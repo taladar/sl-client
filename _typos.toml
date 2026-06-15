@@ -1,0 +1,4 @@
+# The vendored LL message template is upstream content with many typos in its
+# comments and message names; it is not ours to correct.
+[files]
+extend-exclude = ["sl-wire/message_template.msg"]

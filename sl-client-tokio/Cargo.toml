@@ -9,15 +9,24 @@ edition = "2024"
 rust-version = "1.94.0"
 
 publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "client", "tokio", "async"]
+categories = ["network-programming", "game-development"]
 
 exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
 [dependencies]
+reqwest = { version = "0.12.15", default-features = false }
+sl-proto = { version = "0.1.0", path = "../sl-proto" }
+sl-wire = { version = "0.1.0", path = "../sl-wire" }
 thiserror = { version = "2.0.18" }
+tokio = { version = "1.44.2", features = ["net", "time", "rt", "macros", "sync"] }
 tracing = { version = "0.1.44" }
 
 [dev-dependencies]
 pretty_assertions = { version = "1.4.1" }
+tokio = { version = "1.44.2", features = ["rt-multi-thread", "macros", "time"] }
+tracing-subscriber = { version = "0.3.19" }
 
 [lints.clippy]
 allow_attributes = "deny"
