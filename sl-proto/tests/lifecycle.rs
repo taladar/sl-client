@@ -33,7 +33,7 @@ mod test {
     fn new_session() -> Session {
         Session::new(LoginParams {
             login_uri: "http://127.0.0.1:9000/".to_owned(),
-            request: LoginRequest::new("Test", "User", "secret", "last"),
+            request: LoginRequest::new("Test", "User", "secret", "last", "MyViewer", "1.2.3"),
         })
     }
 

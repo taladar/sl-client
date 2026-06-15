@@ -27,7 +27,7 @@ mod test {
 
     #[test]
     fn request_contains_method_and_escaped_fields() {
-        let mut request = LoginRequest::new("Test", "User", "secret", "last");
+        let mut request = LoginRequest::new("Test", "User", "secret", "last", "MyViewer", "1.2.3");
         request.options = vec!["inventory-root".to_owned()];
         let body = build_login_request(&request);
 
@@ -40,8 +40,14 @@ mod test {
     }
 
     #[test]
+    fn user_agent_joins_channel_and_version() {
+        let request = LoginRequest::new("Test", "User", "secret", "last", "MyViewer", "1.2.3");
+        assert_eq!(request.user_agent(), "MyViewer 1.2.3");
+    }
+
+    #[test]
     fn request_escapes_xml_metacharacters() {
-        let request = LoginRequest::new("A&B", "C<D", "p", "last");
+        let request = LoginRequest::new("A&B", "C<D", "p", "last", "MyViewer", "1.2.3");
         let body = build_login_request(&request);
         assert!(body.contains("<string>A&amp;B</string>"));
         assert!(body.contains("<string>C&lt;D</string>"));
@@ -92,7 +98,7 @@ mod test {
 
     #[test]
     fn request_carries_mfa_fields() {
-        let request = LoginRequest::new("Test", "User", "secret", "last")
+        let request = LoginRequest::new("Test", "User", "secret", "last", "MyViewer", "1.2.3")
             .with_mfa("123456", Some("storedhash".to_owned()));
         let body = build_login_request(&request);
         assert!(body.contains("<name>token</name><value><string>123456</string>"));
@@ -139,7 +145,7 @@ mod test {
     #[test]
     fn round_trips_through_the_builder_field_names() -> Result<(), Box<dyn std::error::Error>> {
         // The fields the builder writes must match the names OpenSim expects.
-        let request = LoginRequest::new("First", "Last", "pw", "home");
+        let request = LoginRequest::new("First", "Last", "pw", "home", "MyViewer", "1.2.3");
         let body = build_login_request(&request);
         for name in [
             "first", "last", "passwd", "start", "channel", "version", "mac", "id0",
@@ -149,6 +155,9 @@ mod test {
                 "missing {name}"
             );
         }
+        // The caller-supplied channel and version are carried verbatim.
+        assert!(body.contains("<name>channel</name><value><string>MyViewer</string>"));
+        assert!(body.contains("<name>version</name><value><string>1.2.3</string>"));
         Ok(())
     }
 }
