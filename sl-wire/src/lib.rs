@@ -9,6 +9,7 @@ mod message;
 /// Generated LLUDP message types and their (de)serialization, produced at build
 /// time from the vendored `message_template.msg`.
 pub mod messages;
+mod parcel_flags;
 mod zerocode;
 
 pub use error::WireError;
@@ -20,6 +21,7 @@ pub use login::{
 };
 pub use message::{Message, MessageId};
 pub use messages::AnyMessage;
+pub use parcel_flags::{ParcelFlags, RegionFlags, sim_access};
 pub use zerocode::{decode as zero_decode, encode as zero_encode};
 
 #[cfg(test)]

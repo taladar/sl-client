@@ -14,8 +14,10 @@ use sl_proto::{Session, parse_login_response};
 // Re-export the core types a consumer needs so they can depend on this crate
 // alone.
 pub use sl_proto::{
-    AnyMessage, DisconnectReason, Event, LoginParams, LoginRequest, LoginResponse, MfaChallenge,
-    Reliability, Transmit,
+    AnyMessage, DisconnectReason, Event, LoginParams, LoginRequest, LoginResponse, Maturity,
+    MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
+    RegionFlags, RegionIdentity, RegionLimits, Reliability, Transmit, Vector, grid_to_handle,
+    handle_to_global, handle_to_grid, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -66,6 +68,32 @@ pub enum Command {
         /// How to deliver it.
         reliability: Reliability,
     },
+    /// Teleport to `position` (region-local) in the region `region_handle`.
+    Teleport {
+        /// The destination region handle.
+        region_handle: u64,
+        /// The destination position within the region.
+        position: Vector,
+        /// The look-at direction on arrival.
+        look_at: Vector,
+    },
+    /// Request the current region's info (agent/object limits).
+    RequestRegionInfo,
+    /// Request `ParcelProperties` for a metre rectangle (region-local).
+    RequestParcelProperties {
+        /// The western edge (metres).
+        west: f32,
+        /// The southern edge (metres).
+        south: f32,
+        /// The eastern edge (metres).
+        east: f32,
+        /// The northern edge (metres).
+        north: f32,
+        /// A sequence id echoed back in the reply for matching.
+        sequence_id: i32,
+    },
+    /// Set the draw distance advertised in keep-alive `AgentUpdate`s.
+    SetDrawDistance(f32),
     /// Begin a clean logout.
     Logout,
 }
@@ -166,6 +194,20 @@ impl Client {
                     match command {
                         Some(Command::Send { message, reliability }) => {
                             self.session.enqueue(*message, reliability, Instant::now())?;
+                        }
+                        Some(Command::Teleport { region_handle, position, look_at }) => {
+                            self.session.teleport_to(region_handle, position, look_at, Instant::now())?;
+                        }
+                        Some(Command::RequestRegionInfo) => {
+                            self.session.request_region_info(Instant::now())?;
+                        }
+                        Some(Command::RequestParcelProperties { west, south, east, north, sequence_id }) => {
+                            self.session.request_parcel_properties(
+                                west, south, east, north, sequence_id, Instant::now(),
+                            )?;
+                        }
+                        Some(Command::SetDrawDistance(far)) => {
+                            self.session.set_draw_distance(far);
                         }
                         Some(Command::Logout) | None => {
                             self.session.initiate_logout(Instant::now());
