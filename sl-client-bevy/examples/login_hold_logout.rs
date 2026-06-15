@@ -1,0 +1,103 @@
+//! A headless Bevy app that logs in to a Second Life / OpenSim grid, holds the
+//! session alive past the server inactivity timeout, then logs out cleanly.
+//!
+//! Configure via the same environment variables as the tokio example:
+//!   `SL_LOGIN_URI`, `SL_FIRST`, `SL_LAST`, `SL_PASSWORD`, `SL_START`,
+//!   `SL_HOLD_SECS`.
+
+use std::time::{Duration, Instant};
+
+use bevy::app::ScheduleRunnerPlugin;
+use bevy::prelude::*;
+use sl_client_bevy::{
+    LoginParams, LoginRequest, SessionDisconnectReason, SlClientPlugin, SlCommand, SlEvent,
+    SlSessionEvent,
+};
+use tracing::{info, warn};
+
+/// Tracks when to request logout after the handshake completes.
+#[derive(Resource)]
+struct HoldState {
+    /// How long to stay connected after the handshake.
+    hold: Duration,
+    /// When to request logout, set once the handshake completes.
+    logout_at: Option<Instant>,
+    /// Whether the logout has already been requested.
+    requested: bool,
+}
+
+/// Reads an environment variable or returns the given default.
+fn env_or(name: &str, default: &str) -> String {
+    std::env::var(name).unwrap_or_else(|_ignored| default.to_owned())
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt::init();
+
+    let login_uri = env_or("SL_LOGIN_URI", "http://127.0.0.1:9000/");
+    let first = std::env::var("SL_FIRST")?;
+    let last = std::env::var("SL_LAST")?;
+    let password = std::env::var("SL_PASSWORD")?;
+    let start = env_or("SL_START", "last");
+    let hold_secs: u64 = env_or("SL_HOLD_SECS", "90").parse()?;
+
+    let params = LoginParams {
+        login_uri,
+        request: LoginRequest::new(first, last, password, start),
+    };
+
+    info!("starting Bevy session");
+    let _exit = App::new()
+        .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_millis(10))))
+        .add_plugins(SlClientPlugin { params })
+        .insert_resource(HoldState {
+            hold: Duration::from_secs(hold_secs),
+            logout_at: None,
+            requested: false,
+        })
+        .add_systems(Update, (on_events, maybe_logout))
+        .run();
+    Ok(())
+}
+
+/// Logs session events and schedules logout once the region handshake lands.
+fn on_events(
+    mut events: EventReader<SlEvent>,
+    mut hold: ResMut<HoldState>,
+    mut exit: EventWriter<AppExit>,
+) {
+    for event in events.read() {
+        match &event.0 {
+            SlSessionEvent::CircuitEstablished { sim } => info!("circuit established to {sim}"),
+            SlSessionEvent::RegionHandshakeComplete => {
+                info!("region handshake complete; holding for {:?}", hold.hold);
+                hold.logout_at = Instant::now().checked_add(hold.hold);
+            }
+            SlSessionEvent::LoggedOut => {
+                info!("logged out cleanly");
+                exit.write(AppExit::Success);
+            }
+            SlSessionEvent::Disconnected(reason) => {
+                match reason {
+                    SessionDisconnectReason::Timeout => warn!("disconnected: inactivity timeout"),
+                    other => warn!("disconnected: {other:?}"),
+                }
+                exit.write(AppExit::Success);
+            }
+        }
+    }
+}
+
+/// Requests a clean logout once the hold period has elapsed.
+fn maybe_logout(mut hold: ResMut<HoldState>, mut commands: EventWriter<SlCommand>) {
+    if hold.requested {
+        return;
+    }
+    if let Some(deadline) = hold.logout_at
+        && Instant::now() >= deadline
+    {
+        info!("hold elapsed; requesting logout");
+        commands.write(SlCommand::Logout);
+        hold.requested = true;
+    }
+}

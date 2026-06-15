@@ -9,15 +9,24 @@ edition = "2024"
 rust-version = "1.94.0"
 
 publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "client", "bevy", "ecs"]
+categories = ["network-programming", "game-development"]
 
 exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
 [dependencies]
+bevy = { version = "0.16.0", default-features = false }
+crossbeam-channel = { version = "0.5.15" }
+reqwest = { version = "0.12.15", default-features = false, features = ["blocking"] }
+sl-proto = { version = "0.1.0", path = "../sl-proto" }
+sl-wire = { version = "0.1.0", path = "../sl-wire" }
 thiserror = { version = "2.0.18" }
 tracing = { version = "0.1.44" }
 
 [dev-dependencies]
 pretty_assertions = { version = "1.4.1" }
+tracing-subscriber = { version = "0.3.19" }
 
 [lints.clippy]
 allow_attributes = "deny"
