@@ -22,6 +22,9 @@ pub struct LoginHttpRequest {
     pub url: String,
     /// The XML-RPC request body.
     pub body: String,
+    /// The `User-Agent` header to send, identifying the viewer by its channel
+    /// and version (see [`LoginRequest::user_agent`](sl_wire::LoginRequest::user_agent)).
+    pub user_agent: String,
 }
 
 /// How an outgoing message should be delivered.

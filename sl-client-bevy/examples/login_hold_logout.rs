@@ -3,7 +3,7 @@
 //!
 //! Configure via the same environment variables as the tokio example:
 //!   `SL_LOGIN_URI`, `SL_FIRST`, `SL_LAST`, `SL_PASSWORD`, `SL_START`,
-//!   `SL_HOLD_SECS`.
+//!   `SL_CHANNEL`, `SL_VERSION`, `SL_HOLD_SECS`.
 
 use std::time::{Duration, Instant};
 
@@ -39,11 +39,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let last = std::env::var("SL_LAST")?;
     let password = std::env::var("SL_PASSWORD")?;
     let start = env_or("SL_START", "last");
+    let channel = env_or("SL_CHANNEL", "sl-client-bevy-example");
+    let version = env_or("SL_VERSION", env!("CARGO_PKG_VERSION"));
     let hold_secs: u64 = env_or("SL_HOLD_SECS", "90").parse()?;
 
     let params = LoginParams {
         login_uri,
-        request: LoginRequest::new(first, last, password, start),
+        request: LoginRequest::new(first, last, password, start, channel, version),
     };
 
     info!("starting Bevy session");

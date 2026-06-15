@@ -108,7 +108,12 @@ fn start_login(mut commands: Commands, config: Res<SlConfig>) {
         Some(request) => {
             let (tx, rx) = unbounded();
             std::thread::spawn(move || {
-                tx.send(perform_login(&request.url, request.body)).ok();
+                tx.send(perform_login(
+                    &request.url,
+                    &request.user_agent,
+                    request.body,
+                ))
+                .ok();
             });
             SlInner::LoggingIn {
                 session: Box::new(session),
@@ -121,10 +126,11 @@ fn start_login(mut commands: Commands, config: Res<SlConfig>) {
 }
 
 /// Performs the blocking XML-RPC login POST, returning the response body.
-fn perform_login(url: &str, body: String) -> Result<String, String> {
+fn perform_login(url: &str, user_agent: &str, body: String) -> Result<String, String> {
     ReqwestBlockingClient::new()
         .post(url)
         .header("Content-Type", "text/xml")
+        .header("User-Agent", user_agent)
         .body(body)
         .send()
         .and_then(reqwest::blocking::Response::text)

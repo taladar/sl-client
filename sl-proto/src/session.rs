@@ -416,6 +416,7 @@ impl Session {
             Some(LoginHttpRequest {
                 url: self.login.login_uri.clone(),
                 body: build_login_request(&self.login.request),
+                user_agent: self.login.request.user_agent(),
             })
         } else {
             None

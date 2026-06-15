@@ -5,6 +5,8 @@
 //!   `SL_LOGIN_URI`  (default `http://127.0.0.1:9000/`)
 //!   `SL_FIRST`, `SL_LAST`, `SL_PASSWORD`  (required)
 //!   `SL_START`      (default `last`)
+//!   `SL_CHANNEL`    (default `sl-client-tokio-example`)
+//!   `SL_VERSION`    (default this crate's version)
 //!   `SL_HOLD_SECS`  (default `90`)
 
 use std::time::Duration;
@@ -65,10 +67,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let last = std::env::var("SL_LAST")?;
     let password = std::env::var("SL_PASSWORD")?;
     let start = env_or("SL_START", "last");
+    let channel = env_or("SL_CHANNEL", "sl-client-tokio-example");
+    let version = env_or("SL_VERSION", env!("CARGO_PKG_VERSION"));
     let hold_secs: u64 = env_or("SL_HOLD_SECS", "90").parse()?;
 
     info!("logging in...");
-    let request = LoginRequest::new(first, last, password, start);
+    let request = LoginRequest::new(first, last, password, start, channel, version);
     let client = connect_with_mfa(&login_uri, request).await?;
     info!("login succeeded; running session");
 

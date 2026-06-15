@@ -96,6 +96,7 @@ impl Client {
         let body = http
             .post(&request.url)
             .header("Content-Type", "text/xml")
+            .header("User-Agent", &request.user_agent)
             .body(request.body)
             .send()
             .await?

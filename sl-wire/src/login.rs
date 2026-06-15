@@ -42,22 +42,29 @@ pub struct LoginRequest {
 }
 
 impl LoginRequest {
-    /// Builds a request for the given credentials and start location, filling
-    /// in conservative defaults for the remaining viewer-identification fields.
+    /// Builds a request for the given credentials and start location.
+    ///
+    /// The `channel` and `version` identify your application to the grid: they
+    /// are sent as the `channel`/`version` XML-RPC fields and combined into the
+    /// HTTP `User-Agent` header (see [`LoginRequest::user_agent`]). There is no
+    /// default — every application must supply its own identity. The remaining
+    /// viewer-identification fields keep conservative defaults.
     #[must_use]
     pub fn new(
         first_name: impl Into<String>,
         last_name: impl Into<String>,
         password: impl Into<String>,
         start: impl Into<String>,
+        channel: impl Into<String>,
+        version: impl Into<String>,
     ) -> Self {
         Self {
             first_name: first_name.into(),
             last_name: last_name.into(),
             password: password.into(),
             start: start.into(),
-            channel: "sl-client".to_owned(),
-            version: concat!("sl-client ", env!("CARGO_PKG_VERSION")).to_owned(),
+            channel: channel.into(),
+            version: version.into(),
             platform: "lin".to_owned(),
             mac: "00000000000000000000000000000000".to_owned(),
             id0: String::new(),
@@ -65,6 +72,15 @@ impl LoginRequest {
             mfa_hash: String::new(),
             options: Vec::new(),
         }
+    }
+
+    /// The HTTP `User-Agent` header value identifying this viewer: the
+    /// [`channel`](Self::channel) and [`version`](Self::version) joined by a
+    /// space (e.g. `"MyViewer 1.2.3"`), mirroring the XML-RPC `channel`/`version`
+    /// login fields.
+    #[must_use]
+    pub fn user_agent(&self) -> String {
+        format!("{} {}", self.channel, self.version)
     }
 
     /// Returns a copy of this request prepared to answer a multi-factor
