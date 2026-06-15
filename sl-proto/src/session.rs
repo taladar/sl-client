@@ -2,16 +2,22 @@
 //! keep-alive, and clean logout, driven entirely by passed-in time.
 
 use std::collections::{BTreeMap, HashSet, VecDeque};
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
     AgentUpdate, AgentUpdateAgentDataBlock, CompleteAgentMovement,
     CompleteAgentMovementAgentDataBlock, CompletePingCheck, CompletePingCheckPingIDBlock,
-    LogoutRequest, LogoutRequestAgentDataBlock, PacketAck, PacketAckPacketsBlock,
-    RegionHandshakeReply, RegionHandshakeReplyAgentDataBlock, RegionHandshakeReplyRegionInfoBlock,
-    UseCircuitCode, UseCircuitCodeCircuitCodeBlock,
+    EnableSimulatorSimulatorInfoBlock, LogoutRequest, LogoutRequestAgentDataBlock, PacketAck,
+    PacketAckPacketsBlock, ParcelPropertiesParcelDataBlock, ParcelPropertiesRequest,
+    ParcelPropertiesRequestAgentDataBlock, ParcelPropertiesRequestParcelDataBlock,
+    RegionHandshakeRegionInfo3Block, RegionHandshakeRegionInfoBlock, RegionHandshakeReply,
+    RegionHandshakeReplyAgentDataBlock, RegionHandshakeReplyRegionInfoBlock,
+    RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock, RequestRegionInfo,
+    RequestRegionInfoAgentDataBlock, TeleportLocationRequest,
+    TeleportLocationRequestAgentDataBlock, TeleportLocationRequestInfoBlock, UseCircuitCode,
+    UseCircuitCodeCircuitCodeBlock,
 };
 use sl_wire::{
     AnyMessage, MessageId, PacketFlags, Reader, WireError, Writer, build_login_request,
@@ -20,7 +26,11 @@ use sl_wire::{
 use uuid::Uuid;
 
 use crate::error::Error;
-use crate::types::{DisconnectReason, Event, LoginHttpRequest, LoginParams, Reliability, Transmit};
+use crate::types::{
+    DisconnectReason, Event, LoginHttpRequest, LoginParams, Maturity, NeighborInfo, ParcelInfo,
+    ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability, Transmit,
+    handle_to_grid,
+};
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
 const AGENT_UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
@@ -40,6 +50,11 @@ const MAX_RESEND_ATTEMPTS: u32 = 6;
 const SEEN_CAPACITY: usize = 4096;
 /// The maximum number of acknowledgements packed into a single `PacketAck`.
 const MAX_ACKS_PER_PACKET: usize = 255;
+/// How long to wait for a `TeleportFinish` before declaring the teleport failed.
+const TELEPORT_TIMEOUT: Duration = Duration::from_secs(30);
+/// The default draw distance (metres) advertised in keep-alive `AgentUpdate`s,
+/// large enough that the simulator enables the neighbouring regions.
+const DEFAULT_DRAW_DISTANCE: f32 = 256.0;
 
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
 fn deadline(now: Instant, duration: Duration) -> Instant {
@@ -104,6 +119,8 @@ struct Timers {
     agent_update: Option<Instant>,
     /// When to give up waiting for a `LogoutReply`, once logging out.
     logout: Option<Instant>,
+    /// When to give up waiting for a `TeleportFinish`, once teleporting.
+    teleport: Option<Instant>,
 }
 
 /// The UDP circuit to a single simulator.
@@ -127,6 +144,8 @@ struct Circuit {
     seen: SeenWindow,
     /// Datagrams ready to be transmitted.
     out: VecDeque<Vec<u8>>,
+    /// The draw distance (metres) advertised in keep-alive `AgentUpdate`s.
+    draw_distance: f32,
     /// The connection timers.
     timers: Timers,
 }
@@ -138,6 +157,7 @@ impl Circuit {
         agent_id: Uuid,
         session_id: Uuid,
         circuit_code: u32,
+        draw_distance: f32,
         now: Instant,
     ) -> Self {
         Self {
@@ -150,13 +170,34 @@ impl Circuit {
             unacked: BTreeMap::new(),
             seen: SeenWindow::default(),
             out: VecDeque::new(),
+            draw_distance,
             timers: Timers {
                 inactivity: deadline(now, INACTIVITY_TIMEOUT),
                 ack_flush: None,
                 agent_update: None,
                 logout: None,
+                teleport: None,
             },
         }
+    }
+
+    /// Re-points the circuit at a new simulator after a teleport, resetting the
+    /// per-circuit sequence/ack/seen/timer state while keeping the agent
+    /// identity and circuit code (both reused across regions).
+    fn retarget(&mut self, sim_addr: SocketAddr, now: Instant) {
+        self.sim_addr = sim_addr;
+        self.next_sequence = 1;
+        self.pending_acks.clear();
+        self.unacked.clear();
+        self.seen = SeenWindow::default();
+        self.out.clear();
+        self.timers = Timers {
+            inactivity: deadline(now, INACTIVITY_TIMEOUT),
+            ack_flush: None,
+            agent_update: None,
+            logout: None,
+            teleport: None,
+        };
     }
 
     /// Allocates the next outgoing sequence number.
@@ -243,7 +284,11 @@ impl Circuit {
         self.send(&message, Reliability::Unreliable, now)
     }
 
-    /// Queues a minimal `AgentUpdate` keep-alive unreliably.
+    /// Queues a keep-alive `AgentUpdate` unreliably.
+    ///
+    /// The camera is placed at the region centre with an orthonormal basis and
+    /// the configured draw distance, so the simulator builds an interest list
+    /// and enables the neighbouring regions (which arrive as `EnableSimulator`).
     fn send_agent_update(&mut self, now: Instant) -> Result<(), WireError> {
         let identity = Rotation {
             x: 0.0,
@@ -251,10 +296,25 @@ impl Circuit {
             z: 0.0,
             s: 1.0,
         };
-        let zero = Vector {
-            x: 0.0,
+        let camera_center = Vector {
+            x: 128.0,
+            y: 128.0,
+            z: 30.0,
+        };
+        let camera_at_axis = Vector {
+            x: 1.0,
             y: 0.0,
             z: 0.0,
+        };
+        let camera_left_axis = Vector {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        };
+        let camera_up_axis = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
         };
         let message = AnyMessage::AgentUpdate(AgentUpdate {
             agent_data: AgentUpdateAgentDataBlock {
@@ -263,16 +323,38 @@ impl Circuit {
                 body_rotation: identity.clone(),
                 head_rotation: identity,
                 state: 0,
-                camera_center: zero.clone(),
-                camera_at_axis: zero.clone(),
-                camera_left_axis: zero.clone(),
-                camera_up_axis: zero,
-                far: 128.0,
+                camera_center,
+                camera_at_axis,
+                camera_left_axis,
+                camera_up_axis,
+                far: self.draw_distance,
                 control_flags: 0,
                 flags: 0,
             },
         });
         self.send(&message, Reliability::Unreliable, now)
+    }
+
+    /// Queues a `TeleportLocationRequest` reliably.
+    fn send_teleport_location_request(
+        &mut self,
+        region_handle: u64,
+        position: Vector,
+        look_at: Vector,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::TeleportLocationRequest(TeleportLocationRequest {
+            agent_data: TeleportLocationRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            info: TeleportLocationRequestInfoBlock {
+                region_handle,
+                position,
+                look_at,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
     }
 
     /// Queues a `LogoutRequest` reliably.
@@ -281,6 +363,44 @@ impl Circuit {
             agent_data: LogoutRequestAgentDataBlock {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RequestRegionInfo` reliably.
+    fn send_request_region_info(&mut self, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::RequestRegionInfo(RequestRegionInfo {
+            agent_data: RequestRegionInfoAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelPropertiesRequest` reliably for the given metre rectangle.
+    fn send_parcel_properties_request(
+        &mut self,
+        west: f32,
+        south: f32,
+        east: f32,
+        north: f32,
+        sequence_id: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelPropertiesRequest(ParcelPropertiesRequest {
+            agent_data: ParcelPropertiesRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            parcel_data: ParcelPropertiesRequestParcelDataBlock {
+                sequence_id,
+                west,
+                south,
+                east,
+                north,
+                snap_selection: false,
             },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -373,10 +493,20 @@ enum SessionState {
     AwaitingHandshake,
     /// The region handshake completed; keep-alives are flowing.
     Active,
+    /// A `TeleportLocationRequest` was sent; awaiting the `TeleportFinish`.
+    Teleporting,
     /// A `LogoutRequest` was sent; awaiting the `LogoutReply`.
     LoggingOut,
     /// The session is finished.
     Closed,
+}
+
+/// Bookkeeping for an in-progress teleport handover, so the next
+/// `RegionHandshake` is reported as a [`Event::RegionChanged`].
+#[derive(Debug)]
+struct HandoverPending {
+    /// The destination region handle reported by `TeleportFinish`.
+    region_handle: u64,
 }
 
 /// A single agent session: login bookkeeping plus one simulator circuit.
@@ -392,6 +522,10 @@ pub struct Session {
     state: SessionState,
     /// The active circuit, once login has succeeded.
     circuit: Option<Circuit>,
+    /// The draw distance (metres) advertised in keep-alive `AgentUpdate`s.
+    draw_distance: f32,
+    /// In-progress teleport handover bookkeeping, if any.
+    handover: Option<HandoverPending>,
     /// Pending high-level events for the driver.
     events: VecDeque<Event>,
 }
@@ -404,7 +538,20 @@ impl Session {
             login,
             state: SessionState::New,
             circuit: None,
+            draw_distance: DEFAULT_DRAW_DISTANCE,
+            handover: None,
             events: VecDeque::new(),
+        }
+    }
+
+    /// Sets the draw distance (metres) advertised in keep-alive `AgentUpdate`s.
+    /// A larger value makes the simulator enable more neighbouring regions
+    /// (surfaced as [`Event::NeighborDiscovered`]). Takes effect on the next
+    /// keep-alive, including for the current circuit.
+    pub const fn set_draw_distance(&mut self, draw_distance: f32) {
+        self.draw_distance = draw_distance;
+        if let Some(circuit) = self.circuit.as_mut() {
+            circuit.draw_distance = draw_distance;
         }
     }
 
@@ -457,6 +604,7 @@ impl Session {
                     success.agent_id,
                     success.session_id,
                     success.circuit_code,
+                    self.draw_distance,
                     now,
                 );
                 circuit.send_use_circuit_code(now)?;
@@ -529,14 +677,107 @@ impl Session {
     /// Acts on a decoded inbound message.
     fn dispatch(&mut self, message: &AnyMessage, now: Instant) -> Result<(), Error> {
         match message {
-            AnyMessage::RegionHandshake(_) => {
+            AnyMessage::RegionHandshake(handshake) => {
                 if matches!(self.state, SessionState::AwaitingHandshake) {
                     if let Some(circuit) = self.circuit.as_mut() {
                         circuit.send_region_handshake_reply(now)?;
                         circuit.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
                     }
                     self.state = SessionState::Active;
-                    self.events.push_back(Event::RegionHandshakeComplete);
+                    self.events
+                        .push_back(Event::RegionInfoHandshake(Box::new(region_identity(
+                            &handshake.region_info,
+                            &handshake.region_info3,
+                        ))));
+                    // A pending handover means this handshake completes a
+                    // teleport into a new region; otherwise it is the initial
+                    // login handshake.
+                    match self.handover.take() {
+                        Some(handover) => {
+                            if let Some(sim) = self.circuit.as_ref().map(|c| c.sim_addr) {
+                                self.events.push_back(Event::RegionChanged {
+                                    region_handle: handover.region_handle,
+                                    sim,
+                                });
+                            }
+                        }
+                        None => self.events.push_back(Event::RegionHandshakeComplete),
+                    }
+                }
+            }
+            AnyMessage::RegionInfo(info) => {
+                self.events.push_back(Event::RegionLimits(region_limits(
+                    &info.region_info,
+                    &info.region_info2,
+                )));
+            }
+            AnyMessage::ParcelProperties(props) => {
+                self.events
+                    .push_back(Event::ParcelProperties(Box::new(parcel_info(
+                        &props.parcel_data,
+                    ))));
+            }
+            AnyMessage::ParcelOverlay(overlay) => {
+                self.events
+                    .push_back(Event::ParcelOverlay(ParcelOverlayInfo {
+                        sequence_id: overlay.parcel_data.sequence_id,
+                        data: overlay.parcel_data.data.clone(),
+                    }));
+            }
+            AnyMessage::EnableSimulator(sim) => {
+                self.events
+                    .push_back(Event::NeighborDiscovered(neighbor_info(
+                        &sim.simulator_info,
+                    )));
+            }
+            AnyMessage::TeleportStart(_) => {
+                self.events.push_back(Event::TeleportStarted);
+            }
+            AnyMessage::TeleportProgress(progress) => {
+                self.events.push_back(Event::TeleportProgress {
+                    message: String::from_utf8_lossy(&progress.info.message).into_owned(),
+                    teleport_flags: progress.info.teleport_flags,
+                });
+            }
+            AnyMessage::TeleportLocal(_) => {
+                // An intra-region teleport: no new circuit, just resume activity.
+                if matches!(self.state, SessionState::Teleporting) {
+                    self.state = SessionState::Active;
+                    if let Some(circuit) = self.circuit.as_mut() {
+                        circuit.timers.teleport = None;
+                    }
+                    self.events.push_back(Event::TeleportLocal);
+                }
+            }
+            AnyMessage::TeleportFailed(failed) => {
+                if matches!(self.state, SessionState::Teleporting) {
+                    self.state = SessionState::Active;
+                    if let Some(circuit) = self.circuit.as_mut() {
+                        circuit.timers.teleport = None;
+                    }
+                }
+                self.events.push_back(Event::TeleportFailed {
+                    reason: String::from_utf8_lossy(&failed.info.reason).into_owned(),
+                });
+            }
+            AnyMessage::TeleportFinish(finish) => {
+                if matches!(self.state, SessionState::Teleporting) {
+                    let info = &finish.info;
+                    // IPPORT is big-endian on the wire; the generated decoder
+                    // reads it little-endian, so swap back to host order.
+                    let port = info.sim_port.swap_bytes();
+                    let new_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(info.sim_ip)), port);
+                    let region_handle = info.region_handle;
+                    // Retarget synchronously: this message arrived on the old
+                    // circuit (still passing the source check), and afterwards
+                    // the source check accepts only the new simulator.
+                    if let Some(circuit) = self.circuit.as_mut() {
+                        circuit.retarget(new_addr, now);
+                        circuit.send_use_circuit_code(now)?;
+                        circuit.send_complete_agent_movement(now)?;
+                    }
+                    self.handover = Some(HandoverPending { region_handle });
+                    self.state = SessionState::AwaitingHandshake;
                 }
             }
             AnyMessage::StartPingCheck(ping) => {
@@ -594,6 +835,23 @@ impl Session {
             return Ok(());
         }
 
+        if matches!(self.state, SessionState::Teleporting)
+            && self
+                .circuit
+                .as_ref()
+                .and_then(|c| c.timers.teleport)
+                .is_some_and(|d| now >= d)
+        {
+            self.state = SessionState::Active;
+            if let Some(circuit) = self.circuit.as_mut() {
+                circuit.timers.teleport = None;
+            }
+            self.events.push_back(Event::TeleportFailed {
+                reason: "teleport timed out".to_owned(),
+            });
+            return Ok(());
+        }
+
         let exhausted = self
             .circuit
             .as_mut()
@@ -644,6 +902,70 @@ impl Session {
         Ok(())
     }
 
+    /// Requests the region's info (agent and object limits) via
+    /// `RequestRegionInfo`. The reply arrives as an [`Event::RegionLimits`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_region_info(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_request_region_info(now)?;
+        Ok(())
+    }
+
+    /// Requests `ParcelProperties` for the parcel overlapping the given metre
+    /// rectangle (region-local coordinates). `sequence_id` is echoed back in the
+    /// reply ([`Event::ParcelProperties`]) so callers can match outstanding
+    /// queries.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_parcel_properties(
+        &mut self,
+        west: f32,
+        south: f32,
+        east: f32,
+        north: f32,
+        sequence_id: i32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_properties_request(west, south, east, north, sequence_id, now)?;
+        Ok(())
+    }
+
+    /// Requests an in-world teleport to `position` (region-local) in the region
+    /// identified by `region_handle`, looking towards `look_at`. On success the
+    /// session re-establishes its circuit at the destination simulator and emits
+    /// [`Event::RegionChanged`]; on failure it emits [`Event::TeleportFailed`]
+    /// and stays connected to the current region.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotActive`] if the session is not in the active state,
+    /// [`Error::NoCircuit`] if no circuit is established, or [`Error::Wire`] if
+    /// the request fails to encode.
+    pub fn teleport_to(
+        &mut self,
+        region_handle: u64,
+        position: Vector,
+        look_at: Vector,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if !matches!(self.state, SessionState::Active) {
+            return Err(Error::NotActive);
+        }
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_teleport_location_request(region_handle, position, look_at, now)?;
+        circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
+        self.state = SessionState::Teleporting;
+        Ok(())
+    }
+
     /// Begins a clean logout: queues a `LogoutRequest` and arms the logout
     /// timeout. Does nothing if the session is already closing or closed.
     pub fn initiate_logout(&mut self, now: Instant) {
@@ -684,6 +1006,7 @@ impl Session {
         merge_deadline(&mut earliest, circuit.timers.ack_flush);
         merge_deadline(&mut earliest, circuit.timers.agent_update);
         merge_deadline(&mut earliest, circuit.timers.logout);
+        merge_deadline(&mut earliest, circuit.timers.teleport);
         merge_deadline(&mut earliest, circuit.next_resend_deadline());
         earliest
     }
@@ -705,5 +1028,77 @@ impl Session {
             self.state = SessionState::Closed;
             self.events.push_back(Event::Disconnected(reason));
         }
+    }
+}
+
+/// Builds a [`RegionIdentity`] from a `RegionHandshake`'s region-info blocks.
+fn region_identity(
+    info: &RegionHandshakeRegionInfoBlock,
+    info3: &RegionHandshakeRegionInfo3Block,
+) -> RegionIdentity {
+    let product_sku = String::from_utf8_lossy(&info3.product_sku).into_owned();
+    let product_name = String::from_utf8_lossy(&info3.product_name).into_owned();
+    RegionIdentity {
+        sim_name: String::from_utf8_lossy(&info.sim_name).into_owned(),
+        region_flags: info.region_flags,
+        maturity: Maturity::from_sim_access(info.sim_access),
+        product: ProductType::classify(&product_sku, &product_name),
+        product_sku,
+        product_name,
+    }
+}
+
+/// Builds [`RegionLimits`] from a `RegionInfo` message's region-info blocks.
+fn region_limits(
+    info: &RegionInfoRegionInfoBlock,
+    info2: &RegionInfoRegionInfo2Block,
+) -> RegionLimits {
+    // Prefer the 32-bit agent cap; fall back to the legacy 8-bit field when the
+    // grid leaves the wider one at zero.
+    let max_agents = if info2.max_agents32 == 0 {
+        u32::from(info.max_agents)
+    } else {
+        info2.max_agents32
+    };
+    RegionLimits {
+        sim_name: String::from_utf8_lossy(&info.sim_name).into_owned(),
+        max_agents,
+        hard_max_agents: info2.hard_max_agents,
+        hard_max_objects: info2.hard_max_objects,
+        region_flags: info.region_flags,
+        maturity: Maturity::from_sim_access(info.sim_access),
+    }
+}
+
+/// Builds a [`ParcelInfo`] from a `ParcelProperties` parcel-data block.
+fn parcel_info(data: &ParcelPropertiesParcelDataBlock) -> ParcelInfo {
+    ParcelInfo {
+        sequence_id: data.sequence_id,
+        local_id: data.local_id,
+        aabb_min: (data.aabb_min.x, data.aabb_min.y, data.aabb_min.z),
+        aabb_max: (data.aabb_max.x, data.aabb_max.y, data.aabb_max.z),
+        area: data.area,
+        bitmap: data.bitmap.clone(),
+        max_prims: data.max_prims,
+        sim_wide_max_prims: data.sim_wide_max_prims,
+        sim_wide_total_prims: data.sim_wide_total_prims,
+        owner_id: data.owner_id,
+        raw_parcel_flags: data.parcel_flags,
+    }
+}
+
+/// Builds a [`NeighborInfo`] from an `EnableSimulator` simulator-info block.
+fn neighbor_info(info: &EnableSimulatorSimulatorInfoBlock) -> NeighborInfo {
+    // IPPORT is big-endian (network order) on the wire, but the generated field
+    // decoder reads it as a little-endian U16, so swap the bytes back to host
+    // order here. (IPADDR is raw octets in order and needs no swap.)
+    let port = info.port.swap_bytes();
+    let sim = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(info.ip)), port);
+    let (grid_x, grid_y) = handle_to_grid(info.handle);
+    NeighborInfo {
+        region_handle: info.handle,
+        sim,
+        grid_x,
+        grid_y,
     }
 }

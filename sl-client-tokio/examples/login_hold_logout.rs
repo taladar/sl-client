@@ -103,6 +103,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 break;
             }
+            // This demo ignores the region/parcel/neighbour/teleport survey events.
+            Event::RegionInfoHandshake(_)
+            | Event::RegionLimits(_)
+            | Event::ParcelProperties(_)
+            | Event::ParcelOverlay(_)
+            | Event::NeighborDiscovered(_)
+            | Event::TeleportStarted
+            | Event::TeleportProgress { .. }
+            | Event::TeleportLocal
+            | Event::TeleportFailed { .. }
+            | Event::RegionChanged { .. } => {}
         }
     }
 

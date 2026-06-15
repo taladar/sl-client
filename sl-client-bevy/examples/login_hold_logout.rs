@@ -86,6 +86,17 @@ fn on_events(
                 }
                 exit.write(AppExit::Success);
             }
+            // This demo ignores the region/parcel/neighbour/teleport survey events.
+            SlSessionEvent::RegionInfoHandshake(_)
+            | SlSessionEvent::RegionLimits(_)
+            | SlSessionEvent::ParcelProperties(_)
+            | SlSessionEvent::ParcelOverlay(_)
+            | SlSessionEvent::NeighborDiscovered(_)
+            | SlSessionEvent::TeleportStarted
+            | SlSessionEvent::TeleportProgress { .. }
+            | SlSessionEvent::TeleportLocal
+            | SlSessionEvent::TeleportFailed { .. }
+            | SlSessionEvent::RegionChanged { .. } => {}
         }
     }
 }

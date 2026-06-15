@@ -12,4 +12,8 @@ pub enum Error {
     /// completed.
     #[error("the session has no active circuit yet")]
     NoCircuit,
+    /// A teleport was requested while the session was not in the active state
+    /// (for example before the region handshake, or during another teleport).
+    #[error("the session is not active")]
+    NotActive,
 }

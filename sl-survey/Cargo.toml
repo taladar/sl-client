@@ -1,32 +1,61 @@
 [package]
-name = "sl-proto"
-description = "Sans-I/O state machine for Second Life / OpenSim client sessions (login, keep-alive, logout)"
+name = "sl-survey"
+description = "Headless Second Life / OpenSim survey client: teleports across regions collecting parcel and region data"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 version = "0.1.0"
 authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
 edition = "2024"
 rust-version = "1.94.0"
-
 publish = false
 repository = "https://github.com/taladar/sl-client"
-keywords = ["secondlife", "opensim", "lludp", "protocol", "sans-io"]
-categories = ["network-programming", "game-development"]
-
+keywords = ["secondlife", "opensim", "survey", "client", "cli"]
+categories = ["command-line-utilities", "network-programming"]
 exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
+[package.metadata.deb]
+name = "sl-survey"
+depends = "$auto"
+extended-description = "Headless Second Life / OpenSim survey client: teleports across regions collecting parcel and region data"
+section = "database"
+copyright = "2026, Matthias Hörmann <mhoermann@gmail.com>"
+assets = [
+  [ "target/release/sl-survey", "usr/bin/", "755" ],
+  ]
+maintainer-scripts = "maintainer-scripts"
+changelog = "changelog"
+revision = "1"
+
+[package.metadata.rpm.cargo]
+buildflags = ["--release"]
+
+[package.metadata.rpm.targets]
+sl-survey = { path = "/usr/bin/sl-survey" }
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/sl-survey", dest = "/usr/bin/sl-survey", mode = "755" },
+]
 [dependencies]
-sl-types = { version = "0.3.1", path = "../../sl-map-tools/sl-types" }
-sl-wire = { version = "0.1.0", path = "../sl-wire" }
-thiserror = { version = "2.0.18" }
-tracing = { version = "0.1.44" }
-uuid = { version = "1.18.1" }
+clap = { version = "4.6.1", features = ["derive", "cargo", "env"] }
+clap_complete = "4.6.2"
+clap_mangen = "0.3.0"
+humantime = "2.3.0"
+log-panics = { version = "2.1.0", features = ["with-backtrace"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+sl-client-tokio = { version = "0.1.0", path = "../sl-client-tokio" }
+thiserror = "2.0.18"
+tokio = { version = "1.52.1", features = [ "full" ] }
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = [ "env-filter", "tracing-log" ] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tracing-journald = "0.3.2"
 
 [dev-dependencies]
 pretty_assertions = { version = "1.4.1" }
-sl-types = { version = "0.3.1", path = "../../sl-map-tools/sl-types" }
-sl-wire = { version = "0.1.0", path = "../sl-wire" }
-uuid = { version = "1.18.1" }
 
 [lints.clippy]
 allow_attributes = "deny"
