@@ -1,0 +1,11 @@
+.*~
+.*.swp
+.env
+tarpaulin-report.html
+tarpaulin-report.json
+/target
+bom.xml
+bom.json
+perf.data
+perf.data.old
+flamegraph.svg
