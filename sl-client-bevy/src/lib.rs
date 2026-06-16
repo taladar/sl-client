@@ -20,11 +20,12 @@ use sl_proto::{
 // survey commands, and read events. `Event` is aliased to avoid clashing with
 // Bevy's `Event` derive.
 pub use sl_proto::{
-    AnyMessage, ChatAudible, ChatMessage, ChatSourceType, ChatType, ControlFlags, DisconnectReason,
-    ImDialog, InstantMessage, LoginParams, LoginRequest, MapRegionInfo, Maturity, MfaChallenge,
-    NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType, RegionFlags,
-    RegionIdentity, RegionLimits, Reliability, Rotation, Transmit, Uuid, Vector, grid_to_handle,
-    handle_to_global, handle_to_grid, sim_access,
+    AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
+    ChatMessage, ChatSourceType, ChatType, ControlFlags, DisconnectReason, ImDialog,
+    InstantMessage, LoginParams, LoginRequest, MapRegionInfo, Maturity, MfaChallenge, NeighborInfo,
+    ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity,
+    RegionLimits, Reliability, Rotation, Transmit, Uuid, Vector, grid_to_handle, handle_to_global,
+    handle_to_grid, sim_access,
 };
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
@@ -135,6 +136,16 @@ pub enum SlCommand {
         /// The region-local height, in metres.
         z: f64,
     },
+    /// Request an avatar's profile. Replies arrive as
+    /// [`SlSessionEvent::AvatarProperties`], [`SlSessionEvent::AvatarInterests`],
+    /// and [`SlSessionEvent::AvatarGroups`].
+    RequestAvatarProperties(Uuid),
+    /// Request an avatar's picks. The reply arrives as
+    /// [`SlSessionEvent::AvatarPicks`].
+    RequestAvatarPicks(Uuid),
+    /// Request the agent's private notes about an avatar. The reply arrives as
+    /// [`SlSessionEvent::AvatarNotes`].
+    RequestAvatarNotes(Uuid),
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
         /// The destination region handle.
@@ -455,6 +466,15 @@ fn advance_running(
                 z,
             } => {
                 session.autopilot_to(*global_x, *global_y, *z, now).ok();
+            }
+            SlCommand::RequestAvatarProperties(target) => {
+                session.request_avatar_properties(*target, now).ok();
+            }
+            SlCommand::RequestAvatarPicks(target) => {
+                session.request_avatar_picks(*target, now).ok();
+            }
+            SlCommand::RequestAvatarNotes(target) => {
+                session.request_avatar_notes(*target, now).ok();
             }
             SlCommand::Teleport {
                 region_handle,

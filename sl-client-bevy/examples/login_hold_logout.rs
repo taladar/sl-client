@@ -123,8 +123,18 @@ fn on_events(
             } => {
                 info!("sat on {sit_object} at {sit_position:?}");
             }
-            // This demo ignores the region/parcel/neighbour/teleport survey events.
-            SlSessionEvent::RegionInfoHandshake(_)
+            SlSessionEvent::AvatarProperties(props) => {
+                info!(
+                    "avatar {} born {}: {}",
+                    props.avatar_id, props.born_on, props.about_text
+                );
+            }
+            SlSessionEvent::AvatarPicks { picks, .. } => info!("avatar has {} picks", picks.len()),
+            // This demo ignores the remaining profile/region/parcel/teleport events.
+            SlSessionEvent::AvatarInterests(_)
+            | SlSessionEvent::AvatarGroups { .. }
+            | SlSessionEvent::AvatarNotes { .. }
+            | SlSessionEvent::RegionInfoHandshake(_)
             | SlSessionEvent::RegionLimits(_)
             | SlSessionEvent::ParcelProperties(_)
             | SlSessionEvent::ParcelOverlay(_)

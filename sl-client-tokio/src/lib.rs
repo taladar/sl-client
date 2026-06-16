@@ -17,9 +17,10 @@ use sl_proto::{
 // Re-export the core types a consumer needs so they can depend on this crate
 // alone.
 pub use sl_proto::{
-    AnyMessage, ChatAudible, ChatMessage, ChatSourceType, ChatType, ControlFlags, DisconnectReason,
-    Event, ImDialog, InstantMessage, LoginParams, LoginRequest, LoginResponse, MapRegionInfo,
-    Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
+    AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
+    ChatMessage, ChatSourceType, ChatType, ControlFlags, DisconnectReason, Event, ImDialog,
+    InstantMessage, LoginParams, LoginRequest, LoginResponse, MapRegionInfo, Maturity,
+    MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
     RegionFlags, RegionIdentity, RegionLimits, Reliability, Rotation, Transmit, Uuid, Vector,
     grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
@@ -133,6 +134,14 @@ pub enum Command {
         /// The region-local height, in metres.
         z: f64,
     },
+    /// Request an avatar's profile. Replies arrive as [`Event::AvatarProperties`],
+    /// [`Event::AvatarInterests`], and [`Event::AvatarGroups`].
+    RequestAvatarProperties(Uuid),
+    /// Request an avatar's picks. The reply arrives as [`Event::AvatarPicks`].
+    RequestAvatarPicks(Uuid),
+    /// Request the agent's private notes about an avatar. The reply arrives as
+    /// [`Event::AvatarNotes`].
+    RequestAvatarNotes(Uuid),
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
         /// The destination region handle.
@@ -323,6 +332,15 @@ impl Client {
                         }
                         Some(Command::Autopilot { global_x, global_y, z }) => {
                             self.session.autopilot_to(global_x, global_y, z, Instant::now())?;
+                        }
+                        Some(Command::RequestAvatarProperties(target)) => {
+                            self.session.request_avatar_properties(target, Instant::now())?;
+                        }
+                        Some(Command::RequestAvatarPicks(target)) => {
+                            self.session.request_avatar_picks(target, Instant::now())?;
+                        }
+                        Some(Command::RequestAvatarNotes(target)) => {
+                            self.session.request_avatar_notes(target, Instant::now())?;
                         }
                         Some(Command::Teleport { region_handle, position, look_at }) => {
                             self.session.teleport_to(region_handle, position, look_at, Instant::now())?;

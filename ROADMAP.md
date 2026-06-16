@@ -31,7 +31,7 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 1 ✅ | Local chat **(done)** | 3 | Text-only chat client / chat bot | Local OpenSim |
 | 2 ✅ | Instant messaging **(done)** | 5 | IM bot, notifier, offer-handler | Local OpenSim |
 | 3 ✅ | Agent movement & control **(done)** | 5 | Walking/flying/follow bot, autopilot | Local OpenSim (real physics engine) |
-| 4 | Avatar profiles | 3 | Profile / picks checker | Local OpenSim |
+| 4 ✅ | Avatar profiles **(done)** | 3 | Profile / picks checker | Local OpenSim (profiles enabled) |
 | 5 | Inventory (AIS3) | 8 | Inventory manager, product-update bot | Local OpenSim |
 | 6 | Friends & presence | 5 | Presence/online monitor | Local OpenSim (2 accounts) |
 | 7 | Group support | 8 | Group chat bot, roster tool | Local OpenSim (Groups module) |
@@ -107,9 +107,21 @@ tracking from the object/scene graph (#16). *Test: local OpenSim — needs a rea
 physics engine (ubODE/BulletSim); the default BasicPhysics does not move
 avatars.*
 
-**4. Avatar profiles — `AvatarPropertiesRequest`/`Reply`, `AvatarPicksRequest`,
-`AvatarNotesRequest`, CAPS `AgentProfile` · 3 pts.** A standalone profile/picks
-checker. Cheap and fully independent. *Test: local OpenSim.*
+**4. Avatar profiles — `AvatarPropertiesRequest`/`Reply` + `GenericMessage`
+picks/notes · 3 pts. ✅ Done.** A standalone profile/picks checker. Implemented:
+`Session::request_avatar_properties` (UDP `AvatarPropertiesRequest`, answered by
+`AvatarPropertiesReply` + `AvatarInterestsReply` + `AvatarGroupsReply`) plus
+`request_avatar_picks` and `request_avatar_notes` (the `GenericMessage`
+`avatarpicksrequest` / `avatarnotesrequest` calls OpenSim expects). Surfaced as
+`Event::{AvatarProperties, AvatarInterests, AvatarGroups, AvatarPicks, AvatarNotes}`
+with value types (`AvatarProperties`, `AvatarInterests`,
+`AvatarGroupMembership`, `AvatarPick`). Wired as
+`Command::RequestAvatar{Properties, Picks,Notes}` through both runtimes;
+verified live (own-profile round-trip returned born date, flags, about text, and
+interests). Profile *editing* (`AvatarPropertiesUpdate`, pick/classified
+create-update-delete) and pick/classified *detail* fetches are follow-ups.
+*Test: local OpenSim — needs the profile module enabled (set `[UserProfiles]
+ProfileServiceURL`); otherwise no reply is sent.*
 
 **5. Inventory — AIS3 CAPS (`FetchInventoryDescendents2`, `FetchInventory2`,
 `InventoryAPIv3`), legacy `FetchInventoryDescendents`,

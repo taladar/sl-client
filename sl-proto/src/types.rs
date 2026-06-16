@@ -154,6 +154,38 @@ pub enum Event {
         /// `true` when typing started, `false` when it stopped.
         typing: bool,
     },
+    /// An avatar's profile properties (`AvatarPropertiesReply`), in response to
+    /// [`Session::request_avatar_properties`](crate::Session::request_avatar_properties).
+    AvatarProperties(Box<AvatarProperties>),
+    /// An avatar's interests (`AvatarInterestsReply`), sent alongside
+    /// [`Event::AvatarProperties`].
+    AvatarInterests(Box<AvatarInterests>),
+    /// The groups shown in an avatar's profile (`AvatarGroupsReply`), sent
+    /// alongside [`Event::AvatarProperties`].
+    AvatarGroups {
+        /// The avatar whose groups these are.
+        avatar_id: Uuid,
+        /// The groups listed in the profile.
+        groups: Vec<AvatarGroupMembership>,
+        /// Whether the avatar lists groups in their profile.
+        list_in_profile: bool,
+    },
+    /// An avatar's picks (`AvatarPicksReply`), in response to
+    /// [`Session::request_avatar_picks`](crate::Session::request_avatar_picks).
+    AvatarPicks {
+        /// The avatar whose picks these are.
+        target_id: Uuid,
+        /// The picks (id and name only; fetch details separately).
+        picks: Vec<AvatarPick>,
+    },
+    /// The agent's private notes about an avatar (`AvatarNotesReply`), in response
+    /// to [`Session::request_avatar_notes`](crate::Session::request_avatar_notes).
+    AvatarNotes {
+        /// The avatar the notes are about.
+        target_id: Uuid,
+        /// The note text.
+        notes: String,
+    },
     /// The simulator answered a sit request (`AvatarSitResponse`) after a
     /// [`Session::sit_on`](crate::Session::sit_on); the session has sent the
     /// completing `AgentSit`.
@@ -666,6 +698,74 @@ pub struct InstantMessage {
     /// Dialog-dependent binary payload (e.g. an inventory offer's asset type and
     /// item id, a group invite's role and fee). Empty for an ordinary IM.
     pub binary_bucket: Vec<u8>,
+}
+
+/// An avatar's profile properties, parsed from `AvatarPropertiesReply`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvatarProperties {
+    /// The avatar the profile is about.
+    pub avatar_id: Uuid,
+    /// The "second life" profile image (texture id).
+    pub image_id: Uuid,
+    /// The "first life" profile image (texture id).
+    pub fl_image_id: Uuid,
+    /// The avatar's partner, or nil if none.
+    pub partner_id: Uuid,
+    /// The "second life" about text.
+    pub about_text: String,
+    /// The "first life" about text.
+    pub fl_about_text: String,
+    /// The account creation date, as the grid's display string (e.g. `2008-01-15`).
+    pub born_on: String,
+    /// The web profile URL, if any.
+    pub profile_url: String,
+    /// The charter-member / account-title field (grid-specific; often empty).
+    pub charter_member: String,
+    /// The raw account/profile flags bitfield.
+    pub flags: u32,
+}
+
+/// An avatar's interests, parsed from `AvatarInterestsReply`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvatarInterests {
+    /// The avatar the interests are about.
+    pub avatar_id: Uuid,
+    /// The "want to" category bitmask.
+    pub want_to_mask: u32,
+    /// The "want to" free text.
+    pub want_to_text: String,
+    /// The "skills" category bitmask.
+    pub skills_mask: u32,
+    /// The "skills" free text.
+    pub skills_text: String,
+    /// The languages free text.
+    pub languages_text: String,
+}
+
+/// One group listed in an avatar's profile, from an `AvatarGroupsReply` entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvatarGroupMembership {
+    /// The group id.
+    pub group_id: Uuid,
+    /// The group name.
+    pub group_name: String,
+    /// The avatar's title in the group.
+    pub group_title: String,
+    /// The avatar's group powers bitfield.
+    pub group_powers: u64,
+    /// Whether the avatar accepts notices from the group.
+    pub accept_notices: bool,
+    /// The group's insignia (texture id).
+    pub group_insignia_id: Uuid,
+}
+
+/// One pick from an `AvatarPicksReply` (header data only: id and name).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvatarPick {
+    /// The pick id (use to fetch full details).
+    pub pick_id: Uuid,
+    /// The pick name.
+    pub name: String,
 }
 
 /// Splits a region handle into its global south-west corner in metres,

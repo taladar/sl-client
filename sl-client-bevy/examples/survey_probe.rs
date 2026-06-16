@@ -133,6 +133,11 @@ fn on_events(
             | SlSessionEvent::InstantMessageReceived(_)
             | SlSessionEvent::ImTyping { .. }
             | SlSessionEvent::SitResult { .. }
+            | SlSessionEvent::AvatarProperties(_)
+            | SlSessionEvent::AvatarInterests(_)
+            | SlSessionEvent::AvatarGroups { .. }
+            | SlSessionEvent::AvatarPicks { .. }
+            | SlSessionEvent::AvatarNotes { .. }
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal => {}

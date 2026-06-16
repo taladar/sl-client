@@ -580,6 +580,11 @@ impl Survey {
             | Event::InstantMessageReceived(_)
             | Event::ImTyping { .. }
             | Event::SitResult { .. }
+            | Event::AvatarProperties(_)
+            | Event::AvatarInterests(_)
+            | Event::AvatarGroups { .. }
+            | Event::AvatarPicks { .. }
+            | Event::AvatarNotes { .. }
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal
