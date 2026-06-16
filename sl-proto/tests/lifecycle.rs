@@ -9,17 +9,18 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
-        DisconnectReason, Event, LoginParams, Maturity, ProductType, Reliability, Session, Transmit,
+        ChatAudible, ChatSourceType, ChatType, DisconnectReason, Event, LoginParams, Maturity,
+        ProductType, Reliability, Session, Transmit,
     };
     use sl_types::lsl::Vector;
     use sl_wire::messages::{
         AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
-        AgentMovementCompleteSimDataBlock, LogoutRequest, LogoutRequestAgentDataBlock,
-        MapBlockReply, MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock,
-        ParcelProperties, ParcelPropertiesAgeVerificationBlockBlock,
-        ParcelPropertiesParcelDataBlock, ParcelPropertiesParcelEnvironmentBlockBlock,
-        ParcelPropertiesRegionAllowAccessBlockBlock, RegionHandshake,
-        RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
+        AgentMovementCompleteSimDataBlock, ChatFromSimulator, ChatFromSimulatorChatDataBlock,
+        LogoutRequest, LogoutRequestAgentDataBlock, MapBlockReply, MapBlockReplyAgentDataBlock,
+        MapBlockReplyDataBlock, MapBlockReplySizeBlock, ParcelProperties,
+        ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
+        ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
+        RegionHandshake, RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
         RegionHandshakeRegionInfoBlock, RegionInfo, RegionInfoAgentDataBlock,
         RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock, TeleportFailed,
         TeleportFailedInfoBlock,
@@ -321,6 +322,133 @@ mod test {
             sent.iter()
                 .any(|m| matches!(m, AnyMessage::LogoutRequest(_)))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn say_sends_chat_from_viewer() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.say("hi there", ChatType::Shout, 0, now)?;
+        let sent = drain(&mut session)?;
+        let chat = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ChatFromViewer(chat) => Some(chat),
+                _ => None,
+            })
+            .ok_or("expected a ChatFromViewer")?;
+        // The wire string carries a trailing NUL, as a real viewer sends.
+        assert_eq!(chat.chat_data.message, b"hi there\0");
+        assert_eq!(chat.chat_data.r#type, 2); // shout
+        assert_eq!(chat.chat_data.channel, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn chat_from_simulator_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let chat = AnyMessage::ChatFromSimulator(ChatFromSimulator {
+            chat_data: ChatFromSimulatorChatDataBlock {
+                from_name: b"Resident Tester\0".to_vec(),
+                source_id: uuid::Uuid::from_u128(0x42),
+                owner_id: uuid::Uuid::from_u128(0x43),
+                source_type: 1, // agent
+                chat_type: 1,   // normal
+                audible: 1,     // fully
+                position: vec3(10.0, 20.0, 30.0),
+                message: b"hello world\0".to_vec(),
+            },
+        });
+        let datagram = server_message(&chat, 7, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let received = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ChatReceived(chat) => Some(chat),
+                _ => None,
+            })
+            .ok_or("expected a ChatReceived event")?;
+        // Trailing NUL padding is stripped from both strings.
+        assert_eq!(received.from_name, "Resident Tester");
+        assert_eq!(received.message, "hello world");
+        assert_eq!(received.source_id, uuid::Uuid::from_u128(0x42));
+        assert_eq!(received.owner_id, uuid::Uuid::from_u128(0x43));
+        assert_eq!(received.source_type, ChatSourceType::Agent);
+        assert_eq!(received.chat_type, ChatType::Normal);
+        assert_eq!(received.audible, ChatAudible::Fully);
+        assert_eq!(received.position, (10.0, 20.0, 30.0));
+        Ok(())
+    }
+
+    #[test]
+    fn set_typing_sends_typing_chat() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.set_typing(true, now)?;
+        let sent = drain(&mut session)?;
+        let chat = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ChatFromViewer(chat) => Some(chat),
+                _ => None,
+            })
+            .ok_or("expected a ChatFromViewer")?;
+        assert_eq!(chat.chat_data.r#type, 4); // StartTyping
+        // Typing carries no text, just the wire NUL terminator.
+        assert_eq!(chat.chat_data.message, b"\0");
+        Ok(())
+    }
+
+    #[test]
+    fn typing_chat_from_simulator_surfaces_typing_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let chat = AnyMessage::ChatFromSimulator(ChatFromSimulator {
+            chat_data: ChatFromSimulatorChatDataBlock {
+                from_name: b"Resident Tester\0".to_vec(),
+                source_id: uuid::Uuid::from_u128(0x42),
+                owner_id: uuid::Uuid::nil(),
+                source_type: 1, // agent
+                chat_type: 4,   // StartTyping
+                audible: 1,     // fully
+                position: vec3(1.0, 2.0, 3.0),
+                message: b"\0".to_vec(),
+            },
+        });
+        let datagram = server_message(&chat, 8, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let events = drain_events(&mut session);
+        // A typing message surfaces as ChatTyping, never as ChatReceived.
+        assert!(
+            !events.iter().any(|e| matches!(e, Event::ChatReceived(_))),
+            "typing must not surface as ChatReceived, got {events:?}"
+        );
+        let typing = events
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ChatTyping {
+                    from_name,
+                    source_id,
+                    typing,
+                } => Some((from_name, source_id, typing)),
+                _ => None,
+            })
+            .ok_or("expected a ChatTyping event")?;
+        assert_eq!(typing.0, "Resident Tester");
+        assert_eq!(typing.1, uuid::Uuid::from_u128(0x42));
+        assert!(typing.2, "StartTyping should set typing = true");
         Ok(())
     }
 

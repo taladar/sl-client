@@ -103,6 +103,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 break;
             }
+            Event::ChatReceived(chat) => {
+                info!(
+                    "chat from {} ({:?}): {}",
+                    chat.from_name, chat.chat_type, chat.message
+                );
+            }
+            Event::ChatTyping {
+                from_name, typing, ..
+            } => {
+                info!(
+                    "{from_name} {} typing",
+                    if typing { "started" } else { "stopped" }
+                );
+            }
             // This demo ignores the region/parcel/neighbour/teleport survey events.
             Event::RegionInfoHandshake(_)
             | Event::RegionLimits(_)

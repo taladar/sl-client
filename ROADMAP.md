@@ -28,7 +28,7 @@ epic. **Test** says whether the local `opensim.service` is enough.
 
 | # | Feature | Pts | Standalone client it unlocks | Test |
 |---|---------|-----|------------------------------|------|
-| 1 | Local chat | 3 | Text-only chat client / chat bot | Local OpenSim |
+| 1 ✅ | Local chat **(done)** | 3 | Text-only chat client / chat bot | Local OpenSim |
 | 2 | Instant messaging | 5 | IM bot, notifier, offer-handler | Local OpenSim (2 accounts) |
 | 3 | Agent movement & control | 5 | Walking/flying/follow bot, autopilot | Local OpenSim |
 | 4 | Avatar profiles | 3 | Profile / picks checker | Local OpenSim |
@@ -61,9 +61,14 @@ epic. **Test** says whether the local `opensim.service` is enough.
 Each works as a complete, useful client on top of today's connection layer.
 
 **1. Local chat — `ChatFromViewer` (send), `ChatFromSimulator` (receive) · 3
-pts.** Smallest step to a genuinely interactive client: a text-only viewer or
-chat bot. Add `say`/`shout`/`whisper` commands and a `ChatReceived` event
-(speaker, type, source position, range). *Test: local OpenSim.*
+pts. ✅ Done.** Smallest step to a genuinely interactive client: a text-only
+viewer or chat bot. Implemented: `Session::say` (whisper/normal/shout, any
+channel) and `Session::set_typing`, with `Event::ChatReceived` (speaker, ids,
+type, audibility, region-local position, text) and a distinct
+`Event::ChatTyping` for typing start/stop. Wired as
+`Command::Chat`/`Command::Typing` through both the tokio and bevy runtimes;
+verified live against the local OpenSim (full send→rebroadcast→receive
+round-trip). *Test: local OpenSim.*
 
 **2. Instant messaging — `ImprovedInstantMessage` · 5 pts.** 1:1 IM send/receive
 and typing, plus the many dialog sub-types multiplexed over this one message

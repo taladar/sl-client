@@ -121,6 +121,21 @@ pub enum Event {
         /// The destination simulator's UDP address.
         sim: SocketAddr,
     },
+    /// Local chat was received (`ChatFromSimulator`): a nearby agent or object
+    /// spoke, or the region/system sent a message. Sent in response to nearby
+    /// activity once the session is active. Typing-only messages are surfaced as
+    /// [`Event::ChatTyping`] instead.
+    ChatReceived(Box<ChatMessage>),
+    /// A nearby agent started or stopped typing in local chat (a
+    /// `ChatFromSimulator` with a `StartTyping`/`StopTyping` type and no text).
+    ChatTyping {
+        /// The typist's display name.
+        from_name: String,
+        /// The typist's id (agent id).
+        source_id: Uuid,
+        /// `true` when typing started, `false` when it stopped.
+        typing: bool,
+    },
     /// The session logged out cleanly (a `LogoutReply` was received).
     LoggedOut,
     /// The session disconnected for the given reason.
@@ -340,6 +355,143 @@ pub struct NeighborInfo {
     pub grid_x: u32,
     /// The neighbour's grid y coordinate (region index, i.e. global metres / 256).
     pub grid_y: u32,
+}
+
+/// The kind of a chat message, from the `Type`/`ChatType` byte shared by
+/// `ChatFromViewer` (outgoing) and `ChatFromSimulator` (incoming).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatType {
+    /// Whisper: a reduced (10 m) range.
+    Whisper,
+    /// Normal local say: the default (20 m) range.
+    Normal,
+    /// Shout: an extended (100 m) range.
+    Shout,
+    /// "Start typing" animation trigger (no text).
+    StartTyping,
+    /// "Stop typing" animation trigger (no text).
+    StopTyping,
+    /// A debug-channel message (script errors; channel `2147483647`).
+    DebugChannel,
+    /// A region-wide message.
+    Region,
+    /// A message from an object to its owner.
+    Owner,
+    /// A directed message to a single agent (`llRegionSayTo`).
+    Direct,
+    /// An unrecognised type byte, preserved verbatim.
+    Unknown(u8),
+}
+
+impl ChatType {
+    /// Classifies a `Type`/`ChatType` byte.
+    #[must_use]
+    pub const fn from_u8(byte: u8) -> Self {
+        match byte {
+            0 => Self::Whisper,
+            1 => Self::Normal,
+            2 => Self::Shout,
+            4 => Self::StartTyping,
+            5 => Self::StopTyping,
+            6 => Self::DebugChannel,
+            7 => Self::Region,
+            8 => Self::Owner,
+            9 => Self::Direct,
+            other => Self::Unknown(other),
+        }
+    }
+
+    /// The wire byte for this chat type.
+    #[must_use]
+    pub const fn to_u8(self) -> u8 {
+        match self {
+            Self::Whisper => 0,
+            Self::Normal => 1,
+            Self::Shout => 2,
+            Self::StartTyping => 4,
+            Self::StopTyping => 5,
+            Self::DebugChannel => 6,
+            Self::Region => 7,
+            Self::Owner => 8,
+            Self::Direct => 9,
+            Self::Unknown(other) => other,
+        }
+    }
+}
+
+/// What kind of source produced a chat message, from the `SourceType` byte of
+/// `ChatFromSimulator`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatSourceType {
+    /// The system / region (no avatar or object).
+    System,
+    /// An avatar.
+    Agent,
+    /// An in-world object.
+    Object,
+    /// An unrecognised source-type byte, preserved verbatim.
+    Unknown(u8),
+}
+
+impl ChatSourceType {
+    /// Classifies a `SourceType` byte.
+    #[must_use]
+    pub const fn from_u8(byte: u8) -> Self {
+        match byte {
+            0 => Self::System,
+            1 => Self::Agent,
+            2 => Self::Object,
+            other => Self::Unknown(other),
+        }
+    }
+}
+
+/// Whether a chat message was audible at the listener, from the `Audible` byte
+/// of `ChatFromSimulator` (a signed value: `-1`/`255` means not audible).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatAudible {
+    /// Not audible (out of range); the message text may be elided.
+    Not,
+    /// Barely audible (at the edge of range).
+    Barely,
+    /// Fully audible.
+    Fully,
+    /// An unrecognised audibility byte, preserved verbatim.
+    Unknown(u8),
+}
+
+impl ChatAudible {
+    /// Classifies an `Audible` byte (`255`/`-1` = not, `0` = barely, `1` = fully).
+    #[must_use]
+    pub const fn from_u8(byte: u8) -> Self {
+        match byte {
+            255 => Self::Not,
+            0 => Self::Barely,
+            1 => Self::Fully,
+            other => Self::Unknown(other),
+        }
+    }
+}
+
+/// A chat message received from the simulator, parsed from `ChatFromSimulator`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChatMessage {
+    /// The display name of the speaker (avatar legacy name or object name).
+    pub from_name: String,
+    /// The speaker's id (agent id or object id), or nil for the system.
+    pub source_id: Uuid,
+    /// For an object speaker, its owner's agent id; nil otherwise.
+    pub owner_id: Uuid,
+    /// What kind of source produced the message.
+    pub source_type: ChatSourceType,
+    /// The chat type (whisper / normal / shout / …).
+    pub chat_type: ChatType,
+    /// Whether the message was audible at the listener.
+    pub audible: ChatAudible,
+    /// The speaker's region-local position, in metres.
+    pub position: (f32, f32, f32),
+    /// The message text (UTF-8, with any trailing NUL padding removed).
+    pub message: String,
 }
 
 /// Splits a region handle into its global south-west corner in metres,

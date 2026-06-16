@@ -17,10 +17,11 @@ use sl_proto::{
 // Re-export the core types a consumer needs so they can depend on this crate
 // alone.
 pub use sl_proto::{
-    AnyMessage, DisconnectReason, Event, LoginParams, LoginRequest, LoginResponse, MapRegionInfo,
-    Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
-    RegionFlags, RegionIdentity, RegionLimits, Reliability, Transmit, Vector, grid_to_handle,
-    handle_to_global, handle_to_grid, sim_access,
+    AnyMessage, ChatAudible, ChatMessage, ChatSourceType, ChatType, DisconnectReason, Event,
+    LoginParams, LoginRequest, LoginResponse, MapRegionInfo, Maturity, MfaChallenge, NeighborInfo,
+    ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity,
+    RegionLimits, Reliability, Transmit, Vector, grid_to_handle, handle_to_global, handle_to_grid,
+    sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -71,6 +72,19 @@ pub enum Command {
         /// How to deliver it.
         reliability: Reliability,
     },
+    /// Send local chat via `ChatFromViewer`. Incoming chat arrives as an
+    /// [`Event::ChatReceived`].
+    Chat {
+        /// The message text.
+        message: String,
+        /// The chat type (whisper / normal / shout / …).
+        chat_type: ChatType,
+        /// The chat channel (`0` for ordinary local chat).
+        channel: i32,
+    },
+    /// Broadcast a local-chat typing indicator (`true` = start, `false` = stop).
+    /// Other clients see it as an [`Event::ChatTyping`].
+    Typing(bool),
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
         /// The destination region handle.
@@ -231,6 +245,12 @@ impl Client {
                     match command {
                         Some(Command::Send { message, reliability }) => {
                             self.session.enqueue(*message, reliability, Instant::now())?;
+                        }
+                        Some(Command::Chat { message, chat_type, channel }) => {
+                            self.session.say(&message, chat_type, channel, Instant::now())?;
+                        }
+                        Some(Command::Typing(typing)) => {
+                            self.session.set_typing(typing, Instant::now())?;
                         }
                         Some(Command::Teleport { region_handle, position, look_at }) => {
                             self.session.teleport_to(region_handle, position, look_at, Instant::now())?;

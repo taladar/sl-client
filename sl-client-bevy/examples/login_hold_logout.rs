@@ -86,6 +86,20 @@ fn on_events(
                 }
                 exit.write(AppExit::Success);
             }
+            SlSessionEvent::ChatReceived(chat) => {
+                info!(
+                    "chat from {} ({:?}): {}",
+                    chat.from_name, chat.chat_type, chat.message
+                );
+            }
+            SlSessionEvent::ChatTyping {
+                from_name, typing, ..
+            } => {
+                info!(
+                    "{from_name} {} typing",
+                    if *typing { "started" } else { "stopped" }
+                );
+            }
             // This demo ignores the region/parcel/neighbour/teleport survey events.
             SlSessionEvent::RegionInfoHandshake(_)
             | SlSessionEvent::RegionLimits(_)

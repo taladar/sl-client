@@ -20,10 +20,10 @@ use sl_proto::{
 // survey commands, and read events. `Event` is aliased to avoid clashing with
 // Bevy's `Event` derive.
 pub use sl_proto::{
-    AnyMessage, DisconnectReason, LoginParams, LoginRequest, MapRegionInfo, Maturity, MfaChallenge,
-    NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType, RegionFlags,
-    RegionIdentity, RegionLimits, Reliability, Transmit, Vector, grid_to_handle, handle_to_global,
-    handle_to_grid, sim_access,
+    AnyMessage, ChatAudible, ChatMessage, ChatSourceType, ChatType, DisconnectReason, LoginParams,
+    LoginRequest, MapRegionInfo, Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo,
+    ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity, RegionLimits, Reliability,
+    Transmit, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
@@ -73,6 +73,19 @@ pub enum SlCommand {
         /// How to deliver it.
         reliability: Reliability,
     },
+    /// Send local chat via `ChatFromViewer`. Incoming chat arrives as an
+    /// [`SlSessionEvent::ChatReceived`].
+    Chat {
+        /// The message text.
+        message: String,
+        /// The chat type (whisper / normal / shout / …).
+        chat_type: ChatType,
+        /// The chat channel (`0` for ordinary local chat).
+        channel: i32,
+    },
+    /// Broadcast a local-chat typing indicator (`true` = start, `false` = stop).
+    /// Other clients see it as an [`SlSessionEvent::ChatTyping`].
+    Typing(bool),
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
         /// The destination region handle.
@@ -347,6 +360,16 @@ fn advance_running(
                 reliability,
             } => {
                 session.enqueue((**message).clone(), *reliability, now).ok();
+            }
+            SlCommand::Chat {
+                message,
+                chat_type,
+                channel,
+            } => {
+                session.say(message, *chat_type, *channel, now).ok();
+            }
+            SlCommand::Typing(typing) => {
+                session.set_typing(*typing, now).ok();
             }
             SlCommand::Teleport {
                 region_handle,
