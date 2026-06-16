@@ -2,3 +2,7 @@
 # comments and message names; it is not ours to correct.
 [files]
 extend-exclude = ["sl-wire/message_template.msg"]
+
+[default.extend-words]
+# "LOD" = level of detail (mesh rendering term), not a typo of "LOAD".
+LOD = "LOD"
