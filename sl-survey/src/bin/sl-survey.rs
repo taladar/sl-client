@@ -1,11 +1,11 @@
 #![doc = include_str!("../../README.md")]
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write as _;
 
 use sl_client_tokio::{
-    Client, Command, Event, LoginParams, LoginRequest, Maturity, NeighborInfo, ParcelInfo,
-    ProductType, RegionIdentity, RegionLimits, Vector, grid_to_handle, handle_to_grid,
+    Client, Command, Event, LoginParams, LoginRequest, Maturity, ParcelInfo, ProductType,
+    RegionIdentity, RegionLimits, Vector, grid_to_handle, handle_to_grid,
 };
 use tokio::sync::mpsc;
 use tracing::{instrument, warn};
@@ -382,11 +382,27 @@ fn square_metres(square: usize) -> f32 {
     f32::from(metres)
 }
 
+/// The result of running one session: either the survey is finished, or a
+/// teleport to a known-named region failed and the driver should re-log in
+/// there to continue.
+enum SessionOutcome {
+    /// The survey is complete (queue drained or the region cap reached).
+    Done,
+    /// Re-log in at the named region (its teleport failed) and continue.
+    RelogAt {
+        /// The destination region handle.
+        handle: u64,
+        /// The destination region name (for the login start URI).
+        name: String,
+    },
+}
+
 /// The breadth-first survey driver: consumes session events and issues commands.
+/// Persistent BFS state survives re-logins; per-session state is reset each run.
 struct Survey {
     /// The survey bounds.
     bounds: Bounds,
-    /// The start region handle (anchor for the initial handshake).
+    /// The start region handle (anchor for the current session's handshake).
     start_handle: u64,
     /// The maximum number of regions to survey.
     max_regions: u32,
@@ -400,10 +416,18 @@ struct Survey {
     queued: HashSet<u64>,
     /// The breadth-first queue of region handles to visit.
     queue: VecDeque<u64>,
+    /// Region handle to name, learned from the world map (for re-login).
+    names: HashMap<u64, String>,
+    /// Whether the world-map request has been sent yet (sent once).
+    map_requested: bool,
     /// The number of regions surveyed so far.
     surveyed: u32,
     /// The latest region identity, buffered until the arrival marker.
     pending_identity: Option<RegionIdentity>,
+    /// The handle of the region we are currently teleporting to, if any.
+    pending_teleport: Option<u64>,
+    /// A pending re-login target (set when a named teleport fails).
+    relog_target: Option<(u64, String)>,
     /// The region currently being surveyed, if any.
     current: Option<RegionAccum>,
     /// When the current region's collection window ends.
@@ -433,20 +457,31 @@ impl Survey {
             visited: HashSet::new(),
             queued,
             queue: VecDeque::new(),
+            names: HashMap::new(),
+            map_requested: false,
             surveyed: 0,
             pending_identity: None,
+            pending_teleport: None,
+            relog_target: None,
             current: None,
             deadline: None,
             writer,
         }
     }
 
-    /// Drives the survey to completion over the session's event/command channels.
-    async fn run(
-        mut self,
+    /// Drives one session over its event/command channels, returning whether the
+    /// survey is finished or a re-login is needed. Per-session state is reset on
+    /// entry so the persistent BFS state can be reused across re-logins.
+    async fn run_session(
+        &mut self,
         mut events: mpsc::Receiver<Event>,
         commands: mpsc::Sender<Command>,
-    ) -> Result<(), Error> {
+    ) -> Result<SessionOutcome, Error> {
+        self.current = None;
+        self.deadline = None;
+        self.pending_identity = None;
+        self.pending_teleport = None;
+        self.relog_target = None;
         commands
             .send(Command::SetDrawDistance(self.draw_distance))
             .await
@@ -471,7 +506,10 @@ impl Survey {
                 }
             }
         }
-        Ok(())
+        Ok(match self.relog_target.take() {
+            Some((handle, name)) => SessionOutcome::RelogAt { handle, name },
+            None => SessionOutcome::Done,
+        })
     }
 
     /// Handles one session event. Returns `true` when the session is finished.
@@ -490,6 +528,7 @@ impl Survey {
                 self.arrive(handle, commands).await;
             }
             Event::RegionChanged { region_handle, .. } => {
+                self.pending_teleport = None;
                 self.arrive(region_handle, commands).await;
             }
             Event::RegionLimits(limits) => {
@@ -501,11 +540,35 @@ impl Survey {
                 self.on_parcel(&parcel, commands).await;
             }
             Event::NeighborDiscovered(neighbor) => {
-                self.on_neighbor(&neighbor);
+                self.queue_region(neighbor.region_handle, neighbor.grid_x, neighbor.grid_y);
+                if let Some(current) = self.current.as_mut()
+                    && !current.neighbors.contains(&neighbor.region_handle)
+                {
+                    current.neighbors.push(neighbor.region_handle);
+                }
+            }
+            Event::MapBlock(region) => {
+                self.names.insert(region.region_handle, region.name.clone());
+                self.queue_region(region.region_handle, region.grid_x, region.grid_y);
             }
             Event::TeleportFailed { reason } => {
-                warn!("teleport failed ({reason}); advancing to the next region");
-                self.advance(commands).await;
+                // Ignore stray/duplicate failures (a teleport that times out also
+                // draws a failure message from the simulator); only the one that
+                // clears our in-flight teleport handle is acted upon.
+                let Some(handle) = self.pending_teleport.take() else {
+                    return Ok(false);
+                };
+                match self.names.get(&handle).map(|name| (handle, name.clone())) {
+                    Some((handle, name)) => {
+                        warn!("teleport failed ({reason}); re-logging in at {name}");
+                        self.relog_target = Some((handle, name));
+                        commands.send(Command::Logout).await.ok();
+                    }
+                    None => {
+                        warn!("teleport failed ({reason}); advancing to the next region");
+                        self.advance(commands).await;
+                    }
+                }
             }
             Event::Disconnected(reason) => {
                 warn!("disconnected: {reason:?}");
@@ -534,6 +597,20 @@ impl Survey {
         self.current = Some(accum);
         let now = tokio::time::Instant::now();
         self.deadline = Some(now.checked_add(self.collection).unwrap_or(now));
+        // Request the world map once, to enumerate the in-bounds regions and
+        // resolve their names (used for the re-login fallback).
+        if !self.map_requested {
+            self.map_requested = true;
+            commands
+                .send(Command::RequestMapBlocks {
+                    min_x: self.bounds.min_x,
+                    max_x: self.bounds.max_x,
+                    min_y: self.bounds.min_y,
+                    max_y: self.bounds.max_y,
+                })
+                .await
+                .ok();
+        }
         commands.send(Command::RequestRegionInfo).await.ok();
         self.send_next_parcel_query(commands).await;
     }
@@ -591,16 +668,11 @@ impl Survey {
         }
     }
 
-    /// Queues an in-bounds, unseen neighbour for a later visit.
-    fn on_neighbor(&mut self, neighbor: &NeighborInfo) {
-        if !self.bounds.contains(neighbor.grid_x, neighbor.grid_y) {
+    /// Queues a region for a later visit, if it is in bounds and not already
+    /// surveyed or queued.
+    fn queue_region(&mut self, handle: u64, grid_x: u32, grid_y: u32) {
+        if !self.bounds.contains(grid_x, grid_y) {
             return;
-        }
-        let handle = neighbor.region_handle;
-        if let Some(current) = self.current.as_mut()
-            && !current.neighbors.contains(&handle)
-        {
-            current.neighbors.push(handle);
         }
         if self.visited.contains(&handle) || self.queued.contains(&handle) {
             return;
@@ -667,7 +739,10 @@ impl Survey {
         Ok(())
     }
 
-    /// Teleports to the next queued region, or logs out when finished.
+    /// Moves to the next queued region — by re-logging in directly when its name
+    /// is known (reliable; cross-region teleport needs child-agent circuits this
+    /// client does not maintain), or by teleporting as a fallback — and logs out
+    /// when the queue is drained or the region cap is reached.
     async fn advance(&mut self, commands: &mpsc::Sender<Command>) {
         if self.surveyed >= self.max_regions {
             commands.send(Command::Logout).await.ok();
@@ -677,14 +752,24 @@ impl Survey {
             if self.visited.contains(&handle) {
                 continue;
             }
-            commands
-                .send(Command::Teleport {
-                    region_handle: handle,
-                    position: ARRIVAL_POSITION,
-                    look_at: ARRIVAL_LOOK_AT,
-                })
-                .await
-                .ok();
+            match self.names.get(&handle).cloned() {
+                Some(name) => {
+                    // Log in directly at the named region on the next session.
+                    self.relog_target = Some((handle, name));
+                    commands.send(Command::Logout).await.ok();
+                }
+                None => {
+                    self.pending_teleport = Some(handle);
+                    commands
+                        .send(Command::Teleport {
+                            region_handle: handle,
+                            position: ARRIVAL_POSITION,
+                            look_at: ARRIVAL_LOOK_AT,
+                        })
+                        .await
+                        .ok();
+                }
+            }
             return;
         }
         commands.send(Command::Logout).await.ok();
@@ -712,27 +797,7 @@ async fn survey_command(parameters: SurveyParameters) -> Result<(), Error> {
         Box::new(std::fs::File::create(&parameters.output)?)
     };
 
-    let request = LoginRequest::new(
-        parameters.first,
-        parameters.last,
-        parameters.password,
-        parameters.start,
-        parameters.channel,
-        parameters.version,
-    );
-    let params = LoginParams {
-        login_uri: parameters.login_uri,
-        request,
-    };
-
-    tracing::info!("logging in for survey");
-    let client = Client::connect(params).await?;
-
-    let (event_tx, event_rx) = mpsc::channel::<Event>(256);
-    let (command_tx, command_rx) = mpsc::channel::<Command>(64);
-    let run = tokio::spawn(client.run(event_tx, command_rx));
-
-    let survey = Survey::new(
+    let mut survey = Survey::new(
         bounds,
         start_handle,
         parameters.max_regions,
@@ -740,9 +805,43 @@ async fn survey_command(parameters: SurveyParameters) -> Result<(), Error> {
         parameters.draw_distance,
         writer,
     );
-    survey.run(event_rx, command_tx).await?;
 
-    run.await??;
+    // Each iteration runs one logged-in session; a teleport failure to a named
+    // region ends the session with a re-login at that region.
+    let mut start_location = parameters.start;
+    loop {
+        let request = LoginRequest::new(
+            parameters.first.clone(),
+            parameters.last.clone(),
+            parameters.password.clone(),
+            start_location.clone(),
+            parameters.channel.clone(),
+            parameters.version.clone(),
+        );
+        let params = LoginParams {
+            login_uri: parameters.login_uri.clone(),
+            request,
+        };
+
+        tracing::info!("logging in for survey");
+        let client = Client::connect(params).await?;
+        let (event_tx, event_rx) = mpsc::channel::<Event>(256);
+        let (command_tx, command_rx) = mpsc::channel::<Command>(64);
+        let run = tokio::spawn(client.run(event_tx, command_rx));
+
+        let outcome = survey.run_session(event_rx, command_tx).await?;
+        run.await??;
+
+        match outcome {
+            SessionOutcome::Done => break,
+            SessionOutcome::RelogAt { handle, name } => {
+                tracing::info!("re-logging in at {name} to continue the survey");
+                survey.start_handle = handle;
+                start_location = format!("uri:{name}&128&128&30");
+            }
+        }
+    }
+
     tracing::info!("survey complete");
     Ok(())
 }

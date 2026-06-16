@@ -7,9 +7,9 @@ mod types;
 pub use error::Error;
 pub use session::Session;
 pub use types::{
-    DisconnectReason, Event, LoginHttpRequest, LoginParams, Maturity, NeighborInfo, ParcelInfo,
-    ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability, Transmit,
-    grid_to_handle, handle_to_global, handle_to_grid,
+    DisconnectReason, Event, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, NeighborInfo,
+    ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability,
+    Transmit, grid_to_handle, handle_to_global, handle_to_grid,
 };
 
 // Re-export the wire-level types a driver needs to build messages and parse
