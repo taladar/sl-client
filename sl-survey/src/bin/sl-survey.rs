@@ -591,6 +591,20 @@ impl Survey {
             | Event::FriendsOnline(_)
             | Event::FriendsOffline(_)
             | Event::FriendRightsChanged { .. }
+            | Event::ActiveGroupChanged(_)
+            | Event::GroupMemberships(_)
+            | Event::GroupMembers { .. }
+            | Event::GroupRoleData { .. }
+            | Event::GroupRoleMembers { .. }
+            | Event::GroupTitles { .. }
+            | Event::GroupProfileReceived(_)
+            | Event::GroupNotices { .. }
+            | Event::GroupSessionMessage { .. }
+            | Event::GroupSessionParticipant { .. }
+            | Event::CreateGroupResult { .. }
+            | Event::JoinGroupResult { .. }
+            | Event::LeaveGroupResult { .. }
+            | Event::DroppedFromGroup { .. }
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal

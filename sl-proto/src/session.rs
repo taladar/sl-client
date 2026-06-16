@@ -36,6 +36,31 @@ use sl_wire::messages::{
     TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock, UseCircuitCode,
     UseCircuitCodeCircuitCodeBlock,
 };
+// Group support (#7): incoming reply blocks consumed by the converter helpers.
+use sl_wire::messages::{
+    AgentDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
+    GroupMembersReplyMemberDataBlock, GroupNoticesListReplyDataBlock,
+    GroupProfileReplyGroupDataBlock, GroupRoleDataReplyRoleDataBlock,
+    GroupTitlesReplyGroupDataBlock,
+};
+// Group support (#7): the outgoing group messages and their blocks.
+use sl_wire::messages::{
+    ActivateGroup, ActivateGroupAgentDataBlock, CreateGroupRequest,
+    CreateGroupRequestAgentDataBlock, CreateGroupRequestGroupDataBlock, GroupMembersRequest,
+    GroupMembersRequestAgentDataBlock, GroupMembersRequestGroupDataBlock, GroupNoticeRequest,
+    GroupNoticeRequestAgentDataBlock, GroupNoticeRequestDataBlock, GroupNoticesListRequest,
+    GroupNoticesListRequestAgentDataBlock, GroupNoticesListRequestDataBlock, GroupProfileRequest,
+    GroupProfileRequestAgentDataBlock, GroupProfileRequestGroupDataBlock, GroupRoleDataRequest,
+    GroupRoleDataRequestAgentDataBlock, GroupRoleDataRequestGroupDataBlock,
+    GroupRoleMembersRequest, GroupRoleMembersRequestAgentDataBlock,
+    GroupRoleMembersRequestGroupDataBlock, GroupTitlesRequest, GroupTitlesRequestAgentDataBlock,
+    InviteGroupRequest, InviteGroupRequestAgentDataBlock, InviteGroupRequestGroupDataBlock,
+    InviteGroupRequestInviteDataBlock, JoinGroupRequest, JoinGroupRequestAgentDataBlock,
+    JoinGroupRequestGroupDataBlock, LeaveGroupRequest, LeaveGroupRequestAgentDataBlock,
+    LeaveGroupRequestGroupDataBlock, SetGroupAcceptNotices, SetGroupAcceptNoticesAgentDataBlock,
+    SetGroupAcceptNoticesDataBlock, SetGroupAcceptNoticesNewDataBlock, SetGroupContribution,
+    SetGroupContributionAgentDataBlock, SetGroupContributionDataBlock,
+};
 use sl_wire::{
     AnyMessage, ControlFlags, Llsd, MessageId, PacketFlags, Reader, SkeletonFolder, WireError,
     Writer, build_login_request, encode_datagram, parse_datagram, zero_decode,
@@ -44,11 +69,13 @@ use uuid::Uuid;
 
 use crate::error::Error;
 use crate::types::{
-    AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible, ChatMessage,
-    ChatSourceType, ChatType, DisconnectReason, Event, Friend, FriendRights, ImDialog,
-    InstantMessage, InventoryFolder, InventoryItem, LoginHttpRequest, LoginParams, MapRegionInfo,
-    Maturity, NeighborInfo, ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity,
-    RegionLimits, Reliability, Transmit, grid_to_handle, handle_to_grid,
+    ActiveGroup, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
+    ChatMessage, ChatSourceType, ChatType, CreateGroupParams, DisconnectReason, Event, Friend,
+    FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
+    GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
+    LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, NeighborInfo, ParcelInfo,
+    ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability, Transmit,
+    grid_to_handle, handle_to_grid,
 };
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
@@ -87,11 +114,18 @@ const IDENTITY_ROTATION: Rotation = Rotation {
 /// message tag a driver feeds back via [`Session::handle_caps_event`].
 pub const CAP_FETCH_INVENTORY: &str = "FetchInventoryDescendents2";
 
+/// The HTTP capability for fetching a group's full member roster (a POST of an
+/// LLSD `{ group_id }` map — the modern Second Life path that replaces the UDP
+/// `GroupMembersRequest`/`Reply`). The LLSD response is decoded by
+/// [`Session::handle_caps_event`] into [`Event::GroupMembers`].
+pub const CAP_GROUP_MEMBER_DATA: &str = "GroupMemberData";
+
 /// The capability names the client requests from the region seed. A driver POSTs
 /// these to the seed URL to obtain the capability map, then uses `EventQueueGet`
-/// for the event-queue long-poll and [`CAP_FETCH_INVENTORY`] for inventory
-/// fetches.
-pub const REQUESTED_CAPABILITIES: &[&str] = &["EventQueueGet", CAP_FETCH_INVENTORY];
+/// for the event-queue long-poll, [`CAP_FETCH_INVENTORY`] for inventory fetches,
+/// and [`CAP_GROUP_MEMBER_DATA`] for group rosters.
+pub const REQUESTED_CAPABILITIES: &[&str] =
+    &["EventQueueGet", CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA];
 
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
 fn deadline(now: Instant, duration: Duration) -> Instant {
@@ -591,6 +625,296 @@ impl Circuit {
         self.send(&message, Reliability::Reliable, now)
     }
 
+    /// Queues an `ActivateGroup` reliably, making `group_id` the active group
+    /// (nil clears the active group).
+    fn send_activate_group(&mut self, group_id: Uuid, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::ActivateGroup(ActivateGroup {
+            agent_data: ActivateGroupAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                group_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GroupMembersRequest` reliably for `group_id`.
+    fn send_group_members_request(
+        &mut self,
+        group_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GroupMembersRequest(GroupMembersRequest {
+            agent_data: GroupMembersRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            group_data: GroupMembersRequestGroupDataBlock {
+                group_id,
+                request_id: Uuid::nil(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GroupRoleDataRequest` reliably for `group_id`.
+    fn send_group_role_data_request(
+        &mut self,
+        group_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GroupRoleDataRequest(GroupRoleDataRequest {
+            agent_data: GroupRoleDataRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            group_data: GroupRoleDataRequestGroupDataBlock {
+                group_id,
+                request_id: Uuid::nil(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GroupRoleMembersRequest` reliably for `group_id`.
+    fn send_group_role_members_request(
+        &mut self,
+        group_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GroupRoleMembersRequest(GroupRoleMembersRequest {
+            agent_data: GroupRoleMembersRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            group_data: GroupRoleMembersRequestGroupDataBlock {
+                group_id,
+                request_id: Uuid::nil(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GroupTitlesRequest` reliably for `group_id`.
+    fn send_group_titles_request(&mut self, group_id: Uuid, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::GroupTitlesRequest(GroupTitlesRequest {
+            agent_data: GroupTitlesRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                group_id,
+                request_id: Uuid::nil(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GroupProfileRequest` reliably for `group_id`.
+    fn send_group_profile_request(
+        &mut self,
+        group_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GroupProfileRequest(GroupProfileRequest {
+            agent_data: GroupProfileRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            group_data: GroupProfileRequestGroupDataBlock { group_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GroupNoticesListRequest` reliably for `group_id`.
+    fn send_group_notices_list_request(
+        &mut self,
+        group_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GroupNoticesListRequest(GroupNoticesListRequest {
+            agent_data: GroupNoticesListRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: GroupNoticesListRequestDataBlock { group_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GroupNoticeRequest` reliably for the notice `notice_id`.
+    fn send_group_notice_request(
+        &mut self,
+        notice_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GroupNoticeRequest(GroupNoticeRequest {
+            agent_data: GroupNoticeRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: GroupNoticeRequestDataBlock {
+                group_notice_id: notice_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `CreateGroupRequest` reliably.
+    fn send_create_group_request(
+        &mut self,
+        params: &CreateGroupParams,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::CreateGroupRequest(CreateGroupRequest {
+            agent_data: CreateGroupRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            group_data: CreateGroupRequestGroupDataBlock {
+                name: with_nul(&params.name),
+                charter: with_nul(&params.charter),
+                show_in_list: params.show_in_list,
+                insignia_id: params.insignia_id,
+                membership_fee: params.membership_fee,
+                open_enrollment: params.open_enrollment,
+                allow_publish: params.allow_publish,
+                mature_publish: params.mature_publish,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `JoinGroupRequest` reliably for `group_id`.
+    fn send_join_group_request(&mut self, group_id: Uuid, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::JoinGroupRequest(JoinGroupRequest {
+            agent_data: JoinGroupRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            group_data: JoinGroupRequestGroupDataBlock { group_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `LeaveGroupRequest` reliably for `group_id`.
+    fn send_leave_group_request(&mut self, group_id: Uuid, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::LeaveGroupRequest(LeaveGroupRequest {
+            agent_data: LeaveGroupRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            group_data: LeaveGroupRequestGroupDataBlock { group_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `InviteGroupRequest` reliably inviting `invitees` (each an
+    /// `(invitee_id, role_id)` pair, nil `role_id` for the default Everyone role)
+    /// to `group_id`.
+    fn send_invite_group_request(
+        &mut self,
+        group_id: Uuid,
+        invitees: &[(Uuid, Uuid)],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::InviteGroupRequest(InviteGroupRequest {
+            agent_data: InviteGroupRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            group_data: InviteGroupRequestGroupDataBlock { group_id },
+            invite_data: invitees
+                .iter()
+                .map(|(invitee_id, role_id)| InviteGroupRequestInviteDataBlock {
+                    invitee_id: *invitee_id,
+                    role_id: *role_id,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `SetGroupAcceptNotices` reliably for `group_id`.
+    fn send_set_group_accept_notices(
+        &mut self,
+        group_id: Uuid,
+        accept_notices: bool,
+        list_in_profile: bool,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::SetGroupAcceptNotices(SetGroupAcceptNotices {
+            agent_data: SetGroupAcceptNoticesAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: SetGroupAcceptNoticesDataBlock {
+                group_id,
+                accept_notices,
+            },
+            new_data: SetGroupAcceptNoticesNewDataBlock { list_in_profile },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `SetGroupContribution` reliably for `group_id`.
+    fn send_set_group_contribution(
+        &mut self,
+        group_id: Uuid,
+        contribution: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::SetGroupContribution(SetGroupContribution {
+            agent_data: SetGroupContributionAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: SetGroupContributionDataBlock {
+                group_id,
+                contribution,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a group IM (`ImprovedInstantMessage`) reliably: the session id and
+    /// recipient are both `group_id`, as group chat requires. `dialog` selects
+    /// start/send/leave.
+    fn send_group_session_im(
+        &mut self,
+        group_id: Uuid,
+        dialog: ImDialog,
+        message: &str,
+        from_name: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let im = AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
+            agent_data: ImprovedInstantMessageAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            message_block: ImprovedInstantMessageMessageBlockBlock {
+                from_group: false,
+                to_agent_id: group_id,
+                parent_estate_id: 0,
+                region_id: Uuid::nil(),
+                position: Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                offline: 0,
+                dialog: dialog.to_u8(),
+                id: group_id,
+                timestamp: 0,
+                from_agent_name: with_nul(from_name),
+                message: with_nul(message),
+                binary_bucket: Vec::new(),
+            },
+            estate_block: ImprovedInstantMessageEstateBlockBlock { estate_id: 0 },
+            meta_data: Vec::new(),
+        });
+        self.send(&im, Reliability::Reliable, now)
+    }
+
     /// Queues a `FetchInventoryDescendents` reliably for the folder `folder_id`
     /// (sorted by name), requesting its sub-folders and items.
     fn send_fetch_inventory_descendents(
@@ -931,6 +1255,20 @@ impl Session {
                     self.events.push_back(event);
                 }
             }
+            // The modern (CAPS event-queue) delivery of group memberships; the
+            // UDP `AgentGroupDataUpdate` is deprecated on Second Life.
+            "AgentGroupDataUpdate" => {
+                if let Some(event) = group_memberships_from_caps_llsd(body) {
+                    self.events.push_back(event);
+                }
+            }
+            // The response to a `GroupMemberData` capability POST (the modern
+            // group roster fetch).
+            CAP_GROUP_MEMBER_DATA => {
+                if let Some(event) = group_members_from_caps_llsd(body) {
+                    self.events.push_back(event);
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -1199,6 +1537,24 @@ impl Session {
                             typing: matches!(dialog, ImDialog::TypingStart),
                         });
                     }
+                    // Group IM session traffic (the session id is the group id).
+                    ImDialog::SessionSend if block.from_group => {
+                        self.events.push_back(Event::GroupSessionMessage {
+                            group_id: block.id,
+                            from_agent_id: im.agent_data.agent_id,
+                            from_name: trimmed_string(&block.from_agent_name),
+                            message: trimmed_string(&block.message),
+                        });
+                    }
+                    dialog @ (ImDialog::SessionAdd | ImDialog::SessionLeave)
+                        if block.from_group =>
+                    {
+                        self.events.push_back(Event::GroupSessionParticipant {
+                            group_id: block.id,
+                            agent_id: im.agent_data.agent_id,
+                            joined: matches!(dialog, ImDialog::SessionAdd),
+                        });
+                    }
                     _ => self
                         .events
                         .push_back(Event::InstantMessageReceived(Box::new(instant_message(
@@ -1345,6 +1701,89 @@ impl Session {
                         circuit.record_acks(&[packet.id]);
                     }
                 }
+            }
+            AnyMessage::AgentDataUpdate(update) => {
+                self.events
+                    .push_back(Event::ActiveGroupChanged(Box::new(active_group(
+                        &update.agent_data,
+                    ))));
+            }
+            AnyMessage::AgentGroupDataUpdate(update) => {
+                self.events.push_back(Event::GroupMemberships(
+                    update.group_data.iter().map(group_membership).collect(),
+                ));
+            }
+            AnyMessage::GroupMembersReply(reply) => {
+                self.events.push_back(Event::GroupMembers {
+                    group_id: reply.group_data.group_id,
+                    request_id: reply.group_data.request_id,
+                    member_count: reply.group_data.member_count,
+                    members: reply.member_data.iter().map(group_member).collect(),
+                });
+            }
+            AnyMessage::GroupRoleDataReply(reply) => {
+                self.events.push_back(Event::GroupRoleData {
+                    group_id: reply.group_data.group_id,
+                    request_id: reply.group_data.request_id,
+                    roles: reply.role_data.iter().map(group_role).collect(),
+                });
+            }
+            AnyMessage::GroupRoleMembersReply(reply) => {
+                self.events.push_back(Event::GroupRoleMembers {
+                    group_id: reply.agent_data.group_id,
+                    request_id: reply.agent_data.request_id,
+                    pairs: reply
+                        .member_data
+                        .iter()
+                        .map(|pair| GroupRoleMember {
+                            role_id: pair.role_id,
+                            member_id: pair.member_id,
+                        })
+                        .collect(),
+                });
+            }
+            AnyMessage::GroupTitlesReply(reply) => {
+                self.events.push_back(Event::GroupTitles {
+                    group_id: reply.agent_data.group_id,
+                    request_id: reply.agent_data.request_id,
+                    titles: reply.group_data.iter().map(group_title).collect(),
+                });
+            }
+            AnyMessage::GroupProfileReply(reply) => {
+                self.events
+                    .push_back(Event::GroupProfileReceived(Box::new(group_profile(
+                        &reply.group_data,
+                    ))));
+            }
+            AnyMessage::GroupNoticesListReply(reply) => {
+                self.events.push_back(Event::GroupNotices {
+                    group_id: reply.agent_data.group_id,
+                    notices: reply.data.iter().map(group_notice).collect(),
+                });
+            }
+            AnyMessage::CreateGroupReply(reply) => {
+                self.events.push_back(Event::CreateGroupResult {
+                    group_id: reply.reply_data.group_id,
+                    success: reply.reply_data.success,
+                    message: trimmed_string(&reply.reply_data.message),
+                });
+            }
+            AnyMessage::JoinGroupReply(reply) => {
+                self.events.push_back(Event::JoinGroupResult {
+                    group_id: reply.group_data.group_id,
+                    success: reply.group_data.success,
+                });
+            }
+            AnyMessage::LeaveGroupReply(reply) => {
+                self.events.push_back(Event::LeaveGroupResult {
+                    group_id: reply.group_data.group_id,
+                    success: reply.group_data.success,
+                });
+            }
+            AnyMessage::AgentDropGroup(drop) => {
+                self.events.push_back(Event::DroppedFromGroup {
+                    group_id: drop.agent_data.group_id,
+                });
             }
             AnyMessage::OnlineNotification(notification) => {
                 let ids = notification
@@ -1857,6 +2296,272 @@ impl Session {
         Ok(())
     }
 
+    /// Makes `group_id` the agent's active group (`ActivateGroup`); pass
+    /// [`Uuid::nil`] to clear it. The simulator confirms with an
+    /// [`Event::ActiveGroupChanged`]. The agent's memberships arrive at login as
+    /// [`Event::GroupMemberships`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn activate_group(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_activate_group(group_id, now)?;
+        Ok(())
+    }
+
+    /// Requests a group's member roster (`GroupMembersRequest`). The reply
+    /// arrives as [`Event::GroupMembers`] (the simulator may split large rosters
+    /// across several events).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_group_members(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_members_request(group_id, now)?;
+        Ok(())
+    }
+
+    /// Requests a group's roles (`GroupRoleDataRequest`). The reply arrives as
+    /// [`Event::GroupRoleData`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_group_roles(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_role_data_request(group_id, now)?;
+        Ok(())
+    }
+
+    /// Requests a group's role↔member pairings (`GroupRoleMembersRequest`). The
+    /// reply arrives as [`Event::GroupRoleMembers`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_group_role_members(
+        &mut self,
+        group_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_role_members_request(group_id, now)?;
+        Ok(())
+    }
+
+    /// Requests the agent's selectable titles in a group (`GroupTitlesRequest`).
+    /// The reply arrives as [`Event::GroupTitles`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_group_titles(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_titles_request(group_id, now)?;
+        Ok(())
+    }
+
+    /// Requests a group's profile (`GroupProfileRequest`). The reply arrives as
+    /// [`Event::GroupProfileReceived`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_group_profile(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_profile_request(group_id, now)?;
+        Ok(())
+    }
+
+    /// Requests a group's notice list (`GroupNoticesListRequest`). The reply
+    /// arrives as [`Event::GroupNotices`] (headers only; fetch a notice's body
+    /// with [`Session::request_group_notice`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_group_notices(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_notices_list_request(group_id, now)?;
+        Ok(())
+    }
+
+    /// Requests a single group notice's full body and attachment
+    /// (`GroupNoticeRequest`); the notice is delivered as an
+    /// [`Event::InstantMessageReceived`] with the `GroupNotice` dialog.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_group_notice(&mut self, notice_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_notice_request(notice_id, now)?;
+        Ok(())
+    }
+
+    /// Creates a new group (`CreateGroupRequest`). The result arrives as
+    /// [`Event::CreateGroupResult`] (with the new group id on success). Note the
+    /// grid may charge an L$ creation fee.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn create_group(&mut self, params: &CreateGroupParams, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_create_group_request(params, now)?;
+        Ok(())
+    }
+
+    /// Joins an open-enrollment group (`JoinGroupRequest`). The result arrives as
+    /// [`Event::JoinGroupResult`]. Closed groups require an invitation instead
+    /// (see [`Session::invite_to_group`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn join_group(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_join_group_request(group_id, now)?;
+        Ok(())
+    }
+
+    /// Leaves a group (`LeaveGroupRequest`). The result arrives as
+    /// [`Event::LeaveGroupResult`], followed by an [`Event::DroppedFromGroup`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn leave_group(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_leave_group_request(group_id, now)?;
+        Ok(())
+    }
+
+    /// Invites agents to a group (`InviteGroupRequest`). Each invitee is an
+    /// `(invitee_id, role_id)` pair; use [`Uuid::nil`] for the role to assign the
+    /// default "Everyone" role. Invitees receive a group-invitation IM.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn invite_to_group(
+        &mut self,
+        group_id: Uuid,
+        invitees: &[(Uuid, Uuid)],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_invite_group_request(group_id, invitees, now)?;
+        Ok(())
+    }
+
+    /// Sets whether the agent accepts notices from a group and lists it in their
+    /// profile (`SetGroupAcceptNotices`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_group_accept_notices(
+        &mut self,
+        group_id: Uuid,
+        accept_notices: bool,
+        list_in_profile: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_set_group_accept_notices(group_id, accept_notices, list_in_profile, now)?;
+        Ok(())
+    }
+
+    /// Sets the agent's L$ contribution to a group (`SetGroupContribution`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_group_contribution(
+        &mut self,
+        group_id: Uuid,
+        contribution: i32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_set_group_contribution(group_id, contribution, now)?;
+        Ok(())
+    }
+
+    /// Starts (joins) a group's IM session (`ImprovedInstantMessage`,
+    /// `IM_SESSION_GROUP_START`), so the agent receives the group's chat. Group
+    /// messages arrive as [`Event::GroupSessionMessage`]. Sending a message with
+    /// [`Session::send_group_message`] also joins the session implicitly.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn start_group_session(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_session_im(
+            group_id,
+            ImDialog::SessionGroupStart,
+            "",
+            &from_name,
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Sends a message to a group's IM session (`ImprovedInstantMessage`,
+    /// `IM_SESSION_SEND`, session id = group id). Other members receive it as
+    /// [`Event::GroupSessionMessage`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn send_group_message(
+        &mut self,
+        group_id: Uuid,
+        message: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_session_im(group_id, ImDialog::SessionSend, message, &from_name, now)?;
+        Ok(())
+    }
+
+    /// Leaves a group's IM session (`ImprovedInstantMessage`,
+    /// `IM_SESSION_LEAVE`), so the agent stops receiving the group's chat without
+    /// leaving the group itself.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn leave_group_session(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_session_im(group_id, ImDialog::SessionLeave, "", &from_name, now)?;
+        Ok(())
+    }
+
     /// The agent's own id, once login has established the circuit. Useful as the
     /// `owner_id` for inventory fetches and for recognising the client's own
     /// messages.
@@ -2055,6 +2760,14 @@ fn trimmed_string(bytes: &[u8]) -> String {
         .to_owned()
 }
 
+/// Encodes a string as NUL-terminated UTF-8 bytes, as the viewer sends variable
+/// string fields on the wire.
+fn with_nul(s: &str) -> Vec<u8> {
+    let mut bytes = s.as_bytes().to_vec();
+    bytes.push(0);
+    bytes
+}
+
 /// Builds a [`RegionIdentity`] from a `RegionHandshake`'s region-info blocks.
 fn region_identity(
     info: &RegionHandshakeRegionInfoBlock,
@@ -2230,6 +2943,98 @@ const fn friend(entry: &sl_wire::BuddyListEntry) -> Friend {
         id: entry.buddy_id,
         rights_granted: FriendRights(entry.rights_granted),
         rights_received: FriendRights(entry.rights_has),
+    }
+}
+
+/// Builds [`ActiveGroup`] from an `AgentDataUpdate` block.
+fn active_group(data: &AgentDataUpdateAgentDataBlock) -> ActiveGroup {
+    ActiveGroup {
+        agent_id: data.agent_id,
+        first_name: trimmed_string(&data.first_name),
+        last_name: trimmed_string(&data.last_name),
+        group_title: trimmed_string(&data.group_title),
+        active_group_id: data.active_group_id,
+        group_powers: data.group_powers,
+        group_name: trimmed_string(&data.group_name),
+    }
+}
+
+/// Builds [`GroupMembership`] from an `AgentGroupDataUpdate` entry.
+fn group_membership(data: &AgentGroupDataUpdateGroupDataBlock) -> GroupMembership {
+    GroupMembership {
+        group_id: data.group_id,
+        group_powers: data.group_powers,
+        accept_notices: data.accept_notices,
+        group_insignia_id: data.group_insignia_id,
+        contribution: data.contribution,
+        group_name: trimmed_string(&data.group_name),
+    }
+}
+
+/// Builds [`GroupMember`] from a `GroupMembersReply` entry.
+fn group_member(data: &GroupMembersReplyMemberDataBlock) -> GroupMember {
+    GroupMember {
+        agent_id: data.agent_id,
+        contribution: data.contribution,
+        online_status: trimmed_string(&data.online_status),
+        agent_powers: data.agent_powers,
+        title: trimmed_string(&data.title),
+        is_owner: data.is_owner,
+    }
+}
+
+/// Builds [`GroupRole`] from a `GroupRoleDataReply` entry.
+fn group_role(data: &GroupRoleDataReplyRoleDataBlock) -> GroupRole {
+    GroupRole {
+        role_id: data.role_id,
+        name: trimmed_string(&data.name),
+        title: trimmed_string(&data.title),
+        description: trimmed_string(&data.description),
+        powers: data.powers,
+        members: data.members,
+    }
+}
+
+/// Builds [`GroupTitle`] from a `GroupTitlesReply` entry.
+fn group_title(data: &GroupTitlesReplyGroupDataBlock) -> GroupTitle {
+    GroupTitle {
+        title: trimmed_string(&data.title),
+        role_id: data.role_id,
+        selected: data.selected,
+    }
+}
+
+/// Builds [`GroupProfile`] from a `GroupProfileReply` block.
+fn group_profile(data: &GroupProfileReplyGroupDataBlock) -> GroupProfile {
+    GroupProfile {
+        group_id: data.group_id,
+        name: trimmed_string(&data.name),
+        charter: trimmed_string(&data.charter),
+        show_in_list: data.show_in_list,
+        member_title: trimmed_string(&data.member_title),
+        powers: data.powers_mask,
+        insignia_id: data.insignia_id,
+        founder_id: data.founder_id,
+        membership_fee: data.membership_fee,
+        open_enrollment: data.open_enrollment,
+        money: data.money,
+        member_count: data.group_membership_count,
+        role_count: data.group_roles_count,
+        allow_publish: data.allow_publish,
+        mature_publish: data.mature_publish,
+        owner_role: data.owner_role,
+    }
+}
+
+/// Builds [`GroupNotice`] from a `GroupNoticesListReply` entry.
+fn group_notice(data: &GroupNoticesListReplyDataBlock) -> GroupNotice {
+    GroupNotice {
+        notice_id: data.notice_id,
+        timestamp: data.timestamp,
+        from_name: trimmed_string(&data.from_name),
+        subject: trimmed_string(&data.subject),
+        has_attachment: data.has_attachment,
+        asset_type: data.asset_type,
     }
 }
 
@@ -2409,6 +3214,120 @@ fn i32_member(map: &Llsd, key: &str) -> i32 {
 /// Reads a string from an LLSD map member, defaulting to empty.
 fn string_member(map: &Llsd, key: &str) -> String {
     map.get(key).and_then(Llsd::as_str).unwrap_or("").to_owned()
+}
+
+/// Decodes a `u64` from an LLSD value as the viewer's `ll_U64_from_sd` does:
+/// from an 8-byte big-endian binary, a hex/decimal string, or an integer.
+fn llsd_u64(value: &Llsd) -> u64 {
+    match value {
+        Llsd::Binary(bytes) if bytes.len() >= 8 => bytes
+            .iter()
+            .take(8)
+            .fold(0u64, |acc, &byte| (acc << 8) | u64::from(byte)),
+        Llsd::String(s) => {
+            let trimmed = s.trim().trim_start_matches("0x");
+            u64::from_str_radix(trimmed, 16)
+                .ok()
+                .or_else(|| s.trim().parse().ok())
+                .unwrap_or(0)
+        }
+        Llsd::Integer(i) => u64::try_from(*i).unwrap_or(0),
+        _ => 0,
+    }
+}
+
+/// Decodes the CAPS event-queue `AgentGroupDataUpdate` event (the modern
+/// delivery of the agent's group memberships) into [`Event::GroupMemberships`].
+/// The LLSD mirrors the UDP message: a `GroupData` array of per-group maps.
+fn group_memberships_from_caps_llsd(body: &Llsd) -> Option<Event> {
+    // The sim sometimes double-wraps the payload in a nested `body`.
+    let body = body.get("body").unwrap_or(body);
+    let groups = body.get("GroupData").and_then(Llsd::as_array)?;
+    let memberships = groups
+        .iter()
+        .filter_map(|group| {
+            let group_id = group.get("GroupID").and_then(Llsd::as_uuid)?;
+            Some(GroupMembership {
+                group_id,
+                group_powers: group.get("GroupPowers").map_or(0, llsd_u64),
+                accept_notices: group
+                    .get("AcceptNotices")
+                    .and_then(Llsd::as_bool)
+                    .unwrap_or(false),
+                group_insignia_id: group
+                    .get("GroupInsigniaID")
+                    .and_then(Llsd::as_uuid)
+                    .unwrap_or_else(Uuid::nil),
+                contribution: group
+                    .get("Contribution")
+                    .and_then(Llsd::as_i32)
+                    .unwrap_or(0),
+                group_name: group
+                    .get("GroupName")
+                    .and_then(Llsd::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            })
+        })
+        .collect();
+    Some(Event::GroupMemberships(memberships))
+}
+
+/// Decodes a `GroupMemberData` capability response into [`Event::GroupMembers`].
+/// The LLSD is `{ group_id, members: { <id>: {...} }, titles: [...],
+/// defaults: { default_powers } }`; per-member fields fall back to the defaults.
+fn group_members_from_caps_llsd(body: &Llsd) -> Option<Event> {
+    let group_id = body.get("group_id").and_then(Llsd::as_uuid)?;
+    let Llsd::Map(members) = body.get("members")? else {
+        return None;
+    };
+    let titles = body.get("titles").and_then(Llsd::as_array);
+    let default_title = titles
+        .and_then(|t| t.first())
+        .and_then(Llsd::as_str)
+        .unwrap_or_default();
+    let default_powers = body
+        .get("defaults")
+        .and_then(|d| d.get("default_powers"))
+        .map_or(0, llsd_u64);
+
+    let mut roster: Vec<GroupMember> = members
+        .iter()
+        .filter_map(|(member_id, info)| {
+            let agent_id = Uuid::parse_str(member_id).ok()?;
+            let title = info
+                .get("title")
+                .and_then(Llsd::as_i32)
+                .and_then(|index| titles?.get(usize::try_from(index).ok()?))
+                .and_then(Llsd::as_str)
+                .unwrap_or(default_title)
+                .to_owned();
+            Some(GroupMember {
+                agent_id,
+                contribution: info
+                    .get("donated_square_meters")
+                    .and_then(Llsd::as_i32)
+                    .unwrap_or(0),
+                online_status: info
+                    .get("last_login")
+                    .and_then(Llsd::as_str)
+                    .unwrap_or("unknown")
+                    .to_owned(),
+                agent_powers: info.get("powers").map_or(default_powers, llsd_u64),
+                title,
+                is_owner: info.get("owner").is_some(),
+            })
+        })
+        .collect();
+    // The members map is unordered; sort by id for deterministic output.
+    roster.sort_by_key(|member| member.agent_id);
+    let member_count = i32::try_from(roster.len()).unwrap_or(i32::MAX);
+    Some(Event::GroupMembers {
+        group_id,
+        request_id: Uuid::nil(),
+        member_count,
+        members: roster,
+    })
 }
 
 /// Parses a `FetchInventoryDescendents2` CAPS response body into one

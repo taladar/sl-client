@@ -157,8 +157,29 @@ fn on_events(
                     "us->them"
                 }
             ),
-            // This demo ignores the remaining profile/region/parcel/teleport events.
-            SlSessionEvent::AvatarInterests(_)
+            SlSessionEvent::ActiveGroupChanged(active) => info!(
+                "active group: {} (title {:?})",
+                active.group_name, active.group_title
+            ),
+            SlSessionEvent::GroupMemberships(groups) => {
+                info!("member of {} group(s)", groups.len());
+            }
+            SlSessionEvent::GroupSessionMessage {
+                from_name, message, ..
+            } => info!("group chat from {from_name}: {message}"),
+            // This demo ignores the remaining profile/region/parcel/teleport/group events.
+            SlSessionEvent::GroupMembers { .. }
+            | SlSessionEvent::GroupRoleData { .. }
+            | SlSessionEvent::GroupRoleMembers { .. }
+            | SlSessionEvent::GroupTitles { .. }
+            | SlSessionEvent::GroupProfileReceived(_)
+            | SlSessionEvent::GroupNotices { .. }
+            | SlSessionEvent::GroupSessionParticipant { .. }
+            | SlSessionEvent::CreateGroupResult { .. }
+            | SlSessionEvent::JoinGroupResult { .. }
+            | SlSessionEvent::LeaveGroupResult { .. }
+            | SlSessionEvent::DroppedFromGroup { .. }
+            | SlSessionEvent::AvatarInterests(_)
             | SlSessionEvent::AvatarGroups { .. }
             | SlSessionEvent::AvatarNotes { .. }
             | SlSessionEvent::RegionInfoHandshake(_)

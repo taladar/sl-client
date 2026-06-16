@@ -12,21 +12,23 @@ use tokio::sync::mpsc;
 use std::collections::HashMap;
 
 use sl_proto::{
-    CAP_FETCH_INVENTORY, Llsd, REQUESTED_CAPABILITIES, Session, build_event_queue_request,
-    build_fetch_inventory_request, build_seed_request, parse_event_queue_response, parse_llsd_xml,
-    parse_login_response, parse_seed_response,
+    CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA, Llsd, REQUESTED_CAPABILITIES, Session,
+    build_event_queue_request, build_fetch_inventory_request, build_group_member_data_request,
+    build_seed_request, parse_event_queue_response, parse_llsd_xml, parse_login_response,
+    parse_seed_response,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
 // alone.
 pub use sl_proto::{
-    AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
-    ChatMessage, ChatSourceType, ChatType, ControlFlags, DisconnectReason, Event, Friend,
-    FriendRights, ImDialog, InstantMessage, InventoryFolder, InventoryItem, LoginParams,
-    LoginRequest, LoginResponse, MapRegionInfo, Maturity, MfaChallenge, NeighborInfo, ParcelFlags,
-    ParcelInfo, ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity, RegionLimits,
-    Reliability, Rotation, Transmit, Uuid, Vector, grid_to_handle, handle_to_global,
-    handle_to_grid, sim_access,
+    ActiveGroup, AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,
+    ChatAudible, ChatMessage, ChatSourceType, ChatType, ControlFlags, CreateGroupParams,
+    DisconnectReason, Event, Friend, FriendRights, GroupMember, GroupMembership, GroupNotice,
+    GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
+    InventoryFolder, InventoryItem, LoginParams, LoginRequest, LoginResponse, MapRegionInfo,
+    Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
+    RegionFlags, RegionIdentity, RegionLimits, Reliability, Rotation, Transmit, Uuid, Vector,
+    grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -187,6 +189,77 @@ pub enum Command {
     /// Decline a friendship offer (`DeclineFriendship`). The `transaction_id` is
     /// the [`InstantMessage::id`] of the incoming friendship-offer IM.
     DeclineFriendship(Uuid),
+    /// Make a group the active group (`ActivateGroup`); nil clears it. Confirmed
+    /// by [`Event::ActiveGroupChanged`].
+    ActivateGroup(Uuid),
+    /// Request a group's member roster over **UDP** (`GroupMembersRequest`).
+    /// Replies arrive as [`Event::GroupMembers`].
+    RequestGroupMembers(Uuid),
+    /// Fetch a group's member roster over the **HTTP CAPS** path
+    /// (`GroupMemberData`) — the modern path used on Second Life. The roster
+    /// arrives as an [`Event::GroupMembers`].
+    FetchGroupMembers(Uuid),
+    /// Request a group's roles. The reply arrives as [`Event::GroupRoleData`].
+    RequestGroupRoles(Uuid),
+    /// Request a group's role↔member pairings. The reply arrives as
+    /// [`Event::GroupRoleMembers`].
+    RequestGroupRoleMembers(Uuid),
+    /// Request the agent's selectable titles in a group. The reply arrives as
+    /// [`Event::GroupTitles`].
+    RequestGroupTitles(Uuid),
+    /// Request a group's profile. The reply arrives as
+    /// [`Event::GroupProfileReceived`].
+    RequestGroupProfile(Uuid),
+    /// Request a group's notice list. The reply arrives as [`Event::GroupNotices`].
+    RequestGroupNotices(Uuid),
+    /// Request a single group notice's full body (by notice id). Delivered as an
+    /// [`Event::InstantMessageReceived`] with the group-notice dialog.
+    RequestGroupNotice(Uuid),
+    /// Create a new group. The result arrives as [`Event::CreateGroupResult`].
+    CreateGroup(CreateGroupParams),
+    /// Join an open-enrollment group. The result arrives as
+    /// [`Event::JoinGroupResult`].
+    JoinGroup(Uuid),
+    /// Leave a group. The result arrives as [`Event::LeaveGroupResult`].
+    LeaveGroup(Uuid),
+    /// Invite agents to a group, each an `(invitee_id, role_id)` pair (nil role
+    /// = the default Everyone role).
+    InviteToGroup {
+        /// The group to invite into.
+        group_id: Uuid,
+        /// The `(invitee_id, role_id)` pairs.
+        invitees: Vec<(Uuid, Uuid)>,
+    },
+    /// Set whether the agent accepts notices from a group / lists it in profile.
+    SetGroupAcceptNotices {
+        /// The group.
+        group_id: Uuid,
+        /// Whether to accept notices.
+        accept_notices: bool,
+        /// Whether to list the group in the agent's profile.
+        list_in_profile: bool,
+    },
+    /// Set the agent's L$ contribution to a group.
+    SetGroupContribution {
+        /// The group.
+        group_id: Uuid,
+        /// The new contribution amount.
+        contribution: i32,
+    },
+    /// Start (join) a group's IM session (`IM_SESSION_GROUP_START`). Group
+    /// messages then arrive as [`Event::GroupSessionMessage`].
+    StartGroupSession(Uuid),
+    /// Send a message into a group's IM session. Other members receive it as
+    /// [`Event::GroupSessionMessage`].
+    SendGroupMessage {
+        /// The group (and IM session) to post to.
+        group_id: Uuid,
+        /// The message text.
+        message: String,
+    },
+    /// Leave a group's IM session (stop receiving its chat) without leaving the
+    /// group itself.
+    LeaveGroupSession(Uuid),
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
         /// The destination region handle.
@@ -403,6 +476,11 @@ impl Client {
                                 ));
                             }
                         }
+                        Some(Command::FetchGroupMembers(group_id)) => {
+                            if let Some(url) = caps.get(CAP_GROUP_MEMBER_DATA).cloned() {
+                                tokio::spawn(fetch_group_members(url, group_id, http.clone(), caps_tx.clone()));
+                            }
+                        }
                         Some(Command::OfferFriendship { to_agent_id, message }) => {
                             self.session.send_friendship_offer(to_agent_id, &message, Instant::now())?;
                         }
@@ -417,6 +495,57 @@ impl Client {
                         }
                         Some(Command::DeclineFriendship(transaction_id)) => {
                             self.session.decline_friendship(transaction_id, Instant::now())?;
+                        }
+                        Some(Command::ActivateGroup(group_id)) => {
+                            self.session.activate_group(group_id, Instant::now())?;
+                        }
+                        Some(Command::RequestGroupMembers(group_id)) => {
+                            self.session.request_group_members(group_id, Instant::now())?;
+                        }
+                        Some(Command::RequestGroupRoles(group_id)) => {
+                            self.session.request_group_roles(group_id, Instant::now())?;
+                        }
+                        Some(Command::RequestGroupRoleMembers(group_id)) => {
+                            self.session.request_group_role_members(group_id, Instant::now())?;
+                        }
+                        Some(Command::RequestGroupTitles(group_id)) => {
+                            self.session.request_group_titles(group_id, Instant::now())?;
+                        }
+                        Some(Command::RequestGroupProfile(group_id)) => {
+                            self.session.request_group_profile(group_id, Instant::now())?;
+                        }
+                        Some(Command::RequestGroupNotices(group_id)) => {
+                            self.session.request_group_notices(group_id, Instant::now())?;
+                        }
+                        Some(Command::RequestGroupNotice(notice_id)) => {
+                            self.session.request_group_notice(notice_id, Instant::now())?;
+                        }
+                        Some(Command::CreateGroup(params)) => {
+                            self.session.create_group(&params, Instant::now())?;
+                        }
+                        Some(Command::JoinGroup(group_id)) => {
+                            self.session.join_group(group_id, Instant::now())?;
+                        }
+                        Some(Command::LeaveGroup(group_id)) => {
+                            self.session.leave_group(group_id, Instant::now())?;
+                        }
+                        Some(Command::InviteToGroup { group_id, invitees }) => {
+                            self.session.invite_to_group(group_id, &invitees, Instant::now())?;
+                        }
+                        Some(Command::SetGroupAcceptNotices { group_id, accept_notices, list_in_profile }) => {
+                            self.session.set_group_accept_notices(group_id, accept_notices, list_in_profile, Instant::now())?;
+                        }
+                        Some(Command::SetGroupContribution { group_id, contribution }) => {
+                            self.session.set_group_contribution(group_id, contribution, Instant::now())?;
+                        }
+                        Some(Command::StartGroupSession(group_id)) => {
+                            self.session.start_group_session(group_id, Instant::now())?;
+                        }
+                        Some(Command::SendGroupMessage { group_id, message }) => {
+                            self.session.send_group_message(group_id, &message, Instant::now())?;
+                        }
+                        Some(Command::LeaveGroupSession(group_id)) => {
+                            self.session.leave_group_session(group_id, Instant::now())?;
                         }
                         Some(Command::Teleport { region_handle, position, look_at }) => {
                             self.session.teleport_to(region_handle, position, look_at, Instant::now())?;
@@ -518,6 +647,35 @@ async fn fetch_inventory(
     if let Ok(llsd) = parse_llsd_xml(&text) {
         caps_tx
             .send((CAP_FETCH_INVENTORY.to_owned(), llsd))
+            .await
+            .ok();
+    }
+}
+
+/// POSTs the `GroupMemberData` capability for `group_id`, forwarding the decoded
+/// LLSD roster back over `caps_tx` to be surfaced as an [`Event::GroupMembers`].
+async fn fetch_group_members(
+    cap_url: String,
+    group_id: Uuid,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let body = build_group_member_data_request(group_id);
+    let Ok(response) = http
+        .post(&cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+    else {
+        return;
+    };
+    let Ok(text) = response.text().await else {
+        return;
+    };
+    if let Ok(llsd) = parse_llsd_xml(&text) {
+        caps_tx
+            .send((CAP_GROUP_MEMBER_DATA.to_owned(), llsd))
             .await
             .ok();
     }

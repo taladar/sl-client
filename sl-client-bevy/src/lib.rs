@@ -14,21 +14,24 @@ use reqwest::blocking::Client as ReqwestBlockingClient;
 use std::collections::HashMap;
 
 use sl_proto::{
-    CAP_FETCH_INVENTORY, Event as SessionEvent, Llsd, LoginResponse, REQUESTED_CAPABILITIES,
-    Session, build_event_queue_request, build_fetch_inventory_request, build_seed_request,
-    parse_event_queue_response, parse_llsd_xml, parse_login_response, parse_seed_response,
+    CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA, Event as SessionEvent, Llsd, LoginResponse,
+    REQUESTED_CAPABILITIES, Session, build_event_queue_request, build_fetch_inventory_request,
+    build_group_member_data_request, build_seed_request, parse_event_queue_response,
+    parse_llsd_xml, parse_login_response, parse_seed_response,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
 // survey commands, and read events. `Event` is aliased to avoid clashing with
 // Bevy's `Event` derive.
 pub use sl_proto::{
-    AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
-    ChatMessage, ChatSourceType, ChatType, ControlFlags, DisconnectReason, Friend, FriendRights,
-    ImDialog, InstantMessage, InventoryFolder, InventoryItem, LoginParams, LoginRequest,
-    MapRegionInfo, Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo,
-    ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity, RegionLimits, Reliability,
-    Rotation, Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
+    ActiveGroup, AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,
+    ChatAudible, ChatMessage, ChatSourceType, ChatType, ControlFlags, CreateGroupParams,
+    DisconnectReason, Friend, FriendRights, GroupMember, GroupMembership, GroupNotice,
+    GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
+    InventoryFolder, InventoryItem, LoginParams, LoginRequest, MapRegionInfo, Maturity,
+    MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
+    RegionFlags, RegionIdentity, RegionLimits, Reliability, Rotation, Transmit, Uuid, Vector,
+    grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
@@ -191,6 +194,79 @@ pub enum SlCommand {
     /// Decline a friendship offer (`DeclineFriendship`). The `transaction_id` is
     /// the [`InstantMessage::id`] of the incoming friendship-offer IM.
     DeclineFriendship(Uuid),
+    /// Make a group the active group (`ActivateGroup`); nil clears it. Confirmed
+    /// by [`SlSessionEvent::ActiveGroupChanged`].
+    ActivateGroup(Uuid),
+    /// Request a group's member roster over **UDP** (`GroupMembersRequest`).
+    /// Replies arrive as [`SlSessionEvent::GroupMembers`].
+    RequestGroupMembers(Uuid),
+    /// Fetch a group's member roster over the **HTTP CAPS** path
+    /// (`GroupMemberData`) — the modern path used on Second Life. The roster
+    /// arrives as an [`SlSessionEvent::GroupMembers`].
+    FetchGroupMembers(Uuid),
+    /// Request a group's roles. The reply arrives as
+    /// [`SlSessionEvent::GroupRoleData`].
+    RequestGroupRoles(Uuid),
+    /// Request a group's role↔member pairings. The reply arrives as
+    /// [`SlSessionEvent::GroupRoleMembers`].
+    RequestGroupRoleMembers(Uuid),
+    /// Request the agent's selectable titles in a group. The reply arrives as
+    /// [`SlSessionEvent::GroupTitles`].
+    RequestGroupTitles(Uuid),
+    /// Request a group's profile. The reply arrives as
+    /// [`SlSessionEvent::GroupProfileReceived`].
+    RequestGroupProfile(Uuid),
+    /// Request a group's notice list. The reply arrives as
+    /// [`SlSessionEvent::GroupNotices`].
+    RequestGroupNotices(Uuid),
+    /// Request a single group notice's full body (by notice id).
+    RequestGroupNotice(Uuid),
+    /// Create a new group. The result arrives as
+    /// [`SlSessionEvent::CreateGroupResult`].
+    CreateGroup(CreateGroupParams),
+    /// Join an open-enrollment group. The result arrives as
+    /// [`SlSessionEvent::JoinGroupResult`].
+    JoinGroup(Uuid),
+    /// Leave a group. The result arrives as [`SlSessionEvent::LeaveGroupResult`].
+    LeaveGroup(Uuid),
+    /// Invite agents to a group, each an `(invitee_id, role_id)` pair (nil role
+    /// = the default Everyone role).
+    InviteToGroup {
+        /// The group to invite into.
+        group_id: Uuid,
+        /// The `(invitee_id, role_id)` pairs.
+        invitees: Vec<(Uuid, Uuid)>,
+    },
+    /// Set whether the agent accepts notices from a group / lists it in profile.
+    SetGroupAcceptNotices {
+        /// The group.
+        group_id: Uuid,
+        /// Whether to accept notices.
+        accept_notices: bool,
+        /// Whether to list the group in the agent's profile.
+        list_in_profile: bool,
+    },
+    /// Set the agent's L$ contribution to a group.
+    SetGroupContribution {
+        /// The group.
+        group_id: Uuid,
+        /// The new contribution amount.
+        contribution: i32,
+    },
+    /// Start (join) a group's IM session (`IM_SESSION_GROUP_START`). Group
+    /// messages then arrive as [`SlSessionEvent::GroupSessionMessage`].
+    StartGroupSession(Uuid),
+    /// Send a message into a group's IM session. Other members receive it as
+    /// [`SlSessionEvent::GroupSessionMessage`].
+    SendGroupMessage {
+        /// The group (and IM session) to post to.
+        group_id: Uuid,
+        /// The message text.
+        message: String,
+    },
+    /// Leave a group's IM session (stop receiving its chat) without leaving the
+    /// group itself.
+    LeaveGroupSession(Uuid),
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
         /// The destination region handle.
@@ -548,6 +624,17 @@ fn advance_running(
                     });
                 }
             }
+            SlCommand::FetchGroupMembers(group_id) => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_GROUP_MEMBER_DATA).cloned()
+                {
+                    let events_tx = caps.events_tx.clone();
+                    let group = *group_id;
+                    std::thread::spawn(move || {
+                        run_group_members_fetch(&url, group, &events_tx);
+                    });
+                }
+            }
             SlCommand::OfferFriendship {
                 to_agent_id,
                 message,
@@ -572,6 +659,68 @@ fn advance_running(
             }
             SlCommand::DeclineFriendship(transaction_id) => {
                 session.decline_friendship(*transaction_id, now).ok();
+            }
+            SlCommand::ActivateGroup(group_id) => {
+                session.activate_group(*group_id, now).ok();
+            }
+            SlCommand::RequestGroupMembers(group_id) => {
+                session.request_group_members(*group_id, now).ok();
+            }
+            SlCommand::RequestGroupRoles(group_id) => {
+                session.request_group_roles(*group_id, now).ok();
+            }
+            SlCommand::RequestGroupRoleMembers(group_id) => {
+                session.request_group_role_members(*group_id, now).ok();
+            }
+            SlCommand::RequestGroupTitles(group_id) => {
+                session.request_group_titles(*group_id, now).ok();
+            }
+            SlCommand::RequestGroupProfile(group_id) => {
+                session.request_group_profile(*group_id, now).ok();
+            }
+            SlCommand::RequestGroupNotices(group_id) => {
+                session.request_group_notices(*group_id, now).ok();
+            }
+            SlCommand::RequestGroupNotice(notice_id) => {
+                session.request_group_notice(*notice_id, now).ok();
+            }
+            SlCommand::CreateGroup(params) => {
+                session.create_group(params, now).ok();
+            }
+            SlCommand::JoinGroup(group_id) => {
+                session.join_group(*group_id, now).ok();
+            }
+            SlCommand::LeaveGroup(group_id) => {
+                session.leave_group(*group_id, now).ok();
+            }
+            SlCommand::InviteToGroup { group_id, invitees } => {
+                session.invite_to_group(*group_id, invitees, now).ok();
+            }
+            SlCommand::SetGroupAcceptNotices {
+                group_id,
+                accept_notices,
+                list_in_profile,
+            } => {
+                session
+                    .set_group_accept_notices(*group_id, *accept_notices, *list_in_profile, now)
+                    .ok();
+            }
+            SlCommand::SetGroupContribution {
+                group_id,
+                contribution,
+            } => {
+                session
+                    .set_group_contribution(*group_id, *contribution, now)
+                    .ok();
+            }
+            SlCommand::StartGroupSession(group_id) => {
+                session.start_group_session(*group_id, now).ok();
+            }
+            SlCommand::SendGroupMessage { group_id, message } => {
+                session.send_group_message(*group_id, message, now).ok();
+            }
+            SlCommand::LeaveGroupSession(group_id) => {
+                session.leave_group_session(*group_id, now).ok();
             }
             SlCommand::Teleport {
                 region_handle,
@@ -773,6 +922,33 @@ fn run_inventory_fetch(
     };
     if let Ok(llsd) = parse_llsd_xml(&text) {
         caps_tx.send((CAP_FETCH_INVENTORY.to_owned(), llsd)).ok();
+    }
+}
+
+/// POSTs a `GroupMemberData` request for `group_id` and forwards the LLSD roster
+/// response to `caps_tx` tagged [`CAP_GROUP_MEMBER_DATA`], for the session to
+/// decode into [`SlSessionEvent::GroupMembers`].
+fn run_group_members_fetch(cap_url: &str, group_id: Uuid, caps_tx: &Sender<(String, Llsd)>) {
+    let Ok(http) = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    else {
+        return;
+    };
+    let body = build_group_member_data_request(group_id);
+    let Ok(response) = http
+        .post(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+    else {
+        return;
+    };
+    let Ok(text) = response.text() else {
+        return;
+    };
+    if let Ok(llsd) = parse_llsd_xml(&text) {
+        caps_tx.send((CAP_GROUP_MEMBER_DATA.to_owned(), llsd)).ok();
     }
 }
 
