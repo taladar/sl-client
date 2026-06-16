@@ -24,8 +24,8 @@ pub use llsd::{
     parse_seed_response,
 };
 pub use login::{
-    LoginFailure, LoginParseError, LoginRequest, LoginResponse, LoginSuccess, MfaChallenge,
-    SkeletonFolder, build_login_request, parse_login_response, password_hash,
+    BuddyListEntry, LoginFailure, LoginParseError, LoginRequest, LoginResponse, LoginSuccess,
+    MfaChallenge, SkeletonFolder, build_login_request, parse_login_response, password_hash,
 };
 pub use message::{Message, MessageId};
 pub use messages::AnyMessage;

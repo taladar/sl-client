@@ -8,10 +8,10 @@ pub use error::Error;
 pub use session::{CAP_FETCH_INVENTORY, REQUESTED_CAPABILITIES, Session};
 pub use types::{
     AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible, ChatMessage,
-    ChatSourceType, ChatType, DisconnectReason, Event, ImDialog, InstantMessage, InventoryFolder,
-    InventoryItem, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, NeighborInfo,
-    ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability,
-    Transmit, grid_to_handle, handle_to_global, handle_to_grid,
+    ChatSourceType, ChatType, DisconnectReason, Event, Friend, FriendRights, ImDialog,
+    InstantMessage, InventoryFolder, InventoryItem, LoginHttpRequest, LoginParams, MapRegionInfo,
+    Maturity, NeighborInfo, ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity,
+    RegionLimits, Reliability, Transmit, grid_to_handle, handle_to_global, handle_to_grid,
 };
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,

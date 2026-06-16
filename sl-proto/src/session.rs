@@ -7,28 +7,33 @@ use std::time::{Duration, Instant};
 
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
-    AgentRequestSit, AgentRequestSitAgentDataBlock, AgentRequestSitTargetObjectBlock, AgentSit,
-    AgentSitAgentDataBlock, AgentUpdate, AgentUpdateAgentDataBlock,
-    AvatarGroupsReplyGroupDataBlock, AvatarInterestsReplyPropertiesDataBlock,
-    AvatarPropertiesReplyPropertiesDataBlock, AvatarPropertiesRequest,
-    AvatarPropertiesRequestAgentDataBlock, ChatFromSimulatorChatDataBlock, ChatFromViewer,
-    ChatFromViewerAgentDataBlock, ChatFromViewerChatDataBlock, CompleteAgentMovement,
-    CompleteAgentMovementAgentDataBlock, CompletePingCheck, CompletePingCheckPingIDBlock,
-    EnableSimulatorSimulatorInfoBlock, FetchInventoryDescendents,
-    FetchInventoryDescendentsAgentDataBlock, FetchInventoryDescendentsInventoryDataBlock,
-    GenericMessage, GenericMessageAgentDataBlock, GenericMessageMethodDataBlock,
-    GenericMessageParamListBlock, ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
-    ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
-    InventoryDescendentsFolderDataBlock, InventoryDescendentsItemDataBlock, LogoutRequest,
-    LogoutRequestAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapBlockRequest,
-    MapBlockRequestAgentDataBlock, MapBlockRequestPositionDataBlock, PacketAck,
-    PacketAckPacketsBlock, ParcelPropertiesParcelDataBlock, ParcelPropertiesRequest,
+    AcceptFriendship, AcceptFriendshipAgentDataBlock, AcceptFriendshipFolderDataBlock,
+    AcceptFriendshipTransactionBlockBlock, AgentRequestSit, AgentRequestSitAgentDataBlock,
+    AgentRequestSitTargetObjectBlock, AgentSit, AgentSitAgentDataBlock, AgentUpdate,
+    AgentUpdateAgentDataBlock, AvatarGroupsReplyGroupDataBlock,
+    AvatarInterestsReplyPropertiesDataBlock, AvatarPropertiesReplyPropertiesDataBlock,
+    AvatarPropertiesRequest, AvatarPropertiesRequestAgentDataBlock, ChatFromSimulatorChatDataBlock,
+    ChatFromViewer, ChatFromViewerAgentDataBlock, ChatFromViewerChatDataBlock,
+    CompleteAgentMovement, CompleteAgentMovementAgentDataBlock, CompletePingCheck,
+    CompletePingCheckPingIDBlock, DeclineFriendship, DeclineFriendshipAgentDataBlock,
+    DeclineFriendshipTransactionBlockBlock, EnableSimulatorSimulatorInfoBlock,
+    FetchInventoryDescendents, FetchInventoryDescendentsAgentDataBlock,
+    FetchInventoryDescendentsInventoryDataBlock, GenericMessage, GenericMessageAgentDataBlock,
+    GenericMessageMethodDataBlock, GenericMessageParamListBlock, GrantUserRights,
+    GrantUserRightsAgentDataBlock, GrantUserRightsRightsBlock, ImprovedInstantMessage,
+    ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
+    ImprovedInstantMessageMessageBlockBlock, InventoryDescendentsFolderDataBlock,
+    InventoryDescendentsItemDataBlock, LogoutRequest, LogoutRequestAgentDataBlock,
+    MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapBlockRequest, MapBlockRequestAgentDataBlock,
+    MapBlockRequestPositionDataBlock, PacketAck, PacketAckPacketsBlock,
+    ParcelPropertiesParcelDataBlock, ParcelPropertiesRequest,
     ParcelPropertiesRequestAgentDataBlock, ParcelPropertiesRequestParcelDataBlock,
     RegionHandshakeRegionInfo3Block, RegionHandshakeRegionInfoBlock, RegionHandshakeReply,
     RegionHandshakeReplyAgentDataBlock, RegionHandshakeReplyRegionInfoBlock,
     RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock, RequestRegionInfo,
     RequestRegionInfoAgentDataBlock, TeleportLocationRequest,
-    TeleportLocationRequestAgentDataBlock, TeleportLocationRequestInfoBlock, UseCircuitCode,
+    TeleportLocationRequestAgentDataBlock, TeleportLocationRequestInfoBlock, TerminateFriendship,
+    TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock, UseCircuitCode,
     UseCircuitCodeCircuitCodeBlock,
 };
 use sl_wire::{
@@ -40,10 +45,10 @@ use uuid::Uuid;
 use crate::error::Error;
 use crate::types::{
     AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible, ChatMessage,
-    ChatSourceType, ChatType, DisconnectReason, Event, ImDialog, InstantMessage, InventoryFolder,
-    InventoryItem, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, NeighborInfo,
-    ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability,
-    Transmit, grid_to_handle, handle_to_grid,
+    ChatSourceType, ChatType, DisconnectReason, Event, Friend, FriendRights, ImDialog,
+    InstantMessage, InventoryFolder, InventoryItem, LoginHttpRequest, LoginParams, MapRegionInfo,
+    Maturity, NeighborInfo, ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity,
+    RegionLimits, Reliability, Transmit, grid_to_handle, handle_to_grid,
 };
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
@@ -512,6 +517,76 @@ impl Circuit {
                 session_id: self.session_id,
                 avatar_id: target,
             },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GrantUserRights` reliably, setting the rights this agent grants
+    /// the friend `target` to `rights`.
+    fn send_grant_user_rights(
+        &mut self,
+        target: Uuid,
+        rights: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GrantUserRights(GrantUserRights {
+            agent_data: GrantUserRightsAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            rights: vec![GrantUserRightsRightsBlock {
+                agent_related: target,
+                related_rights: rights,
+            }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `TerminateFriendship` reliably, ending the friendship with
+    /// `other`.
+    fn send_terminate_friendship(&mut self, other: Uuid, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::TerminateFriendship(TerminateFriendship {
+            agent_data: TerminateFriendshipAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            ex_block: TerminateFriendshipExBlockBlock { other_id: other },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AcceptFriendship` reliably for the friendship-offer
+    /// `transaction_id`, placing the new calling card in `folder`.
+    fn send_accept_friendship(
+        &mut self,
+        transaction_id: Uuid,
+        folder: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AcceptFriendship(AcceptFriendship {
+            agent_data: AcceptFriendshipAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            transaction_block: AcceptFriendshipTransactionBlockBlock { transaction_id },
+            folder_data: vec![AcceptFriendshipFolderDataBlock { folder_id: folder }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `DeclineFriendship` reliably for the friendship-offer
+    /// `transaction_id`.
+    fn send_decline_friendship(
+        &mut self,
+        transaction_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::DeclineFriendship(DeclineFriendship {
+            agent_data: DeclineFriendshipAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            transaction_block: DeclineFriendshipTransactionBlockBlock { transaction_id },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -988,6 +1063,10 @@ impl Session {
                         .collect();
                     self.events.push_back(Event::InventorySkeleton(folders));
                 }
+                if !success.buddy_list.is_empty() {
+                    let friends = success.buddy_list.iter().map(friend).collect();
+                    self.events.push_back(Event::FriendList(friends));
+                }
             }
         }
         Ok(())
@@ -1267,6 +1346,50 @@ impl Session {
                     }
                 }
             }
+            AnyMessage::OnlineNotification(notification) => {
+                let ids = notification
+                    .agent_block
+                    .iter()
+                    .map(|block| block.agent_id)
+                    .collect::<Vec<_>>();
+                if !ids.is_empty() {
+                    self.events.push_back(Event::FriendsOnline(ids));
+                }
+            }
+            AnyMessage::OfflineNotification(notification) => {
+                let ids = notification
+                    .agent_block
+                    .iter()
+                    .map(|block| block.agent_id)
+                    .collect::<Vec<_>>();
+                if !ids.is_empty() {
+                    self.events.push_back(Event::FriendsOffline(ids));
+                }
+            }
+            AnyMessage::ChangeUserRights(change) => {
+                // The AgentData id distinguishes the direction: when it is our
+                // own id, each rights block echoes a change *we* made to a
+                // friend (`agent_related` is the friend); otherwise the friend
+                // (`AgentData.AgentID`) changed the rights they grant us, and
+                // `agent_related` is our own id.
+                let own = self
+                    .circuit
+                    .as_ref()
+                    .map_or_else(Uuid::nil, |circuit| circuit.agent_id);
+                for block in &change.rights {
+                    let granted_to_us = change.agent_data.agent_id != own;
+                    let friend_id = if granted_to_us {
+                        change.agent_data.agent_id
+                    } else {
+                        block.agent_related
+                    };
+                    self.events.push_back(Event::FriendRightsChanged {
+                        friend_id,
+                        rights: FriendRights(block.related_rights),
+                        granted_to_us,
+                    });
+                }
+            }
             AnyMessage::LogoutReply(_) => {
                 self.state = SessionState::Closed;
                 self.events.push_back(Event::LoggedOut);
@@ -1484,6 +1607,35 @@ impl Session {
         Ok(())
     }
 
+    /// Offers friendship to `to_agent_id` via an `ImprovedInstantMessage` with
+    /// the `IM_FRIENDSHIP_OFFERED` dialog. The recipient sees it as an
+    /// [`Event::InstantMessageReceived`] with [`ImDialog::FriendshipOffered`] and
+    /// replies with [`Session::accept_friendship`] or
+    /// [`Session::decline_friendship`], echoing the offer's
+    /// [`InstantMessage::id`] as the transaction id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn send_friendship_offer(
+        &mut self,
+        to_agent_id: Uuid,
+        message: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_instant_message_raw(
+            to_agent_id,
+            ImDialog::FriendshipOffered,
+            message,
+            &from_name,
+            now,
+        )?;
+        Ok(())
+    }
+
     /// Sends an `AgentUpdate` immediately with the current control state, plus the
     /// transient `extra` control bits (e.g. a one-shot `STAND_UP`). The extra bits
     /// are not persisted, so the next keep-alive clears them.
@@ -1632,6 +1784,76 @@ impl Session {
     pub fn request_avatar_notes(&mut self, target: Uuid, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_generic_message("avatarnotesrequest", &[target.to_string()], now)?;
+        Ok(())
+    }
+
+    /// Sets the friendship rights this agent grants the friend `target` via
+    /// `GrantUserRights`. `rights` is a [`FriendRights`] bitfield (combine the
+    /// `FriendRights::CAN_*` flags). The simulator echoes the change back as an
+    /// [`Event::FriendRightsChanged`] with `granted_to_us = false`.
+    ///
+    /// The agent's friend list (with the current rights) arrives at login as
+    /// [`Event::FriendList`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn grant_user_rights(
+        &mut self,
+        target: Uuid,
+        rights: FriendRights,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_grant_user_rights(target, rights.0, now)?;
+        Ok(())
+    }
+
+    /// Ends the friendship with `other` via `TerminateFriendship`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn terminate_friendship(&mut self, other: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_terminate_friendship(other, now)?;
+        Ok(())
+    }
+
+    /// Accepts a friendship offer via `AcceptFriendship`. The `transaction_id`
+    /// is the [`InstantMessage::id`] of the incoming
+    /// [`ImDialog::FriendshipOffered`] IM; `calling_card_folder` is the
+    /// inventory folder to place the new friend's calling card in (use the
+    /// Calling Cards system folder, or the inventory root).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn accept_friendship(
+        &mut self,
+        transaction_id: Uuid,
+        calling_card_folder: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_accept_friendship(transaction_id, calling_card_folder, now)?;
+        Ok(())
+    }
+
+    /// Declines a friendship offer via `DeclineFriendship`. The `transaction_id`
+    /// is the [`InstantMessage::id`] of the incoming
+    /// [`ImDialog::FriendshipOffered`] IM.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn decline_friendship(&mut self, transaction_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_decline_friendship(transaction_id, now)?;
         Ok(())
     }
 
@@ -1999,6 +2221,15 @@ fn skeleton_folder(folder: &SkeletonFolder) -> InventoryFolder {
         name: folder.name.clone(),
         folder_type: folder.type_default,
         version: folder.version,
+    }
+}
+
+/// Builds a [`Friend`] from a login `buddy-list` entry.
+const fn friend(entry: &sl_wire::BuddyListEntry) -> Friend {
+    Friend {
+        id: entry.buddy_id,
+        rights_granted: FriendRights(entry.rights_granted),
+        rights_received: FriendRights(entry.rights_has),
     }
 }
 

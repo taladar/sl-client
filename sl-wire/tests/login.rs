@@ -136,6 +136,50 @@ mod test {
     }
 
     #[test]
+    fn parses_buddy_list() -> Result<(), Box<dyn std::error::Error>> {
+        // A minimal success response carrying a buddy-list (array of friend
+        // structs with the two rights ints).
+        let members = concat!(
+            "<member><name>login</name><value><string>true</string></value></member>",
+            "<member><name>agent_id</name><value><string>11111111-1111-1111-1111-111111111111</string></value></member>",
+            "<member><name>session_id</name><value><string>22222222-2222-2222-2222-222222222222</string></value></member>",
+            "<member><name>secure_session_id</name><value><string>33333333-3333-3333-3333-333333333333</string></value></member>",
+            "<member><name>circuit_code</name><value><i4>1</i4></value></member>",
+            "<member><name>sim_ip</name><value><string>127.0.0.1</string></value></member>",
+            "<member><name>sim_port</name><value><i4>9000</i4></value></member>",
+            "<member><name>seed_capability</name><value><string>http://x/seed</string></value></member>",
+            "<member><name>buddy-list</name><value><array><data>",
+            "<value><struct>",
+            "<member><name>buddy_id</name><value><string>cccccccc-0000-0000-0000-000000000000</string></value></member>",
+            "<member><name>buddy_rights_given</name><value><i4>3</i4></value></member>",
+            "<member><name>buddy_rights_has</name><value><i4>1</i4></value></member>",
+            "</struct></value>",
+            "</data></array></value></member>",
+        );
+        let xml = response(members);
+
+        let LoginResponse::Success(success) = parse_login_response(&xml)? else {
+            return Err("expected a successful login".into());
+        };
+        assert_eq!(success.buddy_list.len(), 1);
+        let buddy = success.buddy_list.first().ok_or("first buddy")?;
+        assert_eq!(
+            buddy.buddy_id,
+            "cccccccc-0000-0000-0000-000000000000".parse::<uuid::Uuid>()?
+        );
+        assert_eq!(buddy.rights_granted, 3);
+        assert_eq!(buddy.rights_has, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn request_carries_buddy_list_option() {
+        let request = LoginRequest::new("Test", "User", "secret", "last", "MyViewer", "1.2.3");
+        let body = build_login_request(&request);
+        assert!(body.contains("<value><string>buddy-list</string></value>"));
+    }
+
+    #[test]
     fn parses_a_failure_response() -> Result<(), Box<dyn std::error::Error>> {
         let xml = r#"<?xml version="1.0"?>
 <methodResponse><params><param><value><struct>

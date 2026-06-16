@@ -205,6 +205,31 @@ pub enum Event {
         /// The items directly in the folder.
         items: Vec<InventoryItem>,
     },
+    /// The agent's friends (the buddy list), parsed from the login response.
+    /// Emitted once, right after [`Event::CircuitEstablished`], when the login
+    /// provided a non-empty list.
+    FriendList(Vec<Friend>),
+    /// One or more friends came online (`OnlineNotification`). Only friends who
+    /// grant this agent the see-online right are reported.
+    FriendsOnline(Vec<Uuid>),
+    /// One or more friends went offline (`OfflineNotification`).
+    FriendsOffline(Vec<Uuid>),
+    /// A friendship's rights changed (`ChangeUserRights`): either a friend
+    /// changed the rights they grant this agent, or the simulator echoed a
+    /// change this agent made to the rights it grants a friend (see
+    /// [`granted_to_us`](Event::FriendRightsChanged::granted_to_us)).
+    FriendRightsChanged {
+        /// The friend the rights pertain to.
+        friend_id: Uuid,
+        /// The new rights bitfield.
+        rights: FriendRights,
+        /// `true` when these are the rights the *friend* now grants this agent;
+        /// `false` when they are the rights this agent grants the friend (a
+        /// server echo of this agent's own [`Session::grant_user_rights`] call).
+        ///
+        /// [`Session::grant_user_rights`]: crate::Session::grant_user_rights
+        granted_to_us: bool,
+    },
     /// The simulator answered a sit request (`AvatarSitResponse`) after a
     /// [`Session::sit_on`](crate::Session::sit_on); the session has sent the
     /// completing `AgentSit`.
@@ -785,6 +810,53 @@ pub struct AvatarPick {
     pub pick_id: Uuid,
     /// The pick name.
     pub name: String,
+}
+
+/// The rights one party grants the other in a Second Life friendship: a
+/// bitfield shared by the login `buddy-list`, `GrantUserRights`, and
+/// `ChangeUserRights`. The flag values match the viewer's `RIGHTS_*`/`GRANT_*`
+/// constants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FriendRights(pub i32);
+
+impl FriendRights {
+    /// The other party may see when this party is online (`GRANT_ONLINE_STATUS`).
+    pub const CAN_SEE_ONLINE: i32 = 1 << 0;
+    /// The other party may see this party's location on the world map
+    /// (`GRANT_MAP_LOCATION`).
+    pub const CAN_SEE_ON_MAP: i32 = 1 << 1;
+    /// The other party may modify this party's objects (`GRANT_MODIFY_OBJECTS`).
+    pub const CAN_MODIFY_OBJECTS: i32 = 1 << 2;
+
+    /// Whether the see-online bit is set.
+    #[must_use]
+    pub const fn can_see_online(self) -> bool {
+        self.0 & Self::CAN_SEE_ONLINE != 0
+    }
+
+    /// Whether the see-on-map bit is set.
+    #[must_use]
+    pub const fn can_see_on_map(self) -> bool {
+        self.0 & Self::CAN_SEE_ON_MAP != 0
+    }
+
+    /// Whether the modify-objects bit is set.
+    #[must_use]
+    pub const fn can_modify_objects(self) -> bool {
+        self.0 & Self::CAN_MODIFY_OBJECTS != 0
+    }
+}
+
+/// One friend from the login buddy list, with the friendship rights in both
+/// directions (parsed from the login `buddy-list`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Friend {
+    /// The friend's agent id.
+    pub id: Uuid,
+    /// The rights this agent grants the friend.
+    pub rights_granted: FriendRights,
+    /// The rights the friend grants this agent.
+    pub rights_received: FriendRights,
 }
 
 /// An inventory folder (category): from the login skeleton

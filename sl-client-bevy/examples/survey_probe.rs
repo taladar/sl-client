@@ -140,6 +140,10 @@ fn on_events(
             | SlSessionEvent::AvatarNotes { .. }
             | SlSessionEvent::InventorySkeleton(_)
             | SlSessionEvent::InventoryDescendents { .. }
+            | SlSessionEvent::FriendList(_)
+            | SlSessionEvent::FriendsOnline(_)
+            | SlSessionEvent::FriendsOffline(_)
+            | SlSessionEvent::FriendRightsChanged { .. }
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal => {}
