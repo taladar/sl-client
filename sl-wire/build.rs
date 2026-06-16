@@ -211,8 +211,11 @@ fn block_decode_expr(message_name: &str, block: &BlockDef) -> String {
         Cardinality::Multiple(count) => format!(
             "{{ let mut items = Vec::with_capacity({count}); for _ in 0..{count}u32 {{ items.push({construct}); }} items }}"
         ),
+        // A missing count byte (end of data) yields an empty block rather than
+        // an error, so messages that omit trailing optional `Variable` blocks
+        // (e.g. OpenSim's shorter `RegionInfo`) still decode.
         Cardinality::Variable => format!(
-            "{{ let count = reader.u8()?; let mut items = Vec::with_capacity(usize::from(count)); for _ in 0..count {{ items.push({construct}); }} items }}"
+            "{{ let count = reader.u8().unwrap_or(0); let mut items = Vec::with_capacity(usize::from(count)); for _ in 0..count {{ items.push({construct}); }} items }}"
         ),
     }
 }

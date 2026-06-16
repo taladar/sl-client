@@ -20,7 +20,7 @@ use sl_wire::messages::{
     UseCircuitCodeCircuitCodeBlock,
 };
 use sl_wire::{
-    AnyMessage, MessageId, PacketFlags, Reader, WireError, Writer, build_login_request,
+    AnyMessage, Llsd, MessageId, PacketFlags, Reader, WireError, Writer, build_login_request,
     encode_datagram, parse_datagram, zero_decode,
 };
 use uuid::Uuid;
@@ -526,6 +526,9 @@ pub struct Session {
     draw_distance: f32,
     /// In-progress teleport handover bookkeeping, if any.
     handover: Option<HandoverPending>,
+    /// The current region's capability-seed URL (from login or a teleport), for
+    /// the driver to fetch the CAPS map and event queue.
+    seed_capability: Option<String>,
     /// Pending high-level events for the driver.
     events: VecDeque<Event>,
 }
@@ -540,6 +543,7 @@ impl Session {
             circuit: None,
             draw_distance: DEFAULT_DRAW_DISTANCE,
             handover: None,
+            seed_capability: None,
             events: VecDeque::new(),
         }
     }
@@ -552,6 +556,26 @@ impl Session {
         self.draw_distance = draw_distance;
         if let Some(circuit) = self.circuit.as_mut() {
             circuit.draw_distance = draw_distance;
+        }
+    }
+
+    /// The current region's capability-seed URL, once login (or a teleport) has
+    /// provided one. The driver POSTs this to obtain the capability map and the
+    /// `EventQueueGet` URL. It changes on each region change.
+    #[must_use]
+    pub fn seed_capability(&self) -> Option<&str> {
+        self.seed_capability.as_deref()
+    }
+
+    /// Feeds a parsed CAPS `EventQueue` event into the session, surfacing any
+    /// recognised payload as a high-level [`Event`]. Currently handles
+    /// `ParcelProperties` (delivered over the event queue, not UDP).
+    pub fn handle_caps_event(&mut self, message: &str, body: &Llsd) {
+        if message == "ParcelProperties"
+            && let Some(parcel) = parcel_info_from_llsd(body)
+        {
+            self.events
+                .push_back(Event::ParcelProperties(Box::new(parcel)));
         }
     }
 
@@ -610,6 +634,7 @@ impl Session {
                 circuit.send_use_circuit_code(now)?;
                 circuit.send_complete_agent_movement(now)?;
                 self.circuit = Some(circuit);
+                self.seed_capability = Some(success.seed_capability.clone());
                 self.state = SessionState::AwaitingHandshake;
                 self.events
                     .push_back(Event::CircuitEstablished { sim: sim_addr });
@@ -776,6 +801,8 @@ impl Session {
                         circuit.send_use_circuit_code(now)?;
                         circuit.send_complete_agent_movement(now)?;
                     }
+                    self.seed_capability =
+                        Some(String::from_utf8_lossy(&info.seed_capability).into_owned());
                     self.handover = Some(HandoverPending { region_handle });
                     self.state = SessionState::AwaitingHandshake;
                 }
@@ -1031,15 +1058,23 @@ impl Session {
     }
 }
 
+/// Decodes name/SKU bytes to a `String`, dropping any trailing NUL padding the
+/// simulator appends to fixed-width string fields.
+fn trimmed_string(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes)
+        .trim_end_matches('\0')
+        .to_owned()
+}
+
 /// Builds a [`RegionIdentity`] from a `RegionHandshake`'s region-info blocks.
 fn region_identity(
     info: &RegionHandshakeRegionInfoBlock,
     info3: &RegionHandshakeRegionInfo3Block,
 ) -> RegionIdentity {
-    let product_sku = String::from_utf8_lossy(&info3.product_sku).into_owned();
-    let product_name = String::from_utf8_lossy(&info3.product_name).into_owned();
+    let product_sku = trimmed_string(&info3.product_sku);
+    let product_name = trimmed_string(&info3.product_name);
     RegionIdentity {
-        sim_name: String::from_utf8_lossy(&info.sim_name).into_owned(),
+        sim_name: trimmed_string(&info.sim_name),
         region_flags: info.region_flags,
         maturity: Maturity::from_sim_access(info.sim_access),
         product: ProductType::classify(&product_sku, &product_name),
@@ -1061,7 +1096,7 @@ fn region_limits(
         info2.max_agents32
     };
     RegionLimits {
-        sim_name: String::from_utf8_lossy(&info.sim_name).into_owned(),
+        sim_name: trimmed_string(&info.sim_name),
         max_agents,
         hard_max_agents: info2.hard_max_agents,
         hard_max_objects: info2.hard_max_objects,
@@ -1101,4 +1136,52 @@ fn neighbor_info(info: &EnableSimulatorSimulatorInfoBlock) -> NeighborInfo {
         grid_x,
         grid_y,
     }
+}
+
+/// Builds a [`ParcelInfo`] from a CAPS `ParcelProperties` event body.
+fn parcel_info_from_llsd(body: &Llsd) -> Option<ParcelInfo> {
+    let data = body
+        .get("ParcelData")
+        .and_then(|parcel_data| parcel_data.index(0))?;
+    Some(ParcelInfo {
+        sequence_id: data.get("SequenceID").and_then(Llsd::as_i32).unwrap_or(0),
+        local_id: data.get("LocalID").and_then(Llsd::as_i32).unwrap_or(0),
+        aabb_min: vec3_from_llsd(data.get("AABBMin")),
+        aabb_max: vec3_from_llsd(data.get("AABBMax")),
+        area: data.get("Area").and_then(Llsd::as_i32).unwrap_or(0),
+        bitmap: data
+            .get("Bitmap")
+            .and_then(Llsd::as_binary)
+            .map(<[u8]>::to_vec)
+            .unwrap_or_default(),
+        max_prims: data.get("MaxPrims").and_then(Llsd::as_i32).unwrap_or(0),
+        sim_wide_max_prims: data
+            .get("SimWideMaxPrims")
+            .and_then(Llsd::as_i32)
+            .unwrap_or(0),
+        sim_wide_total_prims: data
+            .get("SimWideTotalPrims")
+            .and_then(Llsd::as_i32)
+            .unwrap_or(0),
+        owner_id: data
+            .get("OwnerID")
+            .and_then(Llsd::as_uuid)
+            .unwrap_or_else(Uuid::nil),
+        raw_parcel_flags: data
+            .get("ParcelFlags")
+            .and_then(Llsd::as_i32)
+            .unwrap_or(0)
+            .cast_unsigned(),
+    })
+}
+
+/// Reads a three-component vector (`[x, y, z]` reals) from an LLSD array.
+fn vec3_from_llsd(value: Option<&Llsd>) -> (f32, f32, f32) {
+    let component = |index: usize| {
+        value
+            .and_then(|vector| vector.index(index))
+            .and_then(Llsd::as_f32)
+            .unwrap_or(0.0)
+    };
+    (component(0), component(1), component(2))
 }

@@ -573,7 +573,15 @@ impl Survey {
                 return;
             };
             let newly = current.merge_bitmap(&parcel.bitmap);
-            current.parcels.push(ParcelRecord::from_info(parcel));
+            // The simulator may send a parcel both unsolicited (on entry) and in
+            // reply to our query, so record each local id only once.
+            if !current
+                .parcels
+                .iter()
+                .any(|recorded| recorded.local_id == parcel.local_id)
+            {
+                current.parcels.push(ParcelRecord::from_info(parcel));
+            }
             // Keep walking only while the query made progress, to avoid looping
             // on a grid that ignores or wrongly answers a query.
             newly > 0

@@ -15,8 +15,10 @@ pub use types::{
 // Re-export the wire-level types a driver needs to build messages and parse
 // login responses, so it can depend on `sl-proto` alone.
 pub use sl_wire::{
-    AnyMessage, LoginRequest, LoginResponse, MfaChallenge, ParcelFlags, RegionFlags, WireError,
-    build_login_request, parse_login_response, sim_access,
+    AnyMessage, EventQueueEvent, EventQueueResponse, Llsd, LoginRequest, LoginResponse,
+    MfaChallenge, ParcelFlags, RegionFlags, WireError, build_event_queue_request,
+    build_login_request, build_seed_request, parse_event_queue_response, parse_llsd_xml,
+    parse_login_response, parse_seed_response, sim_access,
 };
 // Re-export the vector type used by the teleport API.
 pub use sl_types::lsl::Vector;

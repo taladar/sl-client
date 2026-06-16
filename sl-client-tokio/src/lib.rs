@@ -9,7 +9,10 @@ use thiserror::Error;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
-use sl_proto::{Session, parse_login_response};
+use sl_proto::{
+    Llsd, Session, build_event_queue_request, build_seed_request, parse_event_queue_response,
+    parse_login_response, parse_seed_response,
+};
 
 // Re-export the core types a consumer needs so they can depend on this crate
 // alone.
@@ -162,6 +165,14 @@ impl Client {
         events: mpsc::Sender<Event>,
         mut commands: mpsc::Receiver<Command>,
     ) -> Result<(), Error> {
+        // The CAPS event queue (ParcelProperties and other event-queue payloads)
+        // is polled over HTTP on a side task; decoded events arrive on `caps_rx`.
+        let http = ReqwestClient::builder()
+            .timeout(Duration::from_secs(60))
+            .build()?;
+        let (caps_tx, mut caps_rx) = mpsc::channel::<(String, Llsd)>(64);
+        let mut caps_task = self.start_caps_poller(&http, &caps_tx);
+
         loop {
             while let Some(transmit) = self.session.poll_transmit() {
                 self.socket
@@ -171,12 +182,21 @@ impl Client {
 
             while let Some(event) = self.session.poll_event() {
                 let terminal = matches!(event, Event::Disconnected(_) | Event::LoggedOut);
+                // A region change brings a new seed capability, so restart the
+                // event-queue poller against the new region.
+                let region_changed = matches!(event, Event::RegionChanged { .. });
                 events.send(event).await.ok();
+                if region_changed {
+                    abort_task(&mut caps_task);
+                    caps_task = self.start_caps_poller(&http, &caps_tx);
+                }
                 if terminal {
+                    abort_task(&mut caps_task);
                     return Ok(());
                 }
             }
             if self.session.is_closed() {
+                abort_task(&mut caps_task);
                 return Ok(());
             }
 
@@ -188,6 +208,11 @@ impl Client {
                     let (len, from) = result?;
                     if let Some(datagram) = self.recv_buf.get(..len) {
                         self.session.handle_datagram(from, datagram, Instant::now())?;
+                    }
+                }
+                caps_event = caps_rx.recv() => {
+                    if let Some((message, body)) = caps_event {
+                        self.session.handle_caps_event(&message, &body);
                     }
                 }
                 command = commands.recv() => {
@@ -217,6 +242,93 @@ impl Client {
                 () = &mut sleep => {
                     self.session.handle_timeout(Instant::now());
                 }
+            }
+        }
+    }
+
+    /// Starts the CAPS event-queue poll task for the session's current seed
+    /// capability, returning its handle, or `None` if no seed is known yet.
+    fn start_caps_poller(
+        &self,
+        http: &ReqwestClient,
+        caps_tx: &mpsc::Sender<(String, Llsd)>,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        let seed = self.session.seed_capability()?.to_owned();
+        Some(tokio::spawn(run_event_queue(
+            seed,
+            http.clone(),
+            caps_tx.clone(),
+        )))
+    }
+}
+
+/// Aborts a running task handle, if present.
+fn abort_task(task: &mut Option<tokio::task::JoinHandle<()>>) {
+    if let Some(handle) = task.take() {
+        handle.abort();
+    }
+}
+
+/// Fetches the capability map from `seed_url`, then long-polls its
+/// `EventQueueGet` capability, forwarding each decoded event to `caps_tx` until
+/// a request fails fatally or the receiver is dropped (e.g. on region change).
+async fn run_event_queue(
+    seed_url: String,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let seed_body = build_seed_request(&["EventQueueGet"]);
+    let Ok(response) = http
+        .post(&seed_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(seed_body)
+        .send()
+        .await
+    else {
+        return;
+    };
+    let Ok(text) = response.text().await else {
+        return;
+    };
+    let Ok(capabilities) = parse_seed_response(&text) else {
+        return;
+    };
+    let Some(event_queue_url) = capabilities.get("EventQueueGet").cloned() else {
+        return;
+    };
+
+    let mut ack: Option<i32> = None;
+    loop {
+        let request_body = build_event_queue_request(ack, false);
+        let response = match http
+            .post(&event_queue_url)
+            .header("Content-Type", "application/llsd+xml")
+            .body(request_body)
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(_error) => {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+        // A timeout with no events returns a non-2xx (e.g. 502); re-poll with
+        // the same ack after a short pause.
+        if !response.status().is_success() {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            continue;
+        }
+        let Ok(text) = response.text().await else {
+            continue;
+        };
+        let Ok(parsed) = parse_event_queue_response(&text) else {
+            continue;
+        };
+        ack = Some(parsed.id);
+        for event in parsed.events {
+            if caps_tx.send((event.message, event.body)).await.is_err() {
+                return;
             }
         }
     }

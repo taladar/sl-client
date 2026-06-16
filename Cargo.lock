@@ -1700,6 +1700,7 @@ dependencies = [
 name = "sl-wire"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "fs-err",
  "md5",
  "pretty_assertions",

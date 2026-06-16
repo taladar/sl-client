@@ -16,6 +16,7 @@ categories = ["encoding", "parser-implementations", "network-programming"]
 exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
 [dependencies]
+base64 = { version = "0.22.1" }
 md5 = { version = "0.7.0" }
 roxmltree = { version = "0.20.0" }
 sl-types = { version = "0.3.1", path = "../../sl-map-tools/sl-types" }

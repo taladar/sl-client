@@ -824,4 +824,75 @@ mod test {
         );
         Ok(())
     }
+
+    #[test]
+    fn caps_parcel_properties_becomes_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // A ParcelProperties event as delivered over the CAPS event queue.
+        let xml = "<llsd><map><key>ParcelData</key><array><map>\
+            <key>LocalID</key><integer>3</integer>\
+            <key>SequenceID</key><integer>9</integer>\
+            <key>Area</key><integer>2048</integer>\
+            <key>ParcelFlags</key><integer>64</integer>\
+            <key>MaxPrims</key><integer>750</integer>\
+            <key>AABBMax</key><array><real>32</real><real>16</real><real>0</real></array>\
+            <key>Bitmap</key><binary>AQID</binary>\
+            </map></array></map></llsd>";
+        let body = sl_proto::parse_llsd_xml(xml)?;
+        session.handle_caps_event("ParcelProperties", &body);
+
+        let events = drain_events(&mut session);
+        let parcel = events
+            .iter()
+            .find_map(|e| match e {
+                Event::ParcelProperties(parcel) => Some(parcel),
+                _ => None,
+            })
+            .ok_or("expected a ParcelProperties event")?;
+        assert_eq!(parcel.local_id, 3);
+        assert_eq!(parcel.sequence_id, 9);
+        assert_eq!(parcel.area, 2048);
+        assert_eq!(parcel.max_prims, 750);
+        assert_eq!(parcel.aabb_max.0.to_bits(), 32.0_f32.to_bits());
+        assert_eq!(parcel.bitmap, vec![1u8, 2, 3]);
+        // ParcelFlags 64 = CREATE_OBJECTS.
+        assert!(parcel.create_objects());
+        Ok(())
+    }
+
+    #[test]
+    fn region_info_decodes_without_trailing_variable_blocks() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Encode a RegionInfo, then drop the two trailing empty variable-block
+        // count bytes (RegionInfo5/CombatSettings), as OpenSim's shorter
+        // RegionInfo does. The lenient decoder must still succeed.
+        let message = region_info_msg("TrimRegion", 13, 25, 0, 80, 12000);
+        let mut writer = Writer::new();
+        message.id().encode(&mut writer);
+        message.encode_body(&mut writer)?;
+        let mut body = writer.into_bytes();
+        body.truncate(body.len().saturating_sub(2));
+        let datagram = encode_datagram(PacketFlags::EMPTY, 9, &body);
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let events = drain_events(&mut session);
+        let limits = events
+            .iter()
+            .find_map(|e| match e {
+                Event::RegionLimits(limits) => Some(limits),
+                _ => None,
+            })
+            .ok_or("expected a RegionLimits event")?;
+        assert_eq!(limits.max_agents, 25);
+        assert_eq!(limits.hard_max_objects, 12000);
+        Ok(())
+    }
 }
