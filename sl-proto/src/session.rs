@@ -8,16 +8,19 @@ use std::time::{Duration, Instant};
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
     AgentRequestSit, AgentRequestSitAgentDataBlock, AgentRequestSitTargetObjectBlock, AgentSit,
-    AgentSitAgentDataBlock, AgentUpdate, AgentUpdateAgentDataBlock, ChatFromSimulatorChatDataBlock,
-    ChatFromViewer, ChatFromViewerAgentDataBlock, ChatFromViewerChatDataBlock,
-    CompleteAgentMovement, CompleteAgentMovementAgentDataBlock, CompletePingCheck,
-    CompletePingCheckPingIDBlock, EnableSimulatorSimulatorInfoBlock, GenericMessage,
-    GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GenericMessageParamListBlock,
-    ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
-    ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock, LogoutRequest,
-    LogoutRequestAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapBlockRequest,
-    MapBlockRequestAgentDataBlock, MapBlockRequestPositionDataBlock, PacketAck,
-    PacketAckPacketsBlock, ParcelPropertiesParcelDataBlock, ParcelPropertiesRequest,
+    AgentSitAgentDataBlock, AgentUpdate, AgentUpdateAgentDataBlock,
+    AvatarGroupsReplyGroupDataBlock, AvatarInterestsReplyPropertiesDataBlock,
+    AvatarPropertiesReplyPropertiesDataBlock, AvatarPropertiesRequest,
+    AvatarPropertiesRequestAgentDataBlock, ChatFromSimulatorChatDataBlock, ChatFromViewer,
+    ChatFromViewerAgentDataBlock, ChatFromViewerChatDataBlock, CompleteAgentMovement,
+    CompleteAgentMovementAgentDataBlock, CompletePingCheck, CompletePingCheckPingIDBlock,
+    EnableSimulatorSimulatorInfoBlock, GenericMessage, GenericMessageAgentDataBlock,
+    GenericMessageMethodDataBlock, GenericMessageParamListBlock, ImprovedInstantMessage,
+    ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
+    ImprovedInstantMessageMessageBlockBlock, LogoutRequest, LogoutRequestAgentDataBlock,
+    MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapBlockRequest, MapBlockRequestAgentDataBlock,
+    MapBlockRequestPositionDataBlock, PacketAck, PacketAckPacketsBlock,
+    ParcelPropertiesParcelDataBlock, ParcelPropertiesRequest,
     ParcelPropertiesRequestAgentDataBlock, ParcelPropertiesRequestParcelDataBlock,
     RegionHandshakeRegionInfo3Block, RegionHandshakeRegionInfoBlock, RegionHandshakeReply,
     RegionHandshakeReplyAgentDataBlock, RegionHandshakeReplyRegionInfoBlock,
@@ -34,10 +37,10 @@ use uuid::Uuid;
 
 use crate::error::Error;
 use crate::types::{
-    ChatAudible, ChatMessage, ChatSourceType, ChatType, DisconnectReason, Event, ImDialog,
-    InstantMessage, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, NeighborInfo,
-    ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability,
-    Transmit, grid_to_handle, handle_to_grid,
+    AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible, ChatMessage,
+    ChatSourceType, ChatType, DisconnectReason, Event, ImDialog, InstantMessage, LoginHttpRequest,
+    LoginParams, MapRegionInfo, Maturity, NeighborInfo, ParcelInfo, ParcelOverlayInfo, ProductType,
+    RegionIdentity, RegionLimits, Reliability, Transmit, grid_to_handle, handle_to_grid,
 };
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
@@ -479,6 +482,22 @@ impl Circuit {
                     parameter: param.as_bytes().to_vec(),
                 })
                 .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AvatarPropertiesRequest` reliably for the avatar `target`.
+    fn send_avatar_properties_request(
+        &mut self,
+        target: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AvatarPropertiesRequest(AvatarPropertiesRequest {
+            agent_data: AvatarPropertiesRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                avatar_id: target,
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -1072,6 +1091,46 @@ impl Session {
                     });
                 }
             }
+            AnyMessage::AvatarPropertiesReply(reply) => {
+                self.events
+                    .push_back(Event::AvatarProperties(Box::new(avatar_properties(
+                        reply.agent_data.avatar_id,
+                        &reply.properties_data,
+                    ))));
+            }
+            AnyMessage::AvatarInterestsReply(reply) => {
+                self.events
+                    .push_back(Event::AvatarInterests(Box::new(avatar_interests(
+                        reply.agent_data.avatar_id,
+                        &reply.properties_data,
+                    ))));
+            }
+            AnyMessage::AvatarGroupsReply(reply) => {
+                self.events.push_back(Event::AvatarGroups {
+                    avatar_id: reply.agent_data.avatar_id,
+                    groups: reply.group_data.iter().map(avatar_group).collect(),
+                    list_in_profile: reply.new_group_data.list_in_profile,
+                });
+            }
+            AnyMessage::AvatarPicksReply(reply) => {
+                self.events.push_back(Event::AvatarPicks {
+                    target_id: reply.agent_data.target_id,
+                    picks: reply
+                        .data
+                        .iter()
+                        .map(|pick| AvatarPick {
+                            pick_id: pick.pick_id,
+                            name: trimmed_string(&pick.pick_name),
+                        })
+                        .collect(),
+                });
+            }
+            AnyMessage::AvatarNotesReply(reply) => {
+                self.events.push_back(Event::AvatarNotes {
+                    target_id: reply.data.target_id,
+                    notes: trimmed_string(&reply.data.notes),
+                });
+            }
             AnyMessage::EnableSimulator(sim) => {
                 self.events
                     .push_back(Event::NeighborDiscovered(neighbor_info(
@@ -1469,6 +1528,47 @@ impl Session {
         Ok(())
     }
 
+    /// Requests the profile of the avatar `target` via `AvatarPropertiesRequest`.
+    /// The simulator replies with [`Event::AvatarProperties`], and usually also
+    /// [`Event::AvatarInterests`] and [`Event::AvatarGroups`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_avatar_properties(&mut self, target: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_avatar_properties_request(target, now)?;
+        Ok(())
+    }
+
+    /// Requests the picks of the avatar `target` (a `GenericMessage`
+    /// `avatarpicksrequest`). The reply arrives as [`Event::AvatarPicks`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_avatar_picks(&mut self, target: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_generic_message("avatarpicksrequest", &[target.to_string()], now)?;
+        Ok(())
+    }
+
+    /// Requests the agent's private notes about the avatar `target` (a
+    /// `GenericMessage` `avatarnotesrequest`). The reply arrives as
+    /// [`Event::AvatarNotes`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_avatar_notes(&mut self, target: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_generic_message("avatarnotesrequest", &[target.to_string()], now)?;
+        Ok(())
+    }
+
     /// Requests the region's info (agent and object limits) via
     /// `RequestRegionInfo`. The reply arrives as an [`Event::RegionLimits`].
     ///
@@ -1745,6 +1845,52 @@ fn instant_message(
         parent_estate_id: block.parent_estate_id,
         message: trimmed_string(&block.message),
         binary_bucket: block.binary_bucket.clone(),
+    }
+}
+
+/// Builds [`AvatarProperties`] from an `AvatarPropertiesReply` properties block.
+fn avatar_properties(
+    avatar_id: Uuid,
+    data: &AvatarPropertiesReplyPropertiesDataBlock,
+) -> AvatarProperties {
+    AvatarProperties {
+        avatar_id,
+        image_id: data.image_id,
+        fl_image_id: data.fl_image_id,
+        partner_id: data.partner_id,
+        about_text: trimmed_string(&data.about_text),
+        fl_about_text: trimmed_string(&data.fl_about_text),
+        born_on: trimmed_string(&data.born_on),
+        profile_url: trimmed_string(&data.profile_url),
+        charter_member: trimmed_string(&data.charter_member),
+        flags: data.flags,
+    }
+}
+
+/// Builds [`AvatarInterests`] from an `AvatarInterestsReply` properties block.
+fn avatar_interests(
+    avatar_id: Uuid,
+    data: &AvatarInterestsReplyPropertiesDataBlock,
+) -> AvatarInterests {
+    AvatarInterests {
+        avatar_id,
+        want_to_mask: data.want_to_mask,
+        want_to_text: trimmed_string(&data.want_to_text),
+        skills_mask: data.skills_mask,
+        skills_text: trimmed_string(&data.skills_text),
+        languages_text: trimmed_string(&data.languages_text),
+    }
+}
+
+/// Builds an [`AvatarGroupMembership`] from an `AvatarGroupsReply` group entry.
+fn avatar_group(data: &AvatarGroupsReplyGroupDataBlock) -> AvatarGroupMembership {
+    AvatarGroupMembership {
+        group_id: data.group_id,
+        group_name: trimmed_string(&data.group_name),
+        group_title: trimmed_string(&data.group_title),
+        group_powers: data.group_powers,
+        accept_notices: data.accept_notices,
+        group_insignia_id: data.group_insignia_id,
     }
 }
 

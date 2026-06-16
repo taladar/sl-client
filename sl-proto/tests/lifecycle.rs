@@ -15,15 +15,19 @@ mod test {
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
         AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
-        AgentMovementCompleteSimDataBlock, AvatarSitResponse, AvatarSitResponseSitObjectBlock,
-        AvatarSitResponseSitTransformBlock, ChatFromSimulator, ChatFromSimulatorChatDataBlock,
-        ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
-        ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
-        LogoutRequest, LogoutRequestAgentDataBlock, MapBlockReply, MapBlockReplyAgentDataBlock,
-        MapBlockReplyDataBlock, MapBlockReplySizeBlock, ParcelProperties,
-        ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
-        ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
-        RegionHandshake, RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
+        AgentMovementCompleteSimDataBlock, AvatarNotesReply, AvatarNotesReplyAgentDataBlock,
+        AvatarNotesReplyDataBlock, AvatarPicksReply, AvatarPicksReplyAgentDataBlock,
+        AvatarPicksReplyDataBlock, AvatarPropertiesReply, AvatarPropertiesReplyAgentDataBlock,
+        AvatarPropertiesReplyPropertiesDataBlock, AvatarSitResponse,
+        AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock, ChatFromSimulator,
+        ChatFromSimulatorChatDataBlock, ImprovedInstantMessage,
+        ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
+        ImprovedInstantMessageMessageBlockBlock, LogoutRequest, LogoutRequestAgentDataBlock,
+        MapBlockReply, MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock,
+        ParcelProperties, ParcelPropertiesAgeVerificationBlockBlock,
+        ParcelPropertiesParcelDataBlock, ParcelPropertiesParcelEnvironmentBlockBlock,
+        ParcelPropertiesRegionAllowAccessBlockBlock, RegionHandshake,
+        RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
         RegionHandshakeRegionInfoBlock, RegionInfo, RegionInfoAgentDataBlock,
         RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock, TeleportFailed,
         TeleportFailedInfoBlock,
@@ -756,6 +760,156 @@ mod test {
                 .any(|e| matches!(e, Event::SitResult { .. })),
             "no SitResult should be emitted"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn request_avatar_properties_packs_request() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let target = uuid::Uuid::from_u128(0xA1);
+        session.request_avatar_properties(target, now)?;
+        let sent = drain(&mut session)?;
+        let request = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AvatarPropertiesRequest(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("expected an AvatarPropertiesRequest")?;
+        assert_eq!(request.agent_data.avatar_id, target);
+        Ok(())
+    }
+
+    #[test]
+    fn avatar_properties_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let target = uuid::Uuid::from_u128(0xA1);
+        let reply = AnyMessage::AvatarPropertiesReply(AvatarPropertiesReply {
+            agent_data: AvatarPropertiesReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                avatar_id: target,
+            },
+            properties_data: AvatarPropertiesReplyPropertiesDataBlock {
+                image_id: uuid::Uuid::from_u128(0xB1),
+                fl_image_id: uuid::Uuid::from_u128(0xB2),
+                partner_id: uuid::Uuid::from_u128(0xB3),
+                about_text: b"a test avatar\0".to_vec(),
+                fl_about_text: b"first life\0".to_vec(),
+                born_on: b"2008-01-15\0".to_vec(),
+                profile_url: b"\0".to_vec(),
+                charter_member: b"\0".to_vec(),
+                flags: 0x10,
+            },
+        });
+        let datagram = server_message(&reply, 9, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let props = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AvatarProperties(props) => Some(props),
+                _ => None,
+            })
+            .ok_or("expected an AvatarProperties event")?;
+        assert_eq!(props.avatar_id, target);
+        assert_eq!(props.about_text, "a test avatar");
+        assert_eq!(props.born_on, "2008-01-15");
+        assert_eq!(props.partner_id, uuid::Uuid::from_u128(0xB3));
+        assert_eq!(props.flags, 0x10);
+        Ok(())
+    }
+
+    #[test]
+    fn request_avatar_picks_packs_generic_message() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let target = uuid::Uuid::from_u128(0xA1);
+        session.request_avatar_picks(target, now)?;
+        let sent = drain(&mut session)?;
+        let generic = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::GenericMessage(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a GenericMessage")?;
+        assert_eq!(generic.method_data.method, b"avatarpicksrequest");
+        assert_eq!(
+            generic.param_list.first().map(|p| p.parameter.as_slice()),
+            Some(target.to_string().as_bytes())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn avatar_picks_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let target = uuid::Uuid::from_u128(0xA1);
+        let reply = AnyMessage::AvatarPicksReply(AvatarPicksReply {
+            agent_data: AvatarPicksReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                target_id: target,
+            },
+            data: vec![AvatarPicksReplyDataBlock {
+                pick_id: uuid::Uuid::from_u128(0xC1),
+                pick_name: b"My favourite spot\0".to_vec(),
+            }],
+        });
+        let datagram = server_message(&reply, 9, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let picks = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AvatarPicks { target_id, picks } if target_id == target => Some(picks),
+                _ => None,
+            })
+            .ok_or("expected an AvatarPicks event")?;
+        assert_eq!(picks.len(), 1);
+        let pick = picks.first().ok_or("expected one pick")?;
+        assert_eq!(pick.pick_id, uuid::Uuid::from_u128(0xC1));
+        assert_eq!(pick.name, "My favourite spot");
+        Ok(())
+    }
+
+    #[test]
+    fn avatar_notes_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let target = uuid::Uuid::from_u128(0xA1);
+        let reply = AnyMessage::AvatarNotesReply(AvatarNotesReply {
+            agent_data: AvatarNotesReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+            data: AvatarNotesReplyDataBlock {
+                target_id: target,
+                notes: b"met at the welcome area\0".to_vec(),
+            },
+        });
+        let datagram = server_message(&reply, 9, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let notes = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AvatarNotes { target_id, notes } if target_id == target => Some(notes),
+                _ => None,
+            })
+            .ok_or("expected an AvatarNotes event")?;
+        assert_eq!(notes, "met at the welcome area");
         Ok(())
     }
 

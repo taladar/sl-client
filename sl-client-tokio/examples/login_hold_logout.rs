@@ -140,8 +140,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } => {
                 info!("sat on {sit_object} at {sit_position:?}");
             }
-            // This demo ignores the region/parcel/neighbour/teleport survey events.
-            Event::RegionInfoHandshake(_)
+            Event::AvatarProperties(props) => {
+                info!(
+                    "avatar {} born {}: {}",
+                    props.avatar_id, props.born_on, props.about_text
+                );
+            }
+            Event::AvatarPicks { picks, .. } => info!("avatar has {} picks", picks.len()),
+            // This demo ignores the remaining profile/region/parcel/teleport events.
+            Event::AvatarInterests(_)
+            | Event::AvatarGroups { .. }
+            | Event::AvatarNotes { .. }
+            | Event::RegionInfoHandshake(_)
             | Event::RegionLimits(_)
             | Event::ParcelProperties(_)
             | Event::ParcelOverlay(_)
