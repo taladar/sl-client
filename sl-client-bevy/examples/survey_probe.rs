@@ -158,6 +158,10 @@ fn on_events(
             | SlSessionEvent::JoinGroupResult { .. }
             | SlSessionEvent::LeaveGroupResult { .. }
             | SlSessionEvent::DroppedFromGroup { .. }
+            | SlSessionEvent::ScriptDialog(_)
+            | SlSessionEvent::ScriptPermissionRequest(_)
+            | SlSessionEvent::LoadUrl(_)
+            | SlSessionEvent::ScriptTeleport(_)
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal => {}

@@ -28,9 +28,10 @@ pub use sl_proto::{
     ChatAudible, ChatMessage, ChatSourceType, ChatType, ControlFlags, CreateGroupParams,
     DisconnectReason, Friend, FriendRights, GroupMember, GroupMembership, GroupNotice,
     GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
-    InventoryFolder, InventoryItem, LoginParams, LoginRequest, MapRegionInfo, Maturity,
-    MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
-    RegionFlags, RegionIdentity, RegionLimits, Reliability, Rotation, Transmit, Uuid, Vector,
+    InventoryFolder, InventoryItem, LoadUrlRequest, LoginParams, LoginRequest, MapRegionInfo,
+    Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
+    RegionFlags, RegionIdentity, RegionLimits, Reliability, Rotation, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit, Uuid, Vector,
     grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
@@ -267,6 +268,30 @@ pub enum SlCommand {
     /// Leave a group's IM session (stop receiving its chat) without leaving the
     /// group itself.
     LeaveGroupSession(Uuid),
+    /// Reply to a scripted-object dialog (`ScriptDialogReply`) from an
+    /// [`SlSessionEvent::ScriptDialog`] — the chosen button on its hidden
+    /// `chat_channel`.
+    ReplyScriptDialog {
+        /// The object that raised the dialog.
+        object_id: Uuid,
+        /// The dialog's hidden chat channel.
+        chat_channel: i32,
+        /// The chosen button index.
+        button_index: i32,
+        /// The chosen button label (or the typed text for an `llTextBox`).
+        button_label: String,
+    },
+    /// Answer a scripted-object permission request (`ScriptAnswerYes`) from an
+    /// [`SlSessionEvent::ScriptPermissionRequest`] — grants `permissions`
+    /// ([`ScriptPermissions::default`] denies everything).
+    AnswerScriptPermissions {
+        /// The task (object) id holding the script.
+        task_id: Uuid,
+        /// The script item id.
+        item_id: Uuid,
+        /// The permissions to grant.
+        permissions: ScriptPermissions,
+    },
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
         /// The destination region handle.
@@ -721,6 +746,31 @@ fn advance_running(
             }
             SlCommand::LeaveGroupSession(group_id) => {
                 session.leave_group_session(*group_id, now).ok();
+            }
+            SlCommand::ReplyScriptDialog {
+                object_id,
+                chat_channel,
+                button_index,
+                button_label,
+            } => {
+                session
+                    .reply_script_dialog(
+                        *object_id,
+                        *chat_channel,
+                        *button_index,
+                        button_label,
+                        now,
+                    )
+                    .ok();
+            }
+            SlCommand::AnswerScriptPermissions {
+                task_id,
+                item_id,
+                permissions,
+            } => {
+                session
+                    .answer_script_permissions(*task_id, *item_id, *permissions, now)
+                    .ok();
             }
             SlCommand::Teleport {
                 region_handle,

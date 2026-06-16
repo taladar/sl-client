@@ -36,6 +36,11 @@ use sl_wire::messages::{
     TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock, UseCircuitCode,
     UseCircuitCodeCircuitCodeBlock,
 };
+// Script dialogs & permissions (#8): the outgoing reply messages.
+use sl_wire::messages::{
+    ScriptAnswerYes, ScriptAnswerYesAgentDataBlock, ScriptAnswerYesDataBlock, ScriptDialogReply,
+    ScriptDialogReplyAgentDataBlock, ScriptDialogReplyDataBlock,
+};
 // Group support (#7): incoming reply blocks consumed by the converter helpers.
 use sl_wire::messages::{
     AgentDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
@@ -73,8 +78,9 @@ use crate::types::{
     ChatMessage, ChatSourceType, ChatType, CreateGroupParams, DisconnectReason, Event, Friend,
     FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
     GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, NeighborInfo, ParcelInfo,
-    ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability, Transmit,
+    LoadUrlRequest, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, NeighborInfo,
+    ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit,
     grid_to_handle, handle_to_grid,
 };
 
@@ -915,6 +921,53 @@ impl Circuit {
         self.send(&im, Reliability::Reliable, now)
     }
 
+    /// Queues a `ScriptDialogReply` reliably (the chosen `llDialog` button).
+    fn send_script_dialog_reply(
+        &mut self,
+        object_id: Uuid,
+        chat_channel: i32,
+        button_index: i32,
+        button_label: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ScriptDialogReply(ScriptDialogReply {
+            agent_data: ScriptDialogReplyAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: ScriptDialogReplyDataBlock {
+                object_id,
+                chat_channel,
+                button_index,
+                button_label: with_nul(button_label),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ScriptAnswerYes` reliably granting `permissions` to the script
+    /// `item_id` in object `task_id` (pass `0` to deny everything).
+    fn send_script_answer_yes(
+        &mut self,
+        task_id: Uuid,
+        item_id: Uuid,
+        permissions: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ScriptAnswerYes(ScriptAnswerYes {
+            agent_data: ScriptAnswerYesAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: ScriptAnswerYesDataBlock {
+                task_id,
+                item_id,
+                questions: permissions,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
     /// Queues a `FetchInventoryDescendents` reliably for the folder `folder_id`
     /// (sorted by name), requesting its sub-folders and items.
     fn send_fetch_inventory_descendents(
@@ -1701,6 +1754,42 @@ impl Session {
                         circuit.record_acks(&[packet.id]);
                     }
                 }
+            }
+            AnyMessage::ScriptDialog(dialog) => {
+                self.events
+                    .push_back(Event::ScriptDialog(Box::new(script_dialog(dialog))));
+            }
+            AnyMessage::ScriptQuestion(question) => {
+                self.events
+                    .push_back(Event::ScriptPermissionRequest(Box::new(
+                        script_permission_request(question),
+                    )));
+            }
+            AnyMessage::LoadURL(load) => {
+                let data = &load.data;
+                self.events
+                    .push_back(Event::LoadUrl(Box::new(LoadUrlRequest {
+                        object_name: trimmed_string(&data.object_name),
+                        object_id: data.object_id,
+                        owner_id: data.owner_id,
+                        owner_is_group: data.owner_is_group,
+                        message: trimmed_string(&data.message),
+                        url: trimmed_string(&data.url),
+                    })));
+            }
+            AnyMessage::ScriptTeleportRequest(request) => {
+                let data = &request.data;
+                self.events
+                    .push_back(Event::ScriptTeleport(Box::new(ScriptTeleportRequest {
+                        object_name: trimmed_string(&data.object_name),
+                        region_name: trimmed_string(&data.sim_name),
+                        position: (
+                            data.sim_position.x,
+                            data.sim_position.y,
+                            data.sim_position.z,
+                        ),
+                        look_at: (data.look_at.x, data.look_at.y, data.look_at.z),
+                    })));
             }
             AnyMessage::AgentDataUpdate(update) => {
                 self.events
@@ -2562,6 +2651,56 @@ impl Session {
         Ok(())
     }
 
+    /// Replies to a scripted-object dialog (`ScriptDialogReply`): the chosen
+    /// `button_index`/`button_label` (from the [`Event::ScriptDialog`]'s
+    /// [`ScriptDialog::buttons`]) is sent back to `object_id` on the dialog's
+    /// hidden `chat_channel`. For an `llTextBox`, pass the typed text as
+    /// `button_label` with `button_index` `0`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the reply fails to encode.
+    pub fn reply_script_dialog(
+        &mut self,
+        object_id: Uuid,
+        chat_channel: i32,
+        button_index: i32,
+        button_label: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_script_dialog_reply(
+            object_id,
+            chat_channel,
+            button_index,
+            button_label,
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Answers a scripted-object permission request (`ScriptAnswerYes`) from the
+    /// [`Event::ScriptPermissionRequest`]: grants the `permissions` bitfield (a
+    /// subset of those requested) to the script `item_id` in object `task_id`.
+    /// Pass [`ScriptPermissions::default`] (an empty set) to deny everything.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the reply fails to encode.
+    pub fn answer_script_permissions(
+        &mut self,
+        task_id: Uuid,
+        item_id: Uuid,
+        permissions: ScriptPermissions,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_script_answer_yes(task_id, item_id, permissions.0, now)?;
+        Ok(())
+    }
+
     /// The agent's own id, once login has established the circuit. Useful as the
     /// `owner_id` for inventory fetches and for recognising the client's own
     /// messages.
@@ -3035,6 +3174,44 @@ fn group_notice(data: &GroupNoticesListReplyDataBlock) -> GroupNotice {
         subject: trimmed_string(&data.subject),
         has_attachment: data.has_attachment,
         asset_type: data.asset_type,
+    }
+}
+
+/// Builds a [`ScriptDialog`] value from a `ScriptDialog` message.
+fn script_dialog(message: &sl_wire::messages::ScriptDialog) -> ScriptDialog {
+    let data = &message.data;
+    ScriptDialog {
+        object_id: data.object_id,
+        object_name: trimmed_string(&data.object_name),
+        owner_first_name: trimmed_string(&data.first_name),
+        owner_last_name: trimmed_string(&data.last_name),
+        owner_id: message
+            .owner_data
+            .first()
+            .map_or_else(Uuid::nil, |owner| owner.owner_id),
+        message: trimmed_string(&data.message),
+        chat_channel: data.chat_channel,
+        image_id: data.image_id,
+        buttons: message
+            .buttons
+            .iter()
+            .map(|button| trimmed_string(&button.button_label))
+            .collect(),
+    }
+}
+
+/// Builds a [`ScriptPermissionRequest`] value from a `ScriptQuestion` message.
+fn script_permission_request(
+    message: &sl_wire::messages::ScriptQuestion,
+) -> ScriptPermissionRequest {
+    let data = &message.data;
+    ScriptPermissionRequest {
+        task_id: data.task_id,
+        item_id: data.item_id,
+        object_name: trimmed_string(&data.object_name),
+        object_owner: trimmed_string(&data.object_owner),
+        experience_id: message.experience.experience_id,
+        permissions: ScriptPermissions(data.questions),
     }
 }
 

@@ -167,6 +167,22 @@ fn on_events(
             SlSessionEvent::GroupSessionMessage {
                 from_name, message, ..
             } => info!("group chat from {from_name}: {message}"),
+            SlSessionEvent::ScriptDialog(dialog) => info!(
+                "script dialog from {:?}: {:?} [{}]",
+                dialog.object_name,
+                dialog.message,
+                dialog.buttons.join(", ")
+            ),
+            SlSessionEvent::ScriptPermissionRequest(request) => info!(
+                "permission request from {:?} (0x{:x})",
+                request.object_name, request.permissions.0
+            ),
+            SlSessionEvent::LoadUrl(load) => {
+                info!("load-url from {:?}: {}", load.object_name, load.url);
+            }
+            SlSessionEvent::ScriptTeleport(request) => {
+                info!("script teleport to {:?}", request.region_name);
+            }
             // This demo ignores the remaining profile/region/parcel/teleport/group events.
             SlSessionEvent::GroupMembers { .. }
             | SlSessionEvent::GroupRoleData { .. }

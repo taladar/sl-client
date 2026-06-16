@@ -345,6 +345,20 @@ pub enum Event {
         /// The group the agent is no longer in.
         group_id: Uuid,
     },
+    /// A scripted object showed a dialog (`ScriptDialog`, i.e. `llDialog` or
+    /// `llTextBox`). Respond with
+    /// [`Session::reply_script_dialog`](crate::Session::reply_script_dialog).
+    ScriptDialog(Box<ScriptDialog>),
+    /// A scripted object requested permissions (`ScriptQuestion`, i.e.
+    /// `llRequestPermissions`). Grant a subset with
+    /// [`Session::answer_script_permissions`](crate::Session::answer_script_permissions).
+    ScriptPermissionRequest(Box<ScriptPermissionRequest>),
+    /// A scripted object asked to open a URL (`LoadURL`, i.e. `llLoadURL`). There
+    /// is no protocol reply; the client decides whether to open it.
+    LoadUrl(Box<LoadUrlRequest>),
+    /// A scripted object asked to teleport the agent (`ScriptTeleportRequest`,
+    /// i.e. `llMapDestination`). The client may initiate the teleport itself.
+    ScriptTeleport(Box<ScriptTeleportRequest>),
     /// The simulator answered a sit request (`AvatarSitResponse`) after a
     /// [`Session::sit_on`](crate::Session::sit_on); the session has sent the
     /// completing `AgentSit`.
@@ -1176,6 +1190,141 @@ pub struct GroupNotice {
     pub has_attachment: bool,
     /// The attachment's asset type (meaningful only if `has_attachment`).
     pub asset_type: u8,
+}
+
+/// A scripted-object dialog (`llDialog`/`llTextBox`), parsed from a
+/// `ScriptDialog`. Reply with
+/// [`Session::reply_script_dialog`](crate::Session::reply_script_dialog), passing
+/// the chosen button's index/label on [`chat_channel`](ScriptDialog::chat_channel).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptDialog {
+    /// The object id that raised the dialog (the reply target).
+    pub object_id: Uuid,
+    /// The object's name.
+    pub object_name: String,
+    /// The object owner's first name.
+    pub owner_first_name: String,
+    /// The object owner's last name.
+    pub owner_last_name: String,
+    /// The object owner's agent id (nil if the sim did not include it).
+    pub owner_id: Uuid,
+    /// The dialog message text.
+    pub message: String,
+    /// The hidden chat channel the button reply is sent on.
+    pub chat_channel: i32,
+    /// The dialog's icon (texture id).
+    pub image_id: Uuid,
+    /// The button labels, in order (the reply carries the chosen index/label).
+    pub buttons: Vec<String>,
+}
+
+impl ScriptDialog {
+    /// The magic single-button label an `llTextBox` uses instead of real
+    /// buttons. When [`buttons`](Self::buttons) is exactly this, the object is
+    /// requesting free-text input rather than a button choice.
+    pub const TEXT_BOX_BUTTON: &'static str = "!!llTextBox!!";
+
+    /// Whether this dialog is an `llTextBox` free-text prompt (a single
+    /// [`TEXT_BOX_BUTTON`](Self::TEXT_BOX_BUTTON) button).
+    #[must_use]
+    pub fn is_text_box(&self) -> bool {
+        self.buttons.len() == 1
+            && self
+                .buttons
+                .first()
+                .is_some_and(|button| button == Self::TEXT_BOX_BUTTON)
+    }
+}
+
+/// The permissions an in-world script may request via `llRequestPermissions`, a
+/// bitfield shared by `ScriptQuestion` (request) and `ScriptAnswerYes` (grant).
+/// The flag values match the LSL `PERMISSION_*` constants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ScriptPermissions(pub i32);
+
+impl ScriptPermissions {
+    /// Debit the agent's account (`PERMISSION_DEBIT`).
+    pub const DEBIT: i32 = 1 << 1;
+    /// Take control inputs (`PERMISSION_TAKE_CONTROLS`).
+    pub const TAKE_CONTROLS: i32 = 1 << 2;
+    /// Trigger animations on the agent (`PERMISSION_TRIGGER_ANIMATION`).
+    pub const TRIGGER_ANIMATION: i32 = 1 << 4;
+    /// Attach to the agent (`PERMISSION_ATTACH`).
+    pub const ATTACH: i32 = 1 << 5;
+    /// Change link-set membership (`PERMISSION_CHANGE_LINKS`).
+    pub const CHANGE_LINKS: i32 = 1 << 7;
+    /// Track the agent's camera (`PERMISSION_TRACK_CAMERA`).
+    pub const TRACK_CAMERA: i32 = 1 << 10;
+    /// Control the agent's camera (`PERMISSION_CONTROL_CAMERA`).
+    pub const CONTROL_CAMERA: i32 = 1 << 11;
+    /// Teleport the agent (`PERMISSION_TELEPORT`).
+    pub const TELEPORT: i32 = 1 << 12;
+    /// Participate in an experience (`PERMISSION_EXPERIENCE`).
+    pub const EXPERIENCE: i32 = 1 << 13;
+    /// Silently manage estate access (`PERMISSION_SILENT_ESTATE_MANAGEMENT`).
+    pub const SILENT_ESTATE_MANAGEMENT: i32 = 1 << 14;
+    /// Override the agent's animations (`PERMISSION_OVERRIDE_ANIMATIONS`).
+    pub const OVERRIDE_ANIMATIONS: i32 = 1 << 15;
+    /// Return objects (`PERMISSION_RETURN_OBJECTS`).
+    pub const RETURN_OBJECTS: i32 = 1 << 16;
+
+    /// Whether all of the bits in `mask` are granted/requested.
+    #[must_use]
+    pub const fn contains(self, mask: i32) -> bool {
+        self.0 & mask == mask
+    }
+}
+
+/// A scripted-object permission request (`llRequestPermissions`), parsed from a
+/// `ScriptQuestion`. Grant (a subset) with
+/// [`Session::answer_script_permissions`](crate::Session::answer_script_permissions).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptPermissionRequest {
+    /// The task (object) id holding the script.
+    pub task_id: Uuid,
+    /// The script item id within the object.
+    pub item_id: Uuid,
+    /// The object's name.
+    pub object_name: String,
+    /// The object owner's name.
+    pub object_owner: String,
+    /// The experience id requesting, or nil if not an experience.
+    pub experience_id: Uuid,
+    /// The permissions requested.
+    pub permissions: ScriptPermissions,
+}
+
+/// A scripted-object request to open a URL (`llLoadURL`), parsed from a
+/// `LoadURL`. There is no reply; the client decides whether to open the URL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadUrlRequest {
+    /// The object's name.
+    pub object_name: String,
+    /// The object id.
+    pub object_id: Uuid,
+    /// The object owner's agent (or group) id.
+    pub owner_id: Uuid,
+    /// Whether [`owner_id`](Self::owner_id) is a group rather than an agent.
+    pub owner_is_group: bool,
+    /// The accompanying message text.
+    pub message: String,
+    /// The URL the object asks to open.
+    pub url: String,
+}
+
+/// A scripted-object request to teleport the agent (`llMapDestination` /
+/// `ScriptTeleportRequest`). There is no direct reply; the client may initiate a
+/// teleport to the named region/position.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScriptTeleportRequest {
+    /// The requesting object's name.
+    pub object_name: String,
+    /// The destination region (simulator) name.
+    pub region_name: String,
+    /// The destination position within the region, in metres.
+    pub position: (f32, f32, f32),
+    /// The look-at direction on arrival.
+    pub look_at: (f32, f32, f32),
 }
 
 /// An inventory folder (category): from the login skeleton
