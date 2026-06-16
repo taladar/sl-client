@@ -11,8 +11,8 @@ Per region:
 
 - region name, maturity rating (PG / Mature / Adult), and product type
   (Full / Homestead / Openspace, where the grid reports it);
-- region-wide agent and object/Land-Impact limits (where the grid provides
-  them — some are estate-manager-only on Second Life);
+- region-wide agent and object/Land-Impact limits (`max_agents`,
+  `hard_max_agents`, `hard_max_objects` from `RegionInfo`);
 - per-parcel geometry (bounding box, area), rez-zone flags (object create /
   group create), access flags (ban list = banlines, access list, deny
   anonymous), and parcel/region prim limits;
@@ -25,7 +25,11 @@ Per region:
    protocol; every later region's handle comes from the teleport response).
 2. In each region it advertises a draw distance so the simulator enables the
    neighbouring regions (`EnableSimulator`), requests the region info, and walks
-   the parcel grid (`ParcelProperties`) using the returned coverage bitmaps.
+   the parcel grid (`ParcelPropertiesRequest`) using the returned coverage
+   bitmaps. The parcel replies (`ParcelProperties`) arrive over the CAPS event
+   queue (the driver POSTs the seed capability, then long-polls `EventQueueGet`
+   and feeds the LLSD events back into the session), since the simulator no
+   longer sends them over UDP.
 3. It performs a breadth-first traversal: queue in-bounds, unvisited neighbours
    and teleport to each in turn, until the queue empties, `--max-regions` is
    reached, or it leaves the bounds.
