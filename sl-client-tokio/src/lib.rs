@@ -25,10 +25,11 @@ pub use sl_proto::{
     ChatAudible, ChatMessage, ChatSourceType, ChatType, ControlFlags, CreateGroupParams,
     DisconnectReason, Event, Friend, FriendRights, GroupMember, GroupMembership, GroupNotice,
     GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
-    InventoryFolder, InventoryItem, LoginParams, LoginRequest, LoginResponse, MapRegionInfo,
-    Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
-    RegionFlags, RegionIdentity, RegionLimits, Reliability, Rotation, Transmit, Uuid, Vector,
-    grid_to_handle, handle_to_global, handle_to_grid, sim_access,
+    InventoryFolder, InventoryItem, LoadUrlRequest, LoginParams, LoginRequest, LoginResponse,
+    MapRegionInfo, Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo,
+    ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity, RegionLimits, Reliability,
+    Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
+    Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -260,6 +261,29 @@ pub enum Command {
     /// Leave a group's IM session (stop receiving its chat) without leaving the
     /// group itself.
     LeaveGroupSession(Uuid),
+    /// Reply to a scripted-object dialog (`ScriptDialogReply`) from an
+    /// [`Event::ScriptDialog`] — the chosen button on its hidden `chat_channel`.
+    ReplyScriptDialog {
+        /// The object that raised the dialog.
+        object_id: Uuid,
+        /// The dialog's hidden chat channel.
+        chat_channel: i32,
+        /// The chosen button index.
+        button_index: i32,
+        /// The chosen button label (or the typed text for an `llTextBox`).
+        button_label: String,
+    },
+    /// Answer a scripted-object permission request (`ScriptAnswerYes`) from an
+    /// [`Event::ScriptPermissionRequest`] — grants `permissions` (a subset of
+    /// those requested; [`ScriptPermissions::default`] denies everything).
+    AnswerScriptPermissions {
+        /// The task (object) id holding the script.
+        task_id: Uuid,
+        /// The script item id.
+        item_id: Uuid,
+        /// The permissions to grant.
+        permissions: ScriptPermissions,
+    },
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
         /// The destination region handle.
@@ -546,6 +570,12 @@ impl Client {
                         }
                         Some(Command::LeaveGroupSession(group_id)) => {
                             self.session.leave_group_session(group_id, Instant::now())?;
+                        }
+                        Some(Command::ReplyScriptDialog { object_id, chat_channel, button_index, button_label }) => {
+                            self.session.reply_script_dialog(object_id, chat_channel, button_index, &button_label, Instant::now())?;
+                        }
+                        Some(Command::AnswerScriptPermissions { task_id, item_id, permissions }) => {
+                            self.session.answer_script_permissions(task_id, item_id, permissions, Instant::now())?;
                         }
                         Some(Command::Teleport { region_handle, position, look_at }) => {
                             self.session.teleport_to(region_handle, position, look_at, Instant::now())?;

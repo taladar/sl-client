@@ -605,6 +605,10 @@ impl Survey {
             | Event::JoinGroupResult { .. }
             | Event::LeaveGroupResult { .. }
             | Event::DroppedFromGroup { .. }
+            | Event::ScriptDialog(_)
+            | Event::ScriptPermissionRequest(_)
+            | Event::LoadUrl(_)
+            | Event::ScriptTeleport(_)
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal

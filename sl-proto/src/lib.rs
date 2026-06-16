@@ -11,8 +11,9 @@ pub use types::{
     ChatMessage, ChatSourceType, ChatType, CreateGroupParams, DisconnectReason, Event, Friend,
     FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
     GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, NeighborInfo, ParcelInfo,
-    ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability, Transmit,
+    LoadUrlRequest, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, NeighborInfo,
+    ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit,
     grid_to_handle, handle_to_global, handle_to_grid,
 };
 

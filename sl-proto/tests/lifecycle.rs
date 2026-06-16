@@ -10,8 +10,8 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         ChatAudible, ChatSourceType, ChatType, ControlFlags, CreateGroupParams, DisconnectReason,
-        Event, FriendRights, ImDialog, LoginParams, Maturity, ProductType, Reliability, Session,
-        Transmit,
+        Event, FriendRights, ImDialog, LoginParams, Maturity, ProductType, Reliability,
+        ScriptPermissions, Session, Transmit,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -38,7 +38,9 @@ mod test {
         ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
         RegionHandshake, RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
         RegionHandshakeRegionInfoBlock, RegionInfo, RegionInfoAgentDataBlock,
-        RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock, TeleportFailed,
+        RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock, ScriptDialog,
+        ScriptDialogButtonsBlock, ScriptDialogDataBlock, ScriptDialogOwnerDataBlock,
+        ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock, TeleportFailed,
         TeleportFailedInfoBlock,
     };
     use sl_wire::{
@@ -1655,6 +1657,150 @@ mod test {
         assert_eq!(first.online_status, "Online");
         assert_eq!(first.contribution, 512);
         assert!(first.is_owner);
+        Ok(())
+    }
+
+    #[test]
+    fn script_dialog_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let object = uuid::Uuid::from_u128(0x8001);
+        let owner = uuid::Uuid::from_u128(0x8002);
+        let message = AnyMessage::ScriptDialog(ScriptDialog {
+            data: ScriptDialogDataBlock {
+                object_id: object,
+                first_name: b"Avatar\0".to_vec(),
+                last_name: b"Tester\0".to_vec(),
+                object_name: b"Vendor\0".to_vec(),
+                message: b"Pick one\0".to_vec(),
+                chat_channel: -1234,
+                image_id: uuid::Uuid::nil(),
+            },
+            buttons: vec![
+                ScriptDialogButtonsBlock {
+                    button_label: b"Yes\0".to_vec(),
+                },
+                ScriptDialogButtonsBlock {
+                    button_label: b"No\0".to_vec(),
+                },
+            ],
+            owner_data: vec![ScriptDialogOwnerDataBlock { owner_id: owner }],
+        });
+        let datagram = server_message(&message, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let dialog = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ScriptDialog(dialog) => Some(dialog),
+                _ => None,
+            })
+            .ok_or("expected a ScriptDialog event")?;
+        assert_eq!(dialog.object_id, object);
+        assert_eq!(dialog.owner_id, owner);
+        assert_eq!(dialog.object_name, "Vendor");
+        assert_eq!(dialog.message, "Pick one");
+        assert_eq!(dialog.chat_channel, -1234);
+        assert_eq!(dialog.buttons, vec!["Yes".to_owned(), "No".to_owned()]);
+        assert!(!dialog.is_text_box());
+        Ok(())
+    }
+
+    #[test]
+    fn script_question_surfaces_permission_request() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let task = uuid::Uuid::from_u128(0x8003);
+        let item = uuid::Uuid::from_u128(0x8004);
+        let requested = ScriptPermissions::DEBIT | ScriptPermissions::TAKE_CONTROLS;
+        let message = AnyMessage::ScriptQuestion(ScriptQuestion {
+            data: ScriptQuestionDataBlock {
+                task_id: task,
+                item_id: item,
+                object_name: b"Money Tree\0".to_vec(),
+                object_owner: b"Avatar Tester\0".to_vec(),
+                questions: requested,
+            },
+            experience: ScriptQuestionExperienceBlock {
+                experience_id: uuid::Uuid::nil(),
+            },
+        });
+        let datagram = server_message(&message, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let request = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ScriptPermissionRequest(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("expected a ScriptPermissionRequest event")?;
+        assert_eq!(request.task_id, task);
+        assert_eq!(request.item_id, item);
+        assert_eq!(request.object_name, "Money Tree");
+        assert_eq!(request.permissions.0, requested);
+        assert!(request.permissions.contains(ScriptPermissions::DEBIT));
+        assert!(
+            request
+                .permissions
+                .contains(ScriptPermissions::TAKE_CONTROLS)
+        );
+        assert!(!request.permissions.contains(ScriptPermissions::ATTACH));
+        Ok(())
+    }
+
+    #[test]
+    fn reply_script_dialog_packs_message() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let object = uuid::Uuid::from_u128(0x8005);
+        session.reply_script_dialog(object, -1234, 1, "No", now)?;
+        let sent = drain(&mut session)?;
+        let reply = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ScriptDialogReply(reply) => Some(reply),
+                _ => None,
+            })
+            .ok_or("expected a ScriptDialogReply")?;
+        assert_eq!(reply.data.object_id, object);
+        assert_eq!(reply.data.chat_channel, -1234);
+        assert_eq!(reply.data.button_index, 1);
+        assert_eq!(trimmed(&reply.data.button_label), "No");
+        Ok(())
+    }
+
+    #[test]
+    fn answer_script_permissions_packs_message() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let task = uuid::Uuid::from_u128(0x8006);
+        let item = uuid::Uuid::from_u128(0x8007);
+        session.answer_script_permissions(
+            task,
+            item,
+            ScriptPermissions(ScriptPermissions::TAKE_CONTROLS),
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let answer = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ScriptAnswerYes(answer) => Some(answer),
+                _ => None,
+            })
+            .ok_or("expected a ScriptAnswerYes")?;
+        assert_eq!(answer.data.task_id, task);
+        assert_eq!(answer.data.item_id, item);
+        assert_eq!(answer.data.questions, ScriptPermissions::TAKE_CONTROLS);
         Ok(())
     }
 

@@ -35,7 +35,7 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 5 ✅ | Inventory **(done, UDP + CAPS)** | 8 | Inventory manager, product-update bot | Local OpenSim |
 | 6 ✅ | Friends & presence **(done)** | 5 | Presence/online monitor | Local OpenSim (2 accounts) |
 | 7 ✅ | Group support **(done)** | 8 | Group chat bot, roster tool | Local OpenSim (Groups V2 module) |
-| 8 | Script dialogs & permissions | 3 | Vendor/scripted-object interaction bot | Local OpenSim |
+| 8 ✅ | Script dialogs & permissions **(done)** | 3 | Vendor/scripted-object interaction bot | Local OpenSim (scripted object) |
 | 9 | Mute list | 2 | Moderation helper | Local OpenSim |
 | 10 | Seamless teleport (child circuits) | 8 | Roaming bot that keeps its session | Local OpenSim (multi-region) |
 | 11 | Money / economy | 5 | Balance monitor, tip/vendor bot | **Money module or SL grid** |
@@ -215,11 +215,25 @@ create/delete and member-role assignment edits, and ejecting members. *Test:
 local OpenSim with the Groups V2 module enabled (needs a MySQL/MariaDB ≤10.x
 backend; OpenSim's bundled connector can't talk to MariaDB 12).*
 
-**8. Script dialogs & permissions — `ScriptDialog`/`ScriptDialogReply`,
-`ScriptQuestion`/ `ScriptAnswerYes` (`llRequestPermissions`), `LoadURL`,
-`ScriptTeleportRequest` · 3 pts.** Respond to in-world scripted prompts and
-vendors (`llDialog`, permission grants). Usable now that the avatar is present
-in-world. *Test: local OpenSim with a scripted object.*
+**8. Script dialogs & permissions · 3 pts. ✅ Done.** A vendor / scripted-object
+interaction bot. Incoming scripted prompts surface as events:
+`Event::ScriptDialog` (`llDialog`/`llTextBox` — object, owner, message, buttons,
+hidden chat channel; `ScriptDialog::is_text_box` detects the `llTextBox` magic
+button), `Event::ScriptPermissionRequest` (`llRequestPermissions`, with a
+`ScriptPermissions` bitfield mirroring the LSL `PERMISSION_*` constants),
+`Event::LoadUrl` (`llLoadURL`), and `Event::ScriptTeleport`
+(`ScriptTeleportRequest`/`llMapDestination`). Replies:
+`Session::reply_script_dialog` (`ScriptDialogReply` — chosen button on the
+dialog's channel, also used to return `llTextBox` text) and
+`Session::answer_script_permissions` (`ScriptAnswerYes` — grant a subset, or
+`ScriptPermissions::default` to deny). Wired as
+`Command::{ReplyScriptDialog, AnswerScriptPermissions}` through both runtimes.
+Verified live against the local OpenSim (XEngine/YEngine enabled): an OAR-loaded
+scripted prim fired `llDialog`, `llRequestPermissions(PERMISSION_DEBIT)` and
+`llLoadURL` at the test avatar, which received all three events and replied to
+the dialog. *Test: local OpenSim with the script engine enabled and a scripted
+object (no headless rez path — a scripted prim must be loaded via an OAR or a
+viewer).*
 
 **9. Mute list — `MuteListRequest`, `UpdateMuteListEntry`, `RemoveMuteListEntry`
 · 2 pts.** Fetch and edit the mute/block list — a small moderation helper.
