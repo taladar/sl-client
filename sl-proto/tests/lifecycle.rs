@@ -13,11 +13,13 @@ mod test {
     };
     use sl_types::lsl::Vector;
     use sl_wire::messages::{
-        LogoutRequest, LogoutRequestAgentDataBlock, MapBlockReply, MapBlockReplyAgentDataBlock,
-        MapBlockReplyDataBlock, MapBlockReplySizeBlock, ParcelProperties,
-        ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
-        ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
-        RegionHandshake, RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
+        AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
+        AgentMovementCompleteSimDataBlock, LogoutRequest, LogoutRequestAgentDataBlock,
+        MapBlockReply, MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock,
+        ParcelProperties, ParcelPropertiesAgeVerificationBlockBlock,
+        ParcelPropertiesParcelDataBlock, ParcelPropertiesParcelEnvironmentBlockBlock,
+        ParcelPropertiesRegionAllowAccessBlockBlock, RegionHandshake,
+        RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
         RegionHandshakeRegionInfoBlock, RegionInfo, RegionInfoAgentDataBlock,
         RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock, TeleportFailed,
         TeleportFailedInfoBlock,
@@ -844,7 +846,7 @@ mod test {
             <key>Bitmap</key><binary>AQID</binary>\
             </map></array></map></llsd>";
         let body = sl_proto::parse_llsd_xml(xml)?;
-        session.handle_caps_event("ParcelProperties", &body);
+        session.handle_caps_event("ParcelProperties", &body, now)?;
 
         let events = drain_events(&mut session);
         let parcel = events
@@ -967,6 +969,131 @@ mod test {
         assert_eq!(region.grid_y, 1001);
         assert_eq!(region.maturity, Maturity::Mature);
         assert_eq!(region.region_handle, sl_proto::grid_to_handle(1000, 1001));
+        Ok(())
+    }
+
+    /// The CAPS `TeleportFinish` event body naming [`sim_b`] as the destination.
+    fn caps_teleport_finish_xml() -> &'static str {
+        // SimIP fwAAAQ== is base64 of [127, 0, 0, 1]; SimPort is a plain integer
+        // (host order, no byte swap).
+        "<llsd><map><key>Info</key><array><map>\
+            <key>SimIP</key><binary>fwAAAQ==</binary>\
+            <key>SimPort</key><integer>9001</integer>\
+            <key>SeedCapability</key><string>http://127.0.0.1:9001/seed</string>\
+            </map></array></map></llsd>"
+    }
+
+    #[test]
+    fn caps_teleport_finish_hands_over_to_destination() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let handle = 0x0003_E800_0003_E900;
+        session.teleport_to(handle, vec3(128.0, 128.0, 30.0), vec3(1.0, 0.0, 0.0), now)?;
+        let sent = drain(&mut session)?;
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::TeleportLocationRequest(_))),
+            "expected a TeleportLocationRequest"
+        );
+
+        // OpenSim delivers TeleportFinish over the CAPS event queue.
+        let body = sl_proto::parse_llsd_xml(caps_teleport_finish_xml())?;
+        session.handle_caps_event("TeleportFinish", &body, now)?;
+
+        // The handover bootstraps the destination: UseCircuitCode +
+        // CompleteAgentMovement to sim_b.
+        let mut to_dest = Vec::new();
+        while let Some(transmit) = session.poll_transmit() {
+            let message = decode(&transmit)?;
+            if transmit.destination == sim_b() {
+                to_dest.push(message);
+            }
+        }
+        assert!(
+            to_dest
+                .iter()
+                .any(|m| matches!(m, AnyMessage::UseCircuitCode(_))),
+            "expected a UseCircuitCode to the destination, got {to_dest:?}"
+        );
+        assert!(
+            to_dest
+                .iter()
+                .any(|m| matches!(m, AnyMessage::CompleteAgentMovement(_))),
+            "expected a CompleteAgentMovement to the destination, got {to_dest:?}"
+        );
+
+        // The destination's handshake completes the handover.
+        let handshake = server_message(&region_handshake_msg(13, 0, "RegionB", "", ""), 1, true)?;
+        session.handle_datagram(sim_b(), &handshake, now)?;
+        let events = drain_events(&mut session);
+        let changed = events
+            .iter()
+            .find_map(|e| match e {
+                Event::RegionChanged { region_handle, sim } => Some((*region_handle, *sim)),
+                _ => None,
+            })
+            .ok_or("expected a RegionChanged event")?;
+        assert_eq!(changed.0, handle);
+        assert_eq!(changed.1, sim_b());
+        Ok(())
+    }
+
+    #[test]
+    fn agent_movement_complete_completes_handover_once() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let handle = 0x0003_E800_0003_E900;
+        session.teleport_to(handle, vec3(128.0, 128.0, 30.0), vec3(1.0, 0.0, 0.0), now)?;
+        drain(&mut session)?;
+        let body = sl_proto::parse_llsd_xml(caps_teleport_finish_xml())?;
+        session.handle_caps_event("TeleportFinish", &body, now)?;
+        drain(&mut session)?; // UseCircuitCode + CompleteAgentMovement
+
+        // The destination promotes us to root and confirms with
+        // AgentMovementComplete; the handover completes even with no RegionHandshake.
+        let amc = AnyMessage::AgentMovementComplete(AgentMovementComplete {
+            agent_data: AgentMovementCompleteAgentDataBlock {
+                agent_id: uuid::Uuid::nil(),
+                session_id: uuid::Uuid::nil(),
+            },
+            data: AgentMovementCompleteDataBlock {
+                position: vec3(128.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+                region_handle: handle,
+                timestamp: 0,
+            },
+            sim_data: AgentMovementCompleteSimDataBlock {
+                channel_version: b"test".to_vec(),
+            },
+        });
+        let datagram = server_message(&amc, 1, true)?;
+        session.handle_datagram(sim_b(), &datagram, now)?;
+        let events = drain_events(&mut session);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e, Event::RegionChanged { .. }))
+                .count(),
+            1,
+            "AgentMovementComplete should complete the handover once"
+        );
+
+        // A later RegionHandshake must not emit a second RegionChanged.
+        let handshake = server_message(&region_handshake_msg(13, 0, "RegionB", "", ""), 2, true)?;
+        session.handle_datagram(sim_b(), &handshake, now)?;
+        let events = drain_events(&mut session);
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Event::RegionChanged { .. })),
+            "handover must not complete twice"
+        );
         Ok(())
     }
 }

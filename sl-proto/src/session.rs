@@ -556,6 +556,9 @@ pub struct Session {
     draw_distance: f32,
     /// In-progress teleport handover bookkeeping, if any.
     handover: Option<HandoverPending>,
+    /// The destination region handle of an in-flight teleport (between sending
+    /// `TeleportLocationRequest` and receiving `TeleportFinish`/failure).
+    teleport_target: Option<u64>,
     /// The current region's capability-seed URL (from login or a teleport), for
     /// the driver to fetch the CAPS map and event queue.
     seed_capability: Option<String>,
@@ -573,6 +576,7 @@ impl Session {
             circuit: None,
             draw_distance: DEFAULT_DRAW_DISTANCE,
             handover: None,
+            teleport_target: None,
             seed_capability: None,
             events: VecDeque::new(),
         }
@@ -598,14 +602,94 @@ impl Session {
     }
 
     /// Feeds a parsed CAPS `EventQueue` event into the session, surfacing any
-    /// recognised payload as a high-level [`Event`]. Currently handles
-    /// `ParcelProperties` (delivered over the event queue, not UDP).
-    pub fn handle_caps_event(&mut self, message: &str, body: &Llsd) {
-        if message == "ParcelProperties"
-            && let Some(parcel) = parcel_info_from_llsd(body)
-        {
-            self.events
-                .push_back(Event::ParcelProperties(Box::new(parcel)));
+    /// recognised payload. Handles `ParcelProperties` (delivered over the event
+    /// queue, not UDP) and `TeleportFinish` (the destination address for a
+    /// cross-region teleport — OpenSim sends this over the event queue, not UDP).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Wire`] if a teleport-handover bootstrap packet fails to
+    /// encode.
+    pub fn handle_caps_event(
+        &mut self,
+        message: &str,
+        body: &Llsd,
+        now: Instant,
+    ) -> Result<(), Error> {
+        match message {
+            "ParcelProperties" => {
+                if let Some(parcel) = parcel_info_from_llsd(body) {
+                    self.events
+                        .push_back(Event::ParcelProperties(Box::new(parcel)));
+                }
+            }
+            "TeleportFinish" => {
+                if let Some((dest, seed)) = teleport_finish_from_llsd(body) {
+                    let region_handle = self.teleport_target.unwrap_or(0);
+                    self.begin_handover(dest, region_handle, Some(seed), now)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Hands the circuit over to a teleport destination `dest`: retargets the
+    /// circuit, sends `UseCircuitCode` + `CompleteAgentMovement` (creating the
+    /// child presence then promoting it to root, as a viewer does on
+    /// `TeleportFinish`), records the seed capability, and awaits the
+    /// destination's handshake / `AgentMovementComplete`. No-op unless a teleport
+    /// is in flight.
+    fn begin_handover(
+        &mut self,
+        dest: SocketAddr,
+        region_handle: u64,
+        seed_capability: Option<String>,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if !matches!(self.state, SessionState::Teleporting) {
+            return Ok(());
+        }
+        // Retarget synchronously: it resets the circuit's sequence/ack/seen/timer
+        // state to the new simulator, after which the source check accepts only
+        // the destination.
+        if let Some(circuit) = self.circuit.as_mut() {
+            circuit.retarget(dest, now);
+            circuit.send_use_circuit_code(now)?;
+            circuit.send_complete_agent_movement(now)?;
+        }
+        if seed_capability.is_some() {
+            self.seed_capability = seed_capability;
+        }
+        self.teleport_target = None;
+        self.handover = Some(HandoverPending { region_handle });
+        self.state = SessionState::AwaitingHandshake;
+        Ok(())
+    }
+
+    /// Completes the initial login handshake or a teleport handover: arms the
+    /// keep-alive `AgentUpdate`, transitions to `Active`, and emits
+    /// `RegionHandshakeComplete` (login) or `RegionChanged` (handover). Idempotent
+    /// — only acts while still `AwaitingHandshake`, so it may be driven by
+    /// whichever of `RegionHandshake` / `AgentMovementComplete` arrives first.
+    fn complete_arrival(&mut self, now: Instant) {
+        if !matches!(self.state, SessionState::AwaitingHandshake) {
+            return;
+        }
+        if let Some(circuit) = self.circuit.as_mut() {
+            circuit.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
+        }
+        self.state = SessionState::Active;
+        match self.handover.take() {
+            Some(handover) => {
+                if let Some(sim) = self.circuit.as_ref().map(|c| c.sim_addr) {
+                    self.events.push_back(Event::RegionChanged {
+                        region_handle: handover.region_handle,
+                        sim,
+                    });
+                }
+            }
+            None => self.events.push_back(Event::RegionHandshakeComplete),
         }
     }
 
@@ -736,29 +820,20 @@ impl Session {
                 if matches!(self.state, SessionState::AwaitingHandshake) {
                     if let Some(circuit) = self.circuit.as_mut() {
                         circuit.send_region_handshake_reply(now)?;
-                        circuit.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
                     }
-                    self.state = SessionState::Active;
                     self.events
                         .push_back(Event::RegionInfoHandshake(Box::new(region_identity(
                             &handshake.region_info,
                             &handshake.region_info3,
                         ))));
-                    // A pending handover means this handshake completes a
-                    // teleport into a new region; otherwise it is the initial
-                    // login handshake.
-                    match self.handover.take() {
-                        Some(handover) => {
-                            if let Some(sim) = self.circuit.as_ref().map(|c| c.sim_addr) {
-                                self.events.push_back(Event::RegionChanged {
-                                    region_handle: handover.region_handle,
-                                    sim,
-                                });
-                            }
-                        }
-                        None => self.events.push_back(Event::RegionHandshakeComplete),
-                    }
+                    self.complete_arrival(now);
                 }
+            }
+            AnyMessage::AgentMovementComplete(_) => {
+                // After a teleport handover the destination promotes us to root
+                // and confirms with AgentMovementComplete; it may not re-send a
+                // RegionHandshake, so complete the arrival here too (idempotent).
+                self.complete_arrival(now);
             }
             AnyMessage::RegionInfo(info) => {
                 self.events.push_back(Event::RegionLimits(region_limits(
@@ -814,6 +889,7 @@ impl Session {
             AnyMessage::TeleportFailed(failed) => {
                 if matches!(self.state, SessionState::Teleporting) {
                     self.state = SessionState::Active;
+                    self.teleport_target = None;
                     if let Some(circuit) = self.circuit.as_mut() {
                         circuit.timers.teleport = None;
                     }
@@ -823,25 +899,17 @@ impl Session {
                 });
             }
             AnyMessage::TeleportFinish(finish) => {
+                // The UDP TeleportFinish path (grids without an event queue).
+                // OpenSim normally delivers TeleportFinish over the CAPS event
+                // queue instead; see `handle_caps_event`.
                 if matches!(self.state, SessionState::Teleporting) {
                     let info = &finish.info;
                     // IPPORT is big-endian on the wire; the generated decoder
                     // reads it little-endian, so swap back to host order.
                     let port = info.sim_port.swap_bytes();
-                    let new_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(info.sim_ip)), port);
-                    let region_handle = info.region_handle;
-                    // Retarget synchronously: this message arrived on the old
-                    // circuit (still passing the source check), and afterwards
-                    // the source check accepts only the new simulator.
-                    if let Some(circuit) = self.circuit.as_mut() {
-                        circuit.retarget(new_addr, now);
-                        circuit.send_use_circuit_code(now)?;
-                        circuit.send_complete_agent_movement(now)?;
-                    }
-                    self.seed_capability =
-                        Some(String::from_utf8_lossy(&info.seed_capability).into_owned());
-                    self.handover = Some(HandoverPending { region_handle });
-                    self.state = SessionState::AwaitingHandshake;
+                    let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(info.sim_ip)), port);
+                    let seed = Some(String::from_utf8_lossy(&info.seed_capability).into_owned());
+                    self.begin_handover(dest, info.region_handle, seed, now)?;
                 }
             }
             AnyMessage::StartPingCheck(ping) => {
@@ -907,6 +975,7 @@ impl Session {
                 .is_some_and(|d| now >= d)
         {
             self.state = SessionState::Active;
+            self.teleport_target = None;
             if let Some(circuit) = self.circuit.as_mut() {
                 circuit.timers.teleport = None;
             }
@@ -1055,6 +1124,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_teleport_location_request(region_handle, position, look_at, now)?;
         circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
+        self.teleport_target = Some(region_handle);
         self.state = SessionState::Teleporting;
         Ok(())
     }
@@ -1238,6 +1308,29 @@ fn map_region_info(
         agents: data.agents,
         map_image_id: data.map_image_id,
     })
+}
+
+/// Extracts the destination UDP address and seed capability from a CAPS
+/// `TeleportFinish` event body: `{ "Info": [ { "SimIP": <binary 4 bytes>,
+/// "SimPort": <integer>, "SeedCapability": <string>, … } ] }`. The CAPS `SimPort`
+/// is a plain host-order integer port (unlike the byte-swapped generated-UDP field).
+fn teleport_finish_from_llsd(body: &Llsd) -> Option<(SocketAddr, String)> {
+    let info = body.get("Info").and_then(|info| info.index(0))?;
+    let octets: [u8; 4] = info
+        .get("SimIP")
+        .and_then(Llsd::as_binary)?
+        .try_into()
+        .ok()?;
+    let port = u16::try_from(info.get("SimPort").and_then(Llsd::as_i32)?).ok()?;
+    let seed = info
+        .get("SeedCapability")
+        .and_then(Llsd::as_str)
+        .unwrap_or("")
+        .to_owned();
+    Some((
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::from(octets)), port),
+        seed,
+    ))
 }
 
 /// Builds a [`ParcelInfo`] from a CAPS `ParcelProperties` event body.

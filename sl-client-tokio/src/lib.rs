@@ -224,7 +224,7 @@ impl Client {
                 }
                 caps_event = caps_rx.recv() => {
                     if let Some((message, body)) = caps_event {
-                        self.session.handle_caps_event(&message, &body);
+                        self.session.handle_caps_event(&message, &body, Instant::now())?;
                     }
                 }
                 command = commands.recv() => {
