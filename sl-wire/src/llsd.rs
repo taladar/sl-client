@@ -262,6 +262,28 @@ pub fn build_event_queue_request(ack: Option<i32>, done: bool) -> String {
     )
 }
 
+/// Builds the LLSD-XML body for a `FetchInventoryDescendents2` request: a
+/// `folders` array, one entry per folder to fetch, each requesting its
+/// sub-folders and items sorted by name.
+#[must_use]
+pub fn build_fetch_inventory_request(owner_id: Uuid, folder_ids: &[Uuid]) -> String {
+    let mut out = String::from("<llsd><map><key>folders</key><array>");
+    for folder in folder_ids {
+        out.push_str("<map><key>folder_id</key><uuid>");
+        out.push_str(&folder.to_string());
+        out.push_str("</uuid><key>owner_id</key><uuid>");
+        out.push_str(&owner_id.to_string());
+        out.push_str(concat!(
+            "</uuid>",
+            "<key>fetch_folders</key><boolean>1</boolean>",
+            "<key>fetch_items</key><boolean>1</boolean>",
+            "<key>sort_order</key><integer>0</integer></map>",
+        ));
+    }
+    out.push_str("</array></map></llsd>");
+    out
+}
+
 /// A single event from an [`EventQueueResponse`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventQueueEvent {

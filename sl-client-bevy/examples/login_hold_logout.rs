@@ -130,6 +130,16 @@ fn on_events(
                 );
             }
             SlSessionEvent::AvatarPicks { picks, .. } => info!("avatar has {} picks", picks.len()),
+            SlSessionEvent::InventorySkeleton(folders) => {
+                info!("inventory skeleton: {} folders", folders.len());
+            }
+            SlSessionEvent::InventoryDescendents { folders, items, .. } => {
+                info!(
+                    "folder contents: {} sub-folders, {} items",
+                    folders.len(),
+                    items.len()
+                );
+            }
             // This demo ignores the remaining profile/region/parcel/teleport events.
             SlSessionEvent::AvatarInterests(_)
             | SlSessionEvent::AvatarGroups { .. }

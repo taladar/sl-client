@@ -14,13 +14,15 @@ use sl_wire::messages::{
     AvatarPropertiesRequestAgentDataBlock, ChatFromSimulatorChatDataBlock, ChatFromViewer,
     ChatFromViewerAgentDataBlock, ChatFromViewerChatDataBlock, CompleteAgentMovement,
     CompleteAgentMovementAgentDataBlock, CompletePingCheck, CompletePingCheckPingIDBlock,
-    EnableSimulatorSimulatorInfoBlock, GenericMessage, GenericMessageAgentDataBlock,
-    GenericMessageMethodDataBlock, GenericMessageParamListBlock, ImprovedInstantMessage,
-    ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
-    ImprovedInstantMessageMessageBlockBlock, LogoutRequest, LogoutRequestAgentDataBlock,
-    MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapBlockRequest, MapBlockRequestAgentDataBlock,
-    MapBlockRequestPositionDataBlock, PacketAck, PacketAckPacketsBlock,
-    ParcelPropertiesParcelDataBlock, ParcelPropertiesRequest,
+    EnableSimulatorSimulatorInfoBlock, FetchInventoryDescendents,
+    FetchInventoryDescendentsAgentDataBlock, FetchInventoryDescendentsInventoryDataBlock,
+    GenericMessage, GenericMessageAgentDataBlock, GenericMessageMethodDataBlock,
+    GenericMessageParamListBlock, ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
+    ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
+    InventoryDescendentsFolderDataBlock, InventoryDescendentsItemDataBlock, LogoutRequest,
+    LogoutRequestAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapBlockRequest,
+    MapBlockRequestAgentDataBlock, MapBlockRequestPositionDataBlock, PacketAck,
+    PacketAckPacketsBlock, ParcelPropertiesParcelDataBlock, ParcelPropertiesRequest,
     ParcelPropertiesRequestAgentDataBlock, ParcelPropertiesRequestParcelDataBlock,
     RegionHandshakeRegionInfo3Block, RegionHandshakeRegionInfoBlock, RegionHandshakeReply,
     RegionHandshakeReplyAgentDataBlock, RegionHandshakeReplyRegionInfoBlock,
@@ -30,17 +32,18 @@ use sl_wire::messages::{
     UseCircuitCodeCircuitCodeBlock,
 };
 use sl_wire::{
-    AnyMessage, ControlFlags, Llsd, MessageId, PacketFlags, Reader, WireError, Writer,
-    build_login_request, encode_datagram, parse_datagram, zero_decode,
+    AnyMessage, ControlFlags, Llsd, MessageId, PacketFlags, Reader, SkeletonFolder, WireError,
+    Writer, build_login_request, encode_datagram, parse_datagram, zero_decode,
 };
 use uuid::Uuid;
 
 use crate::error::Error;
 use crate::types::{
     AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible, ChatMessage,
-    ChatSourceType, ChatType, DisconnectReason, Event, ImDialog, InstantMessage, LoginHttpRequest,
-    LoginParams, MapRegionInfo, Maturity, NeighborInfo, ParcelInfo, ParcelOverlayInfo, ProductType,
-    RegionIdentity, RegionLimits, Reliability, Transmit, grid_to_handle, handle_to_grid,
+    ChatSourceType, ChatType, DisconnectReason, Event, ImDialog, InstantMessage, InventoryFolder,
+    InventoryItem, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, NeighborInfo,
+    ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability,
+    Transmit, grid_to_handle, handle_to_grid,
 };
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
@@ -73,6 +76,17 @@ const IDENTITY_ROTATION: Rotation = Rotation {
     z: 0.0,
     s: 1.0,
 };
+
+/// The HTTP capability for fetching inventory folder contents (a POST of an LLSD
+/// folder list). Used as the seed capability name, the request cap, and the
+/// message tag a driver feeds back via [`Session::handle_caps_event`].
+pub const CAP_FETCH_INVENTORY: &str = "FetchInventoryDescendents2";
+
+/// The capability names the client requests from the region seed. A driver POSTs
+/// these to the seed URL to obtain the capability map, then uses `EventQueueGet`
+/// for the event-queue long-poll and [`CAP_FETCH_INVENTORY`] for inventory
+/// fetches.
+pub const REQUESTED_CAPABILITIES: &[&str] = &["EventQueueGet", CAP_FETCH_INVENTORY];
 
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
 fn deadline(now: Instant, duration: Duration) -> Instant {
@@ -502,6 +516,30 @@ impl Circuit {
         self.send(&message, Reliability::Reliable, now)
     }
 
+    /// Queues a `FetchInventoryDescendents` reliably for the folder `folder_id`
+    /// (sorted by name), requesting its sub-folders and items.
+    fn send_fetch_inventory_descendents(
+        &mut self,
+        folder_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::FetchInventoryDescendents(FetchInventoryDescendents {
+            agent_data: FetchInventoryDescendentsAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            inventory_data: FetchInventoryDescendentsInventoryDataBlock {
+                folder_id,
+                // Own inventory: the owner is the agent itself.
+                owner_id: self.agent_id,
+                sort_order: 0, // 0 = by name
+                fetch_folders: true,
+                fetch_items: true,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
     /// Queues a `TeleportLocationRequest` reliably.
     fn send_teleport_location_request(
         &mut self,
@@ -737,6 +775,9 @@ pub struct Session {
     /// The current region's capability-seed URL (from login or a teleport), for
     /// the driver to fetch the CAPS map and event queue.
     seed_capability: Option<String>,
+    /// The agent's inventory root ("My Inventory") folder id, from the login
+    /// response.
+    inventory_root: Option<Uuid>,
     /// Pending high-level events for the driver.
     events: VecDeque<Event>,
 }
@@ -757,6 +798,7 @@ impl Session {
             handover: None,
             teleport_target: None,
             seed_capability: None,
+            inventory_root: None,
             events: VecDeque::new(),
         }
     }
@@ -780,10 +822,11 @@ impl Session {
         self.seed_capability.as_deref()
     }
 
-    /// Feeds a parsed CAPS `EventQueue` event into the session, surfacing any
-    /// recognised payload. Handles `ParcelProperties` (delivered over the event
-    /// queue, not UDP) and `TeleportFinish` (the destination address for a
-    /// cross-region teleport — OpenSim sends this over the event queue, not UDP).
+    /// Feeds a parsed CAPS response into the session, surfacing any recognised
+    /// payload. Handles `ParcelProperties` and `TeleportFinish` (delivered over
+    /// the event queue, not UDP) and [`CAP_FETCH_INVENTORY`] (the LLSD response to
+    /// a `FetchInventoryDescendents2` POST the driver performed on the client's
+    /// behalf), surfaced as [`Event::InventoryDescendents`].
     ///
     /// # Errors
     ///
@@ -806,6 +849,11 @@ impl Session {
                 if let Some((dest, seed)) = teleport_finish_from_llsd(body) {
                     let region_handle = self.teleport_target.unwrap_or(0);
                     self.begin_handover(dest, region_handle, Some(seed), now)?;
+                }
+            }
+            CAP_FETCH_INVENTORY => {
+                for event in inventory_descendents_from_llsd(body) {
+                    self.events.push_back(event);
                 }
             }
             _ => {}
@@ -928,9 +976,18 @@ impl Session {
                 circuit.send_complete_agent_movement(now)?;
                 self.circuit = Some(circuit);
                 self.seed_capability = Some(success.seed_capability.clone());
+                self.inventory_root = success.inventory_root;
                 self.state = SessionState::AwaitingHandshake;
                 self.events
                     .push_back(Event::CircuitEstablished { sim: sim_addr });
+                if !success.inventory_skeleton.is_empty() {
+                    let folders = success
+                        .inventory_skeleton
+                        .iter()
+                        .map(skeleton_folder)
+                        .collect();
+                    self.events.push_back(Event::InventorySkeleton(folders));
+                }
             }
         }
         Ok(())
@@ -1129,6 +1186,15 @@ impl Session {
                 self.events.push_back(Event::AvatarNotes {
                     target_id: reply.data.target_id,
                     notes: trimmed_string(&reply.data.notes),
+                });
+            }
+            AnyMessage::InventoryDescendents(reply) => {
+                self.events.push_back(Event::InventoryDescendents {
+                    folder_id: reply.agent_data.folder_id,
+                    version: reply.agent_data.version,
+                    descendents: reply.agent_data.descendents,
+                    folders: reply.folder_data.iter().map(inventory_folder).collect(),
+                    items: reply.item_data.iter().map(inventory_item).collect(),
                 });
             }
             AnyMessage::EnableSimulator(sim) => {
@@ -1569,6 +1635,37 @@ impl Session {
         Ok(())
     }
 
+    /// The agent's own id, once login has established the circuit. Useful as the
+    /// `owner_id` for inventory fetches and for recognising the client's own
+    /// messages.
+    #[must_use]
+    pub fn agent_id(&self) -> Option<Uuid> {
+        self.circuit.as_ref().map(|circuit| circuit.agent_id)
+    }
+
+    /// The agent's inventory root ("My Inventory") folder id, from the login
+    /// response, or `None` if the grid did not provide it. Use it as the starting
+    /// point for [`Session::request_folder_contents`].
+    #[must_use]
+    pub const fn inventory_root(&self) -> Option<Uuid> {
+        self.inventory_root
+    }
+
+    /// Requests the contents (sub-folders and items) of the inventory folder
+    /// `folder_id` via `FetchInventoryDescendents`. The reply arrives as
+    /// [`Event::InventoryDescendents`]. The folder structure as a whole is also
+    /// available upfront from [`Event::InventorySkeleton`] (login).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_folder_contents(&mut self, folder_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_fetch_inventory_descendents(folder_id, now)?;
+        Ok(())
+    }
+
     /// Requests the region's info (agent and object limits) via
     /// `RequestRegionInfo`. The reply arrives as an [`Event::RegionLimits`].
     ///
@@ -1894,6 +1991,55 @@ fn avatar_group(data: &AvatarGroupsReplyGroupDataBlock) -> AvatarGroupMembership
     }
 }
 
+/// Converts a login [`SkeletonFolder`] into an [`InventoryFolder`].
+fn skeleton_folder(folder: &SkeletonFolder) -> InventoryFolder {
+    InventoryFolder {
+        folder_id: folder.folder_id,
+        parent_id: folder.parent_id,
+        name: folder.name.clone(),
+        folder_type: folder.type_default,
+        version: folder.version,
+    }
+}
+
+/// Builds an [`InventoryFolder`] from an `InventoryDescendents` folder entry.
+/// Such entries carry no per-folder version, so it is reported as `0`.
+fn inventory_folder(data: &InventoryDescendentsFolderDataBlock) -> InventoryFolder {
+    InventoryFolder {
+        folder_id: data.folder_id,
+        parent_id: data.parent_id,
+        name: trimmed_string(&data.name),
+        folder_type: data.r#type,
+        version: 0,
+    }
+}
+
+/// Builds an [`InventoryItem`] from an `InventoryDescendents` item entry.
+fn inventory_item(data: &InventoryDescendentsItemDataBlock) -> InventoryItem {
+    InventoryItem {
+        item_id: data.item_id,
+        folder_id: data.folder_id,
+        name: trimmed_string(&data.name),
+        description: trimmed_string(&data.description),
+        asset_id: data.asset_id,
+        item_type: data.r#type,
+        inv_type: data.inv_type,
+        flags: data.flags,
+        sale_type: data.sale_type,
+        sale_price: data.sale_price,
+        creation_date: data.creation_date,
+        owner_id: data.owner_id,
+        creator_id: data.creator_id,
+        group_id: data.group_id,
+        group_owned: data.group_owned,
+        base_mask: data.base_mask,
+        owner_mask: data.owner_mask,
+        group_mask: data.group_mask,
+        everyone_mask: data.everyone_mask,
+        next_owner_mask: data.next_owner_mask,
+    }
+}
+
 /// Builds a [`NeighborInfo`] from an `EnableSimulator` simulator-info block.
 fn neighbor_info(info: &EnableSimulatorSimulatorInfoBlock) -> NeighborInfo {
     // IPPORT is big-endian (network order) on the wire, but the generated field
@@ -2015,4 +2161,96 @@ fn vec3_from_llsd(value: Option<&Llsd>) -> (f32, f32, f32) {
             .unwrap_or(0.0)
     };
     (component(0), component(1), component(2))
+}
+
+/// Reads a UUID from an LLSD map member, defaulting to nil.
+fn uuid_member(map: &Llsd, key: &str) -> Uuid {
+    map.get(key)
+        .and_then(Llsd::as_uuid)
+        .unwrap_or_else(Uuid::nil)
+}
+
+/// Reads an `i32` from an LLSD map member, defaulting to `0`.
+fn i32_member(map: &Llsd, key: &str) -> i32 {
+    map.get(key).and_then(Llsd::as_i32).unwrap_or(0)
+}
+
+/// Reads a string from an LLSD map member, defaulting to empty.
+fn string_member(map: &Llsd, key: &str) -> String {
+    map.get(key).and_then(Llsd::as_str).unwrap_or("").to_owned()
+}
+
+/// Parses a `FetchInventoryDescendents2` CAPS response body into one
+/// [`Event::InventoryDescendents`] per returned folder. The HTTP response shape
+/// differs from the UDP `InventoryDescendents`, but yields the same value types.
+fn inventory_descendents_from_llsd(body: &Llsd) -> Vec<Event> {
+    let Some(folders) = body.get("folders").and_then(Llsd::as_array) else {
+        return Vec::new();
+    };
+    folders
+        .iter()
+        .map(|folder| {
+            let categories = folder
+                .get("categories")
+                .and_then(Llsd::as_array)
+                .unwrap_or(&[]);
+            let items = folder.get("items").and_then(Llsd::as_array).unwrap_or(&[]);
+            Event::InventoryDescendents {
+                folder_id: uuid_member(folder, "folder_id"),
+                version: i32_member(folder, "version"),
+                descendents: i32_member(folder, "descendents"),
+                folders: categories.iter().map(inventory_folder_from_llsd).collect(),
+                items: items.iter().map(inventory_item_from_llsd).collect(),
+            }
+        })
+        .collect()
+}
+
+/// Builds an [`InventoryFolder`] from a CAPS `categories` entry.
+fn inventory_folder_from_llsd(category: &Llsd) -> InventoryFolder {
+    InventoryFolder {
+        folder_id: uuid_member(category, "category_id"),
+        parent_id: uuid_member(category, "parent_id"),
+        name: string_member(category, "name"),
+        folder_type: i8::try_from(i32_member(category, "type_default")).unwrap_or(-1),
+        version: i32_member(category, "version"),
+    }
+}
+
+/// Builds an [`InventoryItem`] from a CAPS `items` entry (with nested
+/// `permissions` and `sale_info` maps).
+fn inventory_item_from_llsd(item: &Llsd) -> InventoryItem {
+    let permissions = item.get("permissions");
+    let sale_info = item.get("sale_info");
+    let perm = |key: &str| {
+        permissions
+            .map_or(0, |p| i32_member(p, key))
+            .cast_unsigned()
+    };
+    let perm_uuid = |key: &str| permissions.map_or_else(Uuid::nil, |p| uuid_member(p, key));
+    InventoryItem {
+        item_id: uuid_member(item, "item_id"),
+        folder_id: uuid_member(item, "parent_id"),
+        name: string_member(item, "name"),
+        description: string_member(item, "desc"),
+        asset_id: uuid_member(item, "asset_id"),
+        item_type: i8::try_from(i32_member(item, "type")).unwrap_or(-1),
+        inv_type: i8::try_from(i32_member(item, "inv_type")).unwrap_or(-1),
+        flags: i32_member(item, "flags").cast_unsigned(),
+        sale_type: sale_info.map_or(0, |s| u8::try_from(i32_member(s, "sale_type")).unwrap_or(0)),
+        sale_price: sale_info.map_or(0, |s| i32_member(s, "sale_price")),
+        creation_date: i32_member(item, "created_at"),
+        owner_id: perm_uuid("owner_id"),
+        creator_id: perm_uuid("creator_id"),
+        group_id: perm_uuid("group_id"),
+        group_owned: permissions
+            .and_then(|p| p.get("is_owner_group"))
+            .and_then(Llsd::as_bool)
+            .unwrap_or(false),
+        base_mask: perm("base_mask"),
+        owner_mask: perm("owner_mask"),
+        group_mask: perm("group_mask"),
+        everyone_mask: perm("everyone_mask"),
+        next_owner_mask: perm("next_owner_mask"),
+    }
 }

@@ -585,6 +585,8 @@ impl Survey {
             | Event::AvatarGroups { .. }
             | Event::AvatarPicks { .. }
             | Event::AvatarNotes { .. }
+            | Event::InventorySkeleton(_)
+            | Event::InventoryDescendents { .. }
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal

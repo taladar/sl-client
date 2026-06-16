@@ -138,6 +138,8 @@ fn on_events(
             | SlSessionEvent::AvatarGroups { .. }
             | SlSessionEvent::AvatarPicks { .. }
             | SlSessionEvent::AvatarNotes { .. }
+            | SlSessionEvent::InventorySkeleton(_)
+            | SlSessionEvent::InventoryDescendents { .. }
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal => {}

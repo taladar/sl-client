@@ -80,6 +80,62 @@ mod test {
     }
 
     #[test]
+    fn parses_inventory_root_and_skeleton() -> Result<(), Box<dyn std::error::Error>> {
+        // A minimal success response carrying inventory-root (array of one struct)
+        // and inventory-skeleton (array of folder structs).
+        let members = concat!(
+            "<member><name>login</name><value><string>true</string></value></member>",
+            "<member><name>agent_id</name><value><string>11111111-1111-1111-1111-111111111111</string></value></member>",
+            "<member><name>session_id</name><value><string>22222222-2222-2222-2222-222222222222</string></value></member>",
+            "<member><name>secure_session_id</name><value><string>33333333-3333-3333-3333-333333333333</string></value></member>",
+            "<member><name>circuit_code</name><value><i4>1</i4></value></member>",
+            "<member><name>sim_ip</name><value><string>127.0.0.1</string></value></member>",
+            "<member><name>sim_port</name><value><i4>9000</i4></value></member>",
+            "<member><name>seed_capability</name><value><string>http://x/seed</string></value></member>",
+            "<member><name>inventory-root</name><value><array><data>",
+            "<value><struct><member><name>folder_id</name><value><string>aaaaaaaa-0000-0000-0000-000000000000</string></value></member></struct></value>",
+            "</data></array></value></member>",
+            "<member><name>inventory-skeleton</name><value><array><data>",
+            "<value><struct>",
+            "<member><name>folder_id</name><value><string>aaaaaaaa-0000-0000-0000-000000000000</string></value></member>",
+            "<member><name>parent_id</name><value><string>00000000-0000-0000-0000-000000000000</string></value></member>",
+            "<member><name>name</name><value><string>My Inventory</string></value></member>",
+            "<member><name>type_default</name><value><i4>8</i4></value></member>",
+            "<member><name>version</name><value><i4>5</i4></value></member>",
+            "</struct></value>",
+            "<value><struct>",
+            "<member><name>folder_id</name><value><string>bbbbbbbb-0000-0000-0000-000000000000</string></value></member>",
+            "<member><name>parent_id</name><value><string>aaaaaaaa-0000-0000-0000-000000000000</string></value></member>",
+            "<member><name>name</name><value><string>Objects</string></value></member>",
+            "<member><name>type_default</name><value><i4>6</i4></value></member>",
+            "<member><name>version</name><value><i4>2</i4></value></member>",
+            "</struct></value>",
+            "</data></array></value></member>",
+        );
+        let xml = response(members);
+
+        let LoginResponse::Success(success) = parse_login_response(&xml)? else {
+            return Err("expected a successful login".into());
+        };
+        assert_eq!(
+            success.inventory_root,
+            Some("aaaaaaaa-0000-0000-0000-000000000000".parse::<uuid::Uuid>()?)
+        );
+        assert_eq!(success.inventory_skeleton.len(), 2);
+        let root = success.inventory_skeleton.first().ok_or("root folder")?;
+        assert_eq!(root.name, "My Inventory");
+        assert_eq!(root.type_default, 8);
+        assert_eq!(root.version, 5);
+        let objects = success.inventory_skeleton.get(1).ok_or("objects folder")?;
+        assert_eq!(objects.name, "Objects");
+        assert_eq!(
+            objects.parent_id,
+            "aaaaaaaa-0000-0000-0000-000000000000".parse::<uuid::Uuid>()?
+        );
+        Ok(())
+    }
+
+    #[test]
     fn parses_a_failure_response() -> Result<(), Box<dyn std::error::Error>> {
         let xml = r#"<?xml version="1.0"?>
 <methodResponse><params><param><value><struct>

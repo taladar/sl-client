@@ -9,8 +9,11 @@ use thiserror::Error;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
+use std::collections::HashMap;
+
 use sl_proto::{
-    Llsd, Session, build_event_queue_request, build_seed_request, parse_event_queue_response,
+    CAP_FETCH_INVENTORY, Llsd, REQUESTED_CAPABILITIES, Session, build_event_queue_request,
+    build_fetch_inventory_request, build_seed_request, parse_event_queue_response, parse_llsd_xml,
     parse_login_response, parse_seed_response,
 };
 
@@ -19,10 +22,10 @@ use sl_proto::{
 pub use sl_proto::{
     AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
     ChatMessage, ChatSourceType, ChatType, ControlFlags, DisconnectReason, Event, ImDialog,
-    InstantMessage, LoginParams, LoginRequest, LoginResponse, MapRegionInfo, Maturity,
-    MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
-    RegionFlags, RegionIdentity, RegionLimits, Reliability, Rotation, Transmit, Uuid, Vector,
-    grid_to_handle, handle_to_global, handle_to_grid, sim_access,
+    InstantMessage, InventoryFolder, InventoryItem, LoginParams, LoginRequest, LoginResponse,
+    MapRegionInfo, Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo,
+    ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity, RegionLimits, Reliability,
+    Rotation, Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -142,6 +145,15 @@ pub enum Command {
     /// Request the agent's private notes about an avatar. The reply arrives as
     /// [`Event::AvatarNotes`].
     RequestAvatarNotes(Uuid),
+    /// Request the contents (sub-folders and items) of an inventory folder over
+    /// **UDP** (`FetchInventoryDescendents`). The reply arrives as
+    /// [`Event::InventoryDescendents`]. The full folder skeleton arrives once at
+    /// login as [`Event::InventorySkeleton`].
+    RequestFolderContents(Uuid),
+    /// Fetch the contents of one or more inventory folders over the **HTTP CAPS**
+    /// path (`FetchInventoryDescendents2`) — the modern path used on Second Life.
+    /// Each folder's contents arrive as an [`Event::InventoryDescendents`].
+    FetchInventoryFolders(Vec<Uuid>),
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
         /// The destination region handle.
@@ -248,13 +260,16 @@ impl Client {
         events: mpsc::Sender<Event>,
         mut commands: mpsc::Receiver<Command>,
     ) -> Result<(), Error> {
-        // The CAPS event queue (ParcelProperties and other event-queue payloads)
-        // is polled over HTTP on a side task; decoded events arrive on `caps_rx`.
+        // The region's capability map is fetched once from the seed and cached
+        // here: the event-queue long-poll runs off `EventQueueGet`, and inventory
+        // fetches POST to `FetchInventoryDescendents2`. Both deliver their decoded
+        // payloads back over `caps_rx` to `handle_caps_event`.
         let http = ReqwestClient::builder()
             .timeout(Duration::from_secs(60))
             .build()?;
         let (caps_tx, mut caps_rx) = mpsc::channel::<(String, Llsd)>(64);
-        let mut caps_task = self.start_caps_poller(&http, &caps_tx);
+        let mut caps = fetch_capabilities(self.session.seed_capability(), &http).await;
+        let mut caps_task = spawn_event_queue(&caps, &http, &caps_tx);
 
         loop {
             while let Some(transmit) = self.session.poll_transmit() {
@@ -265,13 +280,14 @@ impl Client {
 
             while let Some(event) = self.session.poll_event() {
                 let terminal = matches!(event, Event::Disconnected(_) | Event::LoggedOut);
-                // A region change brings a new seed capability, so restart the
-                // event-queue poller against the new region.
+                // A region change brings a new seed capability, so re-fetch the
+                // capability map and restart the event-queue poller.
                 let region_changed = matches!(event, Event::RegionChanged { .. });
                 events.send(event).await.ok();
                 if region_changed {
                     abort_task(&mut caps_task);
-                    caps_task = self.start_caps_poller(&http, &caps_tx);
+                    caps = fetch_capabilities(self.session.seed_capability(), &http).await;
+                    caps_task = spawn_event_queue(&caps, &http, &caps_tx);
                 }
                 if terminal {
                     abort_task(&mut caps_task);
@@ -342,6 +358,18 @@ impl Client {
                         Some(Command::RequestAvatarNotes(target)) => {
                             self.session.request_avatar_notes(target, Instant::now())?;
                         }
+                        Some(Command::RequestFolderContents(folder_id)) => {
+                            self.session.request_folder_contents(folder_id, Instant::now())?;
+                        }
+                        Some(Command::FetchInventoryFolders(folder_ids)) => {
+                            if let (Some(url), Some(owner)) =
+                                (caps.get(CAP_FETCH_INVENTORY).cloned(), self.session.agent_id())
+                            {
+                                tokio::spawn(fetch_inventory(
+                                    url, owner, folder_ids, http.clone(), caps_tx.clone(),
+                                ));
+                            }
+                        }
                         Some(Command::Teleport { region_handle, position, look_at }) => {
                             self.session.teleport_to(region_handle, position, look_at, Instant::now())?;
                         }
@@ -370,21 +398,6 @@ impl Client {
             }
         }
     }
-
-    /// Starts the CAPS event-queue poll task for the session's current seed
-    /// capability, returning its handle, or `None` if no seed is known yet.
-    fn start_caps_poller(
-        &self,
-        http: &ReqwestClient,
-        caps_tx: &mpsc::Sender<(String, Llsd)>,
-    ) -> Option<tokio::task::JoinHandle<()>> {
-        let seed = self.session.seed_capability()?.to_owned();
-        Some(tokio::spawn(run_event_queue(
-            seed,
-            http.clone(),
-            caps_tx.clone(),
-        )))
-    }
 }
 
 /// Aborts a running task handle, if present.
@@ -394,19 +407,58 @@ fn abort_task(task: &mut Option<tokio::task::JoinHandle<()>>) {
     }
 }
 
-/// Fetches the capability map from `seed_url`, then long-polls its
-/// `EventQueueGet` capability, forwarding each decoded event to `caps_tx` until
-/// a request fails fatally or the receiver is dropped (e.g. on region change).
-async fn run_event_queue(
-    seed_url: String,
+/// Fetches the region's capability map by POSTing the seed with the requested
+/// capability names, returning the cap-name → URL map (empty on any failure or
+/// if no seed is known yet).
+async fn fetch_capabilities(seed: Option<&str>, http: &ReqwestClient) -> HashMap<String, String> {
+    let Some(seed_url) = seed else {
+        return HashMap::new();
+    };
+    let result = http
+        .post(seed_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(build_seed_request(REQUESTED_CAPABILITIES))
+        .send()
+        .await;
+    let Ok(response) = result else {
+        return HashMap::new();
+    };
+    let Ok(text) = response.text().await else {
+        return HashMap::new();
+    };
+    parse_seed_response(&text).unwrap_or_default()
+}
+
+/// Spawns the event-queue long-poll task for the `EventQueueGet` capability in
+/// `caps`, or `None` if the region did not provide one.
+fn spawn_event_queue(
+    caps: &HashMap<String, String>,
+    http: &ReqwestClient,
+    caps_tx: &mpsc::Sender<(String, Llsd)>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    let event_queue_url = caps.get("EventQueueGet")?.clone();
+    Some(tokio::spawn(run_event_queue(
+        event_queue_url,
+        http.clone(),
+        caps_tx.clone(),
+    )))
+}
+
+/// POSTs a `FetchInventoryDescendents2` request for `folder_ids` and forwards the
+/// LLSD response to `caps_tx` tagged [`CAP_FETCH_INVENTORY`], for the session to
+/// decode into [`Event::InventoryDescendents`].
+async fn fetch_inventory(
+    cap_url: String,
+    owner_id: Uuid,
+    folder_ids: Vec<Uuid>,
     http: ReqwestClient,
     caps_tx: mpsc::Sender<(String, Llsd)>,
 ) {
-    let seed_body = build_seed_request(&["EventQueueGet"]);
+    let body = build_fetch_inventory_request(owner_id, &folder_ids);
     let Ok(response) = http
-        .post(&seed_url)
+        .post(&cap_url)
         .header("Content-Type", "application/llsd+xml")
-        .body(seed_body)
+        .body(body)
         .send()
         .await
     else {
@@ -415,13 +467,22 @@ async fn run_event_queue(
     let Ok(text) = response.text().await else {
         return;
     };
-    let Ok(capabilities) = parse_seed_response(&text) else {
-        return;
-    };
-    let Some(event_queue_url) = capabilities.get("EventQueueGet").cloned() else {
-        return;
-    };
+    if let Ok(llsd) = parse_llsd_xml(&text) {
+        caps_tx
+            .send((CAP_FETCH_INVENTORY.to_owned(), llsd))
+            .await
+            .ok();
+    }
+}
 
+/// Long-polls the `EventQueueGet` capability at `event_queue_url`, forwarding each
+/// decoded event to `caps_tx` until a request fails fatally or the receiver is
+/// dropped (e.g. on region change).
+async fn run_event_queue(
+    event_queue_url: String,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
     let mut ack: Option<i32> = None;
     loop {
         let request_body = build_event_queue_request(ack, false);

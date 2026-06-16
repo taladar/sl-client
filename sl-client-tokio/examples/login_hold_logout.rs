@@ -147,6 +147,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
             Event::AvatarPicks { picks, .. } => info!("avatar has {} picks", picks.len()),
+            Event::InventorySkeleton(folders) => {
+                info!("inventory skeleton: {} folders", folders.len());
+            }
+            Event::InventoryDescendents { folders, items, .. } => {
+                info!(
+                    "folder contents: {} sub-folders, {} items",
+                    folders.len(),
+                    items.len()
+                );
+            }
             // This demo ignores the remaining profile/region/parcel/teleport events.
             Event::AvatarInterests(_)
             | Event::AvatarGroups { .. }
