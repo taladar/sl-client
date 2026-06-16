@@ -154,6 +154,18 @@ pub enum Event {
         /// `true` when typing started, `false` when it stopped.
         typing: bool,
     },
+    /// The simulator answered a sit request (`AvatarSitResponse`) after a
+    /// [`Session::sit_on`](crate::Session::sit_on); the session has sent the
+    /// completing `AgentSit`.
+    SitResult {
+        /// The object sat upon.
+        sit_object: Uuid,
+        /// Whether the simulator wants the viewer to autopilot (walk) to the seat
+        /// first (the target was out of immediate sit range).
+        autopilot: bool,
+        /// The seat position relative to the object, in metres.
+        sit_position: (f32, f32, f32),
+    },
     /// The session logged out cleanly (a `LogoutReply` was received).
     LoggedOut,
     /// The session disconnected for the given reason.

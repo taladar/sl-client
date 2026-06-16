@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+mod control_flags;
 mod endian;
 mod error;
 mod field;
@@ -13,6 +14,7 @@ pub mod messages;
 mod parcel_flags;
 mod zerocode;
 
+pub use control_flags::ControlFlags;
 pub use error::WireError;
 pub use field::{Reader, Writer};
 pub use header::{PacketFlags, ParsedDatagram, encode_datagram, parse_datagram};

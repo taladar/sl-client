@@ -17,11 +17,11 @@ use sl_proto::{
 // Re-export the core types a consumer needs so they can depend on this crate
 // alone.
 pub use sl_proto::{
-    AnyMessage, ChatAudible, ChatMessage, ChatSourceType, ChatType, DisconnectReason, Event,
-    ImDialog, InstantMessage, LoginParams, LoginRequest, LoginResponse, MapRegionInfo, Maturity,
-    MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
-    RegionFlags, RegionIdentity, RegionLimits, Reliability, Transmit, Uuid, Vector, grid_to_handle,
-    handle_to_global, handle_to_grid, sim_access,
+    AnyMessage, ChatAudible, ChatMessage, ChatSourceType, ChatType, ControlFlags, DisconnectReason,
+    Event, ImDialog, InstantMessage, LoginParams, LoginRequest, LoginResponse, MapRegionInfo,
+    Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
+    RegionFlags, RegionIdentity, RegionLimits, Reliability, Rotation, Transmit, Uuid, Vector,
+    grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -100,6 +100,38 @@ pub enum Command {
         to_agent_id: Uuid,
         /// Whether typing started (`true`) or stopped (`false`).
         typing: bool,
+    },
+    /// Set the agent control flags (movement); the simulator moves the agent
+    /// accordingly. Pass [`ControlFlags::empty`] to stop.
+    SetControls(ControlFlags),
+    /// Set the agent's body and head rotation (facing/steering).
+    SetRotation {
+        /// The body rotation.
+        body: Rotation,
+        /// The head rotation.
+        head: Rotation,
+    },
+    /// Stand the agent up (from sitting).
+    Stand,
+    /// Sit the agent on the ground where it stands.
+    SitOnGround,
+    /// Sit the agent on the object `target` at the region-local `offset`. The
+    /// result arrives as an [`Event::SitResult`].
+    Sit {
+        /// The object to sit on.
+        target: Uuid,
+        /// The seat offset, in region-local metres.
+        offset: Vector,
+    },
+    /// Walk the agent to the global coordinates `(global_x, global_y, z)` using
+    /// the simulator's server-side autopilot.
+    Autopilot {
+        /// The global X coordinate, in metres.
+        global_x: f64,
+        /// The global Y coordinate, in metres.
+        global_y: f64,
+        /// The region-local height, in metres.
+        z: f64,
     },
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
@@ -273,6 +305,24 @@ impl Client {
                         }
                         Some(Command::ImTyping { to_agent_id, typing }) => {
                             self.session.send_im_typing(to_agent_id, typing, Instant::now())?;
+                        }
+                        Some(Command::SetControls(controls)) => {
+                            self.session.set_controls(controls, Instant::now())?;
+                        }
+                        Some(Command::SetRotation { body, head }) => {
+                            self.session.set_rotation(body, head, Instant::now())?;
+                        }
+                        Some(Command::Stand) => {
+                            self.session.stand(Instant::now())?;
+                        }
+                        Some(Command::SitOnGround) => {
+                            self.session.sit_on_ground(Instant::now())?;
+                        }
+                        Some(Command::Sit { target, offset }) => {
+                            self.session.sit_on(target, offset, Instant::now())?;
+                        }
+                        Some(Command::Autopilot { global_x, global_y, z }) => {
+                            self.session.autopilot_to(global_x, global_y, z, Instant::now())?;
                         }
                         Some(Command::Teleport { region_handle, position, look_at }) => {
                             self.session.teleport_to(region_handle, position, look_at, Instant::now())?;
