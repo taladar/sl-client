@@ -1,0 +1,242 @@
+# sl-client roadmap — missing Second Life protocol features
+
+This is a gap analysis of what a *full* Second Life / OpenSim client needs
+versus what `sl-client` implements today. Today the workspace does login,
+circuit setup, region handshake, keepalive, teleport, logout, and read-only
+region/parcel/map *survey* data. Everything below is unimplemented at the
+handler level.
+
+**Ordering — incremental standalone value.** Items are ordered so that each one
+delivers a client capability *usable on its own* given only that feature plus
+everything above it. A feature that is only useful in combination with several
+others (notably the world-rendering set: object scene graph, terrain, textures,
+avatar appearance, PBR) is ranked by when that *combination* becomes viable, not
+by its raw importance. So narrow but self-sufficient clients come first — a
+text/chat client, a profile checker, an inventory/product-update bot, an IM or
+group bot — and the world-rendering cluster, where value only compounds once its
+members coexist, comes later.
+
+All 483 LLUDP messages already exist as generated codec types
+(`sl-wire/build.rs`), so most estimates cover
+**session state + handler logic + wiring through both runtimes**, not wire
+encoding. CAPS-delivered features additionally need new HTTP capability calls
+(only `EventQueueGet` is used today).
+
+**Story points** (relative effort, single number for core + both runtimes): 1
+trivial · 2 small · 3 small-medium · 5 medium · 8 large · 13 very large · 21
+epic. **Test** says whether the local `opensim.service` is enough.
+
+| # | Feature | Pts | Standalone client it unlocks | Test |
+|---|---------|-----|------------------------------|------|
+| 1 | Local chat | 3 | Text-only chat client / chat bot | Local OpenSim |
+| 2 | Instant messaging | 5 | IM bot, notifier, offer-handler | Local OpenSim (2 accounts) |
+| 3 | Agent movement & control | 5 | Walking/flying/follow bot, autopilot | Local OpenSim |
+| 4 | Avatar profiles | 3 | Profile / picks checker | Local OpenSim |
+| 5 | Inventory (AIS3) | 8 | Inventory manager, product-update bot | Local OpenSim |
+| 6 | Friends & presence | 5 | Presence/online monitor | Local OpenSim (2 accounts) |
+| 7 | Group support | 8 | Group chat bot, roster tool | Local OpenSim (Groups module) |
+| 8 | Script dialogs & permissions | 3 | Vendor/scripted-object interaction bot | Local OpenSim |
+| 9 | Mute list | 2 | Moderation helper | Local OpenSim |
+| 10 | Seamless teleport (child circuits) | 8 | Roaming bot that keeps its session | Local OpenSim (multi-region) |
+| 11 | Money / economy | 5 | Balance monitor, tip/vendor bot | **Money module or SL grid** |
+| 12 | Full world map | 5 | Live map: agents, POIs, land-for-sale | Local OpenSim |
+| 13 | Parcel management | 5 | Land-management tool | Local OpenSim |
+| 14 | Estate/region management | 5 | Region admin/restart/ban bot | Local OpenSim (owner account) |
+| 15 | Bandwidth throttle (`AgentThrottle`) | 2 | *(enabler for 16–25)* | Local OpenSim |
+| 16 | Object/scene graph | 13 | Scene auditor, proximity bot | Local OpenSim |
+| 17 | Object interaction & editing | 8 | Builder/rezzer, object mover | Local OpenSim |
+| 18 | Terrain heightmaps (`LayerData`) | 8 | Ground geometry for a renderer | Local OpenSim |
+| 19 | Asset & texture pipeline | 13 | Asset fetch + textured rendering | Local OpenSim (upload content) |
+| 20 | Avatar appearance & wearables | 13 | Render avatars; outfit control | Local OpenSim |
+| 21 | Animations | 5 | Dance/gesture bot; animate scene | Local OpenSim |
+| 22 | Sound | 3 | Spatial audio playback | Local OpenSim |
+| 23 | Asset/texture/mesh upload | 5 | Content uploader | Local OpenSim |
+| 24 | Media-on-a-prim / parcel audio | 5 | Media surfaces, streaming audio | Local OpenSim (external stream) |
+| 25 | PBR materials / GLTF | 8 | Modern materials in a renderer | **Recent SL grid; OpenSim varies** |
+| 26 | Voice chat | 13 | Voice-enabled client | **SL Vivox/WebRTC or FreeSWITCH** |
+| 27 | Experiences | 5 | Experience-permission client | **SL grid only** |
+
+## Tier A — self-sufficient interactive clients (text & bot viewers)
+
+Each works as a complete, useful client on top of today's connection layer.
+
+**1. Local chat — `ChatFromViewer` (send), `ChatFromSimulator` (receive) · 3
+pts.** Smallest step to a genuinely interactive client: a text-only viewer or
+chat bot. Add `say`/`shout`/`whisper` commands and a `ChatReceived` event
+(speaker, type, source position, range). *Test: local OpenSim.*
+
+**2. Instant messaging — `ImprovedInstantMessage` · 5 pts.** 1:1 IM send/receive
+and typing, plus the many dialog sub-types multiplexed over this one message
+(inventory offers, teleport offers/lures, group invites, friendship offers,
+object-given IMs). Offline IMs arrive via CAPS. Enables an IM bot or
+auto-responder on its own. *Test: local OpenSim with two accounts.*
+
+**3. Agent movement & control · 5 pts.** Promote the stubbed `AgentUpdate` into
+a real control surface: control flags (walk/run/fly/turn/jump/up/down),
+body+head rotation, camera, plus `AgentRequestSit`/`AgentSit` and stand. Yields
+a walking/flying/follow bot or autopilot — usable without any scene knowledge by
+navigating to coordinates or a known object UUID. *Test: local OpenSim.*
+
+**4. Avatar profiles — `AvatarPropertiesRequest`/`Reply`, `AvatarPicksRequest`,
+`AvatarNotesRequest`, CAPS `AgentProfile` · 3 pts.** A standalone profile/picks
+checker. Cheap and fully independent. *Test: local OpenSim.*
+
+**5. Inventory — AIS3 CAPS (`FetchInventoryDescendents2`, `FetchInventory2`,
+`InventoryAPIv3`), legacy `FetchInventoryDescendents`,
+`BulkUpdateInventory`/`UpdateInventoryItem` · 8 pts.** Fetch and cache the
+folder/item tree, watch updates, move/copy/delete. On its own this is an
+inventory manager or a product-update distributor bot; later it is the
+prerequisite for appearance (Current Outfit Folder) and for giving items over IM
+(#2). Mostly LLSD over HTTP. *Test: local OpenSim.*
+
+**6. Friends & presence — `OnlineNotification`/`OfflineNotification`,
+`TerminateFriendship`, `GrantUserRights`/`ChangeUserRights`, friendship
+offer/accept via IM · 5 pts.** Friend list, online status, rights — a presence
+monitor on its own; pairs naturally with #2.
+*Test: local OpenSim with two accounts.*
+
+**7. Group support — `AgentDataUpdate`, `AgentGroupDataUpdate`, group chat over
+`ImprovedInstantMessage` (session start/agent-update), CAPS group APIs
+(`GroupMemberData`, `GroupRoles`, profile) · 8 pts.** Membership, active
+group/title, roles, and group IM sessions — a group chat relay or roster tool.
+Builds on #2. *Test: local OpenSim with the Groups module enabled in config.*
+
+**8. Script dialogs & permissions — `ScriptDialog`/`ScriptDialogReply`,
+`ScriptQuestion`/ `ScriptAnswerYes` (`llRequestPermissions`), `LoadURL`,
+`ScriptTeleportRequest` · 3 pts.** Respond to in-world scripted prompts and
+vendors (`llDialog`, permission grants). Usable now that the avatar is present
+in-world. *Test: local OpenSim with a scripted object.*
+
+**9. Mute list — `MuteListRequest`, `UpdateMuteListEntry`, `RemoveMuteListEntry`
+· 2 pts.** Fetch and edit the mute/block list — a small moderation helper.
+*Test: local OpenSim.*
+
+**10. Seamless teleport via child-agent circuits — `EnableSimulator` → child
+`UseCircuitCode`, `EstablishAgentCommunication` (CAPS), `CrossedRegion`,
+`TeleportFinish` handover · 8 pts.** Not a new surface but a quality upgrade
+that *adds value to the Tier-A clients*: replace the re-login workaround with
+real child→root handover so a roaming bot keeps one continuous session (open
+IMs, group sessions, agent state) across teleports and region crossings.
+*Test: local OpenSim with adjacent regions.*
+
+## Tier B — extensions of the existing survey/map strengths
+
+These build directly on the read-only data the client already collects, each a
+usable standalone tool.
+
+**11. Money / economy — `MoneyBalanceRequest`/`Reply`, `MoneyTransferRequest`,
+`EconomyData`/`Request` · 5 pts.** L$ balance and transfers — a balance monitor
+or tip/vendor bot (stronger combined with #2/#8, but a balance/transfer tool
+stands alone). *Test: stock OpenSim has no real economy — needs a money module
+(e.g. Gloebit/DTL) or the real SL grid.*
+
+**12. Full world map — `MapItemRequest` (agents/telehubs/events/land-for-sale),
+`MapNameRequest`, `MapBlockRequest` by name · 5 pts.** Extends the existing
+`MapBlockRequest`/`MapBlockReply` to a complete map: avatar dots, POIs,
+search-by-name — a live map tool on its own. *Test: local OpenSim.*
+
+**13. Parcel management — `ParcelPropertiesUpdate`,
+`ParcelAccessListRequest`/`Update`, `ParcelDwellRequest`, `ParcelBuy`,
+`ParcelReturnObjects`, `ParcelSelectObjects` · 5 pts.** Turns the existing
+parcel read path into a land-management tool (edit, access lists, dwell, buy).
+*Test: local OpenSim.*
+
+**14. Estate/region management — `EstateOwnerMessage`
+(kick/ban/restart/teleport-home/manage), `GodlikeMessage` · 5 pts.**
+Region/estate admin for owners — a restart/ban/management bot.
+*Test: local OpenSim with an estate-owner account (full control locally).*
+
+## Tier C — world-rendering cluster (value compounds across the group)
+
+Individually these do little; together they let the bevy crate render and
+interact with the actual world. Do them as a set, in this order. **#15 first** —
+it is the bandwidth prerequisite for the bulk UDP streams that the rest depend
+on.
+
+**15. Bandwidth throttle — `AgentThrottle` · 2 pts.** Tell the sim how to
+allocate the 7 throttle categories (resend/land/wind/cloud/task/texture/asset);
+without it the sim's conservative defaults starve the object/terrain/texture
+firehose the rest of this tier needs. Send after circuit setup, re-send on
+region change. Wire a `set_throttle` command. *Test: local OpenSim.*
+
+**16. Object/scene graph — `ObjectUpdate`, `ObjectUpdateCompressed`,
+`ObjectUpdateCached`, `ImprovedTerseObjectUpdate`, `KillObject`,
+`ObjectProperties`, `RequestMultipleObjects` · 13 pts.** The largest single
+piece — "seeing the world." Needs a per-region object cache keyed by
+LocalID/FullID, the compressed-update bitfield decoder, terse (movement)
+decoding, object-cache CRC negotiation, and an `ObjectAdded`/`Updated`/`Removed`
+event stream. Even before a renderer exists this enables a scene auditor or
+proximity bot, but its full payoff needs #18–#20. Depends on
+
+## 15. *Test: local OpenSim — rez prims via console/viewer to populate the scene.*
+
+**17. Object interaction & editing — `ObjectSelect`/`ObjectDeselect`,
+`ObjectGrab`/ `ObjectGrabUpdate`/`ObjectDeGrab` (touch/click), `ObjectAdd`
+(rez), `ObjectDuplicate`, `ObjectDelete`/`DeRezObject`,
+`ObjectName`/`ObjectDescription`/`ObjectFlagUpdate`, `MultipleObjectUpdate`
+(move/scale/rotate) · 8 pts.** Turns the read-only scene (#16) into an editable
+one — a builder/rezzer or object mover. Depends on #16. *Test: local OpenSim.*
+
+**18. Terrain heightmaps — `LayerData` (LAND/WATER/WIND/CLOUD) · 8 pts.** Decode
+the patched DCT-compressed terrain layers into a heightmap — the ground for a
+renderer. Self-contained but math-heavy (bit-stream + inverse DCT).
+*Test: local OpenSim.*
+
+**19. Asset & texture pipeline — CAPS `GetTexture`/`GetMesh2`, legacy
+`TransferRequest`/ `TransferPacket`/`RequestImage` + `ImageData`/`ImagePacket` ·
+13 pts.** HTTP texture/mesh fetch (range requests, J2C/JPEG2000 decode, mesh LOD
+parsing) plus the legacy UDP asset path for
+sounds/animations/notecards/landmarks. Underpins textured rendering, appearance,
+animations, and sound; usable alone as an asset fetcher given known UUIDs. Big
+because of the J2C decoder and the dual HTTP+UDP paths. *Test: local OpenSim —
+upload assets first; SL grid for full-scale CDN behavior.*
+
+**20. Avatar appearance & wearables — `AvatarAppearance` (receive),
+`AgentSetAppearance`, `AgentWearablesUpdate`, `AgentIsNowWearing`, CAPS baking ·
+13 pts.** Decode other avatars' baked-texture IDs + visual params to render
+them; manage own outfit via the COF. Depends on #19 (textures) and #5
+(inventory). *Test: local OpenSim.*
+
+**21. Animations — `AgentAnimation` (send/trigger), `AvatarAnimation` (receive)
+· 5 pts.** Play/stop built-in and custom animations and observe others' — a
+dance/gesture bot, or motion in a renderer. Custom (uploaded) anims depend on
+
+## 19. *Test: local OpenSim.*
+
+**22. Sound — `SoundTrigger`, `AttachedSound`, `PreloadSound`,
+`AttachedSoundGainChange` · 3 pts.** Receive and locate spatial sound events;
+fetch the clips via #19. *Test: local OpenSim.*
+
+**23. Asset/texture/mesh upload — CAPS `NewFileAgentInventory`,
+`UploadBakedTexture`, `UpdateGestureAgentInventory`; legacy
+`AssetUploadRequest`/`SendXferPacket` · 5 pts.** Upload content and create
+inventory items; needed for appearance baking (#20). Depends on #5.
+*Test: local OpenSim.*
+
+**24. Media-on-a-prim / parcel audio — CAPS `ObjectMedia`/`ObjectMediaNavigate`,
+parcel audio/media URLs · 5 pts.** Per-face media and streaming audio on the
+scene (#16). *Test: local OpenSim with an external stream URL (rendering the
+media itself is out of protocol scope).*
+
+**25. PBR materials / GLTF / reflection probes — `RenderMaterialParams`, CAPS
+material assets, GLTF override decode · 8 pts.** Modern SL rendering layered on
+objects (#16) and textures (#19).
+*Test: a recent SL grid; OpenSim support varies by build/version.*
+
+### Tier D — specialized (needs more than local OpenSim)
+
+**26. Voice chat — Vivox/WebRTC signalling via CAPS
+(`ProvisionVoiceAccountRequest`, `ParcelVoiceInfoRequest`, WebRTC session SDP) ·
+13 pts.** An entirely separate subsystem (SIP/RTP or WebRTC) bolted on via CAPS.
+*Test: SL grid (Vivox/WebRTC backend) or an OpenSim configured with a FreeSWITCH
+voice module — not available on stock local OpenSim.*
+
+**27. Experiences — CAPS experience APIs, `ScriptExperience*` · 5 pts.**
+Permission grants and experience-keyed scripts.
+*Test: SL grid only — no OpenSim equivalent.*
+
+### Out of scope (not LLUDP/CAPS protocol)
+
+Rendering/physics engines, J2C/mesh *display* (vs. decode), the in-viewer UI,
+and the Marketplace (web, not protocol) are deliberately excluded — this roadmap
+covers protocol features only.
