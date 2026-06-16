@@ -739,10 +739,10 @@ impl Survey {
         Ok(())
     }
 
-    /// Moves to the next queued region — by re-logging in directly when its name
-    /// is known (reliable; cross-region teleport needs child-agent circuits this
-    /// client does not maintain), or by teleporting as a fallback — and logs out
-    /// when the queue is drained or the region cap is reached.
+    /// Teleports to the next queued region (by handle), or logs out when the
+    /// queue is drained or the region cap is reached. A teleport that fails is
+    /// handled in `handle_event` by re-logging in directly at the region (using
+    /// its map name) as a fallback.
     async fn advance(&mut self, commands: &mpsc::Sender<Command>) {
         if self.surveyed >= self.max_regions {
             commands.send(Command::Logout).await.ok();
@@ -752,24 +752,15 @@ impl Survey {
             if self.visited.contains(&handle) {
                 continue;
             }
-            match self.names.get(&handle).cloned() {
-                Some(name) => {
-                    // Log in directly at the named region on the next session.
-                    self.relog_target = Some((handle, name));
-                    commands.send(Command::Logout).await.ok();
-                }
-                None => {
-                    self.pending_teleport = Some(handle);
-                    commands
-                        .send(Command::Teleport {
-                            region_handle: handle,
-                            position: ARRIVAL_POSITION,
-                            look_at: ARRIVAL_LOOK_AT,
-                        })
-                        .await
-                        .ok();
-                }
-            }
+            self.pending_teleport = Some(handle);
+            commands
+                .send(Command::Teleport {
+                    region_handle: handle,
+                    position: ARRIVAL_POSITION,
+                    look_at: ARRIVAL_LOOK_AT,
+                })
+                .await
+                .ok();
             return;
         }
         commands.send(Command::Logout).await.ok();

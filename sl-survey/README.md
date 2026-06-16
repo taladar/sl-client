@@ -32,23 +32,25 @@ Per region:
    POSTs the seed capability, then long-polls `EventQueueGet` and feeds the LLSD
    events back into the session), since the simulator no longer sends them over
    UDP.
-4. To move to the next region it **logs in directly there** (using the name from
-   the map, via `start=uri:Region&x&y&z`), surveys it, and repeats until the
-   queue drains, `--max-regions` is reached, or it leaves the bounds.
+4. To move to the next region it **teleports** there
+   (`TeleportLocationRequest`), surveys it, and repeats until the queue drains,
+   `--max-regions` is reached, or it leaves the bounds. The whole survey runs on
+   a single login.
 
-### Why direct re-login instead of teleport
+### Teleport and the re-login fallback
 
-The library implements in-world teleport (`TeleportLocationRequest` + a
-circuit-handover state machine), but a real cross-region teleport requires the
-viewer to already hold a **child-agent UDP circuit** to the destination region
-(opened from the `EnableSimulator` / `EstablishAgentCommunication` the source
-region sends), so the destination has the agent's presence when the teleport
-runs. This single-circuit client does not maintain child-agent circuits, so a
-teleport times out ("could not establish connection to destination"). The survey
-therefore visits each region by logging in directly — fast and reliable given
-the map provides the names. Teleport remains as a fallback for any queued region
-whose name is unknown. (Implementing child-agent circuits would make true
-teleport work and avoid the per-region re-login.)
+Teleport works to any region by handle. The destination's address is delivered
+by the source region as a `TeleportFinish` event over the CAPS event queue (not
+UDP); on it the session hands its circuit over to the destination
+(`UseCircuitCode` + `CompleteAgentMovement`), which the destination's presence
+wait requires. If a teleport fails, the survey falls back to logging in directly
+at the region (using its name from the map, via `start=uri:Region&x&y&z`) and
+continues from there.
+
+Because the initial region's handle is not surfaced by the protocol, give the
+start region's grid coordinates with `--start-x`/`--start-y`, and a matching
+`--start` location (e.g. `--start "uri:Region Name&128&128&30"`) so the first
+record is labelled correctly.
 
 ## Usage
 
