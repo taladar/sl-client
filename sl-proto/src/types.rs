@@ -91,6 +91,10 @@ pub enum Event {
     ParcelOverlay(ParcelOverlayInfo),
     /// A neighbouring simulator was announced via `EnableSimulator`.
     NeighborDiscovered(NeighborInfo),
+    /// A region was reported by the world map (a `MapBlockReply` entry), giving
+    /// its name and grid coordinates. Sent in response to
+    /// [`Session::request_map_blocks`](crate::Session::request_map_blocks).
+    MapBlock(Box<MapRegionInfo>),
     /// A teleport has begun (`TeleportStart`).
     TeleportStarted,
     /// A progress update during a teleport (`TeleportProgress`).
@@ -297,6 +301,32 @@ pub struct ParcelOverlayInfo {
     pub sequence_id: i32,
     /// The packed overlay bytes: per-square ownership colour and edge/flag bits.
     pub data: Vec<u8>,
+}
+
+/// A region reported by the world map (one `MapBlockReply` `Data` entry).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapRegionInfo {
+    /// The region name.
+    pub name: String,
+    /// The region's grid x coordinate (region index).
+    pub grid_x: u32,
+    /// The region's grid y coordinate (region index).
+    pub grid_y: u32,
+    /// The region handle (derived from the grid coordinates).
+    pub region_handle: u64,
+    /// The maturity rating, from the map's access byte.
+    pub maturity: Maturity,
+    /// The raw region flags bitfield.
+    pub region_flags: u32,
+    /// The region width in metres (256 for standard regions; larger for
+    /// variable-sized OpenSim regions).
+    pub size_x: u32,
+    /// The region height in metres.
+    pub size_y: u32,
+    /// The number of agents the map reports in the region (often 0).
+    pub agents: u8,
+    /// The region's map tile image id.
+    pub map_image_id: Uuid,
 }
 
 /// A neighbouring simulator announced via `EnableSimulator`.

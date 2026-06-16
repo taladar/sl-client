@@ -17,8 +17,8 @@ use sl_proto::{
 // Re-export the core types a consumer needs so they can depend on this crate
 // alone.
 pub use sl_proto::{
-    AnyMessage, DisconnectReason, Event, LoginParams, LoginRequest, LoginResponse, Maturity,
-    MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
+    AnyMessage, DisconnectReason, Event, LoginParams, LoginRequest, LoginResponse, MapRegionInfo,
+    Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
     RegionFlags, RegionIdentity, RegionLimits, Reliability, Transmit, Vector, grid_to_handle,
     handle_to_global, handle_to_grid, sim_access,
 };
@@ -97,6 +97,18 @@ pub enum Command {
     },
     /// Set the draw distance advertised in keep-alive `AgentUpdate`s.
     SetDrawDistance(f32),
+    /// Request world-map blocks for a grid-coordinate rectangle (region
+    /// indices); each region arrives as an [`Event::MapBlock`].
+    RequestMapBlocks {
+        /// Minimum grid x (inclusive).
+        min_x: u32,
+        /// Maximum grid x (inclusive).
+        max_x: u32,
+        /// Minimum grid y (inclusive).
+        min_y: u32,
+        /// Maximum grid y (inclusive).
+        max_y: u32,
+    },
     /// Begin a clean logout.
     Logout,
 }
@@ -233,6 +245,9 @@ impl Client {
                         }
                         Some(Command::SetDrawDistance(far)) => {
                             self.session.set_draw_distance(far);
+                        }
+                        Some(Command::RequestMapBlocks { min_x, max_x, min_y, max_y }) => {
+                            self.session.request_map_blocks(min_x, max_x, min_y, max_y, Instant::now())?;
                         }
                         Some(Command::Logout) | None => {
                             self.session.initiate_logout(Instant::now());

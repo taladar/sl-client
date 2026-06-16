@@ -109,6 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::ParcelProperties(_)
             | Event::ParcelOverlay(_)
             | Event::NeighborDiscovered(_)
+            | Event::MapBlock(_)
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal

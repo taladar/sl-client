@@ -13,7 +13,8 @@ mod test {
     };
     use sl_types::lsl::Vector;
     use sl_wire::messages::{
-        LogoutRequest, LogoutRequestAgentDataBlock, ParcelProperties,
+        LogoutRequest, LogoutRequestAgentDataBlock, MapBlockReply, MapBlockReplyAgentDataBlock,
+        MapBlockReplyDataBlock, MapBlockReplySizeBlock, ParcelProperties,
         ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
         ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
         RegionHandshake, RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
@@ -893,6 +894,79 @@ mod test {
             .ok_or("expected a RegionLimits event")?;
         assert_eq!(limits.max_agents, 25);
         assert_eq!(limits.hard_max_objects, 12000);
+        Ok(())
+    }
+
+    #[test]
+    fn map_block_reply_reports_named_regions() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        session.request_map_blocks(1000, 1001, 1000, 1001, now)?;
+        let sent = drain(&mut session)?;
+        let request = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::MapBlockRequest(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("expected a MapBlockRequest")?;
+        assert_eq!(request.position_data.min_x, 1000);
+        assert_eq!(request.position_data.max_y, 1001);
+
+        let reply = AnyMessage::MapBlockReply(MapBlockReply {
+            agent_data: MapBlockReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                flags: 0,
+            },
+            data: vec![
+                MapBlockReplyDataBlock {
+                    x: 1000,
+                    y: 1001,
+                    name: b"TestRegion\0".to_vec(),
+                    access: 21,
+                    region_flags: 0,
+                    water_height: 20,
+                    agents: 3,
+                    map_image_id: uuid::Uuid::nil(),
+                },
+                // A sentinel "not found" block, which must be filtered out.
+                MapBlockReplyDataBlock {
+                    x: 0,
+                    y: 0,
+                    name: Vec::new(),
+                    access: 255,
+                    region_flags: 0,
+                    water_height: 0,
+                    agents: 0,
+                    map_image_id: uuid::Uuid::nil(),
+                },
+            ],
+            size: vec![MapBlockReplySizeBlock {
+                size_x: 256,
+                size_y: 256,
+            }],
+        });
+        let datagram = server_message(&reply, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let events = drain_events(&mut session);
+        let regions: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::MapBlock(region) => Some(region),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(regions.len(), 1, "sentinel block should be filtered");
+        let region = regions.first().ok_or("one region")?;
+        assert_eq!(region.name, "TestRegion");
+        assert_eq!(region.grid_x, 1000);
+        assert_eq!(region.grid_y, 1001);
+        assert_eq!(region.maturity, Maturity::Mature);
+        assert_eq!(region.region_handle, sl_proto::grid_to_handle(1000, 1001));
         Ok(())
     }
 }

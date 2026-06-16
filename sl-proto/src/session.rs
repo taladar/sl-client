@@ -9,8 +9,10 @@ use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
     AgentUpdate, AgentUpdateAgentDataBlock, CompleteAgentMovement,
     CompleteAgentMovementAgentDataBlock, CompletePingCheck, CompletePingCheckPingIDBlock,
-    EnableSimulatorSimulatorInfoBlock, LogoutRequest, LogoutRequestAgentDataBlock, PacketAck,
-    PacketAckPacketsBlock, ParcelPropertiesParcelDataBlock, ParcelPropertiesRequest,
+    EnableSimulatorSimulatorInfoBlock, LogoutRequest, LogoutRequestAgentDataBlock,
+    MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapBlockRequest, MapBlockRequestAgentDataBlock,
+    MapBlockRequestPositionDataBlock, PacketAck, PacketAckPacketsBlock,
+    ParcelPropertiesParcelDataBlock, ParcelPropertiesRequest,
     ParcelPropertiesRequestAgentDataBlock, ParcelPropertiesRequestParcelDataBlock,
     RegionHandshakeRegionInfo3Block, RegionHandshakeRegionInfoBlock, RegionHandshakeReply,
     RegionHandshakeReplyAgentDataBlock, RegionHandshakeReplyRegionInfoBlock,
@@ -27,9 +29,9 @@ use uuid::Uuid;
 
 use crate::error::Error;
 use crate::types::{
-    DisconnectReason, Event, LoginHttpRequest, LoginParams, Maturity, NeighborInfo, ParcelInfo,
-    ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability, Transmit,
-    handle_to_grid,
+    DisconnectReason, Event, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, NeighborInfo,
+    ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability,
+    Transmit, grid_to_handle, handle_to_grid,
 };
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
@@ -406,6 +408,34 @@ impl Circuit {
         self.send(&message, Reliability::Reliable, now)
     }
 
+    /// Queues a `MapBlockRequest` reliably for a grid-coordinate rectangle.
+    fn send_map_block_request(
+        &mut self,
+        min_x: u16,
+        max_x: u16,
+        min_y: u16,
+        max_y: u16,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::MapBlockRequest(MapBlockRequest {
+            agent_data: MapBlockRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                // Flags 0 selects the terrain map layer; estate/godlike unused.
+                flags: 0,
+                estate_id: 0,
+                godlike: false,
+            },
+            position_data: MapBlockRequestPositionDataBlock {
+                min_x,
+                max_x,
+                min_y,
+                max_y,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
     /// Records that a datagram was received, resetting the inactivity timer.
     fn note_received(&mut self, now: Instant) {
         self.timers.inactivity = deadline(now, INACTIVITY_TIMEOUT);
@@ -755,6 +785,13 @@ impl Session {
                         &sim.simulator_info,
                     )));
             }
+            AnyMessage::MapBlockReply(reply) => {
+                for (index, data) in reply.data.iter().enumerate() {
+                    if let Some(region) = map_region_info(data, reply.size.get(index)) {
+                        self.events.push_back(Event::MapBlock(Box::new(region)));
+                    }
+                }
+            }
             AnyMessage::TeleportStart(_) => {
                 self.events.push_back(Event::TeleportStarted);
             }
@@ -965,6 +1002,35 @@ impl Session {
         Ok(())
     }
 
+    /// Requests world-map blocks for the inclusive grid-coordinate rectangle
+    /// `[min_x, max_x] x [min_y, max_y]` (region indices). Each region in range
+    /// arrives as an [`Event::MapBlock`], giving its name, coordinates, and
+    /// maturity. Coordinates are clamped to the protocol's 16-bit range.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_map_blocks(
+        &mut self,
+        min_x: u32,
+        max_x: u32,
+        min_y: u32,
+        max_y: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let clamp = |value: u32| u16::try_from(value).unwrap_or(u16::MAX);
+        circuit.send_map_block_request(
+            clamp(min_x),
+            clamp(max_x),
+            clamp(min_y),
+            clamp(max_y),
+            now,
+        )?;
+        Ok(())
+    }
+
     /// Requests an in-world teleport to `position` (region-local) in the region
     /// identified by `region_handle`, looking towards `look_at`. On success the
     /// session re-establishes its circuit at the destination simulator and emits
@@ -1136,6 +1202,42 @@ fn neighbor_info(info: &EnableSimulatorSimulatorInfoBlock) -> NeighborInfo {
         grid_x,
         grid_y,
     }
+}
+
+/// Builds a [`MapRegionInfo`] from a `MapBlockReply` data block (with its
+/// optional size block), or `None` for a sentinel/empty entry.
+fn map_region_info(
+    data: &MapBlockReplyDataBlock,
+    size: Option<&MapBlockReplySizeBlock>,
+) -> Option<MapRegionInfo> {
+    // The map sends a sentinel block (0,0 / empty name) for "not found".
+    if data.x == 0 && data.y == 0 {
+        return None;
+    }
+    let name = trimmed_string(&data.name);
+    if name.is_empty() {
+        return None;
+    }
+    let grid_x = u32::from(data.x);
+    let grid_y = u32::from(data.y);
+    Some(MapRegionInfo {
+        name,
+        grid_x,
+        grid_y,
+        region_handle: grid_to_handle(grid_x, grid_y),
+        maturity: Maturity::from_sim_access(data.access),
+        region_flags: data.region_flags,
+        size_x: size
+            .map(|block| u32::from(block.size_x))
+            .filter(|&value| value != 0)
+            .unwrap_or(256),
+        size_y: size
+            .map(|block| u32::from(block.size_y))
+            .filter(|&value| value != 0)
+            .unwrap_or(256),
+        agents: data.agents,
+        map_image_id: data.map_image_id,
+    })
 }
 
 /// Builds a [`ParcelInfo`] from a CAPS `ParcelProperties` event body.
