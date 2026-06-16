@@ -9,13 +9,15 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
-        ChatAudible, ChatSourceType, ChatType, DisconnectReason, Event, LoginParams, Maturity,
-        ProductType, Reliability, Session, Transmit,
+        ChatAudible, ChatSourceType, ChatType, DisconnectReason, Event, ImDialog, LoginParams,
+        Maturity, ProductType, Reliability, Session, Transmit,
     };
     use sl_types::lsl::Vector;
     use sl_wire::messages::{
         AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
         AgentMovementCompleteSimDataBlock, ChatFromSimulator, ChatFromSimulatorChatDataBlock,
+        ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
+        ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
         LogoutRequest, LogoutRequestAgentDataBlock, MapBlockReply, MapBlockReplyAgentDataBlock,
         MapBlockReplyDataBlock, MapBlockReplySizeBlock, ParcelProperties,
         ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
@@ -449,6 +451,142 @@ mod test {
         assert_eq!(typing.0, "Resident Tester");
         assert_eq!(typing.1, uuid::Uuid::from_u128(0x42));
         assert!(typing.2, "StartTyping should set typing = true");
+        Ok(())
+    }
+
+    #[test]
+    fn send_instant_message_packs_improved_instant_message() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let target = uuid::Uuid::from_u128(0x99);
+        session.send_instant_message(target, "hi there", now)?;
+        let sent = drain(&mut session)?;
+        let im = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ImprovedInstantMessage(im) => Some(im),
+                _ => None,
+            })
+            .ok_or("expected an ImprovedInstantMessage")?;
+        let block = &im.message_block;
+        assert_eq!(block.to_agent_id, target);
+        assert_eq!(block.dialog, 0); // IM_NOTHING_SPECIAL
+        assert!(!block.from_group);
+        // Wire strings carry a trailing NUL; the agent's login name is sent.
+        assert_eq!(block.message, b"hi there\0");
+        assert_eq!(block.from_agent_name, b"Test User\0");
+        // The 1:1 session id is the XOR of the two agent ids (agent id is 1).
+        assert_eq!(block.id, uuid::Uuid::from_u128(1u128 ^ 0x99u128));
+        // AgentData.SessionID is the login session id (2), not the IM session id.
+        assert_eq!(im.agent_data.session_id, uuid::Uuid::from_u128(2));
+        Ok(())
+    }
+
+    #[test]
+    fn send_im_typing_packs_typing_dialog() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.send_im_typing(uuid::Uuid::from_u128(0x99), true, now)?;
+        let sent = drain(&mut session)?;
+        let im = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ImprovedInstantMessage(im) => Some(im),
+                _ => None,
+            })
+            .ok_or("expected an ImprovedInstantMessage")?;
+        assert_eq!(im.message_block.dialog, 41); // IM_TYPING_START
+        assert_eq!(im.message_block.message, b"typing\0");
+        Ok(())
+    }
+
+    /// Builds an inbound `ImprovedInstantMessage` from a sender with the given
+    /// dialog, name, and message.
+    fn inbound_im(dialog: u8, from_name: &[u8], message: &[u8]) -> AnyMessage {
+        AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
+            agent_data: ImprovedInstantMessageAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(0x55),
+                session_id: uuid::Uuid::nil(),
+            },
+            message_block: ImprovedInstantMessageMessageBlockBlock {
+                from_group: false,
+                to_agent_id: uuid::Uuid::from_u128(1),
+                parent_estate_id: 1,
+                region_id: uuid::Uuid::from_u128(0x7),
+                position: vec3(1.0, 2.0, 3.0),
+                offline: 0,
+                dialog,
+                id: uuid::Uuid::from_u128(0xABC),
+                timestamp: 0,
+                from_agent_name: from_name.to_vec(),
+                message: message.to_vec(),
+                binary_bucket: Vec::new(),
+            },
+            estate_block: ImprovedInstantMessageEstateBlockBlock { estate_id: 1 },
+            meta_data: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn improved_instant_message_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let im = inbound_im(0, b"Friendly Bot\0", b"hi there\0");
+        let datagram = server_message(&im, 9, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let received = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InstantMessageReceived(im) => Some(im),
+                _ => None,
+            })
+            .ok_or("expected an InstantMessageReceived event")?;
+        assert_eq!(received.from_agent_id, uuid::Uuid::from_u128(0x55));
+        assert_eq!(received.from_agent_name, "Friendly Bot");
+        assert_eq!(received.message, "hi there");
+        assert_eq!(received.dialog, ImDialog::Message);
+        assert!(!received.offline);
+        Ok(())
+    }
+
+    #[test]
+    fn improved_instant_message_typing_surfaces_im_typing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Dialog 41 = IM_TYPING_START; the viewer sends "typing" as the text.
+        let im = inbound_im(41, b"Friendly Bot\0", b"typing\0");
+        let datagram = server_message(&im, 9, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let events = drain_events(&mut session);
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Event::InstantMessageReceived(_))),
+            "IM typing must not surface as InstantMessageReceived, got {events:?}"
+        );
+        let typing = events
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ImTyping {
+                    from_agent_id,
+                    typing,
+                    ..
+                } => Some((from_agent_id, typing)),
+                _ => None,
+            })
+            .ok_or("expected an ImTyping event")?;
+        assert_eq!(typing.0, uuid::Uuid::from_u128(0x55));
+        assert!(typing.1, "IM_TYPING_START should set typing = true");
         Ok(())
     }
 

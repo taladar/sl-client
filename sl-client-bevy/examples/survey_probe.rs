@@ -130,6 +130,8 @@ fn on_events(
             }
             SlSessionEvent::ChatReceived(_)
             | SlSessionEvent::ChatTyping { .. }
+            | SlSessionEvent::InstantMessageReceived(_)
+            | SlSessionEvent::ImTyping { .. }
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal => {}

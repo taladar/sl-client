@@ -20,10 +20,11 @@ use sl_proto::{
 // survey commands, and read events. `Event` is aliased to avoid clashing with
 // Bevy's `Event` derive.
 pub use sl_proto::{
-    AnyMessage, ChatAudible, ChatMessage, ChatSourceType, ChatType, DisconnectReason, LoginParams,
-    LoginRequest, MapRegionInfo, Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo,
-    ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity, RegionLimits, Reliability,
-    Transmit, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
+    AnyMessage, ChatAudible, ChatMessage, ChatSourceType, ChatType, DisconnectReason, ImDialog,
+    InstantMessage, LoginParams, LoginRequest, MapRegionInfo, Maturity, MfaChallenge, NeighborInfo,
+    ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity,
+    RegionLimits, Reliability, Transmit, Uuid, Vector, grid_to_handle, handle_to_global,
+    handle_to_grid, sim_access,
 };
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
@@ -86,6 +87,22 @@ pub enum SlCommand {
     /// Broadcast a local-chat typing indicator (`true` = start, `false` = stop).
     /// Other clients see it as an [`SlSessionEvent::ChatTyping`].
     Typing(bool),
+    /// Send a direct (1:1) instant message. Incoming IMs arrive as an
+    /// [`SlSessionEvent::InstantMessageReceived`].
+    InstantMessage {
+        /// The recipient's agent id.
+        to_agent_id: Uuid,
+        /// The message text.
+        message: String,
+    },
+    /// Send an instant-message typing indicator to `to_agent_id` (`true` = start,
+    /// `false` = stop). Other clients see it as an [`SlSessionEvent::ImTyping`].
+    ImTyping {
+        /// The correspondent's agent id.
+        to_agent_id: Uuid,
+        /// Whether typing started (`true`) or stopped (`false`).
+        typing: bool,
+    },
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
         /// The destination region handle.
@@ -370,6 +387,20 @@ fn advance_running(
             }
             SlCommand::Typing(typing) => {
                 session.set_typing(*typing, now).ok();
+            }
+            SlCommand::InstantMessage {
+                to_agent_id,
+                message,
+            } => {
+                session
+                    .send_instant_message(*to_agent_id, message, now)
+                    .ok();
+            }
+            SlCommand::ImTyping {
+                to_agent_id,
+                typing,
+            } => {
+                session.send_im_typing(*to_agent_id, *typing, now).ok();
             }
             SlCommand::Teleport {
                 region_handle,

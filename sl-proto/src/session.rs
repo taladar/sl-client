@@ -10,7 +10,9 @@ use sl_wire::messages::{
     AgentUpdate, AgentUpdateAgentDataBlock, ChatFromSimulatorChatDataBlock, ChatFromViewer,
     ChatFromViewerAgentDataBlock, ChatFromViewerChatDataBlock, CompleteAgentMovement,
     CompleteAgentMovementAgentDataBlock, CompletePingCheck, CompletePingCheckPingIDBlock,
-    EnableSimulatorSimulatorInfoBlock, LogoutRequest, LogoutRequestAgentDataBlock,
+    EnableSimulatorSimulatorInfoBlock, ImprovedInstantMessage,
+    ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
+    ImprovedInstantMessageMessageBlockBlock, LogoutRequest, LogoutRequestAgentDataBlock,
     MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapBlockRequest, MapBlockRequestAgentDataBlock,
     MapBlockRequestPositionDataBlock, PacketAck, PacketAckPacketsBlock,
     ParcelPropertiesParcelDataBlock, ParcelPropertiesRequest,
@@ -30,9 +32,10 @@ use uuid::Uuid;
 
 use crate::error::Error;
 use crate::types::{
-    ChatAudible, ChatMessage, ChatSourceType, ChatType, DisconnectReason, Event, LoginHttpRequest,
-    LoginParams, MapRegionInfo, Maturity, NeighborInfo, ParcelInfo, ParcelOverlayInfo, ProductType,
-    RegionIdentity, RegionLimits, Reliability, Transmit, grid_to_handle, handle_to_grid,
+    ChatAudible, ChatMessage, ChatSourceType, ChatType, DisconnectReason, Event, ImDialog,
+    InstantMessage, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, NeighborInfo,
+    ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability,
+    Transmit, grid_to_handle, handle_to_grid,
 };
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
@@ -308,6 +311,52 @@ impl Circuit {
                 r#type: chat_type.to_u8(),
                 channel,
             },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ImprovedInstantMessage` reliably to a single agent. The IM
+    /// session id is the canonical `agent_id XOR to_agent_id` the viewer uses for
+    /// 1:1 sessions; `from_group` is false and the binary bucket is empty (the
+    /// shape of an ordinary direct IM or a typing notification). The wire strings
+    /// carry trailing NULs, as a real viewer sends.
+    fn send_instant_message_raw(
+        &mut self,
+        to_agent_id: Uuid,
+        dialog: ImDialog,
+        message: &str,
+        from_name: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let mut name_bytes = from_name.as_bytes().to_vec();
+        name_bytes.push(0);
+        let mut message_bytes = message.as_bytes().to_vec();
+        message_bytes.push(0);
+        let message = AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
+            agent_data: ImprovedInstantMessageAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            message_block: ImprovedInstantMessageMessageBlockBlock {
+                from_group: false,
+                to_agent_id,
+                parent_estate_id: 0,
+                region_id: Uuid::nil(),
+                position: Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                offline: 0, // IM_ONLINE
+                dialog: dialog.to_u8(),
+                id: compute_im_session_id(self.agent_id, to_agent_id),
+                timestamp: 0,
+                from_agent_name: name_bytes,
+                message: message_bytes,
+                binary_bucket: Vec::new(),
+            },
+            estate_block: ImprovedInstantMessageEstateBlockBlock { estate_id: 0 },
+            meta_data: Vec::new(),
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -897,6 +946,27 @@ impl Session {
                         .push_back(Event::ChatReceived(Box::new(chat_message(data)))),
                 }
             }
+            AnyMessage::ImprovedInstantMessage(im) => {
+                let block = &im.message_block;
+                match ImDialog::from_u8(block.dialog) {
+                    // Typing notifications carry no real text; surface them as a
+                    // distinct signal rather than an empty instant message.
+                    dialog @ (ImDialog::TypingStart | ImDialog::TypingStop) => {
+                        self.events.push_back(Event::ImTyping {
+                            from_agent_id: im.agent_data.agent_id,
+                            from_agent_name: trimmed_string(&block.from_agent_name),
+                            session_id: block.id,
+                            typing: matches!(dialog, ImDialog::TypingStart),
+                        });
+                    }
+                    _ => self
+                        .events
+                        .push_back(Event::InstantMessageReceived(Box::new(instant_message(
+                            &im.agent_data,
+                            block,
+                        )))),
+                }
+            }
             AnyMessage::EnableSimulator(sim) => {
                 self.events
                     .push_back(Event::NeighborDiscovered(neighbor_info(
@@ -1116,6 +1186,67 @@ impl Session {
         };
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_chat_from_viewer("", chat_type, 0, now)?;
+        Ok(())
+    }
+
+    /// The agent's legacy name (`"First Last"`), used as the `FromAgentName` of
+    /// outgoing instant messages.
+    fn agent_name(&self) -> String {
+        format!(
+            "{} {}",
+            self.login.request.first_name, self.login.request.last_name
+        )
+    }
+
+    /// Sends a direct (1:1) instant message to `to_agent_id` via
+    /// `ImprovedInstantMessage`. Incoming IMs are surfaced as
+    /// [`Event::InstantMessageReceived`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn send_instant_message(
+        &mut self,
+        to_agent_id: Uuid,
+        message: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_instant_message_raw(
+            to_agent_id,
+            ImDialog::Message,
+            message,
+            &from_name,
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Sends an instant-message typing indicator to `to_agent_id`: an
+    /// `IM_TYPING_START` message when `typing`, otherwise `IM_TYPING_STOP`. The
+    /// counterpart is surfaced to other clients as [`Event::ImTyping`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn send_im_typing(
+        &mut self,
+        to_agent_id: Uuid,
+        typing: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let dialog = if typing {
+            ImDialog::TypingStart
+        } else {
+            ImDialog::TypingStop
+        };
+        let from_name = self.agent_name();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        // The viewer sends the literal text "typing" with a typing IM.
+        circuit.send_instant_message_raw(to_agent_id, dialog, "typing", &from_name, now)?;
         Ok(())
     }
 
@@ -1354,6 +1485,47 @@ fn chat_message(data: &ChatFromSimulatorChatDataBlock) -> ChatMessage {
         audible: ChatAudible::from_u8(data.audible),
         position: (data.position.x, data.position.y, data.position.z),
         message: trimmed_string(&data.message),
+    }
+}
+
+/// Computes the canonical 1:1 IM session id the viewer uses: the byte-wise XOR
+/// of the two agent ids, except an IM to oneself (where the XOR would be nil)
+/// uses the agent id directly.
+fn compute_im_session_id(agent_id: Uuid, other: Uuid) -> Uuid {
+    if agent_id == other {
+        return agent_id;
+    }
+    let mut out = [0u8; 16];
+    for (slot, (a, b)) in out
+        .iter_mut()
+        .zip(agent_id.as_bytes().iter().zip(other.as_bytes()))
+    {
+        *slot = a ^ b;
+    }
+    Uuid::from_bytes(out)
+}
+
+/// Builds an [`InstantMessage`] from an `ImprovedInstantMessage`'s agent-data and
+/// message blocks. The `FromAgentName` and `Message` strings carry trailing NUL
+/// padding, which is removed.
+fn instant_message(
+    agent_data: &ImprovedInstantMessageAgentDataBlock,
+    block: &ImprovedInstantMessageMessageBlockBlock,
+) -> InstantMessage {
+    InstantMessage {
+        from_agent_id: agent_data.agent_id,
+        from_agent_name: trimmed_string(&block.from_agent_name),
+        to_agent_id: block.to_agent_id,
+        dialog: ImDialog::from_u8(block.dialog),
+        from_group: block.from_group,
+        region_id: block.region_id,
+        position: (block.position.x, block.position.y, block.position.z),
+        offline: block.offline != 0,
+        timestamp: block.timestamp,
+        id: block.id,
+        parent_estate_id: block.parent_estate_id,
+        message: trimmed_string(&block.message),
+        binary_bucket: block.binary_bucket.clone(),
     }
 }
 

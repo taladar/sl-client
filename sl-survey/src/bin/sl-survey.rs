@@ -577,6 +577,8 @@ impl Survey {
             Event::LoggedOut => return Ok(true),
             Event::ChatReceived(_)
             | Event::ChatTyping { .. }
+            | Event::InstantMessageReceived(_)
+            | Event::ImTyping { .. }
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal

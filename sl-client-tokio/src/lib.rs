@@ -18,10 +18,10 @@ use sl_proto::{
 // alone.
 pub use sl_proto::{
     AnyMessage, ChatAudible, ChatMessage, ChatSourceType, ChatType, DisconnectReason, Event,
-    LoginParams, LoginRequest, LoginResponse, MapRegionInfo, Maturity, MfaChallenge, NeighborInfo,
-    ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity,
-    RegionLimits, Reliability, Transmit, Vector, grid_to_handle, handle_to_global, handle_to_grid,
-    sim_access,
+    ImDialog, InstantMessage, LoginParams, LoginRequest, LoginResponse, MapRegionInfo, Maturity,
+    MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
+    RegionFlags, RegionIdentity, RegionLimits, Reliability, Transmit, Uuid, Vector, grid_to_handle,
+    handle_to_global, handle_to_grid, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -85,6 +85,22 @@ pub enum Command {
     /// Broadcast a local-chat typing indicator (`true` = start, `false` = stop).
     /// Other clients see it as an [`Event::ChatTyping`].
     Typing(bool),
+    /// Send a direct (1:1) instant message. Incoming IMs arrive as an
+    /// [`Event::InstantMessageReceived`].
+    InstantMessage {
+        /// The recipient's agent id.
+        to_agent_id: Uuid,
+        /// The message text.
+        message: String,
+    },
+    /// Send an instant-message typing indicator to `to_agent_id` (`true` = start,
+    /// `false` = stop). Other clients see it as an [`Event::ImTyping`].
+    ImTyping {
+        /// The correspondent's agent id.
+        to_agent_id: Uuid,
+        /// Whether typing started (`true`) or stopped (`false`).
+        typing: bool,
+    },
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
         /// The destination region handle.
@@ -251,6 +267,12 @@ impl Client {
                         }
                         Some(Command::Typing(typing)) => {
                             self.session.set_typing(typing, Instant::now())?;
+                        }
+                        Some(Command::InstantMessage { to_agent_id, message }) => {
+                            self.session.send_instant_message(to_agent_id, &message, Instant::now())?;
+                        }
+                        Some(Command::ImTyping { to_agent_id, typing }) => {
+                            self.session.send_im_typing(to_agent_id, typing, Instant::now())?;
                         }
                         Some(Command::Teleport { region_handle, position, look_at }) => {
                             self.session.teleport_to(region_handle, position, look_at, Instant::now())?;
