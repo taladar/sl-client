@@ -2,24 +2,36 @@
 
 use std::io::ErrorKind;
 use std::net::UdpSocket;
-use std::time::Instant;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
-use crossbeam_channel::{Receiver, TryRecvError, unbounded};
+use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 
 use bevy::prelude::*;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 
 use sl_proto::{
-    DisconnectReason, Event as SessionEvent, LoginResponse, Session, parse_login_response,
+    Event as SessionEvent, Llsd, LoginResponse, Session, build_event_queue_request,
+    build_seed_request, parse_event_queue_response, parse_login_response, parse_seed_response,
 };
 
-// Re-export the core types a consumer needs to configure the plugin and read
-// events. `Event` is aliased to avoid clashing with Bevy's `Event` derive.
-pub use sl_proto::{AnyMessage, LoginParams, LoginRequest, MfaChallenge, Reliability, Transmit};
+// Re-export the core types a consumer needs to configure the plugin, drive the
+// survey commands, and read events. `Event` is aliased to avoid clashing with
+// Bevy's `Event` derive.
+pub use sl_proto::{
+    AnyMessage, DisconnectReason, LoginParams, LoginRequest, MapRegionInfo, Maturity, MfaChallenge,
+    NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType, RegionFlags,
+    RegionIdentity, RegionLimits, Reliability, Transmit, Vector, grid_to_handle, handle_to_global,
+    handle_to_grid, sim_access,
+};
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
 /// The maximum UDP datagram size we are prepared to receive.
 const RECV_BUFFER_SIZE: usize = 0x1_0000;
+
+/// How long to wait for a single CAPS event-queue long-poll before retrying.
+const EVENT_QUEUE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The Bevy plugin that drives a sans-I/O [`Session`] from ECS systems.
 #[derive(Debug, Clone)]
@@ -61,6 +73,44 @@ pub enum SlCommand {
         /// How to deliver it.
         reliability: Reliability,
     },
+    /// Teleport to `position` (region-local) in the region `region_handle`.
+    Teleport {
+        /// The destination region handle.
+        region_handle: u64,
+        /// The destination position within the region.
+        position: Vector,
+        /// The look-at direction on arrival.
+        look_at: Vector,
+    },
+    /// Request the current region's info (agent/object limits).
+    RequestRegionInfo,
+    /// Request `ParcelProperties` for a metre rectangle (region-local).
+    RequestParcelProperties {
+        /// The western edge (metres).
+        west: f32,
+        /// The southern edge (metres).
+        south: f32,
+        /// The eastern edge (metres).
+        east: f32,
+        /// The northern edge (metres).
+        north: f32,
+        /// A sequence id echoed back in the reply for matching.
+        sequence_id: i32,
+    },
+    /// Set the draw distance advertised in keep-alive `AgentUpdate`s.
+    SetDrawDistance(f32),
+    /// Request world-map blocks for a grid-coordinate rectangle (region
+    /// indices); each region arrives as an [`SlSessionEvent::MapBlock`].
+    RequestMapBlocks {
+        /// Minimum grid x (inclusive).
+        min_x: u32,
+        /// Maximum grid x (inclusive).
+        max_x: u32,
+        /// Minimum grid y (inclusive).
+        min_y: u32,
+        /// Maximum grid y (inclusive).
+        max_y: u32,
+    },
     /// Begin a clean logout.
     Logout,
 }
@@ -96,9 +146,30 @@ enum SlInner {
         socket: UdpSocket,
         /// A reusable receive buffer.
         recv_buf: Vec<u8>,
+        /// The CAPS event-queue poller for the current region, if a seed
+        /// capability is known. Restarted on each region change.
+        caps: Option<CapsPoller>,
     },
     /// The session is finished.
     Done,
+}
+
+/// A handle to the background CAPS event-queue long-poll thread for one region.
+///
+/// The thread fetches the region's capability map, then long-polls
+/// `EventQueueGet`, forwarding each decoded event over `rx`. Dropping the poller
+/// signals the thread to stop after its in-flight request returns.
+struct CapsPoller {
+    /// Receives `(message, body)` pairs decoded from the event queue.
+    rx: Receiver<(String, Llsd)>,
+    /// Set on drop to ask the thread to stop at its next loop iteration.
+    stop: Arc<AtomicBool>,
+}
+
+impl Drop for CapsPoller {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
 }
 
 /// Startup system: builds the session and spawns the blocking login thread.
@@ -154,7 +225,16 @@ fn drive(
             session,
             socket,
             recv_buf,
-        } => advance_running(session, socket, recv_buf, now, &mut events, &mut commands),
+            caps,
+        } => advance_running(
+            session,
+            socket,
+            recv_buf,
+            caps,
+            now,
+            &mut events,
+            &mut commands,
+        ),
         SlInner::Done => SlInner::Done,
     };
 }
@@ -179,11 +259,15 @@ fn advance_login(
                     return SlInner::Done;
                 }
                 match bind_socket() {
-                    Ok(socket) => SlInner::Running {
-                        session,
-                        socket,
-                        recv_buf: vec![0u8; RECV_BUFFER_SIZE],
-                    },
+                    Ok(socket) => {
+                        let caps = start_caps_poller(&session);
+                        SlInner::Running {
+                            session,
+                            socket,
+                            recv_buf: vec![0u8; RECV_BUFFER_SIZE],
+                            caps,
+                        }
+                    }
                     Err(()) => {
                         emit_disconnect(events, DisconnectReason::ProtocolError);
                         SlInner::Done
@@ -224,12 +308,13 @@ fn bind_socket() -> Result<UdpSocket, ()> {
     Ok(socket)
 }
 
-/// Handles the running phase: receive, apply commands, time out, transmit, and
-/// surface events.
+/// Handles the running phase: receive UDP and CAPS events, apply commands, time
+/// out, transmit, and surface events.
 fn advance_running(
     mut session: Box<Session>,
     socket: UdpSocket,
     mut recv_buf: Vec<u8>,
+    mut caps: Option<CapsPoller>,
     now: Instant,
     events: &mut EventWriter<SlEvent>,
     commands: &mut EventReader<SlCommand>,
@@ -247,6 +332,13 @@ fn advance_running(
         }
     }
 
+    // Drain any CAPS event-queue events (ParcelProperties, TeleportFinish, ...).
+    if let Some(poller) = caps.as_ref() {
+        while let Ok((message, body)) = poller.rx.try_recv() {
+            session.handle_caps_event(&message, &body, now).ok();
+        }
+    }
+
     // Apply queued commands.
     for command in commands.read() {
         match command {
@@ -255,6 +347,40 @@ fn advance_running(
                 reliability,
             } => {
                 session.enqueue((**message).clone(), *reliability, now).ok();
+            }
+            SlCommand::Teleport {
+                region_handle,
+                position,
+                look_at,
+            } => {
+                session
+                    .teleport_to(*region_handle, position.clone(), look_at.clone(), now)
+                    .ok();
+            }
+            SlCommand::RequestRegionInfo => {
+                session.request_region_info(now).ok();
+            }
+            SlCommand::RequestParcelProperties {
+                west,
+                south,
+                east,
+                north,
+                sequence_id,
+            } => {
+                session
+                    .request_parcel_properties(*west, *south, *east, *north, *sequence_id, now)
+                    .ok();
+            }
+            SlCommand::SetDrawDistance(far) => session.set_draw_distance(*far),
+            SlCommand::RequestMapBlocks {
+                min_x,
+                max_x,
+                min_y,
+                max_y,
+            } => {
+                session
+                    .request_map_blocks(*min_x, *max_x, *min_y, *max_y, now)
+                    .ok();
             }
             SlCommand::Logout => session.initiate_logout(now),
         }
@@ -273,16 +399,21 @@ fn advance_running(
         socket.send_to(&transmit.payload, transmit.destination).ok();
     }
 
-    // Surface events.
+    // Surface events. A region change brings a new seed capability, so restart
+    // the event-queue poller against the new region (dropping the old poller
+    // signals its thread to stop).
     let mut done = false;
+    let mut region_changed = false;
     while let Some(event) = session.poll_event() {
-        if matches!(
-            event,
-            SessionEvent::Disconnected(_) | SessionEvent::LoggedOut
-        ) {
-            done = true;
+        match &event {
+            SessionEvent::Disconnected(_) | SessionEvent::LoggedOut => done = true,
+            SessionEvent::RegionChanged { .. } => region_changed = true,
+            _ => {}
         }
         events.write(SlEvent(event));
+    }
+    if region_changed {
+        caps = start_caps_poller(&session);
     }
 
     if done || session.is_closed() {
@@ -292,6 +423,84 @@ fn advance_running(
             session,
             socket,
             recv_buf,
+            caps,
+        }
+    }
+}
+
+/// Starts the CAPS event-queue poll thread for the session's current seed
+/// capability, returning its handle, or `None` if no seed is known yet.
+fn start_caps_poller(session: &Session) -> Option<CapsPoller> {
+    let seed = session.seed_capability()?.to_owned();
+    let (tx, rx) = unbounded();
+    let stop = Arc::new(AtomicBool::new(false));
+    let thread_stop = Arc::clone(&stop);
+    std::thread::spawn(move || run_event_queue(seed, &tx, &thread_stop));
+    Some(CapsPoller { rx, stop })
+}
+
+/// Fetches the capability map from `seed_url`, then long-polls its
+/// `EventQueueGet` capability on a background thread, forwarding each decoded
+/// event to `caps_tx` until `stop` is set, the receiver is dropped (e.g. on
+/// region change), or a request fails fatally.
+fn run_event_queue(seed_url: String, caps_tx: &Sender<(String, Llsd)>, stop: &AtomicBool) {
+    let Ok(http) = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    else {
+        return;
+    };
+    let seed_body = build_seed_request(&["EventQueueGet"]);
+    let Ok(response) = http
+        .post(&seed_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(seed_body)
+        .send()
+    else {
+        return;
+    };
+    let Ok(text) = response.text() else {
+        return;
+    };
+    let Ok(capabilities) = parse_seed_response(&text) else {
+        return;
+    };
+    let Some(event_queue_url) = capabilities.get("EventQueueGet").cloned() else {
+        return;
+    };
+
+    let mut ack: Option<i32> = None;
+    while !stop.load(Ordering::Relaxed) {
+        let request_body = build_event_queue_request(ack, false);
+        let response = match http
+            .post(&event_queue_url)
+            .header("Content-Type", "application/llsd+xml")
+            .body(request_body)
+            .send()
+        {
+            Ok(response) => response,
+            Err(_error) => {
+                std::thread::sleep(Duration::from_secs(1));
+                continue;
+            }
+        };
+        // A timeout with no events returns a non-2xx (e.g. 502); re-poll with
+        // the same ack after a short pause.
+        if !response.status().is_success() {
+            std::thread::sleep(Duration::from_millis(200));
+            continue;
+        }
+        let Ok(text) = response.text() else {
+            continue;
+        };
+        let Ok(parsed) = parse_event_queue_response(&text) else {
+            continue;
+        };
+        ack = Some(parsed.id);
+        for event in parsed.events {
+            if caps_tx.send((event.message, event.body)).is_err() {
+                return;
+            }
         }
     }
 }
