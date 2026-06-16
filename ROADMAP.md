@@ -32,7 +32,7 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 2 ✅ | Instant messaging **(done)** | 5 | IM bot, notifier, offer-handler | Local OpenSim |
 | 3 ✅ | Agent movement & control **(done)** | 5 | Walking/flying/follow bot, autopilot | Local OpenSim (real physics engine) |
 | 4 ✅ | Avatar profiles **(done)** | 3 | Profile / picks checker | Local OpenSim (profiles enabled) |
-| 5 | Inventory (AIS3) | 8 | Inventory manager, product-update bot | Local OpenSim |
+| 5 ✅ | Inventory **(done, UDP + CAPS)** | 8 | Inventory manager, product-update bot | Local OpenSim |
 | 6 | Friends & presence | 5 | Presence/online monitor | Local OpenSim (2 accounts) |
 | 7 | Group support | 8 | Group chat bot, roster tool | Local OpenSim (Groups module) |
 | 8 | Script dialogs & permissions | 3 | Vendor/scripted-object interaction bot | Local OpenSim |
@@ -123,13 +123,37 @@ create-update-delete) and pick/classified *detail* fetches are follow-ups.
 *Test: local OpenSim — needs the profile module enabled (set `[UserProfiles]
 ProfileServiceURL`); otherwise no reply is sent.*
 
-**5. Inventory — AIS3 CAPS (`FetchInventoryDescendents2`, `FetchInventory2`,
-`InventoryAPIv3`), legacy `FetchInventoryDescendents`,
-`BulkUpdateInventory`/`UpdateInventoryItem` · 8 pts.** Fetch and cache the
-folder/item tree, watch updates, move/copy/delete. On its own this is an
-inventory manager or a product-update distributor bot; later it is the
-prerequisite for appearance (Current Outfit Folder) and for giving items over IM
-(#2). Mostly LLSD over HTTP. *Test: local OpenSim.*
+**5. Inventory — login skeleton + UDP and HTTP-CAPS fetch · 8 pts. ✅ Done (UDP
+
+- CAPS).** Fetch the folder/item tree. Implemented: the login request asks for
+`inventory-root` + `inventory-skeleton`, and the response parser extracts the
+root folder id and the full folder skeleton (every folder's
+id/parent/name/type/version), surfaced as `Event::InventorySkeleton` +
+`Session::inventory_root()`. Folder *contents* are available over **both**
+transports, both surfaced as `Event::InventoryDescendents` with
+`InventoryFolder`
+- `InventoryItem` value types (full permissions, asset id, types, sale info):
+- **UDP** — `Session::request_folder_contents` (`FetchInventoryDescendents` →
+  `InventoryDescendents`), wired as `Command::RequestFolderContents`. Simple,
+  one folder per call; OpenSim splits the reply across packets.
+- **HTTP CAPS** — `Command::FetchInventoryFolders` (batch), the modern path used
+  on Second Life. The capability map is now a first-class runtime concept: each
+  runtime fetches the seed once per region (requesting
+  `REQUESTED_CAPABILITIES`), caches the `cap → URL` map, drives the
+  `EventQueueGet` long-poll off it, and POSTs `FetchInventoryDescendents2` for
+  inventory; the LLSD response is decoded by `Session::handle_caps_event` into
+  the same event. The capability-map caching refactor also sets up future CAPS
+  calls (textures, mesh, AIS3, …).
+
+Verified live against the local OpenSim on both paths (20-folder skeleton; root
+fetch returning all 17 system sub-folders — three UDP packets vs one CAPS
+response). Deferred: AIS3 (`InventoryAPIv3`) REST semantics, and inventory
+*mutation* (`BulkUpdateInventory`/`UpdateInventoryItem` watching,
+move/copy/delete/create). Prerequisite for appearance (Current Outfit Folder,
+
+## 20) and giving items over IM (#2). *Test: local OpenSim (both paths
+
+`Cap_FetchInventoryDescendents2` is enabled by default).*
 
 **6. Friends & presence — `OnlineNotification`/`OfflineNotification`,
 `TerminateFriendship`, `GrantUserRights`/`ChangeUserRights`, friendship
@@ -161,7 +185,7 @@ real child→root handover so a roaming bot keeps one continuous session (open
 IMs, group sessions, agent state) across teleports and region crossings.
 *Test: local OpenSim with adjacent regions.*
 
-## Tier B — extensions of the existing survey/map strengths
+### Tier B — extensions of the existing survey/map strengths
 
 These build directly on the read-only data the client already collects, each a
 usable standalone tool.
@@ -188,7 +212,7 @@ parcel read path into a land-management tool (edit, access lists, dwell, buy).
 Region/estate admin for owners — a restart/ban/management bot.
 *Test: local OpenSim with an estate-owner account (full control locally).*
 
-## Tier C — world-rendering cluster (value compounds across the group)
+### Tier C — world-rendering cluster (value compounds across the group)
 
 Individually these do little; together they let the bevy crate render and
 interact with the actual world. Do them as a set, in this order. **#15 first** —
@@ -210,7 +234,7 @@ decoding, object-cache CRC negotiation, and an `ObjectAdded`/`Updated`/`Removed`
 event stream. Even before a renderer exists this enables a scene auditor or
 proximity bot, but its full payoff needs #18–#20. Depends on
 
-## 15. *Test: local OpenSim — rez prims via console/viewer to populate the scene.*
+### 15. *Test: local OpenSim — rez prims via console/viewer to populate the scene.*
 
 **17. Object interaction & editing — `ObjectSelect`/`ObjectDeselect`,
 `ObjectGrab`/ `ObjectGrabUpdate`/`ObjectDeGrab` (touch/click), `ObjectAdd`
@@ -243,7 +267,7 @@ them; manage own outfit via the COF. Depends on #19 (textures) and #5
 · 5 pts.** Play/stop built-in and custom animations and observe others' — a
 dance/gesture bot, or motion in a renderer. Custom (uploaded) anims depend on
 
-## 19. *Test: local OpenSim.*
+### 19. *Test: local OpenSim.*
 
 **22. Sound — `SoundTrigger`, `AttachedSound`, `PreloadSound`,
 `AttachedSoundGainChange` · 3 pts.** Receive and locate spatial sound events;
@@ -265,7 +289,7 @@ material assets, GLTF override decode · 8 pts.** Modern SL rendering layered on
 objects (#16) and textures (#19).
 *Test: a recent SL grid; OpenSim support varies by build/version.*
 
-### Tier D — specialized (needs more than local OpenSim)
+#### Tier D — specialized (needs more than local OpenSim)
 
 **26. Voice chat — Vivox/WebRTC signalling via CAPS
 (`ProvisionVoiceAccountRequest`, `ParcelVoiceInfoRequest`, WebRTC session SDP) ·
@@ -277,7 +301,7 @@ voice module — not available on stock local OpenSim.*
 Permission grants and experience-keyed scripts.
 *Test: SL grid only — no OpenSim equivalent.*
 
-### Out of scope (not LLUDP/CAPS protocol)
+#### Out of scope (not LLUDP/CAPS protocol)
 
 Rendering/physics engines, J2C/mesh *display* (vs. decode), the in-viewer UI,
 and the Marketplace (web, not protocol) are deliberately excluded — this roadmap

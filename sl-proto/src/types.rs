@@ -186,6 +186,25 @@ pub enum Event {
         /// The note text.
         notes: String,
     },
+    /// The agent's inventory folder skeleton (every folder, without item
+    /// contents), parsed from the login response. Emitted once, right after
+    /// [`Event::CircuitEstablished`], when the login provided it.
+    InventorySkeleton(Vec<InventoryFolder>),
+    /// The contents of an inventory folder (`InventoryDescendents`), in response
+    /// to [`Session::request_folder_contents`](crate::Session::request_folder_contents):
+    /// its immediate sub-folders and items.
+    InventoryDescendents {
+        /// The folder whose contents these are.
+        folder_id: Uuid,
+        /// The folder version (for cache validation).
+        version: i32,
+        /// The total descendent count the simulator reports.
+        descendents: i32,
+        /// The immediate sub-folders.
+        folders: Vec<InventoryFolder>,
+        /// The items directly in the folder.
+        items: Vec<InventoryItem>,
+    },
     /// The simulator answered a sit request (`AvatarSitResponse`) after a
     /// [`Session::sit_on`](crate::Session::sit_on); the session has sent the
     /// completing `AgentSit`.
@@ -766,6 +785,68 @@ pub struct AvatarPick {
     pub pick_id: Uuid,
     /// The pick name.
     pub name: String,
+}
+
+/// An inventory folder (category): from the login skeleton
+/// ([`Event::InventorySkeleton`]) or an `InventoryDescendents` sub-folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InventoryFolder {
+    /// The folder's id.
+    pub folder_id: Uuid,
+    /// The parent folder's id (nil for the root).
+    pub parent_id: Uuid,
+    /// The folder name.
+    pub name: String,
+    /// The folder's default asset/folder type (`FolderType`; `-1` for none).
+    pub folder_type: i8,
+    /// The folder version, or `0` when not provided (sub-folders of a descendents
+    /// reply do not carry their own version).
+    pub version: i32,
+}
+
+/// An inventory item, from an `InventoryDescendents` item entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InventoryItem {
+    /// The item's id.
+    pub item_id: Uuid,
+    /// The containing folder's id.
+    pub folder_id: Uuid,
+    /// The item name.
+    pub name: String,
+    /// The item description.
+    pub description: String,
+    /// The underlying asset id.
+    pub asset_id: Uuid,
+    /// The asset type (`AssetType`).
+    pub item_type: i8,
+    /// The inventory type (`InventoryType`).
+    pub inv_type: i8,
+    /// The item flags bitfield.
+    pub flags: u32,
+    /// The sale type (not for sale / original / copy / contents).
+    pub sale_type: u8,
+    /// The sale price, in L$.
+    pub sale_price: i32,
+    /// The creation date (Unix seconds).
+    pub creation_date: i32,
+    /// The current owner's id.
+    pub owner_id: Uuid,
+    /// The creator's id.
+    pub creator_id: Uuid,
+    /// The group associated with the item.
+    pub group_id: Uuid,
+    /// Whether the item is group-owned.
+    pub group_owned: bool,
+    /// The base permissions mask.
+    pub base_mask: u32,
+    /// The owner permissions mask.
+    pub owner_mask: u32,
+    /// The group permissions mask.
+    pub group_mask: u32,
+    /// The everyone permissions mask.
+    pub everyone_mask: u32,
+    /// The next-owner permissions mask.
+    pub next_owner_mask: u32,
 }
 
 /// Splits a region handle into its global south-west corner in metres,

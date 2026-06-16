@@ -11,9 +11,12 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 use bevy::prelude::*;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 
+use std::collections::HashMap;
+
 use sl_proto::{
-    Event as SessionEvent, Llsd, LoginResponse, Session, build_event_queue_request,
-    build_seed_request, parse_event_queue_response, parse_login_response, parse_seed_response,
+    CAP_FETCH_INVENTORY, Event as SessionEvent, Llsd, LoginResponse, REQUESTED_CAPABILITIES,
+    Session, build_event_queue_request, build_fetch_inventory_request, build_seed_request,
+    parse_event_queue_response, parse_llsd_xml, parse_login_response, parse_seed_response,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -22,10 +25,10 @@ use sl_proto::{
 pub use sl_proto::{
     AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
     ChatMessage, ChatSourceType, ChatType, ControlFlags, DisconnectReason, ImDialog,
-    InstantMessage, LoginParams, LoginRequest, MapRegionInfo, Maturity, MfaChallenge, NeighborInfo,
-    ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity,
-    RegionLimits, Reliability, Rotation, Transmit, Uuid, Vector, grid_to_handle, handle_to_global,
-    handle_to_grid, sim_access,
+    InstantMessage, InventoryFolder, InventoryItem, LoginParams, LoginRequest, MapRegionInfo,
+    Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
+    RegionFlags, RegionIdentity, RegionLimits, Reliability, Rotation, Transmit, Uuid, Vector,
+    grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
@@ -146,6 +149,15 @@ pub enum SlCommand {
     /// Request the agent's private notes about an avatar. The reply arrives as
     /// [`SlSessionEvent::AvatarNotes`].
     RequestAvatarNotes(Uuid),
+    /// Request the contents (sub-folders and items) of an inventory folder over
+    /// **UDP** (`FetchInventoryDescendents`). The reply arrives as
+    /// [`SlSessionEvent::InventoryDescendents`]. The full folder skeleton arrives
+    /// once at login as [`SlSessionEvent::InventorySkeleton`].
+    RequestFolderContents(Uuid),
+    /// Fetch the contents of one or more inventory folders over the **HTTP CAPS**
+    /// path (`FetchInventoryDescendents2`) — the modern path used on Second Life.
+    /// Each folder's contents arrive as an [`SlSessionEvent::InventoryDescendents`].
+    FetchInventoryFolders(Vec<Uuid>),
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
         /// The destination region handle.
@@ -219,27 +231,33 @@ enum SlInner {
         socket: UdpSocket,
         /// A reusable receive buffer.
         recv_buf: Vec<u8>,
-        /// The CAPS event-queue poller for the current region, if a seed
-        /// capability is known. Restarted on each region change.
-        caps: Option<CapsPoller>,
+        /// The CAPS subsystem for the current region, if a seed capability is
+        /// known. Restarted on each region change.
+        caps: Option<Caps>,
     },
     /// The session is finished.
     Done,
 }
 
-/// A handle to the background CAPS event-queue long-poll thread for one region.
-///
-/// The thread fetches the region's capability map, then long-polls
-/// `EventQueueGet`, forwarding each decoded event over `rx`. Dropping the poller
-/// signals the thread to stop after its in-flight request returns.
-struct CapsPoller {
-    /// Receives `(message, body)` pairs decoded from the event queue.
-    rx: Receiver<(String, Llsd)>,
-    /// Set on drop to ask the thread to stop at its next loop iteration.
+/// The CAPS subsystem for one region: a background thread fetches the capability
+/// map (reported over `map_rx`) then long-polls `EventQueueGet`, forwarding each
+/// decoded event over `events_rx`. One-shot CAPS fetches (inventory) run on their
+/// own threads and report back over the same `events_tx`. Dropping it signals the
+/// poller thread to stop after its in-flight request returns.
+struct Caps {
+    /// Receives decoded event-queue events and CAPS responses (e.g. inventory).
+    events_rx: Receiver<(String, Llsd)>,
+    /// A sender clone for spawning one-shot CAPS fetches.
+    events_tx: Sender<(String, Llsd)>,
+    /// Receives the region's capability map once the poller has fetched it.
+    map_rx: Receiver<HashMap<String, String>>,
+    /// The cached capability map (cap name → URL), empty until discovered.
+    map: HashMap<String, String>,
+    /// Set on drop to ask the poller thread to stop at its next loop iteration.
     stop: Arc<AtomicBool>,
 }
 
-impl Drop for CapsPoller {
+impl Drop for Caps {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
     }
@@ -333,7 +351,7 @@ fn advance_login(
                 }
                 match bind_socket() {
                     Ok(socket) => {
-                        let caps = start_caps_poller(&session);
+                        let caps = start_caps(&session);
                         SlInner::Running {
                             session,
                             socket,
@@ -387,7 +405,7 @@ fn advance_running(
     mut session: Box<Session>,
     socket: UdpSocket,
     mut recv_buf: Vec<u8>,
-    mut caps: Option<CapsPoller>,
+    mut caps: Option<Caps>,
     now: Instant,
     events: &mut EventWriter<SlEvent>,
     commands: &mut EventReader<SlCommand>,
@@ -405,9 +423,13 @@ fn advance_running(
         }
     }
 
-    // Drain any CAPS event-queue events (ParcelProperties, TeleportFinish, ...).
-    if let Some(poller) = caps.as_ref() {
-        while let Ok((message, body)) = poller.rx.try_recv() {
+    // Cache the capability map once the poller discovers it, then drain any CAPS
+    // payloads (event-queue events plus inventory responses).
+    if let Some(caps) = caps.as_mut() {
+        while let Ok(map) = caps.map_rx.try_recv() {
+            caps.map = map;
+        }
+        while let Ok((message, body)) = caps.events_rx.try_recv() {
             session.handle_caps_event(&message, &body, now).ok();
         }
     }
@@ -476,6 +498,23 @@ fn advance_running(
             SlCommand::RequestAvatarNotes(target) => {
                 session.request_avatar_notes(*target, now).ok();
             }
+            SlCommand::RequestFolderContents(folder_id) => {
+                session.request_folder_contents(*folder_id, now).ok();
+            }
+            SlCommand::FetchInventoryFolders(folder_ids) => {
+                if let Some(caps) = caps.as_ref()
+                    && let (Some(url), Some(owner)) = (
+                        caps.map.get(CAP_FETCH_INVENTORY).cloned(),
+                        session.agent_id(),
+                    )
+                {
+                    let events_tx = caps.events_tx.clone();
+                    let folders = folder_ids.clone();
+                    std::thread::spawn(move || {
+                        run_inventory_fetch(&url, owner, &folders, &events_tx);
+                    });
+                }
+            }
             SlCommand::Teleport {
                 region_handle,
                 position,
@@ -541,7 +580,7 @@ fn advance_running(
         events.write(SlEvent(event));
     }
     if region_changed {
-        caps = start_caps_poller(&session);
+        caps = start_caps(&session);
     }
 
     if done || session.is_closed() {
@@ -556,33 +595,46 @@ fn advance_running(
     }
 }
 
-/// Starts the CAPS event-queue poll thread for the session's current seed
-/// capability, returning its handle, or `None` if no seed is known yet.
-fn start_caps_poller(session: &Session) -> Option<CapsPoller> {
+/// Starts the CAPS subsystem for the session's current seed capability: a
+/// background thread that fetches the capability map (reported over `map_rx`)
+/// then long-polls `EventQueueGet`. Returns `None` if no seed is known yet.
+fn start_caps(session: &Session) -> Option<Caps> {
     let seed = session.seed_capability()?.to_owned();
-    let (tx, rx) = unbounded();
+    let (events_tx, events_rx) = unbounded();
+    let (map_tx, map_rx) = unbounded();
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
-    std::thread::spawn(move || run_event_queue(seed, &tx, &thread_stop));
-    Some(CapsPoller { rx, stop })
+    let thread_events = events_tx.clone();
+    std::thread::spawn(move || run_caps(seed, &thread_events, &map_tx, &thread_stop));
+    Some(Caps {
+        events_rx,
+        events_tx,
+        map_rx,
+        map: HashMap::new(),
+        stop,
+    })
 }
 
-/// Fetches the capability map from `seed_url`, then long-polls its
-/// `EventQueueGet` capability on a background thread, forwarding each decoded
-/// event to `caps_tx` until `stop` is set, the receiver is dropped (e.g. on
-/// region change), or a request fails fatally.
-fn run_event_queue(seed_url: String, caps_tx: &Sender<(String, Llsd)>, stop: &AtomicBool) {
+/// Fetches the capability map from `seed_url` (reporting it over `map_tx`), then
+/// long-polls the `EventQueueGet` capability, forwarding each decoded event to
+/// `caps_tx` until `stop` is set, a receiver is dropped (e.g. on region change),
+/// or a request fails fatally.
+fn run_caps(
+    seed_url: String,
+    caps_tx: &Sender<(String, Llsd)>,
+    map_tx: &Sender<HashMap<String, String>>,
+    stop: &AtomicBool,
+) {
     let Ok(http) = ReqwestBlockingClient::builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
         return;
     };
-    let seed_body = build_seed_request(&["EventQueueGet"]);
     let Ok(response) = http
         .post(&seed_url)
         .header("Content-Type", "application/llsd+xml")
-        .body(seed_body)
+        .body(build_seed_request(REQUESTED_CAPABILITIES))
         .send()
     else {
         return;
@@ -593,6 +645,7 @@ fn run_event_queue(seed_url: String, caps_tx: &Sender<(String, Llsd)>, stop: &At
     let Ok(capabilities) = parse_seed_response(&text) else {
         return;
     };
+    map_tx.send(capabilities.clone()).ok();
     let Some(event_queue_url) = capabilities.get("EventQueueGet").cloned() else {
         return;
     };
@@ -630,6 +683,38 @@ fn run_event_queue(seed_url: String, caps_tx: &Sender<(String, Llsd)>, stop: &At
                 return;
             }
         }
+    }
+}
+
+/// POSTs a `FetchInventoryDescendents2` request for `folder_ids` and forwards the
+/// LLSD response to `caps_tx` tagged [`CAP_FETCH_INVENTORY`], for the session to
+/// decode into [`SlSessionEvent::InventoryDescendents`].
+fn run_inventory_fetch(
+    cap_url: &str,
+    owner_id: Uuid,
+    folder_ids: &[Uuid],
+    caps_tx: &Sender<(String, Llsd)>,
+) {
+    let Ok(http) = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    else {
+        return;
+    };
+    let body = build_fetch_inventory_request(owner_id, folder_ids);
+    let Ok(response) = http
+        .post(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+    else {
+        return;
+    };
+    let Ok(text) = response.text() else {
+        return;
+    };
+    if let Ok(llsd) = parse_llsd_xml(&text) {
+        caps_tx.send((CAP_FETCH_INVENTORY.to_owned(), llsd)).ok();
     }
 }
 

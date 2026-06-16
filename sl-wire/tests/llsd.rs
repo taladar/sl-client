@@ -102,6 +102,24 @@ mod test {
     }
 
     #[test]
+    fn builds_fetch_inventory_request() -> Result<(), TestError> {
+        let owner = "11111111-1111-1111-1111-111111111111".parse::<uuid::Uuid>()?;
+        let folder = "22222222-2222-2222-2222-222222222222".parse::<uuid::Uuid>()?;
+        let body = sl_wire::build_fetch_inventory_request(owner, &[folder]);
+        assert!(body.starts_with("<llsd><map><key>folders</key><array>"));
+        assert!(
+            body.contains("<key>folder_id</key><uuid>22222222-2222-2222-2222-222222222222</uuid>")
+        );
+        assert!(
+            body.contains("<key>owner_id</key><uuid>11111111-1111-1111-1111-111111111111</uuid>")
+        );
+        assert!(body.contains("<key>fetch_items</key><boolean>1</boolean>"));
+        // The parsed round-trip is well-formed LLSD.
+        assert!(parse_llsd_xml(&body)?.get("folders").is_some());
+        Ok(())
+    }
+
+    #[test]
     fn malformed_xml_is_an_error() {
         assert!(
             parse_llsd_xml("<llsd><map>").err().is_some(),

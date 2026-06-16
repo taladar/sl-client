@@ -19,12 +19,13 @@ pub use error::WireError;
 pub use field::{Reader, Writer};
 pub use header::{PacketFlags, ParsedDatagram, encode_datagram, parse_datagram};
 pub use llsd::{
-    EventQueueEvent, EventQueueResponse, Llsd, build_event_queue_request, build_seed_request,
-    parse_event_queue_response, parse_llsd_xml, parse_seed_response,
+    EventQueueEvent, EventQueueResponse, Llsd, build_event_queue_request,
+    build_fetch_inventory_request, build_seed_request, parse_event_queue_response, parse_llsd_xml,
+    parse_seed_response,
 };
 pub use login::{
     LoginFailure, LoginParseError, LoginRequest, LoginResponse, LoginSuccess, MfaChallenge,
-    build_login_request, parse_login_response, password_hash,
+    SkeletonFolder, build_login_request, parse_login_response, password_hash,
 };
 pub use message::{Message, MessageId};
 pub use messages::AnyMessage;

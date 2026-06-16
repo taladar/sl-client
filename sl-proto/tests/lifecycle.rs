@@ -22,7 +22,9 @@ mod test {
         AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock, ChatFromSimulator,
         ChatFromSimulatorChatDataBlock, ImprovedInstantMessage,
         ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
-        ImprovedInstantMessageMessageBlockBlock, LogoutRequest, LogoutRequestAgentDataBlock,
+        ImprovedInstantMessageMessageBlockBlock, InventoryDescendents,
+        InventoryDescendentsAgentDataBlock, InventoryDescendentsFolderDataBlock,
+        InventoryDescendentsItemDataBlock, LogoutRequest, LogoutRequestAgentDataBlock,
         MapBlockReply, MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock,
         ParcelProperties, ParcelPropertiesAgeVerificationBlockBlock,
         ParcelPropertiesParcelDataBlock, ParcelPropertiesParcelEnvironmentBlockBlock,
@@ -34,7 +36,8 @@ mod test {
     };
     use sl_wire::{
         AnyMessage, LoginFailure, LoginRequest, LoginResponse, LoginSuccess, MessageId,
-        PacketFlags, Reader, Writer, encode_datagram, parse_datagram,
+        PacketFlags, Reader, SkeletonFolder, Writer, encode_datagram, parse_datagram,
+        parse_llsd_xml,
     };
 
     /// A boxed test error.
@@ -71,6 +74,8 @@ mod test {
             seed_capability: "http://127.0.0.1:9000/seed".to_owned(),
             message: None,
             mfa_hash: None,
+            inventory_root: None,
+            inventory_skeleton: Vec::new(),
         }))
     }
 
@@ -910,6 +915,224 @@ mod test {
             })
             .ok_or("expected an AvatarNotes event")?;
         assert_eq!(notes, "met at the welcome area");
+        Ok(())
+    }
+
+    #[test]
+    fn login_skeleton_emits_inventory_skeleton() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = new_session();
+        let root = uuid::Uuid::from_u128(0xF0);
+        let login = LoginResponse::Success(Box::new(LoginSuccess {
+            agent_id: uuid::Uuid::from_u128(1),
+            session_id: uuid::Uuid::from_u128(2),
+            secure_session_id: uuid::Uuid::from_u128(3),
+            circuit_code: 0x0011_2233,
+            sim_ip: Ipv4Addr::new(127, 0, 0, 1),
+            sim_port: 9000,
+            seed_capability: "http://127.0.0.1:9000/seed".to_owned(),
+            message: None,
+            mfa_hash: None,
+            inventory_root: Some(root),
+            inventory_skeleton: vec![
+                SkeletonFolder {
+                    folder_id: root,
+                    parent_id: uuid::Uuid::nil(),
+                    name: "My Inventory".to_owned(),
+                    type_default: 8,
+                    version: 5,
+                },
+                SkeletonFolder {
+                    folder_id: uuid::Uuid::from_u128(0xF1),
+                    parent_id: root,
+                    name: "Objects".to_owned(),
+                    type_default: 6,
+                    version: 2,
+                },
+            ],
+        }));
+        session.handle_login_response(login, now)?;
+
+        assert_eq!(session.inventory_root(), Some(root));
+        let folders = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InventorySkeleton(folders) => Some(folders),
+                _ => None,
+            })
+            .ok_or("expected an InventorySkeleton event")?;
+        assert_eq!(folders.len(), 2);
+        let first = folders.first().ok_or("root folder")?;
+        assert_eq!(first.name, "My Inventory");
+        assert_eq!(first.folder_id, root);
+        assert_eq!(folders.get(1).ok_or("second folder")?.parent_id, root);
+        Ok(())
+    }
+
+    #[test]
+    fn request_folder_contents_packs_fetch() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let folder = uuid::Uuid::from_u128(0xF0);
+        session.request_folder_contents(folder, now)?;
+        let sent = drain(&mut session)?;
+        let fetch = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::FetchInventoryDescendents(fetch) => Some(fetch),
+                _ => None,
+            })
+            .ok_or("expected a FetchInventoryDescendents")?;
+        assert_eq!(fetch.inventory_data.folder_id, folder);
+        assert!(fetch.inventory_data.fetch_folders);
+        assert!(fetch.inventory_data.fetch_items);
+        Ok(())
+    }
+
+    #[test]
+    fn inventory_descendents_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let folder = uuid::Uuid::from_u128(0xF0);
+        let reply = AnyMessage::InventoryDescendents(InventoryDescendents {
+            agent_data: InventoryDescendentsAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                folder_id: folder,
+                owner_id: uuid::Uuid::from_u128(1),
+                version: 7,
+                descendents: 2,
+            },
+            folder_data: vec![InventoryDescendentsFolderDataBlock {
+                folder_id: uuid::Uuid::from_u128(0xF2),
+                parent_id: folder,
+                r#type: 6,
+                name: b"Clothing\0".to_vec(),
+            }],
+            item_data: vec![InventoryDescendentsItemDataBlock {
+                item_id: uuid::Uuid::from_u128(0xD1),
+                folder_id: folder,
+                creator_id: uuid::Uuid::from_u128(0xC1),
+                owner_id: uuid::Uuid::from_u128(1),
+                group_id: uuid::Uuid::nil(),
+                base_mask: 0x7FFF_FFFF,
+                owner_mask: 0x7FFF_FFFF,
+                group_mask: 0,
+                everyone_mask: 0,
+                next_owner_mask: 0x0008_2000,
+                group_owned: false,
+                asset_id: uuid::Uuid::from_u128(0xA1),
+                r#type: 5,
+                inv_type: 7,
+                flags: 0,
+                sale_type: 0,
+                sale_price: 0,
+                name: b"a notecard\0".to_vec(),
+                description: b"2008-01-01\0".to_vec(),
+                creation_date: 1_200_000_000,
+                crc: 0,
+            }],
+        });
+        let datagram = server_message(&reply, 9, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let (folders, items) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InventoryDescendents {
+                    folder_id,
+                    folders,
+                    items,
+                    ..
+                } if folder_id == folder => Some((folders, items)),
+                _ => None,
+            })
+            .ok_or("expected an InventoryDescendents event")?;
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders.first().ok_or("folder")?.name, "Clothing");
+        assert_eq!(items.len(), 1);
+        let item = items.first().ok_or("item")?;
+        assert_eq!(item.name, "a notecard");
+        assert_eq!(item.asset_id, uuid::Uuid::from_u128(0xA1));
+        assert_eq!(item.inv_type, 7);
+        Ok(())
+    }
+
+    #[test]
+    fn caps_inventory_response_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A FetchInventoryDescendents2 CAPS response: one folder with a
+        // sub-category and one item (with nested permissions and sale_info).
+        let xml = r"<llsd><map><key>folders</key><array><map>
+            <key>folder_id</key><uuid>00000000-0000-0000-0000-0000000000f0</uuid>
+            <key>version</key><integer>7</integer>
+            <key>descendents</key><integer>2</integer>
+            <key>categories</key><array><map>
+                <key>category_id</key><uuid>00000000-0000-0000-0000-0000000000f2</uuid>
+                <key>parent_id</key><uuid>00000000-0000-0000-0000-0000000000f0</uuid>
+                <key>name</key><string>Clothing</string>
+                <key>type_default</key><integer>5</integer>
+                <key>version</key><integer>1</integer>
+            </map></array>
+            <key>items</key><array><map>
+                <key>item_id</key><uuid>00000000-0000-0000-0000-0000000000d1</uuid>
+                <key>parent_id</key><uuid>00000000-0000-0000-0000-0000000000f0</uuid>
+                <key>name</key><string>a notecard</string>
+                <key>desc</key><string>my notes</string>
+                <key>asset_id</key><uuid>00000000-0000-0000-0000-0000000000a1</uuid>
+                <key>type</key><integer>7</integer>
+                <key>inv_type</key><integer>7</integer>
+                <key>flags</key><integer>0</integer>
+                <key>created_at</key><integer>1200000000</integer>
+                <key>sale_info</key><map><key>sale_price</key><integer>0</integer><key>sale_type</key><integer>0</integer></map>
+                <key>permissions</key><map>
+                    <key>creator_id</key><uuid>00000000-0000-0000-0000-0000000000c1</uuid>
+                    <key>owner_id</key><uuid>00000000-0000-0000-0000-000000000001</uuid>
+                    <key>group_id</key><uuid>00000000-0000-0000-0000-000000000000</uuid>
+                    <key>base_mask</key><integer>2147483647</integer>
+                    <key>owner_mask</key><integer>2147483647</integer>
+                    <key>group_mask</key><integer>0</integer>
+                    <key>everyone_mask</key><integer>0</integer>
+                    <key>next_owner_mask</key><integer>532480</integer>
+                    <key>is_owner_group</key><boolean>0</boolean>
+                </map>
+            </map></array>
+        </map></array></map></llsd>";
+        let body = parse_llsd_xml(xml)?;
+        session.handle_caps_event("FetchInventoryDescendents2", &body, now)?;
+
+        let (folders, items) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InventoryDescendents {
+                    folder_id,
+                    version,
+                    folders,
+                    items,
+                    ..
+                } if folder_id == uuid::Uuid::from_u128(0xF0) && version == 7 => {
+                    Some((folders, items))
+                }
+                _ => None,
+            })
+            .ok_or("expected an InventoryDescendents event")?;
+        let folder = folders.first().ok_or("category")?;
+        assert_eq!(folder.name, "Clothing");
+        assert_eq!(folder.folder_id, uuid::Uuid::from_u128(0xF2));
+        let item = items.first().ok_or("item")?;
+        assert_eq!(item.name, "a notecard");
+        assert_eq!(item.description, "my notes");
+        assert_eq!(item.asset_id, uuid::Uuid::from_u128(0xA1));
+        assert_eq!(item.creator_id, uuid::Uuid::from_u128(0xC1));
+        assert_eq!(item.inv_type, 7);
+        assert_eq!(item.base_mask, 0x7FFF_FFFF);
+        assert_eq!(item.next_owner_mask, 532_480);
         Ok(())
     }
 

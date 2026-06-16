@@ -70,7 +70,9 @@ impl LoginRequest {
             id0: String::new(),
             token: String::new(),
             mfa_hash: String::new(),
-            options: Vec::new(),
+            // Request the inventory root and folder skeleton so the login
+            // response carries the agent's full folder tree.
+            options: vec!["inventory-root".to_owned(), "inventory-skeleton".to_owned()],
         }
     }
 
@@ -219,6 +221,29 @@ pub struct LoginSuccess {
     /// multi-factor challenge ("remember this device"), if the grid provided
     /// one.
     pub mfa_hash: Option<String>,
+    /// The agent's inventory root ("My Inventory") folder id, from the
+    /// `inventory-root` response field (if requested and provided).
+    pub inventory_root: Option<Uuid>,
+    /// The agent's inventory folder skeleton (every folder's id, parent, name,
+    /// type, and version), from the `inventory-skeleton` response field. Empty if
+    /// not requested/provided.
+    pub inventory_skeleton: Vec<SkeletonFolder>,
+}
+
+/// One folder of the inventory skeleton carried in a login response
+/// (`inventory-skeleton`): the folder tree without item contents.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkeletonFolder {
+    /// The folder's id.
+    pub folder_id: Uuid,
+    /// The parent folder's id (nil for the root).
+    pub parent_id: Uuid,
+    /// The folder name.
+    pub name: String,
+    /// The default asset/folder type (the `FolderType`; `-1` for none).
+    pub type_default: i8,
+    /// The folder version (for cache validation).
+    pub version: i32,
 }
 
 /// The reason a login was rejected.
@@ -312,7 +337,81 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
         seed_capability: required(&members, "seed_capability")?.clone(),
         message: members.get("message").cloned(),
         mfa_hash: members.get("mfa_hash").cloned(),
+        inventory_root: parse_inventory_root(response_struct),
+        inventory_skeleton: parse_inventory_skeleton(response_struct),
     })))
+}
+
+/// Extracts the inventory root folder id from the `inventory-root` member: an
+/// array holding one struct with a `folder_id` string.
+fn parse_inventory_root(response_struct: roxmltree::Node<'_, '_>) -> Option<Uuid> {
+    let value = member_value_node(response_struct, "inventory-root")?;
+    let folder_struct = array_structs(value).next()?;
+    let members = collect_members(folder_struct);
+    members
+        .get("folder_id")
+        .and_then(|id| Uuid::parse_str(id).ok())
+}
+
+/// Extracts the inventory folder skeleton from the `inventory-skeleton` member:
+/// an array of structs, one per folder.
+fn parse_inventory_skeleton(response_struct: roxmltree::Node<'_, '_>) -> Vec<SkeletonFolder> {
+    let Some(value) = member_value_node(response_struct, "inventory-skeleton") else {
+        return Vec::new();
+    };
+    array_structs(value)
+        .filter_map(|folder_struct| {
+            let members = collect_members(folder_struct);
+            Some(SkeletonFolder {
+                folder_id: Uuid::parse_str(members.get("folder_id")?).ok()?,
+                parent_id: members
+                    .get("parent_id")
+                    .and_then(|id| Uuid::parse_str(id).ok())
+                    .unwrap_or_else(Uuid::nil),
+                name: members.get("name").cloned().unwrap_or_default(),
+                type_default: members
+                    .get("type_default")
+                    .and_then(|t| t.trim().parse().ok())
+                    .unwrap_or(-1),
+                version: members
+                    .get("version")
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(0),
+            })
+        })
+        .collect()
+}
+
+/// Finds the `<value>` node of the named `<member>` directly under a `<struct>`.
+fn member_value_node<'a>(
+    struct_node: roxmltree::Node<'a, '_>,
+    name: &str,
+) -> Option<roxmltree::Node<'a, 'a>> {
+    struct_node
+        .children()
+        .filter(|n| n.has_tag_name("member"))
+        .find(|member| {
+            member
+                .children()
+                .find(|n| n.has_tag_name("name"))
+                .and_then(|n| n.text())
+                == Some(name)
+        })
+        .and_then(|member| member.children().find(|n| n.has_tag_name("value")))
+}
+
+/// Iterates the `<struct>` nodes inside an array `<value>` (`value → array →
+/// data → value → struct`).
+fn array_structs<'a>(
+    value_node: roxmltree::Node<'a, 'a>,
+) -> impl Iterator<Item = roxmltree::Node<'a, 'a>> {
+    value_node
+        .children()
+        .find(|n| n.has_tag_name("array"))
+        .and_then(|array| array.children().find(|n| n.has_tag_name("data")))
+        .into_iter()
+        .flat_map(|data| data.children().filter(|n| n.has_tag_name("value")))
+        .filter_map(|value| value.children().find(|n| n.has_tag_name("struct")))
 }
 
 /// Collects the direct `<member>` children of a `<struct>` node into a map of
