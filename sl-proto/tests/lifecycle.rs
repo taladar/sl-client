@@ -9,11 +9,14 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
-        ChatAudible, ChatSourceType, ChatType, ControlFlags, DisconnectReason, Event, FriendRights,
-        ImDialog, LoginParams, Maturity, ProductType, Reliability, Session, Transmit,
+        ChatAudible, ChatSourceType, ChatType, ControlFlags, CreateGroupParams, DisconnectReason,
+        Event, FriendRights, ImDialog, LoginParams, Maturity, ProductType, Reliability, Session,
+        Transmit,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
+        AgentDataUpdate, AgentDataUpdateAgentDataBlock, AgentGroupDataUpdate,
+        AgentGroupDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
         AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
         AgentMovementCompleteSimDataBlock, AvatarNotesReply, AvatarNotesReplyAgentDataBlock,
         AvatarNotesReplyDataBlock, AvatarPicksReply, AvatarPicksReplyAgentDataBlock,
@@ -21,7 +24,9 @@ mod test {
         AvatarPropertiesReplyPropertiesDataBlock, AvatarSitResponse,
         AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock, ChangeUserRights,
         ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock, ChatFromSimulator,
-        ChatFromSimulatorChatDataBlock, ImprovedInstantMessage,
+        ChatFromSimulatorChatDataBlock, GroupMembersReply, GroupMembersReplyAgentDataBlock,
+        GroupMembersReplyGroupDataBlock, GroupMembersReplyMemberDataBlock, GroupProfileReply,
+        GroupProfileReplyAgentDataBlock, GroupProfileReplyGroupDataBlock, ImprovedInstantMessage,
         ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
         ImprovedInstantMessageMessageBlockBlock, InventoryDescendents,
         InventoryDescendentsAgentDataBlock, InventoryDescendentsFolderDataBlock,
@@ -44,6 +49,13 @@ mod test {
 
     /// A boxed test error.
     type TestError = Box<dyn Error>;
+
+    /// Decodes a NUL-terminated wire string field for assertions.
+    fn trimmed(bytes: &[u8]) -> String {
+        String::from_utf8_lossy(bytes)
+            .trim_end_matches('\0')
+            .to_owned()
+    }
 
     /// The simulator address used throughout these tests.
     fn sim_addr() -> SocketAddr {
@@ -1203,6 +1215,446 @@ mod test {
             })
             .ok_or("expected a DeclineFriendship")?;
         assert_eq!(decline.transaction_block.transaction_id, decline_tx);
+        Ok(())
+    }
+
+    #[test]
+    fn agent_data_update_surfaces_active_group() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6701);
+        let message = AnyMessage::AgentDataUpdate(AgentDataUpdate {
+            agent_data: AgentDataUpdateAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                first_name: b"Avatar\0".to_vec(),
+                last_name: b"Tester\0".to_vec(),
+                group_title: b"Founder\0".to_vec(),
+                active_group_id: group,
+                group_powers: 0x1234,
+                group_name: b"Test Group\0".to_vec(),
+            },
+        });
+        let datagram = server_message(&message, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let active = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ActiveGroupChanged(active) => Some(active),
+                _ => None,
+            })
+            .ok_or("expected an ActiveGroupChanged event")?;
+        assert_eq!(active.active_group_id, group);
+        assert_eq!(active.group_title, "Founder");
+        assert_eq!(active.group_name, "Test Group");
+        assert_eq!(active.group_powers, 0x1234);
+        Ok(())
+    }
+
+    #[test]
+    fn agent_group_data_update_surfaces_memberships() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6702);
+        let message = AnyMessage::AgentGroupDataUpdate(AgentGroupDataUpdate {
+            agent_data: AgentGroupDataUpdateAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+            group_data: vec![AgentGroupDataUpdateGroupDataBlock {
+                group_id: group,
+                group_powers: 0xFF,
+                accept_notices: true,
+                group_insignia_id: uuid::Uuid::nil(),
+                contribution: 50,
+                group_name: b"Test Group\0".to_vec(),
+            }],
+        });
+        let datagram = server_message(&message, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let groups = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::GroupMemberships(groups) => Some(groups),
+                _ => None,
+            })
+            .ok_or("expected a GroupMemberships event")?;
+        assert_eq!(groups.len(), 1);
+        let first = groups.first().ok_or("first group")?;
+        assert_eq!(first.group_id, group);
+        assert_eq!(first.group_name, "Test Group");
+        assert!(first.accept_notices);
+        assert_eq!(first.contribution, 50);
+        Ok(())
+    }
+
+    #[test]
+    fn group_members_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6703);
+        let member = uuid::Uuid::from_u128(0x6704);
+        let message = AnyMessage::GroupMembersReply(GroupMembersReply {
+            agent_data: GroupMembersReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+            group_data: GroupMembersReplyGroupDataBlock {
+                group_id: group,
+                request_id: uuid::Uuid::nil(),
+                member_count: 1,
+            },
+            member_data: vec![GroupMembersReplyMemberDataBlock {
+                agent_id: member,
+                contribution: 10,
+                online_status: b"Online\0".to_vec(),
+                agent_powers: 0xABCD,
+                title: b"Owner\0".to_vec(),
+                is_owner: true,
+            }],
+        });
+        let datagram = server_message(&message, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let (group_id, members) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::GroupMembers {
+                    group_id, members, ..
+                } => Some((group_id, members)),
+                _ => None,
+            })
+            .ok_or("expected a GroupMembers event")?;
+        assert_eq!(group_id, group);
+        assert_eq!(members.len(), 1);
+        let first = members.first().ok_or("first member")?;
+        assert_eq!(first.agent_id, member);
+        assert_eq!(first.title, "Owner");
+        assert!(first.is_owner);
+        assert_eq!(first.agent_powers, 0xABCD);
+        Ok(())
+    }
+
+    #[test]
+    fn group_profile_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6705);
+        let founder = uuid::Uuid::from_u128(0x6706);
+        let message = AnyMessage::GroupProfileReply(GroupProfileReply {
+            agent_data: GroupProfileReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+            group_data: GroupProfileReplyGroupDataBlock {
+                group_id: group,
+                name: b"Test Group\0".to_vec(),
+                charter: b"a charter\0".to_vec(),
+                show_in_list: true,
+                member_title: b"Member\0".to_vec(),
+                powers_mask: 0x7FFF,
+                insignia_id: uuid::Uuid::nil(),
+                founder_id: founder,
+                membership_fee: 0,
+                open_enrollment: true,
+                money: 0,
+                group_membership_count: 2,
+                group_roles_count: 1,
+                allow_publish: false,
+                mature_publish: false,
+                owner_role: uuid::Uuid::from_u128(0x6707),
+            },
+        });
+        let datagram = server_message(&message, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let profile = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::GroupProfileReceived(profile) => Some(profile),
+                _ => None,
+            })
+            .ok_or("expected a GroupProfileReceived event")?;
+        assert_eq!(profile.group_id, group);
+        assert_eq!(profile.name, "Test Group");
+        assert_eq!(profile.charter, "a charter");
+        assert_eq!(profile.founder_id, founder);
+        assert_eq!(profile.member_count, 2);
+        assert!(profile.open_enrollment);
+        Ok(())
+    }
+
+    #[test]
+    fn group_session_message_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A group IM: from_group set, dialog SessionSend (17), session id = group.
+        let group = uuid::Uuid::from_u128(0x6708);
+        let sender = uuid::Uuid::from_u128(0x6709);
+        let message = AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
+            agent_data: ImprovedInstantMessageAgentDataBlock {
+                agent_id: sender,
+                session_id: uuid::Uuid::nil(),
+            },
+            message_block: ImprovedInstantMessageMessageBlockBlock {
+                from_group: true,
+                to_agent_id: uuid::Uuid::from_u128(1),
+                parent_estate_id: 0,
+                region_id: uuid::Uuid::nil(),
+                position: Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                offline: 0,
+                dialog: 17,
+                id: group,
+                timestamp: 0,
+                from_agent_name: b"Friend Tester\0".to_vec(),
+                message: b"hello group\0".to_vec(),
+                binary_bucket: Vec::new(),
+            },
+            estate_block: ImprovedInstantMessageEstateBlockBlock { estate_id: 0 },
+            meta_data: Vec::new(),
+        });
+        let datagram = server_message(&message, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::GroupSessionMessage { .. } => Some(event),
+                _ => None,
+            })
+            .ok_or("expected a GroupSessionMessage event")?;
+        match event {
+            Event::GroupSessionMessage {
+                group_id,
+                from_agent_id,
+                from_name,
+                message,
+            } => {
+                assert_eq!(group_id, group);
+                assert_eq!(from_agent_id, sender);
+                assert_eq!(from_name, "Friend Tester");
+                assert_eq!(message, "hello group");
+            }
+            _ => return Err("expected GroupSessionMessage".into()),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn activate_group_and_requests_pack_messages() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x670A);
+        session.activate_group(group, now)?;
+        session.request_group_members(group, now)?;
+        let sent = drain(&mut session)?;
+
+        let activate = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ActivateGroup(a) => Some(a),
+                _ => None,
+            })
+            .ok_or("expected an ActivateGroup")?;
+        assert_eq!(activate.agent_data.group_id, group);
+
+        let members = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::GroupMembersRequest(r) => Some(r),
+                _ => None,
+            })
+            .ok_or("expected a GroupMembersRequest")?;
+        assert_eq!(members.group_data.group_id, group);
+        Ok(())
+    }
+
+    #[test]
+    fn group_session_send_packs_im() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x670B);
+        session.start_group_session(group, now)?;
+        session.send_group_message(group, "hi all", now)?;
+        let sent = drain(&mut session)?;
+        let ims: Vec<_> = sent
+            .iter()
+            .filter_map(|m| match m {
+                AnyMessage::ImprovedInstantMessage(im) => Some(&im.message_block),
+                _ => None,
+            })
+            .collect();
+        // Start session: dialog 15, session id = group.
+        let start = ims
+            .iter()
+            .find(|b| b.dialog == 15)
+            .ok_or("expected a SessionGroupStart IM")?;
+        assert_eq!(start.id, group);
+        assert_eq!(start.to_agent_id, group);
+        // Send: dialog 17, session id = group, carrying the text.
+        let send = ims
+            .iter()
+            .find(|b| b.dialog == 17)
+            .ok_or("expected a SessionSend IM")?;
+        assert_eq!(send.id, group);
+        assert_eq!(send.to_agent_id, group);
+        assert_eq!(trimmed(&send.message), "hi all");
+        Ok(())
+    }
+
+    #[test]
+    fn create_join_leave_invite_pack_messages() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.create_group(
+            &CreateGroupParams {
+                name: "My Group".to_owned(),
+                charter: "hi".to_owned(),
+                show_in_list: true,
+                insignia_id: uuid::Uuid::nil(),
+                membership_fee: 0,
+                open_enrollment: true,
+                allow_publish: false,
+                mature_publish: false,
+            },
+            now,
+        )?;
+        let group = uuid::Uuid::from_u128(0x670C);
+        let invitee = uuid::Uuid::from_u128(0x670D);
+        session.join_group(group, now)?;
+        session.leave_group(group, now)?;
+        session.invite_to_group(group, &[(invitee, uuid::Uuid::nil())], now)?;
+        let sent = drain(&mut session)?;
+
+        let create = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::CreateGroupRequest(c) => Some(c),
+                _ => None,
+            })
+            .ok_or("expected a CreateGroupRequest")?;
+        assert_eq!(trimmed(&create.group_data.name), "My Group");
+        assert!(sent.iter().any(
+            |m| matches!(m, AnyMessage::JoinGroupRequest(j) if j.group_data.group_id == group)
+        ));
+        assert!(sent.iter().any(
+            |m| matches!(m, AnyMessage::LeaveGroupRequest(l) if l.group_data.group_id == group)
+        ));
+        let invite = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::InviteGroupRequest(i) => Some(i),
+                _ => None,
+            })
+            .ok_or("expected an InviteGroupRequest")?;
+        assert_eq!(
+            invite.invite_data.first().map(|d| d.invitee_id),
+            Some(invitee)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn agent_group_data_update_caps_surfaces_memberships() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // The modern CAPS event-queue delivery of `AgentGroupDataUpdate`.
+        let xml = concat!(
+            "<llsd><map>",
+            "<key>AgentData</key><array><map><key>AgentID</key>",
+            "<uuid>00000000-0000-0000-0000-000000000001</uuid></map></array>",
+            "<key>GroupData</key><array><map>",
+            "<key>GroupID</key><uuid>00000000-0000-0000-0000-000000006701</uuid>",
+            "<key>GroupPowers</key><integer>4660</integer>",
+            "<key>AcceptNotices</key><boolean>1</boolean>",
+            "<key>GroupInsigniaID</key><uuid>00000000-0000-0000-0000-000000000000</uuid>",
+            "<key>Contribution</key><integer>25</integer>",
+            "<key>GroupName</key><string>CAPS Group</string>",
+            "</map></array></map></llsd>",
+        );
+        let body = parse_llsd_xml(xml)?;
+        session.handle_caps_event("AgentGroupDataUpdate", &body, now)?;
+
+        let groups = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::GroupMemberships(groups) => Some(groups),
+                _ => None,
+            })
+            .ok_or("expected a GroupMemberships event")?;
+        assert_eq!(groups.len(), 1);
+        let first = groups.first().ok_or("first group")?;
+        assert_eq!(first.group_id, uuid::Uuid::from_u128(0x6701));
+        assert_eq!(first.group_name, "CAPS Group");
+        assert_eq!(first.group_powers, 4660);
+        assert!(first.accept_notices);
+        assert_eq!(first.contribution, 25);
+        Ok(())
+    }
+
+    #[test]
+    fn group_member_data_caps_surfaces_members() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A `GroupMemberData` capability response: members keyed by id, titles
+        // by index, powers as hex strings.
+        let xml = concat!(
+            "<llsd><map>",
+            "<key>group_id</key><uuid>00000000-0000-0000-0000-000000006703</uuid>",
+            "<key>titles</key><array><string>Member</string><string>Owner</string></array>",
+            "<key>defaults</key><map><key>default_powers</key><string>0x0</string></map>",
+            "<key>members</key><map>",
+            "<key>00000000-0000-0000-0000-000000006704</key><map>",
+            "<key>title</key><integer>1</integer>",
+            "<key>powers</key><string>0xabcd</string>",
+            "<key>last_login</key><string>Online</string>",
+            "<key>donated_square_meters</key><integer>512</integer>",
+            "<key>owner</key><integer>1</integer>",
+            "</map></map></map></llsd>",
+        );
+        let body = parse_llsd_xml(xml)?;
+        session.handle_caps_event("GroupMemberData", &body, now)?;
+
+        let (group_id, members) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::GroupMembers {
+                    group_id, members, ..
+                } => Some((group_id, members)),
+                _ => None,
+            })
+            .ok_or("expected a GroupMembers event")?;
+        assert_eq!(group_id, uuid::Uuid::from_u128(0x6703));
+        assert_eq!(members.len(), 1);
+        let first = members.first().ok_or("first member")?;
+        assert_eq!(first.agent_id, uuid::Uuid::from_u128(0x6704));
+        assert_eq!(first.title, "Owner");
+        assert_eq!(first.agent_powers, 0xabcd);
+        assert_eq!(first.online_status, "Online");
+        assert_eq!(first.contribution, 512);
+        assert!(first.is_owner);
         Ok(())
     }
 

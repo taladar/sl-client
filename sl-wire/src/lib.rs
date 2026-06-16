@@ -20,8 +20,8 @@ pub use field::{Reader, Writer};
 pub use header::{PacketFlags, ParsedDatagram, encode_datagram, parse_datagram};
 pub use llsd::{
     EventQueueEvent, EventQueueResponse, Llsd, build_event_queue_request,
-    build_fetch_inventory_request, build_seed_request, parse_event_queue_response, parse_llsd_xml,
-    parse_seed_response,
+    build_fetch_inventory_request, build_group_member_data_request, build_seed_request,
+    parse_event_queue_response, parse_llsd_xml, parse_seed_response,
 };
 pub use login::{
     BuddyListEntry, LoginFailure, LoginParseError, LoginRequest, LoginResponse, LoginSuccess,

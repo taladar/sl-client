@@ -230,6 +230,121 @@ pub enum Event {
         /// [`Session::grant_user_rights`]: crate::Session::grant_user_rights
         granted_to_us: bool,
     },
+    /// The agent's active group, title, and powers changed (`AgentDataUpdate`):
+    /// pushed on login and after [`Session::activate_group`](crate::Session::activate_group).
+    ActiveGroupChanged(Box<ActiveGroup>),
+    /// The agent's group memberships (`AgentGroupDataUpdate`), pushed on login
+    /// and when membership changes.
+    GroupMemberships(Vec<GroupMembership>),
+    /// A group's member roster (`GroupMembersReply`), in response to
+    /// [`Session::request_group_members`](crate::Session::request_group_members).
+    GroupMembers {
+        /// The group whose members these are.
+        group_id: Uuid,
+        /// The request id echoed from the request.
+        request_id: Uuid,
+        /// The total member count the simulator reports.
+        member_count: i32,
+        /// The members in this reply.
+        members: Vec<GroupMember>,
+    },
+    /// A group's roles (`GroupRoleDataReply`), in response to
+    /// [`Session::request_group_roles`](crate::Session::request_group_roles).
+    GroupRoleData {
+        /// The group whose roles these are.
+        group_id: Uuid,
+        /// The request id echoed from the request.
+        request_id: Uuid,
+        /// The roles.
+        roles: Vec<GroupRole>,
+    },
+    /// A group's role↔member pairings (`GroupRoleMembersReply`), in response to
+    /// [`Session::request_group_role_members`](crate::Session::request_group_role_members).
+    GroupRoleMembers {
+        /// The group whose pairings these are.
+        group_id: Uuid,
+        /// The request id echoed from the request.
+        request_id: Uuid,
+        /// The role↔member pairs in this reply.
+        pairs: Vec<GroupRoleMember>,
+    },
+    /// The agent's selectable titles in a group (`GroupTitlesReply`), in response
+    /// to [`Session::request_group_titles`](crate::Session::request_group_titles).
+    GroupTitles {
+        /// The group whose titles these are.
+        group_id: Uuid,
+        /// The request id echoed from the request.
+        request_id: Uuid,
+        /// The titles.
+        titles: Vec<GroupTitle>,
+    },
+    /// A group's profile (`GroupProfileReply`), in response to
+    /// [`Session::request_group_profile`](crate::Session::request_group_profile).
+    GroupProfileReceived(Box<GroupProfile>),
+    /// A group's notices (`GroupNoticesListReply`), in response to
+    /// [`Session::request_group_notices`](crate::Session::request_group_notices).
+    GroupNotices {
+        /// The group whose notices these are.
+        group_id: Uuid,
+        /// The notice headers.
+        notices: Vec<GroupNotice>,
+    },
+    /// A message was received in a group IM session (an `ImprovedInstantMessage`
+    /// with `from_group` set and the `IM_SESSION_SEND` dialog). The session id is
+    /// the group id.
+    GroupSessionMessage {
+        /// The group (and IM session) the message belongs to.
+        group_id: Uuid,
+        /// The sender's agent id.
+        from_agent_id: Uuid,
+        /// The sender's display name.
+        from_name: String,
+        /// The message text.
+        message: String,
+    },
+    /// A participant joined or left a group IM session (an
+    /// `ImprovedInstantMessage` with the `IM_SESSION_INVITE`/`SessionAdd` or
+    /// `IM_SESSION_LEAVE`/`SessionDrop` dialog and `from_group` set).
+    GroupSessionParticipant {
+        /// The group (and IM session) id.
+        group_id: Uuid,
+        /// The participant's agent id.
+        agent_id: Uuid,
+        /// `true` when the participant joined, `false` when they left.
+        joined: bool,
+    },
+    /// The result of a [`Session::create_group`](crate::Session::create_group)
+    /// (`CreateGroupReply`).
+    CreateGroupResult {
+        /// The new group's id (nil on failure).
+        group_id: Uuid,
+        /// Whether creation succeeded.
+        success: bool,
+        /// The grid's human-readable result message.
+        message: String,
+    },
+    /// The result of a [`Session::join_group`](crate::Session::join_group)
+    /// (`JoinGroupReply`).
+    JoinGroupResult {
+        /// The group joined.
+        group_id: Uuid,
+        /// Whether the join succeeded.
+        success: bool,
+    },
+    /// The result of a [`Session::leave_group`](crate::Session::leave_group)
+    /// (`LeaveGroupReply`).
+    LeaveGroupResult {
+        /// The group left.
+        group_id: Uuid,
+        /// Whether the leave succeeded.
+        success: bool,
+    },
+    /// The agent was removed from a group (`AgentDropGroup`) — by leaving,
+    /// ejection, or the group being dissolved.
+    DroppedFromGroup {
+        /// The group the agent is no longer in.
+        group_id: Uuid,
+    },
     /// The simulator answered a sit request (`AvatarSitResponse`) after a
     /// [`Session::sit_on`](crate::Session::sit_on); the session has sent the
     /// completing `AgentSit`.
@@ -620,8 +735,23 @@ pub enum ImDialog {
     InventoryDeclined,
     /// An inventory item offered by a task/object (`IM_TASK_INVENTORY_OFFERED`).
     TaskInventoryOffered,
+    /// A participant was added to a group/conference session
+    /// (`IM_SESSION_INVITE` / OpenMetaverse `SessionAdd`).
+    SessionAdd,
+    /// An offline participant was added to a session (`IM_SESSION_P2P_INVITE` /
+    /// OpenMetaverse `SessionOfflineAdd`).
+    SessionOfflineAdd,
+    /// A request to start a group IM session (`IM_SESSION_GROUP_START`); the
+    /// session id is the group id.
+    SessionGroupStart,
+    /// A request to start an ad-hoc conference IM session
+    /// (`IM_SESSION_CONFERENCE_START`).
+    SessionConferenceStart,
     /// A message within a group or conference session (`IM_SESSION_SEND`).
     SessionSend,
+    /// A participant left / was dropped from a session (`IM_SESSION_LEAVE` /
+    /// OpenMetaverse `SessionDrop`).
+    SessionLeave,
     /// A message from an in-world object/task (`IM_FROM_TASK`).
     FromTask,
     /// A "do not disturb" auto-response (`IM_DO_NOT_DISTURB_AUTO_RESPONSE`).
@@ -662,7 +792,12 @@ impl ImDialog {
             5 => Self::InventoryAccepted,
             6 => Self::InventoryDeclined,
             9 => Self::TaskInventoryOffered,
+            13 => Self::SessionAdd,
+            14 => Self::SessionOfflineAdd,
+            15 => Self::SessionGroupStart,
+            16 => Self::SessionConferenceStart,
             17 => Self::SessionSend,
+            18 => Self::SessionLeave,
             19 => Self::FromTask,
             20 => Self::DoNotDisturbAutoResponse,
             22 => Self::LureUser,
@@ -690,7 +825,12 @@ impl ImDialog {
             Self::InventoryAccepted => 5,
             Self::InventoryDeclined => 6,
             Self::TaskInventoryOffered => 9,
+            Self::SessionAdd => 13,
+            Self::SessionOfflineAdd => 14,
+            Self::SessionGroupStart => 15,
+            Self::SessionConferenceStart => 16,
             Self::SessionSend => 17,
+            Self::SessionLeave => 18,
             Self::FromTask => 19,
             Self::DoNotDisturbAutoResponse => 20,
             Self::LureUser => 22,
@@ -857,6 +997,185 @@ pub struct Friend {
     pub rights_granted: FriendRights,
     /// The rights the friend grants this agent.
     pub rights_received: FriendRights,
+}
+
+/// The agent's active group and title, parsed from `AgentDataUpdate` (pushed on
+/// login and whenever the active group changes via
+/// [`Session::activate_group`](crate::Session::activate_group)).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveGroup {
+    /// The agent the update is about.
+    pub agent_id: Uuid,
+    /// The agent's first name.
+    pub first_name: String,
+    /// The agent's last name.
+    pub last_name: String,
+    /// The active group's title shown over the avatar (empty if no active group).
+    pub group_title: String,
+    /// The active group's id (nil if no active group).
+    pub active_group_id: Uuid,
+    /// The agent's powers bitfield within the active group.
+    pub group_powers: u64,
+    /// The active group's name (empty if no active group).
+    pub group_name: String,
+}
+
+/// One of the agent's group memberships, from an `AgentGroupDataUpdate` entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupMembership {
+    /// The group id.
+    pub group_id: Uuid,
+    /// The agent's powers bitfield in the group.
+    pub group_powers: u64,
+    /// Whether the agent accepts notices from the group.
+    pub accept_notices: bool,
+    /// The group's insignia (texture id).
+    pub group_insignia_id: Uuid,
+    /// The agent's L$ contribution to the group.
+    pub contribution: i32,
+    /// The group name.
+    pub group_name: String,
+}
+
+/// One member of a group, from a `GroupMembersReply` entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupMember {
+    /// The member's agent id.
+    pub agent_id: Uuid,
+    /// The member's L$ contribution.
+    pub contribution: i32,
+    /// The member's online status string (grid-formatted, e.g. `"Online"`).
+    pub online_status: String,
+    /// The member's powers bitfield.
+    pub agent_powers: u64,
+    /// The member's group title.
+    pub title: String,
+    /// Whether the member is a group owner.
+    pub is_owner: bool,
+}
+
+/// One role within a group, from a `GroupRoleDataReply` entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupRole {
+    /// The role id (nil for the "Everyone" default role).
+    pub role_id: Uuid,
+    /// The role name.
+    pub name: String,
+    /// The role title shown over members holding it.
+    pub title: String,
+    /// The role description.
+    pub description: String,
+    /// The powers granted by the role.
+    pub powers: u64,
+    /// The number of members holding the role.
+    pub members: u32,
+}
+
+/// One role↔member pairing, from a `GroupRoleMembersReply` entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GroupRoleMember {
+    /// The role id.
+    pub role_id: Uuid,
+    /// The member's agent id.
+    pub member_id: Uuid,
+}
+
+/// One title the agent may wear in a group, from a `GroupTitlesReply` entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupTitle {
+    /// The title text.
+    pub title: String,
+    /// The role the title belongs to.
+    pub role_id: Uuid,
+    /// Whether this is the agent's currently selected title.
+    pub selected: bool,
+}
+
+/// A group's full profile, parsed from `GroupProfileReply`.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the four booleans mirror distinct wire flags in GroupProfileReply"
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupProfile {
+    /// The group id.
+    pub group_id: Uuid,
+    /// The group name.
+    pub name: String,
+    /// The group charter text.
+    pub charter: String,
+    /// Whether the group is shown in search.
+    pub show_in_list: bool,
+    /// The requesting agent's title in the group.
+    pub member_title: String,
+    /// The requesting agent's powers bitfield.
+    pub powers: u64,
+    /// The group insignia (texture id).
+    pub insignia_id: Uuid,
+    /// The group founder's agent id.
+    pub founder_id: Uuid,
+    /// The L$ fee to join.
+    pub membership_fee: i32,
+    /// Whether enrollment is open (no invitation needed).
+    pub open_enrollment: bool,
+    /// The group's L$ balance (owners only; otherwise 0).
+    pub money: i32,
+    /// The total member count.
+    pub member_count: i32,
+    /// The total role count.
+    pub role_count: i32,
+    /// Whether the group allows publishing on the web.
+    pub allow_publish: bool,
+    /// Whether the group is flagged mature.
+    pub mature_publish: bool,
+    /// The owner role id.
+    pub owner_role: Uuid,
+}
+
+/// The parameters for creating a group via
+/// [`Session::create_group`](crate::Session::create_group)
+/// (`CreateGroupRequest`).
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the four booleans mirror distinct wire flags in CreateGroupRequest"
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateGroupParams {
+    /// The group name (must be unique on the grid).
+    pub name: String,
+    /// The group charter text.
+    pub charter: String,
+    /// Whether the group is shown in search.
+    pub show_in_list: bool,
+    /// The group insignia (texture id); nil for none.
+    pub insignia_id: Uuid,
+    /// The L$ fee to join.
+    pub membership_fee: i32,
+    /// Whether enrollment is open (no invitation needed).
+    pub open_enrollment: bool,
+    /// Whether the group allows publishing on the web.
+    pub allow_publish: bool,
+    /// Whether the group is flagged mature.
+    pub mature_publish: bool,
+}
+
+/// One group notice header, from a `GroupNoticesListReply` entry. Fetch the full
+/// body/attachment with
+/// [`Session::request_group_notice`](crate::Session::request_group_notice).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupNotice {
+    /// The notice id.
+    pub notice_id: Uuid,
+    /// The Unix timestamp the notice was posted.
+    pub timestamp: u32,
+    /// The poster's name.
+    pub from_name: String,
+    /// The notice subject.
+    pub subject: String,
+    /// Whether the notice carries an inventory attachment.
+    pub has_attachment: bool,
+    /// The attachment's asset type (meaningful only if `has_attachment`).
+    pub asset_type: u8,
 }
 
 /// An inventory folder (category): from the login skeleton

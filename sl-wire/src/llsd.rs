@@ -284,6 +284,14 @@ pub fn build_fetch_inventory_request(owner_id: Uuid, folder_ids: &[Uuid]) -> Str
     out
 }
 
+/// Builds the LLSD-XML body for a `GroupMemberData` capability request: a map
+/// with the `group_id` to fetch the full member roster for (no paging, so the
+/// simulator returns every member).
+#[must_use]
+pub fn build_group_member_data_request(group_id: Uuid) -> String {
+    format!("<llsd><map><key>group_id</key><uuid>{group_id}</uuid></map></llsd>")
+}
+
 /// A single event from an [`EventQueueResponse`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventQueueEvent {

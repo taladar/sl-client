@@ -144,6 +144,20 @@ fn on_events(
             | SlSessionEvent::FriendsOnline(_)
             | SlSessionEvent::FriendsOffline(_)
             | SlSessionEvent::FriendRightsChanged { .. }
+            | SlSessionEvent::ActiveGroupChanged(_)
+            | SlSessionEvent::GroupMemberships(_)
+            | SlSessionEvent::GroupMembers { .. }
+            | SlSessionEvent::GroupRoleData { .. }
+            | SlSessionEvent::GroupRoleMembers { .. }
+            | SlSessionEvent::GroupTitles { .. }
+            | SlSessionEvent::GroupProfileReceived(_)
+            | SlSessionEvent::GroupNotices { .. }
+            | SlSessionEvent::GroupSessionMessage { .. }
+            | SlSessionEvent::GroupSessionParticipant { .. }
+            | SlSessionEvent::CreateGroupResult { .. }
+            | SlSessionEvent::JoinGroupResult { .. }
+            | SlSessionEvent::LeaveGroupResult { .. }
+            | SlSessionEvent::DroppedFromGroup { .. }
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal => {}

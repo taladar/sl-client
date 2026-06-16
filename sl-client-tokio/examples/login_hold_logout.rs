@@ -174,8 +174,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "us->them"
                 }
             ),
-            // This demo ignores the remaining profile/region/parcel/teleport events.
-            Event::AvatarInterests(_)
+            Event::ActiveGroupChanged(active) => info!(
+                "active group: {} (title {:?})",
+                active.group_name, active.group_title
+            ),
+            Event::GroupMemberships(groups) => {
+                info!("member of {} group(s)", groups.len());
+            }
+            Event::GroupSessionMessage {
+                from_name, message, ..
+            } => info!("group chat from {from_name}: {message}"),
+            // This demo ignores the remaining profile/region/parcel/teleport/group events.
+            Event::GroupMembers { .. }
+            | Event::GroupRoleData { .. }
+            | Event::GroupRoleMembers { .. }
+            | Event::GroupTitles { .. }
+            | Event::GroupProfileReceived(_)
+            | Event::GroupNotices { .. }
+            | Event::GroupSessionParticipant { .. }
+            | Event::CreateGroupResult { .. }
+            | Event::JoinGroupResult { .. }
+            | Event::LeaveGroupResult { .. }
+            | Event::DroppedFromGroup { .. }
+            | Event::AvatarInterests(_)
             | Event::AvatarGroups { .. }
             | Event::AvatarNotes { .. }
             | Event::RegionInfoHandshake(_)
