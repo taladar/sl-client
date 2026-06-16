@@ -9,8 +9,8 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
-        ChatAudible, ChatSourceType, ChatType, ControlFlags, DisconnectReason, Event, ImDialog,
-        LoginParams, Maturity, ProductType, Reliability, Session, Transmit,
+        ChatAudible, ChatSourceType, ChatType, ControlFlags, DisconnectReason, Event, FriendRights,
+        ImDialog, LoginParams, Maturity, ProductType, Reliability, Session, Transmit,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -19,17 +19,19 @@ mod test {
         AvatarNotesReplyDataBlock, AvatarPicksReply, AvatarPicksReplyAgentDataBlock,
         AvatarPicksReplyDataBlock, AvatarPropertiesReply, AvatarPropertiesReplyAgentDataBlock,
         AvatarPropertiesReplyPropertiesDataBlock, AvatarSitResponse,
-        AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock, ChatFromSimulator,
+        AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock, ChangeUserRights,
+        ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock, ChatFromSimulator,
         ChatFromSimulatorChatDataBlock, ImprovedInstantMessage,
         ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
         ImprovedInstantMessageMessageBlockBlock, InventoryDescendents,
         InventoryDescendentsAgentDataBlock, InventoryDescendentsFolderDataBlock,
         InventoryDescendentsItemDataBlock, LogoutRequest, LogoutRequestAgentDataBlock,
         MapBlockReply, MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock,
-        ParcelProperties, ParcelPropertiesAgeVerificationBlockBlock,
-        ParcelPropertiesParcelDataBlock, ParcelPropertiesParcelEnvironmentBlockBlock,
-        ParcelPropertiesRegionAllowAccessBlockBlock, RegionHandshake,
-        RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
+        OfflineNotification, OfflineNotificationAgentBlockBlock, OnlineNotification,
+        OnlineNotificationAgentBlockBlock, ParcelProperties,
+        ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
+        ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
+        RegionHandshake, RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
         RegionHandshakeRegionInfoBlock, RegionInfo, RegionInfoAgentDataBlock,
         RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock, TeleportFailed,
         TeleportFailedInfoBlock,
@@ -76,6 +78,7 @@ mod test {
             mfa_hash: None,
             inventory_root: None,
             inventory_skeleton: Vec::new(),
+            buddy_list: Vec::new(),
         }))
     }
 
@@ -919,6 +922,291 @@ mod test {
     }
 
     #[test]
+    fn login_buddy_list_emits_friend_list() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = new_session();
+        let friend_a = uuid::Uuid::from_u128(0xF1);
+        let friend_b = uuid::Uuid::from_u128(0xF2);
+        let LoginResponse::Success(mut login_success) = success() else {
+            return Err("expected a success response".into());
+        };
+        login_success.buddy_list = vec![
+            sl_wire::BuddyListEntry {
+                buddy_id: friend_a,
+                rights_granted: FriendRights::CAN_SEE_ONLINE | FriendRights::CAN_SEE_ON_MAP,
+                rights_has: FriendRights::CAN_SEE_ONLINE,
+            },
+            sl_wire::BuddyListEntry {
+                buddy_id: friend_b,
+                rights_granted: 0,
+                rights_has: FriendRights::CAN_MODIFY_OBJECTS,
+            },
+        ];
+        session.handle_login_response(LoginResponse::Success(login_success), now)?;
+
+        let friends = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::FriendList(friends) => Some(friends),
+                _ => None,
+            })
+            .ok_or("expected a FriendList event")?;
+        assert_eq!(friends.len(), 2);
+        let first = friends.first().ok_or("first friend")?;
+        assert_eq!(first.id, friend_a);
+        assert!(first.rights_granted.can_see_online());
+        assert!(first.rights_granted.can_see_on_map());
+        assert!(first.rights_received.can_see_online());
+        assert!(!first.rights_received.can_modify_objects());
+        let second = friends.get(1).ok_or("second friend")?;
+        assert_eq!(second.id, friend_b);
+        assert!(second.rights_received.can_modify_objects());
+        Ok(())
+    }
+
+    #[test]
+    fn online_notification_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let friend_a = uuid::Uuid::from_u128(0xF1);
+        let friend_b = uuid::Uuid::from_u128(0xF2);
+        let message = AnyMessage::OnlineNotification(OnlineNotification {
+            agent_block: vec![
+                OnlineNotificationAgentBlockBlock { agent_id: friend_a },
+                OnlineNotificationAgentBlockBlock { agent_id: friend_b },
+            ],
+        });
+        let datagram = server_message(&message, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let ids = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::FriendsOnline(ids) => Some(ids),
+                _ => None,
+            })
+            .ok_or("expected a FriendsOnline event")?;
+        assert_eq!(ids, vec![friend_a, friend_b]);
+        Ok(())
+    }
+
+    #[test]
+    fn offline_notification_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let friend = uuid::Uuid::from_u128(0xF3);
+        let message = AnyMessage::OfflineNotification(OfflineNotification {
+            agent_block: vec![OfflineNotificationAgentBlockBlock { agent_id: friend }],
+        });
+        let datagram = server_message(&message, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let ids = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::FriendsOffline(ids) => Some(ids),
+                _ => None,
+            })
+            .ok_or("expected a FriendsOffline event")?;
+        assert_eq!(ids, vec![friend]);
+        Ok(())
+    }
+
+    #[test]
+    fn change_user_rights_from_friend_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // The friend (not our own agent id 1) changed the rights they grant us;
+        // `agent_related` is our own id.
+        let friend = uuid::Uuid::from_u128(0xF4);
+        let message = AnyMessage::ChangeUserRights(ChangeUserRights {
+            agent_data: ChangeUserRightsAgentDataBlock { agent_id: friend },
+            rights: vec![ChangeUserRightsRightsBlock {
+                agent_related: uuid::Uuid::from_u128(1),
+                related_rights: FriendRights::CAN_SEE_ONLINE | FriendRights::CAN_SEE_ON_MAP,
+            }],
+        });
+        let datagram = server_message(&message, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::FriendRightsChanged { .. } => Some(event),
+                _ => None,
+            })
+            .ok_or("expected a FriendRightsChanged event")?;
+        match event {
+            Event::FriendRightsChanged {
+                friend_id,
+                rights,
+                granted_to_us,
+            } => {
+                assert_eq!(friend_id, friend);
+                assert!(granted_to_us);
+                assert!(rights.can_see_online());
+                assert!(rights.can_see_on_map());
+            }
+            _ => return Err("expected FriendRightsChanged".into()),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn change_user_rights_echo_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // The simulator echoes a change *we* made (AgentData id == our agent id
+        // 1); `agent_related` names the friend.
+        let friend = uuid::Uuid::from_u128(0xF5);
+        let message = AnyMessage::ChangeUserRights(ChangeUserRights {
+            agent_data: ChangeUserRightsAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+            rights: vec![ChangeUserRightsRightsBlock {
+                agent_related: friend,
+                related_rights: FriendRights::CAN_MODIFY_OBJECTS,
+            }],
+        });
+        let datagram = server_message(&message, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::FriendRightsChanged { .. } => Some(event),
+                _ => None,
+            })
+            .ok_or("expected a FriendRightsChanged event")?;
+        match event {
+            Event::FriendRightsChanged {
+                friend_id,
+                rights,
+                granted_to_us,
+            } => {
+                assert_eq!(friend_id, friend);
+                assert!(!granted_to_us);
+                assert!(rights.can_modify_objects());
+            }
+            _ => return Err("expected FriendRightsChanged".into()),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn send_friendship_offer_packs_im() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let friend = uuid::Uuid::from_u128(0xA6);
+        session.send_friendship_offer(friend, "be my friend", now)?;
+        let sent = drain(&mut session)?;
+        let im = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ImprovedInstantMessage(im) => Some(im),
+                _ => None,
+            })
+            .ok_or("expected an ImprovedInstantMessage")?;
+        // IM_FRIENDSHIP_OFFERED == 38.
+        assert_eq!(im.message_block.dialog, 38);
+        assert_eq!(im.message_block.to_agent_id, friend);
+        Ok(())
+    }
+
+    #[test]
+    fn grant_user_rights_packs_message() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let friend = uuid::Uuid::from_u128(0xA7);
+        session.grant_user_rights(
+            friend,
+            FriendRights(FriendRights::CAN_SEE_ONLINE | FriendRights::CAN_SEE_ON_MAP),
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let grant = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::GrantUserRights(grant) => Some(grant),
+                _ => None,
+            })
+            .ok_or("expected a GrantUserRights")?;
+        let block = grant.rights.first().ok_or("a rights block")?;
+        assert_eq!(block.agent_related, friend);
+        assert_eq!(block.related_rights, 0b11);
+        Ok(())
+    }
+
+    #[test]
+    fn terminate_friendship_packs_message() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let friend = uuid::Uuid::from_u128(0xA8);
+        session.terminate_friendship(friend, now)?;
+        let sent = drain(&mut session)?;
+        let terminate = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::TerminateFriendship(terminate) => Some(terminate),
+                _ => None,
+            })
+            .ok_or("expected a TerminateFriendship")?;
+        assert_eq!(terminate.ex_block.other_id, friend);
+        Ok(())
+    }
+
+    #[test]
+    fn accept_and_decline_friendship_pack_messages() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let transaction = uuid::Uuid::from_u128(0xAA);
+        let folder = uuid::Uuid::from_u128(0xBB);
+        session.accept_friendship(transaction, folder, now)?;
+        let sent = drain(&mut session)?;
+        let accept = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AcceptFriendship(accept) => Some(accept),
+                _ => None,
+            })
+            .ok_or("expected an AcceptFriendship")?;
+        assert_eq!(accept.transaction_block.transaction_id, transaction);
+        assert_eq!(
+            accept.folder_data.first().map(|f| f.folder_id),
+            Some(folder)
+        );
+
+        let decline_tx = uuid::Uuid::from_u128(0xCC);
+        session.decline_friendship(decline_tx, now)?;
+        let sent = drain(&mut session)?;
+        let decline = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::DeclineFriendship(decline) => Some(decline),
+                _ => None,
+            })
+            .ok_or("expected a DeclineFriendship")?;
+        assert_eq!(decline.transaction_block.transaction_id, decline_tx);
+        Ok(())
+    }
+
+    #[test]
     fn login_skeleton_emits_inventory_skeleton() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = new_session();
@@ -950,6 +1238,7 @@ mod test {
                     version: 2,
                 },
             ],
+            buddy_list: Vec::new(),
         }));
         session.handle_login_response(login, now)?;
 

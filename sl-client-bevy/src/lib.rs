@@ -24,11 +24,11 @@ use sl_proto::{
 // Bevy's `Event` derive.
 pub use sl_proto::{
     AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
-    ChatMessage, ChatSourceType, ChatType, ControlFlags, DisconnectReason, ImDialog,
-    InstantMessage, InventoryFolder, InventoryItem, LoginParams, LoginRequest, MapRegionInfo,
-    Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
-    RegionFlags, RegionIdentity, RegionLimits, Reliability, Rotation, Transmit, Uuid, Vector,
-    grid_to_handle, handle_to_global, handle_to_grid, sim_access,
+    ChatMessage, ChatSourceType, ChatType, ControlFlags, DisconnectReason, Friend, FriendRights,
+    ImDialog, InstantMessage, InventoryFolder, InventoryItem, LoginParams, LoginRequest,
+    MapRegionInfo, Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo,
+    ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity, RegionLimits, Reliability,
+    Rotation, Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
@@ -158,6 +158,39 @@ pub enum SlCommand {
     /// path (`FetchInventoryDescendents2`) — the modern path used on Second Life.
     /// Each folder's contents arrive as an [`SlSessionEvent::InventoryDescendents`].
     FetchInventoryFolders(Vec<Uuid>),
+    /// Set the friendship rights granted to a friend (`GrantUserRights`). The
+    /// `rights` bitfield combines the [`FriendRights`] `CAN_*` flags. The change
+    /// is echoed back as an [`SlSessionEvent::FriendRightsChanged`].
+    GrantUserRights {
+        /// The friend whose granted rights to set.
+        target: Uuid,
+        /// The new rights bitfield (combine `FriendRights::CAN_*`).
+        rights: FriendRights,
+    },
+    /// Offer friendship to an agent (`ImprovedInstantMessage`,
+    /// `IM_FRIENDSHIP_OFFERED`). The offer arrives at the recipient as an
+    /// [`SlSessionEvent::InstantMessageReceived`] with
+    /// [`ImDialog::FriendshipOffered`].
+    OfferFriendship {
+        /// The agent to offer friendship to.
+        to_agent_id: Uuid,
+        /// The offer message text.
+        message: String,
+    },
+    /// End the friendship with an agent (`TerminateFriendship`).
+    TerminateFriendship(Uuid),
+    /// Accept a friendship offer (`AcceptFriendship`). The `transaction_id` is
+    /// the [`InstantMessage::id`] of the incoming friendship-offer IM; the
+    /// calling card goes into `calling_card_folder`.
+    AcceptFriendship {
+        /// The offer's transaction id (the friendship-offer IM's `id`).
+        transaction_id: Uuid,
+        /// The inventory folder to place the new calling card in.
+        calling_card_folder: Uuid,
+    },
+    /// Decline a friendship offer (`DeclineFriendship`). The `transaction_id` is
+    /// the [`InstantMessage::id`] of the incoming friendship-offer IM.
+    DeclineFriendship(Uuid),
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
         /// The destination region handle.
@@ -514,6 +547,31 @@ fn advance_running(
                         run_inventory_fetch(&url, owner, &folders, &events_tx);
                     });
                 }
+            }
+            SlCommand::OfferFriendship {
+                to_agent_id,
+                message,
+            } => {
+                session
+                    .send_friendship_offer(*to_agent_id, message, now)
+                    .ok();
+            }
+            SlCommand::GrantUserRights { target, rights } => {
+                session.grant_user_rights(*target, *rights, now).ok();
+            }
+            SlCommand::TerminateFriendship(other) => {
+                session.terminate_friendship(*other, now).ok();
+            }
+            SlCommand::AcceptFriendship {
+                transaction_id,
+                calling_card_folder,
+            } => {
+                session
+                    .accept_friendship(*transaction_id, *calling_card_folder, now)
+                    .ok();
+            }
+            SlCommand::DeclineFriendship(transaction_id) => {
+                session.decline_friendship(*transaction_id, now).ok();
             }
             SlCommand::Teleport {
                 region_handle,

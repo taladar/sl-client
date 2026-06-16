@@ -33,7 +33,7 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 3 ✅ | Agent movement & control **(done)** | 5 | Walking/flying/follow bot, autopilot | Local OpenSim (real physics engine) |
 | 4 ✅ | Avatar profiles **(done)** | 3 | Profile / picks checker | Local OpenSim (profiles enabled) |
 | 5 ✅ | Inventory **(done, UDP + CAPS)** | 8 | Inventory manager, product-update bot | Local OpenSim |
-| 6 | Friends & presence | 5 | Presence/online monitor | Local OpenSim (2 accounts) |
+| 6 ✅ | Friends & presence **(done)** | 5 | Presence/online monitor | Local OpenSim (2 accounts) |
 | 7 | Group support | 8 | Group chat bot, roster tool | Local OpenSim (Groups module) |
 | 8 | Script dialogs & permissions | 3 | Vendor/scripted-object interaction bot | Local OpenSim |
 | 9 | Mute list | 2 | Moderation helper | Local OpenSim |
@@ -155,11 +155,30 @@ move/copy/delete/create). Prerequisite for appearance (Current Outfit Folder,
 
 `Cap_FetchInventoryDescendents2` is enabled by default).*
 
-**6. Friends & presence — `OnlineNotification`/`OfflineNotification`,
-`TerminateFriendship`, `GrantUserRights`/`ChangeUserRights`, friendship
-offer/accept via IM · 5 pts.** Friend list, online status, rights — a presence
-monitor on its own; pairs naturally with #2.
-*Test: local OpenSim with two accounts.*
+**6. Friends & presence · 5 pts. ✅ Done.** A standalone presence/online
+monitor. Implemented: the **friend list arrives at login** — the request now
+asks for `buddy-list`, and the response parser extracts each friend's id plus
+the two rights bitfields (`BuddyListEntry`), surfaced once as
+`Event::FriendList(Vec<Friend>)` right after `CircuitEstablished`. **Presence**
+is sim-pushed: `OnlineNotification` /`OfflineNotification` surface as
+`Event::FriendsOnline`/`FriendsOffline` (`Vec<Uuid>`). **Rights**:
+`Session::grant_user_rights` (`GrantUserRights`) sets the rights granted to a
+friend, and incoming `ChangeUserRights` surfaces as
+`Event::FriendRightsChanged { friend_id, rights, granted_to_us }` — the
+`granted_to_us` flag distinguishes a friend changing their grant to us from the
+sim echoing our own change (OpenSim's `AgentData.AgentID == self` hack).
+**Friendship offer/accept via IM**: `Session::send_friendship_offer`
+(`ImprovedInstantMessage` `IM_FRIENDSHIP_OFFERED`), plus
+`accept_friendship`/`decline_friendship`
+(`AcceptFriendship`/`DeclineFriendship`, echoing the offer IM's `id` as the
+transaction id) and `terminate_friendship` (`TerminateFriendship`). A
+`FriendRights` bitfield value type wraps the rights flags
+(`CAN_SEE_ONLINE`/`CAN_SEE_ON_MAP`/`CAN_MODIFY_OBJECTS`). Wired as
+`Command::{OfferFriendship, GrantUserRights, TerminateFriendship,
+AcceptFriendship, DeclineFriendship}` through both runtimes; verified live
+against the local OpenSim with two accounts
+(offer→accept round-trip, friend list at re-login, and online/offline
+notifications). *Test: local OpenSim with two accounts.*
 
 **7. Group support — `AgentDataUpdate`, `AgentGroupDataUpdate`, group chat over
 `ImprovedInstantMessage` (session start/agent-update), CAPS group APIs

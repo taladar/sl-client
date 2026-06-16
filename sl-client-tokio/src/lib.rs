@@ -21,11 +21,12 @@ use sl_proto::{
 // alone.
 pub use sl_proto::{
     AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
-    ChatMessage, ChatSourceType, ChatType, ControlFlags, DisconnectReason, Event, ImDialog,
-    InstantMessage, InventoryFolder, InventoryItem, LoginParams, LoginRequest, LoginResponse,
-    MapRegionInfo, Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo,
-    ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity, RegionLimits, Reliability,
-    Rotation, Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
+    ChatMessage, ChatSourceType, ChatType, ControlFlags, DisconnectReason, Event, Friend,
+    FriendRights, ImDialog, InstantMessage, InventoryFolder, InventoryItem, LoginParams,
+    LoginRequest, LoginResponse, MapRegionInfo, Maturity, MfaChallenge, NeighborInfo, ParcelFlags,
+    ParcelInfo, ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity, RegionLimits,
+    Reliability, Rotation, Transmit, Uuid, Vector, grid_to_handle, handle_to_global,
+    handle_to_grid, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -154,6 +155,38 @@ pub enum Command {
     /// path (`FetchInventoryDescendents2`) — the modern path used on Second Life.
     /// Each folder's contents arrive as an [`Event::InventoryDescendents`].
     FetchInventoryFolders(Vec<Uuid>),
+    /// Set the friendship rights granted to a friend (`GrantUserRights`). The
+    /// `rights` bitfield combines the [`FriendRights`] `CAN_*` flags. The change
+    /// is echoed back as an [`Event::FriendRightsChanged`].
+    GrantUserRights {
+        /// The friend whose granted rights to set.
+        target: Uuid,
+        /// The new rights bitfield (combine `FriendRights::CAN_*`).
+        rights: FriendRights,
+    },
+    /// Offer friendship to an agent (`ImprovedInstantMessage`,
+    /// `IM_FRIENDSHIP_OFFERED`). The offer arrives at the recipient as an
+    /// [`Event::InstantMessageReceived`] with [`ImDialog::FriendshipOffered`].
+    OfferFriendship {
+        /// The agent to offer friendship to.
+        to_agent_id: Uuid,
+        /// The offer message text.
+        message: String,
+    },
+    /// End the friendship with an agent (`TerminateFriendship`).
+    TerminateFriendship(Uuid),
+    /// Accept a friendship offer (`AcceptFriendship`). The `transaction_id` is
+    /// the [`InstantMessage::id`] of the incoming friendship-offer IM; the
+    /// calling card goes into `calling_card_folder`.
+    AcceptFriendship {
+        /// The offer's transaction id (the friendship-offer IM's `id`).
+        transaction_id: Uuid,
+        /// The inventory folder to place the new calling card in.
+        calling_card_folder: Uuid,
+    },
+    /// Decline a friendship offer (`DeclineFriendship`). The `transaction_id` is
+    /// the [`InstantMessage::id`] of the incoming friendship-offer IM.
+    DeclineFriendship(Uuid),
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
         /// The destination region handle.
@@ -369,6 +402,21 @@ impl Client {
                                     url, owner, folder_ids, http.clone(), caps_tx.clone(),
                                 ));
                             }
+                        }
+                        Some(Command::OfferFriendship { to_agent_id, message }) => {
+                            self.session.send_friendship_offer(to_agent_id, &message, Instant::now())?;
+                        }
+                        Some(Command::GrantUserRights { target, rights }) => {
+                            self.session.grant_user_rights(target, rights, Instant::now())?;
+                        }
+                        Some(Command::TerminateFriendship(other)) => {
+                            self.session.terminate_friendship(other, Instant::now())?;
+                        }
+                        Some(Command::AcceptFriendship { transaction_id, calling_card_folder }) => {
+                            self.session.accept_friendship(transaction_id, calling_card_folder, Instant::now())?;
+                        }
+                        Some(Command::DeclineFriendship(transaction_id)) => {
+                            self.session.decline_friendship(transaction_id, Instant::now())?;
                         }
                         Some(Command::Teleport { region_handle, position, look_at }) => {
                             self.session.teleport_to(region_handle, position, look_at, Instant::now())?;

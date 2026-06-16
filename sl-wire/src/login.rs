@@ -71,8 +71,13 @@ impl LoginRequest {
             token: String::new(),
             mfa_hash: String::new(),
             // Request the inventory root and folder skeleton so the login
-            // response carries the agent's full folder tree.
-            options: vec!["inventory-root".to_owned(), "inventory-skeleton".to_owned()],
+            // response carries the agent's full folder tree, and the buddy
+            // list so it carries the agent's friends and their rights.
+            options: vec![
+                "inventory-root".to_owned(),
+                "inventory-skeleton".to_owned(),
+                "buddy-list".to_owned(),
+            ],
         }
     }
 
@@ -228,6 +233,11 @@ pub struct LoginSuccess {
     /// type, and version), from the `inventory-skeleton` response field. Empty if
     /// not requested/provided.
     pub inventory_skeleton: Vec<SkeletonFolder>,
+    /// The agent's friends (the buddy list), each with the rights the agent
+    /// grants them and the rights they grant the agent, from the `buddy-list`
+    /// response field. Empty if not requested/provided or the agent has no
+    /// friends.
+    pub buddy_list: Vec<BuddyListEntry>,
 }
 
 /// One folder of the inventory skeleton carried in a login response
@@ -244,6 +254,20 @@ pub struct SkeletonFolder {
     pub type_default: i8,
     /// The folder version (for cache validation).
     pub version: i32,
+}
+
+/// One friend carried in a login response (`buddy-list`): a friend's id and the
+/// two friendship rights bitfields. The bit values match the `RIGHTS_*` flags
+/// used by `GrantUserRights`/`ChangeUserRights` (bit 0 = see online, bit 1 = see
+/// on map, bit 2 = modify objects).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuddyListEntry {
+    /// The friend's agent id.
+    pub buddy_id: Uuid,
+    /// The rights the agent grants this friend (`buddy_rights_given`).
+    pub rights_granted: i32,
+    /// The rights this friend grants the agent (`buddy_rights_has`).
+    pub rights_has: i32,
 }
 
 /// The reason a login was rejected.
@@ -339,6 +363,7 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
         mfa_hash: members.get("mfa_hash").cloned(),
         inventory_root: parse_inventory_root(response_struct),
         inventory_skeleton: parse_inventory_skeleton(response_struct),
+        buddy_list: parse_buddy_list(response_struct),
     })))
 }
 
@@ -376,6 +401,30 @@ fn parse_inventory_skeleton(response_struct: roxmltree::Node<'_, '_>) -> Vec<Ske
                 version: members
                     .get("version")
                     .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(0),
+            })
+        })
+        .collect()
+}
+
+/// Extracts the friend/buddy list from the `buddy-list` member: an array of
+/// structs, one per friend, each with a `buddy_id` and the two rights ints.
+fn parse_buddy_list(response_struct: roxmltree::Node<'_, '_>) -> Vec<BuddyListEntry> {
+    let Some(value) = member_value_node(response_struct, "buddy-list") else {
+        return Vec::new();
+    };
+    array_structs(value)
+        .filter_map(|buddy_struct| {
+            let members = collect_members(buddy_struct);
+            Some(BuddyListEntry {
+                buddy_id: Uuid::parse_str(members.get("buddy_id")?).ok()?,
+                rights_granted: members
+                    .get("buddy_rights_given")
+                    .and_then(|r| r.trim().parse().ok())
+                    .unwrap_or(0),
+                rights_has: members
+                    .get("buddy_rights_has")
+                    .and_then(|r| r.trim().parse().ok())
                     .unwrap_or(0),
             })
         })

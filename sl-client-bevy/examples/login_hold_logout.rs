@@ -140,6 +140,23 @@ fn on_events(
                     items.len()
                 );
             }
+            SlSessionEvent::FriendList(friends) => {
+                info!("friend list: {} friend(s)", friends.len());
+            }
+            SlSessionEvent::FriendsOnline(ids) => info!("{} friend(s) came online", ids.len()),
+            SlSessionEvent::FriendsOffline(ids) => info!("{} friend(s) went offline", ids.len()),
+            SlSessionEvent::FriendRightsChanged {
+                friend_id,
+                granted_to_us,
+                ..
+            } => info!(
+                "friend rights changed for {friend_id} ({})",
+                if *granted_to_us {
+                    "they->us"
+                } else {
+                    "us->them"
+                }
+            ),
             // This demo ignores the remaining profile/region/parcel/teleport events.
             SlSessionEvent::AvatarInterests(_)
             | SlSessionEvent::AvatarGroups { .. }

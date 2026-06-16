@@ -587,6 +587,10 @@ impl Survey {
             | Event::AvatarNotes { .. }
             | Event::InventorySkeleton(_)
             | Event::InventoryDescendents { .. }
+            | Event::FriendList(_)
+            | Event::FriendsOnline(_)
+            | Event::FriendsOffline(_)
+            | Event::FriendRightsChanged { .. }
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal
