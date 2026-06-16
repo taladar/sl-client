@@ -100,6 +100,22 @@ fn on_events(
                     if *typing { "started" } else { "stopped" }
                 );
             }
+            SlSessionEvent::InstantMessageReceived(im) => {
+                info!(
+                    "IM from {} ({:?}): {}",
+                    im.from_agent_name, im.dialog, im.message
+                );
+            }
+            SlSessionEvent::ImTyping {
+                from_agent_name,
+                typing,
+                ..
+            } => {
+                info!(
+                    "{from_agent_name} {} typing (IM)",
+                    if *typing { "started" } else { "stopped" }
+                );
+            }
             // This demo ignores the region/parcel/neighbour/teleport survey events.
             SlSessionEvent::RegionInfoHandshake(_)
             | SlSessionEvent::RegionLimits(_)

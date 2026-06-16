@@ -136,6 +136,24 @@ pub enum Event {
         /// `true` when typing started, `false` when it stopped.
         typing: bool,
     },
+    /// An instant message was received (`ImprovedInstantMessage`): a 1:1 IM, a
+    /// group/conference message, an inventory/teleport/group/friendship offer, an
+    /// object IM, and so on — the [`InstantMessage::dialog`] distinguishes the
+    /// sub-type. Typing notifications are surfaced as [`Event::ImTyping`] instead.
+    InstantMessageReceived(Box<InstantMessage>),
+    /// A correspondent started or stopped typing in an instant-message session
+    /// (an `ImprovedInstantMessage` with an `IM_TYPING_START`/`IM_TYPING_STOP`
+    /// dialog).
+    ImTyping {
+        /// The typist's id (agent id).
+        from_agent_id: Uuid,
+        /// The typist's display name.
+        from_agent_name: String,
+        /// The IM session id the typing belongs to.
+        session_id: Uuid,
+        /// `true` when typing started, `false` when it stopped.
+        typing: bool,
+    },
     /// The session logged out cleanly (a `LogoutReply` was received).
     LoggedOut,
     /// The session disconnected for the given reason.
@@ -492,6 +510,150 @@ pub struct ChatMessage {
     pub position: (f32, f32, f32),
     /// The message text (UTF-8, with any trailing NUL padding removed).
     pub message: String,
+}
+
+/// The kind of an instant message, from the `Dialog` byte of
+/// `ImprovedInstantMessage` (the `EInstantMessage` enum in the protocol). Only
+/// the commonly handled dialogs are named; the rest are preserved verbatim via
+/// [`ImDialog::Unknown`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImDialog {
+    /// An ordinary 1:1 instant message (`IM_NOTHING_SPECIAL`).
+    Message,
+    /// A modal message box from an object (`IM_MESSAGEBOX`).
+    MessageBox,
+    /// A group invitation (`IM_GROUP_INVITATION`).
+    GroupInvitation,
+    /// An inventory item offered to the agent (`IM_INVENTORY_OFFERED`).
+    InventoryOffered,
+    /// An inventory offer was accepted (`IM_INVENTORY_ACCEPTED`).
+    InventoryAccepted,
+    /// An inventory offer was declined (`IM_INVENTORY_DECLINED`).
+    InventoryDeclined,
+    /// An inventory item offered by a task/object (`IM_TASK_INVENTORY_OFFERED`).
+    TaskInventoryOffered,
+    /// A message within a group or conference session (`IM_SESSION_SEND`).
+    SessionSend,
+    /// A message from an in-world object/task (`IM_FROM_TASK`).
+    FromTask,
+    /// A "do not disturb" auto-response (`IM_DO_NOT_DISTURB_AUTO_RESPONSE`).
+    DoNotDisturbAutoResponse,
+    /// A teleport offer / lure (`IM_LURE_USER`).
+    LureUser,
+    /// A teleport offer was accepted (`IM_LURE_ACCEPTED`).
+    LureAccepted,
+    /// A teleport offer was declined (`IM_LURE_DECLINED`).
+    LureDeclined,
+    /// A request to be teleported to the sender (`IM_TELEPORT_REQUEST`).
+    TeleportRequest,
+    /// A request to open a URL (`IM_GOTO_URL`).
+    GotoUrl,
+    /// A group notice (`IM_GROUP_NOTICE`).
+    GroupNotice,
+    /// A friendship offer (`IM_FRIENDSHIP_OFFERED`).
+    FriendshipOffered,
+    /// A friendship offer was accepted (`IM_FRIENDSHIP_ACCEPTED`).
+    FriendshipAccepted,
+    /// The correspondent started typing (`IM_TYPING_START`).
+    TypingStart,
+    /// The correspondent stopped typing (`IM_TYPING_STOP`).
+    TypingStop,
+    /// An unrecognised dialog byte, preserved verbatim.
+    Unknown(u8),
+}
+
+impl ImDialog {
+    /// Classifies a `Dialog` byte.
+    #[must_use]
+    pub const fn from_u8(byte: u8) -> Self {
+        match byte {
+            0 => Self::Message,
+            1 => Self::MessageBox,
+            3 => Self::GroupInvitation,
+            4 => Self::InventoryOffered,
+            5 => Self::InventoryAccepted,
+            6 => Self::InventoryDeclined,
+            9 => Self::TaskInventoryOffered,
+            17 => Self::SessionSend,
+            19 => Self::FromTask,
+            20 => Self::DoNotDisturbAutoResponse,
+            22 => Self::LureUser,
+            23 => Self::LureAccepted,
+            24 => Self::LureDeclined,
+            26 => Self::TeleportRequest,
+            28 => Self::GotoUrl,
+            32 => Self::GroupNotice,
+            38 => Self::FriendshipOffered,
+            39 => Self::FriendshipAccepted,
+            41 => Self::TypingStart,
+            42 => Self::TypingStop,
+            other => Self::Unknown(other),
+        }
+    }
+
+    /// The wire byte for this dialog.
+    #[must_use]
+    pub const fn to_u8(self) -> u8 {
+        match self {
+            Self::Message => 0,
+            Self::MessageBox => 1,
+            Self::GroupInvitation => 3,
+            Self::InventoryOffered => 4,
+            Self::InventoryAccepted => 5,
+            Self::InventoryDeclined => 6,
+            Self::TaskInventoryOffered => 9,
+            Self::SessionSend => 17,
+            Self::FromTask => 19,
+            Self::DoNotDisturbAutoResponse => 20,
+            Self::LureUser => 22,
+            Self::LureAccepted => 23,
+            Self::LureDeclined => 24,
+            Self::TeleportRequest => 26,
+            Self::GotoUrl => 28,
+            Self::GroupNotice => 32,
+            Self::FriendshipOffered => 38,
+            Self::FriendshipAccepted => 39,
+            Self::TypingStart => 41,
+            Self::TypingStop => 42,
+            Self::Unknown(other) => other,
+        }
+    }
+}
+
+/// An instant message received from the simulator, parsed from
+/// `ImprovedInstantMessage`. Many fields are dialog-dependent (notably
+/// [`InstantMessage::id`] and [`InstantMessage::binary_bucket`]); see
+/// [`ImDialog`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstantMessage {
+    /// The sender's agent id.
+    pub from_agent_id: Uuid,
+    /// The sender's display name (with any trailing NUL padding removed).
+    pub from_agent_name: String,
+    /// The recipient's agent id (this agent for a direct IM, or a group id).
+    pub to_agent_id: Uuid,
+    /// The dialog (sub-type) of the message.
+    pub dialog: ImDialog,
+    /// Whether the message came from a group (rather than an agent).
+    pub from_group: bool,
+    /// The source region's id (nil if not provided).
+    pub region_id: Uuid,
+    /// The sender's region-local position, in metres.
+    pub position: (f32, f32, f32),
+    /// Whether the message was stored-and-forwarded while the agent was offline.
+    pub offline: bool,
+    /// The sender's timestamp (`0` when unset; the simulator often fills it).
+    pub timestamp: u32,
+    /// A dialog-dependent id: the IM session id for chats, or a transaction id
+    /// for offers.
+    pub id: Uuid,
+    /// The parent estate id of the source.
+    pub parent_estate_id: u32,
+    /// The message text (UTF-8, with any trailing NUL padding removed).
+    pub message: String,
+    /// Dialog-dependent binary payload (e.g. an inventory offer's asset type and
+    /// item id, a group invite's role and fee). Empty for an ordinary IM.
+    pub binary_bucket: Vec<u8>,
 }
 
 /// Splits a region handle into its global south-west corner in metres,

@@ -7,11 +7,15 @@ mod types;
 pub use error::Error;
 pub use session::Session;
 pub use types::{
-    ChatAudible, ChatMessage, ChatSourceType, ChatType, DisconnectReason, Event, LoginHttpRequest,
-    LoginParams, MapRegionInfo, Maturity, NeighborInfo, ParcelInfo, ParcelOverlayInfo, ProductType,
-    RegionIdentity, RegionLimits, Reliability, Transmit, grid_to_handle, handle_to_global,
-    handle_to_grid,
+    ChatAudible, ChatMessage, ChatSourceType, ChatType, DisconnectReason, Event, ImDialog,
+    InstantMessage, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, NeighborInfo,
+    ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability,
+    Transmit, grid_to_handle, handle_to_global, handle_to_grid,
 };
+
+// Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,
+// so consumers can name it without depending on `uuid` directly.
+pub use uuid::Uuid;
 
 // Re-export the wire-level types a driver needs to build messages and parse
 // login responses, so it can depend on `sl-proto` alone.
