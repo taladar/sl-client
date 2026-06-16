@@ -9,13 +9,14 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
-        ChatAudible, ChatSourceType, ChatType, DisconnectReason, Event, ImDialog, LoginParams,
-        Maturity, ProductType, Reliability, Session, Transmit,
+        ChatAudible, ChatSourceType, ChatType, ControlFlags, DisconnectReason, Event, ImDialog,
+        LoginParams, Maturity, ProductType, Reliability, Session, Transmit,
     };
-    use sl_types::lsl::Vector;
+    use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
         AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
-        AgentMovementCompleteSimDataBlock, ChatFromSimulator, ChatFromSimulatorChatDataBlock,
+        AgentMovementCompleteSimDataBlock, AvatarSitResponse, AvatarSitResponseSitObjectBlock,
+        AvatarSitResponseSitTransformBlock, ChatFromSimulator, ChatFromSimulatorChatDataBlock,
         ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
         ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
         LogoutRequest, LogoutRequestAgentDataBlock, MapBlockReply, MapBlockReplyAgentDataBlock,
@@ -587,6 +588,174 @@ mod test {
             .ok_or("expected an ImTyping event")?;
         assert_eq!(typing.0, uuid::Uuid::from_u128(0x55));
         assert!(typing.1, "IM_TYPING_START should set typing = true");
+        Ok(())
+    }
+
+    /// Finds the control flags of the first `AgentUpdate` in a batch.
+    fn agent_update_controls(messages: &[AnyMessage]) -> Option<u32> {
+        messages.iter().find_map(|m| match m {
+            AnyMessage::AgentUpdate(update) => Some(update.agent_data.control_flags),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn set_controls_sends_and_persists_agent_update() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Walking forward, flying: an immediate AgentUpdate carries the flags.
+        session.set_controls(ControlFlags::AT_POS | ControlFlags::FLY, now)?;
+        let sent = drain(&mut session)?;
+        assert_eq!(
+            agent_update_controls(&sent),
+            Some((ControlFlags::AT_POS | ControlFlags::FLY).bits())
+        );
+
+        // The flags persist: the next keep-alive AgentUpdate still carries them.
+        session.handle_timeout(after(now, 1100)?);
+        let keepalive = drain(&mut session)?;
+        assert_eq!(
+            agent_update_controls(&keepalive),
+            Some((ControlFlags::AT_POS | ControlFlags::FLY).bits())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stand_is_a_one_shot_control() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        session.set_controls(ControlFlags::AT_POS, now)?;
+        drain(&mut session)?;
+
+        // stand() adds STAND_UP to the immediate update without persisting it.
+        session.stand(now)?;
+        let sent = drain(&mut session)?;
+        let controls = ControlFlags::from_bits(agent_update_controls(&sent).ok_or("AgentUpdate")?);
+        assert!(controls.contains(ControlFlags::STAND_UP));
+        assert!(controls.contains(ControlFlags::AT_POS));
+
+        // The next keep-alive no longer carries STAND_UP.
+        session.handle_timeout(after(now, 1100)?);
+        let keepalive = drain(&mut session)?;
+        let controls =
+            ControlFlags::from_bits(agent_update_controls(&keepalive).ok_or("AgentUpdate")?);
+        assert!(!controls.contains(ControlFlags::STAND_UP));
+        assert!(controls.contains(ControlFlags::AT_POS));
+        Ok(())
+    }
+
+    #[test]
+    fn autopilot_sends_generic_message() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.autopilot_to(256_010.0, 256_020.0, 25.0, now)?;
+        let sent = drain(&mut session)?;
+        let generic = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::GenericMessage(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a GenericMessage")?;
+        assert_eq!(generic.method_data.method, b"autopilot");
+        let params: Vec<&[u8]> = generic
+            .param_list
+            .iter()
+            .map(|p| p.parameter.as_slice())
+            .collect();
+        assert_eq!(
+            params,
+            vec![&b"256010"[..], &b"256020"[..], &b"25"[..]],
+            "autopilot params are the global x, global y, and z as strings"
+        );
+        Ok(())
+    }
+
+    /// Builds an inbound `AvatarSitResponse` for the object `sit_object`.
+    fn sit_response(sit_object: uuid::Uuid) -> AnyMessage {
+        let zero = vec3(0.0, 0.0, 0.0);
+        AnyMessage::AvatarSitResponse(AvatarSitResponse {
+            sit_object: AvatarSitResponseSitObjectBlock { id: sit_object },
+            sit_transform: AvatarSitResponseSitTransformBlock {
+                auto_pilot: false,
+                sit_position: vec3(0.0, 0.0, 0.5),
+                sit_rotation: Rotation {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    s: 1.0,
+                },
+                camera_eye_offset: zero.clone(),
+                camera_at_offset: zero,
+                force_mouselook: false,
+            },
+        })
+    }
+
+    #[test]
+    fn sit_request_completes_on_response() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let target = uuid::Uuid::from_u128(0x5117);
+        session.sit_on(target, vec3(0.0, 0.0, 0.0), now)?;
+        let sent = drain(&mut session)?;
+        let request = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AgentRequestSit(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("expected an AgentRequestSit")?;
+        assert_eq!(request.target_object.target_id, target);
+
+        // The simulator's response completes the sit with an AgentSit and a
+        // SitResult event.
+        let response = server_message(&sit_response(target), 9, false)?;
+        session.handle_datagram(sim_addr(), &response, now)?;
+        let after_response = drain(&mut session)?;
+        assert!(
+            after_response
+                .iter()
+                .any(|m| matches!(m, AnyMessage::AgentSit(_))),
+            "expected an AgentSit, got {after_response:?}"
+        );
+        let result = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::SitResult { sit_object, .. } => Some(sit_object),
+                _ => None,
+            })
+            .ok_or("expected a SitResult event")?;
+        assert_eq!(result, target);
+        Ok(())
+    }
+
+    #[test]
+    fn unrequested_sit_response_is_ignored() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // An AvatarSitResponse with no outstanding sit request is a no-op.
+        let response = server_message(&sit_response(uuid::Uuid::from_u128(0x1)), 9, false)?;
+        session.handle_datagram(sim_addr(), &response, now)?;
+        assert!(
+            drain(&mut session)?.is_empty(),
+            "no AgentSit should be sent"
+        );
+        assert!(
+            !drain_events(&mut session)
+                .iter()
+                .any(|e| matches!(e, Event::SitResult { .. })),
+            "no SitResult should be emitted"
+        );
         Ok(())
     }
 

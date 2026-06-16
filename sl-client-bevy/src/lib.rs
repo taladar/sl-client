@@ -20,11 +20,11 @@ use sl_proto::{
 // survey commands, and read events. `Event` is aliased to avoid clashing with
 // Bevy's `Event` derive.
 pub use sl_proto::{
-    AnyMessage, ChatAudible, ChatMessage, ChatSourceType, ChatType, DisconnectReason, ImDialog,
-    InstantMessage, LoginParams, LoginRequest, MapRegionInfo, Maturity, MfaChallenge, NeighborInfo,
-    ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity,
-    RegionLimits, Reliability, Transmit, Uuid, Vector, grid_to_handle, handle_to_global,
-    handle_to_grid, sim_access,
+    AnyMessage, ChatAudible, ChatMessage, ChatSourceType, ChatType, ControlFlags, DisconnectReason,
+    ImDialog, InstantMessage, LoginParams, LoginRequest, MapRegionInfo, Maturity, MfaChallenge,
+    NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType, RegionFlags,
+    RegionIdentity, RegionLimits, Reliability, Rotation, Transmit, Uuid, Vector, grid_to_handle,
+    handle_to_global, handle_to_grid, sim_access,
 };
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
@@ -102,6 +102,38 @@ pub enum SlCommand {
         to_agent_id: Uuid,
         /// Whether typing started (`true`) or stopped (`false`).
         typing: bool,
+    },
+    /// Set the agent control flags (movement); the simulator moves the agent
+    /// accordingly. Pass [`ControlFlags::empty`] to stop.
+    SetControls(ControlFlags),
+    /// Set the agent's body and head rotation (facing/steering).
+    SetRotation {
+        /// The body rotation.
+        body: Rotation,
+        /// The head rotation.
+        head: Rotation,
+    },
+    /// Stand the agent up (from sitting).
+    Stand,
+    /// Sit the agent on the ground where it stands.
+    SitOnGround,
+    /// Sit the agent on the object `target` at the region-local `offset`. The
+    /// result arrives as an [`SlSessionEvent::SitResult`].
+    Sit {
+        /// The object to sit on.
+        target: Uuid,
+        /// The seat offset, in region-local metres.
+        offset: Vector,
+    },
+    /// Walk the agent to the global coordinates `(global_x, global_y, z)` using
+    /// the simulator's server-side autopilot.
+    Autopilot {
+        /// The global X coordinate, in metres.
+        global_x: f64,
+        /// The global Y coordinate, in metres.
+        global_y: f64,
+        /// The region-local height, in metres.
+        z: f64,
     },
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
@@ -401,6 +433,28 @@ fn advance_running(
                 typing,
             } => {
                 session.send_im_typing(*to_agent_id, *typing, now).ok();
+            }
+            SlCommand::SetControls(controls) => {
+                session.set_controls(*controls, now).ok();
+            }
+            SlCommand::SetRotation { body, head } => {
+                session.set_rotation(body.clone(), head.clone(), now).ok();
+            }
+            SlCommand::Stand => {
+                session.stand(now).ok();
+            }
+            SlCommand::SitOnGround => {
+                session.sit_on_ground(now).ok();
+            }
+            SlCommand::Sit { target, offset } => {
+                session.sit_on(*target, offset.clone(), now).ok();
+            }
+            SlCommand::Autopilot {
+                global_x,
+                global_y,
+                z,
+            } => {
+                session.autopilot_to(*global_x, *global_y, *z, now).ok();
             }
             SlCommand::Teleport {
                 region_handle,

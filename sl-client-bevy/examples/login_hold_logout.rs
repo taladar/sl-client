@@ -116,6 +116,13 @@ fn on_events(
                     if *typing { "started" } else { "stopped" }
                 );
             }
+            SlSessionEvent::SitResult {
+                sit_object,
+                sit_position,
+                ..
+            } => {
+                info!("sat on {sit_object} at {sit_position:?}");
+            }
             // This demo ignores the region/parcel/neighbour/teleport survey events.
             SlSessionEvent::RegionInfoHandshake(_)
             | SlSessionEvent::RegionLimits(_)

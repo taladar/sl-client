@@ -30,7 +30,7 @@ epic. **Test** says whether the local `opensim.service` is enough.
 |---|---------|-----|------------------------------|------|
 | 1 ✅ | Local chat **(done)** | 3 | Text-only chat client / chat bot | Local OpenSim |
 | 2 ✅ | Instant messaging **(done)** | 5 | IM bot, notifier, offer-handler | Local OpenSim |
-| 3 | Agent movement & control | 5 | Walking/flying/follow bot, autopilot | Local OpenSim |
+| 3 ✅ | Agent movement & control **(done)** | 5 | Walking/flying/follow bot, autopilot | Local OpenSim (real physics engine) |
 | 4 | Avatar profiles | 3 | Profile / picks checker | Local OpenSim |
 | 5 | Inventory (AIS3) | 8 | Inventory manager, product-update bot | Local OpenSim |
 | 6 | Friends & presence | 5 | Presence/online monitor | Local OpenSim (2 accounts) |
@@ -91,11 +91,21 @@ session start/invite/leave dialogs (`IM_SESSION_*`), which belong with #7 (group
 support). *Test: local OpenSim (single account suffices via a self-IM;
 cross-avatar needs two).*
 
-**3. Agent movement & control · 5 pts.** Promote the stubbed `AgentUpdate` into
-a real control surface: control flags (walk/run/fly/turn/jump/up/down),
-body+head rotation, camera, plus `AgentRequestSit`/`AgentSit` and stand. Yields
-a walking/flying/follow bot or autopilot — usable without any scene knowledge by
-navigating to coordinates or a known object UUID. *Test: local OpenSim.*
+**3. Agent movement & control · 5 pts. ✅ Done.** Promoted the stubbed
+`AgentUpdate` into a real control surface. Implemented: a `ControlFlags`
+bitfield (walk/run/fly/turn/jump/up/down/…); `Session::set_controls` and
+`Session::set_rotation` (persisted and re-sent on every keep-alive, so the sim
+keeps moving the agent); one-shot `Session::stand` and `Session::sit_on_ground`;
+`Session::sit_on` (the `AgentRequestSit` → `AvatarSitResponse` → `AgentSit`
+handshake, surfaced as `Event::SitResult`); and `Session::autopilot_to`
+(server-side walk-to-coordinates via a `GenericMessage` `autopilot`, so a bot
+can navigate without any scene knowledge). Wired as
+`Command::{SetControls, SetRotation, Stand, SitOnGround, Sit, Autopilot}`
+through both runtimes; verified live (the avatar walked +14.5 m forward under
+`AT_POS`). Camera stays at region centre — true camera control waits on position
+tracking from the object/scene graph (#16). *Test: local OpenSim — needs a real
+physics engine (ubODE/BulletSim); the default BasicPhysics does not move
+avatars.*
 
 **4. Avatar profiles — `AvatarPropertiesRequest`/`Reply`, `AvatarPicksRequest`,
 `AvatarNotesRequest`, CAPS `AgentProfile` · 3 pts.** A standalone profile/picks

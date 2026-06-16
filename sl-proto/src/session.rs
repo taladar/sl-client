@@ -7,15 +7,17 @@ use std::time::{Duration, Instant};
 
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
-    AgentUpdate, AgentUpdateAgentDataBlock, ChatFromSimulatorChatDataBlock, ChatFromViewer,
-    ChatFromViewerAgentDataBlock, ChatFromViewerChatDataBlock, CompleteAgentMovement,
-    CompleteAgentMovementAgentDataBlock, CompletePingCheck, CompletePingCheckPingIDBlock,
-    EnableSimulatorSimulatorInfoBlock, ImprovedInstantMessage,
-    ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
-    ImprovedInstantMessageMessageBlockBlock, LogoutRequest, LogoutRequestAgentDataBlock,
-    MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapBlockRequest, MapBlockRequestAgentDataBlock,
-    MapBlockRequestPositionDataBlock, PacketAck, PacketAckPacketsBlock,
-    ParcelPropertiesParcelDataBlock, ParcelPropertiesRequest,
+    AgentRequestSit, AgentRequestSitAgentDataBlock, AgentRequestSitTargetObjectBlock, AgentSit,
+    AgentSitAgentDataBlock, AgentUpdate, AgentUpdateAgentDataBlock, ChatFromSimulatorChatDataBlock,
+    ChatFromViewer, ChatFromViewerAgentDataBlock, ChatFromViewerChatDataBlock,
+    CompleteAgentMovement, CompleteAgentMovementAgentDataBlock, CompletePingCheck,
+    CompletePingCheckPingIDBlock, EnableSimulatorSimulatorInfoBlock, GenericMessage,
+    GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GenericMessageParamListBlock,
+    ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
+    ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock, LogoutRequest,
+    LogoutRequestAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapBlockRequest,
+    MapBlockRequestAgentDataBlock, MapBlockRequestPositionDataBlock, PacketAck,
+    PacketAckPacketsBlock, ParcelPropertiesParcelDataBlock, ParcelPropertiesRequest,
     ParcelPropertiesRequestAgentDataBlock, ParcelPropertiesRequestParcelDataBlock,
     RegionHandshakeRegionInfo3Block, RegionHandshakeRegionInfoBlock, RegionHandshakeReply,
     RegionHandshakeReplyAgentDataBlock, RegionHandshakeReplyRegionInfoBlock,
@@ -25,8 +27,8 @@ use sl_wire::messages::{
     UseCircuitCodeCircuitCodeBlock,
 };
 use sl_wire::{
-    AnyMessage, Llsd, MessageId, PacketFlags, Reader, WireError, Writer, build_login_request,
-    encode_datagram, parse_datagram, zero_decode,
+    AnyMessage, ControlFlags, Llsd, MessageId, PacketFlags, Reader, WireError, Writer,
+    build_login_request, encode_datagram, parse_datagram, zero_decode,
 };
 use uuid::Uuid;
 
@@ -61,6 +63,13 @@ const TELEPORT_TIMEOUT: Duration = Duration::from_secs(30);
 /// The default draw distance (metres) advertised in keep-alive `AgentUpdate`s,
 /// large enough that the simulator enables the neighbouring regions.
 const DEFAULT_DRAW_DISTANCE: f32 = 256.0;
+/// The identity (no-op) rotation: the default body/head facing.
+const IDENTITY_ROTATION: Rotation = Rotation {
+    x: 0.0,
+    y: 0.0,
+    z: 0.0,
+    s: 1.0,
+};
 
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
 fn deadline(now: Instant, duration: Duration) -> Instant {
@@ -361,18 +370,21 @@ impl Circuit {
         self.send(&message, Reliability::Reliable, now)
     }
 
-    /// Queues a keep-alive `AgentUpdate` unreliably.
+    /// Queues an `AgentUpdate` unreliably carrying the given control flags and
+    /// body/head rotation.
     ///
     /// The camera is placed at the region centre with an orthonormal basis and
     /// the configured draw distance, so the simulator builds an interest list
     /// and enables the neighbouring regions (which arrive as `EnableSimulator`).
-    fn send_agent_update(&mut self, now: Instant) -> Result<(), WireError> {
-        let identity = Rotation {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-            s: 1.0,
-        };
+    /// The simulator moves the agent according to `control_flags` in the
+    /// direction of `body_rotation`.
+    fn send_agent_update(
+        &mut self,
+        control_flags: u32,
+        body_rotation: Rotation,
+        head_rotation: Rotation,
+        now: Instant,
+    ) -> Result<(), WireError> {
         let camera_center = Vector {
             x: 128.0,
             y: 128.0,
@@ -397,19 +409,78 @@ impl Circuit {
             agent_data: AgentUpdateAgentDataBlock {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
-                body_rotation: identity.clone(),
-                head_rotation: identity,
+                body_rotation,
+                head_rotation,
                 state: 0,
                 camera_center,
                 camera_at_axis,
                 camera_left_axis,
                 camera_up_axis,
                 far: self.draw_distance,
-                control_flags: 0,
+                control_flags,
                 flags: 0,
             },
         });
         self.send(&message, Reliability::Unreliable, now)
+    }
+
+    /// Queues an `AgentRequestSit` reliably (ask to sit on `target` at `offset`).
+    fn send_agent_request_sit(
+        &mut self,
+        target: Uuid,
+        offset: Vector,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AgentRequestSit(AgentRequestSit {
+            agent_data: AgentRequestSitAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            target_object: AgentRequestSitTargetObjectBlock {
+                target_id: target,
+                offset,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AgentSit` reliably (complete a sit after `AvatarSitResponse`).
+    fn send_agent_sit(&mut self, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::AgentSit(AgentSit {
+            agent_data: AgentSitAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GenericMessage` reliably with the given method and string
+    /// parameters (used for the server-side `autopilot` walk-to command).
+    fn send_generic_message(
+        &mut self,
+        method: &str,
+        params: &[String],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GenericMessage(GenericMessage {
+            agent_data: GenericMessageAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                transaction_id: Uuid::nil(),
+            },
+            method_data: GenericMessageMethodDataBlock {
+                method: method.as_bytes().to_vec(),
+                invoice: Uuid::nil(),
+            },
+            param_list: params
+                .iter()
+                .map(|param| GenericMessageParamListBlock {
+                    parameter: param.as_bytes().to_vec(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
     }
 
     /// Queues a `TeleportLocationRequest` reliably.
@@ -629,6 +700,16 @@ pub struct Session {
     circuit: Option<Circuit>,
     /// The draw distance (metres) advertised in keep-alive `AgentUpdate`s.
     draw_distance: f32,
+    /// The agent control flags advertised in keep-alive `AgentUpdate`s; the
+    /// simulator moves the agent accordingly.
+    controls: ControlFlags,
+    /// The agent's body rotation (facing) sent in `AgentUpdate`s.
+    body_rotation: Rotation,
+    /// The agent's head rotation sent in `AgentUpdate`s.
+    head_rotation: Rotation,
+    /// Set between an `AgentRequestSit` and the `AvatarSitResponse` that follows,
+    /// so the response is completed with an `AgentSit`.
+    sit_requested: bool,
     /// In-progress teleport handover bookkeeping, if any.
     handover: Option<HandoverPending>,
     /// The destination region handle of an in-flight teleport (between sending
@@ -650,6 +731,10 @@ impl Session {
             state: SessionState::New,
             circuit: None,
             draw_distance: DEFAULT_DRAW_DISTANCE,
+            controls: ControlFlags::empty(),
+            body_rotation: IDENTITY_ROTATION,
+            head_rotation: IDENTITY_ROTATION,
+            sit_requested: false,
             handover: None,
             teleport_target: None,
             seed_capability: None,
@@ -967,6 +1052,26 @@ impl Session {
                         )))),
                 }
             }
+            AnyMessage::AvatarSitResponse(response) => {
+                // Only act on a response to our own AgentRequestSit; complete the
+                // sit with an AgentSit and surface the result.
+                if self.sit_requested {
+                    self.sit_requested = false;
+                    if let Some(circuit) = self.circuit.as_mut() {
+                        circuit.send_agent_sit(now)?;
+                    }
+                    let transform = &response.sit_transform;
+                    self.events.push_back(Event::SitResult {
+                        sit_object: response.sit_object.id,
+                        autopilot: transform.auto_pilot,
+                        sit_position: (
+                            transform.sit_position.x,
+                            transform.sit_position.y,
+                            transform.sit_position.z,
+                        ),
+                    });
+                }
+            }
             AnyMessage::EnableSimulator(sim) => {
                 self.events
                     .push_back(Event::NeighborDiscovered(neighbor_info(
@@ -1122,10 +1227,14 @@ impl Session {
             .as_ref()
             .and_then(|c| c.timers.agent_update)
             .is_some_and(|d| now >= d)
-            && let Some(circuit) = self.circuit.as_mut()
         {
-            circuit.send_agent_update(now)?;
-            circuit.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
+            let controls = self.controls.bits();
+            let body = self.body_rotation.clone();
+            let head = self.head_rotation.clone();
+            if let Some(circuit) = self.circuit.as_mut() {
+                circuit.send_agent_update(controls, body, head, now)?;
+                circuit.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
+            }
         }
 
         Ok(())
@@ -1247,6 +1356,116 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         // The viewer sends the literal text "typing" with a typing IM.
         circuit.send_instant_message_raw(to_agent_id, dialog, "typing", &from_name, now)?;
+        Ok(())
+    }
+
+    /// Sends an `AgentUpdate` immediately with the current control state, plus the
+    /// transient `extra` control bits (e.g. a one-shot `STAND_UP`). The extra bits
+    /// are not persisted, so the next keep-alive clears them.
+    fn send_agent_update_now(&mut self, extra: ControlFlags, now: Instant) -> Result<(), Error> {
+        let controls = self.controls.union(extra).bits();
+        let body = self.body_rotation.clone();
+        let head = self.head_rotation.clone();
+        if let Some(circuit) = self.circuit.as_mut() {
+            circuit.send_agent_update(controls, body, head, now)?;
+        } else {
+            return Err(Error::NoCircuit);
+        }
+        Ok(())
+    }
+
+    /// Sets the agent control flags advertised in `AgentUpdate`s and sends one
+    /// immediately. The simulator moves the agent accordingly (e.g.
+    /// [`ControlFlags::AT_POS`] walks forward in the body-rotation direction,
+    /// `| `[`ControlFlags::FLY`] flies); pass [`ControlFlags::empty`] to stop.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn set_controls(&mut self, controls: ControlFlags, now: Instant) -> Result<(), Error> {
+        self.controls = controls;
+        self.send_agent_update_now(ControlFlags::empty(), now)
+    }
+
+    /// Sets the agent's body and head rotation (facing) advertised in
+    /// `AgentUpdate`s and sends one immediately. This steers the direction the
+    /// agent walks/flies under [`ControlFlags::AT_POS`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn set_rotation(
+        &mut self,
+        body_rotation: Rotation,
+        head_rotation: Rotation,
+        now: Instant,
+    ) -> Result<(), Error> {
+        self.body_rotation = body_rotation;
+        self.head_rotation = head_rotation;
+        self.send_agent_update_now(ControlFlags::empty(), now)
+    }
+
+    /// Stands the agent up (from sitting), sending one `AgentUpdate` with the
+    /// transient `STAND_UP` control bit. Does not change the persistent controls.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn stand(&mut self, now: Instant) -> Result<(), Error> {
+        self.send_agent_update_now(ControlFlags::STAND_UP, now)
+    }
+
+    /// Sits the agent on the ground where it stands, sending one `AgentUpdate`
+    /// with the transient `SIT_ON_GROUND` control bit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn sit_on_ground(&mut self, now: Instant) -> Result<(), Error> {
+        self.send_agent_update_now(ControlFlags::SIT_ON_GROUND, now)
+    }
+
+    /// Requests to sit on the object `target` at the given region-local `offset`
+    /// via `AgentRequestSit`. The simulator replies with an `AvatarSitResponse`,
+    /// which the session completes with an `AgentSit` and surfaces as
+    /// [`Event::SitResult`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn sit_on(&mut self, target: Uuid, offset: Vector, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_agent_request_sit(target, offset, now)?;
+        self.sit_requested = true;
+        Ok(())
+    }
+
+    /// Walks the agent to the global coordinates `(global_x, global_y, z)` using
+    /// the simulator's server-side autopilot (a `GenericMessage` with method
+    /// `autopilot`). The X/Y are global metres (region south-west corner plus the
+    /// region-local offset — see [`handle_to_global`](crate::handle_to_global));
+    /// Z is the region-local height. Movement happens without the client needing
+    /// any scene knowledge.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn autopilot_to(
+        &mut self,
+        global_x: f64,
+        global_y: f64,
+        z: f64,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let params = [global_x.to_string(), global_y.to_string(), z.to_string()];
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_generic_message("autopilot", &params, now)?;
         Ok(())
     }
 

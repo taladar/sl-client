@@ -579,6 +579,7 @@ impl Survey {
             | Event::ChatTyping { .. }
             | Event::InstantMessageReceived(_)
             | Event::ImTyping { .. }
+            | Event::SitResult { .. }
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal

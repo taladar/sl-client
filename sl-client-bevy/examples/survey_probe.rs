@@ -132,6 +132,7 @@ fn on_events(
             | SlSessionEvent::ChatTyping { .. }
             | SlSessionEvent::InstantMessageReceived(_)
             | SlSessionEvent::ImTyping { .. }
+            | SlSessionEvent::SitResult { .. }
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal => {}
