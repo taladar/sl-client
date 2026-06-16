@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
-    AgentUpdate, AgentUpdateAgentDataBlock, CompleteAgentMovement,
+    AgentUpdate, AgentUpdateAgentDataBlock, ChatFromSimulatorChatDataBlock, ChatFromViewer,
+    ChatFromViewerAgentDataBlock, ChatFromViewerChatDataBlock, CompleteAgentMovement,
     CompleteAgentMovementAgentDataBlock, CompletePingCheck, CompletePingCheckPingIDBlock,
     EnableSimulatorSimulatorInfoBlock, LogoutRequest, LogoutRequestAgentDataBlock,
     MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapBlockRequest, MapBlockRequestAgentDataBlock,
@@ -29,9 +30,9 @@ use uuid::Uuid;
 
 use crate::error::Error;
 use crate::types::{
-    DisconnectReason, Event, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, NeighborInfo,
-    ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability,
-    Transmit, grid_to_handle, handle_to_grid,
+    ChatAudible, ChatMessage, ChatSourceType, ChatType, DisconnectReason, Event, LoginHttpRequest,
+    LoginParams, MapRegionInfo, Maturity, NeighborInfo, ParcelInfo, ParcelOverlayInfo, ProductType,
+    RegionIdentity, RegionLimits, Reliability, Transmit, grid_to_handle, handle_to_grid,
 };
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
@@ -284,6 +285,31 @@ impl Circuit {
             ping_id: CompletePingCheckPingIDBlock { ping_id },
         });
         self.send(&message, Reliability::Unreliable, now)
+    }
+
+    /// Queues a `ChatFromViewer` reliably, sending local chat. The wire string
+    /// carries a trailing NUL, as a real viewer sends.
+    fn send_chat_from_viewer(
+        &mut self,
+        message: &str,
+        chat_type: ChatType,
+        channel: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let mut bytes = message.as_bytes().to_vec();
+        bytes.push(0);
+        let message = AnyMessage::ChatFromViewer(ChatFromViewer {
+            agent_data: ChatFromViewerAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            chat_data: ChatFromViewerChatDataBlock {
+                message: bytes,
+                r#type: chat_type.to_u8(),
+                channel,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
     }
 
     /// Queues a keep-alive `AgentUpdate` unreliably.
@@ -854,6 +880,23 @@ impl Session {
                         data: overlay.parcel_data.data.clone(),
                     }));
             }
+            AnyMessage::ChatFromSimulator(chat) => {
+                let data = &chat.chat_data;
+                match ChatType::from_u8(data.chat_type) {
+                    // A typing animation trigger carries no text; surface it as a
+                    // distinct typing signal rather than an empty chat line.
+                    chat_type @ (ChatType::StartTyping | ChatType::StopTyping) => {
+                        self.events.push_back(Event::ChatTyping {
+                            from_name: trimmed_string(&data.from_name),
+                            source_id: data.source_id,
+                            typing: matches!(chat_type, ChatType::StartTyping),
+                        });
+                    }
+                    _ => self
+                        .events
+                        .push_back(Event::ChatReceived(Box::new(chat_message(data)))),
+                }
+            }
             AnyMessage::EnableSimulator(sim) => {
                 self.events
                     .push_back(Event::NeighborDiscovered(neighbor_info(
@@ -1032,6 +1075,47 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send(&message, reliability, now)?;
+        Ok(())
+    }
+
+    /// Sends local chat via `ChatFromViewer`. `chat_type` selects the range
+    /// (whisper / normal / shout); `channel` is `0` for ordinary local chat or a
+    /// non-zero channel for scripted listeners. Incoming chat is surfaced as
+    /// [`Event::ChatReceived`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn say(
+        &mut self,
+        message: &str,
+        chat_type: ChatType,
+        channel: i32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_chat_from_viewer(message, chat_type, channel, now)?;
+        Ok(())
+    }
+
+    /// Broadcasts a local-chat typing indicator via `ChatFromViewer`: a
+    /// `StartTyping` message when `typing`, otherwise `StopTyping` (both with no
+    /// text). Nearby viewers show or clear the typing animation; the counterpart
+    /// is surfaced to other clients as [`Event::ChatTyping`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn set_typing(&mut self, typing: bool, now: Instant) -> Result<(), Error> {
+        let chat_type = if typing {
+            ChatType::StartTyping
+        } else {
+            ChatType::StopTyping
+        };
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_chat_from_viewer("", chat_type, 0, now)?;
         Ok(())
     }
 
@@ -1255,6 +1339,21 @@ fn parcel_info(data: &ParcelPropertiesParcelDataBlock) -> ParcelInfo {
         sim_wide_total_prims: data.sim_wide_total_prims,
         owner_id: data.owner_id,
         raw_parcel_flags: data.parcel_flags,
+    }
+}
+
+/// Builds a [`ChatMessage`] from a `ChatFromSimulator` chat-data block. The
+/// `FromName` and `Message` strings carry trailing NUL padding, which is removed.
+fn chat_message(data: &ChatFromSimulatorChatDataBlock) -> ChatMessage {
+    ChatMessage {
+        from_name: trimmed_string(&data.from_name),
+        source_id: data.source_id,
+        owner_id: data.owner_id,
+        source_type: ChatSourceType::from_u8(data.source_type),
+        chat_type: ChatType::from_u8(data.chat_type),
+        audible: ChatAudible::from_u8(data.audible),
+        position: (data.position.x, data.position.y, data.position.z),
+        message: trimmed_string(&data.message),
     }
 }
 

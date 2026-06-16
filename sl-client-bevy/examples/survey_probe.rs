@@ -128,7 +128,9 @@ fn on_events(
                 info!("map block: {region:?}");
                 state.map_blocks = state.map_blocks.saturating_add(1);
             }
-            SlSessionEvent::TeleportStarted
+            SlSessionEvent::ChatReceived(_)
+            | SlSessionEvent::ChatTyping { .. }
+            | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal => {}
             SlSessionEvent::TeleportFailed { reason } => warn!("teleport failed: {reason}"),
