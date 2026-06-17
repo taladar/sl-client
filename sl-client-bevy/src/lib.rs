@@ -31,11 +31,12 @@ pub use sl_proto::{
     GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
     LindenAmount, LoadUrlRequest, LoginParams, LoginRequest, MapItem, MapItemType, MapRegionInfo,
     Maturity, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry,
-    MuteFlags, MuteType, NeighborInfo, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
-    ParcelFlags, ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ProductType,
-    RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, Rotation,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Throttle,
-    Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
+    MuteFlags, MuteType, NeighborInfo, Object, ObjectMotion, ObjectProperties, ParcelAccessEntry,
+    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelOverlayInfo,
+    ParcelReturnType, ParcelUpdate, ProductType, RegionFlags, RegionIdentity, RegionInfoUpdate,
+    RegionLimits, Reliability, Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest, Throttle, Transmit, Uuid, Vector, grid_to_handle, handle_to_global,
+    handle_to_grid, pcode, sim_access,
 };
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
@@ -513,6 +514,24 @@ pub enum SlCommand {
         item_type: MapItemType,
         /// The target region handle (0 = the current region).
         region_handle: u64,
+    },
+    /// Request the full `ObjectUpdate` for the given region-local ids
+    /// (`RequestMultipleObjects`); updates arrive as [`SlSessionEvent::ObjectAdded`]
+    /// / [`SlSessionEvent::ObjectUpdated`].
+    RequestObjects {
+        /// The region-local ids to (re)fetch.
+        local_ids: Vec<u32>,
+    },
+    /// Request objects' extended properties by selecting them (`ObjectSelect`);
+    /// the reply arrives as [`SlSessionEvent::ObjectProperties`].
+    RequestObjectProperties {
+        /// The region-local ids to select.
+        local_ids: Vec<u32>,
+    },
+    /// Deselect previously selected objects (`ObjectDeselect`).
+    DeselectObjects {
+        /// The region-local ids to deselect.
+        local_ids: Vec<u32>,
     },
     /// Begin a clean logout.
     Logout,
@@ -1034,6 +1053,15 @@ fn advance_running(
                     .request_map_items(*item_type, *region_handle, now)
                     .ok();
             }
+            SlCommand::RequestObjects { local_ids } => {
+                session.request_objects(local_ids, now).ok();
+            }
+            SlCommand::RequestObjectProperties { local_ids } => {
+                session.request_object_properties(local_ids, now).ok();
+            }
+            SlCommand::DeselectObjects { local_ids } => {
+                session.deselect_objects(local_ids, now).ok();
+            }
             SlCommand::UpdateParcel(update) => {
                 session.update_parcel(update, now).ok();
             }
@@ -1150,6 +1178,12 @@ fn advance_running(
         match &event {
             SessionEvent::Disconnected(_) | SessionEvent::LoggedOut => done = true,
             SessionEvent::RegionChanged { .. } => region_changed = true,
+            // POST a neighbour's seed capability so the simulator streams that
+            // region's scene to the child circuit (its `SendInitialData` is gated
+            // on the seed having been requested). One-shot, off the ECS thread.
+            SessionEvent::NeighborSeed {
+                seed_capability, ..
+            } => post_neighbour_seed(seed_capability.clone()),
             _ => {}
         }
         events.write(SlEvent(event));
@@ -1188,6 +1222,25 @@ fn start_caps(session: &Session) -> Option<Caps> {
         map: HashMap::new(),
         stop,
     })
+}
+
+/// POSTs a neighbour region's seed capability (in a detached thread, result
+/// ignored) so the simulator marks the agent's capabilities as sent and begins
+/// streaming that region's scene to the child circuit.
+fn post_neighbour_seed(seed_url: String) {
+    std::thread::spawn(move || {
+        let Ok(http) = ReqwestBlockingClient::builder()
+            .timeout(EVENT_QUEUE_TIMEOUT)
+            .build()
+        else {
+            return;
+        };
+        let _ignored = http
+            .post(&seed_url)
+            .header("Content-Type", "application/llsd+xml")
+            .body(build_seed_request(REQUESTED_CAPABILITIES))
+            .send();
+    });
 }
 
 /// Fetches the capability map from `seed_url` (reporting it over `map_tx`), then

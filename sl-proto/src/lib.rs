@@ -13,11 +13,12 @@ pub use types::{
     GroupMembership, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog,
     InstantMessage, InventoryFolder, InventoryItem, LoadUrlRequest, LoginHttpRequest, LoginParams,
     MapItem, MapItemType, MapRegionInfo, Maturity, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, ParcelAccessEntry,
-    ParcelAccessScope, ParcelCategory, ParcelInfo, ParcelOverlayInfo, ParcelReturnType,
-    ParcelUpdate, ProductType, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Throttle,
-    Transmit, grid_to_handle, handle_to_global, handle_to_grid,
+    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectMotion,
+    ObjectProperties, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelInfo,
+    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ProductType, RegionIdentity,
+    RegionInfoUpdate, RegionLimits, Reliability, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTeleportRequest, Throttle, Transmit, grid_to_handle, handle_to_global,
+    handle_to_grid, pcode,
 };
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,

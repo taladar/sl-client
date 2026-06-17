@@ -167,6 +167,11 @@ fn on_events(
             | SlSessionEvent::MoneyBalance(_)
             | SlSessionEvent::EconomyData(_)
             | SlSessionEvent::MapItems { .. }
+            | SlSessionEvent::NeighborSeed { .. }
+            | SlSessionEvent::ObjectAdded(_)
+            | SlSessionEvent::ObjectUpdated(_)
+            | SlSessionEvent::ObjectRemoved { .. }
+            | SlSessionEvent::ObjectProperties(_)
             | SlSessionEvent::ParcelDwell { .. }
             | SlSessionEvent::ParcelAccessList { .. }
             | SlSessionEvent::EstateInfo(_)

@@ -209,8 +209,13 @@ fn on_events(
             | SlSessionEvent::ParcelProperties(_)
             | SlSessionEvent::ParcelOverlay(_)
             | SlSessionEvent::NeighborDiscovered(_)
+            | SlSessionEvent::NeighborSeed { .. }
             | SlSessionEvent::MapBlock(_)
             | SlSessionEvent::MapItems { .. }
+            | SlSessionEvent::ObjectAdded(_)
+            | SlSessionEvent::ObjectUpdated(_)
+            | SlSessionEvent::ObjectRemoved { .. }
+            | SlSessionEvent::ObjectProperties(_)
             | SlSessionEvent::ParcelDwell { .. }
             | SlSessionEvent::ParcelAccessList { .. }
             | SlSessionEvent::EstateInfo(_)

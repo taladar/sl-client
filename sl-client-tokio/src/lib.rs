@@ -28,11 +28,12 @@ pub use sl_proto::{
     GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
     LindenAmount, LoadUrlRequest, LoginParams, LoginRequest, LoginResponse, MapItem, MapItemType,
     MapRegionInfo, Maturity, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
-    MuteEntry, MuteFlags, MuteType, NeighborInfo, ParcelAccessEntry, ParcelAccessScope,
-    ParcelCategory, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
-    ProductType, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability,
-    Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    Throttle, Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
+    MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectMotion, ObjectProperties,
+    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
+    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ProductType, RegionFlags, RegionIdentity,
+    RegionInfoUpdate, RegionLimits, Reliability, Rotation, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTeleportRequest, Throttle, Transmit, Uuid, Vector, grid_to_handle,
+    handle_to_global, handle_to_grid, pcode, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -505,6 +506,24 @@ pub enum Command {
         /// The target region handle (0 = the current region).
         region_handle: u64,
     },
+    /// Request the full `ObjectUpdate` for the given region-local ids
+    /// (`RequestMultipleObjects`); updates arrive as [`Event::ObjectAdded`] /
+    /// [`Event::ObjectUpdated`].
+    RequestObjects {
+        /// The region-local ids to (re)fetch.
+        local_ids: Vec<u32>,
+    },
+    /// Request objects' extended properties by selecting them (`ObjectSelect`);
+    /// the reply arrives as [`Event::ObjectProperties`].
+    RequestObjectProperties {
+        /// The region-local ids to select.
+        local_ids: Vec<u32>,
+    },
+    /// Deselect previously selected objects (`ObjectDeselect`).
+    DeselectObjects {
+        /// The region-local ids to deselect.
+        local_ids: Vec<u32>,
+    },
     /// Begin a clean logout.
     Logout,
 }
@@ -596,6 +615,20 @@ impl Client {
                 // A region change brings a new seed capability, so re-fetch the
                 // capability map and restart the event-queue poller.
                 let region_changed = matches!(event, Event::RegionChanged { .. });
+                // POST a neighbour's seed capability so the simulator starts
+                // streaming that region's scene to the child circuit (its
+                // `SendInitialData` is gated on the seed having been requested).
+                // Detached: the POST must not block the main loop.
+                if let Event::NeighborSeed {
+                    seed_capability, ..
+                } = &event
+                {
+                    let seed = seed_capability.clone();
+                    let http = http.clone();
+                    tokio::spawn(async move {
+                        let _ignored = fetch_capabilities(Some(&seed), &http).await;
+                    });
+                }
                 events.send(event).await.ok();
                 if region_changed {
                     abort_task(&mut caps_task);
@@ -805,6 +838,15 @@ impl Client {
                         }
                         Some(Command::RequestMapItems { item_type, region_handle }) => {
                             self.session.request_map_items(item_type, region_handle, Instant::now())?;
+                        }
+                        Some(Command::RequestObjects { local_ids }) => {
+                            self.session.request_objects(&local_ids, Instant::now())?;
+                        }
+                        Some(Command::RequestObjectProperties { local_ids }) => {
+                            self.session.request_object_properties(&local_ids, Instant::now())?;
+                        }
+                        Some(Command::DeselectObjects { local_ids }) => {
+                            self.session.deselect_objects(&local_ids, Instant::now())?;
                         }
                         Some(Command::UpdateParcel(update)) => {
                             self.session.update_parcel(&update, Instant::now())?;

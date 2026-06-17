@@ -74,6 +74,14 @@ use sl_wire::messages::{
     ParcelSelectObjectsAgentDataBlock, ParcelSelectObjectsParcelDataBlock,
     ParcelSelectObjectsReturnIDsBlock,
 };
+// Object / scene graph (#16): incoming update blocks consumed by the decoders,
+// and the outgoing select / cache-miss request messages.
+use sl_wire::messages::{
+    ObjectDeselect, ObjectDeselectAgentDataBlock, ObjectDeselectObjectDataBlock,
+    ObjectPropertiesObjectDataBlock, ObjectSelect, ObjectSelectAgentDataBlock,
+    ObjectSelectObjectDataBlock, ObjectUpdateObjectDataBlock, RequestMultipleObjects,
+    RequestMultipleObjectsAgentDataBlock, RequestMultipleObjectsObjectDataBlock,
+};
 // Estate / region management (#14): the outgoing estate-owner / god messages.
 use sl_wire::messages::{
     EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
@@ -119,11 +127,11 @@ use crate::types::{
     GroupMembership, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog,
     InstantMessage, InventoryFolder, InventoryItem, LoadUrlRequest, LoginHttpRequest, LoginParams,
     MapItem, MapItemType, MapRegionInfo, Maturity, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, ParcelAccessEntry,
-    ParcelAccessScope, ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ProductType,
-    RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Throttle, Transmit,
-    grid_to_handle, handle_to_grid,
+    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectMotion,
+    ObjectProperties, ParcelAccessEntry, ParcelAccessScope, ParcelInfo, ParcelOverlayInfo,
+    ParcelReturnType, ParcelUpdate, ProductType, RegionIdentity, RegionInfoUpdate, RegionLimits,
+    Reliability, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
+    Throttle, Transmit, grid_to_handle, handle_to_grid,
 };
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
@@ -1682,6 +1690,64 @@ impl Circuit {
         self.send(&message, Reliability::Reliable, now)
     }
 
+    /// Queues a `RequestMultipleObjects` reliably, asking the simulator to (re)send
+    /// the full `ObjectUpdate` for each local id (cache-miss type "full" = 0).
+    fn send_request_multiple_objects(
+        &mut self,
+        local_ids: &[u32],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RequestMultipleObjects(RequestMultipleObjects {
+            agent_data: RequestMultipleObjectsAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: local_ids
+                .iter()
+                .map(|id| RequestMultipleObjectsObjectDataBlock {
+                    cache_miss_type: 0,
+                    id: *id,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectSelect` reliably for the given local ids. Selecting an
+    /// object makes the simulator send its `ObjectProperties`.
+    fn send_object_select(&mut self, local_ids: &[u32], now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectSelect(ObjectSelect {
+            agent_data: ObjectSelectAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: local_ids
+                .iter()
+                .map(|id| ObjectSelectObjectDataBlock {
+                    object_local_id: *id,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectDeselect` reliably for the given local ids.
+    fn send_object_deselect(&mut self, local_ids: &[u32], now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectDeselect(ObjectDeselect {
+            agent_data: ObjectDeselectAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: local_ids
+                .iter()
+                .map(|id| ObjectDeselectObjectDataBlock {
+                    object_local_id: *id,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
     /// Records that a datagram was received, resetting the inactivity timer.
     fn note_received(&mut self, now: Instant) {
         self.timers.inactivity = deadline(now, INACTIVITY_TIMEOUT);
@@ -1839,6 +1905,12 @@ pub struct Session {
     mute_xfers: BTreeMap<u64, Vec<u8>>,
     /// A monotonic counter for generating `Xfer` ids (never zero).
     next_xfer_id: u64,
+    /// The scene-graph object cache, keyed by the simulator the objects belong
+    /// to (the root region *and* every child/neighbour circuit), then by
+    /// region-local id. Region-local ids are only unique within a simulator, so
+    /// the cache is partitioned per sim. A sim's objects are dropped when its
+    /// circuit goes away (`DisableSimulator`, teleport handover, relogin).
+    objects: BTreeMap<SocketAddr, BTreeMap<u32, Object>>,
     /// Pending high-level events for the driver.
     events: VecDeque<Event>,
 }
@@ -1865,6 +1937,7 @@ impl Session {
             inventory_root: None,
             mute_xfers: BTreeMap::new(),
             next_xfer_id: 1,
+            objects: BTreeMap::new(),
             events: VecDeque::new(),
         }
     }
@@ -1939,7 +2012,15 @@ impl Session {
             // root on a border crossing.
             "EstablishAgentCommunication" => {
                 if let Some((sim, seed)) = establish_agent_communication_from_llsd(body) {
-                    self.child_seeds.insert(sim, seed);
+                    self.child_seeds.insert(sim, seed.clone());
+                    // Surface the seed so the driver POSTs it: OpenSim only streams
+                    // a region's scene to the (child) agent once its capabilities
+                    // have been requested (`SentSeeds`), so this unlocks neighbour
+                    // object streaming on the child circuit.
+                    self.events.push_back(Event::NeighborSeed {
+                        sim,
+                        seed_capability: seed,
+                    });
                 }
             }
             // The agent has physically crossed a region border; OpenSim signals
@@ -2001,6 +2082,9 @@ impl Session {
         // Any child circuits were neighbours of the source region; drop them.
         self.children.clear();
         self.child_seeds.clear();
+        // The retargeted root and the dropped neighbours leave their cached
+        // objects stale (new local-id spaces at the destination); start fresh.
+        self.objects.clear();
         if seed_capability.is_some() {
             self.seed_capability = seed_capability;
         }
@@ -2066,6 +2150,21 @@ impl Session {
             now,
         );
         child.send_use_circuit_code(now)?;
+        // Advertise the throttle on the child too, so the neighbour opens up its
+        // object stream to this child agent (it otherwise uses conservative
+        // defaults). Best-effort — a wire-encode failure must not abort.
+        if let Some(throttle) = self.throttle {
+            let _ignored = child.send_agent_throttle(&throttle, now);
+        }
+        // Drive the child agent with periodic `AgentUpdate`s (camera/interest) so
+        // the neighbour streams its scene objects to this child circuit, the same
+        // way the root circuit is kept advertised. Send one immediately and arm
+        // the cadence.
+        let controls = self.controls.bits();
+        let body = self.body_rotation.clone();
+        let head = self.head_rotation.clone();
+        let _ignored = child.send_agent_update(controls, body, head, now);
+        child.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
         self.children.insert(sim, child);
         Ok(())
     }
@@ -2172,6 +2271,8 @@ impl Session {
                 circuit.send_use_circuit_code(now)?;
                 circuit.send_complete_agent_movement(now)?;
                 self.circuit = Some(circuit);
+                // A fresh session: discard any objects from a previous login.
+                self.objects.clear();
                 self.seed_capability = Some(success.seed_capability.clone());
                 self.inventory_root = success.inventory_root;
                 self.state = SessionState::AwaitingHandshake;
@@ -2255,7 +2356,7 @@ impl Session {
             return Ok(());
         };
         if is_root {
-            self.dispatch(&message, now)
+            self.dispatch(from, &message, now)
         } else {
             self.dispatch_child(from, &message, now)
         }
@@ -2271,6 +2372,11 @@ impl Session {
         message: &AnyMessage,
         now: Instant,
     ) -> Result<(), Error> {
+        // A child agent still receives the neighbour region's object stream;
+        // cache it so a roaming/proximity bot sees adjacent regions too.
+        if self.try_dispatch_object(from, message, now) {
+            return Ok(());
+        }
         match message {
             AnyMessage::StartPingCheck(ping) => {
                 if let Some(circuit) = self.children.get_mut(&from) {
@@ -2293,14 +2399,194 @@ impl Session {
                 // The simulator is retiring this child circuit.
                 self.children.remove(&from);
                 self.child_seeds.remove(&from);
+                self.forget_sim_objects(from);
             }
             _ => {}
         }
         Ok(())
     }
 
-    /// Acts on a decoded inbound message.
-    fn dispatch(&mut self, message: &AnyMessage, now: Instant) -> Result<(), Error> {
+    /// Handles the object/scene-graph messages (full / compressed / cached /
+    /// terse updates, `KillObject`, `ObjectProperties`) that arrive on the root
+    /// *and* child circuits, keyed by the source simulator `from`. Returns `true`
+    /// if `message` was an object message (and thus fully handled here).
+    fn try_dispatch_object(
+        &mut self,
+        from: SocketAddr,
+        message: &AnyMessage,
+        now: Instant,
+    ) -> bool {
+        match message {
+            AnyMessage::ObjectUpdate(update) => {
+                let region_handle = update.region_data.region_handle;
+                for block in &update.object_data {
+                    self.upsert_object(from, object_from_full_update(block, region_handle));
+                }
+            }
+            AnyMessage::ObjectUpdateCompressed(update) => {
+                let region_handle = update.region_data.region_handle;
+                for block in &update.object_data {
+                    if let Some(object) =
+                        compressed_object(&block.data, region_handle, block.update_flags)
+                    {
+                        self.upsert_object(from, object);
+                    }
+                }
+            }
+            AnyMessage::ObjectUpdateCached(update) => {
+                // We keep no persistent object cache across sessions, so any entry
+                // not already held with a matching CRC is a miss; fetch the full
+                // update for the misses (a full `ObjectUpdate` follows).
+                let cached = self.objects.get(&from);
+                let misses: Vec<u32> = update
+                    .object_data
+                    .iter()
+                    .filter(|block| {
+                        cached
+                            .and_then(|sim| sim.get(&block.id))
+                            .is_none_or(|object| object.crc != block.crc)
+                    })
+                    .map(|block| block.id)
+                    .collect();
+                self.request_object_ids(from, &misses, now);
+            }
+            AnyMessage::ImprovedTerseObjectUpdate(update) => {
+                // Terse updates carry only motion. Apply to known objects; for
+                // unknown ones (which lack identity here), fetch the full update.
+                let mut misses = Vec::new();
+                for block in &update.object_data {
+                    let Some(terse) = terse_update(&block.data) else {
+                        continue;
+                    };
+                    let local_id = terse.local_id;
+                    if !self.apply_terse_update(from, terse) {
+                        misses.push(local_id);
+                    }
+                }
+                self.request_object_ids(from, &misses, now);
+            }
+            AnyMessage::KillObject(kill) => {
+                for block in &kill.object_data {
+                    let region_handle = self
+                        .objects
+                        .get_mut(&from)
+                        .and_then(|sim| sim.remove(&block.id))
+                        .map_or(0, |object| object.region_handle);
+                    self.events.push_back(Event::ObjectRemoved {
+                        region_handle,
+                        local_id: block.id,
+                    });
+                }
+            }
+            AnyMessage::ObjectProperties(props) => {
+                for block in &props.object_data {
+                    let properties = object_properties(block);
+                    if let Some(object) = self.objects.get_mut(&from).and_then(|sim| {
+                        sim.values_mut()
+                            .find(|object| object.full_id == properties.object_id)
+                    }) {
+                        object.properties = Some(properties.clone());
+                    }
+                    self.events
+                        .push_back(Event::ObjectProperties(Box::new(properties)));
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Inserts or refreshes a scene object in the cache for simulator `from`,
+    /// emitting [`Event::ObjectAdded`] for a newly seen local id or
+    /// [`Event::ObjectUpdated`] for one already cached. Any previously merged
+    /// [`properties`](Object::properties) are preserved across a refresh that
+    /// does not carry its own.
+    fn upsert_object(&mut self, from: SocketAddr, mut object: Object) {
+        let sim = self.objects.entry(from).or_default();
+        match sim.get(&object.local_id) {
+            Some(existing) => {
+                if object.properties.is_none() {
+                    object.properties.clone_from(&existing.properties);
+                }
+                sim.insert(object.local_id, object.clone());
+                self.events
+                    .push_back(Event::ObjectUpdated(Box::new(object)));
+            }
+            None => {
+                sim.insert(object.local_id, object.clone());
+                self.events.push_back(Event::ObjectAdded(Box::new(object)));
+            }
+        }
+    }
+
+    /// Applies a motion-only terse update to an object already cached for
+    /// simulator `from`, emitting [`Event::ObjectUpdated`]. Returns `false` if the
+    /// object is not cached (the caller should fetch its full update).
+    fn apply_terse_update(&mut self, from: SocketAddr, update: TerseUpdate) -> bool {
+        let Some(object) = self
+            .objects
+            .get_mut(&from)
+            .and_then(|sim| sim.get_mut(&update.local_id))
+        else {
+            return false;
+        };
+        object.state = update.state;
+        object.motion = update.motion;
+        let snapshot = object.clone();
+        self.events
+            .push_back(Event::ObjectUpdated(Box::new(snapshot)));
+        true
+    }
+
+    /// Sends a `RequestMultipleObjects` (full cache-miss) for the given local ids
+    /// on the circuit at `from` (root or child). Best-effort: a missing circuit or
+    /// encode failure is ignored (these are speculative fetches driven by the
+    /// simulator's stream).
+    fn request_object_ids(&mut self, from: SocketAddr, local_ids: &[u32], now: Instant) {
+        if local_ids.is_empty() {
+            return;
+        }
+        if let Some(circuit) = self.circuit_mut(from) {
+            let _ignored = circuit.send_request_multiple_objects(local_ids, now);
+        }
+    }
+
+    /// Returns a mutable reference to the circuit at `addr`, whether it is the
+    /// root or a child circuit.
+    fn circuit_mut(&mut self, addr: SocketAddr) -> Option<&mut Circuit> {
+        if self.circuit.as_ref().map(|c| c.sim_addr) == Some(addr) {
+            self.circuit.as_mut()
+        } else {
+            self.children.get_mut(&addr)
+        }
+    }
+
+    /// Drops every cached object for simulator `addr` (its circuit has gone away),
+    /// emitting an [`Event::ObjectRemoved`] for each so consumers can prune.
+    fn forget_sim_objects(&mut self, addr: SocketAddr) {
+        let Some(sim) = self.objects.remove(&addr) else {
+            return;
+        };
+        for object in sim.into_values() {
+            self.events.push_back(Event::ObjectRemoved {
+                region_handle: object.region_handle,
+                local_id: object.local_id,
+            });
+        }
+    }
+
+    /// Acts on a decoded inbound message received on the root circuit `from`.
+    fn dispatch(
+        &mut self,
+        from: SocketAddr,
+        message: &AnyMessage,
+        now: Instant,
+    ) -> Result<(), Error> {
+        // Object/scene-graph updates arrive on the root *and* child circuits;
+        // handle them uniformly, keyed by the source sim.
+        if self.try_dispatch_object(from, message, now) {
+            return Ok(());
+        }
         match message {
             AnyMessage::RegionHandshake(handshake) => {
                 if matches!(self.state, SessionState::AwaitingHandshake) {
@@ -2908,8 +3194,12 @@ impl Session {
             }
         }
 
-        // Keep child circuits healthy: flush owed acks and retransmit, and drop
+        // Keep child circuits healthy: flush owed acks, retransmit, advertise the
+        // agent (camera/interest) so the neighbour streams its objects, and drop
         // any that have gone silent (a dead child never fails the session).
+        let controls = self.controls.bits();
+        let body = self.body_rotation.clone();
+        let head = self.head_rotation.clone();
         let mut dead = Vec::new();
         for (addr, child) in &mut self.children {
             if now >= child.timers.inactivity {
@@ -2920,10 +3210,15 @@ impl Session {
             if child.timers.ack_flush.is_some_and(|d| now >= d) {
                 child.flush_acks(now)?;
             }
+            if child.timers.agent_update.is_some_and(|d| now >= d) {
+                child.send_agent_update(controls, body.clone(), head.clone(), now)?;
+                child.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
+            }
         }
         for addr in dead {
             self.children.remove(&addr);
             self.child_seeds.remove(&addr);
+            self.forget_sim_objects(addr);
         }
 
         Ok(())
@@ -3122,6 +3417,11 @@ impl Session {
         self.throttle = Some(throttle);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_agent_throttle(&throttle, now)?;
+        // Also advertise it on the child circuits so neighbour regions open up
+        // their object streams. Best-effort per child.
+        for child in self.children.values_mut() {
+            let _ignored = child.send_agent_throttle(&throttle, now);
+        }
         Ok(())
     }
 
@@ -4222,6 +4522,77 @@ impl Session {
         Ok(())
     }
 
+    /// All cached scene objects across the current region *and* every
+    /// neighbouring region a child circuit is streaming (from `ObjectUpdate` /
+    /// `ObjectUpdateCompressed`, kept current by motion updates). Each
+    /// [`Object`] carries its [`region_handle`](Object::region_handle); a sim's
+    /// objects are dropped when its circuit goes away.
+    pub fn objects(&self) -> impl Iterator<Item = &Object> {
+        self.objects.values().flat_map(BTreeMap::values)
+    }
+
+    /// All cached scene objects in the region identified by `region_handle`.
+    pub fn objects_in_region(&self, region_handle: u64) -> impl Iterator<Item = &Object> {
+        self.objects()
+            .filter(move |object| object.region_handle == region_handle)
+    }
+
+    /// Looks up a cached scene object by its region-local id in the region the
+    /// agent is currently in (the root circuit). Use [`Session::objects`] /
+    /// [`Session::objects_in_region`] to reach neighbour-region objects, whose
+    /// local ids share the same numeric space.
+    #[must_use]
+    pub fn object(&self, local_id: u32) -> Option<&Object> {
+        let root = self.circuit.as_ref().map(|circuit| circuit.sim_addr)?;
+        self.objects.get(&root)?.get(&local_id)
+    }
+
+    /// Requests the full `ObjectUpdate` for the given region-local ids via
+    /// `RequestMultipleObjects` (a "full" cache miss). Useful to (re)fetch
+    /// objects seen only as cached/terse stubs, or to repopulate after a gap.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_objects(&mut self, local_ids: &[u32], now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_request_multiple_objects(local_ids, now)?;
+        Ok(())
+    }
+
+    /// Requests an object's extended properties by selecting it (`ObjectSelect`).
+    /// The simulator replies with `ObjectProperties`, surfaced as
+    /// [`Event::ObjectProperties`] (and merged into the cached [`Object`]). Pair
+    /// with [`Session::deselect_objects`] to release the selection afterwards.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_object_properties(
+        &mut self,
+        local_ids: &[u32],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_select(local_ids, now)?;
+        Ok(())
+    }
+
+    /// Deselects objects previously selected with
+    /// [`Session::request_object_properties`] (`ObjectDeselect`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn deselect_objects(&mut self, local_ids: &[u32], now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_deselect(local_ids, now)?;
+        Ok(())
+    }
+
     /// Requests an in-world teleport to `position` (region-local) in the region
     /// identified by `region_handle`, looking towards `look_at`. On success the
     /// session re-establishes its circuit at the destination simulator and emits
@@ -5260,5 +5631,297 @@ fn inventory_item_from_llsd(item: &Llsd) -> InventoryItem {
         group_mask: perm("group_mask"),
         everyone_mask: perm("everyone_mask"),
         next_owner_mask: perm("next_owner_mask"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Object / scene graph (#16): decoders for the packed `ObjectData`/`Data` blobs.
+// ---------------------------------------------------------------------------
+
+/// The `CompressedFlags` bitfield carried in an `ObjectUpdateCompressed` blob,
+/// gating which optional fields follow (mirrors LL's `CompressedFlags`).
+const COMPRESSED_SCRATCHPAD: u32 = 0x01;
+/// The object carries a tree species byte.
+const COMPRESSED_TREE: u32 = 0x02;
+/// The object has floating text (`llSetText`).
+const COMPRESSED_HAS_TEXT: u32 = 0x04;
+/// The object is linked to a parent (a `ParentID` follows).
+const COMPRESSED_HAS_PARENT: u32 = 0x20;
+/// The object has a non-zero angular velocity (a vector follows).
+const COMPRESSED_HAS_ANGULAR_VELOCITY: u32 = 0x80;
+/// The object has a media URL.
+const COMPRESSED_MEDIA_URL: u32 = 0x200;
+
+/// A zero [`Vector`], used as the fall-back for absent/short motion fields.
+const ZERO_VECTOR: Vector = Vector {
+    x: 0.0,
+    y: 0.0,
+    z: 0.0,
+};
+
+/// Dequantizes a 16-bit fixed-point value spanning `[lower, upper]` back to an
+/// `f32`, matching LL's `U16_to_F32` (including its snap-to-zero of values
+/// within one quantum of zero).
+fn u16_to_f32(value: u16, lower: f32, upper: f32) -> f32 {
+    let range = upper - lower;
+    let result = f32::from(value) / f32::from(u16::MAX) * range + lower;
+    let max_error = range / f32::from(u16::MAX);
+    if result.abs() < max_error {
+        0.0
+    } else {
+        result
+    }
+}
+
+/// Reads three consecutive 16-bit-quantized floats (each spanning
+/// `[-range, range]`) as a [`Vector`].
+fn read_quantized_vector(reader: &mut Reader<'_>, range: f32) -> Result<Vector, WireError> {
+    let x = u16_to_f32(reader.u16()?, -range, range);
+    let y = u16_to_f32(reader.u16()?, -range, range);
+    let z = u16_to_f32(reader.u16()?, -range, range);
+    Ok(Vector { x, y, z })
+}
+
+/// A zero/identity [`ObjectMotion`], used when a motion blob is malformed.
+const fn zero_motion() -> ObjectMotion {
+    ObjectMotion {
+        position: ZERO_VECTOR,
+        velocity: ZERO_VECTOR,
+        acceleration: ZERO_VECTOR,
+        rotation: IDENTITY_ROTATION,
+        angular_velocity: ZERO_VECTOR,
+    }
+}
+
+/// Decodes the full-precision `ObjectData` blob of an `ObjectUpdate` into an
+/// [`ObjectMotion`]. Avatar variants (length 76/140) carry a 16-byte collision
+/// plane prefix, which is skipped. Returns a zero motion on a short/garbled
+/// blob rather than erroring (best-effort, no panic).
+fn full_object_motion(blob: &[u8]) -> ObjectMotion {
+    full_object_motion_inner(blob).unwrap_or_else(|_ignored| zero_motion())
+}
+
+/// The fallible inner of [`full_object_motion`].
+fn full_object_motion_inner(blob: &[u8]) -> Result<ObjectMotion, WireError> {
+    let mut reader = Reader::new(blob);
+    if matches!(blob.len(), 76 | 140) {
+        // Avatar collision plane (LLVector4) prefix — read and discard.
+        let _plane = reader.vector4()?;
+    }
+    let position = reader.vector3()?;
+    let velocity = reader.vector3()?;
+    let acceleration = reader.vector3()?;
+    // Rotation is a packed quaternion (three floats, w reconstructed).
+    let rotation = reader.quaternion()?;
+    let angular_velocity = reader.vector3()?;
+    Ok(ObjectMotion {
+        position,
+        velocity,
+        acceleration,
+        rotation,
+        angular_velocity,
+    })
+}
+
+/// A decoded `ImprovedTerseObjectUpdate` entry: the object's local id, its state
+/// byte, and its new motion.
+struct TerseUpdate {
+    /// The object's region-local id.
+    local_id: u32,
+    /// The object/attachment state byte.
+    state: u8,
+    /// The object's new kinematic state (position full precision; velocity,
+    /// acceleration, rotation, and angular velocity 16-bit quantized).
+    motion: ObjectMotion,
+}
+
+/// Decodes the `Data` blob of an `ImprovedTerseObjectUpdate` entry. Returns
+/// `None` on a short/garbled blob.
+fn terse_update(blob: &[u8]) -> Option<TerseUpdate> {
+    let mut reader = Reader::new(blob);
+    let local_id = reader.u32().ok()?;
+    let state = reader.u8().ok()?;
+    let has_collision_plane = reader.u8().ok()? != 0;
+    if has_collision_plane {
+        // Avatar collision plane (LLVector4) — read and discard.
+        let _plane = reader.vector4().ok()?;
+    }
+    let position = reader.vector3().ok()?;
+    let velocity = read_quantized_vector(&mut reader, 128.0).ok()?;
+    let acceleration = read_quantized_vector(&mut reader, 64.0).ok()?;
+    // Rotation: four explicit 16-bit components (x, y, z, w) — not packed.
+    let rot_x = u16_to_f32(reader.u16().ok()?, -1.0, 1.0);
+    let rot_y = u16_to_f32(reader.u16().ok()?, -1.0, 1.0);
+    let rot_z = u16_to_f32(reader.u16().ok()?, -1.0, 1.0);
+    let rot_s = u16_to_f32(reader.u16().ok()?, -1.0, 1.0);
+    let rotation = Rotation {
+        x: rot_x,
+        y: rot_y,
+        z: rot_z,
+        s: rot_s,
+    };
+    let angular_velocity = read_quantized_vector(&mut reader, 64.0).ok()?;
+    Some(TerseUpdate {
+        local_id,
+        state,
+        motion: ObjectMotion {
+            position,
+            velocity,
+            acceleration,
+            rotation,
+            angular_velocity,
+        },
+    })
+}
+
+/// Reads a NUL-terminated UTF-8 string from `reader` (consuming the terminator).
+fn read_nul_string(reader: &mut Reader<'_>) -> Option<String> {
+    let mut bytes = Vec::new();
+    loop {
+        let byte = reader.u8().ok()?;
+        if byte == 0 {
+            break;
+        }
+        bytes.push(byte);
+    }
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Builds an [`Object`] from a full `ObjectUpdate` object-data block.
+fn object_from_full_update(block: &ObjectUpdateObjectDataBlock, region_handle: u64) -> Object {
+    Object {
+        region_handle,
+        local_id: block.id,
+        full_id: block.full_id,
+        parent_id: block.parent_id,
+        pcode: block.p_code,
+        state: block.state,
+        crc: block.crc,
+        material: block.material,
+        click_action: block.click_action,
+        update_flags: block.update_flags,
+        scale: block.scale.clone(),
+        motion: full_object_motion(&block.object_data),
+        owner_id: block.owner_id,
+        sound: block.sound,
+        gain: block.gain,
+        sound_flags: block.flags,
+        sound_radius: block.radius,
+        text: trimmed_string(&block.text),
+        text_color: block.text_color,
+        name_value: trimmed_string(&block.name_value),
+        media_url: trimmed_string(&block.media_url),
+        texture_entry: block.texture_entry.clone(),
+        extra_params: block.extra_params.clone(),
+        properties: None,
+    }
+}
+
+/// Decodes the packed `Data` blob of an `ObjectUpdateCompressed` entry into an
+/// [`Object`]. The reliable fixed prefix (identity, scale, position, rotation,
+/// flags, owner, optional angular velocity / parent / tree, floating text, and
+/// media URL) is decoded; the trailing variable-size fields (particle systems,
+/// extra params, sound, name-values, shape, texture entry) are not, as walking
+/// past the length-prefix-less legacy particle block is not possible from the
+/// stream alone. Returns `None` on a short/garbled blob.
+fn compressed_object(blob: &[u8], region_handle: u64, update_flags: u32) -> Option<Object> {
+    let mut reader = Reader::new(blob);
+    let full_id = reader.uuid().ok()?;
+    let local_id = reader.u32().ok()?;
+    let pcode = reader.u8().ok()?;
+    let state = reader.u8().ok()?;
+    let crc = reader.u32().ok()?;
+    let material = reader.u8().ok()?;
+    let click_action = reader.u8().ok()?;
+    let scale = reader.vector3().ok()?;
+    let position = reader.vector3().ok()?;
+    // Rotation is a packed quaternion (three floats, w reconstructed).
+    let rotation = reader.quaternion().ok()?;
+    let cflags = reader.u32().ok()?;
+    let owner_id = reader.uuid().ok()?;
+    let angular_velocity = if cflags & COMPRESSED_HAS_ANGULAR_VELOCITY != 0 {
+        reader.vector3().ok()?
+    } else {
+        ZERO_VECTOR
+    };
+    let parent_id = if cflags & COMPRESSED_HAS_PARENT != 0 {
+        reader.u32().ok()?
+    } else {
+        0
+    };
+    if cflags & COMPRESSED_TREE != 0 {
+        let _tree_species = reader.u8().ok()?;
+    } else if cflags & COMPRESSED_SCRATCHPAD != 0 {
+        let size = reader.u32().ok()?;
+        let _scratch = reader.take(usize::try_from(size).ok()?).ok()?;
+    }
+    let text = if cflags & COMPRESSED_HAS_TEXT != 0 {
+        let text = read_nul_string(&mut reader)?;
+        let _color = reader.take_array::<4>().ok()?;
+        text
+    } else {
+        String::new()
+    };
+    let media_url = if cflags & COMPRESSED_MEDIA_URL != 0 {
+        read_nul_string(&mut reader)?
+    } else {
+        String::new()
+    };
+    Some(Object {
+        region_handle,
+        local_id,
+        full_id,
+        parent_id,
+        pcode,
+        state,
+        crc,
+        material,
+        click_action,
+        update_flags,
+        scale,
+        motion: ObjectMotion {
+            position,
+            velocity: ZERO_VECTOR,
+            acceleration: ZERO_VECTOR,
+            rotation,
+            angular_velocity,
+        },
+        owner_id,
+        sound: Uuid::nil(),
+        gain: 0.0,
+        sound_flags: 0,
+        sound_radius: 0.0,
+        text,
+        text_color: [0; 4],
+        name_value: String::new(),
+        media_url,
+        texture_entry: Vec::new(),
+        extra_params: Vec::new(),
+        properties: None,
+    })
+}
+
+/// Builds an [`ObjectProperties`] from an `ObjectProperties` object-data block.
+fn object_properties(block: &ObjectPropertiesObjectDataBlock) -> ObjectProperties {
+    ObjectProperties {
+        object_id: block.object_id,
+        creator_id: block.creator_id,
+        owner_id: block.owner_id,
+        group_id: block.group_id,
+        last_owner_id: block.last_owner_id,
+        creation_date: block.creation_date,
+        base_mask: block.base_mask,
+        owner_mask: block.owner_mask,
+        group_mask: block.group_mask,
+        everyone_mask: block.everyone_mask,
+        next_owner_mask: block.next_owner_mask,
+        ownership_cost: block.ownership_cost,
+        sale_type: block.sale_type,
+        sale_price: block.sale_price,
+        category: block.category,
+        name: trimmed_string(&block.name),
+        description: trimmed_string(&block.description),
+        touch_name: trimmed_string(&block.touch_name),
+        sit_name: trimmed_string(&block.sit_name),
     }
 }
