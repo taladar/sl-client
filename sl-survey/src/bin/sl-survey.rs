@@ -624,6 +624,10 @@ impl Survey {
             | Event::ObjectRemoved { .. }
             | Event::ObjectProperties(_)
             | Event::TerrainPatch(_)
+            | Event::TextureReceived(_)
+            | Event::TextureNotFound(_)
+            | Event::AssetReceived(_)
+            | Event::AssetTransferFailed { .. }
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal

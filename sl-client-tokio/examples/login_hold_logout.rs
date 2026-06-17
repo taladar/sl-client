@@ -271,6 +271,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::TeleportLocal
             | Event::TeleportFailed { .. }
             | Event::TerrainPatch(_)
+            | Event::TextureReceived(_)
+            | Event::TextureNotFound(_)
+            | Event::AssetReceived(_)
+            | Event::AssetTransferFailed { .. }
             | Event::RegionChanged { .. } => {}
         }
     }

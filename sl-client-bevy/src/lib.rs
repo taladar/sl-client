@@ -14,9 +14,10 @@ use reqwest::blocking::Client as ReqwestBlockingClient;
 use std::collections::HashMap;
 
 use sl_proto::{
-    CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA, Event as SessionEvent, Llsd, LoginResponse,
-    REQUESTED_CAPABILITIES, Session, build_event_queue_request, build_fetch_inventory_request,
-    build_group_member_data_request, build_seed_request, parse_event_queue_response,
+    CAP_FETCH_INVENTORY, CAP_GET_ASSET, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE,
+    CAP_GROUP_MEMBER_DATA, Event as SessionEvent, Llsd, LoginResponse, REQUESTED_CAPABILITIES,
+    Session, build_event_queue_request, build_fetch_inventory_request,
+    build_group_member_data_request, build_seed_request, j2c, parse_event_queue_response,
     parse_llsd_xml, parse_login_response, parse_seed_response,
 };
 
@@ -40,6 +41,8 @@ pub use sl_proto::{
     TerrainPatch, Throttle, Transmit, Uuid, Vector, grid_to_handle, handle_to_global,
     handle_to_grid, pcode, sim_access,
 };
+#[doc(no_inline)]
+pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -690,6 +693,53 @@ pub enum SlCommand {
         /// The region-local ids to unlink.
         local_ids: Vec<u32>,
     },
+    /// Request a texture over the legacy UDP image path (`RequestImage`); the
+    /// reassembled image arrives as [`SlSessionEvent::TextureReceived`] (or
+    /// [`SlSessionEvent::TextureNotFound`]).
+    RequestTexture {
+        /// The texture's asset id.
+        texture_id: Uuid,
+        /// The level of detail (0 = full resolution; higher = coarser).
+        discard_level: i8,
+        /// The download priority (larger is fetched sooner).
+        priority: f32,
+    },
+    /// Request a generic asset over the UDP transfer path (`TransferRequest`);
+    /// the reassembled asset arrives as [`SlSessionEvent::AssetReceived`] (or
+    /// [`SlSessionEvent::AssetTransferFailed`]).
+    RequestAsset {
+        /// The asset's id.
+        asset_id: Uuid,
+        /// The asset's class.
+        asset_type: AssetType,
+        /// The transfer priority.
+        priority: f32,
+    },
+    /// Fetch a texture over the HTTP `GetTexture` capability; the image arrives
+    /// as [`SlSessionEvent::TextureReceived`] (or
+    /// [`SlSessionEvent::TextureNotFound`]). When `discard_level` is non-zero the
+    /// codestream is truncated to that level-of-detail prefix via [`j2c`].
+    FetchTexture {
+        /// The texture's asset id.
+        texture_id: Uuid,
+        /// The level of detail (0 = full resolution; higher = coarser).
+        discard_level: u8,
+    },
+    /// Fetch a mesh asset over the HTTP `GetMesh2`/`GetMesh` capability; the data
+    /// arrives as [`SlSessionEvent::AssetReceived`].
+    FetchMesh {
+        /// The mesh asset's id.
+        mesh_id: Uuid,
+    },
+    /// Fetch a generic asset over the HTTP `GetAsset` capability; the data
+    /// arrives as [`SlSessionEvent::AssetReceived`] (or
+    /// [`SlSessionEvent::AssetTransferFailed`]).
+    FetchAsset {
+        /// The asset's id.
+        asset_id: Uuid,
+        /// The asset's class (selects the cap query parameter).
+        asset_type: AssetType,
+    },
     /// Begin a clean logout.
     Logout,
 }
@@ -743,6 +793,12 @@ struct Caps {
     events_rx: Receiver<(String, Llsd)>,
     /// A sender clone for spawning one-shot CAPS fetches.
     events_tx: Sender<(String, Llsd)>,
+    /// Receives fully-formed session events from one-shot binary asset fetches
+    /// (the HTTP texture/mesh/asset caps, which return raw bytes rather than
+    /// LLSD), to be surfaced directly as [`SlEvent`]s.
+    asset_rx: Receiver<SessionEvent>,
+    /// A sender clone for spawning one-shot binary asset fetches.
+    asset_tx: Sender<SessionEvent>,
     /// Receives the region's capability map once the poller has fetched it.
     map_rx: Receiver<HashMap<String, String>>,
     /// The cached capability map (cap name → URL), empty until discovered.
@@ -925,6 +981,10 @@ fn advance_running(
         }
         while let Ok((message, body)) = caps.events_rx.try_recv() {
             session.handle_caps_event(&message, &body, now).ok();
+        }
+        // Binary asset fetches return fully-formed session events; surface them.
+        while let Ok(event) = caps.asset_rx.try_recv() {
+            events.write(SlEvent(event));
         }
     }
 
@@ -1439,6 +1499,73 @@ fn advance_running(
                 let refs: Vec<&str> = params.iter().map(String::as_str).collect();
                 session.send_godlike_message(method, &refs, now).ok();
             }
+            SlCommand::RequestTexture {
+                texture_id,
+                discard_level,
+                priority,
+            } => {
+                session
+                    .request_texture(*texture_id, *discard_level, *priority, now)
+                    .ok();
+            }
+            SlCommand::RequestAsset {
+                asset_id,
+                asset_type,
+                priority,
+            } => {
+                session
+                    .request_asset(*asset_id, *asset_type, *priority, now)
+                    .ok();
+            }
+            SlCommand::FetchTexture {
+                texture_id,
+                discard_level,
+            } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_GET_TEXTURE).cloned()
+                {
+                    let asset_tx = caps.asset_tx.clone();
+                    let (id, discard) = (*texture_id, *discard_level);
+                    std::thread::spawn(move || {
+                        run_texture_fetch(&url, id, discard, &asset_tx);
+                    });
+                }
+            }
+            SlCommand::FetchMesh { mesh_id } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps
+                        .map
+                        .get(CAP_GET_MESH2)
+                        .or_else(|| caps.map.get(CAP_GET_MESH))
+                        .cloned()
+                {
+                    let asset_tx = caps.asset_tx.clone();
+                    let id = *mesh_id;
+                    std::thread::spawn(move || {
+                        run_asset_fetch(
+                            &url,
+                            &format!("?mesh_id={id}"),
+                            id,
+                            AssetType::Mesh,
+                            &asset_tx,
+                        );
+                    });
+                }
+            }
+            SlCommand::FetchAsset {
+                asset_id,
+                asset_type,
+            } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_GET_ASSET).cloned()
+                {
+                    let asset_tx = caps.asset_tx.clone();
+                    let (id, asset_type) = (*asset_id, *asset_type);
+                    std::thread::spawn(move || {
+                        run_generic_asset_fetch(&url, id, asset_type, &asset_tx);
+                    });
+                }
+            }
             SlCommand::Logout => session.initiate_logout(now),
         }
     }
@@ -1497,6 +1624,7 @@ fn advance_running(
 fn start_caps(session: &Session) -> Option<Caps> {
     let seed = session.seed_capability()?.to_owned();
     let (events_tx, events_rx) = unbounded();
+    let (asset_tx, asset_rx) = unbounded();
     let (map_tx, map_rx) = unbounded();
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
@@ -1505,6 +1633,8 @@ fn start_caps(session: &Session) -> Option<Caps> {
     Some(Caps {
         events_rx,
         events_tx,
+        asset_rx,
+        asset_tx,
         map_rx,
         map: HashMap::new(),
         stop,
@@ -1657,6 +1787,102 @@ fn run_group_members_fetch(cap_url: &str, group_id: Uuid, caps_tx: &Sender<(Stri
     };
     if let Ok(llsd) = parse_llsd_xml(&text) {
         caps_tx.send((CAP_GROUP_MEMBER_DATA.to_owned(), llsd)).ok();
+    }
+}
+
+/// Performs a blocking HTTP `GET`, returning the body bytes on a 2xx response,
+/// or `None` on any network/HTTP failure.
+fn blocking_get_bytes(url: &str) -> Option<Vec<u8>> {
+    let http = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+        .ok()?;
+    let response = http.get(url).send().ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    response.bytes().ok().map(|bytes| bytes.to_vec())
+}
+
+/// GETs a texture from the `GetTexture` capability and forwards a
+/// [`SlSessionEvent::TextureReceived`] (its bytes truncated to the
+/// `discard_level` LOD prefix via [`j2c::truncate_to_discard`] when non-zero) or
+/// a [`SlSessionEvent::TextureNotFound`] over `asset_tx`.
+fn run_texture_fetch(
+    cap_url: &str,
+    texture_id: Uuid,
+    discard_level: u8,
+    asset_tx: &Sender<SessionEvent>,
+) {
+    let url = format!("{cap_url}/?texture_id={texture_id}");
+    let event = match blocking_get_bytes(&url) {
+        Some(bytes) => {
+            let data = j2c::truncate_to_discard(&bytes, discard_level).to_vec();
+            SessionEvent::TextureReceived(Box::new(Texture {
+                id: texture_id,
+                codec: ImageCodec::J2c,
+                data,
+            }))
+        }
+        None => SessionEvent::TextureNotFound(texture_id),
+    };
+    asset_tx.send(event).ok();
+}
+
+/// GETs an asset from `{cap_url}/{query}` and forwards a
+/// [`SlSessionEvent::AssetReceived`] (or a [`SlSessionEvent::AssetTransferFailed`]
+/// with the 404-equivalent [`TransferStatus::UnknownSource`]) over `asset_tx`.
+fn run_asset_fetch(
+    cap_url: &str,
+    query: &str,
+    asset_id: Uuid,
+    asset_type: AssetType,
+    asset_tx: &Sender<SessionEvent>,
+) {
+    let url = format!("{cap_url}/{query}");
+    let event = match blocking_get_bytes(&url) {
+        Some(data) => SessionEvent::AssetReceived(Box::new(Asset {
+            id: asset_id,
+            asset_type,
+            data,
+        })),
+        None => SessionEvent::AssetTransferFailed {
+            asset_id,
+            asset_type,
+            status: TransferStatus::UnknownSource,
+        },
+    };
+    asset_tx.send(event).ok();
+}
+
+/// GETs a generic asset from the `GetAsset` capability using the asset class's
+/// query key, forwarding the result over `asset_tx` (or an
+/// [`SlSessionEvent::AssetTransferFailed`] for a class the cap cannot serve).
+fn run_generic_asset_fetch(
+    cap_url: &str,
+    asset_id: Uuid,
+    asset_type: AssetType,
+    asset_tx: &Sender<SessionEvent>,
+) {
+    match asset_type.get_asset_query_key() {
+        Some(key) => {
+            run_asset_fetch(
+                cap_url,
+                &format!("?{key}={asset_id}"),
+                asset_id,
+                asset_type,
+                asset_tx,
+            );
+        }
+        None => {
+            asset_tx
+                .send(SessionEvent::AssetTransferFailed {
+                    asset_id,
+                    asset_type,
+                    status: TransferStatus::Error,
+                })
+                .ok();
+        }
     }
 }
 

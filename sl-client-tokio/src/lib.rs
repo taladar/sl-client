@@ -12,30 +12,30 @@ use tokio::sync::mpsc;
 use std::collections::HashMap;
 
 use sl_proto::{
-    CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA, Llsd, REQUESTED_CAPABILITIES, Session,
-    build_event_queue_request, build_fetch_inventory_request, build_group_member_data_request,
-    build_seed_request, parse_event_queue_response, parse_llsd_xml, parse_login_response,
-    parse_seed_response,
+    CAP_FETCH_INVENTORY, CAP_GET_ASSET, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE,
+    CAP_GROUP_MEMBER_DATA, Llsd, REQUESTED_CAPABILITIES, Session, build_event_queue_request,
+    build_fetch_inventory_request, build_group_member_data_request, build_seed_request, j2c,
+    parse_event_queue_response, parse_llsd_xml, parse_login_response, parse_seed_response,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
 // alone.
 pub use sl_proto::{
-    ActiveGroup, AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,
-    ChatAudible, ChatMessage, ChatSourceType, ChatType, ClickAction, ControlFlags,
-    CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData, EstateAccessDelta,
-    EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupMember, GroupMembership,
-    GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
-    InventoryFolder, InventoryItem, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest,
-    LoginResponse, MapItem, MapItemType, MapRegionInfo, Material, Maturity, MfaChallenge,
-    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, Object, ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform,
-    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
+    ActiveGroup, AnyMessage, Asset, AssetType, AvatarGroupMembership, AvatarInterests, AvatarPick,
+    AvatarProperties, ChatAudible, ChatMessage, ChatSourceType, ChatType, ClickAction,
+    ControlFlags, CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData,
+    EstateAccessDelta, EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupMember,
+    GroupMembership, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog,
+    ImageCodec, InstantMessage, InventoryFolder, InventoryItem, LindenAmount, LoadUrlRequest,
+    LoginParams, LoginRequest, LoginResponse, MapItem, MapItemType, MapRegionInfo, Material,
+    Maturity, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry,
+    MuteFlags, MuteType, NeighborInfo, Object, ObjectFlagSettings, ObjectMotion, ObjectProperties,
+    ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
     ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PrimShape, ProductType,
     RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, Rotation, SaleType,
     ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    TerrainLayerType, TerrainPatch, Throttle, Transmit, Uuid, Vector, grid_to_handle,
-    handle_to_global, handle_to_grid, pcode, sim_access,
+    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, Uuid, Vector,
+    grid_to_handle, handle_to_global, handle_to_grid, pcode, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -681,6 +681,52 @@ pub enum Command {
         /// The region-local ids to unlink.
         local_ids: Vec<u32>,
     },
+    /// Request a texture over the legacy UDP image path (`RequestImage`); the
+    /// reassembled image arrives as [`Event::TextureReceived`] (or
+    /// [`Event::TextureNotFound`]).
+    RequestTexture {
+        /// The texture's asset id.
+        texture_id: Uuid,
+        /// The level of detail (0 = full resolution; higher = coarser).
+        discard_level: i8,
+        /// The download priority (larger is fetched sooner).
+        priority: f32,
+    },
+    /// Request a generic asset over the UDP transfer path (`TransferRequest`);
+    /// the reassembled asset arrives as [`Event::AssetReceived`] (or
+    /// [`Event::AssetTransferFailed`]).
+    RequestAsset {
+        /// The asset's id.
+        asset_id: Uuid,
+        /// The asset's class.
+        asset_type: AssetType,
+        /// The transfer priority.
+        priority: f32,
+    },
+    /// Fetch a texture over the HTTP `GetTexture` capability; the image arrives
+    /// as [`Event::TextureReceived`] (or [`Event::TextureNotFound`]). When
+    /// `discard_level` is non-zero the codestream is truncated to that
+    /// level-of-detail prefix via [`j2c`].
+    FetchTexture {
+        /// The texture's asset id.
+        texture_id: Uuid,
+        /// The level of detail (0 = full resolution; higher = coarser).
+        discard_level: u8,
+    },
+    /// Fetch a mesh asset over the HTTP `GetMesh2`/`GetMesh` capability; the data
+    /// arrives as [`Event::AssetReceived`].
+    FetchMesh {
+        /// The mesh asset's id.
+        mesh_id: Uuid,
+    },
+    /// Fetch a generic asset over the HTTP `GetAsset` capability; the data
+    /// arrives as [`Event::AssetReceived`] (or [`Event::AssetTransferFailed`]).
+    FetchAsset {
+        /// The asset's id.
+        asset_id: Uuid,
+        /// The asset's class (selects the cap query parameter).
+        asset_type: AssetType,
+    },
     /// Begin a clean logout.
     Logout,
 }
@@ -1129,6 +1175,32 @@ impl Client {
                             let refs: Vec<&str> = params.iter().map(String::as_str).collect();
                             self.session.send_godlike_message(&method, &refs, Instant::now())?;
                         }
+                        Some(Command::RequestTexture { texture_id, discard_level, priority }) => {
+                            self.session.request_texture(texture_id, discard_level, priority, Instant::now())?;
+                        }
+                        Some(Command::RequestAsset { asset_id, asset_type, priority }) => {
+                            self.session.request_asset(asset_id, asset_type, priority, Instant::now())?;
+                        }
+                        Some(Command::FetchTexture { texture_id, discard_level }) => {
+                            if let Some(url) = caps.get(CAP_GET_TEXTURE).cloned() {
+                                tokio::spawn(fetch_texture_http(
+                                    url, texture_id, discard_level, http.clone(), events.clone(),
+                                ));
+                            }
+                        }
+                        Some(Command::FetchMesh { mesh_id }) => {
+                            // GetMesh2 is preferred when offered; fall back to GetMesh.
+                            if let Some(url) = caps.get(CAP_GET_MESH2).or_else(|| caps.get(CAP_GET_MESH)).cloned() {
+                                tokio::spawn(fetch_mesh_http(url, mesh_id, http.clone(), events.clone()));
+                            }
+                        }
+                        Some(Command::FetchAsset { asset_id, asset_type }) => {
+                            if let Some(url) = caps.get(CAP_GET_ASSET).cloned() {
+                                tokio::spawn(fetch_asset_http(
+                                    url, asset_id, asset_type, http.clone(), events.clone(),
+                                ));
+                            }
+                        }
                         Some(Command::Logout) | None => {
                             self.session.initiate_logout(Instant::now());
                         }
@@ -1243,6 +1315,99 @@ async fn fetch_group_members(
             .send((CAP_GROUP_MEMBER_DATA.to_owned(), llsd))
             .await
             .ok();
+    }
+}
+
+/// GETs a texture from the `GetTexture` capability and surfaces it as an
+/// [`Event::TextureReceived`] (its bytes truncated to the `discard_level` LOD
+/// prefix via [`j2c::truncate_to_discard`] when non-zero), or an
+/// [`Event::TextureNotFound`] on a 404 / network failure.
+async fn fetch_texture_http(
+    cap_url: String,
+    texture_id: Uuid,
+    discard_level: u8,
+    http: ReqwestClient,
+    events: mpsc::Sender<Event>,
+) {
+    let url = format!("{cap_url}/?texture_id={texture_id}");
+    let event = match http.get(&url).header("Accept", "image/x-j2c").send().await {
+        Ok(response) if response.status().is_success() => match response.bytes().await {
+            Ok(bytes) => {
+                let data = j2c::truncate_to_discard(&bytes, discard_level).to_vec();
+                Event::TextureReceived(Box::new(Texture {
+                    id: texture_id,
+                    codec: ImageCodec::J2c,
+                    data,
+                }))
+            }
+            Err(_error) => Event::TextureNotFound(texture_id),
+        },
+        _ => Event::TextureNotFound(texture_id),
+    };
+    events.send(event).await.ok();
+}
+
+/// GETs a mesh asset from the `GetMesh2`/`GetMesh` capability and surfaces it as
+/// an [`Event::AssetReceived`] (or [`Event::AssetTransferFailed`] on failure).
+async fn fetch_mesh_http(
+    cap_url: String,
+    mesh_id: Uuid,
+    http: ReqwestClient,
+    events: mpsc::Sender<Event>,
+) {
+    let url = format!("{cap_url}/?mesh_id={mesh_id}");
+    let event = http_asset_event(&http, &url, mesh_id, AssetType::Mesh).await;
+    events.send(event).await.ok();
+}
+
+/// GETs a generic asset from the `GetAsset` capability (using the asset class's
+/// query parameter) and surfaces it as an [`Event::AssetReceived`] (or
+/// [`Event::AssetTransferFailed`] on failure / an unsupported class).
+async fn fetch_asset_http(
+    cap_url: String,
+    asset_id: Uuid,
+    asset_type: AssetType,
+    http: ReqwestClient,
+    events: mpsc::Sender<Event>,
+) {
+    let event = match asset_type.get_asset_query_key() {
+        Some(key) => {
+            let url = format!("{cap_url}/?{key}={asset_id}");
+            http_asset_event(&http, &url, asset_id, asset_type).await
+        }
+        None => Event::AssetTransferFailed {
+            asset_id,
+            asset_type,
+            status: TransferStatus::Error,
+        },
+    };
+    events.send(event).await.ok();
+}
+
+/// Performs an HTTP `GET` for an asset and builds the resulting event: an
+/// [`Event::AssetReceived`] on success, or an [`Event::AssetTransferFailed`]
+/// (with [`TransferStatus::UnknownSource`], the 404 equivalent) on any failure.
+async fn http_asset_event(
+    http: &ReqwestClient,
+    url: &str,
+    asset_id: Uuid,
+    asset_type: AssetType,
+) -> Event {
+    let failed = Event::AssetTransferFailed {
+        asset_id,
+        asset_type,
+        status: TransferStatus::UnknownSource,
+    };
+    match http.get(url).send().await {
+        Ok(response) if response.status().is_success() => match response.bytes().await {
+            Ok(bytes) => Event::AssetReceived(Box::new(Asset {
+                id: asset_id,
+                asset_type,
+                data: bytes.to_vec(),
+            })),
+            Err(_error) => failed,
+        },
+        _ => failed,
     }
 }
 

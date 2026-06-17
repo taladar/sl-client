@@ -10,3 +10,7 @@ LOD = "LOD"
 # wrapper), not a typo of "unlink".
 delink = "delink"
 Delink = "Delink"
+# "SIZ"/"siz" is the JPEG-2000 codestream image-size marker (and its `Lsiz`/
+# `Xsiz`/… fields), used by the `sl-proto::j2c` header parser; not a typo.
+SIZ = "SIZ"
+siz = "siz"

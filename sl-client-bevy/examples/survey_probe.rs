@@ -173,6 +173,10 @@ fn on_events(
             | SlSessionEvent::ObjectRemoved { .. }
             | SlSessionEvent::ObjectProperties(_)
             | SlSessionEvent::TerrainPatch(_)
+            | SlSessionEvent::TextureReceived(_)
+            | SlSessionEvent::TextureNotFound(_)
+            | SlSessionEvent::AssetReceived(_)
+            | SlSessionEvent::AssetTransferFailed { .. }
             | SlSessionEvent::ParcelDwell { .. }
             | SlSessionEvent::ParcelAccessList { .. }
             | SlSessionEvent::EstateInfo(_)
