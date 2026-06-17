@@ -613,6 +613,8 @@ impl Survey {
             | Event::MuteListUnchanged
             | Event::MoneyBalance(_)
             | Event::EconomyData(_)
+            | Event::ParcelDwell { .. }
+            | Event::ParcelAccessList { .. }
             | Event::MapItems { .. }
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }

@@ -28,7 +28,8 @@ pub use sl_proto::{
     InventoryFolder, InventoryItem, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest,
     LoginResponse, MapItem, MapItemType, MapRegionInfo, Maturity, MfaChallenge, MoneyBalance,
     MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo,
-    ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity,
+    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
+    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ProductType, RegionFlags, RegionIdentity,
     RegionLimits, Reliability, Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
     ScriptTeleportRequest, Transmit, Uuid, Vector, grid_to_handle, handle_to_global,
     handle_to_grid, sim_access,
@@ -330,6 +331,82 @@ pub enum Command {
         north: f32,
         /// A sequence id echoed back in the reply for matching.
         sequence_id: i32,
+    },
+    /// Edit a parcel's settings (`ParcelPropertiesUpdate`).
+    UpdateParcel(ParcelUpdate),
+    /// Request a parcel's allow or ban list (`ParcelAccessListRequest`); the
+    /// reply arrives as [`Event::ParcelAccessList`].
+    RequestParcelAccessList {
+        /// The parcel's region-local id.
+        local_id: i32,
+        /// Which list to fetch (allow or ban).
+        scope: ParcelAccessScope,
+    },
+    /// Replace a parcel's allow or ban list (`ParcelAccessListUpdate`); empty
+    /// `entries` clears it.
+    UpdateParcelAccessList {
+        /// The parcel's region-local id.
+        local_id: i32,
+        /// Which list to set (allow or ban).
+        scope: ParcelAccessScope,
+        /// The new entries.
+        entries: Vec<ParcelAccessEntry>,
+    },
+    /// Request a parcel's dwell/traffic value (`ParcelDwellRequest`); the reply
+    /// arrives as [`Event::ParcelDwell`].
+    RequestParcelDwell {
+        /// The parcel's region-local id.
+        local_id: i32,
+    },
+    /// Buy a parcel (`ParcelBuy`).
+    BuyParcel {
+        /// The parcel's region-local id.
+        local_id: i32,
+        /// The agreed price in L$.
+        price: i32,
+        /// The parcel area in m².
+        area: i32,
+        /// The group to buy for (nil for a personal purchase).
+        group_id: Uuid,
+        /// Whether the purchase is group-owned.
+        is_group_owned: bool,
+    },
+    /// Return objects on a parcel (`ParcelReturnObjects`).
+    ReturnParcelObjects {
+        /// The parcel's region-local id.
+        local_id: i32,
+        /// Which objects to return (combine `ParcelReturnType` constants).
+        return_type: ParcelReturnType,
+        /// Optional owner-id scope.
+        owner_ids: Vec<Uuid>,
+        /// Optional explicit object/task-id scope.
+        task_ids: Vec<Uuid>,
+    },
+    /// Select (highlight) objects on a parcel (`ParcelSelectObjects`).
+    SelectParcelObjects {
+        /// The parcel's region-local id.
+        local_id: i32,
+        /// Which objects to select (combine `ParcelReturnType` constants).
+        return_type: ParcelReturnType,
+        /// Explicit object ids (used with `ParcelReturnType::LIST`).
+        object_ids: Vec<Uuid>,
+    },
+    /// Deed a parcel to a group (`ParcelDeedToGroup`).
+    DeedParcelToGroup {
+        /// The parcel's region-local id.
+        local_id: i32,
+        /// The group to deed the parcel to.
+        group_id: Uuid,
+    },
+    /// Reclaim a parcel to the estate (`ParcelReclaim`).
+    ReclaimParcel {
+        /// The parcel's region-local id.
+        local_id: i32,
+    },
+    /// Release (abandon) a parcel back to the estate (`ParcelRelease`).
+    ReleaseParcel {
+        /// The parcel's region-local id.
+        local_id: i32,
     },
     /// Request the agent's L$ balance (`MoneyBalanceRequest`); the reply arrives
     /// as [`Event::MoneyBalance`].
@@ -673,6 +750,36 @@ impl Client {
                         }
                         Some(Command::RequestMapItems { item_type, region_handle }) => {
                             self.session.request_map_items(item_type, region_handle, Instant::now())?;
+                        }
+                        Some(Command::UpdateParcel(update)) => {
+                            self.session.update_parcel(&update, Instant::now())?;
+                        }
+                        Some(Command::RequestParcelAccessList { local_id, scope }) => {
+                            self.session.request_parcel_access_list(local_id, scope, Instant::now())?;
+                        }
+                        Some(Command::UpdateParcelAccessList { local_id, scope, entries }) => {
+                            self.session.update_parcel_access_list(local_id, scope, &entries, Instant::now())?;
+                        }
+                        Some(Command::RequestParcelDwell { local_id }) => {
+                            self.session.request_parcel_dwell(local_id, Instant::now())?;
+                        }
+                        Some(Command::BuyParcel { local_id, price, area, group_id, is_group_owned }) => {
+                            self.session.buy_parcel(local_id, price, area, group_id, is_group_owned, Instant::now())?;
+                        }
+                        Some(Command::ReturnParcelObjects { local_id, return_type, owner_ids, task_ids }) => {
+                            self.session.return_parcel_objects(local_id, return_type, &owner_ids, &task_ids, Instant::now())?;
+                        }
+                        Some(Command::SelectParcelObjects { local_id, return_type, object_ids }) => {
+                            self.session.select_parcel_objects(local_id, return_type, &object_ids, Instant::now())?;
+                        }
+                        Some(Command::DeedParcelToGroup { local_id, group_id }) => {
+                            self.session.deed_parcel_to_group(local_id, group_id, Instant::now())?;
+                        }
+                        Some(Command::ReclaimParcel { local_id }) => {
+                            self.session.reclaim_parcel(local_id, Instant::now())?;
+                        }
+                        Some(Command::ReleaseParcel { local_id }) => {
+                            self.session.release_parcel(local_id, Instant::now())?;
                         }
                         Some(Command::Logout) | None => {
                             self.session.initiate_logout(Instant::now());

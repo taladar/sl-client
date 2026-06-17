@@ -40,7 +40,7 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 10 ✅ | Seamless teleport (child circuits) **(done)** | 8 | Roaming bot that keeps its session | Local OpenSim (multi-region) |
 | 11 ✅ | Money / economy **(done)** | 5 | Balance monitor, tip/vendor bot | **Money module or SL grid** |
 | 12 ✅ | Full world map **(done)** | 5 | Live map: agents, POIs, land-for-sale | Local OpenSim |
-| 13 | Parcel management | 5 | Land-management tool | Local OpenSim |
+| 13 ✅ | Parcel management **(done)** | 5 | Land-management tool | Local OpenSim |
 | 14 | Estate/region management | 5 | Region admin/restart/ban bot | Local OpenSim (owner account) |
 | 15 | Bandwidth throttle (`AgentThrottle`) | 2 | *(enabler for 16–25)* | Local OpenSim |
 | 16 | Object/scene graph | 13 | Scene auditor, proximity bot | Local OpenSim |
@@ -319,11 +319,28 @@ returned the second avatar's map dot at the right global coordinates. Stock
 OpenSim answers agent-locations, telehubs and land-for-sale locally; events and
 classifieds are not implemented server-side.*
 
-**13. Parcel management — `ParcelPropertiesUpdate`,
-`ParcelAccessListRequest`/`Update`, `ParcelDwellRequest`, `ParcelBuy`,
-`ParcelReturnObjects`, `ParcelSelectObjects` · 5 pts.** Turns the existing
-parcel read path into a land-management tool (edit, access lists, dwell, buy).
-*Test: local OpenSim.*
+**13. Parcel management (done) ✅ — `ParcelPropertiesUpdate`,
+`ParcelAccessListRequest`/`Reply`/`Update`, `ParcelDwellRequest`/`Reply`,
+`ParcelBuy`, `ParcelReturnObjects`, `ParcelSelectObjects`, plus
+`ParcelDeedToGroup`/`Reclaim`/`Release` · 5 pts.** Turns the existing parcel
+read path into a land-management tool. `Session` gains
+`update_parcel(&ParcelUpdate)` (a builder-style struct — flags, name/desc,
+category, sale price, group, media, landing point),
+`request_parcel_access_list`/`update_parcel_access_list` (allow/ban lists via
+`ParcelAccessScope`, surfaced as `Event::ParcelAccessList`),
+`request_parcel_dwell` (→ `Event::ParcelDwell`), `buy_parcel`,
+`return_parcel_objects`/`select_parcel_objects` (`ParcelReturnType` bitfield),
+`deed_parcel_to_group`, `reclaim_parcel`, `release_parcel`. Wired through both
+runtimes. Added a `ParcelFlags::union` helper for combining flags. **Fixed a
+pre-existing CAPS read bug:** OpenSim encodes the `uint` `ParcelFlags` as a
+4-byte binary LLSD element, which the old `as_i32` parse dropped to `0` — now
+read via a tolerant `llsd_u32` (binary/integer/string). *Live-verified against
+local OpenSim logged in as the estate owner: dwell read, access-list read +
+write + re-read round-trip, and a `ParcelPropertiesUpdate` that changed the
+parcel name and flags (confirmed via the console and across logins; OpenSim
+serves an explicit in-session ParcelProperties re-request from a cached
+snapshot, so flag edits show on the next fetch). Most write ops need parcel
+ownership / estate powers — see the estate-owner login.*
 
 **14. Estate/region management — `EstateOwnerMessage`
 (kick/ban/restart/teleport-home/manage), `GodlikeMessage` · 5 pts.**

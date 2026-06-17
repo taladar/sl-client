@@ -13,7 +13,8 @@ pub use types::{
     GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
     LoadUrlRequest, LoginHttpRequest, LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity,
     MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits,
+    NeighborInfo, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelInfo,
+    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ProductType, RegionIdentity, RegionLimits,
     Reliability, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
     Transmit, grid_to_handle, handle_to_global, handle_to_grid,
 };

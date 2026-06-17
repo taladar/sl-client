@@ -211,6 +211,8 @@ fn on_events(
             | SlSessionEvent::NeighborDiscovered(_)
             | SlSessionEvent::MapBlock(_)
             | SlSessionEvent::MapItems { .. }
+            | SlSessionEvent::ParcelDwell { .. }
+            | SlSessionEvent::ParcelAccessList { .. }
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal

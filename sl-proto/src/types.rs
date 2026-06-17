@@ -2,8 +2,9 @@
 
 use std::net::SocketAddr;
 
+use sl_types::lsl::Vector;
 use sl_types::money::LindenAmount;
-use sl_wire::LoginRequest;
+use sl_wire::{LoginRequest, ParcelFlags};
 use uuid::Uuid;
 
 /// The parameters needed to start a session: where to log in and with what.
@@ -97,6 +98,27 @@ pub enum Event {
     /// A region parcel-ownership overlay chunk (one of four), parsed from a
     /// `ParcelOverlay`.
     ParcelOverlay(ParcelOverlayInfo),
+    /// A parcel's dwell (traffic) value, from a `ParcelDwellReply` in response to
+    /// [`Session::request_parcel_dwell`](crate::Session::request_parcel_dwell).
+    ParcelDwell {
+        /// The parcel's region-local id.
+        local_id: i32,
+        /// The parcel's persistent id.
+        parcel_id: Uuid,
+        /// The dwell (accumulated traffic) value.
+        dwell: f32,
+    },
+    /// A parcel's access (allow) or ban list, from a `ParcelAccessListReply` in
+    /// response to
+    /// [`Session::request_parcel_access_list`](crate::Session::request_parcel_access_list).
+    ParcelAccessList {
+        /// The parcel's region-local id.
+        local_id: i32,
+        /// Which list this is (allow or ban).
+        scope: ParcelAccessScope,
+        /// The list entries.
+        entries: Vec<ParcelAccessEntry>,
+    },
     /// A neighbouring simulator was announced via `EnableSimulator`.
     NeighborDiscovered(NeighborInfo),
     /// A region was reported by the world map (a `MapBlockReply` entry), giving
@@ -711,6 +733,212 @@ pub struct ParcelOverlayInfo {
     pub sequence_id: i32,
     /// The packed overlay bytes: per-square ownership colour and edge/flag bits.
     pub data: Vec<u8>,
+}
+
+/// A parcel category, the `Category` of a [`ParcelUpdate`] (the parcel's search
+/// classification).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ParcelCategory {
+    /// No category set.
+    #[default]
+    None,
+    /// A Linden-owned location.
+    Linden,
+    /// Residential land.
+    Residential,
+    /// Commercial land.
+    Commercial,
+    /// Industrial land.
+    Industrial,
+    /// A park or recreation area.
+    ParkAndRecreation,
+    /// Anything else.
+    Other,
+    /// Adult-oriented land.
+    Adult,
+    /// An unrecognised category value, preserved verbatim.
+    Unknown(u8),
+}
+
+impl ParcelCategory {
+    /// Classifies a parcel-category wire value.
+    #[must_use]
+    pub const fn from_u8(value: u8) -> Self {
+        match value {
+            0 => Self::None,
+            1 => Self::Linden,
+            2 => Self::Residential,
+            3 => Self::Commercial,
+            4 => Self::Industrial,
+            5 => Self::ParkAndRecreation,
+            6 => Self::Other,
+            7 => Self::Adult,
+            other => Self::Unknown(other),
+        }
+    }
+
+    /// The wire value for this category.
+    #[must_use]
+    pub const fn to_u8(self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::Linden => 1,
+            Self::Residential => 2,
+            Self::Commercial => 3,
+            Self::Industrial => 4,
+            Self::ParkAndRecreation => 5,
+            Self::Other => 6,
+            Self::Adult => 7,
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+/// Which parcel access list to query or modify: the allow list or the ban list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParcelAccessScope {
+    /// The allow list (`AL_ACCESS`, `0x1`).
+    Access,
+    /// The ban list (`AL_BAN`, `0x2`).
+    Ban,
+}
+
+impl ParcelAccessScope {
+    /// The access-list flag wire value.
+    #[must_use]
+    pub const fn to_u32(self) -> u32 {
+        match self {
+            Self::Access => 0x1,
+            Self::Ban => 0x2,
+        }
+    }
+
+    /// Classifies an access-list flag value (preferring `Access` if both bits
+    /// are set).
+    #[must_use]
+    pub const fn from_u32(flags: u32) -> Self {
+        if flags & 0x1 != 0 {
+            Self::Access
+        } else {
+            Self::Ban
+        }
+    }
+}
+
+/// One entry of a parcel access (allow) or ban list, from an
+/// [`Event::ParcelAccessList`] or supplied to
+/// [`Session::update_parcel_access_list`](crate::Session::update_parcel_access_list).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParcelAccessEntry {
+    /// The agent the entry applies to.
+    pub id: Uuid,
+    /// The Unix expiry time (`time_t`); `0` means the entry never expires.
+    pub time: i32,
+}
+
+/// The kinds of objects to return or select on a parcel, as the `ReturnType` of
+/// [`Session::return_parcel_objects`](crate::Session::return_parcel_objects) and
+/// [`Session::select_parcel_objects`](crate::Session::select_parcel_objects). A
+/// bitfield: combine the constants with [`ParcelReturnType::union`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParcelReturnType(pub u32);
+
+impl ParcelReturnType {
+    /// No objects (`RT_NONE`).
+    pub const NONE: Self = Self(1 << 0);
+    /// Objects owned by the parcel's owner (`RT_OWNER`).
+    pub const OWNER: Self = Self(1 << 1);
+    /// Objects set to the parcel's group (`RT_GROUP`).
+    pub const GROUP: Self = Self(1 << 2);
+    /// Objects owned by anyone else (`RT_OTHER`).
+    pub const OTHER: Self = Self(1 << 3);
+    /// Only the objects in the supplied id list (`RT_LIST`).
+    pub const LIST: Self = Self(1 << 4);
+    /// Objects that are for sale (`RT_SELL`).
+    pub const SELL: Self = Self(1 << 5);
+
+    /// Combines two sets of return-type bits.
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+}
+
+/// The settings to apply to a parcel via
+/// [`Session::update_parcel`](crate::Session::update_parcel)
+/// (`ParcelPropertiesUpdate`). Start from [`ParcelUpdate::default`] and set the
+/// fields to change; `local_id` is required (from [`ParcelInfo::local_id`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParcelUpdate {
+    /// The parcel's region-local id (from [`ParcelInfo::local_id`]).
+    pub local_id: i32,
+    /// The parcel flags bitfield to set.
+    pub parcel_flags: ParcelFlags,
+    /// The sale price in L$ (when [`ParcelFlags::FOR_SALE`] is set).
+    pub sale_price: i32,
+    /// The parcel name.
+    pub name: String,
+    /// The parcel description.
+    pub description: String,
+    /// The streaming music URL.
+    pub music_url: String,
+    /// The streaming media URL.
+    pub media_url: String,
+    /// The media texture id.
+    pub media_id: Uuid,
+    /// Whether to auto-scale the media to the prim face.
+    pub media_auto_scale: bool,
+    /// The group the parcel is set to.
+    pub group_id: Uuid,
+    /// The price of a parcel pass in L$.
+    pub pass_price: i32,
+    /// How many hours a parcel pass lasts.
+    pub pass_hours: f32,
+    /// The parcel's search category.
+    pub category: ParcelCategory,
+    /// The only agent allowed to buy the parcel (nil for anyone).
+    pub auth_buyer_id: Uuid,
+    /// The parcel snapshot texture id.
+    pub snapshot_id: Uuid,
+    /// The teleport-landing location within the parcel.
+    pub user_location: Vector,
+    /// The direction an arriving agent faces at the landing point.
+    pub user_look_at: Vector,
+    /// The landing type (`0` = blocked, `1` = landing point, `2` = anywhere).
+    pub landing_type: u8,
+}
+
+impl Default for ParcelUpdate {
+    fn default() -> Self {
+        Self {
+            local_id: 0,
+            parcel_flags: ParcelFlags::from_bits(0),
+            sale_price: 0,
+            name: String::new(),
+            description: String::new(),
+            music_url: String::new(),
+            media_url: String::new(),
+            media_id: Uuid::nil(),
+            media_auto_scale: false,
+            group_id: Uuid::nil(),
+            pass_price: 0,
+            pass_hours: 0.0,
+            category: ParcelCategory::None,
+            auth_buyer_id: Uuid::nil(),
+            snapshot_id: Uuid::nil(),
+            user_location: Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            user_look_at: Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            landing_type: 0,
+        }
+    }
 }
 
 /// A region reported by the world map (one `MapBlockReply` `Data` entry).
