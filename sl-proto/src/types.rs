@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
-use sl_wire::{LoginRequest, ParcelFlags};
+use sl_wire::{LoginRequest, MediaEntry, ParcelFlags};
 use uuid::Uuid;
 
 /// The parameters needed to start a session: where to log in and with what.
@@ -209,6 +209,27 @@ pub enum Event {
     /// A region parcel-ownership overlay chunk (one of four), parsed from a
     /// `ParcelOverlay`.
     ParcelOverlay(ParcelOverlayInfo),
+    /// A scripted control of the parcel's streaming media
+    /// (`ParcelMediaCommandMessage` — a `llParcelMediaCommandList` from an
+    /// in-world script). The simulator pushes this to tell viewers to
+    /// play/pause/stop/loop the parcel media surface, or to carry a new
+    /// time/agent target; the richer URL/texture/type/size changes arrive as a
+    /// separate [`Event::ParcelMediaUpdate`].
+    ParcelMediaCommand {
+        /// The raw `Flags` bitfield: each set bit (`1 << command`) marks a
+        /// [`ParcelMediaCommand`] whose field is meaningful in this message.
+        flags: u32,
+        /// The media command being issued.
+        command: ParcelMediaCommand,
+        /// The command argument, when relevant (the seek offset in seconds for
+        /// [`ParcelMediaCommand::Time`]; `0.0` otherwise).
+        time: f32,
+    },
+    /// The parcel's media settings changed (`ParcelMediaUpdate`): the streaming
+    /// media surface's new URL, replacement texture, MIME type, and dimensions.
+    /// Pushed by the simulator when a parcel's media is reconfigured (e.g. via
+    /// the About Land dialog or `llSetPrimMediaParams`-adjacent parcel APIs).
+    ParcelMediaUpdate(ParcelMediaUpdateInfo),
     /// A parcel's dwell (traffic) value, from a `ParcelDwellReply` in response to
     /// [`Session::request_parcel_dwell`](crate::Session::request_parcel_dwell).
     ParcelDwell {
@@ -585,6 +606,22 @@ pub enum Event {
     /// (which selects the object). If the object is in the scene cache its
     /// [`Object::properties`] is updated too.
     ObjectProperties(Box<ObjectProperties>),
+    /// An object's per-face **media-on-a-prim** settings, decoded from an
+    /// `ObjectMedia` capability GET reply (the runtime `RequestObjectMedia`
+    /// command). Each [`faces`](Event::ObjectMedia::faces) slot is the
+    /// [`MediaEntry`] for one prim face, or `None` for a face with no media. Set
+    /// it with the `SetObjectMedia` command or navigate a single face with
+    /// `NavigateObjectMedia`.
+    ObjectMedia {
+        /// The object the media belongs to.
+        object_id: Uuid,
+        /// The media version string (`x-mv:<serial>/<uuid>`); the same value the
+        /// object's [`Object::media_url`] carries, advanced on every change.
+        version: String,
+        /// Per-face media, one slot per prim face in order; `None` for a face
+        /// that has no media.
+        faces: Vec<Option<MediaEntry>>,
+    },
     /// A decoded terrain (or wind/cloud/water) patch arrived in a `LayerData`
     /// message and was added to or refreshed in the terrain cache. For a
     /// [`Land`](TerrainLayerType::Land) patch the [`values`](TerrainPatch::values)
@@ -1792,6 +1829,96 @@ pub struct ParcelOverlayInfo {
     pub sequence_id: i32,
     /// The packed overlay bytes: per-square ownership colour and edge/flag bits.
     pub data: Vec<u8>,
+}
+
+/// A scripted parcel-media control command, the `Command` of a
+/// [`Event::ParcelMediaCommand`] (`ParcelMediaCommandMessage`). The values match
+/// the viewer's `PARCEL_MEDIA_COMMAND_*` constants and the LSL
+/// `PARCEL_MEDIA_COMMAND_*` flags fed to `llParcelMediaCommandList`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParcelMediaCommand {
+    /// Stop the media and unload it (`PARCEL_MEDIA_COMMAND_STOP`).
+    Stop,
+    /// Pause the media, keeping it loaded (`PARCEL_MEDIA_COMMAND_PAUSE`).
+    Pause,
+    /// Start (or resume) playback once (`PARCEL_MEDIA_COMMAND_PLAY`).
+    Play,
+    /// Start playback looping (`PARCEL_MEDIA_COMMAND_LOOP`).
+    Loop,
+    /// Set the media's replacement texture (`PARCEL_MEDIA_COMMAND_TEXTURE`).
+    Texture,
+    /// Set the media URL (`PARCEL_MEDIA_COMMAND_URL`).
+    Url,
+    /// Seek to a time offset, in seconds (`PARCEL_MEDIA_COMMAND_TIME`; the value
+    /// is the [`time`](Event::ParcelMediaCommand::time) field).
+    Time,
+    /// Target a single agent rather than the whole parcel
+    /// (`PARCEL_MEDIA_COMMAND_AGENT`).
+    Agent,
+    /// Unload the media from memory (`PARCEL_MEDIA_COMMAND_UNLOAD`).
+    Unload,
+    /// Auto-align the media to the texture (`PARCEL_MEDIA_COMMAND_AUTO_ALIGN`).
+    AutoAlign,
+    /// Set the media MIME type (`PARCEL_MEDIA_COMMAND_TYPE`).
+    Type,
+    /// Set the media surface size in pixels (`PARCEL_MEDIA_COMMAND_SIZE`).
+    Size,
+    /// Set the media description (`PARCEL_MEDIA_COMMAND_DESC`).
+    Desc,
+    /// Set whether the media loops (`PARCEL_MEDIA_COMMAND_LOOP_SET`).
+    LoopSet,
+    /// An unrecognised command code (forward-compatible).
+    Other(u32),
+}
+
+impl ParcelMediaCommand {
+    /// Maps a wire `Command` code to a [`ParcelMediaCommand`], preserving an
+    /// unknown code as [`Other`](Self::Other).
+    #[must_use]
+    pub const fn from_u32(code: u32) -> Self {
+        match code {
+            0 => Self::Stop,
+            1 => Self::Pause,
+            2 => Self::Play,
+            3 => Self::Loop,
+            4 => Self::Texture,
+            5 => Self::Url,
+            6 => Self::Time,
+            7 => Self::Agent,
+            8 => Self::Unload,
+            9 => Self::AutoAlign,
+            10 => Self::Type,
+            11 => Self::Size,
+            12 => Self::Desc,
+            13 => Self::LoopSet,
+            other => Self::Other(other),
+        }
+    }
+}
+
+/// The parcel's media settings, parsed from a `ParcelMediaUpdate` and surfaced
+/// as [`Event::ParcelMediaUpdate`]. This is the streaming media *surface* (the
+/// "media" half of a parcel's media/music split); the streaming-audio URL is the
+/// separate [`ParcelInfo::music_url`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParcelMediaUpdateInfo {
+    /// The media URL the parcel streams (e.g. an HLS/MP4/web page).
+    pub media_url: String,
+    /// The texture the media replaces on the parcel surface (nil if none).
+    pub media_id: Uuid,
+    /// Whether the media is auto-scaled to the surface.
+    pub media_auto_scale: bool,
+    /// The media MIME type (e.g. `"video/vnd.secondlife.qt.legacy"`,
+    /// `"text/html"`); empty if unset.
+    pub media_type: String,
+    /// The media description; empty if unset.
+    pub media_desc: String,
+    /// The media surface width in pixels (0 if unset / native).
+    pub media_width: i32,
+    /// The media surface height in pixels (0 if unset / native).
+    pub media_height: i32,
+    /// Whether the media loops.
+    pub media_loop: bool,
 }
 
 /// A parcel category, the `Category` of a [`ParcelUpdate`] (the parcel's search

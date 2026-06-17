@@ -15,11 +15,12 @@ use std::collections::HashMap;
 
 use sl_proto::{
     AssetUploadResponse, CAP_FETCH_INVENTORY, CAP_GET_ASSET, CAP_GET_MESH, CAP_GET_MESH2,
-    CAP_GET_TEXTURE, CAP_GROUP_MEMBER_DATA, CAP_NEW_FILE_AGENT_INVENTORY,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPLOAD_BAKED_TEXTURE, Event as SessionEvent, Llsd,
-    LoginResponse, REQUESTED_CAPABILITIES, Session, build_event_queue_request,
-    build_fetch_inventory_request, build_group_member_data_request,
-    build_new_file_agent_inventory_request, build_seed_request,
+    CAP_GET_TEXTURE, CAP_GROUP_MEMBER_DATA, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPLOAD_BAKED_TEXTURE,
+    Event as SessionEvent, Llsd, LoginResponse, REQUESTED_CAPABILITIES, Session,
+    build_event_queue_request, build_fetch_inventory_request, build_group_member_data_request,
+    build_new_file_agent_inventory_request, build_object_media_get_request,
+    build_object_media_navigate_request, build_object_media_update_request, build_seed_request,
     build_update_avatar_appearance_request, build_update_item_asset_request,
     build_upload_baked_texture_request, j2c, parse_asset_upload_response,
     parse_event_queue_response, parse_llsd_xml, parse_login_response, parse_seed_response,
@@ -35,16 +36,18 @@ pub use sl_proto::{
     EstateAccessKind, EstateInfo, Friend, FriendRights, GroupMember, GroupMembership, GroupNotice,
     GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
     InventoryFolder, InventoryItem, InventoryType, LindenAmount, LoadUrlRequest, LoginParams,
-    LoginRequest, MapItem, MapItemType, MapRegionInfo, Material, Maturity, MfaChallenge,
-    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, Object, ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform,
-    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
-    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PlayingAnimation,
-    PrimShape, ProductType, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits,
-    Reliability, Rotation, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, TextureEntry,
-    TextureFace, Throttle, Transmit, Uuid, Vector, Wearable, WearableType, avatar_texture,
-    decode_texture_entry, grid_to_handle, handle_to_global, handle_to_grid, pcode, sim_access,
+    LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
+    MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material, Maturity, MediaEntry,
+    MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags,
+    MuteType, NeighborInfo, Object, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion,
+    ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
+    ParcelFlags, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo,
+    ParcelReturnType, ParcelUpdate, PermissionField, PlayingAnimation, PrimShape, ProductType,
+    RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, Rotation, SaleType,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SoundFlags,
+    SoundPreload, TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, Throttle, Transmit,
+    Uuid, Vector, Wearable, WearableType, avatar_texture, decode_texture_entry, grid_to_handle,
+    handle_to_global, handle_to_grid, pcode, sim_access,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -863,6 +866,34 @@ pub enum SlCommand {
         asset_type: AssetType,
         /// The new raw asset bytes.
         data: Vec<u8>,
+    },
+    /// Fetch an object's per-face **media-on-a-prim** settings over the
+    /// `ObjectMedia` capability (a GET). The result arrives as
+    /// [`SlSessionEvent::ObjectMedia`].
+    RequestObjectMedia {
+        /// The object whose media to fetch.
+        object_id: Uuid,
+    },
+    /// Set an object's per-face media over the `ObjectMedia` capability (an
+    /// UPDATE). `faces` is one entry per prim face in order; a face with no media
+    /// is `None`. The simulator advances the object's media version (visible on a
+    /// subsequent [`SlCommand::RequestObjectMedia`]) rather than replying.
+    SetObjectMedia {
+        /// The object whose media to set.
+        object_id: Uuid,
+        /// Per-face media, one slot per prim face in order (`None` = no media).
+        faces: Vec<Option<MediaEntry>>,
+    },
+    /// Navigate the media on a single prim face to a new URL over the
+    /// `ObjectMediaNavigate` capability. The simulator advances the object's
+    /// media version (visible on a subsequent [`SlCommand::RequestObjectMedia`]).
+    NavigateObjectMedia {
+        /// The object whose media to navigate.
+        object_id: Uuid,
+        /// The prim face (texture index) to navigate.
+        face: u8,
+        /// The URL to navigate that face's media to.
+        url: String,
     },
     /// Begin a clean logout.
     Logout,
@@ -1813,6 +1844,41 @@ fn advance_running(
                     "asset type has no inventory-update capability".to_owned(),
                 ),
             },
+            SlCommand::RequestObjectMedia { object_id } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_OBJECT_MEDIA).cloned()
+                {
+                    let events_tx = caps.events_tx.clone();
+                    let object = *object_id;
+                    std::thread::spawn(move || {
+                        run_object_media_fetch(&url, object, &events_tx);
+                    });
+                }
+            }
+            SlCommand::SetObjectMedia { object_id, faces } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_OBJECT_MEDIA).cloned()
+                {
+                    let body = build_object_media_update_request(*object_id, faces);
+                    std::thread::spawn(move || {
+                        run_object_media_post(&url, body);
+                    });
+                }
+            }
+            SlCommand::NavigateObjectMedia {
+                object_id,
+                face,
+                url: media_url,
+            } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_OBJECT_MEDIA_NAVIGATE).cloned()
+                {
+                    let body = build_object_media_navigate_request(*object_id, *face, media_url);
+                    std::thread::spawn(move || {
+                        run_object_media_post(&url, body);
+                    });
+                }
+            }
             SlCommand::Logout => session.initiate_logout(now),
         }
     }
@@ -2066,6 +2132,51 @@ fn run_server_appearance_update(cap_url: &str, cof_version: i32, caps_tx: &Sende
             .send((CAP_UPDATE_AVATAR_APPEARANCE.to_owned(), llsd))
             .ok();
     }
+}
+
+/// POSTs an `ObjectMedia` GET for `object_id` and forwards the decoded LLSD
+/// response to `caps_tx` tagged [`CAP_OBJECT_MEDIA`], for the session to surface
+/// as a [`SlSessionEvent::ObjectMedia`].
+fn run_object_media_fetch(cap_url: &str, object_id: Uuid, caps_tx: &Sender<(String, Llsd)>) {
+    let Ok(http) = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    else {
+        return;
+    };
+    let body = build_object_media_get_request(object_id);
+    let Ok(response) = http
+        .post(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+    else {
+        return;
+    };
+    let Ok(text) = response.text() else {
+        return;
+    };
+    if let Ok(llsd) = parse_llsd_xml(&text) {
+        caps_tx.send((CAP_OBJECT_MEDIA.to_owned(), llsd)).ok();
+    }
+}
+
+/// POSTs a pre-built `ObjectMedia` UPDATE or `ObjectMediaNavigate` `body` to
+/// `cap_url`. Fire-and-forget: the simulator advances the object's media version
+/// rather than replying with media, so a client re-fetches with
+/// [`SlCommand::RequestObjectMedia`] to observe the change.
+fn run_object_media_post(cap_url: &str, body: String) {
+    let Ok(http) = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    else {
+        return;
+    };
+    http.post(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .ok();
 }
 
 /// Spawns the modern `NewFileAgentInventory` two-step CAPS upload on a background

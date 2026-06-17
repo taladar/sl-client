@@ -161,8 +161,9 @@ use sl_wire::messages::{
     SetGroupContributionAgentDataBlock, SetGroupContributionDataBlock,
 };
 use sl_wire::{
-    AnyMessage, ControlFlags, Llsd, MessageId, PacketFlags, Reader, SkeletonFolder, WireError,
-    Writer, build_login_request, encode_datagram, parse_datagram, zero_decode,
+    AnyMessage, ControlFlags, Llsd, MessageId, ObjectMediaResponse, PacketFlags, Reader,
+    SkeletonFolder, WireError, Writer, build_login_request, encode_datagram, parse_datagram,
+    zero_decode,
 };
 use uuid::Uuid;
 
@@ -178,12 +179,12 @@ use crate::types::{
     MapItem, MapItemType, MapRegionInfo, Material, Maturity, MoneyBalance, MoneyTransaction,
     MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectFlagSettings,
     ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
-    ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
-    PlayingAnimation, PrimShape, ProductType, RegionIdentity, RegionInfoUpdate, RegionLimits,
-    Reliability, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture,
-    Throttle, TransferStatus, Transmit, Wearable, WearableType, avatar_texture, grid_to_handle,
-    handle_to_grid,
+    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType,
+    ParcelUpdate, PermissionField, PlayingAnimation, PrimShape, ProductType, RegionIdentity,
+    RegionInfoUpdate, RegionLimits, Reliability, SaleType, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType,
+    TerrainPatch, Texture, Throttle, TransferStatus, Transmit, Wearable, WearableType,
+    avatar_texture, grid_to_handle, handle_to_grid,
 };
 use crate::{appearance, types::AvatarAppearance, types::AvatarAttachment};
 
@@ -304,6 +305,22 @@ pub const CAP_UPDATE_SCRIPT_AGENT: &str = "UpdateScriptAgent";
 /// the `item_id`.
 pub const CAP_UPDATE_SETTINGS_AGENT_INVENTORY: &str = "UpdateSettingsAgentInventory";
 
+/// The HTTP capability for the **media-on-a-prim** read/write surface
+/// (`ObjectMedia`): a POST of a `{ verb, object_id, … }` map. A `GET` verb asks
+/// for an object's current per-face media (the simulator replies with an
+/// `object_media_data` array decoded into [`Event::ObjectMedia`]); an `UPDATE`
+/// verb sets it. Driven by the runtimes' `RequestObjectMedia` /
+/// `SetObjectMedia` commands; the GET reply is decoded by
+/// [`Session::handle_caps_event`].
+pub const CAP_OBJECT_MEDIA: &str = "ObjectMedia";
+
+/// The HTTP capability for navigating the media on a single prim face to a new
+/// URL (`ObjectMediaNavigate`): a POST of a `{ object_id, current_url,
+/// texture_index }` map. Driven by the runtimes' `NavigateObjectMedia` command;
+/// the simulator advances the object's media version (visible on a subsequent
+/// [`CAP_OBJECT_MEDIA`] GET) rather than replying with media data.
+pub const CAP_OBJECT_MEDIA_NAVIGATE: &str = "ObjectMediaNavigate";
+
 /// The capability names the client requests from the region seed. A driver POSTs
 /// these to the seed URL to obtain the capability map, then uses `EventQueueGet`
 /// for the event-queue long-poll, [`CAP_FETCH_INVENTORY`] for inventory fetches,
@@ -327,6 +344,8 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
     CAP_UPDATE_SCRIPT_AGENT,
     CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
+    CAP_OBJECT_MEDIA,
+    CAP_OBJECT_MEDIA_NAVIGATE,
 ];
 
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
@@ -3084,6 +3103,18 @@ impl Session {
                 self.events
                     .push_back(server_appearance_update_from_llsd(body));
             }
+            // The reply to an `ObjectMedia` GET: an object's current per-face
+            // media (`UPDATE` and the navigate cap have no media-bearing reply —
+            // they advance the object's media version instead).
+            CAP_OBJECT_MEDIA => {
+                if let Some(response) = ObjectMediaResponse::from_llsd(body) {
+                    self.events.push_back(Event::ObjectMedia {
+                        object_id: response.object_id,
+                        version: response.version,
+                        faces: response.faces,
+                    });
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -3704,6 +3735,36 @@ impl Session {
                     .push_back(Event::ParcelOverlay(ParcelOverlayInfo {
                         sequence_id: overlay.parcel_data.sequence_id,
                         data: overlay.parcel_data.data.clone(),
+                    }));
+            }
+            // A scripted parcel-media control (`llParcelMediaCommandList`): the
+            // simulator tells viewers to play/pause/stop/loop the parcel's
+            // streaming media, or carries a new URL/texture/time/size. Each set
+            // bit in `flags` marks a field of this message as meaningful.
+            AnyMessage::ParcelMediaCommandMessage(command) => {
+                let block = &command.command_block;
+                self.events.push_back(Event::ParcelMediaCommand {
+                    flags: block.flags,
+                    command: ParcelMediaCommand::from_u32(block.command),
+                    time: block.time,
+                });
+            }
+            // The parcel's media settings changed (`ParcelMediaUpdate`): the new
+            // media URL / texture id / type / dimensions for the streaming media
+            // surface. The extended block carries the MIME type and size.
+            AnyMessage::ParcelMediaUpdate(update) => {
+                let data = &update.data_block;
+                let extended = &update.data_block_extended;
+                self.events
+                    .push_back(Event::ParcelMediaUpdate(ParcelMediaUpdateInfo {
+                        media_url: trimmed_string(&data.media_url),
+                        media_id: data.media_id,
+                        media_auto_scale: data.media_auto_scale != 0,
+                        media_type: trimmed_string(&extended.media_type),
+                        media_desc: trimmed_string(&extended.media_desc),
+                        media_width: extended.media_width,
+                        media_height: extended.media_height,
+                        media_loop: extended.media_loop != 0,
                     }));
             }
             AnyMessage::ParcelDwellReply(reply) => {
