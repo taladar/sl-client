@@ -12,7 +12,8 @@
 use std::time::Duration;
 
 use sl_client_tokio::{
-    Client, Command, DisconnectReason, Error, Event, LoginParams, LoginRequest, Throttle, pcode,
+    Client, Command, DisconnectReason, Error, Event, LoginParams, LoginRequest, Throttle,
+    avatar_texture, pcode,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -93,6 +94,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .send(Command::SetThrottle(Throttle::preset_1000()))
                     .await
                     .ok();
+                // Ask the simulator for the agent's current outfit; the reply
+                // arrives as an `Event::AgentWearables`.
+                command_tx.send(Command::RequestWearables).await.ok();
                 let command_tx = command_tx.clone();
                 tokio::spawn(async move {
                     sleep(Duration::from_secs(hold_secs)).await;
@@ -235,9 +239,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
             Event::ObjectRemoved { local_id, .. } => info!("object {local_id} removed"),
+            Event::AvatarAppearance(appearance) => {
+                let baked: Vec<&str> = avatar_texture::BAKED
+                    .iter()
+                    .filter(|(index, _)| {
+                        appearance
+                            .texture_entry
+                            .texture_id(*index)
+                            .is_some_and(|id| !id.is_nil())
+                    })
+                    .map(|(_, name)| *name)
+                    .collect();
+                info!(
+                    "avatar appearance: {} — {} visual params, baked slots {:?}",
+                    appearance.avatar_id,
+                    appearance.visual_params.len(),
+                    baked,
+                );
+            }
+            Event::AgentWearables { serial, wearables } => {
+                info!(
+                    "own wearables (serial {serial}): {} worn — {:?}",
+                    wearables.len(),
+                    wearables
+                        .iter()
+                        .map(|w| w.wearable_type)
+                        .collect::<Vec<_>>(),
+                );
+            }
             // This demo ignores motion-only churn and the remaining
-            // profile/region/parcel/teleport/group events.
+            // profile/region/parcel/teleport/group/appearance events.
             Event::ObjectUpdated(_)
+            | Event::ServerAppearanceUpdate { .. }
+            | Event::CachedTextureResponse { .. }
             | Event::GroupMembers { .. }
             | Event::GroupRoleData { .. }
             | Event::GroupRoleMembers { .. }

@@ -47,7 +47,7 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 17 ✅ | Object interaction & editing | 8 | Builder/rezzer, object mover | Local OpenSim |
 | 18 ✅ | Terrain heightmaps (`LayerData`) | 8 | Ground geometry for a renderer | Local OpenSim |
 | 19 ✅ | Asset & texture pipeline **(fetch)** | 13 | Asset fetch + textured rendering | Local OpenSim |
-| 20 | Avatar appearance & wearables | 13 | Render avatars; outfit control | Local OpenSim |
+| 20 ✅ | Avatar appearance & wearables | 13 | Render avatars; outfit control | Local OpenSim |
 | 21 | Animations | 5 | Dance/gesture bot; animate scene | Local OpenSim |
 | 22 | Sound | 3 | Spatial audio playback | Local OpenSim |
 | 23 | Asset/texture/mesh upload | 5 | Content uploader | Local OpenSim |
@@ -582,11 +582,51 @@ needed.* Deferred: HTTP range requests (the LOD prefix is truncated client-side
 rather than byte-ranged), AIS3 inventory-asset semantics, J2C/mesh decode, and
 asset *upload* (#23).
 
-**20. Avatar appearance & wearables — `AvatarAppearance` (receive),
-`AgentSetAppearance`, `AgentWearablesUpdate`, `AgentIsNowWearing`, CAPS baking ·
-13 pts.** Decode other avatars' baked-texture IDs + visual params to render
-them; manage own outfit via the COF. Depends on #19 (textures) and #5
-(inventory). *Test: local OpenSim.*
+**20. Avatar appearance & wearables (done) ✅ — `AvatarAppearance` (receive),
+`AgentSetAppearance`, `AgentWearablesUpdate`/`Request`, `AgentIsNowWearing`,
+`AgentCachedTexture`/`Response`, plus the modern server-side-bake CAPS
+(`UpdateAvatarAppearance`) · 13 pts.** Decode other avatars' baked-texture IDs +
+visual params to render them, and manage the agent's own outfit. **Receive:**
+incoming `AvatarAppearance` is surfaced as `Event::AvatarAppearance` (a decoded
+`AvatarAppearance` value: avatar id, the per-face **`TextureEntry`** — see
+below, the visual-param bytes, the optional appearance-version / COF-version /
+flags, hover height, and attachments). The key piece is a faithful port of the
+viewer's packed-`TextureEntry` decoder in new `sl-proto/src/appearance.rs`
+(`decode_texture_entry`): the run-length
+`(default value, then (face-bitmask, value) overrides terminated by a zero bitmask)`
+form for all eleven per-face fields (texture id, tint colour un-inverted from
+the wire's `255−x`, scale, offset, rotation, bump/shiny/fullbright, media, glow,
+material id), matching `LLPrimitive::parseTEMessage`/`unpack_TEField`. New value
+types `TextureEntry`/ `TextureFace`, a `WearableType` enum and `Wearable`, an
+`AvatarAppearance`/ `AvatarAttachment`, and an `avatar_texture` module of slot
+constants (`HEAD_BAKED`=8 … the 11 baked slots, `COUNT`=45). The agent's own
+outfit is surfaced as `Event::AgentWearables` (from `AgentWearablesUpdate`,
+pushed at login and on change). **Send:** `Session::request_wearables`
+(`AgentWearablesRequest`), `set_wearing` (`AgentIsNowWearing`), `set_appearance`
+(`AgentSetAppearance` — the legacy client-side bake), and
+`request_cached_textures` (`AgentCachedTexture`, reply
+`AgentCachedTextureResponse` → `Event::CachedTextureResponse`).
+**Modern Second Life server-side baking ("Sunshine"):** on a baking-capable
+region the viewer no longer computes or uploads bakes — it manages the COF in
+inventory and POSTs `{cof_version}` to the new `UpdateAvatarAppearance`
+capability (`CAP_UPDATE_AVATAR_APPEARANCE`, added to the seed); the grid
+composites and broadcasts the result over the same UDP `AvatarAppearance`. The
+cap POST is wired through both runtimes (`RequestServerAppearanceUpdate`), with
+its `{success, error?, expected?}` reply decoded by `handle_caps_event` into
+`Event::ServerAppearanceUpdate`. All wired as `Command`/`SlCommand` variants
+(`RequestWearables`, `SetWearing`, `SetAppearance`, `RequestCachedTextures`,
+`RequestServerAppearanceUpdate`) through both runtimes. Built on #19 (fetch the
+baked textures by id) and #5 (the COF). Covered by `sl-proto` unit tests (the TE
+decoder: default fill, face override, empty blob, full round-trip) and four
+`lifecycle.rs` tests (`AvatarAppearance` baked-texture + visual-param decode,
+`AgentWearablesUpdate` worn list, and the `UpdateAvatarAppearance` reply →
+`ServerAppearanceUpdate`). *Live-verified against the local OpenSim via the
+`login_hold_logout` example: one login decoded the avatar's `AvatarAppearance`
+(218 visual params, **all 11 baked slots** carrying real texture ids) and a
+`RequestWearables` round-trip returned the 6 worn wearables (Shape/Skin/Hair/
+Eyes/Shirt/Pants). The server-side-bake cap is SL-only (OpenSim's central-bake
+version is 0, so it uses the legacy path), so `UpdateAvatarAppearance` is
+unit-tested only. Test: local OpenSim.*
 
 **21. Animations — `AgentAnimation` (send/trigger), `AvatarAnimation` (receive)
 · 5 pts.** Play/stop built-in and custom animations and observe others' — a

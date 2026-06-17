@@ -177,6 +177,10 @@ fn on_events(
             | SlSessionEvent::TextureNotFound(_)
             | SlSessionEvent::AssetReceived(_)
             | SlSessionEvent::AssetTransferFailed { .. }
+            | SlSessionEvent::AvatarAppearance(_)
+            | SlSessionEvent::AgentWearables { .. }
+            | SlSessionEvent::ServerAppearanceUpdate { .. }
+            | SlSessionEvent::CachedTextureResponse { .. }
             | SlSessionEvent::ParcelDwell { .. }
             | SlSessionEvent::ParcelAccessList { .. }
             | SlSessionEvent::EstateInfo(_)

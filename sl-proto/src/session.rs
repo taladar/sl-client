@@ -110,6 +110,14 @@ use sl_wire::messages::{
     RequestImage, RequestImageAgentDataBlock, RequestImageRequestImageBlock, TransferRequest,
     TransferRequestTransferInfoBlock,
 };
+// Avatar appearance & wearables (#20): the outgoing appearance/wearable messages.
+use sl_wire::messages::{
+    AgentCachedTexture, AgentCachedTextureAgentDataBlock, AgentCachedTextureWearableDataBlock,
+    AgentIsNowWearing, AgentIsNowWearingAgentDataBlock, AgentIsNowWearingWearableDataBlock,
+    AgentSetAppearance, AgentSetAppearanceAgentDataBlock, AgentSetAppearanceObjectDataBlock,
+    AgentSetAppearanceVisualParamBlock, AgentSetAppearanceWearableDataBlock, AgentWearablesRequest,
+    AgentWearablesRequestAgentDataBlock,
+};
 // Estate / region management (#14): the outgoing estate-owner / god messages.
 use sl_wire::messages::{
     EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
@@ -162,9 +170,10 @@ use crate::types::{
     ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PrimShape,
     ProductType, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, SaleType,
     ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, grid_to_handle,
-    handle_to_grid,
+    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, Wearable,
+    WearableType, avatar_texture, grid_to_handle, handle_to_grid,
 };
+use crate::{appearance, types::AvatarAppearance, types::AvatarAttachment};
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
 const AGENT_UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
@@ -231,6 +240,21 @@ pub const CAP_GET_MESH2: &str = "GetMesh2";
 /// surfaces as an [`Event::AssetReceived`].
 pub const CAP_GET_ASSET: &str = "GetAsset";
 
+/// The HTTP capability for the modern Second Life **server-side appearance bake**
+/// ("Sunshine" / central baking): a POST of an LLSD `{ "cof_version": <int> }`
+/// map asking the grid's bake service to composite the agent's current outfit.
+/// On a baking-capable region the client no longer computes or uploads baked
+/// textures itself (the legacy `AgentSetAppearance` / `UploadBakedTexture`
+/// path); it manages the Current Outfit Folder in inventory and triggers this
+/// capability, after which the server broadcasts the resulting baked-texture ids
+/// to every viewer via the UDP `AvatarAppearance` ([`Event::AvatarAppearance`]).
+/// The POST's own LLSD reply (`{ success, error?, expected? }`) is surfaced as
+/// [`Event::ServerAppearanceUpdate`]. Driven by the runtimes'
+/// `RequestServerAppearanceUpdate` command (an HTTP POST, like the inventory
+/// and group-roster capabilities), whose LLSD reply is decoded by
+/// [`Session::handle_caps_event`].
+pub const CAP_UPDATE_AVATAR_APPEARANCE: &str = "UpdateAvatarAppearance";
+
 /// The capability names the client requests from the region seed. A driver POSTs
 /// these to the seed URL to obtain the capability map, then uses `EventQueueGet`
 /// for the event-queue long-poll, [`CAP_FETCH_INVENTORY`] for inventory fetches,
@@ -245,6 +269,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_GET_MESH,
     CAP_GET_MESH2,
     CAP_GET_ASSET,
+    CAP_UPDATE_AVATAR_APPEARANCE,
 ];
 
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
@@ -1317,6 +1342,108 @@ impl Circuit {
                 priority,
                 params: writer.into_bytes(),
             },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AgentWearablesRequest` reliably, asking the simulator to
+    /// (re-)send the agent's current wearables as an `AgentWearablesUpdate`.
+    fn send_agent_wearables_request(&mut self, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::AgentWearablesRequest(AgentWearablesRequest {
+            agent_data: AgentWearablesRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AgentIsNowWearing` reliably, telling the simulator the agent's
+    /// new outfit (one `(item id, wearable slot)` per worn wearable).
+    fn send_agent_is_now_wearing(
+        &mut self,
+        wearables: &[Wearable],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AgentIsNowWearing(AgentIsNowWearing {
+            agent_data: AgentIsNowWearingAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            wearable_data: wearables
+                .iter()
+                .map(|wearable| AgentIsNowWearingWearableDataBlock {
+                    item_id: wearable.item_id,
+                    wearable_type: wearable.wearable_type.to_code(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AgentSetAppearance` reliably, advertising the agent's own
+    /// appearance: its bounding-box `size`, the baked-texture `texture_entry`
+    /// blob, the `visual_params` bytes, and the per-baked-slot `wearable_cache`
+    /// hashes (`(cache id, texture slot index)`). `serial` must increase on each
+    /// change (0 resets).
+    fn send_agent_set_appearance(
+        &mut self,
+        serial: u32,
+        size: Vector,
+        texture_entry: &[u8],
+        visual_params: &[u8],
+        wearable_cache: &[(Uuid, u8)],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AgentSetAppearance(AgentSetAppearance {
+            agent_data: AgentSetAppearanceAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                serial_num: serial,
+                size,
+            },
+            wearable_data: wearable_cache
+                .iter()
+                .map(
+                    |&(cache_id, texture_index)| AgentSetAppearanceWearableDataBlock {
+                        cache_id,
+                        texture_index,
+                    },
+                )
+                .collect(),
+            object_data: AgentSetAppearanceObjectDataBlock {
+                texture_entry: texture_entry.to_vec(),
+            },
+            visual_param: visual_params
+                .iter()
+                .map(|&param_value| AgentSetAppearanceVisualParamBlock { param_value })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AgentCachedTexture` reliably, asking the simulator which of the
+    /// queried baked-texture slots it already has cached (`(cache id, texture
+    /// slot index)` per slot). The reply is an `AgentCachedTextureResponse`.
+    fn send_agent_cached_texture(
+        &mut self,
+        serial: i32,
+        slots: &[(Uuid, u8)],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AgentCachedTexture(AgentCachedTexture {
+            agent_data: AgentCachedTextureAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                serial_num: serial,
+            },
+            wearable_data: slots
+                .iter()
+                .map(|&(id, texture_index)| AgentCachedTextureWearableDataBlock {
+                    id,
+                    texture_index,
+                })
+                .collect(),
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -2736,6 +2863,15 @@ impl Session {
                     self.events.push_back(event);
                 }
             }
+            // The reply to an `UpdateAvatarAppearance` POST (server-side baking).
+            // The baked result itself arrives separately as a UDP
+            // `AvatarAppearance`; this only reports whether the bake request was
+            // accepted (and, on a version mismatch, the COF version the server
+            // expected, so the client can re-request).
+            CAP_UPDATE_AVATAR_APPEARANCE => {
+                self.events
+                    .push_back(server_appearance_update_from_llsd(body));
+            }
             _ => {}
         }
         Ok(())
@@ -3752,6 +3888,43 @@ impl Session {
                         status,
                     });
                 }
+            }
+            // Another avatar's appearance (baked textures + visual params),
+            // pushed when it comes into range or restyles. Decoded for both the
+            // modern server-side bake (the texture entry names the server's bakes)
+            // and the legacy client-side bake.
+            AnyMessage::AvatarAppearance(appearance) => {
+                self.events
+                    .push_back(Event::AvatarAppearance(Box::new(avatar_appearance(
+                        appearance,
+                    ))));
+            }
+            // The agent's own current wearables, pushed at login and after every
+            // wearable change (or in reply to `AgentWearablesRequest`).
+            AnyMessage::AgentWearablesUpdate(update) => {
+                self.events.push_back(Event::AgentWearables {
+                    serial: update.agent_data.serial_num,
+                    wearables: update
+                        .wearable_data
+                        .iter()
+                        .map(|block| Wearable {
+                            item_id: block.item_id,
+                            asset_id: block.asset_id,
+                            wearable_type: WearableType::from_code(block.wearable_type),
+                        })
+                        .collect(),
+                });
+            }
+            // The reply to a baked-texture cache query (`AgentCachedTexture`).
+            AnyMessage::AgentCachedTextureResponse(response) => {
+                self.events.push_back(Event::CachedTextureResponse {
+                    serial: response.agent_data.serial_num,
+                    textures: response
+                        .wearable_data
+                        .iter()
+                        .map(|block| (block.texture_index, block.texture_id))
+                        .collect(),
+                });
             }
             AnyMessage::GenericMessage(generic)
                 // The sim NUL-terminates the method name on the wire.
@@ -4876,6 +5049,104 @@ impl Session {
         );
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_transfer_request(transfer_id, asset_id, asset_type, priority, now)?;
+        Ok(())
+    }
+
+    /// Asks the simulator to (re-)send the agent's own current wearables via
+    /// `AgentWearablesRequest`. The reply arrives as [`Event::AgentWearables`].
+    /// The simulator also pushes one unsolicited at login and after every
+    /// wearable change, so a passive client need not call this.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_wearables(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_agent_wearables_request(now)?;
+        Ok(())
+    }
+
+    /// Sets the agent's outfit via `AgentIsNowWearing`: the complete set of
+    /// wearables the agent should now be wearing (only the
+    /// [`item_id`](Wearable::item_id) and
+    /// [`wearable_type`](Wearable::wearable_type) are sent). Each wearable item
+    /// must already be in the agent's inventory (see
+    /// [`Session::request_folder_contents`]). The simulator acknowledges by
+    /// pushing a fresh [`Event::AgentWearables`].
+    ///
+    /// Note this changes which wearables are *worn*; the avatar's rendered
+    /// appearance is only refreshed once the baked textures are recomputed and
+    /// advertised with [`Session::set_appearance`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_wearing(&mut self, wearables: &[Wearable], now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_agent_is_now_wearing(wearables, now)?;
+        Ok(())
+    }
+
+    /// Advertises the agent's own appearance to the simulator (and, through it,
+    /// to other viewers) via `AgentSetAppearance`: its bounding-box `size`
+    /// (metres), the packed `texture_entry` blob carrying the baked-texture ids,
+    /// the `visual_params` bytes (one quantized byte per parameter, in the
+    /// reference viewer's order), and the per-baked-slot `wearable_cache` hashes
+    /// (`(cache id, texture slot index)`; see the [`avatar_texture`] constants).
+    /// `serial` must strictly increase across calls (0 resets the simulator's
+    /// counter).
+    ///
+    /// Computing the baked textures and visual parameters is the avatar-baking
+    /// step (it normally requires uploading the bakes — the upload pipeline is a
+    /// separate feature); this method is the wire surface that publishes an
+    /// already-computed appearance.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_appearance(
+        &mut self,
+        serial: u32,
+        size: Vector,
+        texture_entry: &[u8],
+        visual_params: &[u8],
+        wearable_cache: &[(Uuid, u8)],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_agent_set_appearance(
+            serial,
+            size,
+            texture_entry,
+            visual_params,
+            wearable_cache,
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Queries the simulator's baked-texture cache via `AgentCachedTexture`: for
+    /// each queried slot (`(cache id, texture slot index)`; see the
+    /// [`avatar_texture`] constants) the simulator reports whether it already has
+    /// a matching bake, in an [`Event::CachedTextureResponse`]. A viewer uses
+    /// this before baking to skip re-uploading textures the grid already has.
+    /// `serial` is echoed back in the reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_cached_textures(
+        &mut self,
+        serial: i32,
+        slots: &[(Uuid, u8)],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_agent_cached_texture(serial, slots, now)?;
         Ok(())
     }
 
@@ -6221,6 +6492,55 @@ fn money_balance(reply: &sl_wire::messages::MoneyBalanceReply) -> MoneyBalance {
         square_meters_committed: data.square_meters_committed,
         description: trimmed_string(&data.description),
         transaction,
+    }
+}
+
+/// Builds an [`AvatarAppearance`] from an `AvatarAppearance` message: decodes the
+/// per-avatar `TextureEntry` (the baked-texture ids) and collects the visual
+/// params and optional appearance/hover/attachment blocks.
+fn avatar_appearance(message: &sl_wire::messages::AvatarAppearance) -> AvatarAppearance {
+    let texture_entry =
+        appearance::decode_texture_entry(&message.object_data.texture_entry, avatar_texture::COUNT);
+    let visual_params = message
+        .visual_param
+        .iter()
+        .map(|block| block.param_value)
+        .collect();
+    let appearance_block = message.appearance_data.first();
+    let attachments = message
+        .attachment_block
+        .iter()
+        .map(|block| AvatarAttachment {
+            id: block.id,
+            attachment_point: block.attachment_point,
+        })
+        .collect();
+    AvatarAppearance {
+        avatar_id: message.sender.id,
+        is_trial: message.sender.is_trial,
+        texture_entry,
+        visual_params,
+        appearance_version: appearance_block.map(|block| block.appearance_version),
+        cof_version: appearance_block.map(|block| block.cof_version),
+        appearance_flags: appearance_block.map(|block| block.flags),
+        hover_height: message
+            .appearance_hover
+            .first()
+            .map(|block| block.hover_height.clone()),
+        attachments,
+    }
+}
+
+/// Builds an [`Event::ServerAppearanceUpdate`] from the LLSD reply to an
+/// `UpdateAvatarAppearance` POST (`{ success, error?, expected? }`).
+fn server_appearance_update_from_llsd(body: &Llsd) -> Event {
+    Event::ServerAppearanceUpdate {
+        success: body.get("success").and_then(Llsd::as_bool).unwrap_or(false),
+        error: body
+            .get("error")
+            .and_then(Llsd::as_str)
+            .map(ToOwned::to_owned),
+        expected_cof_version: body.get("expected").and_then(Llsd::as_i32),
     }
 }
 

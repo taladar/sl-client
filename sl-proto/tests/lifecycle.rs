@@ -16,14 +16,17 @@ mod test {
         ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags,
         ParcelReturnType, ParcelUpdate, PermissionField, PrimShape, ProductType, RegionInfoUpdate,
         Reliability, SaleType, ScriptPermissions, Session, TerrainLayerType, Throttle,
-        TransferStatus, Transmit, pcode,
+        TransferStatus, Transmit, WearableType, avatar_texture, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
         AgentDataUpdate, AgentDataUpdateAgentDataBlock, AgentGroupDataUpdate,
         AgentGroupDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
         AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
-        AgentMovementCompleteSimDataBlock, AvatarNotesReply, AvatarNotesReplyAgentDataBlock,
+        AgentMovementCompleteSimDataBlock, AgentWearablesUpdate,
+        AgentWearablesUpdateAgentDataBlock, AgentWearablesUpdateWearableDataBlock,
+        AvatarAppearance, AvatarAppearanceObjectDataBlock, AvatarAppearanceSenderBlock,
+        AvatarAppearanceVisualParamBlock, AvatarNotesReply, AvatarNotesReplyAgentDataBlock,
         AvatarNotesReplyDataBlock, AvatarPicksReply, AvatarPicksReplyAgentDataBlock,
         AvatarPicksReplyDataBlock, AvatarPropertiesReply, AvatarPropertiesReplyAgentDataBlock,
         AvatarPropertiesReplyPropertiesDataBlock, AvatarSitResponse,
@@ -2273,6 +2276,155 @@ mod test {
             Event::AssetTransferFailed { asset_id, status, .. }
             if *asset_id == missing && *status == TransferStatus::UnknownSource
         )));
+        Ok(())
+    }
+
+    #[test]
+    fn server_appearance_update_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A COF-version-mismatch failure reply from the UpdateAvatarAppearance cap.
+        let xml = concat!(
+            "<llsd><map>",
+            "<key>success</key><boolean>0</boolean>",
+            "<key>error</key><string>cof version mismatch</string>",
+            "<key>expected</key><integer>42</integer>",
+            "</map></llsd>",
+        );
+        let body = parse_llsd_xml(xml)?;
+        session.handle_caps_event("UpdateAvatarAppearance", &body, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::ServerAppearanceUpdate { .. }))
+            .ok_or("expected a ServerAppearanceUpdate event")?;
+        assert_eq!(
+            event,
+            Event::ServerAppearanceUpdate {
+                success: false,
+                error: Some("cof version mismatch".to_owned()),
+                expected_cof_version: Some(42),
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn avatar_appearance_decodes_baked_textures_and_params() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let avatar = uuid::Uuid::from_u128(0xA1);
+        let head_bake = uuid::Uuid::from_u128(0xBEEF);
+
+        // A minimal packed TextureEntry: a nil default texture with the head-baked
+        // slot (index 8) overridden to `head_bake`. The face bitmask for bit 8 is
+        // the two-byte base-128 big-endian value `0x82 0x00` (= 256), as the
+        // viewer's `packTEField` emits. The remaining TE fields are omitted; the
+        // decoder leaves them at their defaults.
+        let mut te = Writer::new();
+        te.put_uuid(uuid::Uuid::nil()); // default texture for all faces
+        te.put_u8(0x82); // face bitmask: continuation + high bits
+        te.put_u8(0x00); // face bitmask: low bits -> bit 8
+        te.put_uuid(head_bake); // override value for face 8
+        te.put_u8(0); // terminator for the texture field
+
+        let message = AnyMessage::AvatarAppearance(AvatarAppearance {
+            sender: AvatarAppearanceSenderBlock {
+                id: avatar,
+                is_trial: false,
+            },
+            object_data: AvatarAppearanceObjectDataBlock {
+                texture_entry: te.into_bytes(),
+            },
+            visual_param: vec![
+                AvatarAppearanceVisualParamBlock { param_value: 10 },
+                AvatarAppearanceVisualParamBlock { param_value: 200 },
+                AvatarAppearanceVisualParamBlock { param_value: 255 },
+            ],
+            appearance_data: Vec::new(),
+            appearance_hover: Vec::new(),
+            attachment_block: Vec::new(),
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let appearance = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AvatarAppearance(appearance) => Some(appearance),
+                _ => None,
+            })
+            .ok_or("expected an AvatarAppearance event")?;
+        assert_eq!(appearance.avatar_id, avatar);
+        assert_eq!(appearance.visual_params, vec![10, 200, 255]);
+        // The baked head texture decodes at its slot; an untouched slot is nil.
+        assert_eq!(
+            appearance
+                .texture_entry
+                .texture_id(avatar_texture::HEAD_BAKED),
+            Some(head_bake)
+        );
+        assert_eq!(
+            appearance
+                .texture_entry
+                .texture_id(avatar_texture::UPPER_BAKED),
+            Some(uuid::Uuid::nil())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn agent_wearables_update_surfaces_worn_wearables() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let shape_item = uuid::Uuid::from_u128(0x11);
+        let shape_asset = uuid::Uuid::from_u128(0x12);
+        let shirt_item = uuid::Uuid::from_u128(0x21);
+        let shirt_asset = uuid::Uuid::from_u128(0x22);
+
+        let message = AnyMessage::AgentWearablesUpdate(AgentWearablesUpdate {
+            agent_data: AgentWearablesUpdateAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+                serial_num: 7,
+            },
+            wearable_data: vec![
+                AgentWearablesUpdateWearableDataBlock {
+                    item_id: shape_item,
+                    asset_id: shape_asset,
+                    wearable_type: 0, // WT_SHAPE
+                },
+                AgentWearablesUpdateWearableDataBlock {
+                    item_id: shirt_item,
+                    asset_id: shirt_asset,
+                    wearable_type: 4, // WT_SHIRT
+                },
+            ],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let (serial, wearables) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AgentWearables { serial, wearables } => Some((serial, wearables)),
+                _ => None,
+            })
+            .ok_or("expected an AgentWearables event")?;
+        assert_eq!(serial, 7);
+        assert_eq!(wearables.len(), 2);
+        let shape = wearables.first().ok_or("first wearable")?;
+        assert_eq!(shape.item_id, shape_item);
+        assert_eq!(shape.asset_id, shape_asset);
+        assert_eq!(shape.wearable_type, WearableType::Shape);
+        assert!(shape.wearable_type.is_body_part());
+        let shirt = wearables.get(1).ok_or("second wearable")?;
+        assert_eq!(shirt.wearable_type, WearableType::Shirt);
+        assert!(!shirt.wearable_type.is_body_part());
         Ok(())
     }
 
