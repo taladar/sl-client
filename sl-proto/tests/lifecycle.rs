@@ -24,7 +24,8 @@ mod test {
         AgentGroupDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
         AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
         AgentMovementCompleteSimDataBlock, AgentWearablesUpdate,
-        AgentWearablesUpdateAgentDataBlock, AgentWearablesUpdateWearableDataBlock, AttachedSound,
+        AgentWearablesUpdateAgentDataBlock, AgentWearablesUpdateWearableDataBlock,
+        AssetUploadComplete, AssetUploadCompleteAssetBlockBlock, AttachedSound,
         AttachedSoundDataBlockBlock, AvatarAnimation, AvatarAnimationAnimationListBlock,
         AvatarAnimationAnimationSourceListBlock, AvatarAnimationSenderBlock, AvatarAppearance,
         AvatarAppearanceObjectDataBlock, AvatarAppearanceSenderBlock,
@@ -34,15 +35,16 @@ mod test {
         AvatarPropertiesReplyPropertiesDataBlock, AvatarSitResponse,
         AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock, ChangeUserRights,
         ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock, ChatFromSimulator,
-        ChatFromSimulatorChatDataBlock, CrossedRegion, CrossedRegionAgentDataBlock,
-        CrossedRegionInfoBlock, CrossedRegionRegionDataBlock, DisableSimulator, EconomyData,
-        EconomyDataInfoBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
-        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock, GenericMessage,
-        GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GroupMembersReply,
-        GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
-        GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
-        GroupProfileReplyGroupDataBlock, ImageData, ImageDataImageDataBlock, ImageDataImageIDBlock,
-        ImageNotInDatabase, ImageNotInDatabaseImageIDBlock, ImagePacket, ImagePacketImageDataBlock,
+        ChatFromSimulatorChatDataBlock, ConfirmXferPacket, ConfirmXferPacketXferIDBlock,
+        CrossedRegion, CrossedRegionAgentDataBlock, CrossedRegionInfoBlock,
+        CrossedRegionRegionDataBlock, DisableSimulator, EconomyData, EconomyDataInfoBlock,
+        EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
+        EstateOwnerMessageParamListBlock, GenericMessage, GenericMessageAgentDataBlock,
+        GenericMessageMethodDataBlock, GroupMembersReply, GroupMembersReplyAgentDataBlock,
+        GroupMembersReplyGroupDataBlock, GroupMembersReplyMemberDataBlock, GroupProfileReply,
+        GroupProfileReplyAgentDataBlock, GroupProfileReplyGroupDataBlock, ImageData,
+        ImageDataImageDataBlock, ImageDataImageIDBlock, ImageNotInDatabase,
+        ImageNotInDatabaseImageIDBlock, ImagePacket, ImagePacketImageDataBlock,
         ImagePacketImageIDBlock, ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
         ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
         ImprovedTerseObjectUpdate, ImprovedTerseObjectUpdateObjectDataBlock,
@@ -67,12 +69,12 @@ mod test {
         PreloadSound, PreloadSoundDataBlockBlock, RegionHandshake, RegionHandshakeRegionInfo2Block,
         RegionHandshakeRegionInfo3Block, RegionHandshakeRegionInfoBlock, RegionInfo,
         RegionInfoAgentDataBlock, RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock,
-        ScriptDialog, ScriptDialogButtonsBlock, ScriptDialogDataBlock, ScriptDialogOwnerDataBlock,
-        ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock, SendXferPacket,
-        SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock, SoundTrigger,
-        SoundTriggerSoundDataBlock, TeleportFailed, TeleportFailedInfoBlock, TransferInfo,
-        TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
-        UseCachedMuteList, UseCachedMuteListAgentDataBlock,
+        RequestXfer, RequestXferXferIDBlock, ScriptDialog, ScriptDialogButtonsBlock,
+        ScriptDialogDataBlock, ScriptDialogOwnerDataBlock, ScriptQuestion, ScriptQuestionDataBlock,
+        ScriptQuestionExperienceBlock, SendXferPacket, SendXferPacketDataPacketBlock,
+        SendXferPacketXferIDBlock, SoundTrigger, SoundTriggerSoundDataBlock, TeleportFailed,
+        TeleportFailedInfoBlock, TransferInfo, TransferInfoTransferInfoBlock, TransferPacket,
+        TransferPacketTransferDataBlock, UseCachedMuteList, UseCachedMuteListAgentDataBlock,
     };
     use sl_wire::{
         AnyMessage, LoginFailure, LoginRequest, LoginResponse, LoginSuccess, MessageId,
@@ -2279,6 +2281,177 @@ mod test {
             Event::AssetTransferFailed { asset_id, status, .. }
             if *asset_id == missing && *status == TransferStatus::UnknownSource
         )));
+        Ok(())
+    }
+
+    #[test]
+    fn upload_asset_udp_inlines_small_asset_and_completes() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A small asset is inlined directly in the AssetUploadRequest.
+        let data = b"a tiny notecard".to_vec();
+        let asset_id =
+            session.upload_asset_udp(AssetType::Notecard, data.clone(), false, false, now)?;
+        // The predicted asset id is combine(transaction_id, secure_session_id);
+        // the first upload uses transaction id 1 and the test login's secure
+        // session id is 3.
+        let expected = sl_wire::combine_uuids(uuid::Uuid::from_u128(1), uuid::Uuid::from_u128(3));
+        assert_eq!(asset_id, expected);
+
+        let sent = drain(&mut session)?;
+        let request = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AssetUploadRequest(r) => Some(r),
+                _ => None,
+            })
+            .ok_or("expected an AssetUploadRequest")?;
+        // AssetType::Notecard == 7, inlined with the asset bytes, no Xfer.
+        assert_eq!(request.asset_block.r#type, 7);
+        assert_eq!(request.asset_block.asset_data, data);
+        assert!(
+            !sent
+                .iter()
+                .any(|m| matches!(m, AnyMessage::SendXferPacket(_)))
+        );
+
+        // The sim reports the upload complete.
+        let complete = AnyMessage::AssetUploadComplete(AssetUploadComplete {
+            asset_block: AssetUploadCompleteAssetBlockBlock {
+                uuid: asset_id,
+                r#type: 7,
+                success: true,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&complete, 9, true)?, now)?;
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::AssetUploadComplete { .. }))
+            .ok_or("expected an AssetUploadComplete event")?;
+        assert_eq!(
+            event,
+            Event::AssetUploadComplete {
+                asset_id,
+                asset_type: AssetType::Notecard,
+                success: true,
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn upload_asset_udp_streams_large_asset_over_xfer() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // An asset larger than the inline cutoff forces the Xfer path: two
+        // 1000-byte chunks across two SendXferPackets.
+        let data: Vec<u8> = (0..1500_u32)
+            .map(|i| u8::try_from(i & 0xff).unwrap_or(0))
+            .collect();
+        let asset_id =
+            session.upload_asset_udp(AssetType::Texture, data.clone(), true, false, now)?;
+
+        let sent = drain(&mut session)?;
+        let request = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AssetUploadRequest(r) => Some(r),
+                _ => None,
+            })
+            .ok_or("expected an AssetUploadRequest")?;
+        // The asset is NOT inlined (empty AssetData forces the Xfer), and it is
+        // flagged temporary.
+        assert!(request.asset_block.asset_data.is_empty());
+        assert!(request.asset_block.tempfile);
+
+        // The sim requests the file over Xfer, naming our predicted asset id as
+        // the VFileID.
+        let xfer_id = 0x5151_u64;
+        let request_xfer = AnyMessage::RequestXfer(RequestXfer {
+            xfer_id: RequestXferXferIDBlock {
+                id: xfer_id,
+                filename: Vec::new(),
+                file_path: 0,
+                delete_on_completion: true,
+                use_big_packets: false,
+                v_file_id: asset_id,
+                v_file_type: 0,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&request_xfer, 9, true)?, now)?;
+
+        // The client streams packet 0: a 4-byte little-endian length prefix
+        // (1500) followed by the first 1000 bytes; not yet the last packet.
+        let first = drain(&mut session)?
+            .into_iter()
+            .find_map(|m| match m {
+                AnyMessage::SendXferPacket(p) => Some(p),
+                _ => None,
+            })
+            .ok_or("expected a SendXferPacket")?;
+        assert_eq!(first.xfer_id.id, xfer_id);
+        assert_eq!(first.xfer_id.packet, 0);
+        assert_eq!(first.data_packet.data.len(), 1004);
+        assert_eq!(
+            first.data_packet.data.get(..4),
+            Some([0xdc, 0x05, 0, 0].as_slice())
+        );
+
+        // The sim confirms packet 0; the client sends the final packet (sequence
+        // 1, last-packet flag) carrying the remaining 500 bytes.
+        let confirm = AnyMessage::ConfirmXferPacket(ConfirmXferPacket {
+            xfer_id: ConfirmXferPacketXferIDBlock {
+                id: xfer_id,
+                packet: 0,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&confirm, 10, true)?, now)?;
+        let last = drain(&mut session)?
+            .into_iter()
+            .find_map(|m| match m {
+                AnyMessage::SendXferPacket(p) => Some(p),
+                _ => None,
+            })
+            .ok_or("expected a final SendXferPacket")?;
+        assert_eq!(last.xfer_id.packet, 1 | 0x8000_0000);
+        assert_eq!(last.data_packet.data.len(), 500);
+
+        // The sim reports completion.
+        let complete = AnyMessage::AssetUploadComplete(AssetUploadComplete {
+            asset_block: AssetUploadCompleteAssetBlockBlock {
+                uuid: asset_id,
+                r#type: 0,
+                success: true,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&complete, 11, true)?, now)?;
+        assert!(drain_events(&mut session).iter().any(|e| matches!(
+            e,
+            Event::AssetUploadComplete { asset_id: id, success: true, .. } if *id == asset_id
+        )));
+        Ok(())
+    }
+
+    #[test]
+    fn caps_upload_completion_surfaces_asset_uploaded() -> Result<(), TestError> {
+        // The runtimes drive the two-step CAPS upload and decode the response
+        // with `parse_asset_upload_response`; verify the completion shape used to
+        // build `Event::AssetUploaded`.
+        let new_asset = uuid::Uuid::from_u128(0x000a_55e7);
+        let new_item = uuid::Uuid::from_u128(0x17e3);
+        let xml = format!(
+            "<llsd><map><key>state</key><string>complete</string>\
+             <key>new_asset</key><string>{new_asset}</string>\
+             <key>new_inventory_item</key><uuid>{new_item}</uuid></map></llsd>"
+        );
+        let response = sl_wire::parse_asset_upload_response(&xml)?;
+        assert_eq!(response.state, "complete");
+        assert_eq!(response.new_asset, Some(new_asset));
+        assert_eq!(response.new_inventory_item, Some(new_item));
         Ok(())
     }
 

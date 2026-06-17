@@ -302,6 +302,159 @@ pub fn build_update_avatar_appearance_request(cof_version: i32) -> String {
     format!("<llsd><map><key>cof_version</key><integer>{cof_version}</integer></map></llsd>")
 }
 
+/// Builds the LLSD-XML metadata body for the first step of a
+/// `NewFileAgentInventory` capability upload (the modern path that stores a new
+/// asset *and* creates an inventory item). The simulator replies with an
+/// `uploader` URL to which the raw asset bytes are then POSTed (see
+/// [`parse_asset_upload_response`]).
+///
+/// `asset_type` and `inventory_type` are LL's short type names (e.g.
+/// `"texture"` / `"texture"`, `"animatn"` / `"animation"`, `"mesh"` /
+/// `"mesh"`); the `*_mask` values are the permission bitfields granted to the
+/// next owner / group / everyone; `expected_upload_cost` is the L$ price the
+/// client expects (the grid rejects a mismatch).
+#[must_use]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the flat NewFileAgentInventory LLSD request fields"
+)]
+pub fn build_new_file_agent_inventory_request(
+    folder_id: Uuid,
+    asset_type: &str,
+    inventory_type: &str,
+    name: &str,
+    description: &str,
+    next_owner_mask: u32,
+    group_mask: u32,
+    everyone_mask: u32,
+    expected_upload_cost: i32,
+) -> String {
+    let mut out = String::from("<llsd><map>");
+    out.push_str("<key>folder_id</key><uuid>");
+    out.push_str(&folder_id.to_string());
+    out.push_str("</uuid><key>asset_type</key><string>");
+    push_escaped(&mut out, asset_type);
+    out.push_str("</string><key>inventory_type</key><string>");
+    push_escaped(&mut out, inventory_type);
+    out.push_str("</string><key>name</key><string>");
+    push_escaped(&mut out, name);
+    out.push_str("</string><key>description</key><string>");
+    push_escaped(&mut out, description);
+    out.push_str("</string>");
+    out.push_str(&format!(
+        concat!(
+            "<key>next_owner_mask</key><integer>{}</integer>",
+            "<key>group_mask</key><integer>{}</integer>",
+            "<key>everyone_mask</key><integer>{}</integer>",
+            "<key>expected_upload_cost</key><integer>{}</integer>",
+        ),
+        next_owner_mask, group_mask, everyone_mask, expected_upload_cost,
+    ));
+    out.push_str("</map></llsd>");
+    out
+}
+
+/// Builds the LLSD-XML metadata body for the first step of an
+/// `Update*AgentInventory` capability upload (replacing the asset of an
+/// existing inventory item — gesture, notecard, script, or settings): a map
+/// carrying the `item_id` to update. The simulator replies with an `uploader`
+/// URL (see [`parse_asset_upload_response`]).
+#[must_use]
+pub fn build_update_item_asset_request(item_id: Uuid) -> String {
+    format!("<llsd><map><key>item_id</key><uuid>{item_id}</uuid></map></llsd>")
+}
+
+/// Builds the LLSD-XML metadata body for the first step of an
+/// `UploadBakedTexture` capability upload (a temporary avatar bake, which
+/// creates no inventory item): an empty map, as the viewer sends.
+#[must_use]
+pub fn build_upload_baked_texture_request() -> String {
+    String::from("<llsd><map /></llsd>")
+}
+
+/// A parsed response from either step of a CAPS asset upload (the
+/// `NewFileAgentInventory` / `UploadBakedTexture` / `Update*AgentInventory`
+/// two-step uploader). The first POST yields a `state` of `"upload"` with an
+/// [`uploader`](Self::uploader) URL; the second (the raw-bytes POST) yields a
+/// `state` of `"complete"` with [`new_asset`](Self::new_asset) and, when an
+/// inventory item was created/updated,
+/// [`new_inventory_item`](Self::new_inventory_item). A failure yields some other
+/// state and, usually, an [`error`](Self::error) message.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AssetUploadResponse {
+    /// The uploader state (`"upload"`, `"complete"`, or an error state).
+    pub state: String,
+    /// The URL to POST the raw asset bytes to (present on the first step).
+    pub uploader: Option<String>,
+    /// The newly stored asset's UUID (present on completion).
+    pub new_asset: Option<Uuid>,
+    /// The created/updated inventory item's UUID (present on completion when the
+    /// upload produced an inventory item; nil/absent for a baked texture).
+    pub new_inventory_item: Option<Uuid>,
+    /// The grid's error message, if the response reported a failure.
+    pub error: Option<String>,
+}
+
+/// Parses a CAPS asset-upload response (either step of the two-step uploader)
+/// into its [`state`](AssetUploadResponse::state), `uploader` URL, and
+/// `new_asset` / `new_inventory_item` ids.
+///
+/// A nil `new_inventory_item` (as `UploadBakedTexture` returns) is normalised to
+/// `None`.
+///
+/// # Errors
+///
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+pub fn parse_asset_upload_response(xml: &str) -> Result<AssetUploadResponse, roxmltree::Error> {
+    let root = parse_llsd_xml(xml)?;
+    let state = root
+        .get("state")
+        .and_then(Llsd::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let uploader = root
+        .get("uploader")
+        .and_then(Llsd::as_str)
+        .filter(|url| !url.is_empty())
+        .map(str::to_owned);
+    let new_asset = upload_uuid(&root, "new_asset");
+    let new_inventory_item = upload_uuid(&root, "new_inventory_item").filter(|id| !id.is_nil());
+    let error = root
+        .get("error")
+        .and_then(upload_error_message)
+        .filter(|message| !message.is_empty());
+    Ok(AssetUploadResponse {
+        state,
+        uploader,
+        new_asset,
+        new_inventory_item,
+        error,
+    })
+}
+
+/// Extracts a UUID-valued field from an upload response, accepting it as either
+/// an LLSD `uuid` or a `string` (the viewer encodes `new_asset` as a string).
+fn upload_uuid(root: &Llsd, key: &str) -> Option<Uuid> {
+    let value = root.get(key)?;
+    value.as_uuid().or_else(|| {
+        value
+            .as_str()
+            .and_then(|text| Uuid::parse_str(text.trim()).ok())
+    })
+}
+
+/// Extracts a human-readable message from an upload response's `error` field,
+/// which may be a plain string or a map carrying a `message` key.
+fn upload_error_message(error: &Llsd) -> Option<String> {
+    if let Some(text) = error.as_str() {
+        return Some(text.to_owned());
+    }
+    error
+        .get("message")
+        .and_then(Llsd::as_str)
+        .map(str::to_owned)
+}
+
 /// A single event from an [`EventQueueResponse`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventQueueEvent {

@@ -618,6 +618,42 @@ pub enum Event {
         /// The failure status.
         status: TransferStatus,
     },
+    /// A legacy UDP asset upload finished (`AssetUploadComplete`), in reply to an
+    /// [`AssetUploadRequest`](crate::Session::upload_asset_udp) — whether the
+    /// asset was inlined in the request or streamed over the `Xfer` path. Carries
+    /// the stored asset's UUID (the same value
+    /// [`Session::upload_asset_udp`](crate::Session::upload_asset_udp) returned),
+    /// its class, and the success flag. The legacy path stores only the asset; it
+    /// does not create an inventory item (use the CAPS
+    /// [`Command::UploadAsset`](../sl_client_tokio/enum.Command.html) path for
+    /// that).
+    AssetUploadComplete {
+        /// The stored asset's UUID.
+        asset_id: Uuid,
+        /// The uploaded asset class.
+        asset_type: AssetType,
+        /// Whether the simulator stored the asset successfully.
+        success: bool,
+    },
+    /// A CAPS asset upload finished successfully (the modern two-step uploader:
+    /// `NewFileAgentInventory`, `UploadBakedTexture`, or one of the
+    /// `Update*AgentInventory` capabilities). Carries the newly stored asset's
+    /// UUID and, when the upload created or updated an inventory item, that item's
+    /// UUID (`None` for a temporary baked texture, which has no inventory item).
+    AssetUploaded {
+        /// The newly stored asset's UUID (`new_asset`).
+        new_asset: Uuid,
+        /// The created/updated inventory item's UUID (`new_inventory_item`), or
+        /// `None` when the upload produced no inventory item (a baked texture).
+        new_inventory_item: Option<Uuid>,
+    },
+    /// A CAPS asset upload failed: the capability POST returned an error state,
+    /// omitted the uploader URL, or the HTTP request failed. Carries a
+    /// human-readable reason (the grid's error message when one was supplied).
+    AssetUploadFailed {
+        /// A description of the failure.
+        reason: String,
+    },
     /// Another avatar's appearance arrived (`AvatarAppearance`): its decoded
     /// baked textures and visual parameters, pushed when the avatar comes into
     /// range or restyles. Use the baked texture ids (see [`avatar_texture`]) with
@@ -3283,6 +3319,169 @@ impl AssetType {
             Self::Mesh => Some("mesh_id"),
             Self::Settings => Some("settings_id"),
             Self::Material | Self::Gltf | Self::Other(_) => None,
+        }
+    }
+
+    /// The short asset-type name the CAPS upload (`NewFileAgentInventory`)
+    /// expects for this asset class (LL's `LLAssetType` `mTypeName`, e.g.
+    /// `"texture"`, `"animatn"`, `"lsltext"`), or `None` for classes that are not
+    /// uploaded by this capability.
+    #[must_use]
+    pub const fn caps_asset_name(self) -> Option<&'static str> {
+        match self {
+            Self::Texture => Some("texture"),
+            Self::Sound => Some("sound"),
+            Self::CallingCard => Some("callcard"),
+            Self::Landmark => Some("landmark"),
+            Self::Clothing => Some("clothing"),
+            Self::Object => Some("object"),
+            Self::Notecard => Some("notecard"),
+            Self::LslText => Some("lsltext"),
+            Self::LslBytecode => Some("lslbyte"),
+            Self::TextureTga => Some("txtr_tga"),
+            Self::Bodypart => Some("bodypart"),
+            Self::SoundWav => Some("snd_wav"),
+            Self::ImageTga => Some("img_tga"),
+            Self::ImageJpeg => Some("jpeg"),
+            Self::Animation => Some("animatn"),
+            Self::Gesture => Some("gesture"),
+            Self::Mesh => Some("mesh"),
+            Self::Settings => Some("settings"),
+            Self::Material | Self::Gltf | Self::Other(_) => None,
+        }
+    }
+
+    /// The name of the capability that updates an *existing* inventory item's
+    /// asset for this asset class (the modern in-place edit path:
+    /// `UpdateGestureAgentInventory`, `UpdateNotecardAgentInventory`,
+    /// `UpdateScriptAgent`, `UpdateSettingsAgentInventory`), or `None` for classes
+    /// with no such capability (use the
+    /// [`new-asset upload`](Self::caps_asset_name) path instead).
+    #[must_use]
+    pub const fn update_item_cap(self) -> Option<&'static str> {
+        match self {
+            Self::Gesture => Some("UpdateGestureAgentInventory"),
+            Self::Notecard => Some("UpdateNotecardAgentInventory"),
+            Self::LslText => Some("UpdateScriptAgent"),
+            Self::Settings => Some("UpdateSettingsAgentInventory"),
+            _ => None,
+        }
+    }
+}
+
+/// The Second Life inventory-item class (`LLInventoryType` / `IT_*`), describing
+/// how an inventory item behaves (as opposed to [`AssetType`], which describes
+/// the underlying asset bytes). One asset class can map to several inventory
+/// types — a `Texture` asset can be an ordinary [`Texture`](Self::Texture) or a
+/// [`Snapshot`](Self::Snapshot); a `Clothing`/`Bodypart` asset is a
+/// [`Wearable`](Self::Wearable). Used to build the CAPS upload
+/// (`NewFileAgentInventory`) request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InventoryType {
+    /// A texture (`IT_TEXTURE`).
+    Texture,
+    /// A sound clip (`IT_SOUND`).
+    Sound,
+    /// A calling card (`IT_CALLINGCARD`).
+    CallingCard,
+    /// A landmark (`IT_LANDMARK`).
+    Landmark,
+    /// An object / attachment (`IT_OBJECT`).
+    Object,
+    /// A notecard (`IT_NOTECARD`).
+    Notecard,
+    /// A folder / category (`IT_CATEGORY`).
+    Category,
+    /// An LSL script (`IT_LSL`).
+    Script,
+    /// A snapshot photo (`IT_SNAPSHOT`).
+    Snapshot,
+    /// A worn attachment (`IT_ATTACHMENT`).
+    Attachment,
+    /// A wearable (clothing or body part) (`IT_WEARABLE`).
+    Wearable,
+    /// An animation (`IT_ANIMATION`).
+    Animation,
+    /// A gesture (`IT_GESTURE`).
+    Gesture,
+    /// A mesh (`IT_MESH`).
+    Mesh,
+    /// A settings asset (`IT_SETTINGS`).
+    Settings,
+    /// Any other / unrecognised inventory type, carrying the raw `IT_*` code.
+    Other(i32),
+}
+
+impl InventoryType {
+    /// The numeric `LLInventoryType` code for this inventory class.
+    #[must_use]
+    pub const fn to_code(self) -> i32 {
+        match self {
+            Self::Texture => 0,
+            Self::Sound => 1,
+            Self::CallingCard => 2,
+            Self::Landmark => 3,
+            Self::Object => 6,
+            Self::Notecard => 7,
+            Self::Category => 8,
+            Self::Script => 10,
+            Self::Snapshot => 15,
+            Self::Attachment => 17,
+            Self::Wearable => 18,
+            Self::Animation => 19,
+            Self::Gesture => 20,
+            Self::Mesh => 22,
+            Self::Settings => 25,
+            Self::Other(code) => code,
+        }
+    }
+
+    /// Classifies an `LLInventoryType` code (unknown codes become
+    /// [`Other`](Self::Other)).
+    #[must_use]
+    pub const fn from_code(code: i32) -> Self {
+        match code {
+            0 => Self::Texture,
+            1 => Self::Sound,
+            2 => Self::CallingCard,
+            3 => Self::Landmark,
+            6 => Self::Object,
+            7 => Self::Notecard,
+            8 => Self::Category,
+            10 => Self::Script,
+            15 => Self::Snapshot,
+            17 => Self::Attachment,
+            18 => Self::Wearable,
+            19 => Self::Animation,
+            20 => Self::Gesture,
+            22 => Self::Mesh,
+            25 => Self::Settings,
+            other => Self::Other(other),
+        }
+    }
+
+    /// The short inventory-type name the CAPS upload (`NewFileAgentInventory`)
+    /// expects (LL's `LLInventoryType` `mName`, e.g. `"texture"`, `"wearable"`,
+    /// `"script"`), or `None` for [`Other`](Self::Other).
+    #[must_use]
+    pub const fn caps_name(self) -> Option<&'static str> {
+        match self {
+            Self::Texture => Some("texture"),
+            Self::Sound => Some("sound"),
+            Self::CallingCard => Some("callcard"),
+            Self::Landmark => Some("landmark"),
+            Self::Object => Some("object"),
+            Self::Notecard => Some("notecard"),
+            Self::Category => Some("category"),
+            Self::Script => Some("script"),
+            Self::Snapshot => Some("snapshot"),
+            Self::Attachment => Some("attach"),
+            Self::Wearable => Some("wearable"),
+            Self::Animation => Some("animation"),
+            Self::Gesture => Some("gesture"),
+            Self::Mesh => Some("mesh"),
+            Self::Settings => Some("settings"),
+            Self::Other(_) => None,
         }
     }
 }

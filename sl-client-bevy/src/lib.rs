@@ -14,12 +14,15 @@ use reqwest::blocking::Client as ReqwestBlockingClient;
 use std::collections::HashMap;
 
 use sl_proto::{
-    CAP_FETCH_INVENTORY, CAP_GET_ASSET, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE,
-    CAP_GROUP_MEMBER_DATA, CAP_UPDATE_AVATAR_APPEARANCE, Event as SessionEvent, Llsd,
+    AssetUploadResponse, CAP_FETCH_INVENTORY, CAP_GET_ASSET, CAP_GET_MESH, CAP_GET_MESH2,
+    CAP_GET_TEXTURE, CAP_GROUP_MEMBER_DATA, CAP_NEW_FILE_AGENT_INVENTORY,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPLOAD_BAKED_TEXTURE, Event as SessionEvent, Llsd,
     LoginResponse, REQUESTED_CAPABILITIES, Session, build_event_queue_request,
-    build_fetch_inventory_request, build_group_member_data_request, build_seed_request,
-    build_update_avatar_appearance_request, j2c, parse_event_queue_response, parse_llsd_xml,
-    parse_login_response, parse_seed_response,
+    build_fetch_inventory_request, build_group_member_data_request,
+    build_new_file_agent_inventory_request, build_seed_request,
+    build_update_avatar_appearance_request, build_update_item_asset_request,
+    build_upload_baked_texture_request, j2c, parse_asset_upload_response,
+    parse_event_queue_response, parse_llsd_xml, parse_login_response, parse_seed_response,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -31,17 +34,17 @@ pub use sl_proto::{
     CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData, EstateAccessDelta,
     EstateAccessKind, EstateInfo, Friend, FriendRights, GroupMember, GroupMembership, GroupNotice,
     GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
-    InventoryFolder, InventoryItem, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest,
-    MapItem, MapItemType, MapRegionInfo, Material, Maturity, MfaChallenge, MoneyBalance,
-    MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object,
-    ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, PermissionField, PlayingAnimation, PrimShape, ProductType,
-    RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, Rotation, SaleType,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SoundFlags,
-    SoundPreload, TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, Throttle, Transmit,
-    Uuid, Vector, Wearable, WearableType, avatar_texture, decode_texture_entry, grid_to_handle,
-    handle_to_global, handle_to_grid, pcode, sim_access,
+    InventoryFolder, InventoryItem, InventoryType, LindenAmount, LoadUrlRequest, LoginParams,
+    LoginRequest, MapItem, MapItemType, MapRegionInfo, Material, Maturity, MfaChallenge,
+    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
+    NeighborInfo, Object, ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform,
+    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
+    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PlayingAnimation,
+    PrimShape, ProductType, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits,
+    Reliability, Rotation, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, TextureEntry,
+    TextureFace, Throttle, Transmit, Uuid, Vector, Wearable, WearableType, avatar_texture,
+    decode_texture_entry, grid_to_handle, handle_to_global, handle_to_grid, pcode, sim_access,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -792,6 +795,75 @@ pub enum SlCommand {
     /// Stop one of the agent's own animations (`AgentAnimation`); convenience for
     /// a single-element [`SlCommand::SetAnimations`].
     StopAnimation(Uuid),
+    /// Upload a new asset over the legacy UDP path (`AssetUploadRequest`): stores
+    /// the asset bytes (small assets inline, larger ones over `Xfer`) without
+    /// creating an inventory item. Completion arrives as
+    /// [`SlSessionEvent::AssetUploadComplete`]. For an upload that also creates an
+    /// inventory item, use [`SlCommand::UploadAsset`].
+    UploadAssetUdp {
+        /// The asset class to store the bytes as.
+        asset_type: AssetType,
+        /// The raw asset bytes.
+        data: Vec<u8>,
+        /// Mark the asset temporary.
+        temp_file: bool,
+        /// Keep the asset on the simulator only (do not store it grid-wide).
+        store_local: bool,
+    },
+    /// Upload a new asset and create an inventory item for it over the modern
+    /// `NewFileAgentInventory` capability (the two-step CAPS uploader). The result
+    /// arrives as [`SlSessionEvent::AssetUploaded`] (or
+    /// [`SlSessionEvent::AssetUploadFailed`]).
+    ///
+    /// For a mesh, `data` must be the **fully-formed mesh asset bytes** —
+    /// uploading does not run the viewer's model-import pipeline (LOD / physics /
+    /// cost generation).
+    UploadAsset {
+        /// The destination inventory folder.
+        folder_id: Uuid,
+        /// The asset class (e.g. [`AssetType::Texture`], [`AssetType::Animation`]).
+        asset_type: AssetType,
+        /// The inventory-item class (e.g. [`InventoryType::Texture`],
+        /// [`InventoryType::Wearable`]).
+        inventory_type: InventoryType,
+        /// The new item's name.
+        name: String,
+        /// The new item's description.
+        description: String,
+        /// The permission bits granted to the next owner.
+        next_owner_mask: u32,
+        /// The permission bits granted to the group.
+        group_mask: u32,
+        /// The permission bits granted to everyone.
+        everyone_mask: u32,
+        /// The L$ price the client expects to be charged (0 on free grids such
+        /// as OpenSim).
+        expected_upload_cost: i32,
+        /// The raw asset bytes.
+        data: Vec<u8>,
+    },
+    /// Upload a client-computed baked avatar texture over the
+    /// `UploadBakedTexture` capability (the legacy appearance path): stores a
+    /// *temporary* asset with no inventory item. The result arrives as
+    /// [`SlSessionEvent::AssetUploaded`] (with `new_inventory_item` = `None`) or
+    /// [`SlSessionEvent::AssetUploadFailed`].
+    UploadBakedTexture {
+        /// The raw baked-texture bytes (a JPEG-2000 codestream).
+        data: Vec<u8>,
+    },
+    /// Replace the asset of an existing inventory item over the matching
+    /// `Update*AgentInventory` capability (gesture / notecard / script /
+    /// settings, selected by `asset_type`). The result arrives as
+    /// [`SlSessionEvent::AssetUploaded`] or [`SlSessionEvent::AssetUploadFailed`].
+    UpdateInventoryAsset {
+        /// The inventory item whose asset is being replaced.
+        item_id: Uuid,
+        /// The item's asset class (selects the capability; see
+        /// [`AssetType::update_item_cap`]).
+        asset_type: AssetType,
+        /// The new raw asset bytes.
+        data: Vec<u8>,
+    },
     /// Begin a clean logout.
     Logout,
 }
@@ -1665,6 +1737,82 @@ fn advance_running(
             SlCommand::StopAnimation(anim_id) => {
                 session.stop_animation(*anim_id, now).ok();
             }
+            SlCommand::UploadAssetUdp {
+                asset_type,
+                data,
+                temp_file,
+                store_local,
+            } => {
+                session
+                    .upload_asset_udp(*asset_type, data.clone(), *temp_file, *store_local, now)
+                    .ok();
+            }
+            SlCommand::UploadAsset {
+                folder_id,
+                asset_type,
+                inventory_type,
+                name,
+                description,
+                next_owner_mask,
+                group_mask,
+                everyone_mask,
+                expected_upload_cost,
+                data,
+            } => {
+                spawn_new_file_upload(
+                    caps.as_ref(),
+                    *folder_id,
+                    *asset_type,
+                    *inventory_type,
+                    name,
+                    description,
+                    *next_owner_mask,
+                    *group_mask,
+                    *everyone_mask,
+                    *expected_upload_cost,
+                    data.clone(),
+                );
+            }
+            SlCommand::UploadBakedTexture { data } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_UPLOAD_BAKED_TEXTURE).cloned()
+                {
+                    let asset_tx = caps.asset_tx.clone();
+                    let body = build_upload_baked_texture_request();
+                    let data = data.clone();
+                    std::thread::spawn(move || {
+                        let event = run_caps_upload(&url, body, data);
+                        asset_tx.send(event).ok();
+                    });
+                } else {
+                    emit_upload_unavailable(caps.as_ref(), "UploadBakedTexture");
+                }
+            }
+            SlCommand::UpdateInventoryAsset {
+                item_id,
+                asset_type,
+                data,
+            } => match asset_type.update_item_cap() {
+                Some(cap) => {
+                    if let Some(caps) = caps.as_ref()
+                        && let Some(url) = caps.map.get(cap).cloned()
+                    {
+                        let asset_tx = caps.asset_tx.clone();
+                        let body = build_update_item_asset_request(*item_id);
+                        let data = data.clone();
+                        std::thread::spawn(move || {
+                            let event = run_caps_upload(&url, body, data);
+                            asset_tx.send(event).ok();
+                        });
+                    } else {
+                        emit_upload_unavailable(caps.as_ref(), cap);
+                    }
+                }
+                None => emit_upload_failure(
+                    caps.as_ref(),
+                    "asset type has no inventory-update capability".to_owned(),
+                ),
+            },
             SlCommand::Logout => session.initiate_logout(now),
         }
     }
@@ -1918,6 +2066,141 @@ fn run_server_appearance_update(cap_url: &str, cof_version: i32, caps_tx: &Sende
             .send((CAP_UPDATE_AVATAR_APPEARANCE.to_owned(), llsd))
             .ok();
     }
+}
+
+/// Spawns the modern `NewFileAgentInventory` two-step CAPS upload on a background
+/// thread, emitting [`SlSessionEvent::AssetUploaded`] /
+/// [`SlSessionEvent::AssetUploadFailed`] over the asset channel. Emits a failure
+/// immediately if the asset/inventory type is not uploadable or the capability
+/// is unavailable.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the flat NewFileAgentInventory upload command fields"
+)]
+fn spawn_new_file_upload(
+    caps: Option<&Caps>,
+    folder_id: Uuid,
+    asset_type: AssetType,
+    inventory_type: InventoryType,
+    name: &str,
+    description: &str,
+    next_owner_mask: u32,
+    group_mask: u32,
+    everyone_mask: u32,
+    expected_upload_cost: i32,
+    data: Vec<u8>,
+) {
+    let (Some(asset_name), Some(inv_name)) =
+        (asset_type.caps_asset_name(), inventory_type.caps_name())
+    else {
+        emit_upload_failure(caps, "asset/inventory type is not uploadable".to_owned());
+        return;
+    };
+    let Some(caps) = caps else {
+        return;
+    };
+    let Some(url) = caps.map.get(CAP_NEW_FILE_AGENT_INVENTORY).cloned() else {
+        let asset_tx = caps.asset_tx.clone();
+        asset_tx
+            .send(SessionEvent::AssetUploadFailed {
+                reason: "NewFileAgentInventory capability not available".to_owned(),
+            })
+            .ok();
+        return;
+    };
+    let body = build_new_file_agent_inventory_request(
+        folder_id,
+        asset_name,
+        inv_name,
+        name,
+        description,
+        next_owner_mask,
+        group_mask,
+        everyone_mask,
+        expected_upload_cost,
+    );
+    let asset_tx = caps.asset_tx.clone();
+    std::thread::spawn(move || {
+        let event = run_caps_upload(&url, body, data);
+        asset_tx.send(event).ok();
+    });
+}
+
+/// Emits an [`SlSessionEvent::AssetUploadFailed`] over the asset channel naming a
+/// capability that is not available on the current region.
+fn emit_upload_unavailable(caps: Option<&Caps>, cap: &str) {
+    emit_upload_failure(caps, format!("{cap} capability not available"));
+}
+
+/// Emits an [`SlSessionEvent::AssetUploadFailed`] over the asset channel with the
+/// given reason (a no-op if no capabilities are established yet).
+fn emit_upload_failure(caps: Option<&Caps>, reason: String) {
+    if let Some(caps) = caps {
+        caps.asset_tx
+            .send(SessionEvent::AssetUploadFailed { reason })
+            .ok();
+    }
+}
+
+/// Runs both steps of a modern CAPS asset upload synchronously (on the calling
+/// background thread): POST the LLSD `metadata` to `cap_url` for an `uploader`
+/// URL, then POST the raw `data` bytes there. Returns
+/// [`SlSessionEvent::AssetUploaded`] on success or
+/// [`SlSessionEvent::AssetUploadFailed`] on any failure.
+fn run_caps_upload(cap_url: &str, metadata: String, data: Vec<u8>) -> SessionEvent {
+    // Step 1: POST the metadata, expecting an `uploader` URL back.
+    let uploader = match caps_upload_step(cap_url, "application/llsd+xml", metadata.into_bytes()) {
+        Ok(response) => match response.uploader {
+            Some(url) => url,
+            None => {
+                return SessionEvent::AssetUploadFailed {
+                    reason: response.error.unwrap_or_else(|| {
+                        format!("upload metadata rejected (state {})", response.state)
+                    }),
+                };
+            }
+        },
+        Err(reason) => return SessionEvent::AssetUploadFailed { reason },
+    };
+    // Step 2: POST the raw asset bytes to the uploader URL.
+    match caps_upload_step(&uploader, "application/octet-stream", data) {
+        Ok(response) => match response.new_asset {
+            Some(new_asset) => SessionEvent::AssetUploaded {
+                new_asset,
+                new_inventory_item: response.new_inventory_item,
+            },
+            None => SessionEvent::AssetUploadFailed {
+                reason: response.error.unwrap_or_else(|| {
+                    format!("upload did not complete (state {})", response.state)
+                }),
+            },
+        },
+        Err(reason) => SessionEvent::AssetUploadFailed { reason },
+    }
+}
+
+/// POSTs one step of a CAPS upload (blocking) and parses the LLSD response,
+/// returning the parsed [`AssetUploadResponse`] or a failure reason.
+fn caps_upload_step(
+    url: &str,
+    content_type: &str,
+    body: Vec<u8>,
+) -> Result<AssetUploadResponse, String> {
+    let http = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+        .map_err(|error| format!("HTTP client build failed: {error}"))?;
+    let response = http
+        .post(url)
+        .header("Content-Type", content_type)
+        .body(body)
+        .send()
+        .map_err(|error| format!("upload request failed: {error}"))?;
+    let text = response
+        .text()
+        .map_err(|error| format!("upload response read failed: {error}"))?;
+    parse_asset_upload_response(&text)
+        .map_err(|error| format!("upload response parse failed: {error}"))
 }
 
 /// Performs a blocking HTTP `GET`, returning the body bytes on a 2xx response,

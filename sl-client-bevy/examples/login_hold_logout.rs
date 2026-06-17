@@ -221,6 +221,9 @@ fn on_events(
             | SlSessionEvent::TextureNotFound(_)
             | SlSessionEvent::AssetReceived(_)
             | SlSessionEvent::AssetTransferFailed { .. }
+            | SlSessionEvent::AssetUploadComplete { .. }
+            | SlSessionEvent::AssetUploaded { .. }
+            | SlSessionEvent::AssetUploadFailed { .. }
             | SlSessionEvent::AvatarAppearance(_)
             | SlSessionEvent::AgentWearables { .. }
             | SlSessionEvent::AvatarAnimation { .. }

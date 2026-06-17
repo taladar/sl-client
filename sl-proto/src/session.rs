@@ -110,6 +110,12 @@ use sl_wire::messages::{
     RequestImage, RequestImageAgentDataBlock, RequestImageRequestImageBlock, TransferRequest,
     TransferRequestTransferInfoBlock,
 };
+// Asset upload (#23): the legacy UDP asset-upload request and the Xfer-send
+// (upload-direction) packet.
+use sl_wire::messages::{
+    AssetUploadRequest, AssetUploadRequestAssetBlockBlock, SendXferPacket,
+    SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock,
+};
 // Avatar appearance & wearables (#20): the outgoing appearance/wearable messages.
 use sl_wire::messages::{
     AgentCachedTexture, AgentCachedTextureAgentDataBlock, AgentCachedTextureWearableDataBlock,
@@ -261,12 +267,51 @@ pub const CAP_GET_ASSET: &str = "GetAsset";
 /// [`Session::handle_caps_event`].
 pub const CAP_UPDATE_AVATAR_APPEARANCE: &str = "UpdateAvatarAppearance";
 
+/// The HTTP capability for the modern asset upload: storing a new asset **and**
+/// creating an inventory item for it (`NewFileAgentInventory`). A two-step
+/// uploader — the driver POSTs the LLSD metadata (folder, asset/inventory type,
+/// name, permissions, expected cost) and receives an `uploader` URL, then POSTs
+/// the raw asset bytes there and receives `{ new_asset, new_inventory_item }`.
+/// Surfaced as [`Event::AssetUploaded`] (or [`Event::AssetUploadFailed`]).
+pub const CAP_NEW_FILE_AGENT_INVENTORY: &str = "NewFileAgentInventory";
+
+/// The HTTP capability for uploading a client-computed **baked avatar texture**
+/// (`UploadBakedTexture`): the legacy (pre-server-side-bake) appearance path.
+/// Same two-step uploader as [`CAP_NEW_FILE_AGENT_INVENTORY`] but the metadata
+/// POST is an empty map and the result is a *temporary* asset with no inventory
+/// item (`new_inventory_item` is nil → `None`).
+pub const CAP_UPLOAD_BAKED_TEXTURE: &str = "UploadBakedTexture";
+
+/// The HTTP capability for replacing the asset of an existing **gesture**
+/// inventory item (`UpdateGestureAgentInventory`). Two-step uploader; the
+/// metadata POST carries the `item_id`. See also
+/// [`AssetType::update_item_cap`](crate::AssetType::update_item_cap) for the
+/// notecard / script / settings equivalents.
+pub const CAP_UPDATE_GESTURE_AGENT_INVENTORY: &str = "UpdateGestureAgentInventory";
+
+/// The HTTP capability for replacing the asset of an existing **notecard**
+/// inventory item (`UpdateNotecardAgentInventory`). Two-step uploader carrying
+/// the `item_id`.
+pub const CAP_UPDATE_NOTECARD_AGENT_INVENTORY: &str = "UpdateNotecardAgentInventory";
+
+/// The HTTP capability for replacing the asset of an existing **LSL script**
+/// inventory item (`UpdateScriptAgent`). Two-step uploader carrying the
+/// `item_id`.
+pub const CAP_UPDATE_SCRIPT_AGENT: &str = "UpdateScriptAgent";
+
+/// The HTTP capability for replacing the asset of an existing **settings**
+/// inventory item (`UpdateSettingsAgentInventory`). Two-step uploader carrying
+/// the `item_id`.
+pub const CAP_UPDATE_SETTINGS_AGENT_INVENTORY: &str = "UpdateSettingsAgentInventory";
+
 /// The capability names the client requests from the region seed. A driver POSTs
 /// these to the seed URL to obtain the capability map, then uses `EventQueueGet`
 /// for the event-queue long-poll, [`CAP_FETCH_INVENTORY`] for inventory fetches,
-/// [`CAP_GROUP_MEMBER_DATA`] for group rosters, and the asset/texture/mesh caps
+/// [`CAP_GROUP_MEMBER_DATA`] for group rosters, the asset/texture/mesh caps
 /// ([`CAP_GET_TEXTURE`], [`CAP_GET_MESH`], [`CAP_GET_MESH2`], [`CAP_GET_ASSET`])
-/// for the HTTP asset pipeline.
+/// for the HTTP asset-fetch pipeline, and the upload caps
+/// ([`CAP_NEW_FILE_AGENT_INVENTORY`], [`CAP_UPLOAD_BAKED_TEXTURE`], and the
+/// `Update*AgentInventory` family) for the HTTP asset-upload pipeline.
 pub const REQUESTED_CAPABILITIES: &[&str] = &[
     "EventQueueGet",
     CAP_FETCH_INVENTORY,
@@ -276,6 +321,12 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_GET_MESH2,
     CAP_GET_ASSET,
     CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_NEW_FILE_AGENT_INVENTORY,
+    CAP_UPLOAD_BAKED_TEXTURE,
+    CAP_UPDATE_GESTURE_AGENT_INVENTORY,
+    CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
+    CAP_UPDATE_SCRIPT_AGENT,
+    CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
 ];
 
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
@@ -401,6 +452,67 @@ impl AssetTransfer {
             data.extend_from_slice(chunk);
         }
         data
+    }
+}
+
+/// The maximum asset payload (bytes) inlined directly in an `AssetUploadRequest`.
+/// Larger assets are streamed over the `Xfer` path: the request is sent with an
+/// empty `AssetData`, the simulator replies with a `RequestXfer`, and the client
+/// streams the bytes in [`XFER_CHUNK`]-sized `SendXferPacket`s. Kept well under
+/// the UDP MTU so the whole request fits in one datagram.
+const MAX_INLINE_ASSET: usize = 1200;
+
+/// The asset-data payload (bytes) carried in each upload `SendXferPacket`. The
+/// first packet additionally carries a 4-byte little-endian length prefix, which
+/// the simulator strips. Sized to stay within the UDP MTU.
+const XFER_CHUNK: usize = 1000;
+
+/// An in-flight legacy UDP asset upload (`AssetUploadRequest` →, for a large
+/// asset, `RequestXfer` → `SendXferPacket`/`ConfirmXferPacket` → ...). Keyed by
+/// the predicted asset id (`combine(transaction_id, secure_session_id)`), which
+/// the simulator echoes as the `RequestXfer`'s `VFileID`. For an inlined asset
+/// the bytes travel in the request itself and no `Xfer` follows; this record is
+/// kept only so [`Event::AssetUploadComplete`] can name the asset class.
+#[derive(Debug)]
+struct AssetUpload {
+    /// The full asset bytes to stream (empty once inlined in the request — the
+    /// terminating `AssetUploadComplete` carries the asset class and id).
+    data: Vec<u8>,
+    /// The number of `SendXferPacket`s already sent (the next packet's sequence).
+    sent: u32,
+}
+
+impl AssetUpload {
+    /// The total number of `Xfer` packets needed to send [`data`](Self::data),
+    /// at least one (an empty trailing packet is never sent — the data is
+    /// chunked, and a final partial or full chunk carries the last-packet flag).
+    fn packet_count(&self) -> u32 {
+        let chunks = self.data.len().div_ceil(XFER_CHUNK).max(1);
+        u32::try_from(chunks).unwrap_or(u32::MAX)
+    }
+
+    /// Builds the `Data` field for packet `sequence`: the chunk of [`data`](Self::data)
+    /// at that index, with packet 0 prefixed by the 4-byte little-endian total
+    /// asset length the simulator expects.
+    fn packet_data(&self, sequence: u32) -> Vec<u8> {
+        let start = usize::try_from(sequence)
+            .unwrap_or(usize::MAX)
+            .saturating_mul(XFER_CHUNK);
+        let end = start.saturating_add(XFER_CHUNK).min(self.data.len());
+        let chunk = self.data.get(start..end).unwrap_or_default();
+        let mut out = Vec::with_capacity(chunk.len().saturating_add(4));
+        if sequence == 0 {
+            // The first packet carries the total asset length as a 4-byte
+            // little-endian prefix (the simulator strips it). Packed by hand: the
+            // `to_le_bytes` helper is denied by the `little_endian_bytes` lint.
+            let len = u32::try_from(self.data.len()).unwrap_or(u32::MAX);
+            out.push(u8::try_from(len & 0xff).unwrap_or(0));
+            out.push(u8::try_from((len >> 8) & 0xff).unwrap_or(0));
+            out.push(u8::try_from((len >> 16) & 0xff).unwrap_or(0));
+            out.push(u8::try_from((len >> 24) & 0xff).unwrap_or(0));
+        }
+        out.extend_from_slice(chunk);
+        out
     }
 }
 
@@ -1287,6 +1399,51 @@ impl Circuit {
                 id: xfer_id,
                 packet,
             },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AssetUploadRequest` reliably: a legacy UDP upload of `data` as
+    /// asset class `asset_type`, identified by `transaction_id`. `data` is the
+    /// inline payload (empty to force the `Xfer` path); `temp_file`/`store_local`
+    /// mark a temporary / sim-local-only asset.
+    fn send_asset_upload_request(
+        &mut self,
+        transaction_id: Uuid,
+        asset_type: i8,
+        temp_file: bool,
+        store_local: bool,
+        data: Vec<u8>,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AssetUploadRequest(AssetUploadRequest {
+            asset_block: AssetUploadRequestAssetBlockBlock {
+                transaction_id,
+                r#type: asset_type,
+                tempfile: temp_file,
+                store_local,
+                asset_data: data,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `SendXferPacket` reliably: the chunk `data` for sequence
+    /// `packet` of upload `xfer_id`. `packet` already carries the `0x80000000`
+    /// last-packet flag for the final chunk.
+    fn send_send_xfer_packet(
+        &mut self,
+        xfer_id: u64,
+        packet: u32,
+        data: Vec<u8>,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::SendXferPacket(SendXferPacket {
+            xfer_id: SendXferPacketXferIDBlock {
+                id: xfer_id,
+                packet,
+            },
+            data_packet: SendXferPacketDataPacketBlock { data },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -2735,6 +2892,23 @@ pub struct Session {
     /// A monotonic counter for generating asset transfer ids (each packed into a
     /// fresh `TransferID` UUID; never zero).
     next_transfer_id: u128,
+    /// The agent's secure session id, from the login response. Combined with an
+    /// upload's transaction id to predict the stored asset's UUID
+    /// ([`combine_uuids`](sl_wire::combine_uuids)), so an upload's
+    /// simulator-initiated `RequestXfer` (whose `VFileID` is that asset id) can be
+    /// matched to its pending upload.
+    secure_session_id: Uuid,
+    /// In-flight legacy UDP asset uploads, keyed by the predicted asset id
+    /// (`combine(transaction_id, secure_session_id)`). Started by
+    /// [`Session::upload_asset_udp`]; removed on `AssetUploadComplete`.
+    asset_uploads: BTreeMap<Uuid, AssetUpload>,
+    /// Maps an active upload `Xfer` id (chosen by the simulator in its
+    /// `RequestXfer`) to the predicted asset id keying [`asset_uploads`](Self::asset_uploads),
+    /// so an inbound `ConfirmXferPacket` can find the upload to advance.
+    upload_xfers: BTreeMap<u64, Uuid>,
+    /// A monotonic counter for generating upload transaction ids (each packed
+    /// into a fresh transaction UUID; never zero).
+    next_upload_id: u128,
     /// The scene-graph object cache, keyed by the simulator the objects belong
     /// to (the root region *and* every child/neighbour circuit), then by
     /// region-local id. Region-local ids are only unique within a simulator, so
@@ -2781,6 +2955,10 @@ impl Session {
             texture_downloads: BTreeMap::new(),
             asset_transfers: BTreeMap::new(),
             next_transfer_id: 1,
+            secure_session_id: Uuid::nil(),
+            asset_uploads: BTreeMap::new(),
+            upload_xfers: BTreeMap::new(),
+            next_upload_id: 1,
             objects: BTreeMap::new(),
             terrain: BTreeMap::new(),
             regions: BTreeMap::new(),
@@ -3137,6 +3315,7 @@ impl Session {
                 self.regions.clear();
                 self.seed_capability = Some(success.seed_capability.clone());
                 self.inventory_root = success.inventory_root;
+                self.secure_session_id = success.secure_session_id;
                 self.state = SessionState::AwaitingHandshake;
                 self.events
                     .push_back(Event::CircuitEstablished { sim: sim_addr });
@@ -3796,6 +3975,47 @@ impl Session {
             }
             AnyMessage::UseCachedMuteList(_) => {
                 self.events.push_back(Event::MuteListUnchanged);
+            }
+            // The simulator requesting an asset upload over the `Xfer` path: it
+            // answers a large (non-inlined) `AssetUploadRequest` with a
+            // `RequestXfer` whose `VFileID` is the asset id we predicted. Begin
+            // streaming `SendXferPacket`s; the simulator pulls each subsequent
+            // packet by acking the previous one (`ConfirmXferPacket`).
+            AnyMessage::RequestXfer(request) => {
+                let xfer_id = request.xfer_id.id;
+                let asset_id = request.xfer_id.v_file_id;
+                if self.asset_uploads.contains_key(&asset_id) {
+                    self.upload_xfers.insert(xfer_id, asset_id);
+                    self.advance_upload(xfer_id, asset_id, now)?;
+                }
+            }
+            // The simulator acknowledged one of our upload packets; send the
+            // next chunk (the terminal `AssetUploadComplete` follows the last).
+            AnyMessage::ConfirmXferPacket(ack) => {
+                let xfer_id = ack.xfer_id.id;
+                if let Some(&asset_id) = self.upload_xfers.get(&xfer_id) {
+                    let more = self
+                        .asset_uploads
+                        .get(&asset_id)
+                        .is_some_and(|upload| upload.sent < upload.packet_count());
+                    if more {
+                        self.advance_upload(xfer_id, asset_id, now)?;
+                    }
+                }
+            }
+            // A legacy UDP upload finished (inline or via `Xfer`): the simulator
+            // reports the stored asset's id and whether it succeeded.
+            AnyMessage::AssetUploadComplete(complete) => {
+                let asset_id = complete.asset_block.uuid;
+                let asset_type = AssetType::from_code(i32::from(complete.asset_block.r#type));
+                let success = complete.asset_block.success;
+                self.asset_uploads.remove(&asset_id);
+                self.upload_xfers.retain(|_, id| *id != asset_id);
+                self.events.push_back(Event::AssetUploadComplete {
+                    asset_id,
+                    asset_type,
+                    success,
+                });
             }
             AnyMessage::SendXferPacket(packet) => {
                 let xfer_id = packet.xfer_id.id;
@@ -5143,6 +5363,88 @@ impl Session {
         );
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_transfer_request(transfer_id, asset_id, asset_type, priority, now)?;
+        Ok(())
+    }
+
+    /// Uploads `data` as a new asset of class `asset_type` over the **legacy UDP
+    /// path** (`AssetUploadRequest`), returning the asset's predicted UUID (the
+    /// same id the simulator will report in the terminating
+    /// [`Event::AssetUploadComplete`]).
+    ///
+    /// Small assets (≤ `MAX_INLINE_ASSET` bytes) are inlined in the request;
+    /// larger ones are streamed over the `Xfer` path automatically (the simulator
+    /// answers with a `RequestXfer` and the session streams `SendXferPacket`s,
+    /// driven by the simulator's `ConfirmXferPacket`s). `temp_file` marks a
+    /// temporary asset; `store_local` keeps it on the simulator only.
+    ///
+    /// This path stores **only the asset** — it does not create an inventory
+    /// item (a viewer would follow up with a `CreateInventoryItem` referencing
+    /// the same transaction id). For an upload that also creates an inventory
+    /// item, use the modern CAPS path (the runtimes' `UploadAsset` command).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn upload_asset_udp(
+        &mut self,
+        asset_type: AssetType,
+        data: Vec<u8>,
+        temp_file: bool,
+        store_local: bool,
+        now: Instant,
+    ) -> Result<Uuid, Error> {
+        let transaction_id = Uuid::from_u128(self.next_upload_id);
+        self.next_upload_id = self.next_upload_id.checked_add(1).unwrap_or(1);
+        let asset_id = sl_wire::combine_uuids(transaction_id, self.secure_session_id);
+        let inline = data.len() <= MAX_INLINE_ASSET;
+        // The simulator treats an `AssetData` of more than 2 bytes as the inline
+        // asset; an empty payload forces the `Xfer` path.
+        let request_data = if inline { data.clone() } else { Vec::new() };
+        self.asset_uploads.insert(
+            asset_id,
+            AssetUpload {
+                // The inline path needs no buffered copy; only the `Xfer` path
+                // streams from `data`.
+                data: if inline { Vec::new() } else { data },
+                sent: 0,
+            },
+        );
+        // The `AssetUploadRequest` `Type` field is a signed byte; every real
+        // `LLAssetType` code fits, but clamp defensively.
+        let type_code = i8::try_from(asset_type.to_code()).unwrap_or(0);
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_asset_upload_request(
+            transaction_id,
+            type_code,
+            temp_file,
+            store_local,
+            request_data,
+            now,
+        )?;
+        Ok(asset_id)
+    }
+
+    /// Sends the next `SendXferPacket` of the upload keyed by `asset_id` over the
+    /// root circuit, flagging the final packet, and advancing its sent counter.
+    fn advance_upload(&mut self, xfer_id: u64, asset_id: Uuid, now: Instant) -> Result<(), Error> {
+        let Some(upload) = self.asset_uploads.get_mut(&asset_id) else {
+            return Ok(());
+        };
+        let sequence = upload.sent;
+        let total = upload.packet_count();
+        // The final packet's number carries the high-bit last-packet flag.
+        let is_last = sequence.saturating_add(1) >= total;
+        let packet = if is_last {
+            sequence | 0x8000_0000
+        } else {
+            sequence
+        };
+        let data = upload.packet_data(sequence);
+        upload.sent = sequence.saturating_add(1);
+        if let Some(circuit) = self.circuit.as_mut() {
+            circuit.send_send_xfer_packet(xfer_id, packet, data, now)?;
+        }
         Ok(())
     }
 
