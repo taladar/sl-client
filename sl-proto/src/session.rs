@@ -82,6 +82,29 @@ use sl_wire::messages::{
     ObjectSelectObjectDataBlock, ObjectUpdateObjectDataBlock, RequestMultipleObjects,
     RequestMultipleObjectsAgentDataBlock, RequestMultipleObjectsObjectDataBlock,
 };
+// Object interaction & editing (#17): the outgoing touch / rez / edit messages.
+use sl_wire::messages::{
+    DeRezObject, DeRezObjectAgentBlockBlock, DeRezObjectAgentDataBlock, DeRezObjectObjectDataBlock,
+    MultipleObjectUpdate, MultipleObjectUpdateAgentDataBlock, MultipleObjectUpdateObjectDataBlock,
+    ObjectAdd, ObjectAddAgentDataBlock, ObjectAddObjectDataBlock, ObjectCategory,
+    ObjectCategoryAgentDataBlock, ObjectCategoryObjectDataBlock, ObjectClickAction,
+    ObjectClickActionAgentDataBlock, ObjectClickActionObjectDataBlock, ObjectDeGrab,
+    ObjectDeGrabAgentDataBlock, ObjectDeGrabObjectDataBlock, ObjectDelete,
+    ObjectDeleteAgentDataBlock, ObjectDeleteObjectDataBlock, ObjectDelink,
+    ObjectDelinkAgentDataBlock, ObjectDelinkObjectDataBlock, ObjectDescription,
+    ObjectDescriptionAgentDataBlock, ObjectDescriptionObjectDataBlock, ObjectDuplicate,
+    ObjectDuplicateAgentDataBlock, ObjectDuplicateObjectDataBlock, ObjectDuplicateSharedDataBlock,
+    ObjectFlagUpdate, ObjectFlagUpdateAgentDataBlock, ObjectGrab, ObjectGrabAgentDataBlock,
+    ObjectGrabObjectDataBlock, ObjectGrabUpdate, ObjectGrabUpdateAgentDataBlock,
+    ObjectGrabUpdateObjectDataBlock, ObjectGroup, ObjectGroupAgentDataBlock,
+    ObjectGroupObjectDataBlock, ObjectIncludeInSearch, ObjectIncludeInSearchAgentDataBlock,
+    ObjectIncludeInSearchObjectDataBlock, ObjectLink, ObjectLinkAgentDataBlock,
+    ObjectLinkObjectDataBlock, ObjectMaterial, ObjectMaterialAgentDataBlock,
+    ObjectMaterialObjectDataBlock, ObjectName, ObjectNameAgentDataBlock, ObjectNameObjectDataBlock,
+    ObjectPermissions, ObjectPermissionsAgentDataBlock, ObjectPermissionsHeaderDataBlock,
+    ObjectPermissionsObjectDataBlock, ObjectSaleInfo, ObjectSaleInfoAgentDataBlock,
+    ObjectSaleInfoObjectDataBlock,
+};
 // Estate / region management (#14): the outgoing estate-owner / god messages.
 use sl_wire::messages::{
     EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
@@ -122,16 +145,17 @@ use uuid::Uuid;
 use crate::error::Error;
 use crate::types::{
     ActiveGroup, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
-    ChatMessage, ChatSourceType, ChatType, CreateGroupParams, DisconnectReason, EconomyData,
-    EstateAccessDelta, EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupMember,
-    GroupMembership, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog,
-    InstantMessage, InventoryFolder, InventoryItem, LoadUrlRequest, LoginHttpRequest, LoginParams,
-    MapItem, MapItemType, MapRegionInfo, Maturity, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectMotion,
-    ObjectProperties, ParcelAccessEntry, ParcelAccessScope, ParcelInfo, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, ProductType, RegionIdentity, RegionInfoUpdate, RegionLimits,
-    Reliability, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    Throttle, Transmit, grid_to_handle, handle_to_grid,
+    ChatMessage, ChatSourceType, ChatType, ClickAction, CreateGroupParams, DeRezDestination,
+    DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, Event, Friend,
+    FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
+    GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
+    LoadUrlRequest, LoginHttpRequest, LoginParams, MapItem, MapItemType, MapRegionInfo, Material,
+    Maturity, MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
+    NeighborInfo, Object, ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform,
+    ParcelAccessEntry, ParcelAccessScope, ParcelInfo, ParcelOverlayInfo, ParcelReturnType,
+    ParcelUpdate, PermissionField, PrimShape, ProductType, RegionIdentity, RegionInfoUpdate,
+    RegionLimits, Reliability, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest, Throttle, Transmit, grid_to_handle, handle_to_grid,
 };
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
@@ -1744,6 +1768,483 @@ impl Circuit {
                     object_local_id: *id,
                 })
                 .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    // Object interaction & editing (#17) -----------------------------------
+
+    /// Queues an `ObjectGrab` reliably (the start of a touch/click) for `local_id`
+    /// with `grab_offset` and an empty surface-info list.
+    fn send_object_grab(
+        &mut self,
+        local_id: u32,
+        grab_offset: Vector,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectGrab(ObjectGrab {
+            agent_data: ObjectGrabAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: ObjectGrabObjectDataBlock {
+                local_id,
+                grab_offset,
+            },
+            surface_info: Vec::new(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectGrabUpdate` reliably (a drag while grabbing) for the
+    /// object `object_id`.
+    fn send_object_grab_update(
+        &mut self,
+        object_id: Uuid,
+        grab_offset_initial: Vector,
+        grab_position: Vector,
+        time_since_last: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectGrabUpdate(ObjectGrabUpdate {
+            agent_data: ObjectGrabUpdateAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: ObjectGrabUpdateObjectDataBlock {
+                object_id,
+                grab_offset_initial,
+                grab_position,
+                time_since_last,
+            },
+            surface_info: Vec::new(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectDeGrab` reliably (the end of a touch/click) for `local_id`.
+    fn send_object_degrab(&mut self, local_id: u32, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectDeGrab(ObjectDeGrab {
+            agent_data: ObjectDeGrabAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: ObjectDeGrabObjectDataBlock { local_id },
+            surface_info: Vec::new(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectAdd` reliably to rez a new primitive from `shape`.
+    fn send_object_add(
+        &mut self,
+        shape: &PrimShape,
+        group_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectAdd(ObjectAdd {
+            agent_data: ObjectAddAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                group_id,
+            },
+            object_data: ObjectAddObjectDataBlock {
+                p_code: shape.pcode,
+                material: shape.material.to_code(),
+                add_flags: shape.add_flags,
+                path_curve: shape.path_curve,
+                profile_curve: shape.profile_curve,
+                path_begin: shape.path_begin,
+                path_end: shape.path_end,
+                path_scale_x: shape.path_scale_x,
+                path_scale_y: shape.path_scale_y,
+                path_shear_x: shape.path_shear_x,
+                path_shear_y: shape.path_shear_y,
+                path_twist: shape.path_twist,
+                path_twist_begin: shape.path_twist_begin,
+                path_radius_offset: shape.path_radius_offset,
+                path_taper_x: shape.path_taper_x,
+                path_taper_y: shape.path_taper_y,
+                path_revolutions: shape.path_revolutions,
+                path_skew: shape.path_skew,
+                profile_begin: shape.profile_begin,
+                profile_end: shape.profile_end,
+                profile_hollow: shape.profile_hollow,
+                // Rez exactly at `position`: skip the raycast and treat the ray
+                // endpoint as the placement point (the viewer's headless rez path).
+                bypass_raycast: 1,
+                ray_start: shape.position.clone(),
+                ray_end: shape.position.clone(),
+                ray_target_id: Uuid::nil(),
+                ray_end_is_intersection: 0,
+                scale: shape.scale.clone(),
+                rotation: shape.rotation.clone(),
+                state: shape.state,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectDuplicate` reliably (copy `local_ids` by `offset`).
+    fn send_object_duplicate(
+        &mut self,
+        local_ids: &[u32],
+        offset: Vector,
+        group_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectDuplicate(ObjectDuplicate {
+            agent_data: ObjectDuplicateAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                group_id,
+            },
+            shared_data: ObjectDuplicateSharedDataBlock {
+                offset,
+                duplicate_flags: 0,
+            },
+            object_data: local_ids
+                .iter()
+                .map(|id| ObjectDuplicateObjectDataBlock {
+                    object_local_id: *id,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectDelete` reliably for `local_ids` (non-god, non-forced).
+    fn send_object_delete(&mut self, local_ids: &[u32], now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectDelete(ObjectDelete {
+            agent_data: ObjectDeleteAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                force: false,
+            },
+            object_data: local_ids
+                .iter()
+                .map(|id| ObjectDeleteObjectDataBlock {
+                    object_local_id: *id,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `DeRezObject` reliably (take/return/trash `local_ids`).
+    fn send_derez_object(
+        &mut self,
+        local_ids: &[u32],
+        destination: DeRezDestination,
+        destination_id: Uuid,
+        transaction_id: Uuid,
+        group_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::DeRezObject(DeRezObject {
+            agent_data: DeRezObjectAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            agent_block: DeRezObjectAgentBlockBlock {
+                group_id,
+                destination: destination.to_code(),
+                destination_id,
+                transaction_id,
+                // The whole selection fits in one packet.
+                packet_count: 1,
+                packet_number: 0,
+            },
+            object_data: local_ids
+                .iter()
+                .map(|id| DeRezObjectObjectDataBlock {
+                    object_local_id: *id,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectName` reliably (rename `local_id`).
+    fn send_object_name(
+        &mut self,
+        local_id: u32,
+        name: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectName(ObjectName {
+            agent_data: ObjectNameAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: vec![ObjectNameObjectDataBlock {
+                local_id,
+                name: name.as_bytes().to_vec(),
+            }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectDescription` reliably (re-describe `local_id`).
+    fn send_object_description(
+        &mut self,
+        local_id: u32,
+        description: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectDescription(ObjectDescription {
+            agent_data: ObjectDescriptionAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: vec![ObjectDescriptionObjectDataBlock {
+                local_id,
+                description: description.as_bytes().to_vec(),
+            }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectClickAction` reliably (set the left-click behaviour).
+    fn send_object_click_action(
+        &mut self,
+        local_id: u32,
+        action: ClickAction,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectClickAction(ObjectClickAction {
+            agent_data: ObjectClickActionAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: vec![ObjectClickActionObjectDataBlock {
+                object_local_id: local_id,
+                click_action: action.to_code(),
+            }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectMaterial` reliably (set the physical material).
+    fn send_object_material(
+        &mut self,
+        local_id: u32,
+        material: Material,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectMaterial(ObjectMaterial {
+            agent_data: ObjectMaterialAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: vec![ObjectMaterialObjectDataBlock {
+                object_local_id: local_id,
+                material: material.to_code(),
+            }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectFlagUpdate` reliably (set physics/temporary/phantom).
+    fn send_object_flag_update(
+        &mut self,
+        local_id: u32,
+        flags: &ObjectFlagSettings,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectFlagUpdate(ObjectFlagUpdate {
+            agent_data: ObjectFlagUpdateAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                object_local_id: local_id,
+                use_physics: flags.use_physics,
+                is_temporary: flags.is_temporary,
+                is_phantom: flags.is_phantom,
+                casts_shadows: flags.casts_shadows,
+            },
+            // No extra-physics (shape-type/density/…) overrides.
+            extra_physics: Vec::new(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectGroup` reliably (set the group `local_ids` are set to).
+    fn send_object_group(
+        &mut self,
+        local_ids: &[u32],
+        group_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectGroup(ObjectGroup {
+            agent_data: ObjectGroupAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                group_id,
+            },
+            object_data: local_ids
+                .iter()
+                .map(|id| ObjectGroupObjectDataBlock {
+                    object_local_id: *id,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectPermissions` reliably (set/clear `mask` bits of `field`).
+    fn send_object_permissions(
+        &mut self,
+        local_ids: &[u32],
+        field: PermissionField,
+        set: bool,
+        mask: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectPermissions(ObjectPermissions {
+            agent_data: ObjectPermissionsAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            header_data: ObjectPermissionsHeaderDataBlock { r#override: false },
+            object_data: local_ids
+                .iter()
+                .map(|id| ObjectPermissionsObjectDataBlock {
+                    object_local_id: *id,
+                    field: field.to_code(),
+                    set: u8::from(set),
+                    mask,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectSaleInfo` reliably (set the sale type and price).
+    fn send_object_sale_info(
+        &mut self,
+        local_id: u32,
+        sale_type: SaleType,
+        sale_price: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectSaleInfo(ObjectSaleInfo {
+            agent_data: ObjectSaleInfoAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: vec![ObjectSaleInfoObjectDataBlock {
+                local_id,
+                sale_type: sale_type.to_code(),
+                sale_price,
+            }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectCategory` reliably (set the object's category code).
+    fn send_object_category(
+        &mut self,
+        local_id: u32,
+        category: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectCategory(ObjectCategory {
+            agent_data: ObjectCategoryAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: vec![ObjectCategoryObjectDataBlock { local_id, category }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectIncludeInSearch` reliably (toggle search visibility).
+    fn send_object_include_in_search(
+        &mut self,
+        local_id: u32,
+        include: bool,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectIncludeInSearch(ObjectIncludeInSearch {
+            agent_data: ObjectIncludeInSearchAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: vec![ObjectIncludeInSearchObjectDataBlock {
+                object_local_id: local_id,
+                include_in_search: include,
+            }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectLink` reliably linking `local_ids` (the first id becomes
+    /// the linkset root).
+    fn send_object_link(&mut self, local_ids: &[u32], now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectLink(ObjectLink {
+            agent_data: ObjectLinkAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: local_ids
+                .iter()
+                .map(|id| ObjectLinkObjectDataBlock {
+                    object_local_id: *id,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectDelink` reliably unlinking `local_ids`.
+    fn send_object_delink(&mut self, local_ids: &[u32], now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectDelink(ObjectDelink {
+            agent_data: ObjectDelinkAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: local_ids
+                .iter()
+                .map(|id| ObjectDelinkObjectDataBlock {
+                    object_local_id: *id,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `MultipleObjectUpdate` reliably applying `transform` to `local_id`.
+    /// The packed `Data` blob carries position/rotation/scale in that fixed
+    /// order, matching the simulator's `MultipleObjectUpdate` parser.
+    fn send_multiple_object_update(
+        &mut self,
+        local_id: u32,
+        transform: &ObjectTransform,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let mut data = Writer::new();
+        if let Some(position) = &transform.position {
+            data.put_vector3(position);
+        }
+        if let Some(rotation) = &transform.rotation {
+            let [x, y, z] = pack_quaternion_to_vec3(rotation);
+            data.put_f32(x);
+            data.put_f32(y);
+            data.put_f32(z);
+        }
+        if let Some(scale) = &transform.scale {
+            data.put_vector3(scale);
+        }
+        let message = AnyMessage::MultipleObjectUpdate(MultipleObjectUpdate {
+            agent_data: MultipleObjectUpdateAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: vec![MultipleObjectUpdateObjectDataBlock {
+                object_local_id: local_id,
+                r#type: transform.type_byte(),
+                data: data.into_bytes(),
+            }],
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -4593,6 +5094,485 @@ impl Session {
         Ok(())
     }
 
+    // Object interaction & editing (#17) -----------------------------------
+    //
+    // These act on the current (root) region; an object is named by its
+    // region-local id (from [`Session::objects`] / an object event). Each sends
+    // a single reliable message on the root circuit. Edit and rez operations
+    // require the appropriate object/parcel permissions on the grid; the
+    // simulator silently ignores a request the agent is not allowed to make.
+
+    /// Touches (left-clicks) the object `local_id`: sends an `ObjectGrab` and an
+    /// immediate `ObjectDeGrab` with no drag in between, which is what triggers
+    /// a script's `touch_start`/`touch_end` (and a `CLICK_ACTION_*` such as buy
+    /// or pay). For a press-drag-release interaction use [`Session::grab_object`],
+    /// [`Session::grab_object_update`], and [`Session::degrab_object`] instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if a request fails to encode.
+    pub fn touch_object(&mut self, local_id: u32, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_grab(local_id, ZERO_VECTOR, now)?;
+        circuit.send_object_degrab(local_id, now)?;
+        Ok(())
+    }
+
+    /// Begins grabbing the object `local_id` (an `ObjectGrab`) with the given
+    /// grab offset from the object's centre. Follow with
+    /// [`Session::grab_object_update`] to drag and [`Session::degrab_object`] to
+    /// release.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn grab_object(
+        &mut self,
+        local_id: u32,
+        grab_offset: Vector,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_grab(local_id, grab_offset, now)?;
+        Ok(())
+    }
+
+    /// Updates an in-progress grab (an `ObjectGrabUpdate`) as the avatar drags
+    /// the object identified by its persistent `object_id` (not its local id) to
+    /// `grab_position`. `time_since_last` is milliseconds since the previous
+    /// update.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn grab_object_update(
+        &mut self,
+        object_id: Uuid,
+        grab_offset_initial: Vector,
+        grab_position: Vector,
+        time_since_last: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_grab_update(
+            object_id,
+            grab_offset_initial,
+            grab_position,
+            time_since_last,
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Releases a grab on the object `local_id` (an `ObjectDeGrab`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn degrab_object(&mut self, local_id: u32, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_degrab(local_id, now)?;
+        Ok(())
+    }
+
+    /// Rezzes (creates) a new primitive described by `shape` (an `ObjectAdd`);
+    /// `group_id` is the group the new object is set to (use [`Uuid::nil`] for
+    /// none). The new object arrives as an [`Event::ObjectAdded`]. Build `shape`
+    /// from [`PrimShape::cube`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn rez_object(
+        &mut self,
+        shape: &PrimShape,
+        group_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_add(shape, group_id, now)?;
+        Ok(())
+    }
+
+    /// Duplicates the objects `local_ids` (an `ObjectDuplicate`), offsetting the
+    /// copies by `offset` metres; `group_id` is the group the copies are set to.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn duplicate_objects(
+        &mut self,
+        local_ids: &[u32],
+        offset: Vector,
+        group_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_duplicate(local_ids, offset, group_id, now)?;
+        Ok(())
+    }
+
+    /// Force-deletes the objects `local_ids` (an `ObjectDelete`). This is the
+    /// reference viewer's *force-delete* path (its only use of `ObjectDelete`)
+    /// and generally needs estate/god powers; many simulators — including stock
+    /// OpenSim, which has no `ObjectDelete` handler — ignore it. For an ordinary,
+    /// portable delete-to-trash use [`Session::derez_objects`] with
+    /// [`DeRezDestination::Trash`] and the agent's trash folder id (from the
+    /// login inventory skeleton). Removed objects arrive as
+    /// [`Event::ObjectRemoved`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn delete_objects(&mut self, local_ids: &[u32], now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_delete(local_ids, now)?;
+        Ok(())
+    }
+
+    /// Derezzes the objects `local_ids` (a `DeRezObject`) to `destination` (take
+    /// to inventory, return, trash, …). `destination_id` is the target folder or
+    /// task id (its meaning depends on `destination`); `transaction_id` is a
+    /// caller-chosen id correlating any resulting inventory update; `group_id` is
+    /// the active group (use [`Uuid::nil`] for none).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn derez_objects(
+        &mut self,
+        local_ids: &[u32],
+        destination: DeRezDestination,
+        destination_id: Uuid,
+        transaction_id: Uuid,
+        group_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_derez_object(
+            local_ids,
+            destination,
+            destination_id,
+            transaction_id,
+            group_id,
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Moves, rotates, and/or scales the object `local_id` (a
+    /// `MultipleObjectUpdate`) according to `transform`. Only the components set
+    /// in `transform` are changed. The resulting motion arrives as an
+    /// [`Event::ObjectUpdated`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn update_object(
+        &mut self,
+        local_id: u32,
+        transform: &ObjectTransform,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_multiple_object_update(local_id, transform, now)?;
+        Ok(())
+    }
+
+    /// Moves the object `local_id` to the region-local `position`. A convenience
+    /// wrapper over [`Session::update_object`]; `group` moves the whole linkset.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_object_position(
+        &mut self,
+        local_id: u32,
+        position: Vector,
+        group: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        self.update_object(
+            local_id,
+            &ObjectTransform {
+                position: Some(position),
+                group,
+                ..ObjectTransform::default()
+            },
+            now,
+        )
+    }
+
+    /// Rotates the object `local_id` to `rotation`. A convenience wrapper over
+    /// [`Session::update_object`]; `group` rotates the whole linkset.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_object_rotation(
+        &mut self,
+        local_id: u32,
+        rotation: Rotation,
+        group: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        self.update_object(
+            local_id,
+            &ObjectTransform {
+                rotation: Some(rotation),
+                group,
+                ..ObjectTransform::default()
+            },
+            now,
+        )
+    }
+
+    /// Resizes the object `local_id` to `scale` metres. A convenience wrapper
+    /// over [`Session::update_object`]; `group` scales the whole linkset and
+    /// `uniform` scales proportionally about the centre.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_object_scale(
+        &mut self,
+        local_id: u32,
+        scale: Vector,
+        group: bool,
+        uniform: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        self.update_object(
+            local_id,
+            &ObjectTransform {
+                scale: Some(scale),
+                group,
+                uniform,
+                ..ObjectTransform::default()
+            },
+            now,
+        )
+    }
+
+    /// Renames the object `local_id` (an `ObjectName`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_object_name(
+        &mut self,
+        local_id: u32,
+        name: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_name(local_id, name, now)?;
+        Ok(())
+    }
+
+    /// Re-describes the object `local_id` (an `ObjectDescription`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_object_description(
+        &mut self,
+        local_id: u32,
+        description: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_description(local_id, description, now)?;
+        Ok(())
+    }
+
+    /// Sets the left-click behaviour of the object `local_id` (an
+    /// `ObjectClickAction`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_object_click_action(
+        &mut self,
+        local_id: u32,
+        action: ClickAction,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_click_action(local_id, action, now)?;
+        Ok(())
+    }
+
+    /// Sets the physical material of the object `local_id` (an `ObjectMaterial`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_object_material(
+        &mut self,
+        local_id: u32,
+        material: Material,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_material(local_id, material, now)?;
+        Ok(())
+    }
+
+    /// Sets the physics/temporary/phantom flags of the object `local_id` (an
+    /// `ObjectFlagUpdate`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_object_flags(
+        &mut self,
+        local_id: u32,
+        flags: &ObjectFlagSettings,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_flag_update(local_id, flags, now)?;
+        Ok(())
+    }
+
+    /// Sets the group the objects `local_ids` are set to (an `ObjectGroup`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_object_group(
+        &mut self,
+        local_ids: &[u32],
+        group_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_group(local_ids, group_id, now)?;
+        Ok(())
+    }
+
+    /// Sets or clears `mask` permission bits of the `field` mask on the objects
+    /// `local_ids` (an `ObjectPermissions`). The `mask` bits are the LSL
+    /// `PERM_*` permission flags (`PERM_COPY`, `PERM_MODIFY`, `PERM_TRANSFER`,
+    /// …); `set` adds them when true and removes them when false.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_object_permissions(
+        &mut self,
+        local_ids: &[u32],
+        field: PermissionField,
+        set: bool,
+        mask: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_permissions(local_ids, field, set, mask, now)?;
+        Ok(())
+    }
+
+    /// Sets the sale type and price of the object `local_id` (an
+    /// `ObjectSaleInfo`). A price of 0 with [`SaleType::NotForSale`] takes it off
+    /// sale.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_object_for_sale(
+        &mut self,
+        local_id: u32,
+        sale_type: SaleType,
+        sale_price: i32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_sale_info(local_id, sale_type, sale_price, now)?;
+        Ok(())
+    }
+
+    /// Sets the search/category code of the object `local_id` (an
+    /// `ObjectCategory`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_object_category(
+        &mut self,
+        local_id: u32,
+        category: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_category(local_id, category, now)?;
+        Ok(())
+    }
+
+    /// Toggles whether the object `local_id` is listed in search (an
+    /// `ObjectIncludeInSearch`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_object_include_in_search(
+        &mut self,
+        local_id: u32,
+        include: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_include_in_search(local_id, include, now)?;
+        Ok(())
+    }
+
+    /// Links the objects `local_ids` into one linkset (an `ObjectLink`). The
+    /// first id becomes the root prim; the rest become its children.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn link_objects(&mut self, local_ids: &[u32], now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_link(local_ids, now)?;
+        Ok(())
+    }
+
+    /// Unlinks the objects `local_ids` from their linksets (an `ObjectDelink`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn delink_objects(&mut self, local_ids: &[u32], now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_delink(local_ids, now)?;
+        Ok(())
+    }
+
     /// Requests an in-world teleport to `position` (region-local) in the region
     /// identified by `region_handle`, looking towards `look_at`. On success the
     /// session re-establishes its circuit at the destination simulator and emits
@@ -5680,6 +6660,26 @@ fn read_quantized_vector(reader: &mut Reader<'_>, range: f32) -> Result<Vector, 
     let y = u16_to_f32(reader.u16()?, -range, range);
     let z = u16_to_f32(reader.u16()?, -range, range);
     Ok(Vector { x, y, z })
+}
+
+/// Packs a unit quaternion into the three-float form a `MultipleObjectUpdate`
+/// `Data` blob carries (LL's `LLQuaternion::packToVector3`): normalize, then if
+/// the real component is negative negate the vector part so the receiver can
+/// reconstruct `w = sqrt(1 - x² - y² - z²) >= 0`.
+fn pack_quaternion_to_vec3(rotation: &Rotation) -> [f32; 3] {
+    let Rotation { x, y, z, s } = *rotation;
+    let magnitude = s.mul_add(s, z.mul_add(z, x.mul_add(x, y * y))).sqrt();
+    let (mut x, mut y, mut z) = if magnitude > f32::EPSILON {
+        (x / magnitude, y / magnitude, z / magnitude)
+    } else {
+        (x, y, z)
+    };
+    if s < 0.0 {
+        x = -x;
+        y = -y;
+        z = -z;
+    }
+    [x, y, z]
 }
 
 /// A zero/identity [`ObjectMotion`], used when a motion blob is malformed.

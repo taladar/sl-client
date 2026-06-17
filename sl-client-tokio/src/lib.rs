@@ -22,18 +22,19 @@ use sl_proto::{
 // alone.
 pub use sl_proto::{
     ActiveGroup, AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,
-    ChatAudible, ChatMessage, ChatSourceType, ChatType, ControlFlags, CreateGroupParams,
-    DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, Event, Friend,
-    FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
-    GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    LindenAmount, LoadUrlRequest, LoginParams, LoginRequest, LoginResponse, MapItem, MapItemType,
-    MapRegionInfo, Maturity, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
-    MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectMotion, ObjectProperties,
+    ChatAudible, ChatMessage, ChatSourceType, ChatType, ClickAction, ControlFlags,
+    CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData, EstateAccessDelta,
+    EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupMember, GroupMembership,
+    GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
+    InventoryFolder, InventoryItem, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest,
+    LoginResponse, MapItem, MapItemType, MapRegionInfo, Material, Maturity, MfaChallenge,
+    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
+    NeighborInfo, Object, ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform,
     ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
-    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ProductType, RegionFlags, RegionIdentity,
-    RegionInfoUpdate, RegionLimits, Reliability, Rotation, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTeleportRequest, Throttle, Transmit, Uuid, Vector, grid_to_handle,
-    handle_to_global, handle_to_grid, pcode, sim_access,
+    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PrimShape, ProductType,
+    RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, Rotation, SaleType,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Throttle,
+    Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, pcode, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -524,6 +525,161 @@ pub enum Command {
         /// The region-local ids to deselect.
         local_ids: Vec<u32>,
     },
+    /// Touch (left-click) an object (`ObjectGrab` + `ObjectDeGrab`).
+    TouchObject {
+        /// The object's region-local id.
+        local_id: u32,
+    },
+    /// Begin grabbing an object (`ObjectGrab`).
+    GrabObject {
+        /// The object's region-local id.
+        local_id: u32,
+        /// The grab offset from the object's centre.
+        grab_offset: Vector,
+    },
+    /// Update an in-progress grab as the object is dragged (`ObjectGrabUpdate`).
+    GrabObjectUpdate {
+        /// The object's persistent global id.
+        object_id: Uuid,
+        /// The initial grab offset.
+        grab_offset_initial: Vector,
+        /// The current region-local grab position.
+        grab_position: Vector,
+        /// Milliseconds since the previous update.
+        time_since_last: u32,
+    },
+    /// Release a grab on an object (`ObjectDeGrab`).
+    DegrabObject {
+        /// The object's region-local id.
+        local_id: u32,
+    },
+    /// Rez (create) a new primitive (`ObjectAdd`).
+    RezObject {
+        /// The shape of the prim to rez.
+        shape: PrimShape,
+        /// The group the new object is set to ([`Uuid::nil`] for none).
+        group_id: Uuid,
+    },
+    /// Duplicate objects with an offset (`ObjectDuplicate`).
+    DuplicateObjects {
+        /// The region-local ids to duplicate.
+        local_ids: Vec<u32>,
+        /// The offset to apply to the copies.
+        offset: Vector,
+        /// The group the copies are set to.
+        group_id: Uuid,
+    },
+    /// Delete objects to the trash (`ObjectDelete`).
+    DeleteObjects {
+        /// The region-local ids to delete.
+        local_ids: Vec<u32>,
+    },
+    /// Derez objects (take/return/trash; `DeRezObject`).
+    DerezObjects {
+        /// The region-local ids to derez.
+        local_ids: Vec<u32>,
+        /// Where the objects should go.
+        destination: DeRezDestination,
+        /// The destination folder/task id (meaning depends on `destination`).
+        destination_id: Uuid,
+        /// A caller-chosen id correlating the resulting inventory update.
+        transaction_id: Uuid,
+        /// The active group ([`Uuid::nil`] for none).
+        group_id: Uuid,
+    },
+    /// Move/rotate/scale an object (`MultipleObjectUpdate`).
+    UpdateObject {
+        /// The object's region-local id.
+        local_id: u32,
+        /// The transform to apply (only set components change).
+        transform: ObjectTransform,
+    },
+    /// Rename an object (`ObjectName`).
+    SetObjectName {
+        /// The object's region-local id.
+        local_id: u32,
+        /// The new name.
+        name: String,
+    },
+    /// Re-describe an object (`ObjectDescription`).
+    SetObjectDescription {
+        /// The object's region-local id.
+        local_id: u32,
+        /// The new description.
+        description: String,
+    },
+    /// Set an object's left-click behaviour (`ObjectClickAction`).
+    SetObjectClickAction {
+        /// The object's region-local id.
+        local_id: u32,
+        /// The new click action.
+        action: ClickAction,
+    },
+    /// Set an object's physical material (`ObjectMaterial`).
+    SetObjectMaterial {
+        /// The object's region-local id.
+        local_id: u32,
+        /// The new material.
+        material: Material,
+    },
+    /// Set an object's physics/temporary/phantom flags (`ObjectFlagUpdate`).
+    SetObjectFlags {
+        /// The object's region-local id.
+        local_id: u32,
+        /// The flag settings to apply.
+        flags: ObjectFlagSettings,
+    },
+    /// Set the group objects are set to (`ObjectGroup`).
+    SetObjectGroup {
+        /// The region-local ids.
+        local_ids: Vec<u32>,
+        /// The group id.
+        group_id: Uuid,
+    },
+    /// Set or clear permission bits on objects (`ObjectPermissions`).
+    SetObjectPermissions {
+        /// The region-local ids.
+        local_ids: Vec<u32>,
+        /// Which mask to change.
+        field: PermissionField,
+        /// Whether to set (true) or clear (false) the bits.
+        set: bool,
+        /// The `PERM_*` bits to set or clear.
+        mask: u32,
+    },
+    /// Set an object's sale type and price (`ObjectSaleInfo`).
+    SetObjectForSale {
+        /// The object's region-local id.
+        local_id: u32,
+        /// The sale type.
+        sale_type: SaleType,
+        /// The sale price in L$.
+        sale_price: i32,
+    },
+    /// Set an object's category code (`ObjectCategory`).
+    SetObjectCategory {
+        /// The object's region-local id.
+        local_id: u32,
+        /// The category code.
+        category: u32,
+    },
+    /// Toggle whether an object is listed in search (`ObjectIncludeInSearch`).
+    SetObjectIncludeInSearch {
+        /// The object's region-local id.
+        local_id: u32,
+        /// Whether to include the object in search.
+        include: bool,
+    },
+    /// Link objects into one linkset (`ObjectLink`); the first id is the root.
+    LinkObjects {
+        /// The region-local ids to link (first = root).
+        local_ids: Vec<u32>,
+    },
+    /// Unlink objects from their linksets (`ObjectDelink`).
+    DelinkObjects {
+        /// The region-local ids to unlink.
+        local_ids: Vec<u32>,
+    },
     /// Begin a clean logout.
     Logout,
 }
@@ -847,6 +1003,69 @@ impl Client {
                         }
                         Some(Command::DeselectObjects { local_ids }) => {
                             self.session.deselect_objects(&local_ids, Instant::now())?;
+                        }
+                        Some(Command::TouchObject { local_id }) => {
+                            self.session.touch_object(local_id, Instant::now())?;
+                        }
+                        Some(Command::GrabObject { local_id, grab_offset }) => {
+                            self.session.grab_object(local_id, grab_offset, Instant::now())?;
+                        }
+                        Some(Command::GrabObjectUpdate { object_id, grab_offset_initial, grab_position, time_since_last }) => {
+                            self.session.grab_object_update(object_id, grab_offset_initial, grab_position, time_since_last, Instant::now())?;
+                        }
+                        Some(Command::DegrabObject { local_id }) => {
+                            self.session.degrab_object(local_id, Instant::now())?;
+                        }
+                        Some(Command::RezObject { shape, group_id }) => {
+                            self.session.rez_object(&shape, group_id, Instant::now())?;
+                        }
+                        Some(Command::DuplicateObjects { local_ids, offset, group_id }) => {
+                            self.session.duplicate_objects(&local_ids, offset, group_id, Instant::now())?;
+                        }
+                        Some(Command::DeleteObjects { local_ids }) => {
+                            self.session.delete_objects(&local_ids, Instant::now())?;
+                        }
+                        Some(Command::DerezObjects { local_ids, destination, destination_id, transaction_id, group_id }) => {
+                            self.session.derez_objects(&local_ids, destination, destination_id, transaction_id, group_id, Instant::now())?;
+                        }
+                        Some(Command::UpdateObject { local_id, transform }) => {
+                            self.session.update_object(local_id, &transform, Instant::now())?;
+                        }
+                        Some(Command::SetObjectName { local_id, name }) => {
+                            self.session.set_object_name(local_id, &name, Instant::now())?;
+                        }
+                        Some(Command::SetObjectDescription { local_id, description }) => {
+                            self.session.set_object_description(local_id, &description, Instant::now())?;
+                        }
+                        Some(Command::SetObjectClickAction { local_id, action }) => {
+                            self.session.set_object_click_action(local_id, action, Instant::now())?;
+                        }
+                        Some(Command::SetObjectMaterial { local_id, material }) => {
+                            self.session.set_object_material(local_id, material, Instant::now())?;
+                        }
+                        Some(Command::SetObjectFlags { local_id, flags }) => {
+                            self.session.set_object_flags(local_id, &flags, Instant::now())?;
+                        }
+                        Some(Command::SetObjectGroup { local_ids, group_id }) => {
+                            self.session.set_object_group(&local_ids, group_id, Instant::now())?;
+                        }
+                        Some(Command::SetObjectPermissions { local_ids, field, set, mask }) => {
+                            self.session.set_object_permissions(&local_ids, field, set, mask, Instant::now())?;
+                        }
+                        Some(Command::SetObjectForSale { local_id, sale_type, sale_price }) => {
+                            self.session.set_object_for_sale(local_id, sale_type, sale_price, Instant::now())?;
+                        }
+                        Some(Command::SetObjectCategory { local_id, category }) => {
+                            self.session.set_object_category(local_id, category, Instant::now())?;
+                        }
+                        Some(Command::SetObjectIncludeInSearch { local_id, include }) => {
+                            self.session.set_object_include_in_search(local_id, include, Instant::now())?;
+                        }
+                        Some(Command::LinkObjects { local_ids }) => {
+                            self.session.link_objects(&local_ids, Instant::now())?;
+                        }
+                        Some(Command::DelinkObjects { local_ids }) => {
+                            self.session.delink_objects(&local_ids, Instant::now())?;
                         }
                         Some(Command::UpdateParcel(update)) => {
                             self.session.update_parcel(&update, Instant::now())?;
