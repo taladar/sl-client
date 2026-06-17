@@ -623,6 +623,7 @@ impl Survey {
             | Event::ObjectUpdated(_)
             | Event::ObjectRemoved { .. }
             | Event::ObjectProperties(_)
+            | Event::TerrainPatch(_)
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal

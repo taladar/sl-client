@@ -36,8 +36,9 @@ pub use sl_proto::{
     ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelOverlayInfo,
     ParcelReturnType, ParcelUpdate, PermissionField, PrimShape, ProductType, RegionFlags,
     RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, Rotation, SaleType, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Throttle, Transmit, Uuid,
-    Vector, grid_to_handle, handle_to_global, handle_to_grid, pcode, sim_access,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, TerrainLayerType,
+    TerrainPatch, Throttle, Transmit, Uuid, Vector, grid_to_handle, handle_to_global,
+    handle_to_grid, pcode, sim_access,
 };
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 

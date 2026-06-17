@@ -172,6 +172,7 @@ fn on_events(
             | SlSessionEvent::ObjectUpdated(_)
             | SlSessionEvent::ObjectRemoved { .. }
             | SlSessionEvent::ObjectProperties(_)
+            | SlSessionEvent::TerrainPatch(_)
             | SlSessionEvent::ParcelDwell { .. }
             | SlSessionEvent::ParcelAccessList { .. }
             | SlSessionEvent::EstateInfo(_)
