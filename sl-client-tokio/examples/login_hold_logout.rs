@@ -12,7 +12,7 @@
 use std::time::Duration;
 
 use sl_client_tokio::{
-    Client, Command, DisconnectReason, Error, Event, LoginParams, LoginRequest, Throttle,
+    Client, Command, DisconnectReason, Error, Event, LoginParams, LoginRequest, Throttle, pcode,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -208,8 +208,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Event::MuteList(entries) => info!("mute list: {} entr(ies)", entries.len()),
             Event::MuteListUnchanged => info!("mute list unchanged (cached)"),
-            // This demo ignores the remaining profile/region/parcel/teleport/group events.
-            Event::GroupMembers { .. }
+            Event::ObjectAdded(object) => {
+                let kind = if object.pcode == pcode::AVATAR {
+                    "avatar"
+                } else {
+                    "object"
+                };
+                let text = if object.text.is_empty() {
+                    String::new()
+                } else {
+                    format!(" text={:?}", object.text)
+                };
+                info!(
+                    "{kind} {} (pcode {}, parent {}) in region {:#x} at {:?}{text}",
+                    object.local_id,
+                    object.pcode,
+                    object.parent_id,
+                    object.region_handle,
+                    object.motion.position,
+                );
+            }
+            Event::ObjectProperties(props) => {
+                info!(
+                    "object properties: {:?} — {:?}",
+                    props.name, props.description
+                );
+            }
+            Event::ObjectRemoved { local_id, .. } => info!("object {local_id} removed"),
+            // This demo ignores motion-only churn and the remaining
+            // profile/region/parcel/teleport/group events.
+            Event::ObjectUpdated(_)
+            | Event::GroupMembers { .. }
             | Event::GroupRoleData { .. }
             | Event::GroupRoleMembers { .. }
             | Event::GroupTitles { .. }
@@ -234,6 +263,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::EstateInfo(_)
             | Event::EstateAccessList { .. }
             | Event::NeighborDiscovered(_)
+            | Event::NeighborSeed { .. }
             | Event::MapBlock(_)
             | Event::MapItems { .. }
             | Event::TeleportStarted

@@ -618,6 +618,11 @@ impl Survey {
             | Event::EstateInfo(_)
             | Event::EstateAccessList { .. }
             | Event::MapItems { .. }
+            | Event::NeighborSeed { .. }
+            | Event::ObjectAdded(_)
+            | Event::ObjectUpdated(_)
+            | Event::ObjectRemoved { .. }
+            | Event::ObjectProperties(_)
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal

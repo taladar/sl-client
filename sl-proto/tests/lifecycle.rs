@@ -14,7 +14,7 @@ mod test {
         LoginParams, MapItemType, Maturity, MoneyTransactionType, MuteFlags, MuteType,
         ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
         ParcelUpdate, ProductType, RegionInfoUpdate, Reliability, ScriptPermissions, Session,
-        Throttle, Transmit,
+        Throttle, Transmit, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -28,27 +28,34 @@ mod test {
         AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock, ChangeUserRights,
         ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock, ChatFromSimulator,
         ChatFromSimulatorChatDataBlock, CrossedRegion, CrossedRegionAgentDataBlock,
-        CrossedRegionInfoBlock, CrossedRegionRegionDataBlock, EconomyData, EconomyDataInfoBlock,
-        EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
-        EstateOwnerMessageParamListBlock, GenericMessage, GenericMessageAgentDataBlock,
-        GenericMessageMethodDataBlock, GroupMembersReply, GroupMembersReplyAgentDataBlock,
-        GroupMembersReplyGroupDataBlock, GroupMembersReplyMemberDataBlock, GroupProfileReply,
-        GroupProfileReplyAgentDataBlock, GroupProfileReplyGroupDataBlock, ImprovedInstantMessage,
+        CrossedRegionInfoBlock, CrossedRegionRegionDataBlock, DisableSimulator, EconomyData,
+        EconomyDataInfoBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
+        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock, GenericMessage,
+        GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GroupMembersReply,
+        GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
+        GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
+        GroupProfileReplyGroupDataBlock, ImprovedInstantMessage,
         ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
-        ImprovedInstantMessageMessageBlockBlock, InventoryDescendents,
-        InventoryDescendentsAgentDataBlock, InventoryDescendentsFolderDataBlock,
-        InventoryDescendentsItemDataBlock, LogoutRequest, LogoutRequestAgentDataBlock,
-        MapBlockReply, MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock,
-        MapItemReply, MapItemReplyAgentDataBlock, MapItemReplyDataBlock,
-        MapItemReplyRequestDataBlock, MoneyBalanceReply, MoneyBalanceReplyMoneyDataBlock,
-        MoneyBalanceReplyTransactionInfoBlock, MuteListUpdate, MuteListUpdateMuteDataBlock,
-        OfflineNotification, OfflineNotificationAgentBlockBlock, OnlineNotification,
-        OnlineNotificationAgentBlockBlock, ParcelAccessListReply, ParcelAccessListReplyDataBlock,
-        ParcelAccessListReplyListBlock, ParcelDwellReply, ParcelDwellReplyAgentDataBlock,
-        ParcelDwellReplyDataBlock, ParcelProperties, ParcelPropertiesAgeVerificationBlockBlock,
-        ParcelPropertiesParcelDataBlock, ParcelPropertiesParcelEnvironmentBlockBlock,
-        ParcelPropertiesRegionAllowAccessBlockBlock, RegionHandshake,
-        RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
+        ImprovedInstantMessageMessageBlockBlock, ImprovedTerseObjectUpdate,
+        ImprovedTerseObjectUpdateObjectDataBlock, ImprovedTerseObjectUpdateRegionDataBlock,
+        InventoryDescendents, InventoryDescendentsAgentDataBlock,
+        InventoryDescendentsFolderDataBlock, InventoryDescendentsItemDataBlock, KillObject,
+        KillObjectObjectDataBlock, LogoutRequest, LogoutRequestAgentDataBlock, MapBlockReply,
+        MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapItemReply,
+        MapItemReplyAgentDataBlock, MapItemReplyDataBlock, MapItemReplyRequestDataBlock,
+        MoneyBalanceReply, MoneyBalanceReplyMoneyDataBlock, MoneyBalanceReplyTransactionInfoBlock,
+        MuteListUpdate, MuteListUpdateMuteDataBlock, ObjectProperties as WireObjectProperties,
+        ObjectPropertiesObjectDataBlock, ObjectUpdate, ObjectUpdateCached,
+        ObjectUpdateCachedObjectDataBlock, ObjectUpdateCachedRegionDataBlock,
+        ObjectUpdateCompressed, ObjectUpdateCompressedObjectDataBlock,
+        ObjectUpdateCompressedRegionDataBlock, ObjectUpdateObjectDataBlock,
+        ObjectUpdateRegionDataBlock, OfflineNotification, OfflineNotificationAgentBlockBlock,
+        OnlineNotification, OnlineNotificationAgentBlockBlock, ParcelAccessListReply,
+        ParcelAccessListReplyDataBlock, ParcelAccessListReplyListBlock, ParcelDwellReply,
+        ParcelDwellReplyAgentDataBlock, ParcelDwellReplyDataBlock, ParcelProperties,
+        ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
+        ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
+        RegionHandshake, RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
         RegionHandshakeRegionInfoBlock, RegionInfo, RegionInfoAgentDataBlock,
         RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock, ScriptDialog,
         ScriptDialogButtonsBlock, ScriptDialogDataBlock, ScriptDialogOwnerDataBlock,
@@ -2680,6 +2687,9 @@ mod test {
         let msg =
             take_transmit_to(&mut session, sim_b()).ok_or("expected a child UseCircuitCode")?;
         assert!(matches!(msg, AnyMessage::UseCircuitCode(_)));
+        // Drain the rest of the open burst (an AgentUpdate drives the child agent
+        // so the neighbour streams its objects).
+        drain(&mut session)?;
 
         // A second EnableSimulator for the same neighbour is a no-op.
         enable_neighbour_b(&mut session, 10, now)?;
@@ -4069,6 +4079,526 @@ mod test {
                 .any(|e| matches!(e, Event::RegionChanged { .. })),
             "handover must not complete twice"
         );
+        Ok(())
+    }
+
+    // ----- Object / scene graph (#16) ---------------------------------------
+
+    /// The region handle the object tests use.
+    const OBJ_REGION: u64 = 0x0000_03e8_0000_03e8;
+
+    /// A zero [`Vector`] (the shared type has no `Default`/`Copy` impl).
+    fn zero_vec() -> Vector {
+        Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        }
+    }
+
+    /// Encodes a 60-byte full-precision `ObjectData` motion blob (position,
+    /// velocity, acceleration, packed-quaternion rotation, angular velocity).
+    fn full_motion_blob(position: Vector) -> Vec<u8> {
+        let mut writer = Writer::new();
+        writer.put_vector3(&position);
+        writer.put_vector3(&zero_vec());
+        writer.put_vector3(&zero_vec());
+        writer.put_quaternion(&Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            s: 1.0,
+        });
+        writer.put_vector3(&zero_vec());
+        writer.into_bytes()
+    }
+
+    /// Builds a one-object `ObjectUpdate` for a prim in the current region.
+    fn object_update(local_id: u32, full_id: u128, position: Vector) -> AnyMessage {
+        object_update_in(OBJ_REGION, local_id, full_id, position)
+    }
+
+    /// Builds a one-object `ObjectUpdate` for a prim in `region_handle`.
+    fn object_update_in(
+        region_handle: u64,
+        local_id: u32,
+        full_id: u128,
+        position: Vector,
+    ) -> AnyMessage {
+        AnyMessage::ObjectUpdate(ObjectUpdate {
+            region_data: ObjectUpdateRegionDataBlock {
+                region_handle,
+                time_dilation: 0xFFFF,
+            },
+            object_data: vec![ObjectUpdateObjectDataBlock {
+                id: local_id,
+                state: 0,
+                full_id: uuid::Uuid::from_u128(full_id),
+                crc: 42,
+                p_code: pcode::PRIMITIVE,
+                material: 3,
+                click_action: 0,
+                scale: Vector {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 3.0,
+                },
+                object_data: full_motion_blob(position),
+                parent_id: 0,
+                update_flags: 0,
+                path_curve: 16,
+                profile_curve: 1,
+                path_begin: 0,
+                path_end: 0,
+                path_scale_x: 100,
+                path_scale_y: 100,
+                path_shear_x: 0,
+                path_shear_y: 0,
+                path_twist: 0,
+                path_twist_begin: 0,
+                path_radius_offset: 0,
+                path_taper_x: 0,
+                path_taper_y: 0,
+                path_revolutions: 0,
+                path_skew: 0,
+                profile_begin: 0,
+                profile_end: 0,
+                profile_hollow: 0,
+                texture_entry: Vec::new(),
+                texture_anim: Vec::new(),
+                name_value: Vec::new(),
+                data: Vec::new(),
+                text: Vec::new(),
+                text_color: [0; 4],
+                media_url: Vec::new(),
+                ps_block: Vec::new(),
+                extra_params: Vec::new(),
+                sound: uuid::Uuid::nil(),
+                owner_id: uuid::Uuid::nil(),
+                gain: 0.0,
+                flags: 0,
+                radius: 0.0,
+                joint_type: 0,
+                joint_pivot: zero_vec(),
+                joint_axis_or_anchor: zero_vec(),
+            }],
+        })
+    }
+
+    #[test]
+    fn object_update_adds_then_updates() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let position = Vector {
+            x: 10.0,
+            y: 20.0,
+            z: 30.0,
+        };
+        let update = object_update(100, 0xABCD, position.clone());
+        session.handle_datagram(sim_addr(), &server_message(&update, 5, true)?, now)?;
+        let events = drain_events(&mut session);
+        let Some(Event::ObjectAdded(object)) =
+            events.iter().find(|e| matches!(e, Event::ObjectAdded(_)))
+        else {
+            return Err(format!("expected ObjectAdded, got {events:?}").into());
+        };
+        assert_eq!(object.local_id, 100);
+        assert_eq!(object.full_id, uuid::Uuid::from_u128(0xABCD));
+        assert_eq!(object.pcode, pcode::PRIMITIVE);
+        assert_eq!(object.region_handle, OBJ_REGION);
+        assert_eq!(object.motion.position, position);
+        assert_eq!(object.material, 3);
+
+        // The object is in the public cache.
+        assert!(session.object(100).is_some());
+        assert_eq!(session.objects().count(), 1);
+
+        // A second update for the same id updates rather than adds.
+        let moved = Vector {
+            x: 11.0,
+            y: 20.0,
+            z: 30.0,
+        };
+        let update = object_update(100, 0xABCD, moved);
+        session.handle_datagram(sim_addr(), &server_message(&update, 6, true)?, now)?;
+        let events = drain_events(&mut session);
+        assert!(
+            events.iter().any(|e| matches!(e, Event::ObjectUpdated(_))),
+            "expected ObjectUpdated, got {events:?}"
+        );
+        assert!(
+            !events.iter().any(|e| matches!(e, Event::ObjectAdded(_))),
+            "must not re-add a known object"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn terse_update_moves_known_object() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // First establish the object via a full update.
+        let update = object_update(200, 0x1234, zero_vec());
+        session.handle_datagram(sim_addr(), &server_message(&update, 5, true)?, now)?;
+        drain_events(&mut session);
+
+        // Build a terse blob: local id, state, no collision plane, full-precision
+        // position, then quantized velocity/acceleration/rotation/angular velocity.
+        let mut writer = Writer::new();
+        writer.put_u32(200);
+        writer.put_u8(0);
+        writer.put_u8(0);
+        let new_pos = Vector {
+            x: 5.0,
+            y: 6.0,
+            z: 7.0,
+        };
+        writer.put_vector3(&new_pos);
+        for _ in 0..(3 + 3) {
+            writer.put_u16(0x8000);
+        }
+        for _ in 0..4 {
+            writer.put_u16(0xFFFF);
+        }
+        for _ in 0..3 {
+            writer.put_u16(0x8000);
+        }
+        let terse = AnyMessage::ImprovedTerseObjectUpdate(ImprovedTerseObjectUpdate {
+            region_data: ImprovedTerseObjectUpdateRegionDataBlock {
+                region_handle: OBJ_REGION,
+                time_dilation: 0xFFFF,
+            },
+            object_data: vec![ImprovedTerseObjectUpdateObjectDataBlock {
+                data: writer.into_bytes(),
+                texture_entry: Vec::new(),
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&terse, 6, true)?, now)?;
+        let events = drain_events(&mut session);
+        let Some(Event::ObjectUpdated(object)) =
+            events.iter().find(|e| matches!(e, Event::ObjectUpdated(_)))
+        else {
+            return Err(format!("expected ObjectUpdated, got {events:?}").into());
+        };
+        assert_eq!(object.motion.position, new_pos);
+        // Cache reflects the new position.
+        assert_eq!(
+            session.object(200).map(|o| o.motion.position.clone()),
+            Some(new_pos)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn terse_update_for_unknown_requests_full() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let mut writer = Writer::new();
+        writer.put_u32(999);
+        writer.put_u8(0);
+        writer.put_u8(0);
+        writer.put_vector3(&zero_vec());
+        for _ in 0..(3 + 3 + 4 + 3) {
+            writer.put_u16(0x8000);
+        }
+        let terse = AnyMessage::ImprovedTerseObjectUpdate(ImprovedTerseObjectUpdate {
+            region_data: ImprovedTerseObjectUpdateRegionDataBlock {
+                region_handle: OBJ_REGION,
+                time_dilation: 0xFFFF,
+            },
+            object_data: vec![ImprovedTerseObjectUpdateObjectDataBlock {
+                data: writer.into_bytes(),
+                texture_entry: Vec::new(),
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&terse, 6, true)?, now)?;
+        let sent = drain(&mut session)?;
+        let request = sent.iter().find_map(|m| match m {
+            AnyMessage::RequestMultipleObjects(request) => Some(request),
+            _ => None,
+        });
+        let request = request.ok_or("expected a RequestMultipleObjects for the unknown object")?;
+        assert!(request.object_data.iter().any(|o| o.id == 999));
+        Ok(())
+    }
+
+    #[test]
+    fn cached_update_requests_full_update() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let cached = AnyMessage::ObjectUpdateCached(ObjectUpdateCached {
+            region_data: ObjectUpdateCachedRegionDataBlock {
+                region_handle: OBJ_REGION,
+                time_dilation: 0xFFFF,
+            },
+            object_data: vec![ObjectUpdateCachedObjectDataBlock {
+                id: 321,
+                crc: 7,
+                update_flags: 0,
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&cached, 5, true)?, now)?;
+        let sent = drain(&mut session)?;
+        let request = sent.iter().find_map(|m| match m {
+            AnyMessage::RequestMultipleObjects(request) => Some(request),
+            _ => None,
+        });
+        let request = request.ok_or("expected a RequestMultipleObjects for the cached miss")?;
+        assert!(request.object_data.iter().any(|o| o.id == 321));
+        Ok(())
+    }
+
+    #[test]
+    fn kill_object_removes_from_cache() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let update = object_update(400, 0x5678, zero_vec());
+        session.handle_datagram(sim_addr(), &server_message(&update, 5, true)?, now)?;
+        drain_events(&mut session);
+        assert!(session.object(400).is_some());
+
+        let kill = AnyMessage::KillObject(KillObject {
+            object_data: vec![KillObjectObjectDataBlock { id: 400 }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&kill, 6, true)?, now)?;
+        let events = drain_events(&mut session);
+        let removed = events.iter().find_map(|e| match e {
+            Event::ObjectRemoved {
+                local_id,
+                region_handle,
+            } => Some((*local_id, *region_handle)),
+            _ => None,
+        });
+        assert_eq!(removed, Some((400, OBJ_REGION)));
+        assert!(session.object(400).is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn object_properties_surface_and_merge() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Establish the object so properties can merge into it.
+        let update = object_update(500, 0x9ABC, zero_vec());
+        session.handle_datagram(sim_addr(), &server_message(&update, 5, true)?, now)?;
+        drain_events(&mut session);
+
+        let props = AnyMessage::ObjectProperties(WireObjectProperties {
+            object_data: vec![ObjectPropertiesObjectDataBlock {
+                object_id: uuid::Uuid::from_u128(0x9ABC),
+                creator_id: uuid::Uuid::from_u128(0x11),
+                owner_id: uuid::Uuid::from_u128(0x22),
+                group_id: uuid::Uuid::nil(),
+                creation_date: 1700,
+                base_mask: 0x7FFF_FFFF,
+                owner_mask: 0x7FFF_FFFF,
+                group_mask: 0,
+                everyone_mask: 0,
+                next_owner_mask: 0,
+                ownership_cost: 0,
+                sale_type: 0,
+                sale_price: 0,
+                aggregate_perms: 0,
+                aggregate_perm_textures: 0,
+                aggregate_perm_textures_owner: 0,
+                category: 0,
+                inventory_serial: 1,
+                item_id: uuid::Uuid::nil(),
+                folder_id: uuid::Uuid::nil(),
+                from_task_id: uuid::Uuid::nil(),
+                last_owner_id: uuid::Uuid::from_u128(0x33),
+                name: b"Test Prim\0".to_vec(),
+                description: b"a description\0".to_vec(),
+                touch_name: Vec::new(),
+                sit_name: Vec::new(),
+                texture_id: Vec::new(),
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&props, 6, true)?, now)?;
+        let events = drain_events(&mut session);
+        let Some(Event::ObjectProperties(properties)) = events
+            .iter()
+            .find(|e| matches!(e, Event::ObjectProperties(_)))
+        else {
+            return Err(format!("expected ObjectProperties, got {events:?}").into());
+        };
+        assert_eq!(properties.name, "Test Prim");
+        assert_eq!(properties.description, "a description");
+        // Merged into the cached object.
+        assert_eq!(
+            session
+                .object(500)
+                .and_then(|o| o.properties.as_ref())
+                .map(|p| p.name.clone()),
+            Some("Test Prim".to_owned())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn compressed_update_decodes_object() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Build a minimal compressed blob (no optional fields: cflags = 0).
+        let position = Vector {
+            x: 40.0,
+            y: 50.0,
+            z: 60.0,
+        };
+        let mut writer = Writer::new();
+        writer.put_uuid(uuid::Uuid::from_u128(0xDEAD));
+        writer.put_u32(600);
+        writer.put_u8(pcode::PRIMITIVE);
+        writer.put_u8(0);
+        writer.put_u32(99);
+        writer.put_u8(3);
+        writer.put_u8(0);
+        writer.put_vector3(&Vector {
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+        });
+        writer.put_vector3(&position);
+        writer.put_quaternion(&Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            s: 1.0,
+        });
+        writer.put_u32(0);
+        writer.put_uuid(uuid::Uuid::from_u128(0x44));
+        let compressed = AnyMessage::ObjectUpdateCompressed(ObjectUpdateCompressed {
+            region_data: ObjectUpdateCompressedRegionDataBlock {
+                region_handle: OBJ_REGION,
+                time_dilation: 0xFFFF,
+            },
+            object_data: vec![ObjectUpdateCompressedObjectDataBlock {
+                update_flags: 0,
+                data: writer.into_bytes(),
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&compressed, 5, true)?, now)?;
+        let events = drain_events(&mut session);
+        let Some(Event::ObjectAdded(object)) =
+            events.iter().find(|e| matches!(e, Event::ObjectAdded(_)))
+        else {
+            return Err(format!("expected ObjectAdded from compressed, got {events:?}").into());
+        };
+        assert_eq!(object.local_id, 600);
+        assert_eq!(object.full_id, uuid::Uuid::from_u128(0xDEAD));
+        assert_eq!(object.crc, 99);
+        assert_eq!(object.owner_id, uuid::Uuid::from_u128(0x44));
+        assert_eq!(object.motion.position, position);
+        Ok(())
+    }
+
+    /// The neighbour region handle `enable_neighbour_b` announces (grid 1001,1000).
+    const NB_REGION: u64 = 0x0003_E900_0003_E800;
+
+    /// Builds a one-object terse update `Data` blob for `local_id` at the origin.
+    fn terse_blob(local_id: u32) -> Vec<u8> {
+        let mut writer = Writer::new();
+        writer.put_u32(local_id);
+        writer.put_u8(0);
+        writer.put_u8(0);
+        writer.put_vector3(&zero_vec());
+        for _ in 0..(3 + 3 + 4 + 3) {
+            writer.put_u16(0x8000);
+        }
+        writer.into_bytes()
+    }
+
+    #[test]
+    fn neighbour_objects_stream_on_child_circuit() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Open a child-agent circuit to the neighbour `sim_b`.
+        enable_neighbour_b(&mut session, 9, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // An object streamed *from the neighbour circuit* is cached and added.
+        let pos = Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        let update = object_update_in(NB_REGION, 700, 0xBEEF, pos.clone());
+        session.handle_datagram(sim_b(), &server_message(&update, 3, true)?, now)?;
+        let events = drain_events(&mut session);
+        let Some(Event::ObjectAdded(object)) =
+            events.iter().find(|e| matches!(e, Event::ObjectAdded(_)))
+        else {
+            return Err(format!("expected neighbour ObjectAdded, got {events:?}").into());
+        };
+        assert_eq!(object.local_id, 700);
+        assert_eq!(object.region_handle, NB_REGION);
+
+        // It lives in the neighbour region's set; the root-region `object()`
+        // lookup does not see it (local ids share a numeric space across regions).
+        assert_eq!(session.objects_in_region(NB_REGION).count(), 1);
+        assert!(session.object(700).is_none());
+        assert_eq!(session.objects().count(), 1);
+
+        // A terse update for an unknown neighbour id requests the full update on
+        // the child circuit (sim_b), not the root.
+        let terse = AnyMessage::ImprovedTerseObjectUpdate(ImprovedTerseObjectUpdate {
+            region_data: ImprovedTerseObjectUpdateRegionDataBlock {
+                region_handle: NB_REGION,
+                time_dilation: 0xFFFF,
+            },
+            object_data: vec![ImprovedTerseObjectUpdateObjectDataBlock {
+                data: terse_blob(800),
+                texture_entry: Vec::new(),
+            }],
+        });
+        session.handle_datagram(sim_b(), &server_message(&terse, 4, true)?, now)?;
+        let mut requested_on_b = false;
+        while let Some(transmit) = session.poll_transmit() {
+            if transmit.destination == sim_b()
+                && let Ok(AnyMessage::RequestMultipleObjects(request)) = decode(&transmit)
+                && request.object_data.iter().any(|o| o.id == 800)
+            {
+                requested_on_b = true;
+            }
+        }
+        assert!(
+            requested_on_b,
+            "the cache-miss fetch must go to the neighbour circuit"
+        );
+
+        // When the neighbour is disabled, its objects are dropped (with events).
+        let disable = AnyMessage::DisableSimulator(DisableSimulator {});
+        session.handle_datagram(sim_b(), &server_message(&disable, 5, true)?, now)?;
+        let events = drain_events(&mut session);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::ObjectRemoved {
+                    local_id: 700,
+                    region_handle,
+                } if *region_handle == NB_REGION
+            )),
+            "disabling the neighbour must remove its objects, got {events:?}"
+        );
+        assert_eq!(session.objects().count(), 0);
         Ok(())
     }
 }

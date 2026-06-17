@@ -2,7 +2,7 @@
 
 use std::net::SocketAddr;
 
-use sl_types::lsl::Vector;
+use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::{LoginRequest, ParcelFlags};
 use uuid::Uuid;
@@ -247,6 +247,18 @@ pub enum Event {
     },
     /// A neighbouring simulator was announced via `EnableSimulator`.
     NeighborDiscovered(NeighborInfo),
+    /// A neighbouring region's child-agent seed capability arrived
+    /// (`EstablishAgentCommunication`). The driver should POST it (the standard
+    /// CAPS seed request) so the neighbour marks the agent's capabilities as sent
+    /// and begins streaming that region's scene to the child circuit — without
+    /// it, OpenSim withholds the neighbour's object updates (its `SendInitialData`
+    /// is gated on `SentSeeds`).
+    NeighborSeed {
+        /// The neighbouring simulator's UDP address (the child circuit's key).
+        sim: SocketAddr,
+        /// The neighbour's seed capability URL to POST.
+        seed_capability: String,
+    },
     /// A region was reported by the world map (a `MapBlockReply` entry), giving
     /// its name and grid coordinates. Sent in response to
     /// [`Session::request_map_blocks`](crate::Session::request_map_blocks) and
@@ -550,10 +562,177 @@ pub enum Event {
         /// The seat position relative to the object, in metres.
         sit_position: (f32, f32, f32),
     },
+    /// An object entered the current region's scene graph: the first
+    /// `ObjectUpdate`/`ObjectUpdateCompressed` seen for its local id (or the
+    /// first full update after a [`Session::request_objects`](crate::Session::request_objects)
+    /// cache-miss fetch). Carries the full decoded [`Object`].
+    ObjectAdded(Box<Object>),
+    /// A known object changed: a later full/compressed `ObjectUpdate`, or a
+    /// motion-only `ImprovedTerseObjectUpdate` (which updates the
+    /// [`Object::motion`] of an already-cached object). Carries the merged
+    /// [`Object`].
+    ObjectUpdated(Box<Object>),
+    /// An object left the scene (`KillObject`): it was removed from the region
+    /// cache.
+    ObjectRemoved {
+        /// The region the object was in (0 if it was never fully cached).
+        region_handle: u64,
+        /// The object's region-local id.
+        local_id: u32,
+    },
+    /// An object's extended properties (`ObjectProperties`), in response to
+    /// [`Session::request_object_properties`](crate::Session::request_object_properties)
+    /// (which selects the object). If the object is in the scene cache its
+    /// [`Object::properties`] is updated too.
+    ObjectProperties(Box<ObjectProperties>),
     /// The session logged out cleanly (a `LogoutReply` was received).
     LoggedOut,
     /// The session disconnected for the given reason.
     Disconnected(DisconnectReason),
+}
+
+/// Linden `PCode` constants: the object-class byte (`p_code`) in an object
+/// update, identifying what kind of entity an object is.
+pub mod pcode {
+    /// A primitive (an ordinary in-world object / prim).
+    pub const PRIMITIVE: u8 = 9;
+    /// An avatar.
+    pub const AVATAR: u8 = 47;
+    /// A grass patch.
+    pub const GRASS: u8 = 95;
+    /// A new-style (SL 1.x+) tree.
+    pub const NEW_TREE: u8 = 111;
+    /// A particle-system legacy object.
+    pub const PARTICLE_SYSTEM: u8 = 143;
+    /// A legacy tree.
+    pub const TREE: u8 = 255;
+}
+
+/// An object's kinematic state, decoded from the packed `ObjectData`/`Data`
+/// blob of an object update. Linear quantities are region-local; the rotation
+/// is the object's orientation in its parent's frame.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObjectMotion {
+    /// Region-local position, in metres.
+    pub position: Vector,
+    /// Linear velocity, in metres/second.
+    pub velocity: Vector,
+    /// Linear acceleration, in metres/second².
+    pub acceleration: Vector,
+    /// Orientation (a unit quaternion).
+    pub rotation: Rotation,
+    /// Angular velocity (the rotation axis scaled by radians/second).
+    pub angular_velocity: Vector,
+}
+
+/// A cached scene object (a primitive or avatar) for the current region,
+/// assembled from `ObjectUpdate` / `ObjectUpdateCompressed` and kept current by
+/// later full, compressed, and motion-only (`ImprovedTerseObjectUpdate`)
+/// updates. Surfaced via [`Event::ObjectAdded`] / [`Event::ObjectUpdated`] and
+/// removed via [`Event::ObjectRemoved`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Object {
+    /// The region the object lives in (its `RegionHandle`).
+    pub region_handle: u64,
+    /// The region-local id (the transient handle the simulator uses; not stable
+    /// across region crossings or relogins).
+    pub local_id: u32,
+    /// The object's persistent global id.
+    pub full_id: Uuid,
+    /// The local id of the parent object this is linked/attached to, or 0 if it
+    /// has no parent (a root object).
+    pub parent_id: u32,
+    /// The object class (see the [`pcode`] constants).
+    pub pcode: u8,
+    /// The object/attachment state byte (e.g. attachment point for attachments).
+    pub state: u8,
+    /// The simulator's per-object CRC (used for object-cache validation).
+    pub crc: u32,
+    /// The material code.
+    pub material: u8,
+    /// The click action (`CLICK_ACTION_*`).
+    pub click_action: u8,
+    /// The object/prim flags bitfield (`PrimFlags`), from the update's
+    /// `UpdateFlags`.
+    pub update_flags: u32,
+    /// The object's size, in metres along each axis.
+    pub scale: Vector,
+    /// The object's kinematic state.
+    pub motion: ObjectMotion,
+    /// The owner's id (only meaningful when the object has sound or particles;
+    /// otherwise the simulator sends a null id — see the LL protocol "hack").
+    pub owner_id: Uuid,
+    /// The attached sound's asset id (null if none).
+    pub sound: Uuid,
+    /// The attached sound's gain.
+    pub gain: f32,
+    /// The attached sound's flags.
+    pub sound_flags: u8,
+    /// The attached sound's cutoff radius, in metres.
+    pub sound_radius: f32,
+    /// The object's floating text (`llSetText`), empty if none.
+    pub text: String,
+    /// The floating-text colour as RGBA bytes.
+    pub text_color: [u8; 4],
+    /// The object's name-value pairs (e.g. an attachment's `AttachItemID`), as
+    /// the raw newline-separated string; empty if none.
+    pub name_value: String,
+    /// The media URL set on the object, empty if none.
+    pub media_url: String,
+    /// The raw `TextureEntry` blob (per-face texture/colour data), undecoded.
+    pub texture_entry: Vec<u8>,
+    /// The raw `ExtraParams` blob (flexi/light/sculpt/mesh parameters),
+    /// undecoded.
+    pub extra_params: Vec<u8>,
+    /// The object's extended properties (creator, permissions, name,
+    /// description, …) once an [`Event::ObjectProperties`] has been received for
+    /// it; `None` until then.
+    pub properties: Option<ObjectProperties>,
+}
+
+/// An object's extended properties (`ObjectProperties`), delivered after the
+/// object is selected (see
+/// [`Session::request_object_properties`](crate::Session::request_object_properties)).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectProperties {
+    /// The object's persistent global id.
+    pub object_id: Uuid,
+    /// The creator's id.
+    pub creator_id: Uuid,
+    /// The current owner's id.
+    pub owner_id: Uuid,
+    /// The group the object is set to.
+    pub group_id: Uuid,
+    /// The previous owner's id.
+    pub last_owner_id: Uuid,
+    /// The creation timestamp (seconds since the Unix epoch).
+    pub creation_date: u64,
+    /// The base permissions mask.
+    pub base_mask: u32,
+    /// The owner permissions mask.
+    pub owner_mask: u32,
+    /// The group permissions mask.
+    pub group_mask: u32,
+    /// The everyone permissions mask.
+    pub everyone_mask: u32,
+    /// The next-owner permissions mask.
+    pub next_owner_mask: u32,
+    /// The ownership cost, in L$.
+    pub ownership_cost: i32,
+    /// The sale type (`SALE_TYPE_*`).
+    pub sale_type: u8,
+    /// The sale price, in L$.
+    pub sale_price: i32,
+    /// The object category code.
+    pub category: u32,
+    /// The object's name.
+    pub name: String,
+    /// The object's description.
+    pub description: String,
+    /// The custom touch-action label, empty if none.
+    pub touch_name: String,
+    /// The custom sit-action label, empty if none.
+    pub sit_name: String,
 }
 
 /// A region maturity / content rating, from the `SimAccess` byte.
