@@ -32,12 +32,12 @@ pub use sl_proto::{
     Maturity, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry,
     MuteFlags, MuteType, NeighborInfo, Object, ObjectFlagSettings, ObjectMotion, ObjectProperties,
     ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
-    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PrimShape, ProductType,
-    RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, Rotation, SaleType,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace, Throttle, TransferStatus,
-    Transmit, Uuid, Vector, Wearable, WearableType, avatar_texture, decode_texture_entry,
-    grid_to_handle, handle_to_global, handle_to_grid, pcode, sim_access,
+    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PlayingAnimation,
+    PrimShape, ProductType, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits,
+    Reliability, Rotation, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest, TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace,
+    Throttle, TransferStatus, Transmit, Uuid, Vector, Wearable, WearableType, avatar_texture,
+    decode_texture_entry, grid_to_handle, handle_to_global, handle_to_grid, pcode, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -768,6 +768,17 @@ pub enum Command {
         /// The Current Outfit Folder version the grid should bake.
         cof_version: i32,
     },
+    /// Start and/or stop several of the agent's own animations (`AgentAnimation`):
+    /// each `(anim_id, start)` pair starts (`true`) or stops (`false`) one
+    /// animation. Other avatars observe the result as an
+    /// [`Event::AvatarAnimation`].
+    SetAnimations(Vec<(Uuid, bool)>),
+    /// Start one of the agent's own animations (`AgentAnimation`); convenience
+    /// for a single-element [`Command::SetAnimations`].
+    PlayAnimation(Uuid),
+    /// Stop one of the agent's own animations (`AgentAnimation`); convenience for
+    /// a single-element [`Command::SetAnimations`].
+    StopAnimation(Uuid),
     /// Begin a clean logout.
     Logout,
 }
@@ -1260,6 +1271,15 @@ impl Client {
                                     url, cof_version, http.clone(), caps_tx.clone(),
                                 ));
                             }
+                        }
+                        Some(Command::SetAnimations(animations)) => {
+                            self.session.set_animations(&animations, Instant::now())?;
+                        }
+                        Some(Command::PlayAnimation(anim_id)) => {
+                            self.session.play_animation(anim_id, Instant::now())?;
+                        }
+                        Some(Command::StopAnimation(anim_id)) => {
+                            self.session.stop_animation(anim_id, Instant::now())?;
                         }
                         Some(Command::Logout) | None => {
                             self.session.initiate_logout(Instant::now());

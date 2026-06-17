@@ -12,7 +12,7 @@
 use std::time::Duration;
 
 use sl_client_tokio::{
-    Client, Command, DisconnectReason, Error, Event, LoginParams, LoginRequest, Throttle,
+    Client, Command, DisconnectReason, Error, Event, LoginParams, LoginRequest, Throttle, Uuid,
     avatar_texture, pcode,
 };
 use tokio::sync::mpsc;
@@ -97,6 +97,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Ask the simulator for the agent's current outfit; the reply
                 // arrives as an `Event::AgentWearables`.
                 command_tx.send(Command::RequestWearables).await.ok();
+                // Play a built-in animation (ANIM_AGENT_CLAP,
+                // 9b0c1c4e-8ac7-7969-1494-28c874c4f668); the simulator echoes
+                // the agent's own animation set back as an
+                // `Event::AvatarAnimation` for this avatar.
+                command_tx
+                    .send(Command::PlayAnimation(Uuid::from_u128(
+                        0x9b0c_1c4e_8ac7_7969_1494_28c8_74c4_f668,
+                    )))
+                    .await
+                    .ok();
                 let command_tx = command_tx.clone();
                 tokio::spawn(async move {
                     sleep(Duration::from_secs(hold_secs)).await;
@@ -265,6 +275,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .iter()
                         .map(|w| w.wearable_type)
                         .collect::<Vec<_>>(),
+                );
+            }
+            Event::AvatarAnimation {
+                avatar_id,
+                animations,
+            } => {
+                info!(
+                    "avatar {avatar_id} playing {} animation(s): {:?}",
+                    animations.len(),
+                    animations.iter().map(|a| a.anim_id).collect::<Vec<_>>(),
                 );
             }
             // This demo ignores motion-only churn and the remaining

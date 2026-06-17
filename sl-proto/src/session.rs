@@ -118,6 +118,11 @@ use sl_wire::messages::{
     AgentSetAppearanceVisualParamBlock, AgentSetAppearanceWearableDataBlock, AgentWearablesRequest,
     AgentWearablesRequestAgentDataBlock,
 };
+// Animations (#21): the outgoing trigger message.
+use sl_wire::messages::{
+    AgentAnimation, AgentAnimationAgentDataBlock, AgentAnimationAnimationListBlock,
+    AgentAnimationPhysicalAvatarEventListBlock,
+};
 // Estate / region management (#14): the outgoing estate-owner / god messages.
 use sl_wire::messages::{
     EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
@@ -167,11 +172,11 @@ use crate::types::{
     MapItem, MapItemType, MapRegionInfo, Material, Maturity, MoneyBalance, MoneyTransaction,
     MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectFlagSettings,
     ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
-    ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PrimShape,
-    ProductType, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, SaleType,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, Wearable,
-    WearableType, avatar_texture, grid_to_handle, handle_to_grid,
+    ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
+    PlayingAnimation, PrimShape, ProductType, RegionIdentity, RegionInfoUpdate, RegionLimits,
+    Reliability, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus,
+    Transmit, Wearable, WearableType, avatar_texture, grid_to_handle, handle_to_grid,
 };
 use crate::{appearance, types::AvatarAppearance, types::AvatarAttachment};
 
@@ -1418,6 +1423,34 @@ impl Circuit {
                 .iter()
                 .map(|&param_value| AgentSetAppearanceVisualParamBlock { param_value })
                 .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AgentAnimation` reliably, starting or stopping the agent's own
+    /// animations. Each `(anim_id, start)` pair starts (`true`) or stops
+    /// (`false`) one animation. Mirrors the reference viewer, which always
+    /// appends a single empty `PhysicalAvatarEventList` block.
+    fn send_agent_animation(
+        &mut self,
+        animations: &[(Uuid, bool)],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AgentAnimation(AgentAnimation {
+            agent_data: AgentAnimationAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            animation_list: animations
+                .iter()
+                .map(|&(anim_id, start_anim)| AgentAnimationAnimationListBlock {
+                    anim_id,
+                    start_anim,
+                })
+                .collect(),
+            physical_avatar_event_list: vec![AgentAnimationPhysicalAvatarEventListBlock {
+                type_data: Vec::new(),
+            }],
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -3915,6 +3948,15 @@ impl Session {
                         .collect(),
                 });
             }
+            // Another avatar's currently-playing animations, pushed whenever its
+            // animation set changes. The list is the complete current set, not a
+            // delta — a stopped animation simply drops out of a later update.
+            AnyMessage::AvatarAnimation(animation) => {
+                self.events.push_back(Event::AvatarAnimation {
+                    avatar_id: animation.sender.id,
+                    animations: avatar_animations(animation),
+                });
+            }
             // The reply to a baked-texture cache query (`AgentCachedTexture`).
             AnyMessage::AgentCachedTextureResponse(response) => {
                 self.events.push_back(Event::CachedTextureResponse {
@@ -5126,6 +5168,55 @@ impl Session {
             now,
         )?;
         Ok(())
+    }
+
+    /// Starts and/or stops several of the agent's own animations at once via
+    /// `AgentAnimation`. Each `(anim_id, start)` pair starts the animation when
+    /// `start` is `true` and stops it when `false`. `anim_id` is a built-in
+    /// animation UUID or an uploaded animation asset id. Other viewers observe
+    /// the result as an [`Event::AvatarAnimation`] for this agent.
+    ///
+    /// For a single animation prefer the
+    /// [`play_animation`](Session::play_animation) /
+    /// [`stop_animation`](Session::stop_animation) convenience wrappers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_animations(
+        &mut self,
+        animations: &[(Uuid, bool)],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_agent_animation(animations, now)?;
+        Ok(())
+    }
+
+    /// Starts one of the agent's own animations via `AgentAnimation`. `anim_id`
+    /// is a built-in animation UUID or an uploaded animation asset id. Convenience
+    /// for [`set_animations`](Session::set_animations) with a single starting
+    /// animation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn play_animation(&mut self, anim_id: Uuid, now: Instant) -> Result<(), Error> {
+        self.set_animations(&[(anim_id, true)], now)
+    }
+
+    /// Stops one of the agent's own animations via `AgentAnimation`. Convenience
+    /// for [`set_animations`](Session::set_animations) with a single stopping
+    /// animation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn stop_animation(&mut self, anim_id: Uuid, now: Instant) -> Result<(), Error> {
+        self.set_animations(&[(anim_id, false)], now)
     }
 
     /// Queries the simulator's baked-texture cache via `AgentCachedTexture`: for
@@ -6529,6 +6620,26 @@ fn avatar_appearance(message: &sl_wire::messages::AvatarAppearance) -> AvatarApp
             .map(|block| block.hover_height.clone()),
         attachments,
     }
+}
+
+/// Builds the [`PlayingAnimation`] list from an `AvatarAnimation` message. The
+/// `AnimationSourceList` is positionally correlated with the `AnimationList`
+/// (entry `i`'s source is `AnimationSourceList[i]`, when present), matching the
+/// reference viewer's `process_avatar_animation`.
+fn avatar_animations(message: &sl_wire::messages::AvatarAnimation) -> Vec<PlayingAnimation> {
+    message
+        .animation_list
+        .iter()
+        .enumerate()
+        .map(|(index, block)| PlayingAnimation {
+            anim_id: block.anim_id,
+            sequence_id: block.anim_sequence_id,
+            source_id: message
+                .animation_source_list
+                .get(index)
+                .map(|source| source.object_id),
+        })
+        .collect()
 }
 
 /// Builds an [`Event::ServerAppearanceUpdate`] from the LLSD reply to an

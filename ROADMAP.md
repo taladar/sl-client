@@ -48,7 +48,7 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 18 ✅ | Terrain heightmaps (`LayerData`) | 8 | Ground geometry for a renderer | Local OpenSim |
 | 19 ✅ | Asset & texture pipeline **(fetch)** | 13 | Asset fetch + textured rendering | Local OpenSim |
 | 20 ✅ | Avatar appearance & wearables | 13 | Render avatars; outfit control | Local OpenSim |
-| 21 | Animations | 5 | Dance/gesture bot; animate scene | Local OpenSim |
+| 21 ✅ | Animations | 5 | Dance/gesture bot; animate scene | Local OpenSim |
 | 22 | Sound | 3 | Spatial audio playback | Local OpenSim |
 | 23 | Asset/texture/mesh upload | 5 | Content uploader | Local OpenSim |
 | 24 | Media-on-a-prim / parcel audio | 5 | Media surfaces, streaming audio | Local OpenSim (external stream) |
@@ -629,10 +629,29 @@ version is 0, so it uses the legacy path), so `UpdateAvatarAppearance` is
 unit-tested only. Test: local OpenSim.*
 
 **21. Animations — `AgentAnimation` (send/trigger), `AvatarAnimation` (receive)
-· 5 pts.** Play/stop built-in and custom animations and observe others' — a
-dance/gesture bot, or motion in a renderer. Custom (uploaded) anims depend on
-
-### 19. *Test: local OpenSim.*
+· 5 pts. ✅ Done.** Play/stop built-in and custom animations and observe others'
+— a dance/gesture bot, or motion in a renderer. **Send:**
+`Session::set_animations(&[(anim_id, start)])` is the batch surface
+(`AgentAnimation`: each pair starts/stops one animation; the message always
+carries the single empty `PhysicalAvatarEventList` block the reference viewer
+appends), with `play_animation`/`stop_animation` single-animation convenience
+wrappers. `anim_id` is a built-in animation UUID or an uploaded animation asset
+(custom anims are fetched via #19). **Receive:** incoming `AvatarAnimation` is
+surfaced as `Event::AvatarAnimation { avatar_id, animations }` carrying a new
+`PlayingAnimation` value type (`anim_id`, the simulator's per-avatar
+`sequence_id`, and the optional triggering `source_id` from the
+positionally-correlated `AnimationSourceList`, matching the viewer's
+`process_avatar_animation`). The list is the *complete* current set, not a delta
+— a stopped animation simply drops out of a later update — so consumers treat
+each event as authoritative state. Wired as
+`Command`/`SlCommand::{SetAnimations, PlayAnimation, StopAnimation}` through
+both runtimes. Covered by three `lifecycle.rs` tests (the `AgentAnimation` send
+encoding for batch start/stop and the single-animation wrapper, plus the
+`AvatarAnimation` decode with source correlation and nil-vs-missing source
+slots). *Live-verified against the local OpenSim via the `login_hold_logout`
+tokio example: `PlayAnimation(ANIM_AGENT_CLAP)` round-tripped — the simulator
+echoed an `Event::AvatarAnimation` for the agent listing the default stand plus
+the triggered clap animation. Test: local OpenSim.*
 
 **22. Sound — `SoundTrigger`, `AttachedSound`, `PreloadSound`,
 `AttachedSoundGainChange` · 3 pts.** Receive and locate spatial sound events;
