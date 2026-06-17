@@ -39,7 +39,7 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 9 ✅ | Mute list **(done)** | 2 | Moderation helper | Local OpenSim (MuteList module) |
 | 10 ✅ | Seamless teleport (child circuits) **(done)** | 8 | Roaming bot that keeps its session | Local OpenSim (multi-region) |
 | 11 ✅ | Money / economy **(done)** | 5 | Balance monitor, tip/vendor bot | **Money module or SL grid** |
-| 12 | Full world map | 5 | Live map: agents, POIs, land-for-sale | Local OpenSim |
+| 12 ✅ | Full world map **(done)** | 5 | Live map: agents, POIs, land-for-sale | Local OpenSim |
 | 13 | Parcel management | 5 | Land-management tool | Local OpenSim |
 | 14 | Estate/region management | 5 | Region admin/restart/ban bot | Local OpenSim (owner account) |
 | 15 | Bandwidth throttle (`AgentThrottle`) | 2 | *(enabler for 16–25)* | Local OpenSim |
@@ -300,10 +300,24 @@ one login. Stock OpenSim's module hardcodes a 0 balance and does not route real
 transfers, so the transfer path is unit-tested only; full transfers need a money
 backend (Gloebit/DTL) or the real SL grid.*
 
-**12. Full world map — `MapItemRequest` (agents/telehubs/events/land-for-sale),
-`MapNameRequest`, `MapBlockRequest` by name · 5 pts.** Extends the existing
-`MapBlockRequest`/`MapBlockReply` to a complete map: avatar dots, POIs,
-search-by-name — a live map tool on its own. *Test: local OpenSim.*
+**12. Full world map (done) ✅ — `MapItemRequest`
+(agents/telehubs/events/land-for-sale), `MapNameRequest`, `MapBlockRequest` by
+name · 5 pts.** Extends the existing `MapBlockRequest`/`MapBlockReply` to a
+complete map: avatar dots, POIs, search-by-name — a live map tool on its own.
+`Session::request_map_by_name` (search regions by name → `Event::MapBlock`, the
+same reply as a block request) and
+`request_map_items(MapItemType, region_handle)` →
+`Event::MapItems { item_type, items }`, where `MapItemType` covers
+`Telehub`/`AgentLocations`/`LandForSale`/the event types/`Other(u32)` and each
+`MapItem` carries global coordinates (with `region_handle()`/`local_x()`/
+`local_y()` helpers), an id, the type-specific `extra`/`extra2`, and a name.
+Both map requests send the viewer's map-layer flag (`LAYER_FLAG = 2`). Wired
+through both runtimes (`Command::RequestMapByName` / `RequestMapItems`).
+*Live-verified against local OpenSim with two avatars: `MapNameRequest("East
+Region")` resolved the neighbour by name, and an `AgentLocations` request
+returned the second avatar's map dot at the right global coordinates. Stock
+OpenSim answers agent-locations, telehubs and land-for-sale locally; events and
+classifieds are not implemented server-side.*
 
 **13. Parcel management — `ParcelPropertiesUpdate`,
 `ParcelAccessListRequest`/`Update`, `ParcelDwellRequest`, `ParcelBuy`,

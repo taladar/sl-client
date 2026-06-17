@@ -101,8 +101,19 @@ pub enum Event {
     NeighborDiscovered(NeighborInfo),
     /// A region was reported by the world map (a `MapBlockReply` entry), giving
     /// its name and grid coordinates. Sent in response to
-    /// [`Session::request_map_blocks`](crate::Session::request_map_blocks).
+    /// [`Session::request_map_blocks`](crate::Session::request_map_blocks) and
+    /// [`Session::request_map_by_name`](crate::Session::request_map_by_name).
     MapBlock(Box<MapRegionInfo>),
+    /// World-map overlay items (avatar locations, telehubs, land for sale,
+    /// events) from a `MapItemReply`, in response to
+    /// [`Session::request_map_items`](crate::Session::request_map_items). All
+    /// items share the requested `item_type`.
+    MapItems {
+        /// The kind of item these are (echoed from the request).
+        item_type: MapItemType,
+        /// The items returned for the queried region(s).
+        items: Vec<MapItem>,
+    },
     /// A teleport has begun (`TeleportStart`).
     TeleportStarted,
     /// A progress update during a teleport (`TeleportProgress`).
@@ -726,6 +737,113 @@ pub struct MapRegionInfo {
     pub agents: u8,
     /// The region's map tile image id.
     pub map_image_id: Uuid,
+}
+
+/// A kind of world-map overlay item requested via `MapItemRequest` (the
+/// `GridItemType`). [`MapItemType::AgentLocations`] gives the avatar "green
+/// dots"; the land-for-sale and event types give the corresponding map overlays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapItemType {
+    /// The region's telehub, if any (`1`).
+    Telehub,
+    /// PG-rated events (`2`).
+    PgEvent,
+    /// Mature-rated events (`3`).
+    MatureEvent,
+    /// Avatar locations — the map's "green dots" (`6`).
+    AgentLocations,
+    /// Parcels for sale, non-adult (`7`).
+    LandForSale,
+    /// Classified ads (`8`).
+    Classified,
+    /// Adult-rated events (`9`).
+    AdultEvent,
+    /// Parcels for sale in adult regions (`10`).
+    AdultLandForSale,
+    /// Any other grid item type, preserved verbatim.
+    Other(u32),
+}
+
+impl MapItemType {
+    /// Classifies a `GridItemType` wire value.
+    #[must_use]
+    pub const fn from_u32(value: u32) -> Self {
+        match value {
+            1 => Self::Telehub,
+            2 => Self::PgEvent,
+            3 => Self::MatureEvent,
+            6 => Self::AgentLocations,
+            7 => Self::LandForSale,
+            8 => Self::Classified,
+            9 => Self::AdultEvent,
+            10 => Self::AdultLandForSale,
+            other => Self::Other(other),
+        }
+    }
+
+    /// The wire value for this item type.
+    #[must_use]
+    pub const fn to_u32(self) -> u32 {
+        match self {
+            Self::Telehub => 1,
+            Self::PgEvent => 2,
+            Self::MatureEvent => 3,
+            Self::AgentLocations => 6,
+            Self::LandForSale => 7,
+            Self::Classified => 8,
+            Self::AdultEvent => 9,
+            Self::AdultLandForSale => 10,
+            Self::Other(value) => value,
+        }
+    }
+}
+
+/// A single world-map overlay item from a `MapItemReply`. Coordinates are
+/// **global** metres (region origin plus the in-region offset).
+///
+/// The meaning of `extra`/`extra2` depends on the item's [`MapItemType`]:
+/// - [`MapItemType::AgentLocations`]: `extra` is the avatar count at this spot.
+/// - [`MapItemType::Telehub`]: `extra2` is `0` for a hub, `1` for an infohub.
+/// - [`MapItemType::LandForSale`] / [`MapItemType::AdultLandForSale`]: `extra` is
+///   the parcel area in m², `extra2` the sale price in L$.
+/// - event types: `extra` is the event id, `extra2` packs the event flags.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapItem {
+    /// The item's global x coordinate in metres.
+    pub global_x: u32,
+    /// The item's global y coordinate in metres.
+    pub global_y: u32,
+    /// The item's identifier (a parcel/event id, or nil for avatar dots).
+    pub id: Uuid,
+    /// Type-specific context (count, area, event id — see [`MapItem`]).
+    pub extra: i32,
+    /// Type-specific context (sale price, hub kind, flags — see [`MapItem`]).
+    pub extra2: i32,
+    /// The item's name (region/parcel/event name, or a hash for avatar dots).
+    pub name: String,
+}
+
+impl MapItem {
+    /// The handle of the region this item sits in, derived from its global
+    /// coordinates (the global position with the in-region offset masked off).
+    #[must_use]
+    pub fn region_handle(&self) -> u64 {
+        let region_x = u64::from(self.global_x & !0xFF);
+        let region_y = u64::from(self.global_y & !0xFF);
+        (region_x << 32) | region_y
+    }
+
+    /// The item's x offset within its region (0–255 metres).
+    #[must_use]
+    pub const fn local_x(&self) -> u32 {
+        self.global_x & 0xFF
+    }
+
+    /// The item's y offset within its region (0–255 metres).
+    #[must_use]
+    pub const fn local_y(&self) -> u32 {
+        self.global_y & 0xFF
+    }
 }
 
 /// A neighbouring simulator announced via `EnableSimulator`.

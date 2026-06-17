@@ -166,6 +166,7 @@ fn on_events(
             | SlSessionEvent::MuteListUnchanged
             | SlSessionEvent::MoneyBalance(_)
             | SlSessionEvent::EconomyData(_)
+            | SlSessionEvent::MapItems { .. }
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal => {}

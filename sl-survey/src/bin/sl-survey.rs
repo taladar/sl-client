@@ -613,6 +613,7 @@ impl Survey {
             | Event::MuteListUnchanged
             | Event::MoneyBalance(_)
             | Event::EconomyData(_)
+            | Event::MapItems { .. }
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal

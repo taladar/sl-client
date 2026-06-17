@@ -26,13 +26,14 @@ use sl_wire::messages::{
     ImprovedInstantMessageMessageBlockBlock, InventoryDescendentsFolderDataBlock,
     InventoryDescendentsItemDataBlock, LogoutRequest, LogoutRequestAgentDataBlock,
     MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapBlockRequest, MapBlockRequestAgentDataBlock,
-    MapBlockRequestPositionDataBlock, PacketAck, PacketAckPacketsBlock,
-    ParcelPropertiesParcelDataBlock, ParcelPropertiesRequest,
-    ParcelPropertiesRequestAgentDataBlock, ParcelPropertiesRequestParcelDataBlock,
-    RegionHandshakeRegionInfo3Block, RegionHandshakeRegionInfoBlock, RegionHandshakeReply,
-    RegionHandshakeReplyAgentDataBlock, RegionHandshakeReplyRegionInfoBlock,
-    RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock, RequestRegionInfo,
-    RequestRegionInfoAgentDataBlock, TeleportLocationRequest,
+    MapBlockRequestPositionDataBlock, MapItemRequest, MapItemRequestAgentDataBlock,
+    MapItemRequestRequestDataBlock, MapNameRequest, MapNameRequestAgentDataBlock,
+    MapNameRequestNameDataBlock, PacketAck, PacketAckPacketsBlock, ParcelPropertiesParcelDataBlock,
+    ParcelPropertiesRequest, ParcelPropertiesRequestAgentDataBlock,
+    ParcelPropertiesRequestParcelDataBlock, RegionHandshakeRegionInfo3Block,
+    RegionHandshakeRegionInfoBlock, RegionHandshakeReply, RegionHandshakeReplyAgentDataBlock,
+    RegionHandshakeReplyRegionInfoBlock, RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock,
+    RequestRegionInfo, RequestRegionInfoAgentDataBlock, TeleportLocationRequest,
     TeleportLocationRequestAgentDataBlock, TeleportLocationRequestInfoBlock, TerminateFriendship,
     TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock, UseCircuitCode,
     UseCircuitCodeCircuitCodeBlock,
@@ -93,11 +94,11 @@ use crate::types::{
     ChatMessage, ChatSourceType, ChatType, CreateGroupParams, DisconnectReason, EconomyData, Event,
     Friend, FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
     GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    LoadUrlRequest, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, MoneyBalance,
-    MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo,
-    ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit,
-    grid_to_handle, handle_to_grid,
+    LoadUrlRequest, LoginHttpRequest, LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity,
+    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
+    NeighborInfo, ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits,
+    Reliability, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
+    Transmit, grid_to_handle, handle_to_grid,
 };
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
@@ -123,6 +124,9 @@ const TELEPORT_TIMEOUT: Duration = Duration::from_secs(30);
 /// The default draw distance (metres) advertised in keep-alive `AgentUpdate`s,
 /// large enough that the simulator enables the neighbouring regions.
 const DEFAULT_DRAW_DISTANCE: f32 = 256.0;
+/// The world-map layer flag the viewer sends on map name/item requests (the
+/// terrain layer; `LAYER_FLAG` in the reference viewer).
+const MAP_LAYER_FLAG: u32 = 2;
 /// The identity (no-op) rotation: the default body/head facing.
 const IDENTITY_ROTATION: Rotation = Rotation {
     x: 0.0,
@@ -1254,6 +1258,49 @@ impl Circuit {
         self.send(&message, Reliability::Reliable, now)
     }
 
+    /// Queues a `MapNameRequest` reliably (search regions by name). The reply is
+    /// a `MapBlockReply`, the same as [`Circuit::send_map_block_request`].
+    fn send_map_name_request(&mut self, name: &str, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::MapNameRequest(MapNameRequest {
+            agent_data: MapNameRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                // The viewer's map-layer flag (2); estate/godlike filled by the sim.
+                flags: MAP_LAYER_FLAG,
+                estate_id: 0,
+                godlike: false,
+            },
+            name_data: MapNameRequestNameDataBlock {
+                name: with_nul(name),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `MapItemRequest` reliably for the given item type. `region_handle`
+    /// of 0 targets the current region; otherwise it targets that region.
+    fn send_map_item_request(
+        &mut self,
+        item_type: u32,
+        region_handle: u64,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::MapItemRequest(MapItemRequest {
+            agent_data: MapItemRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                flags: MAP_LAYER_FLAG,
+                estate_id: 0,
+                godlike: false,
+            },
+            request_data: MapItemRequestRequestDataBlock {
+                item_type,
+                region_handle,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
     /// Records that a datagram was received, resetting the inactivity timer.
     fn note_received(&mut self, now: Instant) {
         self.timers.inactivity = deadline(now, INACTIVITY_TIMEOUT);
@@ -2046,6 +2093,12 @@ impl Session {
                         self.events.push_back(Event::MapBlock(Box::new(region)));
                     }
                 }
+            }
+            AnyMessage::MapItemReply(reply) => {
+                self.events.push_back(Event::MapItems {
+                    item_type: MapItemType::from_u32(reply.request_data.item_type),
+                    items: reply.data.iter().map(map_item).collect(),
+                });
             }
             AnyMessage::TeleportStart(_) => {
                 self.events.push_back(Event::TeleportStarted);
@@ -3333,6 +3386,41 @@ impl Session {
         Ok(())
     }
 
+    /// Searches the world map for regions whose name matches `name` via
+    /// `MapNameRequest`. Each match arrives as an [`Event::MapBlock`] (the same
+    /// reply as [`Session::request_map_blocks`]). Useful for resolving a region
+    /// name to its handle/coordinates without knowing where it sits on the grid.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_map_by_name(&mut self, name: &str, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_map_name_request(name, now)?;
+        Ok(())
+    }
+
+    /// Requests world-map overlay items of the given [`MapItemType`] (avatar
+    /// locations, telehubs, land for sale, events) via `MapItemRequest`.
+    /// `region_handle` of 0 targets the current region; any other handle targets
+    /// that region. The reply arrives as an [`Event::MapItems`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_map_items(
+        &mut self,
+        item_type: MapItemType,
+        region_handle: u64,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_map_item_request(item_type.to_u32(), region_handle, now)?;
+        Ok(())
+    }
+
     /// Requests an in-world teleport to `position` (region-local) in the region
     /// identified by `region_handle`, looking towards `look_at`. On success the
     /// session re-establishes its circuit at the destination simulator and emits
@@ -3938,6 +4026,19 @@ fn map_region_info(
         agents: data.agents,
         map_image_id: data.map_image_id,
     })
+}
+
+/// Builds a [`MapItem`] from a `MapItemReply` data block. Coordinates are global
+/// metres; `extra`/`extra2` are type-specific (see [`MapItem`]).
+fn map_item(data: &sl_wire::messages::MapItemReplyDataBlock) -> MapItem {
+    MapItem {
+        global_x: data.x,
+        global_y: data.y,
+        id: data.id,
+        extra: data.extra,
+        extra2: data.extra2,
+        name: trimmed_string(&data.name),
+    }
 }
 
 /// Extracts the destination UDP address and seed capability from a CAPS
