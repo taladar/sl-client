@@ -41,11 +41,12 @@ mod test {
         CrossedRegionRegionDataBlock, DisableSimulator, EconomyData, EconomyDataInfoBlock,
         EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
         EstateOwnerMessageParamListBlock, GenericMessage, GenericMessageAgentDataBlock,
-        GenericMessageMethodDataBlock, GroupMembersReply, GroupMembersReplyAgentDataBlock,
-        GroupMembersReplyGroupDataBlock, GroupMembersReplyMemberDataBlock, GroupProfileReply,
-        GroupProfileReplyAgentDataBlock, GroupProfileReplyGroupDataBlock, ImageData,
-        ImageDataImageDataBlock, ImageDataImageIDBlock, ImageNotInDatabase,
-        ImageNotInDatabaseImageIDBlock, ImagePacket, ImagePacketImageDataBlock,
+        GenericMessageMethodDataBlock, GenericStreamingMessage,
+        GenericStreamingMessageDataBlockBlock, GenericStreamingMessageMethodDataBlock,
+        GroupMembersReply, GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
+        GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
+        GroupProfileReplyGroupDataBlock, ImageData, ImageDataImageDataBlock, ImageDataImageIDBlock,
+        ImageNotInDatabase, ImageNotInDatabaseImageIDBlock, ImagePacket, ImagePacketImageDataBlock,
         ImagePacketImageIDBlock, ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
         ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
         ImprovedTerseObjectUpdate, ImprovedTerseObjectUpdateObjectDataBlock,
@@ -2722,6 +2723,70 @@ mod test {
     }
 
     #[test]
+    fn gltf_material_override_surfaces_raw_faces() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A GLTF material override (GenericStreamingMessage method 0x4175):
+        // object local id 7, overrides on faces 0 and 2, each per-face override
+        // a raw notation document left undecoded.
+        let payload = b"{'id':i7,'te':[i0,i2],'od':[{'bc':[r1,r0,r0,r1]},{'mf':r0.25}]}";
+        let message = AnyMessage::GenericStreamingMessage(GenericStreamingMessage {
+            method_data: GenericStreamingMessageMethodDataBlock { method: 0x4175 },
+            data_block: GenericStreamingMessageDataBlockBlock {
+                data: payload.to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::GltfMaterialOverride { .. }))
+            .ok_or("expected a GltfMaterialOverride event")?;
+        let Event::GltfMaterialOverride {
+            local_id,
+            faces,
+            overrides,
+            ..
+        } = event
+        else {
+            return Err("expected GltfMaterialOverride".into());
+        };
+        assert_eq!(local_id, 7);
+        assert_eq!(faces, vec![0, 2]);
+        assert_eq!(
+            overrides,
+            vec![b"{'bc':[r1,r0,r0,r1]}".to_vec(), b"{'mf':r0.25}".to_vec()]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn modify_material_params_reply_surfaces_result() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // The `{ success, message }` reply to a ModifyMaterialParams POST.
+        let xml = "<llsd><map><key>success</key><boolean>true</boolean>\
+            <key>message</key><string></string></map></llsd>";
+        let body = parse_llsd_xml(xml)?;
+        session.handle_caps_event("ModifyMaterialParams", &body, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::MaterialParamsResult { .. }))
+            .ok_or("expected a MaterialParamsResult event")?;
+        let Event::MaterialParamsResult { success, message } = event else {
+            return Err("expected MaterialParamsResult".into());
+        };
+        assert!(success);
+        assert_eq!(message, "");
+        Ok(())
+    }
+
+    #[test]
     fn parcel_media_command_surfaces_command() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
@@ -5216,6 +5281,120 @@ mod test {
             !events.iter().any(|e| matches!(e, Event::ObjectAdded(_))),
             "must not re-add a known object"
         );
+        Ok(())
+    }
+
+    /// Appends one `ExtraParams` entry (`u16 type`, `u32 size`, payload) to a
+    /// container writer.
+    fn push_extra_param(
+        extra: &mut Writer,
+        param_type: u16,
+        payload: &[u8],
+    ) -> Result<(), TestError> {
+        extra.put_u16(param_type);
+        extra.put_u32(u32::try_from(payload.len())?);
+        extra.bytes(payload);
+        Ok(())
+    }
+
+    #[test]
+    fn object_update_decodes_extra_params() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Build a multi-parameter `ExtraParams` blob (`u8 count`, then each
+        // entry as `u16 type` / `u32 size` / payload), one of each decoded type.
+        let sculpt_tex = uuid::Uuid::from_u128(0x5C01);
+        let mat_id = uuid::Uuid::from_u128(0x9A7E);
+
+        let mut flexible = Writer::new();
+        flexible.put_u8(0x12); // tension byte: softness bit + tension 0x12 & 0x7f = 18
+        flexible.put_u8(0x05); // drag byte
+        flexible.put_u8(150); // gravity: 150/10 - 10 = 5.0
+        flexible.put_u8(20); // wind: 20/10 = 2.0
+        flexible.put_vector3(&vec3(1.0, 0.0, 0.0));
+
+        let mut light = Writer::new();
+        light.bytes(&[10, 20, 30, 255]);
+        light.put_f32(5.0);
+        light.put_f32(0.1);
+        light.put_f32(0.75);
+
+        let mut sculpt = Writer::new();
+        sculpt.put_uuid(sculpt_tex);
+        sculpt.put_u8(0x05); // LL_SCULPT_TYPE_MESH
+
+        let mut extended = Writer::new();
+        extended.put_u32(0x0000_0001);
+
+        let mut render = Writer::new();
+        render.put_u8(1); // one entry
+        render.put_u8(3); // face 3
+        render.put_uuid(mat_id);
+
+        let mut probe = Writer::new();
+        probe.put_f32(0.5);
+        probe.put_f32(2.0);
+        probe.put_u8(0x05); // box | mirror
+
+        let mut extra = Writer::new();
+        extra.put_u8(6);
+        push_extra_param(&mut extra, 0x10, &flexible.into_bytes())?;
+        push_extra_param(&mut extra, 0x20, &light.into_bytes())?;
+        push_extra_param(&mut extra, 0x30, &sculpt.into_bytes())?;
+        push_extra_param(&mut extra, 0x70, &extended.into_bytes())?;
+        push_extra_param(&mut extra, 0x80, &render.into_bytes())?;
+        push_extra_param(&mut extra, 0x90, &probe.into_bytes())?;
+        let extra_params = extra.into_bytes();
+
+        let AnyMessage::ObjectUpdate(mut update) = object_update(300, 0xBEEF, zero_vec()) else {
+            return Err("expected ObjectUpdate".into());
+        };
+        if let Some(block) = update.object_data.first_mut() {
+            block.extra_params = extra_params;
+        }
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&AnyMessage::ObjectUpdate(update), 5, true)?,
+            now,
+        )?;
+
+        let events = drain_events(&mut session);
+        let Some(Event::ObjectAdded(object)) =
+            events.iter().find(|e| matches!(e, Event::ObjectAdded(_)))
+        else {
+            return Err(format!("expected ObjectAdded, got {events:?}").into());
+        };
+        let extra = &object.extra;
+
+        let flexible = extra.flexible.as_ref().ok_or("expected flexi")?;
+        assert!((flexible.gravity - 5.0).abs() < f32::EPSILON);
+        assert!((flexible.wind_sensitivity - 2.0).abs() < f32::EPSILON);
+        assert_eq!(flexible.user_force, vec3(1.0, 0.0, 0.0));
+
+        let light = extra.light.ok_or("expected light")?;
+        assert_eq!(light.color, [10, 20, 30, 255]);
+        assert!((light.radius - 5.0).abs() < f32::EPSILON);
+
+        let sculpt = extra.sculpt.ok_or("expected sculpt")?;
+        assert_eq!(sculpt.texture, sculpt_tex);
+        assert_eq!(sculpt.sculpt_type, 0x05);
+
+        assert_eq!(
+            extra.extended_mesh.ok_or("expected extended mesh")?.flags,
+            1
+        );
+
+        let material = extra.render_material.first().ok_or("expected material")?;
+        assert_eq!(material.face, 3);
+        assert_eq!(material.material_id, mat_id);
+
+        let probe = extra.reflection_probe.ok_or("expected probe")?;
+        assert!((probe.ambiance - 0.5).abs() < f32::EPSILON);
+        assert!(probe.is_box);
+        assert!(!probe.is_dynamic);
+        assert!(probe.is_mirror);
         Ok(())
     }
 

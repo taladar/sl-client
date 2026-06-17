@@ -7,6 +7,7 @@ mod field;
 mod header;
 mod llsd;
 mod login;
+mod material;
 mod message;
 /// Generated LLUDP message types and their (de)serialization, produced at build
 /// time from the vendored `message_template.msg`.
@@ -31,6 +32,11 @@ pub use llsd::{
 pub use login::{
     BuddyListEntry, LoginFailure, LoginParseError, LoginRequest, LoginResponse, LoginSuccess,
     MfaChallenge, SkeletonFolder, build_login_request, parse_login_response, password_hash,
+};
+pub use material::{
+    GLTF_MATERIAL_OVERRIDE_METHOD, GltfMaterialOverride, LegacyMaterial, MaterialOverrideUpdate,
+    RenderMaterialEntry, build_modify_material_params_request, build_render_materials_request,
+    parse_gltf_material_override, parse_render_materials_response,
 };
 pub use message::{Message, MessageId};
 pub use messages::AnyMessage;

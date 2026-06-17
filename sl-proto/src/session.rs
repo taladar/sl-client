@@ -161,9 +161,9 @@ use sl_wire::messages::{
     SetGroupContributionAgentDataBlock, SetGroupContributionDataBlock,
 };
 use sl_wire::{
-    AnyMessage, ControlFlags, Llsd, MessageId, ObjectMediaResponse, PacketFlags, Reader,
-    SkeletonFolder, WireError, Writer, build_login_request, encode_datagram, parse_datagram,
-    zero_decode,
+    AnyMessage, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd, MessageId, ObjectMediaResponse,
+    PacketFlags, Reader, SkeletonFolder, WireError, Writer, build_login_request, encode_datagram,
+    parse_datagram, parse_gltf_material_override, zero_decode,
 };
 use uuid::Uuid;
 
@@ -177,14 +177,14 @@ use crate::types::{
     GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, ImageCodec,
     InstantMessage, InventoryFolder, InventoryItem, LoadUrlRequest, LoginHttpRequest, LoginParams,
     MapItem, MapItemType, MapRegionInfo, Material, Maturity, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectFlagSettings,
-    ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
-    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType,
-    ParcelUpdate, PermissionField, PlayingAnimation, PrimShape, ProductType, RegionIdentity,
-    RegionInfoUpdate, RegionLimits, Reliability, SaleType, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType,
-    TerrainPatch, Texture, Throttle, TransferStatus, Transmit, Wearable, WearableType,
-    avatar_texture, grid_to_handle, handle_to_grid,
+    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectExtraParams,
+    ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessScope, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo,
+    ParcelReturnType, ParcelUpdate, PermissionField, PlayingAnimation, PrimShape, ProductType,
+    RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, SaleType, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload,
+    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, Wearable,
+    WearableType, avatar_texture, grid_to_handle, handle_to_grid,
 };
 use crate::{appearance, types::AvatarAppearance, types::AvatarAttachment};
 
@@ -321,6 +321,26 @@ pub const CAP_OBJECT_MEDIA: &str = "ObjectMedia";
 /// [`CAP_OBJECT_MEDIA`] GET) rather than replying with media data.
 pub const CAP_OBJECT_MEDIA_NAVIGATE: &str = "ObjectMediaNavigate";
 
+/// The HTTP capability for the legacy (normal/specular) **materials** surface
+/// (`RenderMaterials`): a POST of a `{ "Zipped": <binary> }` map whose binary is
+/// the zlib-compressed binary-LLSD array of the material ids to fetch. The
+/// simulator replies with the matching materials (decoded into
+/// [`Event::RenderMaterials`]). This is the path stock OpenSim implements.
+/// Driven by the runtimes' `RequestRenderMaterials` command.
+pub const CAP_RENDER_MATERIALS: &str = "RenderMaterials";
+
+/// The HTTP capability for setting **GLTF (PBR) materials** on object faces
+/// (`ModifyMaterialParams`): a POST of an array of `{ object_id, side,
+/// gltf_json?, asset_id? }` maps. Driven by the runtimes' `ModifyMaterialParams`
+/// command; the `{ success, message }` reply is decoded by
+/// [`Session::handle_caps_event`] into [`Event::MaterialParamsResult`].
+pub const CAP_MODIFY_MATERIAL_PARAMS: &str = "ModifyMaterialParams";
+
+/// The HTTP capability for replacing the asset of an existing **material**
+/// inventory item (`UpdateMaterialAgentInventory`). Two-step uploader carrying
+/// the `item_id` (see [`AssetType::update_item_cap`](crate::AssetType::update_item_cap)).
+pub const CAP_UPDATE_MATERIAL_AGENT_INVENTORY: &str = "UpdateMaterialAgentInventory";
+
 /// The capability names the client requests from the region seed. A driver POSTs
 /// these to the seed URL to obtain the capability map, then uses `EventQueueGet`
 /// for the event-queue long-poll, [`CAP_FETCH_INVENTORY`] for inventory fetches,
@@ -346,6 +366,9 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
     CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE,
+    CAP_RENDER_MATERIALS,
+    CAP_MODIFY_MATERIAL_PARAMS,
+    CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
 ];
 
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
@@ -3115,6 +3138,18 @@ impl Session {
                     });
                 }
             }
+            // The reply to a `ModifyMaterialParams` POST (setting a GLTF material
+            // on object faces): a `{ success, message }` status map.
+            CAP_MODIFY_MATERIAL_PARAMS => {
+                let success = body.get("success").and_then(Llsd::as_bool).unwrap_or(false);
+                let message = body
+                    .get("message")
+                    .and_then(Llsd::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                self.events
+                    .push_back(Event::MaterialParamsResult { success, message });
+            }
             _ => {}
         }
         Ok(())
@@ -3565,6 +3600,22 @@ impl Session {
             }
             AnyMessage::LayerData(layer) => {
                 self.dispatch_terrain(from, &layer.layer_data.data);
+            }
+            // A GLTF (PBR) material override for an object in this sim, pushed as
+            // a `GenericStreamingMessage`. Only the override method is ours;
+            // other streaming methods are ignored (but still consumed here).
+            AnyMessage::GenericStreamingMessage(message)
+                if message.method_data.method == GLTF_MATERIAL_OVERRIDE_METHOD =>
+            {
+                if let Some(decoded) = parse_gltf_material_override(&message.data_block.data) {
+                    let region_handle = self.regions.get(&from).copied().unwrap_or(0);
+                    self.events.push_back(Event::GltfMaterialOverride {
+                        region_handle,
+                        local_id: decoded.local_id,
+                        faces: decoded.faces,
+                        overrides: decoded.overrides,
+                    });
+                }
             }
             _ => return false,
         }
@@ -8109,6 +8160,7 @@ fn object_from_full_update(block: &ObjectUpdateObjectDataBlock, region_handle: u
         name_value: trimmed_string(&block.name_value),
         media_url: trimmed_string(&block.media_url),
         texture_entry: block.texture_entry.clone(),
+        extra: crate::extra_params::decode_extra_params(&block.extra_params),
         extra_params: block.extra_params.clone(),
         properties: None,
     }
@@ -8193,6 +8245,7 @@ fn compressed_object(blob: &[u8], region_handle: u64, update_flags: u32) -> Opti
         name_value: String::new(),
         media_url,
         texture_entry: Vec::new(),
+        extra: ObjectExtraParams::default(),
         extra_params: Vec::new(),
         properties: None,
     })

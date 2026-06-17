@@ -211,6 +211,9 @@ fn on_events(
             | SlSessionEvent::ParcelMediaCommand { .. }
             | SlSessionEvent::ParcelMediaUpdate(_)
             | SlSessionEvent::ObjectMedia { .. }
+            | SlSessionEvent::GltfMaterialOverride { .. }
+            | SlSessionEvent::RenderMaterials(_)
+            | SlSessionEvent::MaterialParamsResult { .. }
             | SlSessionEvent::NeighborDiscovered(_)
             | SlSessionEvent::NeighborSeed { .. }
             | SlSessionEvent::MapBlock(_)

@@ -13,15 +13,17 @@ use std::collections::HashMap;
 
 use sl_proto::{
     CAP_FETCH_INVENTORY, CAP_GET_ASSET, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE,
-    CAP_GROUP_MEMBER_DATA, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
-    CAP_OBJECT_MEDIA_NAVIGATE, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPLOAD_BAKED_TEXTURE, Llsd,
-    REQUESTED_CAPABILITIES, Session, build_event_queue_request, build_fetch_inventory_request,
-    build_group_member_data_request, build_new_file_agent_inventory_request,
+    CAP_GROUP_MEMBER_DATA, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
+    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_RENDER_MATERIALS,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPLOAD_BAKED_TEXTURE, Llsd, REQUESTED_CAPABILITIES, Session,
+    build_event_queue_request, build_fetch_inventory_request, build_group_member_data_request,
+    build_modify_material_params_request, build_new_file_agent_inventory_request,
     build_object_media_get_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_seed_request, build_update_avatar_appearance_request,
-    build_update_item_asset_request, build_upload_baked_texture_request, j2c,
-    parse_asset_upload_response, parse_event_queue_response, parse_llsd_xml, parse_login_response,
-    parse_seed_response,
+    build_object_media_update_request, build_render_materials_request, build_seed_request,
+    build_update_avatar_appearance_request, build_update_item_asset_request,
+    build_upload_baked_texture_request, j2c, parse_asset_upload_response,
+    parse_event_queue_response, parse_llsd_xml, parse_login_response,
+    parse_render_materials_response, parse_seed_response,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
@@ -30,22 +32,24 @@ pub use sl_proto::{
     ActiveGroup, AnyMessage, Asset, AssetType, AvatarGroupMembership, AvatarInterests, AvatarPick,
     AvatarProperties, ChatAudible, ChatMessage, ChatSourceType, ChatType, ClickAction,
     ControlFlags, CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData,
-    EstateAccessDelta, EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupMember,
-    GroupMembership, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog,
-    ImageCodec, InstantMessage, InventoryFolder, InventoryItem, InventoryType, LindenAmount,
+    EstateAccessDelta, EstateAccessKind, EstateInfo, Event, ExtendedMesh, FlexibleData, Friend,
+    FriendRights, GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice, GroupProfile,
+    GroupRole, GroupRoleMember, GroupTitle, ImDialog, ImageCodec, InstantMessage, InventoryFolder,
+    InventoryItem, InventoryType, LegacyMaterial, LightData, LightImage, LindenAmount,
     LoadUrlRequest, LoginParams, LoginRequest, LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE,
     MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
-    Material, Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectFlagSettings,
-    ObjectMediaResponse, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
-    PlayingAnimation, PrimShape, ProductType, RegionFlags, RegionIdentity, RegionInfoUpdate,
-    RegionLimits, Reliability, Rotation, SaleType, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType,
-    TerrainPatch, Texture, TextureEntry, TextureFace, Throttle, TransferStatus, Transmit, Uuid,
-    Vector, Wearable, WearableType, avatar_texture, decode_texture_entry, grid_to_handle,
-    handle_to_global, handle_to_grid, pcode, sim_access,
+    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge, MoneyBalance,
+    MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object,
+    ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectProperties,
+    ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
+    PermissionField, PlayingAnimation, PrimShape, ProductType, ReflectionProbe, RegionFlags,
+    RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry,
+    RenderMaterialRef, Rotation, SaleType, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTeleportRequest, SculptData, SoundFlags, SoundPreload,
+    TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace, Throttle, TransferStatus,
+    Transmit, Uuid, Vector, Wearable, WearableType, avatar_texture, decode_texture_entry,
+    grid_to_handle, handle_to_global, handle_to_grid, pcode, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -884,6 +888,22 @@ pub enum Command {
         /// The URL to navigate that face's media to.
         url: String,
     },
+    /// Fetch the legacy (normal/specular) materials for `material_ids` over the
+    /// `RenderMaterials` capability (the OpenSim-supported path). The result
+    /// arrives as [`Event::RenderMaterials`]. The ids are the per-face
+    /// `TextureEntry` material ids carried by scene objects.
+    RequestRenderMaterials {
+        /// The material ids to fetch.
+        material_ids: Vec<Uuid>,
+    },
+    /// Set GLTF (PBR) materials on object faces over the `ModifyMaterialParams`
+    /// capability. Each update applies an opaque `gltf_json` override and/or a
+    /// stored material `asset_id` to one face (`side`, or `-1` for all). The
+    /// `{ success, message }` reply arrives as [`Event::MaterialParamsResult`].
+    ModifyMaterialParams {
+        /// The per-face material assignments to apply.
+        updates: Vec<MaterialOverrideUpdate>,
+    },
     /// Begin a clean logout.
     Logout,
 }
@@ -1460,6 +1480,17 @@ impl Client {
                                 tokio::spawn(post_object_media(url, body, http.clone()));
                             }
                         }
+                        Some(Command::RequestRenderMaterials { material_ids }) => {
+                            if let Some(url) = caps.get(CAP_RENDER_MATERIALS).cloned() {
+                                tokio::spawn(fetch_render_materials(url, material_ids, http.clone(), events.clone()));
+                            }
+                        }
+                        Some(Command::ModifyMaterialParams { updates }) => {
+                            if let Some(url) = caps.get(CAP_MODIFY_MATERIAL_PARAMS).cloned() {
+                                let body = build_modify_material_params_request(&updates);
+                                tokio::spawn(post_modify_material_params(url, body, http.clone(), caps_tx.clone()));
+                            }
+                        }
                         Some(Command::Logout) | None => {
                             self.session.initiate_logout(Instant::now());
                         }
@@ -1615,6 +1646,61 @@ async fn post_object_media(cap_url: String, body: String, http: ReqwestClient) {
         .send()
         .await
         .ok();
+}
+
+/// POSTs a `RenderMaterials` request for `material_ids` (the zipped binary-LLSD
+/// form), decoding the zipped reply into the legacy materials and surfacing them
+/// as an [`Event::RenderMaterials`]. Best-effort: a transport or decode failure
+/// yields an empty list.
+async fn fetch_render_materials(
+    cap_url: String,
+    material_ids: Vec<Uuid>,
+    http: ReqwestClient,
+    events: mpsc::Sender<Event>,
+) {
+    let body = build_render_materials_request(&material_ids);
+    let materials = match http
+        .post(&cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+    {
+        Ok(response) => match response.text().await {
+            Ok(text) => parse_render_materials_response(&text),
+            Err(_error) => Vec::new(),
+        },
+        Err(_error) => Vec::new(),
+    };
+    events.send(Event::RenderMaterials(materials)).await.ok();
+}
+
+/// POSTs a `ModifyMaterialParams` request, forwarding the `{ success, message }`
+/// reply back over `caps_tx` to be surfaced as an [`Event::MaterialParamsResult`].
+async fn post_modify_material_params(
+    cap_url: String,
+    body: String,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let Ok(response) = http
+        .post(&cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+    else {
+        return;
+    };
+    let Ok(text) = response.text().await else {
+        return;
+    };
+    if let Ok(llsd) = parse_llsd_xml(&text) {
+        caps_tx
+            .send((CAP_MODIFY_MATERIAL_PARAMS.to_owned(), llsd))
+            .await
+            .ok();
+    }
 }
 
 /// POSTs the `UpdateAvatarAppearance` capability for `cof_version` (the modern
