@@ -204,6 +204,8 @@ fn on_events(
             | SlSessionEvent::AvatarNotes { .. }
             | SlSessionEvent::RegionInfoHandshake(_)
             | SlSessionEvent::RegionLimits(_)
+            | SlSessionEvent::MoneyBalance(_)
+            | SlSessionEvent::EconomyData(_)
             | SlSessionEvent::ParcelProperties(_)
             | SlSessionEvent::ParcelOverlay(_)
             | SlSessionEvent::NeighborDiscovered(_)

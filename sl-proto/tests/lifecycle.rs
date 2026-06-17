@@ -10,8 +10,8 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         ChatAudible, ChatSourceType, ChatType, ControlFlags, CreateGroupParams, DisconnectReason,
-        Event, FriendRights, ImDialog, LoginParams, Maturity, MuteFlags, MuteType, ProductType,
-        Reliability, ScriptPermissions, Session, Transmit,
+        Event, FriendRights, ImDialog, LindenAmount, LoginParams, Maturity, MoneyTransactionType,
+        MuteFlags, MuteType, ProductType, Reliability, ScriptPermissions, Session, Transmit,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -25,9 +25,9 @@ mod test {
         AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock, ChangeUserRights,
         ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock, ChatFromSimulator,
         ChatFromSimulatorChatDataBlock, CrossedRegion, CrossedRegionAgentDataBlock,
-        CrossedRegionInfoBlock, CrossedRegionRegionDataBlock, GenericMessage,
-        GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GroupMembersReply,
-        GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
+        CrossedRegionInfoBlock, CrossedRegionRegionDataBlock, EconomyData, EconomyDataInfoBlock,
+        GenericMessage, GenericMessageAgentDataBlock, GenericMessageMethodDataBlock,
+        GroupMembersReply, GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
         GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
         GroupProfileReplyGroupDataBlock, ImprovedInstantMessage,
         ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
@@ -35,6 +35,7 @@ mod test {
         InventoryDescendentsAgentDataBlock, InventoryDescendentsFolderDataBlock,
         InventoryDescendentsItemDataBlock, LogoutRequest, LogoutRequestAgentDataBlock,
         MapBlockReply, MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock,
+        MoneyBalanceReply, MoneyBalanceReplyMoneyDataBlock, MoneyBalanceReplyTransactionInfoBlock,
         MuteListUpdate, MuteListUpdateMuteDataBlock, OfflineNotification,
         OfflineNotificationAgentBlockBlock, OnlineNotification, OnlineNotificationAgentBlockBlock,
         ParcelProperties, ParcelPropertiesAgeVerificationBlockBlock,
@@ -2802,6 +2803,196 @@ mod test {
         assert_eq!(parcel.parcel_data.sequence_id, 77);
         assert_eq!(parcel.parcel_data.east.to_bits(), 64.0_f32.to_bits());
         assert_eq!(parcel.parcel_data.north.to_bits(), 48.0_f32.to_bits());
+        Ok(())
+    }
+
+    #[test]
+    fn money_requests_inject_agent_and_payment() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.request_money_balance(now)?;
+        session.request_economy_data(now)?;
+        session.send_money_transfer(
+            uuid::Uuid::from_u128(0xABCD),
+            LindenAmount(250),
+            MoneyTransactionType::PayObject,
+            "tip",
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+
+        let balance = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::MoneyBalanceRequest(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("expected a MoneyBalanceRequest")?;
+        assert_eq!(balance.agent_data.agent_id, uuid::Uuid::from_u128(1));
+        assert_eq!(balance.agent_data.session_id, uuid::Uuid::from_u128(2));
+
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::EconomyDataRequest(_))),
+            "expected an EconomyDataRequest"
+        );
+
+        let transfer = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::MoneyTransferRequest(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("expected a MoneyTransferRequest")?;
+        // The source is the agent; the type/amount/description match the request.
+        assert_eq!(transfer.money_data.source_id, uuid::Uuid::from_u128(1));
+        assert_eq!(transfer.money_data.dest_id, uuid::Uuid::from_u128(0xABCD));
+        assert_eq!(transfer.money_data.amount, 250);
+        assert_eq!(transfer.money_data.transaction_type, 5008);
+        assert_eq!(trimmed(&transfer.money_data.description), "tip");
+        Ok(())
+    }
+
+    #[test]
+    fn money_balance_reply_surfaces_balance() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // A plain balance poll: the TransactionInfo block is all-zero.
+        let reply = AnyMessage::MoneyBalanceReply(MoneyBalanceReply {
+            money_data: MoneyBalanceReplyMoneyDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                transaction_id: uuid::Uuid::nil(),
+                transaction_success: true,
+                money_balance: 1234,
+                square_meters_credit: 512,
+                square_meters_committed: 128,
+                description: Vec::new(),
+            },
+            transaction_info: MoneyBalanceReplyTransactionInfoBlock {
+                transaction_type: 0,
+                source_id: uuid::Uuid::nil(),
+                is_source_group: false,
+                dest_id: uuid::Uuid::nil(),
+                is_dest_group: false,
+                amount: 0,
+                item_description: Vec::new(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&reply, 9, true)?, now)?;
+
+        let balance = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::MoneyBalance(balance) => Some(balance),
+                _ => None,
+            })
+            .ok_or("expected a MoneyBalance event")?;
+        assert_eq!(balance.agent_id, uuid::Uuid::from_u128(1));
+        assert!(balance.success);
+        assert_eq!(balance.balance, LindenAmount(1234));
+        assert_eq!(balance.square_meters_credit, 512);
+        assert_eq!(balance.square_meters_committed, 128);
+        // A plain poll carries no transaction metadata.
+        assert!(balance.transaction.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn money_balance_reply_surfaces_transaction_details() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // A reply after a real payment carries a non-zero TransactionInfo block.
+        let reply = AnyMessage::MoneyBalanceReply(MoneyBalanceReply {
+            money_data: MoneyBalanceReplyMoneyDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                transaction_id: uuid::Uuid::nil(),
+                transaction_success: true,
+                money_balance: 750,
+                square_meters_credit: 0,
+                square_meters_committed: 0,
+                description: b"Object: tip jar\0".to_vec(),
+            },
+            transaction_info: MoneyBalanceReplyTransactionInfoBlock {
+                transaction_type: 5008,
+                source_id: uuid::Uuid::from_u128(1),
+                is_source_group: false,
+                dest_id: uuid::Uuid::from_u128(0xBEEF),
+                is_dest_group: false,
+                amount: 250,
+                item_description: b"tip jar\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&reply, 9, true)?, now)?;
+
+        let balance = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::MoneyBalance(balance) => Some(balance),
+                _ => None,
+            })
+            .ok_or("expected a MoneyBalance event")?;
+        assert_eq!(balance.balance, LindenAmount(750));
+        let transaction = balance.transaction.ok_or("expected transaction details")?;
+        assert_eq!(
+            MoneyTransactionType::from_i32(transaction.transaction_type),
+            MoneyTransactionType::PayObject
+        );
+        assert_eq!(transaction.source_id, uuid::Uuid::from_u128(1));
+        assert_eq!(transaction.dest_id, uuid::Uuid::from_u128(0xBEEF));
+        assert_eq!(transaction.amount, LindenAmount(250));
+        assert_eq!(transaction.item_description, "tip jar");
+        Ok(())
+    }
+
+    #[test]
+    fn economy_data_surfaces_prices() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let data = AnyMessage::EconomyData(EconomyData {
+            info: EconomyDataInfoBlock {
+                object_capacity: 15000,
+                object_count: 1200,
+                price_energy_unit: 100,
+                price_object_claim: 10,
+                price_public_object_decay: 4,
+                price_public_object_delete: 4,
+                price_parcel_claim: 1,
+                price_parcel_claim_factor: 1.0,
+                price_upload: 0,
+                price_rent_light: 5,
+                teleport_min_price: 2,
+                teleport_price_exponent: 2.0,
+                energy_efficiency: 1.0,
+                price_object_rent: 1.0,
+                price_object_scale_factor: 10.0,
+                price_parcel_rent: 1,
+                price_group_create: 0,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&data, 9, true)?, now)?;
+
+        let economy = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::EconomyData(data) => Some(data),
+                _ => None,
+            })
+            .ok_or("expected an EconomyData event")?;
+        assert_eq!(economy.object_capacity, 15000);
+        assert_eq!(economy.price_upload, 0);
+        assert_eq!(economy.price_energy_unit, 100);
+        assert_eq!(economy.teleport_min_price, 2);
         Ok(())
     }
 

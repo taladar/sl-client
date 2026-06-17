@@ -23,14 +23,14 @@ use sl_proto::{
 pub use sl_proto::{
     ActiveGroup, AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,
     ChatAudible, ChatMessage, ChatSourceType, ChatType, ControlFlags, CreateGroupParams,
-    DisconnectReason, Event, Friend, FriendRights, GroupMember, GroupMembership, GroupNotice,
-    GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
-    InventoryFolder, InventoryItem, LoadUrlRequest, LoginParams, LoginRequest, LoginResponse,
-    MapRegionInfo, Maturity, MfaChallenge, MuteEntry, MuteFlags, MuteType, NeighborInfo,
-    ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity,
-    RegionLimits, Reliability, Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, Transmit, Uuid, Vector, grid_to_handle, handle_to_global,
-    handle_to_grid, sim_access,
+    DisconnectReason, EconomyData, Event, Friend, FriendRights, GroupMember, GroupMembership,
+    GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
+    InventoryFolder, InventoryItem, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest,
+    LoginResponse, MapRegionInfo, Maturity, MfaChallenge, MoneyBalance, MoneyTransaction,
+    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, ParcelFlags, ParcelInfo,
+    ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity, RegionLimits, Reliability,
+    Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
+    Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -330,6 +330,23 @@ pub enum Command {
         /// A sequence id echoed back in the reply for matching.
         sequence_id: i32,
     },
+    /// Request the agent's L$ balance (`MoneyBalanceRequest`); the reply arrives
+    /// as [`Event::MoneyBalance`].
+    RequestMoneyBalance,
+    /// Request the grid's economy data (`EconomyDataRequest`); the reply arrives
+    /// as [`Event::EconomyData`].
+    RequestEconomyData,
+    /// Pay L$ to an avatar or object (`MoneyTransferRequest`).
+    SendMoneyTransfer {
+        /// The payee (avatar or object id).
+        dest: Uuid,
+        /// The L$ amount to pay.
+        amount: LindenAmount,
+        /// The kind of transaction (e.g. gift, pay-object).
+        kind: MoneyTransactionType,
+        /// A description annotating the transaction.
+        description: String,
+    },
     /// Set the draw distance advertised in keep-alive `AgentUpdate`s.
     SetDrawDistance(f32),
     /// Request world-map blocks for a grid-coordinate rectangle (region
@@ -613,6 +630,17 @@ impl Client {
                         }
                         Some(Command::RequestRegionInfo) => {
                             self.session.request_region_info(Instant::now())?;
+                        }
+                        Some(Command::RequestMoneyBalance) => {
+                            self.session.request_money_balance(Instant::now())?;
+                        }
+                        Some(Command::RequestEconomyData) => {
+                            self.session.request_economy_data(Instant::now())?;
+                        }
+                        Some(Command::SendMoneyTransfer { dest, amount, kind, description }) => {
+                            self.session.send_money_transfer(
+                                dest, amount, kind, &description, Instant::now(),
+                            )?;
                         }
                         Some(Command::RequestParcelProperties { west, south, east, north, sequence_id }) => {
                             self.session.request_parcel_properties(

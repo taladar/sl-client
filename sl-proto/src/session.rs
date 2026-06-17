@@ -6,6 +6,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use sl_types::lsl::{Rotation, Vector};
+use sl_types::money::LindenAmount;
 use sl_wire::messages::{
     AcceptFriendship, AcceptFriendshipAgentDataBlock, AcceptFriendshipFolderDataBlock,
     AcceptFriendshipTransactionBlockBlock, AgentRequestSit, AgentRequestSitAgentDataBlock,
@@ -49,6 +50,12 @@ use sl_wire::messages::{
     RequestXferXferIDBlock, UpdateMuteListEntry, UpdateMuteListEntryAgentDataBlock,
     UpdateMuteListEntryMuteDataBlock,
 };
+// Money / economy (#11): the outgoing balance/economy/transfer requests.
+use sl_wire::messages::{
+    EconomyDataRequest, MoneyBalanceRequest, MoneyBalanceRequestAgentDataBlock,
+    MoneyBalanceRequestMoneyDataBlock, MoneyTransferRequest, MoneyTransferRequestAgentDataBlock,
+    MoneyTransferRequestMoneyDataBlock,
+};
 // Group support (#7): incoming reply blocks consumed by the converter helpers.
 use sl_wire::messages::{
     AgentDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
@@ -83,13 +90,14 @@ use uuid::Uuid;
 use crate::error::Error;
 use crate::types::{
     ActiveGroup, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
-    ChatMessage, ChatSourceType, ChatType, CreateGroupParams, DisconnectReason, Event, Friend,
-    FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
+    ChatMessage, ChatSourceType, ChatType, CreateGroupParams, DisconnectReason, EconomyData, Event,
+    Friend, FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
     GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    LoadUrlRequest, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, MuteEntry, MuteFlags,
-    MuteType, NeighborInfo, ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity,
-    RegionLimits, Reliability, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, Transmit, grid_to_handle, handle_to_grid,
+    LoadUrlRequest, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, MoneyBalance,
+    MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo,
+    ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit,
+    grid_to_handle, handle_to_grid,
 };
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
@@ -1139,6 +1147,58 @@ impl Circuit {
         self.send(&message, Reliability::Reliable, now)
     }
 
+    /// Queues a `MoneyBalanceRequest` reliably. The transaction id is nil: a
+    /// plain balance poll does not need to correlate a specific transaction.
+    fn send_money_balance_request(&mut self, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::MoneyBalanceRequest(MoneyBalanceRequest {
+            agent_data: MoneyBalanceRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            money_data: MoneyBalanceRequestMoneyDataBlock {
+                transaction_id: Uuid::nil(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `EconomyDataRequest` reliably (an empty message).
+    fn send_economy_data_request(&mut self, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::EconomyDataRequest(EconomyDataRequest {});
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `MoneyTransferRequest` reliably: pay `amount` L$ to `dest` with
+    /// the given transaction type and description. The source is this agent.
+    fn send_money_transfer(
+        &mut self,
+        dest: Uuid,
+        amount: i32,
+        transaction_type: i32,
+        description: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::MoneyTransferRequest(MoneyTransferRequest {
+            agent_data: MoneyTransferRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            money_data: MoneyTransferRequestMoneyDataBlock {
+                source_id: self.agent_id,
+                dest_id: dest,
+                // Flags and the aggregate-permission hints are unused for a plain
+                // avatar/object payment; the simulator ignores them.
+                flags: 0,
+                amount,
+                aggregate_perm_next_owner: 0,
+                aggregate_perm_inventory: 0,
+                transaction_type,
+                description: with_nul(description),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
     /// Queues a `ParcelPropertiesRequest` reliably for the given metre rectangle.
     fn send_parcel_properties_request(
         &mut self,
@@ -1826,6 +1886,14 @@ impl Session {
                     &info.region_info,
                     &info.region_info2,
                 )));
+            }
+            AnyMessage::MoneyBalanceReply(reply) => {
+                self.events
+                    .push_back(Event::MoneyBalance(money_balance(reply)));
+            }
+            AnyMessage::EconomyData(data) => {
+                self.events
+                    .push_back(Event::EconomyData(Box::new(economy_data(data))));
             }
             AnyMessage::ParcelProperties(props) => {
                 self.events
@@ -3160,6 +3228,59 @@ impl Session {
         Ok(())
     }
 
+    /// Requests the agent's current L$ balance via `MoneyBalanceRequest`. The
+    /// reply arrives as an [`Event::MoneyBalance`]. The simulator also pushes a
+    /// `MoneyBalanceReply` unsolicited whenever a transaction changes the balance.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_money_balance(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_money_balance_request(now)?;
+        Ok(())
+    }
+
+    /// Requests the grid's economy data (upload/claim/group prices and region
+    /// object capacity) via `EconomyDataRequest`. The reply arrives as an
+    /// [`Event::EconomyData`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_economy_data(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_economy_data_request(now)?;
+        Ok(())
+    }
+
+    /// Pays `amount` L$ to another avatar or object via `MoneyTransferRequest`.
+    /// `kind` selects the transaction type (e.g. [`MoneyTransactionType::Gift`]
+    /// for a direct avatar payment, [`MoneyTransactionType::PayObject`] for a
+    /// scripted object); `description` annotates the transaction. The grid pushes
+    /// a fresh [`Event::MoneyBalance`] once the transfer settles. The amount is
+    /// clamped to the `i32` wire range.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn send_money_transfer(
+        &mut self,
+        dest: Uuid,
+        amount: LindenAmount,
+        kind: MoneyTransactionType,
+        description: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let amount = i32::try_from(amount.0).unwrap_or(i32::MAX);
+        circuit.send_money_transfer(dest, amount, kind.to_i32(), description, now)?;
+        Ok(())
+    }
+
     /// Requests `ParcelProperties` for the parcel overlapping the given metre
     /// rectangle (region-local coordinates). `sequence_id` is echoed back in the
     /// reply ([`Event::ParcelProperties`]) so callers can match outstanding
@@ -3407,6 +3528,56 @@ fn region_limits(
         hard_max_objects: info2.hard_max_objects,
         region_flags: info.region_flags,
         maturity: Maturity::from_sim_access(info.sim_access),
+    }
+}
+
+/// Builds a [`MoneyBalance`] from a `MoneyBalanceReply`. The optional
+/// `TransactionInfo` block is all-zero for a plain balance poll; it is surfaced
+/// only when it describes a real transaction (non-zero type).
+fn money_balance(reply: &sl_wire::messages::MoneyBalanceReply) -> MoneyBalance {
+    let data = &reply.money_data;
+    let info = &reply.transaction_info;
+    let transaction = (info.transaction_type != 0).then(|| MoneyTransaction {
+        transaction_type: info.transaction_type,
+        source_id: info.source_id,
+        source_is_group: info.is_source_group,
+        dest_id: info.dest_id,
+        dest_is_group: info.is_dest_group,
+        amount: LindenAmount(u64::try_from(info.amount).unwrap_or(0)),
+        item_description: trimmed_string(&info.item_description),
+    });
+    MoneyBalance {
+        agent_id: data.agent_id,
+        success: data.transaction_success,
+        balance: LindenAmount(u64::try_from(data.money_balance).unwrap_or(0)),
+        square_meters_credit: data.square_meters_credit,
+        square_meters_committed: data.square_meters_committed,
+        description: trimmed_string(&data.description),
+        transaction,
+    }
+}
+
+/// Builds [`EconomyData`] from an `EconomyData` message's info block.
+const fn economy_data(data: &sl_wire::messages::EconomyData) -> EconomyData {
+    let info = &data.info;
+    EconomyData {
+        object_capacity: info.object_capacity,
+        object_count: info.object_count,
+        price_energy_unit: info.price_energy_unit,
+        price_object_claim: info.price_object_claim,
+        price_public_object_decay: info.price_public_object_decay,
+        price_public_object_delete: info.price_public_object_delete,
+        price_parcel_claim: info.price_parcel_claim,
+        price_parcel_claim_factor: info.price_parcel_claim_factor,
+        price_upload: info.price_upload,
+        price_rent_light: info.price_rent_light,
+        teleport_min_price: info.teleport_min_price,
+        teleport_price_exponent: info.teleport_price_exponent,
+        energy_efficiency: info.energy_efficiency,
+        price_object_rent: info.price_object_rent,
+        price_object_scale_factor: info.price_object_scale_factor,
+        price_parcel_rent: info.price_parcel_rent,
+        price_group_create: info.price_group_create,
     }
 }
 
