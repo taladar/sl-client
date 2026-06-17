@@ -26,11 +26,12 @@ pub use sl_proto::{
     DisconnectReason, EconomyData, Event, Friend, FriendRights, GroupMember, GroupMembership,
     GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
     InventoryFolder, InventoryItem, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest,
-    LoginResponse, MapRegionInfo, Maturity, MfaChallenge, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, ParcelFlags, ParcelInfo,
-    ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity, RegionLimits, Reliability,
-    Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
+    LoginResponse, MapItem, MapItemType, MapRegionInfo, Maturity, MfaChallenge, MoneyBalance,
+    MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo,
+    ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity,
+    RegionLimits, Reliability, Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest, Transmit, Uuid, Vector, grid_to_handle, handle_to_global,
+    handle_to_grid, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -361,6 +362,20 @@ pub enum Command {
         /// Maximum grid y (inclusive).
         max_y: u32,
     },
+    /// Search the world map for regions by name (`MapNameRequest`); matches
+    /// arrive as [`Event::MapBlock`].
+    RequestMapByName {
+        /// The region name (or prefix) to search for.
+        name: String,
+    },
+    /// Request world-map overlay items of a given type (`MapItemRequest`); the
+    /// reply arrives as [`Event::MapItems`].
+    RequestMapItems {
+        /// The kind of item to request (avatars, telehubs, land for sale, …).
+        item_type: MapItemType,
+        /// The target region handle (0 = the current region).
+        region_handle: u64,
+    },
     /// Begin a clean logout.
     Logout,
 }
@@ -652,6 +667,12 @@ impl Client {
                         }
                         Some(Command::RequestMapBlocks { min_x, max_x, min_y, max_y }) => {
                             self.session.request_map_blocks(min_x, max_x, min_y, max_y, Instant::now())?;
+                        }
+                        Some(Command::RequestMapByName { name }) => {
+                            self.session.request_map_by_name(&name, Instant::now())?;
+                        }
+                        Some(Command::RequestMapItems { item_type, region_handle }) => {
+                            self.session.request_map_items(item_type, region_handle, Instant::now())?;
                         }
                         Some(Command::Logout) | None => {
                             self.session.initiate_logout(Instant::now());

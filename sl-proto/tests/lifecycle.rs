@@ -10,8 +10,9 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         ChatAudible, ChatSourceType, ChatType, ControlFlags, CreateGroupParams, DisconnectReason,
-        Event, FriendRights, ImDialog, LindenAmount, LoginParams, Maturity, MoneyTransactionType,
-        MuteFlags, MuteType, ProductType, Reliability, ScriptPermissions, Session, Transmit,
+        Event, FriendRights, ImDialog, LindenAmount, LoginParams, MapItemType, Maturity,
+        MoneyTransactionType, MuteFlags, MuteType, ProductType, Reliability, ScriptPermissions,
+        Session, Transmit,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -35,13 +36,14 @@ mod test {
         InventoryDescendentsAgentDataBlock, InventoryDescendentsFolderDataBlock,
         InventoryDescendentsItemDataBlock, LogoutRequest, LogoutRequestAgentDataBlock,
         MapBlockReply, MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock,
-        MoneyBalanceReply, MoneyBalanceReplyMoneyDataBlock, MoneyBalanceReplyTransactionInfoBlock,
-        MuteListUpdate, MuteListUpdateMuteDataBlock, OfflineNotification,
-        OfflineNotificationAgentBlockBlock, OnlineNotification, OnlineNotificationAgentBlockBlock,
-        ParcelProperties, ParcelPropertiesAgeVerificationBlockBlock,
-        ParcelPropertiesParcelDataBlock, ParcelPropertiesParcelEnvironmentBlockBlock,
-        ParcelPropertiesRegionAllowAccessBlockBlock, RegionHandshake,
-        RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
+        MapItemReply, MapItemReplyAgentDataBlock, MapItemReplyDataBlock,
+        MapItemReplyRequestDataBlock, MoneyBalanceReply, MoneyBalanceReplyMoneyDataBlock,
+        MoneyBalanceReplyTransactionInfoBlock, MuteListUpdate, MuteListUpdateMuteDataBlock,
+        OfflineNotification, OfflineNotificationAgentBlockBlock, OnlineNotification,
+        OnlineNotificationAgentBlockBlock, ParcelProperties,
+        ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
+        ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
+        RegionHandshake, RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
         RegionHandshakeRegionInfoBlock, RegionInfo, RegionInfoAgentDataBlock,
         RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock, ScriptDialog,
         ScriptDialogButtonsBlock, ScriptDialogDataBlock, ScriptDialogOwnerDataBlock,
@@ -2993,6 +2995,99 @@ mod test {
         assert_eq!(economy.price_upload, 0);
         assert_eq!(economy.price_energy_unit, 100);
         assert_eq!(economy.teleport_min_price, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn map_name_and_item_requests_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.request_map_by_name("East Region", now)?;
+        session.request_map_items(MapItemType::AgentLocations, 0, now)?;
+        let sent = drain(&mut session)?;
+
+        let name = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::MapNameRequest(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("expected a MapNameRequest")?;
+        assert_eq!(name.agent_data.agent_id, uuid::Uuid::from_u128(1));
+        // The viewer's map-layer flag.
+        assert_eq!(name.agent_data.flags, 2);
+        assert_eq!(trimmed(&name.name_data.name), "East Region");
+
+        let item = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::MapItemRequest(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("expected a MapItemRequest")?;
+        assert_eq!(item.agent_data.flags, 2);
+        // AgentLocations is grid item type 6; 0 targets the current region.
+        assert_eq!(item.request_data.item_type, 6);
+        assert_eq!(item.request_data.region_handle, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn map_item_reply_surfaces_agent_locations() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Two avatar "green dots" in the region at grid (1000, 1000): global
+        // origin 256000, plus in-region offsets.
+        let reply = AnyMessage::MapItemReply(MapItemReply {
+            agent_data: MapItemReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                flags: 2,
+            },
+            request_data: MapItemReplyRequestDataBlock { item_type: 6 },
+            data: vec![
+                MapItemReplyDataBlock {
+                    x: 256_000 + 128,
+                    y: 256_000 + 64,
+                    id: uuid::Uuid::nil(),
+                    extra: 1,
+                    extra2: 0,
+                    name: b"hash\0".to_vec(),
+                },
+                MapItemReplyDataBlock {
+                    x: 256_000 + 200,
+                    y: 256_000 + 10,
+                    id: uuid::Uuid::nil(),
+                    extra: 1,
+                    extra2: 0,
+                    name: Vec::new(),
+                },
+            ],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&reply, 9, true)?, now)?;
+
+        let (item_type, items) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::MapItems { item_type, items } => Some((item_type, items)),
+                _ => None,
+            })
+            .ok_or("expected a MapItems event")?;
+        assert_eq!(item_type, MapItemType::AgentLocations);
+        assert_eq!(items.len(), 2);
+        let first = items.first().ok_or("expected at least one item")?;
+        assert_eq!(first.global_x, 256_128);
+        assert_eq!(first.global_y, 256_064);
+        // The region handle masks off the in-region offset; the locals recover it.
+        assert_eq!(first.region_handle(), 0x0003_E800_0003_E800);
+        assert_eq!(first.local_x(), 128);
+        assert_eq!(first.local_y(), 64);
+        assert_eq!(first.extra, 1);
+        assert_eq!(first.name, "hash");
         Ok(())
     }
 

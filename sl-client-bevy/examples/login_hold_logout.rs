@@ -210,6 +210,7 @@ fn on_events(
             | SlSessionEvent::ParcelOverlay(_)
             | SlSessionEvent::NeighborDiscovered(_)
             | SlSessionEvent::MapBlock(_)
+            | SlSessionEvent::MapItems { .. }
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal

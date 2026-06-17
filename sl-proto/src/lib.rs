@@ -11,11 +11,11 @@ pub use types::{
     ChatMessage, ChatSourceType, ChatType, CreateGroupParams, DisconnectReason, EconomyData, Event,
     Friend, FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
     GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    LoadUrlRequest, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, MoneyBalance,
-    MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo,
-    ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit,
-    grid_to_handle, handle_to_global, handle_to_grid,
+    LoadUrlRequest, LoginHttpRequest, LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity,
+    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
+    NeighborInfo, ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits,
+    Reliability, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
+    Transmit, grid_to_handle, handle_to_global, handle_to_grid,
 };
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,

@@ -29,11 +29,11 @@ pub use sl_proto::{
     DisconnectReason, EconomyData, Friend, FriendRights, GroupMember, GroupMembership, GroupNotice,
     GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
     InventoryFolder, InventoryItem, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest,
-    MapRegionInfo, Maturity, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
-    MuteEntry, MuteFlags, MuteType, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo,
-    ProductType, RegionFlags, RegionIdentity, RegionLimits, Reliability, Rotation, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit, Uuid, Vector,
-    grid_to_handle, handle_to_global, handle_to_grid, sim_access,
+    MapItem, MapItemType, MapRegionInfo, Maturity, MfaChallenge, MoneyBalance, MoneyTransaction,
+    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, ParcelFlags, ParcelInfo,
+    ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity, RegionLimits, Reliability,
+    Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
+    Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
@@ -369,6 +369,20 @@ pub enum SlCommand {
         min_y: u32,
         /// Maximum grid y (inclusive).
         max_y: u32,
+    },
+    /// Search the world map for regions by name (`MapNameRequest`); matches
+    /// arrive as [`SlSessionEvent::MapBlock`].
+    RequestMapByName {
+        /// The region name (or prefix) to search for.
+        name: String,
+    },
+    /// Request world-map overlay items of a given type (`MapItemRequest`); the
+    /// reply arrives as [`SlSessionEvent::MapItems`].
+    RequestMapItems {
+        /// The kind of item to request (avatars, telehubs, land for sale, …).
+        item_type: MapItemType,
+        /// The target region handle (0 = the current region).
+        region_handle: u64,
     },
     /// Begin a clean logout.
     Logout,
@@ -874,6 +888,17 @@ fn advance_running(
             } => {
                 session
                     .request_map_blocks(*min_x, *max_x, *min_y, *max_y, now)
+                    .ok();
+            }
+            SlCommand::RequestMapByName { name } => {
+                session.request_map_by_name(name, now).ok();
+            }
+            SlCommand::RequestMapItems {
+                item_type,
+                region_handle,
+            } => {
+                session
+                    .request_map_items(*item_type, *region_handle, now)
                     .ok();
             }
             SlCommand::Logout => session.initiate_logout(now),
