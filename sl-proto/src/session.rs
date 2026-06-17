@@ -162,8 +162,9 @@ use sl_wire::messages::{
 };
 use sl_wire::{
     AnyMessage, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd, MessageId, ObjectMediaResponse,
-    PacketFlags, Reader, SkeletonFolder, WireError, Writer, build_login_request, encode_datagram,
-    parse_datagram, parse_gltf_material_override, zero_decode,
+    PacketFlags, ParcelVoiceInfo, Reader, SkeletonFolder, VoiceAccountInfo, WireError, Writer,
+    build_login_request, encode_datagram, parse_datagram, parse_gltf_material_override,
+    zero_decode,
 };
 use uuid::Uuid;
 
@@ -341,6 +342,31 @@ pub const CAP_MODIFY_MATERIAL_PARAMS: &str = "ModifyMaterialParams";
 /// the `item_id` (see [`AssetType::update_item_cap`](crate::AssetType::update_item_cap)).
 pub const CAP_UPDATE_MATERIAL_AGENT_INVENTORY: &str = "UpdateMaterialAgentInventory";
 
+/// The HTTP capability for obtaining voice-chat account credentials
+/// (`ProvisionVoiceAccountRequest`): a POST that returns either the legacy Vivox
+/// SIP account (`{ username, password, voice_sip_uri_hostname,
+/// voice_account_server_name }`) or, for the modern WebRTC path, a JSEP answer
+/// SDP plus a viewer session. Driven by the runtimes' `RequestVoiceAccount`
+/// command; the reply is decoded by [`Session::handle_caps_event`] into
+/// [`Event::VoiceAccountProvisioned`]. Only the *signalling* is handled — the
+/// audio transport (Vivox SIP/RTP or a WebRTC peer connection) is out of scope.
+pub const CAP_PROVISION_VOICE_ACCOUNT: &str = "ProvisionVoiceAccountRequest";
+
+/// The HTTP capability for a parcel's voice channel (`ParcelVoiceInfoRequest`):
+/// a POST (empty body) that returns `{ parcel_local_id, region_name,
+/// voice_credentials: { channel_uri } }`. Driven by the runtimes'
+/// `RequestParcelVoiceInfo` command; the reply is decoded by
+/// [`Session::handle_caps_event`] into [`Event::ParcelVoiceInfo`].
+pub const CAP_PARCEL_VOICE_INFO: &str = "ParcelVoiceInfoRequest";
+
+/// The HTTP capability for WebRTC ICE-candidate trickling
+/// (`VoiceSignalingRequest`): a fire-and-forget POST of the gathered candidates
+/// (or an end-of-gathering marker) keyed by the viewer session from the
+/// provision reply. Driven by the runtimes' `SendVoiceSignaling` command; the
+/// simulator returns only an HTTP status, so there is no surfaced event. WebRTC
+/// only (Vivox does not use it).
+pub const CAP_VOICE_SIGNALING: &str = "VoiceSignalingRequest";
+
 /// The capability names the client requests from the region seed. A driver POSTs
 /// these to the seed URL to obtain the capability map, then uses `EventQueueGet`
 /// for the event-queue long-poll, [`CAP_FETCH_INVENTORY`] for inventory fetches,
@@ -369,6 +395,9 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_RENDER_MATERIALS,
     CAP_MODIFY_MATERIAL_PARAMS,
     CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
+    CAP_PROVISION_VOICE_ACCOUNT,
+    CAP_PARCEL_VOICE_INFO,
+    CAP_VOICE_SIGNALING,
 ];
 
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
@@ -3149,6 +3178,22 @@ impl Session {
                     .to_owned();
                 self.events
                     .push_back(Event::MaterialParamsResult { success, message });
+            }
+            // The reply to a `ProvisionVoiceAccountRequest` POST: either Vivox
+            // SIP credentials or a WebRTC JSEP answer. Only the signalling is
+            // surfaced; opening the audio session is the caller's concern.
+            CAP_PROVISION_VOICE_ACCOUNT => {
+                self.events
+                    .push_back(Event::VoiceAccountProvisioned(VoiceAccountInfo::from_llsd(
+                        body,
+                    )));
+            }
+            // The reply to a `ParcelVoiceInfoRequest` POST: the parcel's voice
+            // channel URI (absent when the parcel has no voice).
+            CAP_PARCEL_VOICE_INFO => {
+                if let Some(info) = ParcelVoiceInfo::from_llsd(body) {
+                    self.events.push_back(Event::ParcelVoiceInfo(info));
+                }
             }
             _ => {}
         }

@@ -6231,4 +6231,103 @@ mod test {
         assert_eq!(session.terrain_patches_in_region(OBJ_REGION).count(), 1);
         Ok(())
     }
+
+    /// A Vivox `ProvisionVoiceAccountRequest` reply surfaces the SIP account
+    /// credentials as an [`Event::VoiceAccountProvisioned`].
+    #[test]
+    fn voice_provision_vivox_surfaces_credentials() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let xml = "<llsd><map>\
+             <key>username</key><string>xMjQ1</string>\
+             <key>password</key><string>s3cr3t</string>\
+             <key>voice_sip_uri_hostname</key><string>sip.example.com</string>\
+             <key>voice_account_server_name</key><string>https://vivox.example/api</string>\
+             </map></llsd>";
+        let body = sl_proto::parse_llsd_xml(xml)?;
+        session.handle_caps_event("ProvisionVoiceAccountRequest", &body, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::VoiceAccountProvisioned(_)))
+            .ok_or("expected a VoiceAccountProvisioned event")?;
+        let Event::VoiceAccountProvisioned(info) = event else {
+            return Err("expected VoiceAccountProvisioned".into());
+        };
+        assert_eq!(info.username.as_deref(), Some("xMjQ1"));
+        assert_eq!(info.password.as_deref(), Some("s3cr3t"));
+        assert_eq!(info.sip_uri_hostname.as_deref(), Some("sip.example.com"));
+        assert_eq!(
+            info.account_server_name.as_deref(),
+            Some("https://vivox.example/api")
+        );
+        assert!(!info.is_webrtc());
+        Ok(())
+    }
+
+    /// A WebRTC `ProvisionVoiceAccountRequest` reply surfaces the JSEP answer and
+    /// viewer session.
+    #[test]
+    fn voice_provision_webrtc_surfaces_jsep_answer() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let xml = "<llsd><map>\
+             <key>viewer_session</key><string>sess-9</string>\
+             <key>jsep</key><map>\
+             <key>type</key><string>answer</string>\
+             <key>sdp</key><string>v=0 answer-sdp</string>\
+             </map></map></llsd>";
+        let body = sl_proto::parse_llsd_xml(xml)?;
+        session.handle_caps_event("ProvisionVoiceAccountRequest", &body, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::VoiceAccountProvisioned(_)))
+            .ok_or("expected a VoiceAccountProvisioned event")?;
+        let Event::VoiceAccountProvisioned(info) = event else {
+            return Err("expected VoiceAccountProvisioned".into());
+        };
+        assert!(info.is_webrtc());
+        assert_eq!(info.viewer_session.as_deref(), Some("sess-9"));
+        assert_eq!(info.jsep_type.as_deref(), Some("answer"));
+        assert_eq!(info.jsep_sdp.as_deref(), Some("v=0 answer-sdp"));
+        assert_eq!(info.username, None);
+        Ok(())
+    }
+
+    /// A `ParcelVoiceInfoRequest` reply surfaces the parcel's voice channel URI.
+    #[test]
+    fn parcel_voice_info_surfaces_channel() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let xml = "<llsd><map>\
+             <key>parcel_local_id</key><integer>7</integer>\
+             <key>region_name</key><string>Default Region</string>\
+             <key>voice_credentials</key><map>\
+             <key>channel_uri</key><string>sip:Region@sip.example.com</string>\
+             </map></map></llsd>";
+        let body = sl_proto::parse_llsd_xml(xml)?;
+        session.handle_caps_event("ParcelVoiceInfoRequest", &body, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::ParcelVoiceInfo(_)))
+            .ok_or("expected a ParcelVoiceInfo event")?;
+        let Event::ParcelVoiceInfo(info) = event else {
+            return Err("expected ParcelVoiceInfo".into());
+        };
+        assert_eq!(info.parcel_local_id, 7);
+        assert_eq!(info.region_name, "Default Region");
+        assert_eq!(
+            info.channel_uri.as_deref(),
+            Some("sip:Region@sip.example.com")
+        );
+        Ok(())
+    }
 }

@@ -650,6 +650,8 @@ impl Survey {
             | Event::GltfMaterialOverride { .. }
             | Event::RenderMaterials(_)
             | Event::MaterialParamsResult { .. }
+            | Event::VoiceAccountProvisioned(_)
+            | Event::ParcelVoiceInfo(_)
             | Event::CircuitEstablished { .. } => {}
         }
         Ok(false)

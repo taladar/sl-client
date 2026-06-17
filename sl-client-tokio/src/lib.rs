@@ -14,15 +14,17 @@ use std::collections::HashMap;
 use sl_proto::{
     CAP_FETCH_INVENTORY, CAP_GET_ASSET, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE,
     CAP_GROUP_MEMBER_DATA, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
-    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_RENDER_MATERIALS,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPLOAD_BAKED_TEXTURE, Llsd, REQUESTED_CAPABILITIES, Session,
+    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_RENDER_MATERIALS, CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Llsd, REQUESTED_CAPABILITIES, Session,
     build_event_queue_request, build_fetch_inventory_request, build_group_member_data_request,
     build_modify_material_params_request, build_new_file_agent_inventory_request,
     build_object_media_get_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_render_materials_request, build_seed_request,
+    build_object_media_update_request, build_parcel_voice_info_request,
+    build_provision_voice_account_request, build_render_materials_request, build_seed_request,
     build_update_avatar_appearance_request, build_update_item_asset_request,
-    build_upload_baked_texture_request, j2c, parse_asset_upload_response,
-    parse_event_queue_response, parse_llsd_xml, parse_login_response,
+    build_upload_baked_texture_request, build_voice_signaling_request, j2c,
+    parse_asset_upload_response, parse_event_queue_response, parse_llsd_xml, parse_login_response,
     parse_render_materials_response, parse_seed_response,
 };
 
@@ -34,22 +36,23 @@ pub use sl_proto::{
     ControlFlags, CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData,
     EstateAccessDelta, EstateAccessKind, EstateInfo, Event, ExtendedMesh, FlexibleData, Friend,
     FriendRights, GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice, GroupProfile,
-    GroupRole, GroupRoleMember, GroupTitle, ImDialog, ImageCodec, InstantMessage, InventoryFolder,
-    InventoryItem, InventoryType, LegacyMaterial, LightData, LightImage, LindenAmount,
-    LoadUrlRequest, LoginParams, LoginRequest, LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE,
-    MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
-    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge, MoneyBalance,
-    MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object,
-    ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectProperties,
-    ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
-    PermissionField, PlayingAnimation, PrimShape, ProductType, ReflectionProbe, RegionFlags,
-    RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry,
-    RenderMaterialRef, Rotation, SaleType, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTeleportRequest, SculptData, SoundFlags, SoundPreload,
-    TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace, Throttle, TransferStatus,
-    Transmit, Uuid, Vector, Wearable, WearableType, avatar_texture, decode_texture_entry,
-    grid_to_handle, handle_to_global, handle_to_grid, pcode, sim_access,
+    GroupRole, GroupRoleMember, GroupTitle, IceCandidate, ImDialog, ImageCodec, InstantMessage,
+    InventoryFolder, InventoryItem, InventoryType, LegacyMaterial, LightData, LightImage,
+    LindenAmount, LoadUrlRequest, LoginParams, LoginRequest, LoginResponse, MEDIA_PERM_ALL,
+    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
+    MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge,
+    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
+    NeighborInfo, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion,
+    ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
+    ParcelFlags, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo,
+    ParcelReturnType, ParcelUpdate, ParcelVoiceInfo, PermissionField, PlayingAnimation, PrimShape,
+    ProductType, ReflectionProbe, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits,
+    Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData, SoundFlags,
+    SoundPreload, TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace, Throttle,
+    TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable,
+    WearableType, avatar_texture, decode_texture_entry, grid_to_handle, handle_to_global,
+    handle_to_grid, pcode, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -904,6 +907,34 @@ pub enum Command {
         /// The per-face material assignments to apply.
         updates: Vec<MaterialOverrideUpdate>,
     },
+    /// Request voice-chat account credentials over the
+    /// `ProvisionVoiceAccountRequest` capability. A [`VoiceProvisionRequest::vivox`]
+    /// asks for legacy Vivox SIP credentials; a [`VoiceProvisionRequest::webrtc`]
+    /// negotiates a WebRTC session (the JSEP offer SDP is supplied by the
+    /// caller's own — out-of-scope — WebRTC engine). The reply arrives as
+    /// [`Event::VoiceAccountProvisioned`]. This handles the grid *signalling*
+    /// only; the audio session itself is the caller's concern.
+    RequestVoiceAccount {
+        /// The provision request (backend selection + WebRTC offer/logout).
+        request: VoiceProvisionRequest,
+    },
+    /// Request the current parcel's voice channel over the
+    /// `ParcelVoiceInfoRequest` capability. The reply arrives as
+    /// [`Event::ParcelVoiceInfo`].
+    RequestParcelVoiceInfo,
+    /// Trickle WebRTC ICE candidates (or signal end-of-gathering) over the
+    /// `VoiceSignalingRequest` capability, keyed by the `viewer_session` from a
+    /// prior [`Event::VoiceAccountProvisioned`]. Fire-and-forget — the simulator
+    /// returns only an HTTP status. The candidates come from the caller's
+    /// out-of-scope WebRTC engine.
+    SendVoiceSignaling {
+        /// The viewer session id from the provision reply.
+        viewer_session: String,
+        /// The ICE candidates to trickle (empty with `completed` to end).
+        candidates: Vec<IceCandidate>,
+        /// Whether this marks the end of ICE gathering.
+        completed: bool,
+    },
     /// Begin a clean logout.
     Logout,
 }
@@ -1491,6 +1522,24 @@ impl Client {
                                 tokio::spawn(post_modify_material_params(url, body, http.clone(), caps_tx.clone()));
                             }
                         }
+                        Some(Command::RequestVoiceAccount { request }) => {
+                            if let Some(url) = caps.get(CAP_PROVISION_VOICE_ACCOUNT).cloned() {
+                                let body = build_provision_voice_account_request(&request);
+                                tokio::spawn(post_voice_cap(url, body, CAP_PROVISION_VOICE_ACCOUNT, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::RequestParcelVoiceInfo) => {
+                            if let Some(url) = caps.get(CAP_PARCEL_VOICE_INFO).cloned() {
+                                let body = build_parcel_voice_info_request();
+                                tokio::spawn(post_voice_cap(url, body, CAP_PARCEL_VOICE_INFO, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::SendVoiceSignaling { viewer_session, candidates, completed }) => {
+                            if let Some(url) = caps.get(CAP_VOICE_SIGNALING).cloned() {
+                                let body = build_voice_signaling_request(&viewer_session, &candidates, completed);
+                                tokio::spawn(post_voice_signaling(url, body, http.clone()));
+                            }
+                        }
                         Some(Command::Logout) | None => {
                             self.session.initiate_logout(Instant::now());
                         }
@@ -1701,6 +1750,47 @@ async fn post_modify_material_params(
             .await
             .ok();
     }
+}
+
+/// POSTs a voice-signalling capability (`ProvisionVoiceAccountRequest` or
+/// `ParcelVoiceInfoRequest`) carrying the prepared `body`, forwarding the LLSD
+/// reply back over `caps_tx` tagged with `cap` so the session decodes it into
+/// the matching event ([`Event::VoiceAccountProvisioned`] /
+/// [`Event::ParcelVoiceInfo`]). Only the grid signalling is handled here; the
+/// audio session is out of scope.
+async fn post_voice_cap(
+    cap_url: String,
+    body: String,
+    cap: &'static str,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let Ok(response) = http
+        .post(&cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+    else {
+        return;
+    };
+    let Ok(text) = response.text().await else {
+        return;
+    };
+    if let Ok(llsd) = parse_llsd_xml(&text) {
+        caps_tx.send((cap.to_owned(), llsd)).await.ok();
+    }
+}
+
+/// POSTs a `VoiceSignalingRequest` (WebRTC ICE trickle). Fire-and-forget: the
+/// simulator returns only an HTTP status, so there is no event to surface.
+async fn post_voice_signaling(cap_url: String, body: String, http: ReqwestClient) {
+    http.post(&cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+        .ok();
 }
 
 /// POSTs the `UpdateAvatarAppearance` capability for `cof_version` (the modern

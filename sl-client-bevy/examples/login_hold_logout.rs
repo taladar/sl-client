@@ -247,6 +247,8 @@ fn on_events(
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal
             | SlSessionEvent::TeleportFailed { .. }
+            | SlSessionEvent::VoiceAccountProvisioned(_)
+            | SlSessionEvent::ParcelVoiceInfo(_)
             | SlSessionEvent::RegionChanged { .. } => {}
         }
     }

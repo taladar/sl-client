@@ -201,7 +201,9 @@ fn on_events(
             | SlSessionEvent::EstateAccessList { .. }
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
-            | SlSessionEvent::TeleportLocal => {}
+            | SlSessionEvent::TeleportLocal
+            | SlSessionEvent::VoiceAccountProvisioned(_)
+            | SlSessionEvent::ParcelVoiceInfo(_) => {}
             SlSessionEvent::TeleportFailed { reason } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged { region_handle, sim } => {
                 info!("region changed: handle={region_handle} sim={sim}");

@@ -4,7 +4,9 @@ use std::net::SocketAddr;
 
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
-use sl_wire::{LoginRequest, MediaEntry, ParcelFlags, RenderMaterialEntry};
+use sl_wire::{
+    LoginRequest, MediaEntry, ParcelFlags, ParcelVoiceInfo, RenderMaterialEntry, VoiceAccountInfo,
+};
 use uuid::Uuid;
 
 /// The parameters needed to start a session: where to log in and with what.
@@ -656,6 +658,16 @@ pub enum Event {
         /// The simulator's status message (empty on success).
         message: String,
     },
+    /// The reply to a `ProvisionVoiceAccountRequest` capability POST (the runtime
+    /// `RequestVoiceAccount` command): the agent's voice-chat account — either
+    /// legacy Vivox SIP credentials or a WebRTC JSEP answer (see
+    /// [`VoiceAccountInfo`]). This is the grid-side *signalling* only; opening
+    /// the Vivox or WebRTC audio session itself is out of this client's scope.
+    VoiceAccountProvisioned(VoiceAccountInfo),
+    /// The reply to a `ParcelVoiceInfoRequest` capability POST (the runtime
+    /// `RequestParcelVoiceInfo` command): the current parcel's voice channel
+    /// (its `channel_uri`, absent when the parcel has no voice).
+    ParcelVoiceInfo(ParcelVoiceInfo),
     /// A decoded terrain (or wind/cloud/water) patch arrived in a `LayerData`
     /// message and was added to or refreshed in the terrain cache. For a
     /// [`Land`](TerrainLayerType::Land) patch the [`values`](TerrainPatch::values)
