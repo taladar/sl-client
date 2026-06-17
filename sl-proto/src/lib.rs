@@ -1,26 +1,31 @@
 #![doc = include_str!("../README.md")]
 
 mod error;
+pub mod j2c;
 mod session;
 mod terrain;
 mod types;
 
 pub use error::Error;
-pub use session::{CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA, REQUESTED_CAPABILITIES, Session};
+pub use session::{
+    CAP_FETCH_INVENTORY, CAP_GET_ASSET, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE,
+    CAP_GROUP_MEMBER_DATA, REQUESTED_CAPABILITIES, Session,
+};
 pub use types::{
-    ActiveGroup, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
-    ChatMessage, ChatSourceType, ChatType, ClickAction, CreateGroupParams, DeRezDestination,
-    DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, Event, Friend,
-    FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
-    GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    LoadUrlRequest, LoginHttpRequest, LoginParams, MapItem, MapItemType, MapRegionInfo, Material,
-    Maturity, MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, Object, ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform,
-    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelInfo, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, PermissionField, PrimShape, ProductType, RegionIdentity,
-    RegionInfoUpdate, RegionLimits, Reliability, SaleType, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTeleportRequest, TerrainLayerType, TerrainPatch, Throttle, Transmit,
-    grid_to_handle, handle_to_global, handle_to_grid, pcode,
+    ActiveGroup, Asset, AssetType, AvatarGroupMembership, AvatarInterests, AvatarPick,
+    AvatarProperties, ChatAudible, ChatMessage, ChatSourceType, ChatType, ClickAction,
+    CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData, EstateAccessDelta,
+    EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupMember, GroupMembership,
+    GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, ImageCodec,
+    InstantMessage, InventoryFolder, InventoryItem, LoadUrlRequest, LoginHttpRequest, LoginParams,
+    MapItem, MapItemType, MapRegionInfo, Material, Maturity, MoneyBalance, MoneyTransaction,
+    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectFlagSettings,
+    ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
+    ParcelCategory, ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
+    PrimShape, ProductType, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, SaleType,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
+    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, grid_to_handle,
+    handle_to_global, handle_to_grid, pcode,
 };
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,

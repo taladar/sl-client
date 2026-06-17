@@ -105,6 +105,11 @@ use sl_wire::messages::{
     ObjectPermissionsObjectDataBlock, ObjectSaleInfo, ObjectSaleInfoAgentDataBlock,
     ObjectSaleInfoObjectDataBlock,
 };
+// Asset & texture pipeline (#19): the outgoing image/transfer requests.
+use sl_wire::messages::{
+    RequestImage, RequestImageAgentDataBlock, RequestImageRequestImageBlock, TransferRequest,
+    TransferRequestTransferInfoBlock,
+};
 // Estate / region management (#14): the outgoing estate-owner / god messages.
 use sl_wire::messages::{
     EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
@@ -145,18 +150,19 @@ use uuid::Uuid;
 use crate::error::Error;
 use crate::terrain;
 use crate::types::{
-    ActiveGroup, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
-    ChatMessage, ChatSourceType, ChatType, ClickAction, CreateGroupParams, DeRezDestination,
-    DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, Event, Friend,
-    FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
-    GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    LoadUrlRequest, LoginHttpRequest, LoginParams, MapItem, MapItemType, MapRegionInfo, Material,
-    Maturity, MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, Object, ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform,
-    ParcelAccessEntry, ParcelAccessScope, ParcelInfo, ParcelOverlayInfo, ParcelReturnType,
-    ParcelUpdate, PermissionField, PrimShape, ProductType, RegionIdentity, RegionInfoUpdate,
-    RegionLimits, Reliability, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, TerrainLayerType, TerrainPatch, Throttle, Transmit, grid_to_handle,
+    ActiveGroup, Asset, AssetType, AvatarGroupMembership, AvatarInterests, AvatarPick,
+    AvatarProperties, ChatAudible, ChatMessage, ChatSourceType, ChatType, ClickAction,
+    CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData, EstateAccessDelta,
+    EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupMember, GroupMembership,
+    GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, ImageCodec,
+    InstantMessage, InventoryFolder, InventoryItem, LoadUrlRequest, LoginHttpRequest, LoginParams,
+    MapItem, MapItemType, MapRegionInfo, Material, Maturity, MoneyBalance, MoneyTransaction,
+    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectFlagSettings,
+    ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
+    ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PrimShape,
+    ProductType, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, SaleType,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
+    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, grid_to_handle,
     handle_to_grid,
 };
 
@@ -205,12 +211,41 @@ pub const CAP_FETCH_INVENTORY: &str = "FetchInventoryDescendents2";
 /// [`Session::handle_caps_event`] into [`Event::GroupMembers`].
 pub const CAP_GROUP_MEMBER_DATA: &str = "GroupMemberData";
 
+/// The HTTP capability for fetching a texture by UUID (an HTTP `GET` of
+/// `?texture_id=<uuid>`, returning a `.j2c` codestream). The modern Second Life
+/// path that replaces the legacy UDP `RequestImage`/`ImageData` stream; the
+/// driver fetches it and surfaces an [`Event::TextureReceived`].
+pub const CAP_GET_TEXTURE: &str = "GetTexture";
+
+/// The HTTP capability for fetching a mesh asset by UUID (an HTTP `GET` of
+/// `?mesh_id=<uuid>`). Surfaces as an [`Event::AssetReceived`].
+pub const CAP_GET_MESH: &str = "GetMesh";
+
+/// The newer HTTP capability for fetching a mesh asset by UUID, preferred over
+/// [`CAP_GET_MESH`] when offered.
+pub const CAP_GET_MESH2: &str = "GetMesh2";
+
+/// The HTTP capability for fetching a generic asset by UUID and class (an HTTP
+/// `GET` of `?<class>_id=<uuid>`, e.g. `?sound_id=`/`?animatn_id=`). The modern
+/// path that replaces the legacy UDP `TransferRequest` for many asset classes;
+/// surfaces as an [`Event::AssetReceived`].
+pub const CAP_GET_ASSET: &str = "GetAsset";
+
 /// The capability names the client requests from the region seed. A driver POSTs
 /// these to the seed URL to obtain the capability map, then uses `EventQueueGet`
 /// for the event-queue long-poll, [`CAP_FETCH_INVENTORY`] for inventory fetches,
-/// and [`CAP_GROUP_MEMBER_DATA`] for group rosters.
-pub const REQUESTED_CAPABILITIES: &[&str] =
-    &["EventQueueGet", CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA];
+/// [`CAP_GROUP_MEMBER_DATA`] for group rosters, and the asset/texture/mesh caps
+/// ([`CAP_GET_TEXTURE`], [`CAP_GET_MESH`], [`CAP_GET_MESH2`], [`CAP_GET_ASSET`])
+/// for the HTTP asset pipeline.
+pub const REQUESTED_CAPABILITIES: &[&str] = &[
+    "EventQueueGet",
+    CAP_FETCH_INVENTORY,
+    CAP_GROUP_MEMBER_DATA,
+    CAP_GET_TEXTURE,
+    CAP_GET_MESH,
+    CAP_GET_MESH2,
+    CAP_GET_ASSET,
+];
 
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
 fn deadline(now: Instant, duration: Duration) -> Instant {
@@ -277,6 +312,65 @@ struct Timers {
     logout: Option<Instant>,
     /// When to give up waiting for a `TeleportFinish`, once teleporting.
     teleport: Option<Instant>,
+}
+
+/// An in-flight legacy UDP texture download (`RequestImage` →
+/// `ImageData`/`ImagePacket`). The first packet (`ImageData`) carries the codec,
+/// total size and packet count plus packet 0's data; subsequent `ImagePacket`s
+/// carry packets `1..`. Packets are buffered by index so an out-of-order arrival
+/// still reassembles correctly.
+#[derive(Debug)]
+struct TextureDownload {
+    /// The codec reported by the `ImageData` header.
+    codec: ImageCodec,
+    /// The total number of packets, from the `ImageData` header.
+    packets: u16,
+    /// The received packet payloads, keyed by packet index (0 = `ImageData`).
+    chunks: BTreeMap<u16, Vec<u8>>,
+}
+
+impl TextureDownload {
+    /// Whether every packet `0..packets` has been received.
+    fn is_complete(&self) -> bool {
+        usize::from(self.packets) == self.chunks.len()
+    }
+
+    /// Concatenates the buffered packets in index order into the full encoded
+    /// image bytes.
+    fn assemble(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        for chunk in self.chunks.values() {
+            data.extend_from_slice(chunk);
+        }
+        data
+    }
+}
+
+/// An in-flight generic asset transfer (`TransferRequest` →
+/// `TransferInfo`/`TransferPacket`). The `TransferInfo` reply gives the total
+/// size; each `TransferPacket` carries an in-order chunk and a status (the last
+/// one is `LLTS_DONE`).
+#[derive(Debug)]
+struct AssetTransfer {
+    /// The requested asset id (for the surfaced event).
+    asset_id: Uuid,
+    /// The requested asset class (for the surfaced event).
+    asset_type: AssetType,
+    /// The received packet payloads, keyed by packet index, reassembled in
+    /// order once the transfer completes.
+    chunks: BTreeMap<i32, Vec<u8>>,
+}
+
+impl AssetTransfer {
+    /// Concatenates the buffered packets in index order into the full asset
+    /// bytes.
+    fn assemble(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        for chunk in self.chunks.values() {
+            data.extend_from_slice(chunk);
+        }
+        data
+    }
 }
 
 /// The UDP circuit to a single simulator.
@@ -1161,6 +1255,67 @@ impl Circuit {
             xfer_id: ConfirmXferPacketXferIDBlock {
                 id: xfer_id,
                 packet,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RequestImage` reliably to download the texture `image_id` over
+    /// the legacy UDP image path, starting at `packet` (0 for a fresh download)
+    /// and at the given `discard_level` (0 = full resolution) and download
+    /// `priority`. `image_type` is the request channel (0 = normal).
+    fn send_request_image(
+        &mut self,
+        image_id: Uuid,
+        discard_level: i8,
+        priority: f32,
+        packet: u32,
+        image_type: u8,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RequestImage(RequestImage {
+            agent_data: RequestImageAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            request_image: vec![RequestImageRequestImageBlock {
+                image: image_id,
+                discard_level,
+                download_priority: priority,
+                packet,
+                r#type: image_type,
+            }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `TransferRequest` reliably to download a generic asset over the
+    /// transfer path: channel `LLTCT_ASSET` (2), source `LLTST_ASSET` (2), and a
+    /// `Params` block of the asset id (16 bytes) followed by its `LLAssetType`
+    /// code (a little-endian `i32`), matching the viewer's `LLTransferSourceAsset`.
+    fn send_transfer_request(
+        &mut self,
+        transfer_id: Uuid,
+        asset_id: Uuid,
+        asset_type: AssetType,
+        priority: f32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        // LLTCT_ASSET / LLTST_ASSET.
+        const CHANNEL_ASSET: i32 = 2;
+        const SOURCE_ASSET: i32 = 2;
+        // The viewer's `LLTransferSourceAsset` params: the asset UUID followed
+        // by its `LLAssetType` code as a little-endian `i32`.
+        let mut writer = Writer::new();
+        writer.put_uuid(asset_id);
+        writer.put_i32(asset_type.to_code());
+        let message = AnyMessage::TransferRequest(TransferRequest {
+            transfer_info: TransferRequestTransferInfoBlock {
+                transfer_id,
+                channel_type: CHANNEL_ASSET,
+                source_type: SOURCE_ASSET,
+                priority,
+                params: writer.into_bytes(),
             },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -2408,6 +2563,17 @@ pub struct Session {
     mute_xfers: BTreeMap<u64, Vec<u8>>,
     /// A monotonic counter for generating `Xfer` ids (never zero).
     next_xfer_id: u64,
+    /// In-flight legacy UDP texture downloads, keyed by the texture's asset id
+    /// (echoed in every `ImageData`/`ImagePacket`). Started by
+    /// [`Session::request_texture`].
+    texture_downloads: BTreeMap<Uuid, TextureDownload>,
+    /// In-flight generic asset transfers, keyed by the client-generated
+    /// transfer id (echoed in every `TransferInfo`/`TransferPacket`). Started by
+    /// [`Session::request_asset`].
+    asset_transfers: BTreeMap<Uuid, AssetTransfer>,
+    /// A monotonic counter for generating asset transfer ids (each packed into a
+    /// fresh `TransferID` UUID; never zero).
+    next_transfer_id: u128,
     /// The scene-graph object cache, keyed by the simulator the objects belong
     /// to (the root region *and* every child/neighbour circuit), then by
     /// region-local id. Region-local ids are only unique within a simulator, so
@@ -2451,6 +2617,9 @@ impl Session {
             inventory_root: None,
             mute_xfers: BTreeMap::new(),
             next_xfer_id: 1,
+            texture_downloads: BTreeMap::new(),
+            asset_transfers: BTreeMap::new(),
+            next_transfer_id: 1,
             objects: BTreeMap::new(),
             terrain: BTreeMap::new(),
             regions: BTreeMap::new(),
@@ -3483,6 +3652,105 @@ impl Session {
                         self.events
                             .push_back(Event::MuteList(parse_mute_list(&buffer)));
                     }
+                }
+            }
+            AnyMessage::ImageData(image) => {
+                // The first packet of a UDP texture download: the codec/size/
+                // packet-count header plus packet 0's data.
+                let id = image.image_id.id;
+                let completed = if let Some(download) = self.texture_downloads.get_mut(&id) {
+                    download.codec = ImageCodec::from_code(image.image_id.codec);
+                    download.packets = image.image_id.packets;
+                    download.chunks.insert(0, image.image_data.data.clone());
+                    download.is_complete()
+                } else {
+                    false
+                };
+                if completed && let Some(download) = self.texture_downloads.remove(&id) {
+                    let texture = Texture {
+                        id,
+                        codec: download.codec,
+                        data: download.assemble(),
+                    };
+                    self.events
+                        .push_back(Event::TextureReceived(Box::new(texture)));
+                }
+            }
+            AnyMessage::ImagePacket(image) => {
+                // A follow-on packet of a UDP texture download (packets 1..).
+                let id = image.image_id.id;
+                let packet_index = image.image_id.packet;
+                let completed = if let Some(download) = self.texture_downloads.get_mut(&id) {
+                    download
+                        .chunks
+                        .insert(packet_index, image.image_data.data.clone());
+                    download.is_complete()
+                } else {
+                    false
+                };
+                if completed && let Some(download) = self.texture_downloads.remove(&id) {
+                    let texture = Texture {
+                        id,
+                        codec: download.codec,
+                        data: download.assemble(),
+                    };
+                    self.events
+                        .push_back(Event::TextureReceived(Box::new(texture)));
+                }
+            }
+            AnyMessage::ImageNotInDatabase(missing) => {
+                let id = missing.image_id.id;
+                self.texture_downloads.remove(&id);
+                self.events.push_back(Event::TextureNotFound(id));
+            }
+            AnyMessage::TransferInfo(info) => {
+                // The transfer's initial status/size. A non-success status here
+                // (e.g. the asset is missing or denied) means no data follows.
+                let transfer_id = info.transfer_info.transfer_id;
+                let status = TransferStatus::from_code(info.transfer_info.status);
+                if !matches!(status, TransferStatus::Ok | TransferStatus::Done)
+                    && let Some(transfer) = self.asset_transfers.remove(&transfer_id)
+                {
+                    self.events.push_back(Event::AssetTransferFailed {
+                        asset_id: transfer.asset_id,
+                        asset_type: transfer.asset_type,
+                        status,
+                    });
+                }
+            }
+            AnyMessage::TransferPacket(packet) => {
+                // A data chunk of a generic asset transfer; the final packet
+                // carries `LLTS_DONE`.
+                let transfer_id = packet.transfer_data.transfer_id;
+                let status = TransferStatus::from_code(packet.transfer_data.status);
+                let packet_index = packet.transfer_data.packet;
+                let mut done = false;
+                let mut failed = false;
+                if let Some(transfer) = self.asset_transfers.get_mut(&transfer_id) {
+                    transfer
+                        .chunks
+                        .insert(packet_index, packet.transfer_data.data.clone());
+                    match status {
+                        TransferStatus::Done => done = true,
+                        TransferStatus::Ok => {}
+                        _ => failed = true,
+                    }
+                }
+                if done {
+                    if let Some(transfer) = self.asset_transfers.remove(&transfer_id) {
+                        let asset = Asset {
+                            id: transfer.asset_id,
+                            asset_type: transfer.asset_type,
+                            data: transfer.assemble(),
+                        };
+                        self.events.push_back(Event::AssetReceived(Box::new(asset)));
+                    }
+                } else if failed && let Some(transfer) = self.asset_transfers.remove(&transfer_id) {
+                    self.events.push_back(Event::AssetTransferFailed {
+                        asset_id: transfer.asset_id,
+                        asset_type: transfer.asset_type,
+                        status,
+                    });
                 }
             }
             AnyMessage::GenericMessage(generic)
@@ -4537,6 +4805,77 @@ impl Session {
     pub fn unmute(&mut self, id: Uuid, name: &str, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_remove_mute_list_entry(id, name, now)?;
+        Ok(())
+    }
+
+    /// Requests a texture by asset id over the legacy UDP image path
+    /// (`RequestImage`). The simulator streams it back as an `ImageData` header
+    /// packet plus `ImagePacket` follow-ups, which are reassembled and surfaced
+    /// as [`Event::TextureReceived`] (or [`Event::TextureNotFound`] if the asset
+    /// does not exist). `discard_level` selects the level of detail (0 = full
+    /// resolution; higher values request a coarser, smaller image); `priority`
+    /// orders concurrent fetches (a larger value is fetched sooner). The modern
+    /// alternative is the HTTP `GetTexture` capability (a runtime `FetchTexture`
+    /// command), which is preferred on the Second Life grid.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_texture(
+        &mut self,
+        texture_id: Uuid,
+        discard_level: i8,
+        priority: f32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        // A fresh download buffer; a repeat request just restarts it.
+        self.texture_downloads.insert(
+            texture_id,
+            TextureDownload {
+                codec: ImageCodec::J2c,
+                packets: 0,
+                chunks: BTreeMap::new(),
+            },
+        );
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        // `type` 0 is the normal image channel; start at packet 0.
+        circuit.send_request_image(texture_id, discard_level, priority, 0, 0, now)?;
+        Ok(())
+    }
+
+    /// Requests a generic asset (sound, animation, notecard, landmark, mesh, …)
+    /// by asset id and class over the UDP transfer path (`TransferRequest`). The
+    /// simulator replies with a `TransferInfo` (size/status) then `TransferPacket`
+    /// chunks, reassembled and surfaced as [`Event::AssetReceived`] (or
+    /// [`Event::AssetTransferFailed`] if the asset is missing or denied).
+    /// `priority` orders concurrent transfers. The modern alternative is the HTTP
+    /// `GetAsset`/`GetMesh` capability (a runtime `FetchAsset`/`FetchMesh`
+    /// command).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_asset(
+        &mut self,
+        asset_id: Uuid,
+        asset_type: AssetType,
+        priority: f32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let transfer_id = Uuid::from_u128(self.next_transfer_id);
+        self.next_transfer_id = self.next_transfer_id.checked_add(1).unwrap_or(1);
+        self.asset_transfers.insert(
+            transfer_id,
+            AssetTransfer {
+                asset_id,
+                asset_type,
+                chunks: BTreeMap::new(),
+            },
+        );
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_transfer_request(transfer_id, asset_id, asset_type, priority, now)?;
         Ok(())
     }
 

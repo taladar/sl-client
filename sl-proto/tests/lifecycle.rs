@@ -9,13 +9,14 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
-        ChatAudible, ChatSourceType, ChatType, ClickAction, ControlFlags, CreateGroupParams,
-        DeRezDestination, DisconnectReason, EstateAccessDelta, EstateAccessKind, Event,
-        FriendRights, ImDialog, LindenAmount, LoginParams, MapItemType, Material, Maturity,
-        MoneyTransactionType, MuteFlags, MuteType, ObjectFlagSettings, ObjectTransform,
-        ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
-        ParcelUpdate, PermissionField, PrimShape, ProductType, RegionInfoUpdate, Reliability,
-        SaleType, ScriptPermissions, Session, TerrainLayerType, Throttle, Transmit, pcode,
+        AssetType, ChatAudible, ChatSourceType, ChatType, ClickAction, ControlFlags,
+        CreateGroupParams, DeRezDestination, DisconnectReason, EstateAccessDelta, EstateAccessKind,
+        Event, FriendRights, ImDialog, ImageCodec, LindenAmount, LoginParams, MapItemType,
+        Material, Maturity, MoneyTransactionType, MuteFlags, MuteType, ObjectFlagSettings,
+        ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags,
+        ParcelReturnType, ParcelUpdate, PermissionField, PrimShape, ProductType, RegionInfoUpdate,
+        Reliability, SaleType, ScriptPermissions, Session, TerrainLayerType, Throttle,
+        TransferStatus, Transmit, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -35,20 +36,21 @@ mod test {
         GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GroupMembersReply,
         GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
         GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
-        GroupProfileReplyGroupDataBlock, ImprovedInstantMessage,
-        ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
-        ImprovedInstantMessageMessageBlockBlock, ImprovedTerseObjectUpdate,
-        ImprovedTerseObjectUpdateObjectDataBlock, ImprovedTerseObjectUpdateRegionDataBlock,
-        InventoryDescendents, InventoryDescendentsAgentDataBlock,
-        InventoryDescendentsFolderDataBlock, InventoryDescendentsItemDataBlock, KillObject,
-        KillObjectObjectDataBlock, LayerData, LayerDataLayerDataBlock, LayerDataLayerIDBlock,
-        LogoutRequest, LogoutRequestAgentDataBlock, MapBlockReply, MapBlockReplyAgentDataBlock,
-        MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapItemReply, MapItemReplyAgentDataBlock,
-        MapItemReplyDataBlock, MapItemReplyRequestDataBlock, MoneyBalanceReply,
-        MoneyBalanceReplyMoneyDataBlock, MoneyBalanceReplyTransactionInfoBlock, MuteListUpdate,
-        MuteListUpdateMuteDataBlock, ObjectProperties as WireObjectProperties,
-        ObjectPropertiesObjectDataBlock, ObjectUpdate, ObjectUpdateCached,
-        ObjectUpdateCachedObjectDataBlock, ObjectUpdateCachedRegionDataBlock,
+        GroupProfileReplyGroupDataBlock, ImageData, ImageDataImageDataBlock, ImageDataImageIDBlock,
+        ImageNotInDatabase, ImageNotInDatabaseImageIDBlock, ImagePacket, ImagePacketImageDataBlock,
+        ImagePacketImageIDBlock, ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
+        ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
+        ImprovedTerseObjectUpdate, ImprovedTerseObjectUpdateObjectDataBlock,
+        ImprovedTerseObjectUpdateRegionDataBlock, InventoryDescendents,
+        InventoryDescendentsAgentDataBlock, InventoryDescendentsFolderDataBlock,
+        InventoryDescendentsItemDataBlock, KillObject, KillObjectObjectDataBlock, LayerData,
+        LayerDataLayerDataBlock, LayerDataLayerIDBlock, LogoutRequest, LogoutRequestAgentDataBlock,
+        MapBlockReply, MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock,
+        MapItemReply, MapItemReplyAgentDataBlock, MapItemReplyDataBlock,
+        MapItemReplyRequestDataBlock, MoneyBalanceReply, MoneyBalanceReplyMoneyDataBlock,
+        MoneyBalanceReplyTransactionInfoBlock, MuteListUpdate, MuteListUpdateMuteDataBlock,
+        ObjectProperties as WireObjectProperties, ObjectPropertiesObjectDataBlock, ObjectUpdate,
+        ObjectUpdateCached, ObjectUpdateCachedObjectDataBlock, ObjectUpdateCachedRegionDataBlock,
         ObjectUpdateCompressed, ObjectUpdateCompressedObjectDataBlock,
         ObjectUpdateCompressedRegionDataBlock, ObjectUpdateObjectDataBlock,
         ObjectUpdateRegionDataBlock, OfflineNotification, OfflineNotificationAgentBlockBlock,
@@ -63,7 +65,8 @@ mod test {
         ScriptDialogButtonsBlock, ScriptDialogDataBlock, ScriptDialogOwnerDataBlock,
         ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock, SendXferPacket,
         SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock, TeleportFailed,
-        TeleportFailedInfoBlock, UseCachedMuteList, UseCachedMuteListAgentDataBlock,
+        TeleportFailedInfoBlock, TransferInfo, TransferInfoTransferInfoBlock, TransferPacket,
+        TransferPacketTransferDataBlock, UseCachedMuteList, UseCachedMuteListAgentDataBlock,
     };
     use sl_wire::{
         AnyMessage, LoginFailure, LoginRequest, LoginResponse, LoginSuccess, MessageId,
@@ -2065,6 +2068,211 @@ mod test {
         assert_eq!(second.name, "SpamBot");
         assert_eq!(second.mute_type, MuteType::ByName);
         assert_eq!(second.flags.0, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn request_texture_reassembles_image_data_and_packets() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let texture = uuid::Uuid::from_u128(0xABCD);
+        session.request_texture(texture, 0, 1.0e6, now)?;
+
+        // The client sends a RequestImage for the texture at the discard level.
+        let sent = drain(&mut session)?;
+        let request = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RequestImage(r) => Some(r),
+                _ => None,
+            })
+            .ok_or("expected a RequestImage")?;
+        let block = request
+            .request_image
+            .first()
+            .ok_or("expected a RequestImage block")?;
+        assert_eq!(block.image, texture);
+        assert_eq!(block.discard_level, 0);
+
+        // The sim streams the texture in two packets: an ImageData header (codec
+        // J2C, 2 packets) carrying packet 0, then one ImagePacket (packet 1).
+        let header = AnyMessage::ImageData(ImageData {
+            image_id: ImageDataImageIDBlock {
+                id: texture,
+                codec: 2, // IMG_CODEC_J2C
+                size: 6,
+                packets: 2,
+            },
+            image_data: ImageDataImageDataBlock {
+                data: vec![1, 2, 3],
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&header, 9, true)?, now)?;
+        // Not complete yet — no event after only the first packet.
+        assert!(drain_events(&mut session).is_empty());
+
+        let follow = AnyMessage::ImagePacket(ImagePacket {
+            image_id: ImagePacketImageIDBlock {
+                id: texture,
+                packet: 1,
+            },
+            image_data: ImagePacketImageDataBlock {
+                data: vec![4, 5, 6],
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&follow, 10, true)?, now)?;
+
+        let received = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::TextureReceived(texture) => Some(texture),
+                _ => None,
+            })
+            .ok_or("expected a TextureReceived event")?;
+        assert_eq!(received.id, texture);
+        assert_eq!(received.codec, ImageCodec::J2c);
+        assert_eq!(received.data, vec![1, 2, 3, 4, 5, 6]);
+        Ok(())
+    }
+
+    #[test]
+    fn image_not_in_database_surfaces_texture_not_found() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let texture = uuid::Uuid::from_u128(0xDEAD);
+        session.request_texture(texture, 3, 1.0e6, now)?;
+        drain(&mut session)?;
+
+        let missing = AnyMessage::ImageNotInDatabase(ImageNotInDatabase {
+            image_id: ImageNotInDatabaseImageIDBlock { id: texture },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&missing, 9, true)?, now)?;
+
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .any(|e| matches!(e, Event::TextureNotFound(id) if *id == texture))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn request_asset_reassembles_transfer_packets() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let sound = uuid::Uuid::from_u128(0x5005);
+        session.request_asset(sound, AssetType::Sound, 1.0, now)?;
+
+        // The client sends a TransferRequest on the asset channel/source with a
+        // params blob of the asset UUID followed by its little-endian type code.
+        let sent = drain(&mut session)?;
+        let request = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::TransferRequest(r) => Some(r),
+                _ => None,
+            })
+            .ok_or("expected a TransferRequest")?;
+        let transfer_id = request.transfer_info.transfer_id;
+        assert_eq!(request.transfer_info.channel_type, 2);
+        assert_eq!(request.transfer_info.source_type, 2);
+        let mut expected_params = sound.as_bytes().to_vec();
+        // AssetType::Sound == 1, little-endian i32.
+        expected_params.extend_from_slice(&[1, 0, 0, 0]);
+        assert_eq!(request.transfer_info.params, expected_params);
+
+        // The sim acknowledges with a TransferInfo (OK, size 6), then two
+        // TransferPackets; the second carries LLTS_DONE (1).
+        let info = AnyMessage::TransferInfo(TransferInfo {
+            transfer_info: TransferInfoTransferInfoBlock {
+                transfer_id,
+                channel_type: 2,
+                target_type: 0,
+                status: 0, // LLTS_OK
+                size: 6,
+                params: Vec::new(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&info, 9, true)?, now)?;
+        assert!(drain_events(&mut session).is_empty());
+
+        let packet0 = AnyMessage::TransferPacket(TransferPacket {
+            transfer_data: TransferPacketTransferDataBlock {
+                transfer_id,
+                channel_type: 2,
+                packet: 0,
+                status: 0, // LLTS_OK (more to come)
+                data: vec![9, 8, 7],
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&packet0, 10, true)?, now)?;
+        assert!(drain_events(&mut session).is_empty());
+
+        let packet1 = AnyMessage::TransferPacket(TransferPacket {
+            transfer_data: TransferPacketTransferDataBlock {
+                transfer_id,
+                channel_type: 2,
+                packet: 1,
+                status: 1, // LLTS_DONE
+                data: vec![6, 5, 4],
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&packet1, 11, true)?, now)?;
+
+        let asset = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AssetReceived(asset) => Some(asset),
+                _ => None,
+            })
+            .ok_or("expected an AssetReceived event")?;
+        assert_eq!(asset.id, sound);
+        assert_eq!(asset.asset_type, AssetType::Sound);
+        assert_eq!(asset.data, vec![9, 8, 7, 6, 5, 4]);
+        Ok(())
+    }
+
+    #[test]
+    fn transfer_info_failure_surfaces_asset_transfer_failed() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let missing = uuid::Uuid::from_u128(0x404);
+        session.request_asset(missing, AssetType::Animation, 1.0, now)?;
+        let sent = drain(&mut session)?;
+        let transfer_id = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::TransferRequest(r) => Some(r.transfer_info.transfer_id),
+                _ => None,
+            })
+            .ok_or("expected a TransferRequest")?;
+
+        // LLTS_UNKNOWN_SOURCE (-2): the asset does not exist.
+        let info = AnyMessage::TransferInfo(TransferInfo {
+            transfer_info: TransferInfoTransferInfoBlock {
+                transfer_id,
+                channel_type: 2,
+                target_type: 0,
+                status: -2,
+                size: 0,
+                params: Vec::new(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&info, 9, true)?, now)?;
+
+        assert!(drain_events(&mut session).iter().any(|e| matches!(
+            e,
+            Event::AssetTransferFailed { asset_id, status, .. }
+            if *asset_id == missing && *status == TransferStatus::UnknownSource
+        )));
         Ok(())
     }
 

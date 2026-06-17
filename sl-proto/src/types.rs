@@ -592,6 +592,32 @@ pub enum Event {
     /// [`Session::terrain_height`](crate::Session::terrain_height) and
     /// [`Session::terrain_patches`](crate::Session::terrain_patches).
     TerrainPatch(Box<TerrainPatch>),
+    /// A requested texture finished downloading: the reassembled
+    /// [`Texture`] from the legacy UDP image path
+    /// ([`Session::request_texture`](crate::Session::request_texture)) or the
+    /// HTTP `GetTexture` capability (the runtime `FetchTexture` command). The
+    /// image bytes are the raw (usually JPEG-2000) codestream, not pixels.
+    TextureReceived(Box<Texture>),
+    /// A requested texture does not exist in the asset store
+    /// (`ImageNotInDatabase`), or its HTTP fetch returned 404. Carries the
+    /// texture's UUID.
+    TextureNotFound(Uuid),
+    /// A requested generic asset finished downloading: the reassembled
+    /// [`Asset`] from the UDP transfer path
+    /// ([`Session::request_asset`](crate::Session::request_asset)) or the HTTP
+    /// `GetAsset`/`GetMesh` capability.
+    AssetReceived(Box<Asset>),
+    /// A generic asset [transfer](crate::Session::request_asset) failed: the
+    /// simulator reported a non-success [`TransferStatus`] (e.g. the asset is
+    /// missing or permission was denied), or the HTTP fetch failed.
+    AssetTransferFailed {
+        /// The asset UUID that was requested.
+        asset_id: Uuid,
+        /// The asset class that was requested.
+        asset_type: AssetType,
+        /// The failure status.
+        status: TransferStatus,
+    },
     /// The session logged out cleanly (a `LogoutReply` was received).
     LoggedOut,
     /// The session disconnected for the given reason.
@@ -2986,4 +3012,261 @@ pub fn grid_to_handle(grid_x: u32, grid_y: u32) -> u64 {
     let global_x = u64::from(grid_x).checked_mul(256).unwrap_or(0);
     let global_y = u64::from(grid_y).checked_mul(256).unwrap_or(0);
     global_x.checked_shl(32).unwrap_or(0) | global_y
+}
+
+// ---------------------------------------------------------------------------
+// Asset & texture pipeline (#19): asset/texture fetch value types.
+// ---------------------------------------------------------------------------
+
+/// The Second Life asset class (`LLAssetType` / `AT_*`), identifying what kind
+/// of asset a UUID names. Used to build a generic asset
+/// [transfer](crate::Session::request_asset) and to pick the
+/// [`GetAsset`](crate::CAP_GET_ASSET) HTTP query parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssetType {
+    /// A texture (`AT_TEXTURE`, a JPEG-2000 / `.j2c` image).
+    Texture,
+    /// A sound clip (`AT_SOUND`).
+    Sound,
+    /// A calling card (`AT_CALLINGCARD`).
+    CallingCard,
+    /// A landmark (`AT_LANDMARK`).
+    Landmark,
+    /// A wearable clothing layer (`AT_CLOTHING`).
+    Clothing,
+    /// An object / coalesced object (`AT_OBJECT`).
+    Object,
+    /// A notecard (`AT_NOTECARD`).
+    Notecard,
+    /// LSL script source text (`AT_LSL_TEXT`).
+    LslText,
+    /// Compiled LSL bytecode (`AT_LSL_BYTECODE`).
+    LslBytecode,
+    /// A TGA texture (`AT_TEXTURE_TGA`).
+    TextureTga,
+    /// A wearable body part (`AT_BODYPART`).
+    Bodypart,
+    /// A WAV sound (`AT_SOUND_WAV`).
+    SoundWav,
+    /// A TGA image (`AT_IMAGE_TGA`).
+    ImageTga,
+    /// A JPEG image (`AT_IMAGE_JPEG`).
+    ImageJpeg,
+    /// An animation (`AT_ANIMATION`).
+    Animation,
+    /// A gesture (`AT_GESTURE`).
+    Gesture,
+    /// A mesh (`AT_MESH`).
+    Mesh,
+    /// A settings asset (`AT_SETTINGS`).
+    Settings,
+    /// A render material (`AT_MATERIAL`).
+    Material,
+    /// A glTF document (`AT_GLTF`).
+    Gltf,
+    /// Any other / unrecognised asset class, carrying the raw `AT_*` code.
+    Other(i32),
+}
+
+impl AssetType {
+    /// The numeric `LLAssetType` code for this asset class, as sent in a
+    /// `TransferRequest` `Params` block.
+    #[must_use]
+    pub const fn to_code(self) -> i32 {
+        match self {
+            Self::Texture => 0,
+            Self::Sound => 1,
+            Self::CallingCard => 2,
+            Self::Landmark => 3,
+            Self::Clothing => 5,
+            Self::Object => 6,
+            Self::Notecard => 7,
+            Self::LslText => 10,
+            Self::LslBytecode => 11,
+            Self::TextureTga => 12,
+            Self::Bodypart => 13,
+            Self::SoundWav => 17,
+            Self::ImageTga => 18,
+            Self::ImageJpeg => 19,
+            Self::Animation => 20,
+            Self::Gesture => 21,
+            Self::Mesh => 49,
+            Self::Settings => 56,
+            Self::Material => 57,
+            Self::Gltf => 58,
+            Self::Other(code) => code,
+        }
+    }
+
+    /// Classifies an `LLAssetType` code (unknown codes become
+    /// [`Other`](Self::Other)).
+    #[must_use]
+    pub const fn from_code(code: i32) -> Self {
+        match code {
+            0 => Self::Texture,
+            1 => Self::Sound,
+            2 => Self::CallingCard,
+            3 => Self::Landmark,
+            5 => Self::Clothing,
+            6 => Self::Object,
+            7 => Self::Notecard,
+            10 => Self::LslText,
+            11 => Self::LslBytecode,
+            12 => Self::TextureTga,
+            13 => Self::Bodypart,
+            17 => Self::SoundWav,
+            18 => Self::ImageTga,
+            19 => Self::ImageJpeg,
+            20 => Self::Animation,
+            21 => Self::Gesture,
+            49 => Self::Mesh,
+            56 => Self::Settings,
+            57 => Self::Material,
+            58 => Self::Gltf,
+            other => Self::Other(other),
+        }
+    }
+
+    /// The query-parameter name the OpenSim/Second Life `GetAsset` capability
+    /// expects for this asset class (e.g. `"texture_id"`, `"sound_id"`), or
+    /// `None` for classes the cap does not serve by UUID.
+    #[must_use]
+    pub const fn get_asset_query_key(self) -> Option<&'static str> {
+        match self {
+            Self::Texture => Some("texture_id"),
+            Self::Sound => Some("sound_id"),
+            Self::CallingCard => Some("callcard_id"),
+            Self::Landmark => Some("landmark_id"),
+            Self::Clothing => Some("clothing_id"),
+            Self::Object => Some("object_id"),
+            Self::Notecard => Some("notecard_id"),
+            Self::LslText => Some("lsltext_id"),
+            Self::LslBytecode => Some("lslbyte_id"),
+            Self::TextureTga => Some("txtr_tga_id"),
+            Self::Bodypart => Some("bodypart_id"),
+            Self::SoundWav => Some("snd_wav_id"),
+            Self::ImageTga => Some("img_tga_id"),
+            Self::ImageJpeg => Some("jpeg_id"),
+            Self::Animation => Some("animatn_id"),
+            Self::Gesture => Some("gesture_id"),
+            Self::Mesh => Some("mesh_id"),
+            Self::Settings => Some("settings_id"),
+            Self::Material | Self::Gltf | Self::Other(_) => None,
+        }
+    }
+}
+
+/// The image codec of a texture delivered over the legacy UDP image path
+/// (`ImageData`'s `Codec` field / `EImageCodec`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageCodec {
+    /// JPEG 2000 codestream (`IMG_CODEC_J2C`) — the normal Second Life texture
+    /// format.
+    J2c,
+    /// Raw RGB (`IMG_CODEC_RGB`).
+    Rgb,
+    /// Windows bitmap (`IMG_CODEC_BMP`).
+    Bmp,
+    /// Targa (`IMG_CODEC_TGA`).
+    Tga,
+    /// JPEG (`IMG_CODEC_JPEG`).
+    Jpeg,
+    /// S3TC/DXT compressed (`IMG_CODEC_DXT`).
+    Dxt,
+    /// PNG (`IMG_CODEC_PNG`).
+    Png,
+    /// An invalid or unrecognised codec, carrying the raw byte.
+    Other(u8),
+}
+
+impl ImageCodec {
+    /// Classifies an `ImageData` `Codec` byte.
+    #[must_use]
+    pub const fn from_code(code: u8) -> Self {
+        match code {
+            2 => Self::J2c,
+            1 => Self::Rgb,
+            3 => Self::Bmp,
+            4 => Self::Tga,
+            5 => Self::Jpeg,
+            6 => Self::Dxt,
+            7 => Self::Png,
+            other => Self::Other(other),
+        }
+    }
+}
+
+/// The status of a generic asset [transfer](crate::Session::request_asset)
+/// (`LLTSCode`), reported in a `TransferInfo`/`TransferPacket`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferStatus {
+    /// In progress (`LLTS_OK`).
+    Ok,
+    /// The transfer completed successfully (`LLTS_DONE`).
+    Done,
+    /// The source asked to skip (`LLTS_SKIP`).
+    Skip,
+    /// The transfer was aborted (`LLTS_ABORT`).
+    Abort,
+    /// A generic error (`LLTS_ERROR`).
+    Error,
+    /// The asset does not exist — the transfer equivalent of a 404
+    /// (`LLTS_UNKNOWN_SOURCE`).
+    UnknownSource,
+    /// The agent lacks permission to fetch the asset
+    /// (`LLTS_INSUFFICIENT_PERMISSIONS`).
+    InsufficientPermissions,
+    /// Any other / unrecognised status code.
+    Other(i32),
+}
+
+impl TransferStatus {
+    /// Classifies an `LLTSCode` status integer.
+    #[must_use]
+    pub const fn from_code(code: i32) -> Self {
+        match code {
+            0 => Self::Ok,
+            1 => Self::Done,
+            2 => Self::Skip,
+            3 => Self::Abort,
+            -1 => Self::Error,
+            -2 => Self::UnknownSource,
+            -3 => Self::InsufficientPermissions,
+            other => Self::Other(other),
+        }
+    }
+
+    /// Whether this status indicates the transfer succeeded (`LLTS_DONE`).
+    #[must_use]
+    pub const fn is_success(self) -> bool {
+        matches!(self, Self::Done)
+    }
+}
+
+/// A fetched texture: its asset id, the codec the simulator reported (UDP path)
+/// and the raw encoded image bytes (a JPEG-2000 codestream for the usual
+/// [`J2c`](ImageCodec::J2c) codec). The bytes are **not** decoded into pixels —
+/// see [`crate::j2c`] for header parsing / LOD truncation helpers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Texture {
+    /// The texture's asset UUID.
+    pub id: Uuid,
+    /// The codec of [`data`](Self::data). For the HTTP `GetTexture` path this is
+    /// always [`J2c`](ImageCodec::J2c) (the cap serves a `.j2c` codestream).
+    pub codec: ImageCodec,
+    /// The raw encoded image bytes.
+    pub data: Vec<u8>,
+}
+
+/// A fetched generic asset: its UUID, asset class and raw encoded bytes (a sound
+/// clip, animation, notecard, landmark, mesh, …). Delivered over the UDP
+/// transfer path or the HTTP `GetAsset`/`GetMesh` capability.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Asset {
+    /// The asset's UUID.
+    pub id: Uuid,
+    /// The asset class.
+    pub asset_type: AssetType,
+    /// The raw encoded asset bytes.
+    pub data: Vec<u8>,
 }
