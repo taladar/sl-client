@@ -13,6 +13,7 @@ mod message;
 /// time from the vendored `message_template.msg`.
 pub mod messages;
 mod parcel_flags;
+mod voice;
 mod zerocode;
 
 pub use control_flags::ControlFlags;
@@ -41,6 +42,11 @@ pub use material::{
 pub use message::{Message, MessageId};
 pub use messages::AnyMessage;
 pub use parcel_flags::{ParcelFlags, RegionFlags, sim_access};
+pub use voice::{
+    IceCandidate, ParcelVoiceInfo, VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC,
+    VoiceAccountInfo, VoiceProvisionRequest, build_parcel_voice_info_request,
+    build_provision_voice_account_request, build_voice_signaling_request,
+};
 pub use zerocode::{decode as zero_decode, encode as zero_encode};
 
 /// Combines two UUIDs the way Second Life derives a legacy upload's asset id:

@@ -17,15 +17,17 @@ use sl_proto::{
     AssetUploadResponse, CAP_FETCH_INVENTORY, CAP_GET_ASSET, CAP_GET_MESH, CAP_GET_MESH2,
     CAP_GET_TEXTURE, CAP_GROUP_MEMBER_DATA, CAP_MODIFY_MATERIAL_PARAMS,
     CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
-    CAP_RENDER_MATERIALS, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPLOAD_BAKED_TEXTURE,
+    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_RENDER_MATERIALS,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING,
     Event as SessionEvent, Llsd, LoginResponse, REQUESTED_CAPABILITIES, Session,
     build_event_queue_request, build_fetch_inventory_request, build_group_member_data_request,
     build_modify_material_params_request, build_new_file_agent_inventory_request,
     build_object_media_get_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_render_materials_request, build_seed_request,
+    build_object_media_update_request, build_parcel_voice_info_request,
+    build_provision_voice_account_request, build_render_materials_request, build_seed_request,
     build_update_avatar_appearance_request, build_update_item_asset_request,
-    build_upload_baked_texture_request, j2c, parse_asset_upload_response,
-    parse_event_queue_response, parse_llsd_xml, parse_login_response,
+    build_upload_baked_texture_request, build_voice_signaling_request, j2c,
+    parse_asset_upload_response, parse_event_queue_response, parse_llsd_xml, parse_login_response,
     parse_render_materials_response, parse_seed_response,
 };
 
@@ -38,22 +40,22 @@ pub use sl_proto::{
     CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData, EstateAccessDelta,
     EstateAccessKind, EstateInfo, ExtendedMesh, FlexibleData, Friend, FriendRights,
     GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
-    GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    InventoryType, LegacyMaterial, LightData, LightImage, LindenAmount, LoadUrlRequest,
-    LoginParams, LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
+    GroupRoleMember, GroupTitle, IceCandidate, ImDialog, InstantMessage, InventoryFolder,
+    InventoryItem, InventoryType, LegacyMaterial, LightData, LightImage, LindenAmount,
+    LoadUrlRequest, LoginParams, LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
     MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
     MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction,
     MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectExtraParams,
     ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectProperties, ObjectTransform,
     ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
     ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
-    PermissionField, PlayingAnimation, PrimShape, ProductType, ReflectionProbe, RegionFlags,
-    RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry,
+    ParcelVoiceInfo, PermissionField, PlayingAnimation, PrimShape, ProductType, ReflectionProbe,
+    RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry,
     RenderMaterialRef, Rotation, SaleType, ScriptDialog, ScriptPermissionRequest,
     ScriptPermissions, ScriptTeleportRequest, SculptData, SoundFlags, SoundPreload,
     TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, Throttle, Transmit, Uuid, Vector,
-    Wearable, WearableType, avatar_texture, decode_texture_entry, grid_to_handle, handle_to_global,
-    handle_to_grid, pcode, sim_access,
+    VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, avatar_texture,
+    decode_texture_entry, grid_to_handle, handle_to_global, handle_to_grid, pcode, sim_access,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -916,6 +918,34 @@ pub enum SlCommand {
     ModifyMaterialParams {
         /// The per-face material assignments to apply.
         updates: Vec<MaterialOverrideUpdate>,
+    },
+    /// Request voice-chat account credentials over the
+    /// `ProvisionVoiceAccountRequest` capability. A [`VoiceProvisionRequest::vivox`]
+    /// asks for legacy Vivox SIP credentials; a [`VoiceProvisionRequest::webrtc`]
+    /// negotiates a WebRTC session (the JSEP offer SDP is supplied by the
+    /// caller's own — out-of-scope — WebRTC engine). The reply arrives as
+    /// [`SlSessionEvent::VoiceAccountProvisioned`]. This handles the grid
+    /// *signalling* only; the audio session itself is the caller's concern.
+    RequestVoiceAccount {
+        /// The provision request (backend selection + WebRTC offer/logout).
+        request: VoiceProvisionRequest,
+    },
+    /// Request the current parcel's voice channel over the
+    /// `ParcelVoiceInfoRequest` capability. The reply arrives as
+    /// [`SlSessionEvent::ParcelVoiceInfo`].
+    RequestParcelVoiceInfo,
+    /// Trickle WebRTC ICE candidates (or signal end-of-gathering) over the
+    /// `VoiceSignalingRequest` capability, keyed by the `viewer_session` from a
+    /// prior [`SlSessionEvent::VoiceAccountProvisioned`]. Fire-and-forget — the
+    /// simulator returns only an HTTP status. The candidates come from the
+    /// caller's out-of-scope WebRTC engine.
+    SendVoiceSignaling {
+        /// The viewer session id from the provision reply.
+        viewer_session: String,
+        /// The ICE candidates to trickle (empty with `completed` to end).
+        candidates: Vec<IceCandidate>,
+        /// Whether this marks the end of ICE gathering.
+        completed: bool,
     },
     /// Begin a clean logout.
     Logout,
@@ -1923,6 +1953,43 @@ fn advance_running(
                     });
                 }
             }
+            SlCommand::RequestVoiceAccount { request } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_PROVISION_VOICE_ACCOUNT).cloned()
+                {
+                    let body = build_provision_voice_account_request(request);
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_voice_cap(&url, body, CAP_PROVISION_VOICE_ACCOUNT, &events_tx);
+                    });
+                }
+            }
+            SlCommand::RequestParcelVoiceInfo => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_PARCEL_VOICE_INFO).cloned()
+                {
+                    let body = build_parcel_voice_info_request();
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_voice_cap(&url, body, CAP_PARCEL_VOICE_INFO, &events_tx);
+                    });
+                }
+            }
+            SlCommand::SendVoiceSignaling {
+                viewer_session,
+                candidates,
+                completed,
+            } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_VOICE_SIGNALING).cloned()
+                {
+                    let body =
+                        build_voice_signaling_request(viewer_session, candidates, *completed);
+                    std::thread::spawn(move || {
+                        run_voice_signaling(&url, body);
+                    });
+                }
+            }
             SlCommand::Logout => session.initiate_logout(now),
         }
     }
@@ -2276,6 +2343,51 @@ fn run_modify_material_params(cap_url: &str, body: String, caps_tx: &Sender<(Str
             .send((CAP_MODIFY_MATERIAL_PARAMS.to_owned(), llsd))
             .ok();
     }
+}
+
+/// POSTs a voice-signalling capability (`ProvisionVoiceAccountRequest` or
+/// `ParcelVoiceInfoRequest`) carrying the prepared `body` and forwards the LLSD
+/// reply to `caps_tx` tagged with `cap`, for the session to surface as the
+/// matching event ([`SlSessionEvent::VoiceAccountProvisioned`] /
+/// [`SlSessionEvent::ParcelVoiceInfo`]). Only the grid signalling is handled;
+/// the audio session is out of scope.
+fn run_voice_cap(cap_url: &str, body: String, cap: &'static str, caps_tx: &Sender<(String, Llsd)>) {
+    let Ok(http) = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    else {
+        return;
+    };
+    let Ok(response) = http
+        .post(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+    else {
+        return;
+    };
+    let Ok(text) = response.text() else {
+        return;
+    };
+    if let Ok(llsd) = parse_llsd_xml(&text) {
+        caps_tx.send((cap.to_owned(), llsd)).ok();
+    }
+}
+
+/// POSTs a `VoiceSignalingRequest` (WebRTC ICE trickle). Fire-and-forget: the
+/// simulator returns only an HTTP status, so there is no event to surface.
+fn run_voice_signaling(cap_url: &str, body: String) {
+    let Ok(http) = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    else {
+        return;
+    };
+    http.post(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .ok();
 }
 
 /// Spawns the modern `NewFileAgentInventory` two-step CAPS upload on a background

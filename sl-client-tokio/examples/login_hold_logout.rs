@@ -411,6 +411,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::AssetUploadComplete { .. }
             | Event::AssetUploaded { .. }
             | Event::AssetUploadFailed { .. }
+            | Event::VoiceAccountProvisioned(_)
+            | Event::ParcelVoiceInfo(_)
             | Event::RegionChanged { .. } => {}
         }
     }
