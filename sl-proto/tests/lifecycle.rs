@@ -15,7 +15,7 @@ mod test {
         MoneyTransactionType, MuteFlags, MuteType, ObjectFlagSettings, ObjectTransform,
         ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
         ParcelUpdate, PermissionField, PrimShape, ProductType, RegionInfoUpdate, Reliability,
-        SaleType, ScriptPermissions, Session, Throttle, Transmit, pcode,
+        SaleType, ScriptPermissions, Session, TerrainLayerType, Throttle, Transmit, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -41,11 +41,12 @@ mod test {
         ImprovedTerseObjectUpdateObjectDataBlock, ImprovedTerseObjectUpdateRegionDataBlock,
         InventoryDescendents, InventoryDescendentsAgentDataBlock,
         InventoryDescendentsFolderDataBlock, InventoryDescendentsItemDataBlock, KillObject,
-        KillObjectObjectDataBlock, LogoutRequest, LogoutRequestAgentDataBlock, MapBlockReply,
-        MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapItemReply,
-        MapItemReplyAgentDataBlock, MapItemReplyDataBlock, MapItemReplyRequestDataBlock,
-        MoneyBalanceReply, MoneyBalanceReplyMoneyDataBlock, MoneyBalanceReplyTransactionInfoBlock,
-        MuteListUpdate, MuteListUpdateMuteDataBlock, ObjectProperties as WireObjectProperties,
+        KillObjectObjectDataBlock, LayerData, LayerDataLayerDataBlock, LayerDataLayerIDBlock,
+        LogoutRequest, LogoutRequestAgentDataBlock, MapBlockReply, MapBlockReplyAgentDataBlock,
+        MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapItemReply, MapItemReplyAgentDataBlock,
+        MapItemReplyDataBlock, MapItemReplyRequestDataBlock, MoneyBalanceReply,
+        MoneyBalanceReplyMoneyDataBlock, MoneyBalanceReplyTransactionInfoBlock, MuteListUpdate,
+        MuteListUpdateMuteDataBlock, ObjectProperties as WireObjectProperties,
         ObjectPropertiesObjectDataBlock, ObjectUpdate, ObjectUpdateCached,
         ObjectUpdateCachedObjectDataBlock, ObjectUpdateCachedRegionDataBlock,
         ObjectUpdateCompressed, ObjectUpdateCompressedObjectDataBlock,
@@ -4955,6 +4956,118 @@ mod test {
             })
             .ok_or("expected an ObjectIncludeInSearch")?;
         assert!(search.include_in_search);
+        Ok(())
+    }
+
+    /// Emits `count` bits of `value`, MSB first, little-endian by byte (the low
+    /// byte's bits first) — mirroring the viewer's `LLBitPack::bitPack`, the
+    /// encoder the terrain decoder must invert.
+    fn push_bits(bits: &mut Vec<u8>, value: u32, count: u32) {
+        let mut remaining = count;
+        let mut byte_shift = 0u32;
+        while remaining > 0 {
+            let take = remaining.min(8);
+            remaining = remaining.wrapping_sub(take);
+            let chunk = (value >> byte_shift) & 0xff;
+            byte_shift = byte_shift.wrapping_add(8);
+            let mut index = take;
+            while index > 0 {
+                index = index.wrapping_sub(1);
+                bits.push(u8::try_from((chunk >> index) & 1).unwrap_or(0));
+            }
+        }
+    }
+
+    /// Packs a bit list into bytes (MSB first), padding the final byte.
+    fn pack_bits(bits: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut current = 0u8;
+        let mut filled = 0u8;
+        for &bit in bits {
+            current = (current << 1) | (bit & 1);
+            filled = filled.wrapping_add(1);
+            if filled == 8 {
+                out.push(current);
+                current = 0;
+                filled = 0;
+            }
+        }
+        if filled > 0 {
+            current <<= 8u8.wrapping_sub(filled);
+            out.push(current);
+        }
+        out
+    }
+
+    /// Builds a `LayerData` LAND message carrying one flat patch at grid
+    /// (`patch_x`, `patch_y`): all DCT coefficients zero (an immediate
+    /// end-of-block), so every cell decodes to `range/2 + dc_offset`.
+    fn flat_land_layer(patch_x: u32, patch_y: u32, dc_offset: f32, range: u32) -> AnyMessage {
+        let mut bits = Vec::new();
+        // Group header: stride, patch size 16, layer type 'L'.
+        push_bits(&mut bits, 264, 16);
+        push_bits(&mut bits, 16, 8);
+        push_bits(&mut bits, u32::from(b'L'), 8);
+        // Patch header: prequant 10 (high nibble 8), wbits 2 (low nibble 0).
+        push_bits(&mut bits, 0x80, 8);
+        push_bits(&mut bits, dc_offset.to_bits(), 32);
+        push_bits(&mut bits, range, 16);
+        push_bits(&mut bits, (patch_x << 5) | patch_y, 10);
+        // Patch data: `10` => end-of-block (all coefficients zero).
+        push_bits(&mut bits, 1, 1);
+        push_bits(&mut bits, 0, 1);
+        // End of patches.
+        push_bits(&mut bits, 97, 8);
+        AnyMessage::LayerData(LayerData {
+            layer_id: LayerDataLayerIDBlock { r#type: b'L' },
+            layer_data: LayerDataLayerDataBlock {
+                data: pack_bits(&bits),
+            },
+        })
+    }
+
+    #[test]
+    fn layer_data_decodes_terrain_patch() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // An object first, so the session learns the sim's region handle (the
+        // LayerData message itself carries none).
+        let object = object_update(
+            7,
+            0x1234,
+            Vector {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+        );
+        session.handle_datagram(sim_addr(), &server_message(&object, 5, true)?, now)?;
+        drain_events(&mut session);
+
+        // Patch (1, 2), flat height range/2 + dc_offset = 8/2 + 22 = 26.
+        let layer = flat_land_layer(1, 2, 22.0, 8);
+        session.handle_datagram(sim_addr(), &server_message(&layer, 6, false)?, now)?;
+        let events = drain_events(&mut session);
+        let Some(Event::TerrainPatch(patch)) =
+            events.iter().find(|e| matches!(e, Event::TerrainPatch(_)))
+        else {
+            return Err(format!("expected TerrainPatch, got {events:?}").into());
+        };
+        assert_eq!(patch.layer, TerrainLayerType::Land);
+        assert_eq!(patch.patch_x, 1);
+        assert_eq!(patch.patch_y, 2);
+        assert_eq!(patch.size, 16);
+        assert_eq!(patch.region_handle, OBJ_REGION);
+        assert!((patch.value(0, 0).ok_or("cell 0,0")? - 26.0).abs() < 1e-3);
+
+        // It is in the public cache, addressable by region-local cell. Patch
+        // (1, 2) covers region cells x in 16..32, y in 32..48.
+        let height = session.terrain_height(20, 40).ok_or("height at (20,40)")?;
+        assert!((height - 26.0).abs() < 1e-3, "height {height} != 26.0");
+        assert_eq!(session.terrain_patches().count(), 1);
+        assert_eq!(session.terrain_patches_in_region(OBJ_REGION).count(), 1);
         Ok(())
     }
 }

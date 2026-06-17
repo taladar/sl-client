@@ -270,6 +270,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal
             | Event::TeleportFailed { .. }
+            | Event::TerrainPatch(_)
             | Event::RegionChanged { .. } => {}
         }
     }

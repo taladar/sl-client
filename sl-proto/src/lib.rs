@@ -2,6 +2,7 @@
 
 mod error;
 mod session;
+mod terrain;
 mod types;
 
 pub use error::Error;
@@ -18,8 +19,8 @@ pub use types::{
     ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelInfo, ParcelOverlayInfo,
     ParcelReturnType, ParcelUpdate, PermissionField, PrimShape, ProductType, RegionIdentity,
     RegionInfoUpdate, RegionLimits, Reliability, SaleType, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTeleportRequest, Throttle, Transmit, grid_to_handle, handle_to_global,
-    handle_to_grid, pcode,
+    ScriptPermissions, ScriptTeleportRequest, TerrainLayerType, TerrainPatch, Throttle, Transmit,
+    grid_to_handle, handle_to_global, handle_to_grid, pcode,
 };
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,

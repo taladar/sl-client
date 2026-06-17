@@ -143,6 +143,7 @@ use sl_wire::{
 use uuid::Uuid;
 
 use crate::error::Error;
+use crate::terrain;
 use crate::types::{
     ActiveGroup, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
     ChatMessage, ChatSourceType, ChatType, ClickAction, CreateGroupParams, DeRezDestination,
@@ -155,7 +156,8 @@ use crate::types::{
     ParcelAccessEntry, ParcelAccessScope, ParcelInfo, ParcelOverlayInfo, ParcelReturnType,
     ParcelUpdate, PermissionField, PrimShape, ProductType, RegionIdentity, RegionInfoUpdate,
     RegionLimits, Reliability, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, Throttle, Transmit, grid_to_handle, handle_to_grid,
+    ScriptTeleportRequest, TerrainLayerType, TerrainPatch, Throttle, Transmit, grid_to_handle,
+    handle_to_grid,
 };
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
@@ -2412,6 +2414,17 @@ pub struct Session {
     /// the cache is partitioned per sim. A sim's objects are dropped when its
     /// circuit goes away (`DisableSimulator`, teleport handover, relogin).
     objects: BTreeMap<SocketAddr, BTreeMap<u32, Object>>,
+    /// The decoded terrain cache, keyed by the simulator the patches belong to
+    /// (the root region *and* every neighbour streamed over a child circuit),
+    /// then by `(layer code, patch x, patch y)` so each layer's patches are kept
+    /// side by side. Dropped with the rest of a sim's state when its circuit
+    /// goes away. See [`Session::terrain_patches`] and [`Session::terrain_height`].
+    terrain: BTreeMap<SocketAddr, BTreeMap<(u8, u32, u32), TerrainPatch>>,
+    /// The region handle most recently learned for each simulator (from object
+    /// updates, which carry it, and from `EnableSimulator`). Used to label
+    /// terrain patches, which the `LayerData` message does not itself tag with a
+    /// region handle.
+    regions: BTreeMap<SocketAddr, u64>,
     /// Pending high-level events for the driver.
     events: VecDeque<Event>,
 }
@@ -2439,6 +2452,8 @@ impl Session {
             mute_xfers: BTreeMap::new(),
             next_xfer_id: 1,
             objects: BTreeMap::new(),
+            terrain: BTreeMap::new(),
+            regions: BTreeMap::new(),
             events: VecDeque::new(),
         }
     }
@@ -2498,6 +2513,7 @@ impl Session {
             "EnableSimulator" => {
                 if let Some((handle, sim)) = enable_simulator_from_caps_llsd(body) {
                     self.open_child_circuit(sim, now)?;
+                    self.regions.insert(sim, handle);
                     let (grid_x, grid_y) = handle_to_grid(handle);
                     self.events
                         .push_back(Event::NeighborDiscovered(NeighborInfo {
@@ -2584,8 +2600,11 @@ impl Session {
         self.children.clear();
         self.child_seeds.clear();
         // The retargeted root and the dropped neighbours leave their cached
-        // objects stale (new local-id spaces at the destination); start fresh.
+        // objects and terrain stale (new local-id spaces and a new region at the
+        // destination); start fresh.
         self.objects.clear();
+        self.terrain.clear();
+        self.regions.clear();
         if seed_capability.is_some() {
             self.seed_capability = seed_capability;
         }
@@ -2772,8 +2791,11 @@ impl Session {
                 circuit.send_use_circuit_code(now)?;
                 circuit.send_complete_agent_movement(now)?;
                 self.circuit = Some(circuit);
-                // A fresh session: discard any objects from a previous login.
+                // A fresh session: discard any objects and terrain from a
+                // previous login.
                 self.objects.clear();
+                self.terrain.clear();
+                self.regions.clear();
                 self.seed_capability = Some(success.seed_capability.clone());
                 self.inventory_root = success.inventory_root;
                 self.state = SessionState::AwaitingHandshake;
@@ -2992,9 +3014,32 @@ impl Session {
                         .push_back(Event::ObjectProperties(Box::new(properties)));
                 }
             }
+            AnyMessage::LayerData(layer) => {
+                self.dispatch_terrain(from, &layer.layer_data.data);
+            }
             _ => return false,
         }
         true
+    }
+
+    /// Decodes a `LayerData` payload received from simulator `from`, caching each
+    /// patch (keyed by layer and grid position) and emitting an
+    /// [`Event::TerrainPatch`]. Best-effort: a malformed group header is ignored.
+    fn dispatch_terrain(&mut self, from: SocketAddr, data: &[u8]) {
+        let Some((layer, patches)) = terrain::decode_layer(data) else {
+            return;
+        };
+        let region_handle = self.regions.get(&from).copied().unwrap_or(0);
+        let cache = self.terrain.entry(from).or_default();
+        let mut emit = Vec::with_capacity(patches.len());
+        for decoded in patches {
+            let patch = terrain::into_terrain_patch(decoded, layer, region_handle);
+            cache.insert((layer.code(), patch.patch_x, patch.patch_y), patch.clone());
+            emit.push(patch);
+        }
+        for patch in emit {
+            self.events.push_back(Event::TerrainPatch(Box::new(patch)));
+        }
     }
 
     /// Inserts or refreshes a scene object in the cache for simulator `from`,
@@ -3003,6 +3048,11 @@ impl Session {
     /// [`properties`](Object::properties) are preserved across a refresh that
     /// does not carry its own.
     fn upsert_object(&mut self, from: SocketAddr, mut object: Object) {
+        // Remember this sim's region handle so terrain patches (whose `LayerData`
+        // message carries no handle) can be labelled with it.
+        if object.region_handle != 0 {
+            self.regions.insert(from, object.region_handle);
+        }
         let sim = self.objects.entry(from).or_default();
         match sim.get(&object.local_id) {
             Some(existing) => {
@@ -3065,6 +3115,9 @@ impl Session {
     /// Drops every cached object for simulator `addr` (its circuit has gone away),
     /// emitting an [`Event::ObjectRemoved`] for each so consumers can prune.
     fn forget_sim_objects(&mut self, addr: SocketAddr) {
+        // The terrain and region-handle caches for this sim go stale too.
+        self.terrain.remove(&addr);
+        self.regions.remove(&addr);
         let Some(sim) = self.objects.remove(&addr) else {
             return;
         };
@@ -3301,6 +3354,7 @@ impl Session {
                 // Pre-open a child-agent circuit to the neighbour so it holds the
                 // agent's presence before the avatar crosses the border.
                 self.open_child_circuit(info.sim, now)?;
+                self.regions.insert(info.sim, info.region_handle);
                 self.events.push_back(Event::NeighborDiscovered(info));
             }
             AnyMessage::MapBlockReply(reply) => {
@@ -5046,6 +5100,40 @@ impl Session {
     pub fn object(&self, local_id: u32) -> Option<&Object> {
         let root = self.circuit.as_ref().map(|circuit| circuit.sim_addr)?;
         self.objects.get(&root)?.get(&local_id)
+    }
+
+    /// All cached terrain patches across the current region *and* every
+    /// neighbouring region a child circuit is streaming (decoded from
+    /// `LayerData`). Includes every layer (LAND/WATER/WIND/CLOUD); filter on
+    /// [`TerrainPatch::layer`] for a specific one. A sim's patches are dropped
+    /// when its circuit goes away.
+    pub fn terrain_patches(&self) -> impl Iterator<Item = &TerrainPatch> {
+        self.terrain.values().flat_map(BTreeMap::values)
+    }
+
+    /// All cached terrain patches in the region identified by `region_handle`.
+    pub fn terrain_patches_in_region(
+        &self,
+        region_handle: u64,
+    ) -> impl Iterator<Item = &TerrainPatch> {
+        self.terrain_patches()
+            .filter(move |patch| patch.region_handle == region_handle)
+    }
+
+    /// The ground height (metres) at region-local cell (`x`, `y`) in the region
+    /// the agent is currently in (the root circuit), from the cached LAND
+    /// terrain, or `None` if that patch has not been received. `x`/`y` are
+    /// integer metres within the region (`0..region_size`). Standard regions use
+    /// 16-metre LAND patches; for variable ("extended") regions use
+    /// [`Session::terrain_patches`] and each patch's own [`TerrainPatch::size`].
+    #[must_use]
+    pub fn terrain_height(&self, x: u32, y: u32) -> Option<f32> {
+        let root = self.circuit.as_ref().map(|circuit| circuit.sim_addr)?;
+        let cache = self.terrain.get(&root)?;
+        // LAND patches on a standard region are 16×16; locate the patch by its
+        // grid position then the cell within it (16 is a non-zero literal).
+        let patch = cache.get(&(TerrainLayerType::Land.code(), x / 16, y / 16))?;
+        patch.value(x % 16, y % 16)
     }
 
     /// Requests the full `ObjectUpdate` for the given region-local ids via
