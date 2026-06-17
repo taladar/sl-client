@@ -9,12 +9,13 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
-        ChatAudible, ChatSourceType, ChatType, ControlFlags, CreateGroupParams, DisconnectReason,
-        EstateAccessDelta, EstateAccessKind, Event, FriendRights, ImDialog, LindenAmount,
-        LoginParams, MapItemType, Maturity, MoneyTransactionType, MuteFlags, MuteType,
+        ChatAudible, ChatSourceType, ChatType, ClickAction, ControlFlags, CreateGroupParams,
+        DeRezDestination, DisconnectReason, EstateAccessDelta, EstateAccessKind, Event,
+        FriendRights, ImDialog, LindenAmount, LoginParams, MapItemType, Material, Maturity,
+        MoneyTransactionType, MuteFlags, MuteType, ObjectFlagSettings, ObjectTransform,
         ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
-        ParcelUpdate, ProductType, RegionInfoUpdate, Reliability, ScriptPermissions, Session,
-        Throttle, Transmit, pcode,
+        ParcelUpdate, PermissionField, PrimShape, ProductType, RegionInfoUpdate, Reliability,
+        SaleType, ScriptPermissions, Session, Throttle, Transmit, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -4599,6 +4600,361 @@ mod test {
             "disabling the neighbour must remove its objects, got {events:?}"
         );
         assert_eq!(session.objects().count(), 0);
+        Ok(())
+    }
+
+    // Object interaction & editing (#17) -----------------------------------
+
+    #[test]
+    fn rez_object_sends_object_add() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let position = Vector {
+            x: 128.0,
+            y: 64.0,
+            z: 25.0,
+        };
+        session.rez_object(&PrimShape::cube(position.clone()), uuid::Uuid::nil(), now)?;
+        let sent = drain(&mut session)?;
+        let add = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectAdd(add) => Some(add),
+                _ => None,
+            })
+            .ok_or("expected an ObjectAdd")?;
+        // A default cube: volume prim, wood, square profile, line path.
+        assert_eq!(add.object_data.p_code, pcode::PRIMITIVE);
+        assert_eq!(add.object_data.material, 3); // LL_MCODE_WOOD
+        assert_eq!(add.object_data.path_curve, 0x10); // LL_PCODE_PATH_LINE
+        assert_eq!(add.object_data.profile_curve, 0x01); // LL_PCODE_PROFILE_SQUARE
+        assert_eq!(add.object_data.path_scale_x, 100);
+        assert_eq!(add.object_data.path_scale_y, 100);
+        assert_eq!(
+            add.object_data.scale,
+            Vector {
+                x: 0.5,
+                y: 0.5,
+                z: 0.5
+            }
+        );
+        // Rez exactly at the position: raycast bypassed, ray endpoint = position.
+        assert_eq!(add.object_data.bypass_raycast, 1);
+        assert_eq!(add.object_data.ray_end, position);
+        Ok(())
+    }
+
+    #[test]
+    fn update_object_packs_position_and_rotation() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let position = Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        // A 90° rotation about Z: (0, 0, sin45, cos45), so w >= 0 and packToVector3
+        // leaves the vector part untouched.
+        let sin45 = std::f32::consts::FRAC_1_SQRT_2;
+        let rotation = Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: sin45,
+            s: sin45,
+        };
+        session.update_object(
+            42,
+            &ObjectTransform {
+                position: Some(position.clone()),
+                rotation: Some(rotation),
+                ..ObjectTransform::default()
+            },
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let update = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::MultipleObjectUpdate(update) => Some(update),
+                _ => None,
+            })
+            .ok_or("expected a MultipleObjectUpdate")?;
+        let block = update
+            .object_data
+            .first()
+            .ok_or("expected one ObjectData block")?;
+        assert_eq!(block.object_local_id, 42);
+        // POSITION (0x01) | ROTATION (0x02).
+        assert_eq!(block.r#type, 0x03);
+        // The Data blob is position (12 bytes) then the packed quaternion (12).
+        assert_eq!(block.data.len(), 24);
+        let mut reader = Reader::new(&block.data);
+        assert_eq!(reader.vector3()?, position);
+        let qx = reader.f32()?;
+        let qy = reader.f32()?;
+        let qz = reader.f32()?;
+        assert!((qx - 0.0).abs() < 1e-5, "qx = {qx}");
+        assert!((qy - 0.0).abs() < 1e-5, "qy = {qy}");
+        assert!((qz - sin45).abs() < 1e-5, "qz = {qz}");
+        Ok(())
+    }
+
+    #[test]
+    fn set_object_scale_uniform_group_sets_type_byte() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.set_object_scale(
+            7,
+            Vector {
+                x: 2.0,
+                y: 2.0,
+                z: 2.0,
+            },
+            true,
+            true,
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let update = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::MultipleObjectUpdate(update) => Some(update),
+                _ => None,
+            })
+            .ok_or("expected a MultipleObjectUpdate")?;
+        let block = update
+            .object_data
+            .first()
+            .ok_or("expected one ObjectData block")?;
+        // SCALE (0x04) | LINK_SET (0x08) | UNIFORM (0x10) = 0x1C.
+        assert_eq!(block.r#type, 0x1C);
+        assert_eq!(block.data.len(), 12);
+        Ok(())
+    }
+
+    #[test]
+    fn touch_object_sends_grab_then_degrab() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.touch_object(55, now)?;
+        let sent = drain(&mut session)?;
+        let grab = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectGrab(grab) => Some(grab),
+                _ => None,
+            })
+            .ok_or("expected an ObjectGrab")?;
+        assert_eq!(grab.object_data.local_id, 55);
+        assert!(grab.surface_info.is_empty());
+        let degrab = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectDeGrab(degrab) => Some(degrab),
+                _ => None,
+            })
+            .ok_or("expected an ObjectDeGrab")?;
+        assert_eq!(degrab.object_data.local_id, 55);
+        Ok(())
+    }
+
+    #[test]
+    fn set_object_name_sends_object_name() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.set_object_name(9, "Vendor", now)?;
+        let sent = drain(&mut session)?;
+        let name = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectName(name) => Some(name),
+                _ => None,
+            })
+            .ok_or("expected an ObjectName")?;
+        let block = name.object_data.first().ok_or("expected one block")?;
+        assert_eq!(block.local_id, 9);
+        assert_eq!(block.name, b"Vendor");
+        Ok(())
+    }
+
+    #[test]
+    fn delete_objects_sends_object_delete() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.delete_objects(&[11, 12], now)?;
+        let sent = drain(&mut session)?;
+        let delete = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectDelete(delete) => Some(delete),
+                _ => None,
+            })
+            .ok_or("expected an ObjectDelete")?;
+        assert!(!delete.agent_data.force);
+        let ids: Vec<u32> = delete
+            .object_data
+            .iter()
+            .map(|b| b.object_local_id)
+            .collect();
+        assert_eq!(ids, vec![11, 12]);
+        Ok(())
+    }
+
+    #[test]
+    fn derez_objects_sends_derez_object() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let folder = uuid::Uuid::from_u128(0xF0_1DE2);
+        session.derez_objects(
+            &[21],
+            DeRezDestination::TakeIntoAgentInventory,
+            folder,
+            uuid::Uuid::from_u128(0x7),
+            uuid::Uuid::nil(),
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let derez = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::DeRezObject(derez) => Some(derez),
+                _ => None,
+            })
+            .ok_or("expected a DeRezObject")?;
+        assert_eq!(derez.agent_block.destination, 4); // DRD_TAKE_INTO_AGENT_INVENTORY
+        assert_eq!(derez.agent_block.destination_id, folder);
+        assert_eq!(derez.agent_block.packet_count, 1);
+        assert_eq!(derez.agent_block.packet_number, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn set_object_permissions_sends_object_permissions() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // PERM_COPY = 0x8000 in the LSL permission flags.
+        session.set_object_permissions(&[31], PermissionField::NextOwner, false, 0x8000, now)?;
+        let sent = drain(&mut session)?;
+        let perms = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectPermissions(perms) => Some(perms),
+                _ => None,
+            })
+            .ok_or("expected an ObjectPermissions")?;
+        assert!(!perms.header_data.r#override);
+        let block = perms.object_data.first().ok_or("expected one block")?;
+        assert_eq!(block.object_local_id, 31);
+        assert_eq!(block.field, 0x10); // PERM_NEXT_OWNER
+        assert_eq!(block.set, 0); // clearing
+        assert_eq!(block.mask, 0x8000);
+        Ok(())
+    }
+
+    #[test]
+    fn link_objects_sends_object_link_root_first() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.link_objects(&[100, 101, 102], now)?;
+        let sent = drain(&mut session)?;
+        let link = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectLink(link) => Some(link),
+                _ => None,
+            })
+            .ok_or("expected an ObjectLink")?;
+        let ids: Vec<u32> = link.object_data.iter().map(|b| b.object_local_id).collect();
+        assert_eq!(ids, vec![100, 101, 102]);
+        Ok(())
+    }
+
+    #[test]
+    fn edit_helpers_send_their_messages() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.set_object_click_action(1, ClickAction::Buy, now)?;
+        session.set_object_material(1, Material::Metal, now)?;
+        session.set_object_for_sale(1, SaleType::Copy, 250, now)?;
+        session.set_object_flags(
+            1,
+            &ObjectFlagSettings {
+                use_physics: true,
+                is_phantom: true,
+                ..ObjectFlagSettings::default()
+            },
+            now,
+        )?;
+        session.set_object_include_in_search(1, true, now)?;
+        let sent = drain(&mut session)?;
+
+        let click = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectClickAction(c) => c.object_data.first(),
+                _ => None,
+            })
+            .ok_or("expected an ObjectClickAction")?;
+        assert_eq!(click.click_action, 2); // CLICK_ACTION_BUY
+
+        let material = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectMaterial(c) => c.object_data.first(),
+                _ => None,
+            })
+            .ok_or("expected an ObjectMaterial")?;
+        assert_eq!(material.material, 1); // LL_MCODE_METAL
+
+        let sale = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectSaleInfo(c) => c.object_data.first(),
+                _ => None,
+            })
+            .ok_or("expected an ObjectSaleInfo")?;
+        assert_eq!(sale.sale_type, 2); // FS_COPY
+        assert_eq!(sale.sale_price, 250);
+
+        let flags = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectFlagUpdate(f) => Some(f),
+                _ => None,
+            })
+            .ok_or("expected an ObjectFlagUpdate")?;
+        assert!(flags.agent_data.use_physics);
+        assert!(flags.agent_data.is_phantom);
+        assert!(!flags.agent_data.is_temporary);
+
+        let search = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectIncludeInSearch(s) => s.object_data.first(),
+                _ => None,
+            })
+            .ok_or("expected an ObjectIncludeInSearch")?;
+        assert!(search.include_in_search);
         Ok(())
     }
 }

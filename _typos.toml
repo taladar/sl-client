@@ -6,3 +6,7 @@ extend-exclude = ["sl-wire/message_template.msg"]
 [default.extend-words]
 # "LOD" = level of detail (mesh rendering term), not a typo of "LOAD".
 LOD = "LOD"
+# "delink" is the LLUDP message name `ObjectDelink` (and our `delink_objects`
+# wrapper), not a typo of "unlink".
+delink = "delink"
+Delink = "Delink"
