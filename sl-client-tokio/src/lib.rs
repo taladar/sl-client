@@ -26,10 +26,11 @@ pub use sl_proto::{
     DisconnectReason, Event, Friend, FriendRights, GroupMember, GroupMembership, GroupNotice,
     GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
     InventoryFolder, InventoryItem, LoadUrlRequest, LoginParams, LoginRequest, LoginResponse,
-    MapRegionInfo, Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo,
-    ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity, RegionLimits, Reliability,
-    Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
+    MapRegionInfo, Maturity, MfaChallenge, MuteEntry, MuteFlags, MuteType, NeighborInfo,
+    ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity,
+    RegionLimits, Reliability, Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest, Transmit, Uuid, Vector, grid_to_handle, handle_to_global,
+    handle_to_grid, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -283,6 +284,27 @@ pub enum Command {
         item_id: Uuid,
         /// The permissions to grant.
         permissions: ScriptPermissions,
+    },
+    /// Request the agent's mute (block) list (`MuteListRequest`). The list
+    /// arrives as [`Event::MuteList`] (or [`Event::MuteListUnchanged`]).
+    RequestMuteList,
+    /// Mute (block) an entity (`UpdateMuteListEntry`).
+    Mute {
+        /// The muted entity's id (nil for a [`MuteType::ByName`] mute).
+        id: Uuid,
+        /// The muted entity's name.
+        name: String,
+        /// What kind of entity is muted.
+        mute_type: MuteType,
+        /// The per-aspect exception flags ([`MuteFlags::default`] mutes all).
+        flags: MuteFlags,
+    },
+    /// Remove a mute (`RemoveMuteListEntry`); `id`/`name` must match the entry.
+    Unmute {
+        /// The muted entity's id.
+        id: Uuid,
+        /// The muted entity's name.
+        name: String,
     },
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
@@ -576,6 +598,15 @@ impl Client {
                         }
                         Some(Command::AnswerScriptPermissions { task_id, item_id, permissions }) => {
                             self.session.answer_script_permissions(task_id, item_id, permissions, Instant::now())?;
+                        }
+                        Some(Command::RequestMuteList) => {
+                            self.session.request_mute_list(Instant::now())?;
+                        }
+                        Some(Command::Mute { id, name, mute_type, flags }) => {
+                            self.session.mute(id, &name, mute_type, flags, Instant::now())?;
+                        }
+                        Some(Command::Unmute { id, name }) => {
+                            self.session.unmute(id, &name, Instant::now())?;
                         }
                         Some(Command::Teleport { region_handle, position, look_at }) => {
                             self.session.teleport_to(region_handle, position, look_at, Instant::now())?;

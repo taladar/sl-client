@@ -359,6 +359,18 @@ pub enum Event {
     /// A scripted object asked to teleport the agent (`ScriptTeleportRequest`,
     /// i.e. `llMapDestination`). The client may initiate the teleport itself.
     ScriptTeleport(Box<ScriptTeleportRequest>),
+    /// The agent's mute (block) list, in response to
+    /// [`Session::request_mute_list`](crate::Session::request_mute_list): the
+    /// list was downloaded (via the file-transfer `Xfer` path) and parsed, or is
+    /// empty. Edits made with [`Session::mute`](crate::Session::mute) /
+    /// [`unmute`](crate::Session::unmute) take effect server-side; re-request to
+    /// see the updated list.
+    MuteList(Vec<MuteEntry>),
+    /// The simulator reported that the agent's cached mute list is still current
+    /// (`UseCachedMuteList`), in response to
+    /// [`Session::request_mute_list`](crate::Session::request_mute_list) with a
+    /// non-zero CRC; no list was re-downloaded.
+    MuteListUnchanged,
     /// The simulator answered a sit request (`AvatarSitResponse`) after a
     /// [`Session::sit_on`](crate::Session::sit_on); the session has sent the
     /// completing `AgentSit`.
@@ -1325,6 +1337,88 @@ pub struct ScriptTeleportRequest {
     pub position: (f32, f32, f32),
     /// The look-at direction on arrival.
     pub look_at: (f32, f32, f32),
+}
+
+/// The kind of thing a mute-list entry blocks, from the `MuteType` field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MuteType {
+    /// A mute by display name only (no specific id).
+    ByName,
+    /// A muted agent (avatar).
+    Agent,
+    /// A muted object.
+    Object,
+    /// A muted group.
+    Group,
+    /// A muted external (e.g. hypergrid) entity.
+    External,
+    /// An unrecognised mute-type value, preserved verbatim.
+    Unknown(i32),
+}
+
+impl MuteType {
+    /// Classifies a `MuteType` wire value.
+    #[must_use]
+    pub const fn from_i32(value: i32) -> Self {
+        match value {
+            0 => Self::ByName,
+            1 => Self::Agent,
+            2 => Self::Object,
+            3 => Self::Group,
+            4 => Self::External,
+            other => Self::Unknown(other),
+        }
+    }
+
+    /// The wire value for this mute type.
+    #[must_use]
+    pub const fn to_i32(self) -> i32 {
+        match self {
+            Self::ByName => 0,
+            Self::Agent => 1,
+            Self::Object => 2,
+            Self::Group => 3,
+            Self::External => 4,
+            Self::Unknown(other) => other,
+        }
+    }
+}
+
+/// The per-entry mute flags bitfield. **Each set bit is an *exception*** — it
+/// means "do *not* mute this aspect" — so `MuteFlags(0)` mutes everything (the
+/// usual case). The flag values match the viewer's `LLMute::flag*` constants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MuteFlags(pub u32);
+
+impl MuteFlags {
+    /// Do not mute the target's text chat.
+    pub const ALLOW_TEXT_CHAT: u32 = 0x1;
+    /// Do not mute the target's voice chat.
+    pub const ALLOW_VOICE_CHAT: u32 = 0x2;
+    /// Do not mute the target's particles.
+    pub const ALLOW_PARTICLES: u32 = 0x4;
+    /// Do not mute the target's object sounds.
+    pub const ALLOW_OBJECT_SOUNDS: u32 = 0x8;
+
+    /// Whether all of the bits in `mask` are set.
+    #[must_use]
+    pub const fn contains(self, mask: u32) -> bool {
+        self.0 & mask == mask
+    }
+}
+
+/// One entry in the agent's mute (block) list, parsed from the downloaded mute
+/// file ([`Event::MuteList`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MuteEntry {
+    /// The muted entity's id (nil for a [`MuteType::ByName`] mute).
+    pub id: Uuid,
+    /// The muted entity's name.
+    pub name: String,
+    /// What kind of entity is muted.
+    pub mute_type: MuteType,
+    /// The per-entry exception flags.
+    pub flags: MuteFlags,
 }
 
 /// An inventory folder (category): from the login skeleton

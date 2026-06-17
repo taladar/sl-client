@@ -609,6 +609,8 @@ impl Survey {
             | Event::ScriptPermissionRequest(_)
             | Event::LoadUrl(_)
             | Event::ScriptTeleport(_)
+            | Event::MuteList(_)
+            | Event::MuteListUnchanged
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal

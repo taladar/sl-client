@@ -36,7 +36,7 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 6 ✅ | Friends & presence **(done)** | 5 | Presence/online monitor | Local OpenSim (2 accounts) |
 | 7 ✅ | Group support **(done)** | 8 | Group chat bot, roster tool | Local OpenSim (Groups V2 module) |
 | 8 ✅ | Script dialogs & permissions **(done)** | 3 | Vendor/scripted-object interaction bot | Local OpenSim (scripted object) |
-| 9 | Mute list | 2 | Moderation helper | Local OpenSim |
+| 9 ✅ | Mute list **(done)** | 2 | Moderation helper | Local OpenSim (MuteList module) |
 | 10 | Seamless teleport (child circuits) | 8 | Roaming bot that keeps its session | Local OpenSim (multi-region) |
 | 11 | Money / economy | 5 | Balance monitor, tip/vendor bot | **Money module or SL grid** |
 | 12 | Full world map | 5 | Live map: agents, POIs, land-for-sale | Local OpenSim |
@@ -235,9 +235,25 @@ the dialog. *Test: local OpenSim with the script engine enabled and a scripted
 object (no headless rez path — a scripted prim must be loaded via an OAR or a
 viewer).*
 
-**9. Mute list — `MuteListRequest`, `UpdateMuteListEntry`, `RemoveMuteListEntry`
-· 2 pts.** Fetch and edit the mute/block list — a small moderation helper.
-*Test: local OpenSim.*
+**9. Mute list · 2 pts. ✅ Done.** A small moderation helper that fetches and
+edits the mute/block list. Implemented: `Session::request_mute_list`
+(`MuteListRequest`, zero CRC), `mute` (`UpdateMuteListEntry`) and `unmute`
+(`RemoveMuteListEntry`), with `MuteType` (by-name/agent/object/group/external)
+and a `MuteFlags` exception bitfield. The **fetch** is the real thing: the sim
+replies with `UseCachedMuteList` (→ `Event::MuteListUnchanged`), a
+`GenericMessage` `emptymutelist` (→ `Event::MuteList([])`), or a
+`MuteListUpdate` naming a file the client then
+**downloads over the legacy `Xfer` file-transfer path** (`RequestXfer` →
+`SendXferPacket`/`ConfirmXferPacket`, stripping packet-0's 4-byte length prefix
+and detecting the `0x80000000` last-packet flag), parsing the
+`<type> <uuid> <name>|<flags>` lines into `MuteEntry` values
+(`Event::MuteList`). The `Xfer` machinery (session state for in-flight
+transfers) is reusable for #19's legacy asset path. Wired as
+`Command::{RequestMuteList, Mute, Unmute}` through both runtimes. Verified live
+against the local OpenSim (MuteList module + SQLite MuteListService enabled):
+muting an agent then fetching returned the parsed entry over Xfer, and unmuting
+then fetching returned an empty list. *Test: local OpenSim with `[Messaging]
+MuteListModule = MuteListModule` and a `MuteListService` (SQLite) configured.*
 
 **10. Seamless teleport via child-agent circuits — `EnableSimulator` → child
 `UseCircuitCode`, `EstablishAgentCommunication` (CAPS), `CrossedRegion`,

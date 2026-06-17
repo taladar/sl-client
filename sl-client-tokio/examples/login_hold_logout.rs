@@ -198,6 +198,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::ScriptTeleport(request) => {
                 info!("script teleport to {:?}", request.region_name);
             }
+            Event::MuteList(entries) => info!("mute list: {} entr(ies)", entries.len()),
+            Event::MuteListUnchanged => info!("mute list unchanged (cached)"),
             // This demo ignores the remaining profile/region/parcel/teleport/group events.
             Event::GroupMembers { .. }
             | Event::GroupRoleData { .. }

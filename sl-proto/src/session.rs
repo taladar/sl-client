@@ -41,6 +41,14 @@ use sl_wire::messages::{
     ScriptAnswerYes, ScriptAnswerYesAgentDataBlock, ScriptAnswerYesDataBlock, ScriptDialogReply,
     ScriptDialogReplyAgentDataBlock, ScriptDialogReplyDataBlock,
 };
+// Mute list (#9): the outgoing mute-edit messages and the Xfer download messages.
+use sl_wire::messages::{
+    ConfirmXferPacket, ConfirmXferPacketXferIDBlock, MuteListRequest,
+    MuteListRequestAgentDataBlock, MuteListRequestMuteDataBlock, RemoveMuteListEntry,
+    RemoveMuteListEntryAgentDataBlock, RemoveMuteListEntryMuteDataBlock, RequestXfer,
+    RequestXferXferIDBlock, UpdateMuteListEntry, UpdateMuteListEntryAgentDataBlock,
+    UpdateMuteListEntryMuteDataBlock,
+};
 // Group support (#7): incoming reply blocks consumed by the converter helpers.
 use sl_wire::messages::{
     AgentDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
@@ -78,10 +86,10 @@ use crate::types::{
     ChatMessage, ChatSourceType, ChatType, CreateGroupParams, DisconnectReason, Event, Friend,
     FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
     GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    LoadUrlRequest, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, NeighborInfo,
-    ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit,
-    grid_to_handle, handle_to_grid,
+    LoadUrlRequest, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, MuteEntry, MuteFlags,
+    MuteType, NeighborInfo, ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity,
+    RegionLimits, Reliability, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest, Transmit, grid_to_handle, handle_to_grid,
 };
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
@@ -968,6 +976,101 @@ impl Circuit {
         self.send(&message, Reliability::Reliable, now)
     }
 
+    /// Queues a `MuteListRequest` reliably. `mute_crc` is the CRC of the cached
+    /// mute list (`0` forces a fresh download).
+    fn send_mute_list_request(&mut self, mute_crc: u32, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::MuteListRequest(MuteListRequest {
+            agent_data: MuteListRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            mute_data: MuteListRequestMuteDataBlock { mute_crc },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `UpdateMuteListEntry` reliably (add or update a mute).
+    fn send_update_mute_list_entry(
+        &mut self,
+        mute_id: Uuid,
+        mute_name: &str,
+        mute_type: i32,
+        mute_flags: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::UpdateMuteListEntry(UpdateMuteListEntry {
+            agent_data: UpdateMuteListEntryAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            mute_data: UpdateMuteListEntryMuteDataBlock {
+                mute_id,
+                mute_name: with_nul(mute_name),
+                mute_type,
+                mute_flags,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RemoveMuteListEntry` reliably (remove a mute).
+    fn send_remove_mute_list_entry(
+        &mut self,
+        mute_id: Uuid,
+        mute_name: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RemoveMuteListEntry(RemoveMuteListEntry {
+            agent_data: RemoveMuteListEntryAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            mute_data: RemoveMuteListEntryMuteDataBlock {
+                mute_id,
+                mute_name: with_nul(mute_name),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RequestXfer` reliably to download the file `filename` under the
+    /// transfer id `xfer_id`.
+    fn send_request_xfer(
+        &mut self,
+        xfer_id: u64,
+        filename: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RequestXfer(RequestXfer {
+            xfer_id: RequestXferXferIDBlock {
+                id: xfer_id,
+                filename: with_nul(filename),
+                file_path: 0,
+                delete_on_completion: true,
+                use_big_packets: false,
+                v_file_id: Uuid::nil(),
+                v_file_type: 0,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ConfirmXferPacket` reliably acknowledging `packet` of `xfer_id`.
+    fn send_confirm_xfer_packet(
+        &mut self,
+        xfer_id: u64,
+        packet: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ConfirmXferPacket(ConfirmXferPacket {
+            xfer_id: ConfirmXferPacketXferIDBlock {
+                id: xfer_id,
+                packet,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
     /// Queues a `FetchInventoryDescendents` reliably for the folder `folder_id`
     /// (sorted by name), requesting its sub-folders and items.
     fn send_fetch_inventory_descendents(
@@ -1230,6 +1333,11 @@ pub struct Session {
     /// The agent's inventory root ("My Inventory") folder id, from the login
     /// response.
     inventory_root: Option<Uuid>,
+    /// In-flight mute-list file downloads (`Xfer` id → accumulated file bytes),
+    /// started when a `MuteListUpdate` arrives.
+    mute_xfers: BTreeMap<u64, Vec<u8>>,
+    /// A monotonic counter for generating `Xfer` ids (never zero).
+    next_xfer_id: u64,
     /// Pending high-level events for the driver.
     events: VecDeque<Event>,
 }
@@ -1251,6 +1359,8 @@ impl Session {
             teleport_target: None,
             seed_capability: None,
             inventory_root: None,
+            mute_xfers: BTreeMap::new(),
+            next_xfer_id: 1,
             events: VecDeque::new(),
         }
     }
@@ -1754,6 +1864,56 @@ impl Session {
                         circuit.record_acks(&[packet.id]);
                     }
                 }
+            }
+            AnyMessage::MuteListUpdate(update) => {
+                // The mute list changed; download the named file over Xfer.
+                let filename = trimmed_string(&update.mute_data.filename);
+                if filename.is_empty() {
+                    self.events.push_back(Event::MuteList(Vec::new()));
+                } else {
+                    let xfer_id = self.next_xfer_id;
+                    self.next_xfer_id = self.next_xfer_id.checked_add(1).unwrap_or(1);
+                    self.mute_xfers.insert(xfer_id, Vec::new());
+                    if let Some(circuit) = self.circuit.as_mut() {
+                        circuit.send_request_xfer(xfer_id, &filename, now)?;
+                    }
+                }
+            }
+            AnyMessage::UseCachedMuteList(_) => {
+                self.events.push_back(Event::MuteListUnchanged);
+            }
+            AnyMessage::SendXferPacket(packet) => {
+                let xfer_id = packet.xfer_id.id;
+                let packet_num = packet.xfer_id.packet;
+                // The high bit marks the final packet; the low 31 bits are the
+                // sequence number (the first packet is sequence 0).
+                let is_last = packet_num & 0x8000_0000 != 0;
+                let sequence = packet_num & 0x7fff_ffff;
+                if self.mute_xfers.contains_key(&xfer_id) {
+                    // The first packet carries a 4-byte little-endian length
+                    // prefix before the file data; later packets are raw.
+                    let chunk: &[u8] = if sequence == 0 {
+                        packet.data_packet.data.get(4..).unwrap_or(&[])
+                    } else {
+                        &packet.data_packet.data
+                    };
+                    if let Some(buffer) = self.mute_xfers.get_mut(&xfer_id) {
+                        buffer.extend_from_slice(chunk);
+                    }
+                    if let Some(circuit) = self.circuit.as_mut() {
+                        circuit.send_confirm_xfer_packet(xfer_id, packet_num, now)?;
+                    }
+                    if is_last && let Some(buffer) = self.mute_xfers.remove(&xfer_id) {
+                        self.events
+                            .push_back(Event::MuteList(parse_mute_list(&buffer)));
+                    }
+                }
+            }
+            AnyMessage::GenericMessage(generic)
+                // The sim NUL-terminates the method name on the wire.
+                if trimmed_string(&generic.method_data.method) == "emptymutelist" =>
+            {
+                self.events.push_back(Event::MuteList(Vec::new()));
             }
             AnyMessage::ScriptDialog(dialog) => {
                 self.events
@@ -2701,6 +2861,58 @@ impl Session {
         Ok(())
     }
 
+    /// Requests the agent's mute (block) list (`MuteListRequest` with a zero
+    /// CRC, forcing a fresh download). The simulator replies with the list (the
+    /// file is downloaded over the `Xfer` path and surfaced as
+    /// [`Event::MuteList`]), or with [`Event::MuteListUnchanged`] /
+    /// [`Event::MuteList`]`([])` for an unchanged or empty list.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_mute_list(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_mute_list_request(0, now)?;
+        Ok(())
+    }
+
+    /// Mutes (blocks) an entity (`UpdateMuteListEntry`). `mute_type` selects what
+    /// is muted (use [`MuteType::Agent`] for an avatar); `name` is its display
+    /// name (required, especially for [`MuteType::ByName`] where `id` is nil);
+    /// `flags` are the per-aspect *exceptions* (use [`MuteFlags::default`] to mute
+    /// everything). Re-request the list to see the change.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn mute(
+        &mut self,
+        id: Uuid,
+        name: &str,
+        mute_type: MuteType,
+        flags: MuteFlags,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_update_mute_list_entry(id, name, mute_type.to_i32(), flags.0, now)?;
+        Ok(())
+    }
+
+    /// Removes a mute (`RemoveMuteListEntry`). `id` and `name` must match the
+    /// existing entry (from [`Event::MuteList`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn unmute(&mut self, id: Uuid, name: &str, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_remove_mute_list_entry(id, name, now)?;
+        Ok(())
+    }
+
     /// The agent's own id, once login has established the circuit. Useful as the
     /// `owner_id` for inventory fetches and for recognising the client's own
     /// messages.
@@ -2905,6 +3117,37 @@ fn with_nul(s: &str) -> Vec<u8> {
     let mut bytes = s.as_bytes().to_vec();
     bytes.push(0);
     bytes
+}
+
+/// Parses a downloaded mute-list file into [`MuteEntry`] values. Each non-empty
+/// line is `<type> <uuid> <name>|<flags>` (the viewer's on-disk format).
+fn parse_mute_list(bytes: &[u8]) -> Vec<MuteEntry> {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .filter_map(parse_mute_line)
+        .collect()
+}
+
+/// Parses one mute-list line, or `None` if it is blank/malformed.
+fn parse_mute_line(line: &str) -> Option<MuteEntry> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+    // The flags follow the last '|'; everything before is "<type> <uuid> <name>".
+    let (head, flags) = line.rsplit_once('|').map_or((line, 0), |(head, tail)| {
+        (head, tail.trim().parse().unwrap_or(0))
+    });
+    let mut parts = head.splitn(3, ' ');
+    let mute_type = parts.next()?.trim().parse::<i32>().ok()?;
+    let id = Uuid::parse_str(parts.next()?.trim()).unwrap_or_else(|_| Uuid::nil());
+    let name = parts.next().unwrap_or("").trim().to_owned();
+    Some(MuteEntry {
+        id,
+        name,
+        mute_type: MuteType::from_i32(mute_type),
+        flags: MuteFlags(flags),
+    })
 }
 
 /// Builds a [`RegionIdentity`] from a `RegionHandshake`'s region-info blocks.

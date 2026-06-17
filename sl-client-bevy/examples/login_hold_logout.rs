@@ -183,6 +183,10 @@ fn on_events(
             SlSessionEvent::ScriptTeleport(request) => {
                 info!("script teleport to {:?}", request.region_name);
             }
+            SlSessionEvent::MuteList(entries) => {
+                info!("mute list: {} entr(ies)", entries.len());
+            }
+            SlSessionEvent::MuteListUnchanged => info!("mute list unchanged (cached)"),
             // This demo ignores the remaining profile/region/parcel/teleport/group events.
             SlSessionEvent::GroupMembers { .. }
             | SlSessionEvent::GroupRoleData { .. }

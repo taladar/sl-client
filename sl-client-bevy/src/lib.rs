@@ -29,10 +29,10 @@ pub use sl_proto::{
     DisconnectReason, Friend, FriendRights, GroupMember, GroupMembership, GroupNotice,
     GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
     InventoryFolder, InventoryItem, LoadUrlRequest, LoginParams, LoginRequest, MapRegionInfo,
-    Maturity, MfaChallenge, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ProductType,
-    RegionFlags, RegionIdentity, RegionLimits, Reliability, Rotation, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit, Uuid, Vector,
-    grid_to_handle, handle_to_global, handle_to_grid, sim_access,
+    Maturity, MfaChallenge, MuteEntry, MuteFlags, MuteType, NeighborInfo, ParcelFlags, ParcelInfo,
+    ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity, RegionLimits, Reliability,
+    Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
+    Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
@@ -291,6 +291,28 @@ pub enum SlCommand {
         item_id: Uuid,
         /// The permissions to grant.
         permissions: ScriptPermissions,
+    },
+    /// Request the agent's mute (block) list (`MuteListRequest`). The list
+    /// arrives as [`SlSessionEvent::MuteList`] (or
+    /// [`SlSessionEvent::MuteListUnchanged`]).
+    RequestMuteList,
+    /// Mute (block) an entity (`UpdateMuteListEntry`).
+    Mute {
+        /// The muted entity's id (nil for a [`MuteType::ByName`] mute).
+        id: Uuid,
+        /// The muted entity's name.
+        name: String,
+        /// What kind of entity is muted.
+        mute_type: MuteType,
+        /// The per-aspect exception flags ([`MuteFlags::default`] mutes all).
+        flags: MuteFlags,
+    },
+    /// Remove a mute (`RemoveMuteListEntry`); `id`/`name` must match the entry.
+    Unmute {
+        /// The muted entity's id.
+        id: Uuid,
+        /// The muted entity's name.
+        name: String,
     },
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
@@ -771,6 +793,20 @@ fn advance_running(
                 session
                     .answer_script_permissions(*task_id, *item_id, *permissions, now)
                     .ok();
+            }
+            SlCommand::RequestMuteList => {
+                session.request_mute_list(now).ok();
+            }
+            SlCommand::Mute {
+                id,
+                name,
+                mute_type,
+                flags,
+            } => {
+                session.mute(*id, name, *mute_type, *flags, now).ok();
+            }
+            SlCommand::Unmute { id, name } => {
+                session.unmute(*id, name, now).ok();
             }
             SlCommand::Teleport {
                 region_handle,
