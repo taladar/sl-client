@@ -26,16 +26,16 @@ use sl_proto::{
 pub use sl_proto::{
     ActiveGroup, AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,
     ChatAudible, ChatMessage, ChatSourceType, ChatType, ControlFlags, CreateGroupParams,
-    DisconnectReason, EconomyData, Friend, FriendRights, GroupMember, GroupMembership, GroupNotice,
-    GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
-    InventoryFolder, InventoryItem, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest,
-    MapItem, MapItemType, MapRegionInfo, Maturity, MfaChallenge, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, ParcelAccessEntry,
-    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, ProductType, RegionFlags, RegionIdentity, RegionLimits,
-    Reliability, Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, Transmit, Uuid, Vector, grid_to_handle, handle_to_global,
-    handle_to_grid, sim_access,
+    DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, Friend,
+    FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
+    GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
+    LindenAmount, LoadUrlRequest, LoginParams, LoginRequest, MapItem, MapItemType, MapRegionInfo,
+    Maturity, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry,
+    MuteFlags, MuteType, NeighborInfo, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
+    ParcelFlags, ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ProductType,
+    RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, Rotation,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit,
+    Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
@@ -416,6 +416,55 @@ pub enum SlCommand {
     ReleaseParcel {
         /// The parcel's region-local id.
         local_id: i32,
+    },
+    /// Request the region's estate config + access lists (`getinfo`); replies
+    /// arrive as [`SlSessionEvent::EstateInfo`] and [`SlSessionEvent::EstateAccessList`].
+    RequestEstateInfo,
+    /// Add/remove an agent or group on an estate access list (`estateaccessdelta`).
+    UpdateEstateAccess {
+        /// Which list change to apply.
+        delta: EstateAccessDelta,
+        /// The target agent or group id.
+        target: Uuid,
+    },
+    /// Kick (eject) an agent from the region (`kickestate`).
+    KickEstateUser {
+        /// The agent to kick.
+        target: Uuid,
+    },
+    /// Teleport an agent home (`teleporthomeuser`).
+    TeleportHomeUser {
+        /// The agent to send home.
+        target: Uuid,
+    },
+    /// Teleport every agent in the region home (`teleporthomeallusers`).
+    TeleportHomeAllUsers,
+    /// Schedule a region restart in `seconds` (`restart`); `-1` delays a pending
+    /// restart by an hour.
+    RestartRegion {
+        /// Seconds until restart (`-1` to delay).
+        seconds: i32,
+    },
+    /// Send an estate-wide blue-box notice (`simulatormessage`).
+    SendEstateMessage {
+        /// The message body.
+        message: String,
+    },
+    /// Update the region's settings (`setregioninfo`).
+    SetRegionInfo(RegionInfoUpdate),
+    /// God-level eject of an agent (`GodKickUser`; needs grid-god rights).
+    GodKickUser {
+        /// The agent to kick.
+        target: Uuid,
+        /// The kick reason.
+        reason: String,
+    },
+    /// Send a generic god-level command (`GodlikeMessage`; needs grid-god rights).
+    SendGodlikeMessage {
+        /// The god method name.
+        method: String,
+        /// The string parameters.
+        params: Vec<String>,
     },
     /// Request the agent's L$ balance (`MoneyBalanceRequest`); the reply arrives
     /// as [`SlSessionEvent::MoneyBalance`].
@@ -1037,6 +1086,37 @@ fn advance_running(
             }
             SlCommand::ReleaseParcel { local_id } => {
                 session.release_parcel(*local_id, now).ok();
+            }
+            SlCommand::RequestEstateInfo => {
+                session.request_estate_info(now).ok();
+            }
+            SlCommand::UpdateEstateAccess { delta, target } => {
+                session.update_estate_access(*delta, *target, now).ok();
+            }
+            SlCommand::KickEstateUser { target } => {
+                session.kick_estate_user(*target, now).ok();
+            }
+            SlCommand::TeleportHomeUser { target } => {
+                session.teleport_home_user(*target, now).ok();
+            }
+            SlCommand::TeleportHomeAllUsers => {
+                session.teleport_home_all_users(now).ok();
+            }
+            SlCommand::RestartRegion { seconds } => {
+                session.restart_region(*seconds, now).ok();
+            }
+            SlCommand::SendEstateMessage { message } => {
+                session.send_estate_message(message, now).ok();
+            }
+            SlCommand::SetRegionInfo(update) => {
+                session.set_region_info(update, now).ok();
+            }
+            SlCommand::GodKickUser { target, reason } => {
+                session.god_kick_user(*target, reason, now).ok();
+            }
+            SlCommand::SendGodlikeMessage { method, params } => {
+                let refs: Vec<&str> = params.iter().map(String::as_str).collect();
+                session.send_godlike_message(method, &refs, now).ok();
             }
             SlCommand::Logout => session.initiate_logout(now),
         }

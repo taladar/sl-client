@@ -615,6 +615,8 @@ impl Survey {
             | Event::EconomyData(_)
             | Event::ParcelDwell { .. }
             | Event::ParcelAccessList { .. }
+            | Event::EstateInfo(_)
+            | Event::EstateAccessList { .. }
             | Event::MapItems { .. }
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
