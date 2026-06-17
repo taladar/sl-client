@@ -162,6 +162,8 @@ fn on_events(
             | SlSessionEvent::ScriptPermissionRequest(_)
             | SlSessionEvent::LoadUrl(_)
             | SlSessionEvent::ScriptTeleport(_)
+            | SlSessionEvent::MuteList(_)
+            | SlSessionEvent::MuteListUnchanged
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal => {}

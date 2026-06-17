@@ -10,8 +10,8 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         ChatAudible, ChatSourceType, ChatType, ControlFlags, CreateGroupParams, DisconnectReason,
-        Event, FriendRights, ImDialog, LoginParams, Maturity, ProductType, Reliability,
-        ScriptPermissions, Session, Transmit,
+        Event, FriendRights, ImDialog, LoginParams, Maturity, MuteFlags, MuteType, ProductType,
+        Reliability, ScriptPermissions, Session, Transmit,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -24,7 +24,8 @@ mod test {
         AvatarPropertiesReplyPropertiesDataBlock, AvatarSitResponse,
         AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock, ChangeUserRights,
         ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock, ChatFromSimulator,
-        ChatFromSimulatorChatDataBlock, GroupMembersReply, GroupMembersReplyAgentDataBlock,
+        ChatFromSimulatorChatDataBlock, GenericMessage, GenericMessageAgentDataBlock,
+        GenericMessageMethodDataBlock, GroupMembersReply, GroupMembersReplyAgentDataBlock,
         GroupMembersReplyGroupDataBlock, GroupMembersReplyMemberDataBlock, GroupProfileReply,
         GroupProfileReplyAgentDataBlock, GroupProfileReplyGroupDataBlock, ImprovedInstantMessage,
         ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
@@ -32,16 +33,18 @@ mod test {
         InventoryDescendentsAgentDataBlock, InventoryDescendentsFolderDataBlock,
         InventoryDescendentsItemDataBlock, LogoutRequest, LogoutRequestAgentDataBlock,
         MapBlockReply, MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock,
-        OfflineNotification, OfflineNotificationAgentBlockBlock, OnlineNotification,
-        OnlineNotificationAgentBlockBlock, ParcelProperties,
-        ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
-        ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
-        RegionHandshake, RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
+        MuteListUpdate, MuteListUpdateMuteDataBlock, OfflineNotification,
+        OfflineNotificationAgentBlockBlock, OnlineNotification, OnlineNotificationAgentBlockBlock,
+        ParcelProperties, ParcelPropertiesAgeVerificationBlockBlock,
+        ParcelPropertiesParcelDataBlock, ParcelPropertiesParcelEnvironmentBlockBlock,
+        ParcelPropertiesRegionAllowAccessBlockBlock, RegionHandshake,
+        RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
         RegionHandshakeRegionInfoBlock, RegionInfo, RegionInfoAgentDataBlock,
         RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock, ScriptDialog,
         ScriptDialogButtonsBlock, ScriptDialogDataBlock, ScriptDialogOwnerDataBlock,
-        ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock, TeleportFailed,
-        TeleportFailedInfoBlock,
+        ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock, SendXferPacket,
+        SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock, TeleportFailed,
+        TeleportFailedInfoBlock, UseCachedMuteList, UseCachedMuteListAgentDataBlock,
     };
     use sl_wire::{
         AnyMessage, LoginFailure, LoginRequest, LoginResponse, LoginSuccess, MessageId,
@@ -1801,6 +1804,181 @@ mod test {
         assert_eq!(answer.data.task_id, task);
         assert_eq!(answer.data.item_id, item);
         assert_eq!(answer.data.questions, ScriptPermissions::TAKE_CONTROLS);
+        Ok(())
+    }
+
+    #[test]
+    fn mute_request_and_edits_pack_messages() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.request_mute_list(now)?;
+        let target = uuid::Uuid::from_u128(0x9001);
+        session.mute(
+            target,
+            "Bad Actor",
+            MuteType::Agent,
+            MuteFlags::default(),
+            now,
+        )?;
+        session.unmute(target, "Bad Actor", now)?;
+        let sent = drain(&mut session)?;
+
+        let request = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::MuteListRequest(r) => Some(r),
+                _ => None,
+            })
+            .ok_or("expected a MuteListRequest")?;
+        assert_eq!(request.mute_data.mute_crc, 0);
+
+        let update = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::UpdateMuteListEntry(u) => Some(u),
+                _ => None,
+            })
+            .ok_or("expected an UpdateMuteListEntry")?;
+        assert_eq!(update.mute_data.mute_id, target);
+        assert_eq!(update.mute_data.mute_type, MuteType::Agent.to_i32());
+        assert_eq!(trimmed(&update.mute_data.mute_name), "Bad Actor");
+
+        let remove = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RemoveMuteListEntry(r) => Some(r),
+                _ => None,
+            })
+            .ok_or("expected a RemoveMuteListEntry")?;
+        assert_eq!(remove.mute_data.mute_id, target);
+        Ok(())
+    }
+
+    #[test]
+    fn mute_list_update_downloads_and_parses_via_xfer() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // The sim says the mute list changed and names a file to Xfer.
+        let update = AnyMessage::MuteListUpdate(MuteListUpdate {
+            mute_data: MuteListUpdateMuteDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                filename: b"mutes00000000\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&update, 9, true)?, now)?;
+
+        // The client should request the file over Xfer.
+        let sent = drain(&mut session)?;
+        let request = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RequestXfer(r) => Some(r),
+                _ => None,
+            })
+            .ok_or("expected a RequestXfer")?;
+        let xfer_id = request.xfer_id.id;
+        assert_ne!(xfer_id, 0);
+        assert_eq!(trimmed(&request.xfer_id.filename), "mutes00000000");
+
+        // The sim sends the file in a single (first+last) packet: a 4-byte
+        // little-endian length prefix, then two mute lines.
+        let muted = uuid::Uuid::from_u128(0x9002);
+        let file =
+            format!("1 {muted} Bad Actor|0\n0 00000000-0000-0000-0000-000000000000 SpamBot|3\n");
+        // A 4-byte length prefix the parser strips and ignores, then the file.
+        let mut data = vec![0u8; 4];
+        data.extend_from_slice(file.as_bytes());
+        let packet = AnyMessage::SendXferPacket(SendXferPacket {
+            xfer_id: SendXferPacketXferIDBlock {
+                id: xfer_id,
+                packet: 0x8000_0000, // sequence 0 + last-packet flag
+            },
+            data_packet: SendXferPacketDataPacketBlock { data },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&packet, 10, true)?, now)?;
+
+        // The client confirms the packet and surfaces the parsed list.
+        let sent = drain(&mut session)?;
+        let confirm = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ConfirmXferPacket(c) => Some(c),
+                _ => None,
+            })
+            .ok_or("expected a ConfirmXferPacket")?;
+        assert_eq!(confirm.xfer_id.id, xfer_id);
+
+        let entries = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::MuteList(entries) => Some(entries),
+                _ => None,
+            })
+            .ok_or("expected a MuteList event")?;
+        assert_eq!(entries.len(), 2);
+        let first = entries.first().ok_or("first entry")?;
+        assert_eq!(first.id, muted);
+        assert_eq!(first.name, "Bad Actor");
+        assert_eq!(first.mute_type, MuteType::Agent);
+        let second = entries.get(1).ok_or("second entry")?;
+        assert_eq!(second.name, "SpamBot");
+        assert_eq!(second.mute_type, MuteType::ByName);
+        assert_eq!(second.flags.0, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn use_cached_mute_list_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let message = AnyMessage::UseCachedMuteList(UseCachedMuteList {
+            agent_data: UseCachedMuteListAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .any(|e| matches!(e, Event::MuteListUnchanged))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn empty_mute_list_generic_message_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let message = AnyMessage::GenericMessage(GenericMessage {
+            agent_data: GenericMessageAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+                transaction_id: uuid::Uuid::nil(),
+            },
+            method_data: GenericMessageMethodDataBlock {
+                // NUL-terminated, as the simulator sends it on the wire.
+                method: b"emptymutelist\0".to_vec(),
+                invoice: uuid::Uuid::nil(),
+            },
+            param_list: Vec::new(),
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+        let entries = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::MuteList(entries) => Some(entries),
+                _ => None,
+            })
+            .ok_or("expected a MuteList event")?;
+        assert!(entries.is_empty());
         Ok(())
     }
 
