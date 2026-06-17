@@ -180,6 +180,10 @@ fn on_events(
             | SlSessionEvent::AvatarAppearance(_)
             | SlSessionEvent::AgentWearables { .. }
             | SlSessionEvent::AvatarAnimation { .. }
+            | SlSessionEvent::SoundTrigger { .. }
+            | SlSessionEvent::AttachedSound { .. }
+            | SlSessionEvent::AttachedSoundGainChange { .. }
+            | SlSessionEvent::PreloadSound { .. }
             | SlSessionEvent::ServerAppearanceUpdate { .. }
             | SlSessionEvent::CachedTextureResponse { .. }
             | SlSessionEvent::ParcelDwell { .. }

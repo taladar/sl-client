@@ -49,7 +49,7 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 19 ✅ | Asset & texture pipeline **(fetch)** | 13 | Asset fetch + textured rendering | Local OpenSim |
 | 20 ✅ | Avatar appearance & wearables | 13 | Render avatars; outfit control | Local OpenSim |
 | 21 ✅ | Animations | 5 | Dance/gesture bot; animate scene | Local OpenSim |
-| 22 | Sound | 3 | Spatial audio playback | Local OpenSim |
+| 22 ✅ | Sound | 3 | Spatial audio playback | Local OpenSim |
 | 23 | Asset/texture/mesh upload | 5 | Content uploader | Local OpenSim |
 | 24 | Media-on-a-prim / parcel audio | 5 | Media surfaces, streaming audio | Local OpenSim (external stream) |
 | 25 | PBR materials / GLTF | 8 | Modern materials in a renderer | **Recent SL grid; OpenSim varies** |
@@ -334,7 +334,19 @@ category, sale price, group, media, landing point),
 runtimes. Added a `ParcelFlags::union` helper for combining flags. **Fixed a
 pre-existing CAPS read bug:** OpenSim encodes the `uint` `ParcelFlags` as a
 4-byte binary LLSD element, which the old `as_i32` parse dropped to `0` — now
-read via a tolerant `llsd_u32` (binary/integer/string). *Live-verified against
+read via a tolerant `llsd_u32` (binary/integer/string). **Read-side
+stream/media URLs (follow-up):** `ParcelInfo` now also surfaces the parcel's
+streaming-audio URL (`music_url`), media URL (`media_url`), `media_id` and
+`media_auto_scale` — the `ParcelProperties` message and CAPS event already
+carried them, but the old `parcel_info`/`parcel_info_from_llsd` builders dropped
+them, so a client could *set* a parcel's stream URL (via `ParcelUpdate`) but not
+*read* the current one. Both decode paths covered by tests (the UDP wire form
+incl. NUL-trimming, and the CAPS LLSD form incl. OpenSim's boolean
+`MediaAutoScale`); the CAPS LLSD keys (`MusicURL`/`MediaURL`/`MediaID`/
+`MediaAutoScale`) were cross-checked against OpenSim's
+`LLClientView.cs` encoder. (The *per-face* media-on-a-prim system and parcel
+media *control* — `ObjectMedia`/`ObjectMediaNavigate`,
+`ParcelMediaCommandMessage` — remain roadmap #24.) *Live-verified against
 local OpenSim logged in as the estate owner: dwell read, access-list read +
 write + re-read round-trip, and a `ParcelPropertiesUpdate` that changed the
 parcel name and flags (confirmed via the console and across logins; OpenSim
@@ -654,8 +666,36 @@ echoed an `Event::AvatarAnimation` for the agent listing the default stand plus
 the triggered clap animation. Test: local OpenSim.*
 
 **22. Sound — `SoundTrigger`, `AttachedSound`, `PreloadSound`,
-`AttachedSoundGainChange` · 3 pts.** Receive and locate spatial sound events;
-fetch the clips via #19. *Test: local OpenSim.*
+`AttachedSoundGainChange` · 3 pts. ✅ Done.** Receive and locate spatial sound
+events; fetch the clips via #19. Sound is entirely sim-pushed (a scripted
+`llTriggerSound`/`llPlaySound`/`llPreloadSound`), so this is a receive-only
+surface with no commands. Four new events, each decoded in the main dispatch and
+surfaced verbatim: **`Event::SoundTrigger`** (a one-shot spatial sound — sound /
+owner / object ids, the triggering object's `parent_id` as `Option<Uuid>` with
+the wire's nil → `None`, the sound's own `region_handle` since a trigger can
+come from a neighbouring region, the region-local `position`, and `gain`);
+**`Event::AttachedSound`** (a sound bound to an object — ids, `gain`, and a new
+`SoundFlags` bitfield mirroring the viewer's `LL_SOUND_FLAG_*` constants:
+`LOOP`/`SYNC_MASTER`/`SYNC_SLAVE`/`SYNC_PENDING`/`QUEUE`/`STOP`, with
+`is_loop`/`is_stop`/`contains` helpers); **`Event::AttachedSoundGainChange`**
+(object id + new gain, applying to the current attached sound);
+**`Event::PreloadSound`** (a pre-fetch hint carrying a `Vec<SoundPreload>`, each
+`{sound_id, object_id, owner_id}`). New value types `SoundFlags` and
+`SoundPreload`, re-exported through both runtimes' lib re-exports (no
+command/`SlCommand` variants — nothing to send). Covered by three `lifecycle.rs`
+tests (the `SoundTrigger` decode incl. nil-parent → `None`, the `AttachedSound`
+flag decode, and the multi-entry `PreloadSound` decode). *Live-verified against
+the local OpenSim via the `login_hold_logout` tokio example and a new
+`slclient22.oar` (a scripted prim looping
+`llTriggerSound`/`llPlaySound`/`llPreloadSound` of the built-in `UISndAlert`
+sound `ed124764-…` on a 5 s timer): logging in next to the prim at
+(128, 128, 30) the client received, every tick, an `Event::SoundTrigger`
+(position (128,128,30),
+gain 1), an `Event::AttachedSound` (gain 1, loop=false/stop=false), and an
+`Event::PreloadSound` for that sound. `AttachedSoundGainChange` is the
+`llSetSoundVolume`-on-an-already-playing-sound path and is unit-tested only.
+Test: local OpenSim with the script engine enabled and a sound-playing scripted
+object (same OAR mechanism as #8).*
 
 **23. Asset/texture/mesh upload — CAPS `NewFileAgentInventory`,
 `UploadBakedTexture`, `UpdateGestureAgentInventory`; legacy

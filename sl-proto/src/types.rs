@@ -677,6 +677,67 @@ pub enum Event {
         /// The animations that avatar is currently playing.
         animations: Vec<PlayingAnimation>,
     },
+    /// A one-shot spatial sound the simulator wants played at a fixed location
+    /// (`SoundTrigger` — e.g. a scripted `llTriggerSound`, a collision sound, or
+    /// a sound from a neighbouring region). Unlike [`Event::AttachedSound`] this
+    /// sound is not bound to an object: it plays once at `position` and is then
+    /// forgotten. Fetch the clip with
+    /// [`Session::request_asset`](crate::Session::request_asset).
+    SoundTrigger {
+        /// The sound asset to play.
+        sound_id: Uuid,
+        /// The owner of the object that triggered the sound.
+        owner_id: Uuid,
+        /// The object that triggered the sound (nil if none).
+        object_id: Uuid,
+        /// The triggering object's parent (root) id, or `None` when the object
+        /// is itself the root (the wire `ParentID` is nil).
+        parent_id: Option<Uuid>,
+        /// The handle of the region the sound plays in. Because a `SoundTrigger`
+        /// can originate in a neighbouring region, this need not be the agent's
+        /// current region.
+        region_handle: u64,
+        /// The sound's position, region-local to `region_handle`.
+        position: Vector,
+        /// The linear gain (volume), `0.0`..=`1.0`.
+        gain: f32,
+    },
+    /// A looping or one-shot sound attached to an in-world object
+    /// (`AttachedSound` — a scripted `llPlaySound`/`llLoopSound`). The sound
+    /// follows the object; a later [`Event::AttachedSoundGainChange`] for the
+    /// same `object_id` changes its volume, and the object stops the sound by
+    /// sending a fresh `AttachedSound` with [`SoundFlags::STOP`]. Fetch the clip
+    /// with [`Session::request_asset`](crate::Session::request_asset).
+    AttachedSound {
+        /// The sound asset to play.
+        sound_id: Uuid,
+        /// The object the sound is attached to.
+        object_id: Uuid,
+        /// The object owner's id.
+        owner_id: Uuid,
+        /// The linear gain (volume), `0.0`..=`1.0`.
+        gain: f32,
+        /// The playback flags (loop / sync / queue / stop).
+        flags: SoundFlags,
+    },
+    /// The volume of a sound already attached to an object changed
+    /// (`AttachedSoundGainChange`). Applies to the current [`Event::AttachedSound`]
+    /// for the same `object_id`.
+    AttachedSoundGainChange {
+        /// The object whose attached-sound volume changed.
+        object_id: Uuid,
+        /// The new linear gain (volume), `0.0`..=`1.0`.
+        gain: f32,
+    },
+    /// The simulator asks the viewer to pre-fetch one or more sound assets it is
+    /// about to play (`PreloadSound`), so playback is not delayed by the fetch.
+    /// A client that wants gap-free audio can fetch each clip up front with
+    /// [`Session::request_asset`](crate::Session::request_asset); a client that
+    /// does not care can ignore this event.
+    PreloadSound {
+        /// The sounds to pre-fetch (each with its owning object and owner).
+        sounds: Vec<SoundPreload>,
+    },
     /// The session logged out cleanly (a `LogoutReply` was received).
     LoggedOut,
     /// The session disconnected for the given reason.
@@ -1636,6 +1697,17 @@ pub struct ParcelInfo {
     pub owner_id: Uuid,
     /// The raw `ParcelFlags` bitfield (decode with [`sl_wire::ParcelFlags`]).
     pub raw_parcel_flags: u32,
+    /// The parcel's streaming-audio URL (the "music" stream), empty if none.
+    /// Set it with [`ParcelUpdate::music_url`].
+    pub music_url: String,
+    /// The parcel's media URL (movie / web page), empty if none. Set it with
+    /// [`ParcelUpdate::media_url`]. This is the legacy single-media-URL field;
+    /// the per-face media-on-a-prim system is a separate (CAPS) surface.
+    pub media_url: String,
+    /// The texture id the parcel media replaces while playing (nil if none).
+    pub media_id: Uuid,
+    /// Whether the media is auto-scaled to fit the surface it replaces.
+    pub media_auto_scale: bool,
 }
 
 impl ParcelInfo {
@@ -3618,6 +3690,56 @@ pub struct PlayingAnimation {
     /// (an `AnimationSourceList` entry — e.g. a scripted `llStartAnimation`).
     /// `None` for animations the agent or simulator started directly.
     pub source_id: Option<Uuid>,
+}
+
+/// The playback flags carried by an [`Event::AttachedSound`] (`AttachedSound`'s
+/// `Flags` byte). The values match the viewer's `LL_SOUND_FLAG_*` constants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SoundFlags(pub u8);
+
+impl SoundFlags {
+    /// The sound loops until stopped (`llLoopSound`) rather than playing once.
+    pub const LOOP: u8 = 1 << 0;
+    /// This sound is the timing master of a synchronised group.
+    pub const SYNC_MASTER: u8 = 1 << 1;
+    /// This sound is a slave that follows the group's sync master.
+    pub const SYNC_SLAVE: u8 = 1 << 2;
+    /// This sound is waiting to be synchronised to a master.
+    pub const SYNC_PENDING: u8 = 1 << 3;
+    /// Queue this sound behind the currently-playing one rather than interrupting.
+    pub const QUEUE: u8 = 1 << 4;
+    /// Stop the object's attached sound (rather than starting one).
+    pub const STOP: u8 = 1 << 5;
+
+    /// Whether all of the bits in `mask` are set.
+    #[must_use]
+    pub const fn contains(self, mask: u8) -> bool {
+        self.0 & mask == mask
+    }
+
+    /// Whether the sound loops ([`Self::LOOP`]).
+    #[must_use]
+    pub const fn is_loop(self) -> bool {
+        self.contains(Self::LOOP)
+    }
+
+    /// Whether this message stops the attached sound ([`Self::STOP`]).
+    #[must_use]
+    pub const fn is_stop(self) -> bool {
+        self.contains(Self::STOP)
+    }
+}
+
+/// One sound the simulator asks the viewer to pre-fetch, from a `PreloadSound`
+/// update (surfaced inside [`Event::PreloadSound`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SoundPreload {
+    /// The sound asset to pre-fetch.
+    pub sound_id: Uuid,
+    /// The object that will play the sound.
+    pub object_id: Uuid,
+    /// The object owner's id.
+    pub owner_id: Uuid,
 }
 
 /// One entry of an [`AvatarAppearance`] attachment block: an attached object and

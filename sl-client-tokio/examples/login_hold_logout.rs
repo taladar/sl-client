@@ -287,6 +287,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     animations.iter().map(|a| a.anim_id).collect::<Vec<_>>(),
                 );
             }
+            Event::SoundTrigger {
+                sound_id,
+                object_id,
+                gain,
+                position,
+                ..
+            } => {
+                info!(
+                    "sound trigger {sound_id} from object {object_id} at {position:?} gain {gain}"
+                );
+            }
+            Event::AttachedSound {
+                sound_id,
+                object_id,
+                gain,
+                flags,
+                ..
+            } => {
+                info!(
+                    "attached sound {sound_id} on object {object_id} gain {gain} \
+                     (loop={}, stop={})",
+                    flags.is_loop(),
+                    flags.is_stop(),
+                );
+            }
+            Event::AttachedSoundGainChange { object_id, gain } => {
+                info!("attached-sound gain change on object {object_id}: {gain}");
+            }
+            Event::PreloadSound { sounds } => {
+                info!("preload {} sound(s): {:?}", sounds.len(), sounds);
+            }
             // This demo ignores motion-only churn and the remaining
             // profile/region/parcel/teleport/group/appearance events.
             Event::ObjectUpdated(_)

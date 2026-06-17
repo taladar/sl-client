@@ -26,9 +26,9 @@ pub use types::{
     ParcelAccessScope, ParcelCategory, ParcelInfo, ParcelOverlayInfo, ParcelReturnType,
     ParcelUpdate, PermissionField, PlayingAnimation, PrimShape, ProductType, RegionIdentity,
     RegionInfoUpdate, RegionLimits, Reliability, SaleType, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTeleportRequest, TerrainLayerType, TerrainPatch, Texture,
-    TextureEntry, TextureFace, Throttle, TransferStatus, Transmit, Wearable, WearableType,
-    avatar_texture, grid_to_handle, handle_to_global, handle_to_grid, pcode,
+    ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType,
+    TerrainPatch, Texture, TextureEntry, TextureFace, Throttle, TransferStatus, Transmit, Wearable,
+    WearableType, avatar_texture, grid_to_handle, handle_to_global, handle_to_grid, pcode,
 };
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,
