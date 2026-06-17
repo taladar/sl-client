@@ -38,10 +38,10 @@ pub use sl_proto::{
     ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelOverlayInfo,
     ParcelReturnType, ParcelUpdate, PermissionField, PlayingAnimation, PrimShape, ProductType,
     RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, Rotation, SaleType,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, Throttle, Transmit, Uuid, Vector,
-    Wearable, WearableType, avatar_texture, decode_texture_entry, grid_to_handle, handle_to_global,
-    handle_to_grid, pcode, sim_access,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SoundFlags,
+    SoundPreload, TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, Throttle, Transmit,
+    Uuid, Vector, Wearable, WearableType, avatar_texture, decode_texture_entry, grid_to_handle,
+    handle_to_global, handle_to_grid, pcode, sim_access,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};

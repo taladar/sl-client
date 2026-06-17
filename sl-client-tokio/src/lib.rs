@@ -35,9 +35,10 @@ pub use sl_proto::{
     ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PlayingAnimation,
     PrimShape, ProductType, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits,
     Reliability, Rotation, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace,
-    Throttle, TransferStatus, Transmit, Uuid, Vector, Wearable, WearableType, avatar_texture,
-    decode_texture_entry, grid_to_handle, handle_to_global, handle_to_grid, pcode, sim_access,
+    ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture,
+    TextureEntry, TextureFace, Throttle, TransferStatus, Transmit, Uuid, Vector, Wearable,
+    WearableType, avatar_texture, decode_texture_entry, grid_to_handle, handle_to_global,
+    handle_to_grid, pcode, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.

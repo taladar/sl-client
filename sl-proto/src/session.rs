@@ -175,8 +175,9 @@ use crate::types::{
     ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
     PlayingAnimation, PrimShape, ProductType, RegionIdentity, RegionInfoUpdate, RegionLimits,
     Reliability, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus,
-    Transmit, Wearable, WearableType, avatar_texture, grid_to_handle, handle_to_grid,
+    ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture,
+    Throttle, TransferStatus, Transmit, Wearable, WearableType, avatar_texture, grid_to_handle,
+    handle_to_grid,
 };
 use crate::{appearance, types::AvatarAppearance, types::AvatarAttachment};
 
@@ -3957,6 +3958,57 @@ impl Session {
                     animations: avatar_animations(animation),
                 });
             }
+            // A one-shot spatial sound played at a fixed region-local position
+            // (a scripted `llTriggerSound`, a collision sound, …). May originate
+            // in a neighbouring region, so it carries its own region handle. The
+            // wire `ParentID` is nil when the triggering object is itself the
+            // root, which we surface as `None`.
+            AnyMessage::SoundTrigger(trigger) => {
+                let block = &trigger.sound_data;
+                self.events.push_back(Event::SoundTrigger {
+                    sound_id: block.sound_id,
+                    owner_id: block.owner_id,
+                    object_id: block.object_id,
+                    parent_id: (!block.parent_id.is_nil()).then_some(block.parent_id),
+                    region_handle: block.handle,
+                    position: block.position.clone(),
+                    gain: block.gain,
+                });
+            }
+            // A looping or one-shot sound bound to an in-world object (a scripted
+            // `llPlaySound`/`llLoopSound`); the `STOP` flag stops it instead.
+            AnyMessage::AttachedSound(sound) => {
+                let block = &sound.data_block;
+                self.events.push_back(Event::AttachedSound {
+                    sound_id: block.sound_id,
+                    object_id: block.object_id,
+                    owner_id: block.owner_id,
+                    gain: block.gain,
+                    flags: SoundFlags(block.flags),
+                });
+            }
+            // A volume change for a sound already attached to an object.
+            AnyMessage::AttachedSoundGainChange(change) => {
+                let block = &change.data_block;
+                self.events.push_back(Event::AttachedSoundGainChange {
+                    object_id: block.object_id,
+                    gain: block.gain,
+                });
+            }
+            // A hint to pre-fetch sound assets the simulator is about to play.
+            AnyMessage::PreloadSound(preload) => {
+                self.events.push_back(Event::PreloadSound {
+                    sounds: preload
+                        .data_block
+                        .iter()
+                        .map(|block| SoundPreload {
+                            sound_id: block.sound_id,
+                            object_id: block.object_id,
+                            owner_id: block.owner_id,
+                        })
+                        .collect(),
+                });
+            }
             // The reply to a baked-texture cache query (`AgentCachedTexture`).
             AnyMessage::AgentCachedTextureResponse(response) => {
                 self.events.push_back(Event::CachedTextureResponse {
@@ -6693,6 +6745,10 @@ fn parcel_info(data: &ParcelPropertiesParcelDataBlock) -> ParcelInfo {
         sim_wide_total_prims: data.sim_wide_total_prims,
         owner_id: data.owner_id,
         raw_parcel_flags: data.parcel_flags,
+        music_url: trimmed_string(&data.music_url),
+        media_url: trimmed_string(&data.media_url),
+        media_id: data.media_id,
+        media_auto_scale: data.media_auto_scale != 0,
     }
 }
 
@@ -7228,6 +7284,26 @@ fn parcel_info_from_llsd(body: &Llsd) -> Option<ParcelInfo> {
         // OpenSim encodes the `uint` ParcelFlags as a 4-byte binary LLSD element,
         // so read it tolerantly (binary / integer / string).
         raw_parcel_flags: data.get("ParcelFlags").map_or(0, llsd_u32),
+        music_url: data
+            .get("MusicURL")
+            .and_then(Llsd::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        media_url: data
+            .get("MediaURL")
+            .and_then(Llsd::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        media_id: data
+            .get("MediaID")
+            .and_then(Llsd::as_uuid)
+            .unwrap_or_else(Uuid::nil),
+        // OpenSim encodes MediaAutoScale as an LLSD boolean; `as_bool` also
+        // tolerates the integer form.
+        media_auto_scale: data
+            .get("MediaAutoScale")
+            .and_then(Llsd::as_bool)
+            .unwrap_or(false),
     })
 }
 

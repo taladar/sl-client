@@ -15,7 +15,7 @@ mod test {
         Material, Maturity, MoneyTransactionType, MuteFlags, MuteType, ObjectFlagSettings,
         ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags,
         ParcelReturnType, ParcelUpdate, PermissionField, PrimShape, ProductType, RegionInfoUpdate,
-        Reliability, SaleType, ScriptPermissions, Session, TerrainLayerType, Throttle,
+        Reliability, SaleType, ScriptPermissions, Session, SoundFlags, TerrainLayerType, Throttle,
         TransferStatus, Transmit, WearableType, avatar_texture, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
@@ -24,25 +24,25 @@ mod test {
         AgentGroupDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
         AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
         AgentMovementCompleteSimDataBlock, AgentWearablesUpdate,
-        AgentWearablesUpdateAgentDataBlock, AgentWearablesUpdateWearableDataBlock, AvatarAnimation,
-        AvatarAnimationAnimationListBlock, AvatarAnimationAnimationSourceListBlock,
-        AvatarAnimationSenderBlock, AvatarAppearance, AvatarAppearanceObjectDataBlock,
-        AvatarAppearanceSenderBlock, AvatarAppearanceVisualParamBlock, AvatarNotesReply,
-        AvatarNotesReplyAgentDataBlock, AvatarNotesReplyDataBlock, AvatarPicksReply,
-        AvatarPicksReplyAgentDataBlock, AvatarPicksReplyDataBlock, AvatarPropertiesReply,
-        AvatarPropertiesReplyAgentDataBlock, AvatarPropertiesReplyPropertiesDataBlock,
-        AvatarSitResponse, AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock,
-        ChangeUserRights, ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock,
-        ChatFromSimulator, ChatFromSimulatorChatDataBlock, CrossedRegion,
-        CrossedRegionAgentDataBlock, CrossedRegionInfoBlock, CrossedRegionRegionDataBlock,
-        DisableSimulator, EconomyData, EconomyDataInfoBlock, EstateOwnerMessage,
-        EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
-        EstateOwnerMessageParamListBlock, GenericMessage, GenericMessageAgentDataBlock,
-        GenericMessageMethodDataBlock, GroupMembersReply, GroupMembersReplyAgentDataBlock,
-        GroupMembersReplyGroupDataBlock, GroupMembersReplyMemberDataBlock, GroupProfileReply,
-        GroupProfileReplyAgentDataBlock, GroupProfileReplyGroupDataBlock, ImageData,
-        ImageDataImageDataBlock, ImageDataImageIDBlock, ImageNotInDatabase,
-        ImageNotInDatabaseImageIDBlock, ImagePacket, ImagePacketImageDataBlock,
+        AgentWearablesUpdateAgentDataBlock, AgentWearablesUpdateWearableDataBlock, AttachedSound,
+        AttachedSoundDataBlockBlock, AvatarAnimation, AvatarAnimationAnimationListBlock,
+        AvatarAnimationAnimationSourceListBlock, AvatarAnimationSenderBlock, AvatarAppearance,
+        AvatarAppearanceObjectDataBlock, AvatarAppearanceSenderBlock,
+        AvatarAppearanceVisualParamBlock, AvatarNotesReply, AvatarNotesReplyAgentDataBlock,
+        AvatarNotesReplyDataBlock, AvatarPicksReply, AvatarPicksReplyAgentDataBlock,
+        AvatarPicksReplyDataBlock, AvatarPropertiesReply, AvatarPropertiesReplyAgentDataBlock,
+        AvatarPropertiesReplyPropertiesDataBlock, AvatarSitResponse,
+        AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock, ChangeUserRights,
+        ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock, ChatFromSimulator,
+        ChatFromSimulatorChatDataBlock, CrossedRegion, CrossedRegionAgentDataBlock,
+        CrossedRegionInfoBlock, CrossedRegionRegionDataBlock, DisableSimulator, EconomyData,
+        EconomyDataInfoBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
+        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock, GenericMessage,
+        GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GroupMembersReply,
+        GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
+        GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
+        GroupProfileReplyGroupDataBlock, ImageData, ImageDataImageDataBlock, ImageDataImageIDBlock,
+        ImageNotInDatabase, ImageNotInDatabaseImageIDBlock, ImagePacket, ImagePacketImageDataBlock,
         ImagePacketImageIDBlock, ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
         ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
         ImprovedTerseObjectUpdate, ImprovedTerseObjectUpdateObjectDataBlock,
@@ -64,14 +64,15 @@ mod test {
         ParcelDwellReplyAgentDataBlock, ParcelDwellReplyDataBlock, ParcelProperties,
         ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
         ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
-        RegionHandshake, RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
-        RegionHandshakeRegionInfoBlock, RegionInfo, RegionInfoAgentDataBlock,
-        RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock, ScriptDialog,
-        ScriptDialogButtonsBlock, ScriptDialogDataBlock, ScriptDialogOwnerDataBlock,
+        PreloadSound, PreloadSoundDataBlockBlock, RegionHandshake, RegionHandshakeRegionInfo2Block,
+        RegionHandshakeRegionInfo3Block, RegionHandshakeRegionInfoBlock, RegionInfo,
+        RegionInfoAgentDataBlock, RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock,
+        ScriptDialog, ScriptDialogButtonsBlock, ScriptDialogDataBlock, ScriptDialogOwnerDataBlock,
         ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock, SendXferPacket,
-        SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock, TeleportFailed,
-        TeleportFailedInfoBlock, TransferInfo, TransferInfoTransferInfoBlock, TransferPacket,
-        TransferPacketTransferDataBlock, UseCachedMuteList, UseCachedMuteListAgentDataBlock,
+        SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock, SoundTrigger,
+        SoundTriggerSoundDataBlock, TeleportFailed, TeleportFailedInfoBlock, TransferInfo,
+        TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
+        UseCachedMuteList, UseCachedMuteListAgentDataBlock,
     };
     use sl_wire::{
         AnyMessage, LoginFailure, LoginRequest, LoginResponse, LoginSuccess, MessageId,
@@ -2494,6 +2495,139 @@ mod test {
     }
 
     #[test]
+    fn sound_trigger_surfaces_spatial_sound() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let sound = uuid::Uuid::from_u128(0x50);
+        let owner = uuid::Uuid::from_u128(0x51);
+        let object = uuid::Uuid::from_u128(0x52);
+
+        // A SoundTrigger with a nil ParentID (the object is itself the root),
+        // which must surface as `parent_id: None`.
+        let message = AnyMessage::SoundTrigger(SoundTrigger {
+            sound_data: SoundTriggerSoundDataBlock {
+                sound_id: sound,
+                owner_id: owner,
+                object_id: object,
+                parent_id: uuid::Uuid::nil(),
+                handle: 0x0000_03E8_0000_03E8,
+                position: vec3(128.0, 64.0, 25.0),
+                gain: 0.5,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::SoundTrigger { .. }))
+            .ok_or("expected a SoundTrigger event")?;
+        let Event::SoundTrigger {
+            sound_id,
+            owner_id,
+            object_id,
+            parent_id,
+            region_handle,
+            position,
+            gain,
+        } = event
+        else {
+            return Err("expected SoundTrigger".into());
+        };
+        assert_eq!(sound_id, sound);
+        assert_eq!(owner_id, owner);
+        assert_eq!(object_id, object);
+        assert_eq!(parent_id, None);
+        assert_eq!(region_handle, 0x0000_03E8_0000_03E8);
+        assert_eq!(position, vec3(128.0, 64.0, 25.0));
+        assert!((gain - 0.5).abs() < f32::EPSILON);
+        Ok(())
+    }
+
+    #[test]
+    fn attached_sound_surfaces_flags() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let sound = uuid::Uuid::from_u128(0x60);
+        let object = uuid::Uuid::from_u128(0x61);
+        let owner = uuid::Uuid::from_u128(0x62);
+
+        let message = AnyMessage::AttachedSound(AttachedSound {
+            data_block: AttachedSoundDataBlockBlock {
+                sound_id: sound,
+                object_id: object,
+                owner_id: owner,
+                gain: 1.0,
+                flags: SoundFlags::LOOP,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::AttachedSound { .. }))
+            .ok_or("expected an AttachedSound event")?;
+        let Event::AttachedSound {
+            sound_id,
+            object_id,
+            owner_id,
+            gain,
+            flags,
+        } = event
+        else {
+            return Err("expected AttachedSound".into());
+        };
+        assert_eq!(sound_id, sound);
+        assert_eq!(object_id, object);
+        assert_eq!(owner_id, owner);
+        assert!((gain - 1.0).abs() < f32::EPSILON);
+        assert!(flags.is_loop());
+        assert!(!flags.is_stop());
+        Ok(())
+    }
+
+    #[test]
+    fn preload_sound_surfaces_all_entries() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let message = AnyMessage::PreloadSound(PreloadSound {
+            data_block: vec![
+                PreloadSoundDataBlockBlock {
+                    object_id: uuid::Uuid::from_u128(0x71),
+                    owner_id: uuid::Uuid::from_u128(0x72),
+                    sound_id: uuid::Uuid::from_u128(0x73),
+                },
+                PreloadSoundDataBlockBlock {
+                    object_id: uuid::Uuid::from_u128(0x81),
+                    owner_id: uuid::Uuid::from_u128(0x82),
+                    sound_id: uuid::Uuid::from_u128(0x83),
+                },
+            ],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::PreloadSound { .. }))
+            .ok_or("expected a PreloadSound event")?;
+        let Event::PreloadSound { sounds } = event else {
+            return Err("expected PreloadSound".into());
+        };
+        assert_eq!(sounds.len(), 2);
+        let first = sounds.first().ok_or("first preload")?;
+        assert_eq!(first.sound_id, uuid::Uuid::from_u128(0x73));
+        assert_eq!(first.object_id, uuid::Uuid::from_u128(0x71));
+        let second = sounds.get(1).ok_or("second preload")?;
+        assert_eq!(second.sound_id, uuid::Uuid::from_u128(0x83));
+        Ok(())
+    }
+
+    #[test]
     fn set_animations_sends_agent_animation() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
@@ -3098,6 +3232,44 @@ mod test {
         assert!(parcel.create_objects());
         assert!(parcel.use_ban_list());
         assert!(!parcel.use_access_list());
+        // Absent media → empty URLs / nil id / no auto-scale.
+        assert_eq!(parcel.music_url, "");
+        assert_eq!(parcel.media_url, "");
+        assert_eq!(parcel.media_id, uuid::Uuid::nil());
+        assert!(!parcel.media_auto_scale);
+        Ok(())
+    }
+
+    #[test]
+    fn parcel_properties_reports_stream_and_media_urls() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let media_id = uuid::Uuid::from_u128(0x33ED);
+        let mut message = parcel_properties_msg(1, 1, 256, 0, 100, 100, vec3(16.0, 16.0, 0.0));
+        if let AnyMessage::ParcelProperties(props) = &mut message {
+            props.parcel_data.music_url = b"http://stream.example/audio".to_vec();
+            // A trailing NUL like a real simulator sends; the decode must trim it.
+            props.parcel_data.media_url = b"http://example.com/movie\0".to_vec();
+            props.parcel_data.media_id = media_id;
+            props.parcel_data.media_auto_scale = 1;
+        }
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let events = drain_events(&mut session);
+        let parcel = events
+            .iter()
+            .find_map(|e| match e {
+                Event::ParcelProperties(parcel) => Some(parcel),
+                _ => None,
+            })
+            .ok_or("expected a ParcelProperties event")?;
+        assert_eq!(parcel.music_url, "http://stream.example/audio");
+        assert_eq!(parcel.media_url, "http://example.com/movie");
+        assert_eq!(parcel.media_id, media_id);
+        assert!(parcel.media_auto_scale);
         Ok(())
     }
 
@@ -4315,6 +4487,10 @@ mod test {
             <key>MaxPrims</key><integer>750</integer>\
             <key>AABBMax</key><array><real>32</real><real>16</real><real>0</real></array>\
             <key>Bitmap</key><binary>AQID</binary>\
+            <key>MusicURL</key><string>http://stream.example/audio</string>\
+            <key>MediaURL</key><string>http://example.com/movie</string>\
+            <key>MediaID</key><uuid>00000000-0000-0000-0000-0000000033ed</uuid>\
+            <key>MediaAutoScale</key><boolean>1</boolean>\
             </map></array></map></llsd>";
         let body = sl_proto::parse_llsd_xml(xml)?;
         session.handle_caps_event("ParcelProperties", &body, now)?;
@@ -4336,6 +4512,11 @@ mod test {
         // ParcelFlags 64 = CREATE_OBJECTS, decoded from the binary element.
         assert_eq!(parcel.raw_parcel_flags, 64);
         assert!(parcel.create_objects());
+        // The stream / media URLs decode off the CAPS LLSD too.
+        assert_eq!(parcel.music_url, "http://stream.example/audio");
+        assert_eq!(parcel.media_url, "http://example.com/movie");
+        assert_eq!(parcel.media_id, uuid::Uuid::from_u128(0x33ED));
+        assert!(parcel.media_auto_scale);
         Ok(())
     }
 

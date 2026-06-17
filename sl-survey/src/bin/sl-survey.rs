@@ -631,6 +631,10 @@ impl Survey {
             | Event::AvatarAppearance(_)
             | Event::AgentWearables { .. }
             | Event::AvatarAnimation { .. }
+            | Event::SoundTrigger { .. }
+            | Event::AttachedSound { .. }
+            | Event::AttachedSoundGainChange { .. }
+            | Event::PreloadSound { .. }
             | Event::ServerAppearanceUpdate { .. }
             | Event::CachedTextureResponse { .. }
             | Event::TeleportStarted
