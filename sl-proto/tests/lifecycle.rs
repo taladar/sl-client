@@ -10,10 +10,11 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         ChatAudible, ChatSourceType, ChatType, ControlFlags, CreateGroupParams, DisconnectReason,
-        Event, FriendRights, ImDialog, LindenAmount, LoginParams, MapItemType, Maturity,
-        MoneyTransactionType, MuteFlags, MuteType, ParcelAccessEntry, ParcelAccessScope,
-        ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate, ProductType, Reliability,
-        ScriptPermissions, Session, Transmit,
+        EstateAccessDelta, EstateAccessKind, Event, FriendRights, ImDialog, LindenAmount,
+        LoginParams, MapItemType, Maturity, MoneyTransactionType, MuteFlags, MuteType,
+        ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
+        ParcelUpdate, ProductType, RegionInfoUpdate, Reliability, ScriptPermissions, Session,
+        Transmit,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -28,10 +29,11 @@ mod test {
         ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock, ChatFromSimulator,
         ChatFromSimulatorChatDataBlock, CrossedRegion, CrossedRegionAgentDataBlock,
         CrossedRegionInfoBlock, CrossedRegionRegionDataBlock, EconomyData, EconomyDataInfoBlock,
-        GenericMessage, GenericMessageAgentDataBlock, GenericMessageMethodDataBlock,
-        GroupMembersReply, GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
-        GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
-        GroupProfileReplyGroupDataBlock, ImprovedInstantMessage,
+        EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
+        EstateOwnerMessageParamListBlock, GenericMessage, GenericMessageAgentDataBlock,
+        GenericMessageMethodDataBlock, GroupMembersReply, GroupMembersReplyAgentDataBlock,
+        GroupMembersReplyGroupDataBlock, GroupMembersReplyMemberDataBlock, GroupProfileReply,
+        GroupProfileReplyAgentDataBlock, GroupProfileReplyGroupDataBlock, ImprovedInstantMessage,
         ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
         ImprovedInstantMessageMessageBlockBlock, InventoryDescendents,
         InventoryDescendentsAgentDataBlock, InventoryDescendentsFolderDataBlock,
@@ -3298,6 +3300,222 @@ mod test {
         let second = entries.get(1).ok_or("expected a second entry")?;
         assert_eq!(second.id, uuid::Uuid::from_u128(0x11));
         assert_eq!(second.time, 1234);
+        Ok(())
+    }
+
+    /// NUL-terminates a string into wire bytes (as `with_nul` does in the core).
+    fn with_nul_bytes(value: &str) -> Vec<u8> {
+        let mut bytes = value.as_bytes().to_vec();
+        bytes.push(0);
+        bytes
+    }
+
+    /// The NUL-trimmed Parameter string at `index` of an `EstateOwnerMessage`.
+    fn param_at(list: &[EstateOwnerMessageParamListBlock], index: usize) -> String {
+        list.get(index)
+            .map(|block| trimmed(&block.parameter))
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn estate_owner_messages_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.request_estate_info(now)?;
+        session.update_estate_access(
+            EstateAccessDelta::BannedAgentAdd,
+            uuid::Uuid::from_u128(9),
+            now,
+        )?;
+        session.kick_estate_user(uuid::Uuid::from_u128(9), now)?;
+        session.restart_region(-1, now)?;
+        session.send_estate_message("hello estate", now)?;
+        session.set_region_info(
+            &RegionInfoUpdate {
+                maturity: Maturity::Adult,
+                agent_limit: 50,
+                block_fly: true,
+                ..RegionInfoUpdate::default()
+            },
+            now,
+        )?;
+        session.god_kick_user(uuid::Uuid::from_u128(9), "spam", now)?;
+        let sent = drain(&mut session)?;
+
+        let estate: Vec<_> = sent
+            .iter()
+            .filter_map(|m| match m {
+                AnyMessage::EstateOwnerMessage(message) => Some(message),
+                _ => None,
+            })
+            .collect();
+        let method = |name: &str| {
+            estate
+                .iter()
+                .find(|m| trimmed(&m.method_data.method) == name)
+                .copied()
+        };
+
+        let getinfo = method("getinfo").ok_or("expected getinfo")?;
+        assert_eq!(getinfo.agent_data.agent_id, uuid::Uuid::from_u128(1));
+
+        let delta = method("estateaccessdelta").ok_or("expected estateaccessdelta")?;
+        // ParamList: own id, flags (banned-agent-add = 1<<6 = 64), target id.
+        assert_eq!(param_at(&delta.param_list, 1), "64");
+        assert_eq!(
+            param_at(&delta.param_list, 2),
+            uuid::Uuid::from_u128(9).to_string()
+        );
+
+        let kick = method("kickestate").ok_or("expected kickestate")?;
+        assert_eq!(
+            param_at(&kick.param_list, 0),
+            uuid::Uuid::from_u128(9).to_string()
+        );
+
+        let restart = method("restart").ok_or("expected restart")?;
+        assert_eq!(param_at(&restart.param_list, 0), "-1");
+
+        let message = method("simulatormessage").ok_or("expected simulatormessage")?;
+        // Last param is the body.
+        let body = message.param_list.last().ok_or("expected a message body")?;
+        assert_eq!(trimmed(&body.parameter), "hello estate");
+
+        let region = method("setregioninfo").ok_or("expected setregioninfo")?;
+        // [1] block_fly = Y; [6] maturity = 42 (Adult).
+        assert_eq!(param_at(&region.param_list, 1), "Y");
+        assert_eq!(param_at(&region.param_list, 6), "42");
+
+        let god = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::GodKickUser(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a GodKickUser")?;
+        assert_eq!(god.user_info.agent_id, uuid::Uuid::from_u128(9));
+        assert_eq!(trimmed(&god.user_info.reason), "spam");
+        Ok(())
+    }
+
+    #[test]
+    fn estate_updateinfo_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let owner = uuid::Uuid::from_u128(0x42);
+        let params = [
+            "My Estate".to_owned(),
+            owner.to_string(),
+            "101".to_owned(),
+            "8".to_owned(),
+            "0".to_owned(),
+            "1".to_owned(),
+            uuid::Uuid::nil().to_string(),
+            "0".to_owned(),
+            "1".to_owned(),
+            "abuse@example.com".to_owned(),
+        ];
+        let message = AnyMessage::EstateOwnerMessage(EstateOwnerMessage {
+            agent_data: EstateOwnerMessageAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+                transaction_id: uuid::Uuid::nil(),
+            },
+            method_data: EstateOwnerMessageMethodDataBlock {
+                method: b"estateupdateinfo\0".to_vec(),
+                invoice: uuid::Uuid::nil(),
+            },
+            param_list: params
+                .iter()
+                .map(|p| EstateOwnerMessageParamListBlock {
+                    parameter: with_nul_bytes(p),
+                })
+                .collect(),
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let info = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::EstateInfo(info) => Some(info),
+                _ => None,
+            })
+            .ok_or("expected an EstateInfo event")?;
+        assert_eq!(info.estate_name, "My Estate");
+        assert_eq!(info.estate_owner, owner);
+        assert_eq!(info.estate_id, 101);
+        assert_eq!(info.estate_flags, 8);
+        assert_eq!(info.abuse_email, "abuse@example.com");
+        Ok(())
+    }
+
+    #[test]
+    fn estate_setaccess_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // A ban list (code 4) with two banned agents as raw 16-byte UUIDs.
+        let banned = [uuid::Uuid::from_u128(0x10), uuid::Uuid::from_u128(0x11)];
+        let mut param_list = vec![
+            EstateOwnerMessageParamListBlock {
+                parameter: with_nul_bytes("101"),
+            },
+            EstateOwnerMessageParamListBlock {
+                parameter: with_nul_bytes("4"),
+            },
+            EstateOwnerMessageParamListBlock {
+                parameter: with_nul_bytes("0"),
+            },
+            EstateOwnerMessageParamListBlock {
+                parameter: with_nul_bytes("0"),
+            },
+            EstateOwnerMessageParamListBlock {
+                parameter: with_nul_bytes("2"),
+            },
+            EstateOwnerMessageParamListBlock {
+                parameter: with_nul_bytes("0"),
+            },
+        ];
+        for id in banned {
+            param_list.push(EstateOwnerMessageParamListBlock {
+                parameter: id.as_bytes().to_vec(),
+            });
+        }
+        let message = AnyMessage::EstateOwnerMessage(EstateOwnerMessage {
+            agent_data: EstateOwnerMessageAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+                transaction_id: uuid::Uuid::nil(),
+            },
+            method_data: EstateOwnerMessageMethodDataBlock {
+                method: b"setaccess\0".to_vec(),
+                invoice: uuid::Uuid::nil(),
+            },
+            param_list,
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let (estate_id, kind, members) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::EstateAccessList {
+                    estate_id,
+                    kind,
+                    members,
+                } => Some((estate_id, kind, members)),
+                _ => None,
+            })
+            .ok_or("expected an EstateAccessList event")?;
+        assert_eq!(estate_id, 101);
+        assert_eq!(kind, EstateAccessKind::BannedAgents);
+        assert_eq!(members, banned.to_vec());
         Ok(())
     }
 

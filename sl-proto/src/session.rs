@@ -73,6 +73,12 @@ use sl_wire::messages::{
     ParcelSelectObjectsAgentDataBlock, ParcelSelectObjectsParcelDataBlock,
     ParcelSelectObjectsReturnIDsBlock,
 };
+// Estate / region management (#14): the outgoing estate-owner / god messages.
+use sl_wire::messages::{
+    EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
+    EstateOwnerMessageParamListBlock, GodKickUser, GodKickUserUserInfoBlock, GodlikeMessage,
+    GodlikeMessageAgentDataBlock, GodlikeMessageMethodDataBlock, GodlikeMessageParamListBlock,
+};
 // Group support (#7): incoming reply blocks consumed by the converter helpers.
 use sl_wire::messages::{
     AgentDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
@@ -107,15 +113,16 @@ use uuid::Uuid;
 use crate::error::Error;
 use crate::types::{
     ActiveGroup, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
-    ChatMessage, ChatSourceType, ChatType, CreateGroupParams, DisconnectReason, EconomyData, Event,
-    Friend, FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
-    GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    LoadUrlRequest, LoginHttpRequest, LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity,
-    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, ParcelAccessEntry, ParcelAccessScope, ParcelInfo, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, ProductType, RegionIdentity, RegionLimits, Reliability,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit,
-    grid_to_handle, handle_to_grid,
+    ChatMessage, ChatSourceType, ChatType, CreateGroupParams, DisconnectReason, EconomyData,
+    EstateAccessDelta, EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupMember,
+    GroupMembership, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog,
+    InstantMessage, InventoryFolder, InventoryItem, LoadUrlRequest, LoginHttpRequest, LoginParams,
+    MapItem, MapItemType, MapRegionInfo, Maturity, MoneyBalance, MoneyTransaction,
+    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, ParcelAccessEntry,
+    ParcelAccessScope, ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ProductType,
+    RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit, grid_to_handle,
+    handle_to_grid,
 };
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
@@ -1490,6 +1497,95 @@ impl Circuit {
         self.send(&message, Reliability::Reliable, now)
     }
 
+    /// Queues an `EstateOwnerMessage` reliably with the given method and string
+    /// parameters. An empty parameter list is sent as one empty block (matching
+    /// the reference viewer). The invoice is nil — the simulator echoes it back.
+    fn send_estate_owner_message(
+        &mut self,
+        method: &str,
+        params: &[String],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let param_list = if params.is_empty() {
+            vec![EstateOwnerMessageParamListBlock {
+                parameter: Vec::new(),
+            }]
+        } else {
+            params
+                .iter()
+                .map(|param| EstateOwnerMessageParamListBlock {
+                    parameter: with_nul(param),
+                })
+                .collect()
+        };
+        let message = AnyMessage::EstateOwnerMessage(EstateOwnerMessage {
+            agent_data: EstateOwnerMessageAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                transaction_id: Uuid::nil(),
+            },
+            method_data: EstateOwnerMessageMethodDataBlock {
+                method: with_nul(method),
+                invoice: Uuid::nil(),
+            },
+            param_list,
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GodlikeMessage` reliably (a god-level estate/admin command).
+    fn send_godlike_message(
+        &mut self,
+        method: &str,
+        params: &[String],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let param_list = if params.is_empty() {
+            vec![GodlikeMessageParamListBlock {
+                parameter: Vec::new(),
+            }]
+        } else {
+            params
+                .iter()
+                .map(|param| GodlikeMessageParamListBlock {
+                    parameter: with_nul(param),
+                })
+                .collect()
+        };
+        let message = AnyMessage::GodlikeMessage(GodlikeMessage {
+            agent_data: GodlikeMessageAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                transaction_id: Uuid::nil(),
+            },
+            method_data: GodlikeMessageMethodDataBlock {
+                method: with_nul(method),
+                invoice: Uuid::nil(),
+            },
+            param_list,
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GodKickUser` reliably (god-level eject of `target`).
+    fn send_god_kick_user(
+        &mut self,
+        target: Uuid,
+        reason: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GodKickUser(GodKickUser {
+            user_info: GodKickUserUserInfoBlock {
+                god_id: self.agent_id,
+                god_session_id: self.session_id,
+                agent_id: target,
+                kick_flags: 0,
+                reason: with_nul(reason),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
     /// Queues a `MapBlockRequest` reliably for a grid-coordinate rectangle.
     fn send_map_block_request(
         &mut self,
@@ -2235,6 +2331,21 @@ impl Session {
                         })
                         .collect(),
                 });
+            }
+            AnyMessage::EstateOwnerMessage(message) => {
+                match trimmed_string(&message.method_data.method).as_str() {
+                    "estateupdateinfo" => {
+                        if let Some(info) = estate_info_from_params(&message.param_list) {
+                            self.events.push_back(Event::EstateInfo(Box::new(info)));
+                        }
+                    }
+                    "setaccess" => {
+                        if let Some(event) = estate_access_from_params(&message.param_list) {
+                            self.events.push_back(event);
+                        }
+                    }
+                    _ => {}
+                }
             }
             AnyMessage::ChatFromSimulator(chat) => {
                 let data = &chat.chat_data;
@@ -3814,6 +3925,183 @@ impl Session {
         Ok(())
     }
 
+    /// Requests the current region's estate configuration and access lists via
+    /// `EstateOwnerMessage`/`getinfo`. The reply arrives as an
+    /// [`Event::EstateInfo`] plus one or more [`Event::EstateAccessList`].
+    /// Requires the agent to be the estate owner or a manager.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_estate_info(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_estate_owner_message("getinfo", &[], now)?;
+        Ok(())
+    }
+
+    /// Adds or removes an agent/group from one of the estate's access lists
+    /// (allowed agents/groups, bans, managers) via `estateaccessdelta`. The
+    /// updated list arrives as [`Event::EstateAccessList`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn update_estate_access(
+        &mut self,
+        delta: EstateAccessDelta,
+        target: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let params = [
+            circuit.agent_id.to_string(),
+            delta.to_u32().to_string(),
+            target.to_string(),
+        ];
+        circuit.send_estate_owner_message("estateaccessdelta", &params, now)?;
+        Ok(())
+    }
+
+    /// Kicks (ejects) an agent from the region via `EstateOwnerMessage`/
+    /// `kickestate`. The agent is sent home.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn kick_estate_user(&mut self, target: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_estate_owner_message("kickestate", &[target.to_string()], now)?;
+        Ok(())
+    }
+
+    /// Teleports an agent home via `EstateOwnerMessage`/`teleporthomeuser`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn teleport_home_user(&mut self, target: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let params = [circuit.agent_id.to_string(), target.to_string()];
+        circuit.send_estate_owner_message("teleporthomeuser", &params, now)?;
+        Ok(())
+    }
+
+    /// Teleports every agent in the region home via `EstateOwnerMessage`/
+    /// `teleporthomeallusers`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn teleport_home_all_users(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_estate_owner_message("teleporthomeallusers", &[], now)?;
+        Ok(())
+    }
+
+    /// Schedules a region restart in `seconds` via `EstateOwnerMessage`/
+    /// `restart`. Pass `-1` to push a pending restart out by an hour (the
+    /// reference viewer's "cancel restart").
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn restart_region(&mut self, seconds: i32, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_estate_owner_message("restart", &[seconds.to_string()], now)?;
+        Ok(())
+    }
+
+    /// Sends an estate-wide notice (blue-box message) to everyone in the estate
+    /// via `EstateOwnerMessage`/`simulatormessage`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn send_estate_message(&mut self, message: &str, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let sender = circuit.agent_id.to_string();
+        // ParamList: grid_x, grid_y (unused, "-1"), sender id, sender name, body.
+        let params = [
+            "-1".to_owned(),
+            "-1".to_owned(),
+            sender.clone(),
+            sender,
+            message.to_owned(),
+        ];
+        circuit.send_estate_owner_message("simulatormessage", &params, now)?;
+        Ok(())
+    }
+
+    /// Updates the region's settings (maturity, agent limit, object bonus, the
+    /// terraform/fly/damage/land-resell/push/parcel-change toggles) via
+    /// `EstateOwnerMessage`/`setregioninfo`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_region_info(
+        &mut self,
+        update: &RegionInfoUpdate,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let yn = |flag: bool| if flag { "Y" } else { "N" }.to_owned();
+        let params = [
+            yn(update.block_terraform),
+            yn(update.block_fly),
+            yn(update.allow_damage),
+            yn(update.allow_land_resell),
+            format!("{:.6}", f64::from(update.agent_limit)),
+            format!("{:.6}", update.object_bonus),
+            update.maturity.to_sim_access().to_string(),
+            yn(update.restrict_pushobject),
+            yn(update.allow_parcel_changes),
+        ];
+        circuit.send_estate_owner_message("setregioninfo", &params, now)?;
+        Ok(())
+    }
+
+    /// Ejects an agent from the region with god powers via `GodKickUser`. Unlike
+    /// [`Session::kick_estate_user`] this needs grid-god rights, not just estate
+    /// ownership.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn god_kick_user(&mut self, target: Uuid, reason: &str, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_god_kick_user(target, reason, now)?;
+        Ok(())
+    }
+
+    /// Sends a `GodlikeMessage` with the given method and string parameters — the
+    /// generic god-level admin command channel. Needs grid-god rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn send_godlike_message(
+        &mut self,
+        method: &str,
+        params: &[&str],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let params: Vec<String> = params.iter().map(|param| (*param).to_owned()).collect();
+        circuit.send_godlike_message(method, &params, now)?;
+        Ok(())
+    }
+
     /// Requests world-map blocks for the inclusive grid-coordinate rectangle
     /// `[min_x, max_x] x [min_y, max_y]` (region indices). Each region in range
     /// arrives as an [`Event::MapBlock`], giving its name, coordinates, and
@@ -4496,6 +4784,74 @@ fn map_item(data: &sl_wire::messages::MapItemReplyDataBlock) -> MapItem {
         extra2: data.extra2,
         name: trimmed_string(&data.name),
     }
+}
+
+/// Builds [`EstateInfo`] from an `estateupdateinfo` `EstateOwnerMessage`'s param
+/// list (10 string parameters: name, owner, id, flags, sun, parent, covenant id,
+/// covenant timestamp, "1", abuse email).
+fn estate_info_from_params(params: &[EstateOwnerMessageParamListBlock]) -> Option<EstateInfo> {
+    if params.len() < 8 {
+        return None;
+    }
+    let text = |index: usize| {
+        params
+            .get(index)
+            .map(|block| trimmed_string(&block.parameter))
+            .unwrap_or_default()
+    };
+    Some(EstateInfo {
+        estate_name: text(0),
+        estate_owner: Uuid::parse_str(&text(1)).unwrap_or_else(|_| Uuid::nil()),
+        estate_id: text(2).parse().unwrap_or(0),
+        estate_flags: text(3).parse().unwrap_or(0),
+        sun_position: text(4).parse().unwrap_or(0),
+        parent_estate: text(5).parse().unwrap_or(0),
+        covenant_id: Uuid::parse_str(&text(6)).unwrap_or_else(|_| Uuid::nil()),
+        covenant_timestamp: text(7).parse().unwrap_or(0),
+        abuse_email: text(9),
+    })
+}
+
+/// Builds an [`Event::EstateAccessList`] from a `setaccess` `EstateOwnerMessage`.
+/// `param[0]` is the estate id, `param[1]` the single-category code bit,
+/// `param[2..=5]` per-category counts, and `param[6..]` the member ids — each a
+/// raw 16-byte UUID (not a string).
+fn estate_access_from_params(params: &[EstateOwnerMessageParamListBlock]) -> Option<Event> {
+    if params.len() < 6 {
+        return None;
+    }
+    let text = |index: usize| {
+        params
+            .get(index)
+            .map(|block| trimmed_string(&block.parameter))
+            .unwrap_or_default()
+    };
+    let estate_id = text(0).parse().unwrap_or(0);
+    let code: u32 = text(1).parse().unwrap_or(0);
+    let kind = if code & 1 != 0 {
+        EstateAccessKind::AllowedAgents
+    } else if code & 2 != 0 {
+        EstateAccessKind::AllowedGroups
+    } else if code & 4 != 0 {
+        EstateAccessKind::BannedAgents
+    } else if code & 8 != 0 {
+        EstateAccessKind::Managers
+    } else {
+        return None;
+    };
+    let members = params
+        .iter()
+        .skip(6)
+        .filter_map(|block| {
+            let bytes = block.parameter.get(..16)?;
+            Uuid::from_slice(bytes).ok()
+        })
+        .collect();
+    Some(Event::EstateAccessList {
+        estate_id,
+        kind,
+        members,
+    })
 }
 
 /// Extracts the destination UDP address and seed capability from a CAPS

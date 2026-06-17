@@ -213,6 +213,8 @@ fn on_events(
             | SlSessionEvent::MapItems { .. }
             | SlSessionEvent::ParcelDwell { .. }
             | SlSessionEvent::ParcelAccessList { .. }
+            | SlSessionEvent::EstateInfo(_)
+            | SlSessionEvent::EstateAccessList { .. }
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal

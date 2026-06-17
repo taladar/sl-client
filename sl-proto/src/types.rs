@@ -119,6 +119,21 @@ pub enum Event {
         /// The list entries.
         entries: Vec<ParcelAccessEntry>,
     },
+    /// An estate's configuration, from an `EstateOwnerMessage` `estateupdateinfo`
+    /// reply to [`Session::request_estate_info`](crate::Session::request_estate_info).
+    EstateInfo(Box<EstateInfo>),
+    /// One of an estate's access lists, from an `EstateOwnerMessage` `setaccess`
+    /// reply (to [`Session::request_estate_info`](crate::Session::request_estate_info)
+    /// or after an [`Session::update_estate_access`](crate::Session::update_estate_access)).
+    /// A large list may arrive split across several events.
+    EstateAccessList {
+        /// The estate id.
+        estate_id: u32,
+        /// Which list this is.
+        kind: EstateAccessKind,
+        /// The agent/group ids in this chunk of the list.
+        members: Vec<Uuid>,
+    },
     /// A neighbouring simulator was announced via `EnableSimulator`.
     NeighborDiscovered(NeighborInfo),
     /// A region was reported by the world map (a `MapBlockReply` entry), giving
@@ -452,6 +467,17 @@ impl Maturity {
             sl_wire::sim_access::MATURE => Self::Mature,
             sl_wire::sim_access::ADULT => Self::Adult,
             _ => Self::Unknown,
+        }
+    }
+
+    /// The `SimAccess` byte for this maturity (`Unknown` maps to PG), used when
+    /// setting a region's maturity via `setregioninfo`.
+    #[must_use]
+    pub const fn to_sim_access(self) -> u8 {
+        match self {
+            Self::Mature => sl_wire::sim_access::MATURE,
+            Self::Adult => sl_wire::sim_access::ADULT,
+            Self::Pg | Self::Unknown => sl_wire::sim_access::PG,
         }
     }
 }
@@ -937,6 +963,131 @@ impl Default for ParcelUpdate {
                 z: 0.0,
             },
             landing_type: 0,
+        }
+    }
+}
+
+/// A change to one of an estate's access lists, applied via
+/// [`Session::update_estate_access`](crate::Session::update_estate_access)
+/// (`EstateOwnerMessage` method `estateaccessdelta`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EstateAccessDelta {
+    /// Add an agent to the allowed-access list.
+    AllowedAgentAdd,
+    /// Remove an agent from the allowed-access list.
+    AllowedAgentRemove,
+    /// Add a group to the allowed-group list.
+    AllowedGroupAdd,
+    /// Remove a group from the allowed-group list.
+    AllowedGroupRemove,
+    /// Add an agent to the ban list.
+    BannedAgentAdd,
+    /// Remove an agent from the ban list.
+    BannedAgentRemove,
+    /// Add an estate manager.
+    ManagerAdd,
+    /// Remove an estate manager.
+    ManagerRemove,
+}
+
+impl EstateAccessDelta {
+    /// The `estateaccessdelta` flag bit for this change (matching the reference
+    /// viewer's `ESTATE_ACCESS_*` constants).
+    #[must_use]
+    pub const fn to_u32(self) -> u32 {
+        match self {
+            Self::AllowedAgentAdd => 1 << 2,
+            Self::AllowedAgentRemove => 1 << 3,
+            Self::AllowedGroupAdd => 1 << 4,
+            Self::AllowedGroupRemove => 1 << 5,
+            Self::BannedAgentAdd => 1 << 6,
+            Self::BannedAgentRemove => 1 << 7,
+            Self::ManagerAdd => 1 << 8,
+            Self::ManagerRemove => 1 << 9,
+        }
+    }
+}
+
+/// Which estate access list a [`Event::EstateAccessList`] carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EstateAccessKind {
+    /// The allowed-agents list.
+    AllowedAgents,
+    /// The allowed-groups list.
+    AllowedGroups,
+    /// The banned-agents list.
+    BannedAgents,
+    /// The estate-managers list.
+    Managers,
+}
+
+/// An estate's configuration, parsed from an `EstateOwnerMessage`
+/// `estateupdateinfo` reply to
+/// [`Session::request_estate_info`](crate::Session::request_estate_info).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EstateInfo {
+    /// The estate name.
+    pub estate_name: String,
+    /// The estate owner's id.
+    pub estate_owner: Uuid,
+    /// The estate id.
+    pub estate_id: u32,
+    /// The raw estate-flags bitfield.
+    pub estate_flags: u32,
+    /// The sun position (when the estate uses a fixed sun).
+    pub sun_position: u32,
+    /// The parent estate id.
+    pub parent_estate: u32,
+    /// The estate covenant's notecard id (nil if none).
+    pub covenant_id: Uuid,
+    /// When the covenant last changed (Unix timestamp).
+    pub covenant_timestamp: u32,
+    /// The estate's abuse-report email address.
+    pub abuse_email: String,
+}
+
+/// The settings to apply to a region via
+/// [`Session::set_region_info`](crate::Session::set_region_info)
+/// (`EstateOwnerMessage` method `setregioninfo`). Start from
+/// [`RegionInfoUpdate::default`] and set the fields to change.
+#[derive(Debug, Clone, PartialEq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is a distinct region toggle in the setregioninfo wire message"
+)]
+pub struct RegionInfoUpdate {
+    /// Block terraforming by non-owners.
+    pub block_terraform: bool,
+    /// Block flying.
+    pub block_fly: bool,
+    /// Allow damage (enable combat).
+    pub allow_damage: bool,
+    /// Allow residents to resell land.
+    pub allow_land_resell: bool,
+    /// The maximum concurrent agents.
+    pub agent_limit: i32,
+    /// The object (prim) bonus multiplier.
+    pub object_bonus: f32,
+    /// The region maturity rating.
+    pub maturity: Maturity,
+    /// Restrict pushing (no-push).
+    pub restrict_pushobject: bool,
+    /// Allow parcel join/subdivide by owners.
+    pub allow_parcel_changes: bool,
+}
+
+impl Default for RegionInfoUpdate {
+    fn default() -> Self {
+        Self {
+            block_terraform: false,
+            block_fly: false,
+            allow_damage: false,
+            allow_land_resell: true,
+            agent_limit: 40,
+            object_bonus: 1.0,
+            maturity: Maturity::Pg,
+            restrict_pushobject: false,
+            allow_parcel_changes: true,
         }
     }
 }

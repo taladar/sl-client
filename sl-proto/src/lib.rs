@@ -8,15 +8,16 @@ pub use error::Error;
 pub use session::{CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA, REQUESTED_CAPABILITIES, Session};
 pub use types::{
     ActiveGroup, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
-    ChatMessage, ChatSourceType, ChatType, CreateGroupParams, DisconnectReason, EconomyData, Event,
-    Friend, FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
-    GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    LoadUrlRequest, LoginHttpRequest, LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity,
-    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelInfo,
-    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ProductType, RegionIdentity, RegionLimits,
-    Reliability, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    Transmit, grid_to_handle, handle_to_global, handle_to_grid,
+    ChatMessage, ChatSourceType, ChatType, CreateGroupParams, DisconnectReason, EconomyData,
+    EstateAccessDelta, EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupMember,
+    GroupMembership, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog,
+    InstantMessage, InventoryFolder, InventoryItem, LoadUrlRequest, LoginHttpRequest, LoginParams,
+    MapItem, MapItemType, MapRegionInfo, Maturity, MoneyBalance, MoneyTransaction,
+    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, ParcelAccessEntry,
+    ParcelAccessScope, ParcelCategory, ParcelInfo, ParcelOverlayInfo, ParcelReturnType,
+    ParcelUpdate, ProductType, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit,
+    grid_to_handle, handle_to_global, handle_to_grid,
 };
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,
