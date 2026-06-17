@@ -360,6 +360,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::TextureNotFound(_)
             | Event::AssetReceived(_)
             | Event::AssetTransferFailed { .. }
+            | Event::AssetUploadComplete { .. }
+            | Event::AssetUploaded { .. }
+            | Event::AssetUploadFailed { .. }
             | Event::RegionChanged { .. } => {}
         }
     }

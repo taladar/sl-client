@@ -13,10 +13,13 @@ use std::collections::HashMap;
 
 use sl_proto::{
     CAP_FETCH_INVENTORY, CAP_GET_ASSET, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE,
-    CAP_GROUP_MEMBER_DATA, CAP_UPDATE_AVATAR_APPEARANCE, Llsd, REQUESTED_CAPABILITIES, Session,
-    build_event_queue_request, build_fetch_inventory_request, build_group_member_data_request,
-    build_seed_request, build_update_avatar_appearance_request, j2c, parse_event_queue_response,
-    parse_llsd_xml, parse_login_response, parse_seed_response,
+    CAP_GROUP_MEMBER_DATA, CAP_NEW_FILE_AGENT_INVENTORY, CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_UPLOAD_BAKED_TEXTURE, Llsd, REQUESTED_CAPABILITIES, Session, build_event_queue_request,
+    build_fetch_inventory_request, build_group_member_data_request,
+    build_new_file_agent_inventory_request, build_seed_request,
+    build_update_avatar_appearance_request, build_update_item_asset_request,
+    build_upload_baked_texture_request, j2c, parse_asset_upload_response,
+    parse_event_queue_response, parse_llsd_xml, parse_login_response, parse_seed_response,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
@@ -27,18 +30,18 @@ pub use sl_proto::{
     ControlFlags, CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData,
     EstateAccessDelta, EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupMember,
     GroupMembership, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog,
-    ImageCodec, InstantMessage, InventoryFolder, InventoryItem, LindenAmount, LoadUrlRequest,
-    LoginParams, LoginRequest, LoginResponse, MapItem, MapItemType, MapRegionInfo, Material,
-    Maturity, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry,
-    MuteFlags, MuteType, NeighborInfo, Object, ObjectFlagSettings, ObjectMotion, ObjectProperties,
-    ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
-    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PlayingAnimation,
-    PrimShape, ProductType, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits,
-    Reliability, Rotation, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture,
-    TextureEntry, TextureFace, Throttle, TransferStatus, Transmit, Uuid, Vector, Wearable,
-    WearableType, avatar_texture, decode_texture_entry, grid_to_handle, handle_to_global,
-    handle_to_grid, pcode, sim_access,
+    ImageCodec, InstantMessage, InventoryFolder, InventoryItem, InventoryType, LindenAmount,
+    LoadUrlRequest, LoginParams, LoginRequest, LoginResponse, MapItem, MapItemType, MapRegionInfo,
+    Material, Maturity, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
+    MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectFlagSettings, ObjectMotion,
+    ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
+    ParcelFlags, ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
+    PlayingAnimation, PrimShape, ProductType, RegionFlags, RegionIdentity, RegionInfoUpdate,
+    RegionLimits, Reliability, Rotation, SaleType, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType,
+    TerrainPatch, Texture, TextureEntry, TextureFace, Throttle, TransferStatus, Transmit, Uuid,
+    Vector, Wearable, WearableType, avatar_texture, decode_texture_entry, grid_to_handle,
+    handle_to_global, handle_to_grid, pcode, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -780,6 +783,75 @@ pub enum Command {
     /// Stop one of the agent's own animations (`AgentAnimation`); convenience for
     /// a single-element [`Command::SetAnimations`].
     StopAnimation(Uuid),
+    /// Upload a new asset over the legacy UDP path (`AssetUploadRequest`): stores
+    /// the asset bytes (small assets inline, larger ones over `Xfer`) without
+    /// creating an inventory item. Completion arrives as
+    /// [`Event::AssetUploadComplete`]. For an upload that also creates an
+    /// inventory item, use [`Command::UploadAsset`].
+    UploadAssetUdp {
+        /// The asset class to store the bytes as.
+        asset_type: AssetType,
+        /// The raw asset bytes.
+        data: Vec<u8>,
+        /// Mark the asset temporary.
+        temp_file: bool,
+        /// Keep the asset on the simulator only (do not store it grid-wide).
+        store_local: bool,
+    },
+    /// Upload a new asset and create an inventory item for it over the modern
+    /// `NewFileAgentInventory` capability (the two-step CAPS uploader): POST the
+    /// metadata, then the raw bytes. The result arrives as
+    /// [`Event::AssetUploaded`] (or [`Event::AssetUploadFailed`]).
+    ///
+    /// For a mesh, `data` must be the **fully-formed mesh asset bytes** —
+    /// uploading does not run the viewer's model-import pipeline (LOD / physics /
+    /// cost generation).
+    UploadAsset {
+        /// The destination inventory folder.
+        folder_id: Uuid,
+        /// The asset class (e.g. [`AssetType::Texture`], [`AssetType::Animation`]).
+        asset_type: AssetType,
+        /// The inventory-item class (e.g. [`InventoryType::Texture`],
+        /// [`InventoryType::Wearable`]).
+        inventory_type: InventoryType,
+        /// The new item's name.
+        name: String,
+        /// The new item's description.
+        description: String,
+        /// The permission bits granted to the next owner.
+        next_owner_mask: u32,
+        /// The permission bits granted to the group.
+        group_mask: u32,
+        /// The permission bits granted to everyone.
+        everyone_mask: u32,
+        /// The L$ price the client expects to be charged (the grid rejects a
+        /// mismatch; 0 on free grids such as OpenSim).
+        expected_upload_cost: i32,
+        /// The raw asset bytes.
+        data: Vec<u8>,
+    },
+    /// Upload a client-computed baked avatar texture over the
+    /// `UploadBakedTexture` capability (the legacy appearance path): stores a
+    /// *temporary* asset with no inventory item. The result arrives as
+    /// [`Event::AssetUploaded`] (with `new_inventory_item` = `None`) or
+    /// [`Event::AssetUploadFailed`].
+    UploadBakedTexture {
+        /// The raw baked-texture bytes (a JPEG-2000 codestream).
+        data: Vec<u8>,
+    },
+    /// Replace the asset of an existing inventory item over the matching
+    /// `Update*AgentInventory` capability (gesture / notecard / script /
+    /// settings, selected by `asset_type`). The result arrives as
+    /// [`Event::AssetUploaded`] or [`Event::AssetUploadFailed`].
+    UpdateInventoryAsset {
+        /// The inventory item whose asset is being replaced.
+        item_id: Uuid,
+        /// The item's asset class (selects the capability; see
+        /// [`AssetType::update_item_cap`]).
+        asset_type: AssetType,
+        /// The new raw asset bytes.
+        data: Vec<u8>,
+    },
     /// Begin a clean logout.
     Logout,
 }
@@ -1282,6 +1354,63 @@ impl Client {
                         Some(Command::StopAnimation(anim_id)) => {
                             self.session.stop_animation(anim_id, Instant::now())?;
                         }
+                        Some(Command::UploadAssetUdp { asset_type, data, temp_file, store_local }) => {
+                            self.session.upload_asset_udp(asset_type, data, temp_file, store_local, Instant::now())?;
+                        }
+                        Some(Command::UploadAsset {
+                            folder_id, asset_type, inventory_type, name, description,
+                            next_owner_mask, group_mask, everyone_mask, expected_upload_cost, data,
+                        }) => {
+                            match (asset_type.caps_asset_name(), inventory_type.caps_name()) {
+                                (Some(asset_name), Some(inv_name)) => {
+                                    if let Some(url) = caps.get(CAP_NEW_FILE_AGENT_INVENTORY).cloned() {
+                                        let body = build_new_file_agent_inventory_request(
+                                            folder_id, asset_name, inv_name, &name, &description,
+                                            next_owner_mask, group_mask, everyone_mask, expected_upload_cost,
+                                        );
+                                        tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
+                                    } else {
+                                        events.send(Event::AssetUploadFailed {
+                                            reason: "NewFileAgentInventory capability not available".to_owned(),
+                                        }).await.ok();
+                                    }
+                                }
+                                _ => {
+                                    events.send(Event::AssetUploadFailed {
+                                        reason: "asset/inventory type is not uploadable".to_owned(),
+                                    }).await.ok();
+                                }
+                            }
+                        }
+                        Some(Command::UploadBakedTexture { data }) => {
+                            if let Some(url) = caps.get(CAP_UPLOAD_BAKED_TEXTURE).cloned() {
+                                let body = build_upload_baked_texture_request();
+                                tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
+                            } else {
+                                events.send(Event::AssetUploadFailed {
+                                    reason: "UploadBakedTexture capability not available".to_owned(),
+                                }).await.ok();
+                            }
+                        }
+                        Some(Command::UpdateInventoryAsset { item_id, asset_type, data }) => {
+                            match asset_type.update_item_cap() {
+                                Some(cap) => {
+                                    if let Some(url) = caps.get(cap).cloned() {
+                                        let body = build_update_item_asset_request(item_id);
+                                        tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
+                                    } else {
+                                        events.send(Event::AssetUploadFailed {
+                                            reason: format!("{cap} capability not available"),
+                                        }).await.ok();
+                                    }
+                                }
+                                None => {
+                                    events.send(Event::AssetUploadFailed {
+                                        reason: "asset type has no inventory-update capability".to_owned(),
+                                    }).await.ok();
+                                }
+                            }
+                        }
                         Some(Command::Logout) | None => {
                             self.session.initiate_logout(Instant::now());
                         }
@@ -1428,6 +1557,92 @@ async fn request_server_appearance_update(
             .await
             .ok();
     }
+}
+
+/// Runs the modern two-step CAPS asset upload: POST the LLSD `metadata` to the
+/// capability `cap_url` to obtain an `uploader` URL, then POST the raw `data`
+/// bytes there. Surfaces the outcome as [`Event::AssetUploaded`] on success or
+/// [`Event::AssetUploadFailed`] on any failure. Shared by the
+/// `NewFileAgentInventory`, `UploadBakedTexture`, and `Update*AgentInventory`
+/// uploads, whose responses share the `{ state, uploader, new_asset,
+/// new_inventory_item }` shape.
+async fn run_caps_upload(
+    cap_url: String,
+    metadata: String,
+    data: Vec<u8>,
+    http: ReqwestClient,
+    events: mpsc::Sender<Event>,
+) {
+    let event = caps_upload_event(&cap_url, metadata, data, &http).await;
+    events.send(event).await.ok();
+}
+
+/// Performs both steps of a CAPS asset upload and returns the resulting event.
+async fn caps_upload_event(
+    cap_url: &str,
+    metadata: String,
+    data: Vec<u8>,
+    http: &ReqwestClient,
+) -> Event {
+    // Step 1: POST the metadata, expecting an `uploader` URL back.
+    let uploader = match caps_upload_step(
+        http,
+        cap_url,
+        "application/llsd+xml",
+        metadata.into_bytes(),
+    )
+    .await
+    {
+        Ok(response) => match response.uploader {
+            Some(url) => url,
+            None => {
+                return Event::AssetUploadFailed {
+                    reason: response.error.unwrap_or_else(|| {
+                        format!("upload metadata rejected (state {})", response.state)
+                    }),
+                };
+            }
+        },
+        Err(reason) => return Event::AssetUploadFailed { reason },
+    };
+    // Step 2: POST the raw asset bytes to the uploader URL.
+    match caps_upload_step(http, &uploader, "application/octet-stream", data).await {
+        Ok(response) => match response.new_asset {
+            Some(new_asset) => Event::AssetUploaded {
+                new_asset,
+                new_inventory_item: response.new_inventory_item,
+            },
+            None => Event::AssetUploadFailed {
+                reason: response.error.unwrap_or_else(|| {
+                    format!("upload did not complete (state {})", response.state)
+                }),
+            },
+        },
+        Err(reason) => Event::AssetUploadFailed { reason },
+    }
+}
+
+/// POSTs one step of a CAPS upload and parses the LLSD response, returning the
+/// parsed [`AssetUploadResponse`] or a human-readable failure reason.
+async fn caps_upload_step(
+    http: &ReqwestClient,
+    url: &str,
+    content_type: &str,
+    body: Vec<u8>,
+) -> Result<sl_proto::AssetUploadResponse, String> {
+    let response = http
+        .post(url)
+        .header("Content-Type", content_type)
+        .body(body)
+        .send()
+        .await
+        .map_err(|error| format!("upload request failed: {error}"))?;
+    let text = response
+        .text()
+        .await
+        .map_err(|error| format!("upload response read failed: {error}"))?;
+    parse_asset_upload_response(&text)
+        .map_err(|error| format!("upload response parse failed: {error}"))
 }
 
 /// GETs a texture from the `GetTexture` capability and surfaces it as an

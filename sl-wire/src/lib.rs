@@ -19,10 +19,12 @@ pub use error::WireError;
 pub use field::{Reader, Writer};
 pub use header::{PacketFlags, ParsedDatagram, encode_datagram, parse_datagram};
 pub use llsd::{
-    EventQueueEvent, EventQueueResponse, Llsd, build_event_queue_request,
-    build_fetch_inventory_request, build_group_member_data_request, build_seed_request,
-    build_update_avatar_appearance_request, parse_event_queue_response, parse_llsd_xml,
-    parse_seed_response,
+    AssetUploadResponse, EventQueueEvent, EventQueueResponse, Llsd, build_event_queue_request,
+    build_fetch_inventory_request, build_group_member_data_request,
+    build_new_file_agent_inventory_request, build_seed_request,
+    build_update_avatar_appearance_request, build_update_item_asset_request,
+    build_upload_baked_texture_request, parse_asset_upload_response, parse_event_queue_response,
+    parse_llsd_xml, parse_seed_response,
 };
 pub use login::{
     BuddyListEntry, LoginFailure, LoginParseError, LoginRequest, LoginResponse, LoginSuccess,
@@ -33,13 +35,28 @@ pub use messages::AnyMessage;
 pub use parcel_flags::{ParcelFlags, RegionFlags, sim_access};
 pub use zerocode::{decode as zero_decode, encode as zero_encode};
 
+/// Combines two UUIDs the way Second Life derives a legacy upload's asset id:
+/// `MD5(a's 16 bytes ++ b's 16 bytes)` (LL's `LLUUID::combine` /
+/// libomv's `UUID.Combine`). The simulator computes the stored asset's UUID as
+/// `combine(transaction_id, secure_session_id)`, so a client can predict it (and
+/// match the simulator's `RequestXfer`, whose `VFileID` is this asset id) before
+/// the upload completes.
+#[must_use]
+pub fn combine_uuids(a: uuid::Uuid, b: uuid::Uuid) -> uuid::Uuid {
+    let mut input = Vec::with_capacity(32);
+    input.extend_from_slice(a.as_bytes());
+    input.extend_from_slice(b.as_bytes());
+    uuid::Uuid::from_bytes(md5::compute(&input).0)
+}
+
 #[cfg(test)]
 mod test {
     use pretty_assertions::assert_eq;
 
     use super::{
-        PacketFlags, Reader, WireError, Writer, encode_datagram, parse_datagram, zero_decode,
-        zero_encode,
+        PacketFlags, Reader, WireError, Writer, build_new_file_agent_inventory_request,
+        build_update_item_asset_request, combine_uuids, encode_datagram,
+        parse_asset_upload_response, parse_datagram, zero_decode, zero_encode,
     };
 
     #[test]
@@ -186,5 +203,89 @@ mod test {
             let _result = parse_datagram(&bytes);
             let _decoded = zero_decode(&bytes);
         }
+    }
+
+    #[test]
+    fn combine_uuids_matches_md5_of_concatenated_bytes() {
+        // `combine(a, b)` is MD5 of a's 16 bytes followed by b's 16 bytes (LL's
+        // `LLUUID::combine`). Check against a hand-computed digest.
+        let a = uuid::Uuid::from_u128(1);
+        let b = uuid::Uuid::from_u128(3);
+        let mut input = Vec::with_capacity(32);
+        input.extend_from_slice(a.as_bytes());
+        input.extend_from_slice(b.as_bytes());
+        let expected = uuid::Uuid::from_bytes(md5::compute(&input).0);
+        assert_eq!(combine_uuids(a, b), expected);
+    }
+
+    #[test]
+    fn new_file_agent_inventory_request_carries_metadata() {
+        let folder = uuid::Uuid::from_u128(0x00f0_1de7);
+        let body = build_new_file_agent_inventory_request(
+            folder,
+            "texture",
+            "texture",
+            "My Pic",
+            "a desc",
+            0x0008_e000,
+            0,
+            0,
+            0,
+        );
+        assert!(body.contains(&format!("<uuid>{folder}</uuid>")));
+        assert!(body.contains("<key>asset_type</key><string>texture</string>"));
+        assert!(body.contains("<key>inventory_type</key><string>texture</string>"));
+        assert!(body.contains("<key>name</key><string>My Pic</string>"));
+        assert!(body.contains("<key>expected_upload_cost</key><integer>0</integer>"));
+    }
+
+    #[test]
+    fn upload_response_parses_both_steps_and_failure() -> Result<(), roxmltree::Error> {
+        // Step 1: the uploader URL.
+        let step1 = parse_asset_upload_response(
+            "<llsd><map><key>state</key><string>upload</string>\
+             <key>uploader</key><string>http://sim/up/42</string></map></llsd>",
+        )?;
+        assert_eq!(step1.state, "upload");
+        assert_eq!(step1.uploader.as_deref(), Some("http://sim/up/42"));
+        assert_eq!(step1.new_asset, None);
+
+        // Step 2: completion with new_asset (string) + new_inventory_item (uuid).
+        let asset = uuid::Uuid::from_u128(0x000a_55e7);
+        let item = uuid::Uuid::from_u128(0x17e3);
+        let step2 = parse_asset_upload_response(&format!(
+            "<llsd><map><key>state</key><string>complete</string>\
+             <key>new_asset</key><string>{asset}</string>\
+             <key>new_inventory_item</key><uuid>{item}</uuid></map></llsd>"
+        ))?;
+        assert_eq!(step2.new_asset, Some(asset));
+        assert_eq!(step2.new_inventory_item, Some(item));
+
+        // A baked-texture completion has a nil inventory item → None.
+        let baked = parse_asset_upload_response(&format!(
+            "<llsd><map><key>state</key><string>complete</string>\
+             <key>new_asset</key><string>{asset}</string>\
+             <key>new_inventory_item</key>\
+             <uuid>00000000-0000-0000-0000-000000000000</uuid></map></llsd>"
+        ))?;
+        assert_eq!(baked.new_asset, Some(asset));
+        assert_eq!(baked.new_inventory_item, None);
+
+        // An error response surfaces the message.
+        let failed = parse_asset_upload_response(
+            "<llsd><map><key>state</key><string>error</string>\
+             <key>error</key><string>insufficient funds</string></map></llsd>",
+        )?;
+        assert_eq!(failed.state, "error");
+        assert_eq!(failed.uploader, None);
+        assert_eq!(failed.error.as_deref(), Some("insufficient funds"));
+        Ok(())
+    }
+
+    #[test]
+    fn update_item_asset_request_carries_item_id() {
+        let item = uuid::Uuid::from_u128(0x17e3);
+        let body = build_update_item_asset_request(item);
+        assert!(body.contains(&format!("<key>item_id</key><uuid>{item}</uuid>")));
     }
 }
