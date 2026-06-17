@@ -14,7 +14,7 @@ mod test {
         LoginParams, MapItemType, Maturity, MoneyTransactionType, MuteFlags, MuteType,
         ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
         ParcelUpdate, ProductType, RegionInfoUpdate, Reliability, ScriptPermissions, Session,
-        Transmit,
+        Throttle, Transmit,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -711,6 +711,124 @@ mod test {
             params,
             vec![&b"256010"[..], &b"256020"[..], &b"25"[..]],
             "autopilot params are the global x, global y, and z as strings"
+        );
+        Ok(())
+    }
+
+    /// Encodes a [`Throttle`] as its 28-byte `AgentThrottle` payload (seven
+    /// little-endian `f32` bits-per-second values), for asserting the on-wire
+    /// bytes without comparing floats directly.
+    fn throttle_payload(throttle: &Throttle) -> Vec<u8> {
+        let mut writer = Writer::new();
+        for rate in throttle.bits_per_second() {
+            writer.put_f32(rate);
+        }
+        writer.into_bytes()
+    }
+
+    #[test]
+    fn set_throttle_sends_agent_throttle() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.set_throttle(Throttle::preset_500(), now)?;
+        let sent = drain(&mut session)?;
+        let throttle = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AgentThrottle(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected an AgentThrottle")?;
+
+        // The block carries the agent identity and circuit code.
+        assert_eq!(throttle.agent_data.agent_id, uuid::Uuid::from_u128(1));
+        assert_eq!(throttle.agent_data.session_id, uuid::Uuid::from_u128(2));
+        assert_eq!(throttle.agent_data.circuit_code, 0x0011_2233);
+        assert_eq!(throttle.throttle.gen_counter, 0);
+
+        // The payload is the seven preset rates packed as little-endian f32
+        // bits-per-second (7 * 4 = 28 bytes).
+        assert_eq!(throttle.throttle.throttles.len(), 28);
+        assert_eq!(
+            throttle.throttle.throttles,
+            throttle_payload(&Throttle::preset_500())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn throttle_resent_on_region_change() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Advertise a throttle on the root region, then discard its transmits.
+        session.set_throttle(Throttle::preset_300(), now)?;
+        drain(&mut session)?;
+
+        // Pre-open the neighbour and cross into it.
+        enable_neighbour_b(&mut session, 9, now)?;
+        while session.poll_transmit().is_some() {}
+
+        let handle = 0x0003_E900_0003_E800;
+        let crossed = AnyMessage::CrossedRegion(CrossedRegion {
+            agent_data: CrossedRegionAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            region_data: CrossedRegionRegionDataBlock {
+                sim_ip: [127, 0, 0, 1],
+                sim_port: 9001u16.swap_bytes(),
+                region_handle: handle,
+                seed_capability: b"http://x/seedB\0".to_vec(),
+            },
+            info: CrossedRegionInfoBlock {
+                position: vec3(10.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&crossed, 10, true)?, now)?;
+        // Drop the CompleteAgentMovement and any other crossing transmits.
+        while session.poll_transmit().is_some() {}
+
+        // The destination confirms arrival, which completes the crossing.
+        let amc = AnyMessage::AgentMovementComplete(AgentMovementComplete {
+            agent_data: AgentMovementCompleteAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            data: AgentMovementCompleteDataBlock {
+                position: vec3(10.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+                region_handle: handle,
+                timestamp: 0,
+            },
+            sim_data: AgentMovementCompleteSimDataBlock {
+                channel_version: b"x\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_b(), &server_message(&amc, 1, true)?, now)?;
+
+        // The throttle is re-advertised to the new root region (sim_b).
+        let mut to_b = Vec::new();
+        while let Some(transmit) = session.poll_transmit() {
+            if transmit.destination == sim_b() {
+                to_b.push(decode(&transmit)?);
+            }
+        }
+        let throttle = to_b
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AgentThrottle(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected an AgentThrottle to the new root region")?;
+        assert_eq!(
+            throttle.throttle.throttles,
+            throttle_payload(&Throttle::preset_300())
         );
         Ok(())
     }

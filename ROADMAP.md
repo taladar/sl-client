@@ -42,7 +42,7 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 12 ✅ | Full world map **(done)** | 5 | Live map: agents, POIs, land-for-sale | Local OpenSim |
 | 13 ✅ | Parcel management **(done)** | 5 | Land-management tool | Local OpenSim |
 | 14 ✅ | Estate/region management **(done)** | 5 | Region admin/restart/ban bot | Local OpenSim (owner account) |
-| 15 | Bandwidth throttle (`AgentThrottle`) | 2 | *(enabler for 16–25)* | Local OpenSim |
+| 15 ✅ | Bandwidth throttle (`AgentThrottle`) | 2 | *(enabler for 16–25)* | Local OpenSim |
 | 16 | Object/scene graph | 13 | Scene auditor, proximity bot | Local OpenSim |
 | 17 | Object interaction & editing | 8 | Builder/rezzer, object mover | Local OpenSim |
 | 18 | Terrain heightmaps (`LayerData`) | 8 | Ground geometry for a renderer | Local OpenSim |
@@ -369,11 +369,29 @@ interact with the actual world. Do them as a set, in this order. **#15 first** �
 it is the bandwidth prerequisite for the bulk UDP streams that the rest depend
 on.
 
-**15. Bandwidth throttle — `AgentThrottle` · 2 pts.** Tell the sim how to
-allocate the 7 throttle categories (resend/land/wind/cloud/task/texture/asset);
-without it the sim's conservative defaults starve the object/terrain/texture
-firehose the rest of this tier needs. Send after circuit setup, re-send on
-region change. Wire a `set_throttle` command. *Test: local OpenSim.*
+**15. Bandwidth throttle (done) ✅ — `AgentThrottle` · 2 pts.** Tell the sim how
+to allocate the seven throttle categories
+(resend/land/wind/cloud/task/texture/asset); without it the sim's conservative
+defaults starve the object/terrain/texture firehose the rest of this tier needs.
+Implemented: a `Throttle` value type holding the seven per-category rates in
+kilobits per second (with `preset_300`/`preset_500`/`preset_1000` presets
+mirroring the reference viewer's bandwidth tables, a `total`, and the wire
+`bits_per_second` conversion), and `Session::set_throttle`, which packs the
+rates as seven little-endian `f32` bits-per-second values into the
+`AgentThrottle` `Throttles` byte array (`GenCounter` 0, as the viewer does) and
+sends it reliably on the root circuit. The throttle is **remembered and re-sent
+automatically on every region change** (each new root region starts with the
+sim's defaults until re-told) — the re-send is funnelled through
+`complete_arrival`, the single point where a new root region becomes active
+(login *and* handover). Wired through both runtimes
+(`Command::SetThrottle(Throttle)`). *Live-checked against the local OpenSim: the
+example advertises `Throttle::preset_1000` at handshake and the session runs a
+full clean lifecycle (login → throttle sent reliably → neighbours enabled →
+clean logout) with no protocol error; the exact 28-byte wire payload, the
+agent/session/circuit fields, and the re-send-on-region-change are covered by
+unit tests. (`AgentThrottle` has no reply, and OpenSim's `debug lludp throttles`
+console commands aren't dispatchable over the REST console in this build, so the
+applied rate can't be read back live.)*
 
 **16. Object/scene graph — `ObjectUpdate`, `ObjectUpdateCompressed`,
 `ObjectUpdateCached`, `ImprovedTerseObjectUpdate`, `KillObject`,

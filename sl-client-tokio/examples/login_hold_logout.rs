@@ -11,7 +11,9 @@
 
 use std::time::Duration;
 
-use sl_client_tokio::{Client, Command, DisconnectReason, Error, Event, LoginParams, LoginRequest};
+use sl_client_tokio::{
+    Client, Command, DisconnectReason, Error, Event, LoginParams, LoginRequest, Throttle,
+};
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tracing::{info, warn};
@@ -85,6 +87,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::CircuitEstablished { sim } => info!("circuit established to {sim}"),
             Event::RegionHandshakeComplete => {
                 info!("region handshake complete; holding for {hold_secs}s");
+                // Advertise a bandwidth throttle so the simulator opens up the
+                // bulk object/terrain/texture streams (re-sent on region change).
+                command_tx
+                    .send(Command::SetThrottle(Throttle::preset_1000()))
+                    .await
+                    .ok();
                 let command_tx = command_tx.clone();
                 tokio::spawn(async move {
                     sleep(Duration::from_secs(hold_secs)).await;
