@@ -11,8 +11,9 @@ mod test {
     use sl_proto::{
         ChatAudible, ChatSourceType, ChatType, ControlFlags, CreateGroupParams, DisconnectReason,
         Event, FriendRights, ImDialog, LindenAmount, LoginParams, MapItemType, Maturity,
-        MoneyTransactionType, MuteFlags, MuteType, ProductType, Reliability, ScriptPermissions,
-        Session, Transmit,
+        MoneyTransactionType, MuteFlags, MuteType, ParcelAccessEntry, ParcelAccessScope,
+        ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate, ProductType, Reliability,
+        ScriptPermissions, Session, Transmit,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -40,10 +41,12 @@ mod test {
         MapItemReplyRequestDataBlock, MoneyBalanceReply, MoneyBalanceReplyMoneyDataBlock,
         MoneyBalanceReplyTransactionInfoBlock, MuteListUpdate, MuteListUpdateMuteDataBlock,
         OfflineNotification, OfflineNotificationAgentBlockBlock, OnlineNotification,
-        OnlineNotificationAgentBlockBlock, ParcelProperties,
-        ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
-        ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
-        RegionHandshake, RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
+        OnlineNotificationAgentBlockBlock, ParcelAccessListReply, ParcelAccessListReplyDataBlock,
+        ParcelAccessListReplyListBlock, ParcelDwellReply, ParcelDwellReplyAgentDataBlock,
+        ParcelDwellReplyDataBlock, ParcelProperties, ParcelPropertiesAgeVerificationBlockBlock,
+        ParcelPropertiesParcelDataBlock, ParcelPropertiesParcelEnvironmentBlockBlock,
+        ParcelPropertiesRegionAllowAccessBlockBlock, RegionHandshake,
+        RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
         RegionHandshakeRegionInfoBlock, RegionInfo, RegionInfoAgentDataBlock,
         RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock, ScriptDialog,
         ScriptDialogButtonsBlock, ScriptDialogDataBlock, ScriptDialogOwnerDataBlock,
@@ -3091,6 +3094,213 @@ mod test {
         Ok(())
     }
 
+    #[test]
+    fn parcel_properties_update_encodes() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let update = ParcelUpdate {
+            local_id: 7,
+            parcel_flags: ParcelFlags::CREATE_OBJECTS.union(ParcelFlags::USE_BAN_LIST),
+            name: "My Parcel".to_owned(),
+            description: "A test parcel".to_owned(),
+            category: ParcelCategory::Residential,
+            sale_price: 100,
+            ..ParcelUpdate::default()
+        };
+        session.update_parcel(&update, now)?;
+        let sent = drain(&mut session)?;
+
+        let upd = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ParcelPropertiesUpdate(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a ParcelPropertiesUpdate")?;
+        assert_eq!(upd.agent_data.agent_id, uuid::Uuid::from_u128(1));
+        assert_eq!(upd.parcel_data.local_id, 7);
+        // The message-level flag the reference viewer sends.
+        assert_eq!(upd.parcel_data.flags, 0x1);
+        assert_eq!(
+            upd.parcel_data.parcel_flags,
+            ParcelFlags::CREATE_OBJECTS
+                .union(ParcelFlags::USE_BAN_LIST)
+                .bits()
+        );
+        assert_eq!(trimmed(&upd.parcel_data.name), "My Parcel");
+        assert_eq!(trimmed(&upd.parcel_data.desc), "A test parcel");
+        assert_eq!(upd.parcel_data.category, 2);
+        assert_eq!(upd.parcel_data.sale_price, 100);
+        Ok(())
+    }
+
+    #[test]
+    fn parcel_access_dwell_buy_return_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.request_parcel_access_list(7, ParcelAccessScope::Ban, now)?;
+        session.update_parcel_access_list(
+            7,
+            ParcelAccessScope::Access,
+            &[ParcelAccessEntry {
+                id: uuid::Uuid::from_u128(0x55),
+                time: 0,
+            }],
+            now,
+        )?;
+        session.request_parcel_dwell(7, now)?;
+        session.buy_parcel(7, 512, 1024, uuid::Uuid::nil(), false, now)?;
+        session.return_parcel_objects(
+            7,
+            ParcelReturnType::OTHER,
+            &[uuid::Uuid::from_u128(0x99)],
+            &[],
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+
+        let req = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ParcelAccessListRequest(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a ParcelAccessListRequest")?;
+        // Ban list selector.
+        assert_eq!(req.data.flags, 0x2);
+        assert_eq!(req.data.local_id, 7);
+
+        let upd = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ParcelAccessListUpdate(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a ParcelAccessListUpdate")?;
+        assert_eq!(upd.data.flags, 0x1);
+        let entry = upd.list.first().ok_or("expected one access entry")?;
+        assert_eq!(entry.id, uuid::Uuid::from_u128(0x55));
+        assert_eq!(entry.flags, 0x1);
+
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::ParcelDwellRequest(_))),
+            "expected a ParcelDwellRequest"
+        );
+
+        let buy = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ParcelBuy(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a ParcelBuy")?;
+        assert_eq!(buy.parcel_data.price, 512);
+        assert_eq!(buy.parcel_data.area, 1024);
+        assert!(buy.data.r#final);
+
+        let ret = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ParcelReturnObjects(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a ParcelReturnObjects")?;
+        assert_eq!(ret.parcel_data.return_type, ParcelReturnType::OTHER.0);
+        assert_eq!(ret.owner_i_ds.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn parcel_dwell_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let reply = AnyMessage::ParcelDwellReply(ParcelDwellReply {
+            agent_data: ParcelDwellReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+            data: ParcelDwellReplyDataBlock {
+                local_id: 7,
+                parcel_id: uuid::Uuid::from_u128(0xABC),
+                dwell: 42.5,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&reply, 9, true)?, now)?;
+
+        let dwell = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ParcelDwell {
+                    local_id,
+                    parcel_id,
+                    dwell,
+                } => Some((local_id, parcel_id, dwell)),
+                _ => None,
+            })
+            .ok_or("expected a ParcelDwell event")?;
+        assert_eq!(dwell.0, 7);
+        assert_eq!(dwell.1, uuid::Uuid::from_u128(0xABC));
+        assert_eq!(dwell.2.to_bits(), 42.5_f32.to_bits());
+        Ok(())
+    }
+
+    #[test]
+    fn parcel_access_list_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // A ban list (flags 0x2) with two entries.
+        let reply = AnyMessage::ParcelAccessListReply(ParcelAccessListReply {
+            data: ParcelAccessListReplyDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                sequence_id: 0,
+                flags: 0x2,
+                local_id: 7,
+            },
+            list: vec![
+                ParcelAccessListReplyListBlock {
+                    id: uuid::Uuid::from_u128(0x10),
+                    time: 0,
+                    flags: 0x2,
+                },
+                ParcelAccessListReplyListBlock {
+                    id: uuid::Uuid::from_u128(0x11),
+                    time: 1234,
+                    flags: 0x2,
+                },
+            ],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&reply, 9, true)?, now)?;
+
+        let (local_id, scope, entries) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ParcelAccessList {
+                    local_id,
+                    scope,
+                    entries,
+                } => Some((local_id, scope, entries)),
+                _ => None,
+            })
+            .ok_or("expected a ParcelAccessList event")?;
+        assert_eq!(local_id, 7);
+        assert_eq!(scope, ParcelAccessScope::Ban);
+        assert_eq!(entries.len(), 2);
+        let second = entries.get(1).ok_or("expected a second entry")?;
+        assert_eq!(second.id, uuid::Uuid::from_u128(0x11));
+        assert_eq!(second.time, 1234);
+        Ok(())
+    }
+
     /// The destination simulator used for handover tests.
     fn sim_b() -> SocketAddr {
         SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9001)
@@ -3261,12 +3471,14 @@ mod test {
         drain(&mut session)?;
         drain_events(&mut session);
 
-        // A ParcelProperties event as delivered over the CAPS event queue.
+        // A ParcelProperties event as delivered over the CAPS event queue. OpenSim
+        // encodes the uint ParcelFlags as a 4-byte big-endian binary element:
+        // AAAAQA== is [0, 0, 0, 64] = 64 (CREATE_OBJECTS).
         let xml = "<llsd><map><key>ParcelData</key><array><map>\
             <key>LocalID</key><integer>3</integer>\
             <key>SequenceID</key><integer>9</integer>\
             <key>Area</key><integer>2048</integer>\
-            <key>ParcelFlags</key><integer>64</integer>\
+            <key>ParcelFlags</key><binary>AAAAQA==</binary>\
             <key>MaxPrims</key><integer>750</integer>\
             <key>AABBMax</key><array><real>32</real><real>16</real><real>0</real></array>\
             <key>Bitmap</key><binary>AQID</binary>\
@@ -3288,7 +3500,8 @@ mod test {
         assert_eq!(parcel.max_prims, 750);
         assert_eq!(parcel.aabb_max.0.to_bits(), 32.0_f32.to_bits());
         assert_eq!(parcel.bitmap, vec![1u8, 2, 3]);
-        // ParcelFlags 64 = CREATE_OBJECTS.
+        // ParcelFlags 64 = CREATE_OBJECTS, decoded from the binary element.
+        assert_eq!(parcel.raw_parcel_flags, 64);
         assert!(parcel.create_objects());
         Ok(())
     }

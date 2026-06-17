@@ -221,6 +221,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::EconomyData(_)
             | Event::ParcelProperties(_)
             | Event::ParcelOverlay(_)
+            | Event::ParcelDwell { .. }
+            | Event::ParcelAccessList { .. }
             | Event::NeighborDiscovered(_)
             | Event::MapBlock(_)
             | Event::MapItems { .. }

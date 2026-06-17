@@ -57,6 +57,22 @@ use sl_wire::messages::{
     MoneyBalanceRequestMoneyDataBlock, MoneyTransferRequest, MoneyTransferRequestAgentDataBlock,
     MoneyTransferRequestMoneyDataBlock,
 };
+// Parcel management (#13): the outgoing land-edit / access / buy / return messages.
+use sl_wire::messages::{
+    ParcelAccessListRequest, ParcelAccessListRequestAgentDataBlock,
+    ParcelAccessListRequestDataBlock, ParcelAccessListUpdate, ParcelAccessListUpdateAgentDataBlock,
+    ParcelAccessListUpdateDataBlock, ParcelAccessListUpdateListBlock, ParcelBuy,
+    ParcelBuyAgentDataBlock, ParcelBuyDataBlock, ParcelBuyParcelDataBlock, ParcelDeedToGroup,
+    ParcelDeedToGroupAgentDataBlock, ParcelDeedToGroupDataBlock, ParcelDwellRequest,
+    ParcelDwellRequestAgentDataBlock, ParcelDwellRequestDataBlock, ParcelPropertiesUpdate,
+    ParcelPropertiesUpdateAgentDataBlock, ParcelPropertiesUpdateParcelDataBlock, ParcelReclaim,
+    ParcelReclaimAgentDataBlock, ParcelReclaimDataBlock, ParcelRelease,
+    ParcelReleaseAgentDataBlock, ParcelReleaseDataBlock, ParcelReturnObjects,
+    ParcelReturnObjectsAgentDataBlock, ParcelReturnObjectsOwnerIDsBlock,
+    ParcelReturnObjectsParcelDataBlock, ParcelReturnObjectsTaskIDsBlock, ParcelSelectObjects,
+    ParcelSelectObjectsAgentDataBlock, ParcelSelectObjectsParcelDataBlock,
+    ParcelSelectObjectsReturnIDsBlock,
+};
 // Group support (#7): incoming reply blocks consumed by the converter helpers.
 use sl_wire::messages::{
     AgentDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
@@ -96,9 +112,10 @@ use crate::types::{
     GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
     LoadUrlRequest, LoginHttpRequest, LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity,
     MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits,
-    Reliability, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    Transmit, grid_to_handle, handle_to_grid,
+    NeighborInfo, ParcelAccessEntry, ParcelAccessScope, ParcelInfo, ParcelOverlayInfo,
+    ParcelReturnType, ParcelUpdate, ProductType, RegionIdentity, RegionLimits, Reliability,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit,
+    grid_to_handle, handle_to_grid,
 };
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
@@ -1230,6 +1247,249 @@ impl Circuit {
         self.send(&message, Reliability::Reliable, now)
     }
 
+    /// Queues a `ParcelPropertiesUpdate` reliably (edit a parcel's settings).
+    fn send_parcel_properties_update(
+        &mut self,
+        update: &ParcelUpdate,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelPropertiesUpdate(ParcelPropertiesUpdate {
+            agent_data: ParcelPropertiesUpdateAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            parcel_data: ParcelPropertiesUpdateParcelDataBlock {
+                local_id: update.local_id,
+                // The message-level flag the reference viewer sends (0x01).
+                flags: 0x1,
+                parcel_flags: update.parcel_flags.bits(),
+                sale_price: update.sale_price,
+                name: with_nul(&update.name),
+                desc: with_nul(&update.description),
+                music_url: with_nul(&update.music_url),
+                media_url: with_nul(&update.media_url),
+                media_id: update.media_id,
+                media_auto_scale: u8::from(update.media_auto_scale),
+                group_id: update.group_id,
+                pass_price: update.pass_price,
+                pass_hours: update.pass_hours,
+                category: update.category.to_u8(),
+                auth_buyer_id: update.auth_buyer_id,
+                snapshot_id: update.snapshot_id,
+                user_location: update.user_location.clone(),
+                user_look_at: update.user_look_at.clone(),
+                landing_type: update.landing_type,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelAccessListRequest` reliably (fetch the allow or ban list
+    /// selected by `flags`). The reply is a `ParcelAccessListReply`.
+    fn send_parcel_access_list_request(
+        &mut self,
+        local_id: i32,
+        flags: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelAccessListRequest(ParcelAccessListRequest {
+            agent_data: ParcelAccessListRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: ParcelAccessListRequestDataBlock {
+                sequence_id: 0,
+                flags,
+                local_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelAccessListUpdate` reliably (replace the allow or ban list
+    /// selected by `flags`). An empty list clears it (sent as one empty entry, as
+    /// the reference viewer does).
+    fn send_parcel_access_list_update(
+        &mut self,
+        local_id: i32,
+        flags: u32,
+        entries: &[ParcelAccessEntry],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let list = if entries.is_empty() {
+            vec![ParcelAccessListUpdateListBlock {
+                id: Uuid::nil(),
+                time: 0,
+                flags: 0,
+            }]
+        } else {
+            entries
+                .iter()
+                .map(|entry| ParcelAccessListUpdateListBlock {
+                    id: entry.id,
+                    time: entry.time,
+                    flags,
+                })
+                .collect()
+        };
+        let message = AnyMessage::ParcelAccessListUpdate(ParcelAccessListUpdate {
+            agent_data: ParcelAccessListUpdateAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: ParcelAccessListUpdateDataBlock {
+                flags,
+                local_id,
+                transaction_id: Uuid::nil(),
+                sequence_id: 1,
+                sections: 1,
+            },
+            list,
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelDwellRequest` reliably. The reply is a `ParcelDwellReply`.
+    fn send_parcel_dwell_request(&mut self, local_id: i32, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelDwellRequest(ParcelDwellRequest {
+            agent_data: ParcelDwellRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            // The simulator fills in parcel_id from local_id.
+            data: ParcelDwellRequestDataBlock {
+                local_id,
+                parcel_id: Uuid::nil(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelBuy` reliably (purchase the parcel).
+    fn send_parcel_buy(
+        &mut self,
+        local_id: i32,
+        price: i32,
+        area: i32,
+        group_id: Uuid,
+        is_group_owned: bool,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelBuy(ParcelBuy {
+            agent_data: ParcelBuyAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: ParcelBuyDataBlock {
+                group_id,
+                is_group_owned,
+                remove_contribution: false,
+                local_id,
+                r#final: true,
+            },
+            parcel_data: ParcelBuyParcelDataBlock { price, area },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelReturnObjects` reliably (return objects on the parcel
+    /// matching `return_type`, optionally scoped to the given owner/task ids).
+    fn send_parcel_return_objects(
+        &mut self,
+        local_id: i32,
+        return_type: u32,
+        owner_ids: &[Uuid],
+        task_ids: &[Uuid],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelReturnObjects(ParcelReturnObjects {
+            agent_data: ParcelReturnObjectsAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            parcel_data: ParcelReturnObjectsParcelDataBlock {
+                local_id,
+                return_type,
+            },
+            task_i_ds: task_ids
+                .iter()
+                .map(|id| ParcelReturnObjectsTaskIDsBlock { task_id: *id })
+                .collect(),
+            owner_i_ds: owner_ids
+                .iter()
+                .map(|id| ParcelReturnObjectsOwnerIDsBlock { owner_id: *id })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelSelectObjects` reliably (select the parcel objects matching
+    /// `return_type`, or the explicit `object_ids` when using the list type).
+    fn send_parcel_select_objects(
+        &mut self,
+        local_id: i32,
+        return_type: u32,
+        object_ids: &[Uuid],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelSelectObjects(ParcelSelectObjects {
+            agent_data: ParcelSelectObjectsAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            parcel_data: ParcelSelectObjectsParcelDataBlock {
+                local_id,
+                return_type,
+            },
+            return_i_ds: object_ids
+                .iter()
+                .map(|id| ParcelSelectObjectsReturnIDsBlock { return_id: *id })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelDeedToGroup` reliably (deed the parcel to `group_id`).
+    fn send_parcel_deed_to_group(
+        &mut self,
+        local_id: i32,
+        group_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelDeedToGroup(ParcelDeedToGroup {
+            agent_data: ParcelDeedToGroupAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: ParcelDeedToGroupDataBlock { group_id, local_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelReclaim` reliably (reclaim the parcel to the estate).
+    fn send_parcel_reclaim(&mut self, local_id: i32, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelReclaim(ParcelReclaim {
+            agent_data: ParcelReclaimAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: ParcelReclaimDataBlock { local_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelRelease` reliably (abandon the parcel back to the estate).
+    fn send_parcel_release(&mut self, local_id: i32, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelRelease(ParcelRelease {
+            agent_data: ParcelReleaseAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: ParcelReleaseDataBlock { local_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
     /// Queues a `MapBlockRequest` reliably for a grid-coordinate rectangle.
     fn send_map_block_request(
         &mut self,
@@ -1954,6 +2214,27 @@ impl Session {
                         sequence_id: overlay.parcel_data.sequence_id,
                         data: overlay.parcel_data.data.clone(),
                     }));
+            }
+            AnyMessage::ParcelDwellReply(reply) => {
+                self.events.push_back(Event::ParcelDwell {
+                    local_id: reply.data.local_id,
+                    parcel_id: reply.data.parcel_id,
+                    dwell: reply.data.dwell,
+                });
+            }
+            AnyMessage::ParcelAccessListReply(reply) => {
+                self.events.push_back(Event::ParcelAccessList {
+                    local_id: reply.data.local_id,
+                    scope: ParcelAccessScope::from_u32(reply.data.flags),
+                    entries: reply
+                        .list
+                        .iter()
+                        .map(|entry| ParcelAccessEntry {
+                            id: entry.id,
+                            time: entry.time,
+                        })
+                        .collect(),
+                });
             }
             AnyMessage::ChatFromSimulator(chat) => {
                 let data = &chat.chat_data;
@@ -3357,6 +3638,182 @@ impl Session {
         Ok(())
     }
 
+    /// Edits a parcel's settings via `ParcelPropertiesUpdate`. Build the
+    /// [`ParcelUpdate`] from [`ParcelUpdate::default`], setting `local_id` (from
+    /// [`Event::ParcelProperties`]) and the fields to change. Requires the agent
+    /// to own the parcel or hold estate/god powers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn update_parcel(&mut self, update: &ParcelUpdate, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_properties_update(update, now)?;
+        Ok(())
+    }
+
+    /// Requests a parcel's allow or ban list via `ParcelAccessListRequest`. The
+    /// reply arrives as [`Event::ParcelAccessList`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_parcel_access_list(
+        &mut self,
+        local_id: i32,
+        scope: ParcelAccessScope,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_access_list_request(local_id, scope.to_u32(), now)?;
+        Ok(())
+    }
+
+    /// Replaces a parcel's allow or ban list via `ParcelAccessListUpdate`. An
+    /// empty `entries` clears the list. Requires parcel ownership / land edit
+    /// rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn update_parcel_access_list(
+        &mut self,
+        local_id: i32,
+        scope: ParcelAccessScope,
+        entries: &[ParcelAccessEntry],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_access_list_update(local_id, scope.to_u32(), entries, now)?;
+        Ok(())
+    }
+
+    /// Requests a parcel's dwell (traffic) value via `ParcelDwellRequest`. The
+    /// reply arrives as [`Event::ParcelDwell`]. Dwell is public — no ownership
+    /// required.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_parcel_dwell(&mut self, local_id: i32, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_dwell_request(local_id, now)?;
+        Ok(())
+    }
+
+    /// Buys a parcel via `ParcelBuy` for `price` L$ covering `area` m². Pass a
+    /// `group_id` with `is_group_owned` to buy on a group's behalf (nil/false for
+    /// a personal purchase).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn buy_parcel(
+        &mut self,
+        local_id: i32,
+        price: i32,
+        area: i32,
+        group_id: Uuid,
+        is_group_owned: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_buy(local_id, price, area, group_id, is_group_owned, now)?;
+        Ok(())
+    }
+
+    /// Returns objects on a parcel via `ParcelReturnObjects`. `return_type`
+    /// selects which objects (owner/group/other/for-sale — combine
+    /// [`ParcelReturnType`] constants); `owner_ids`/`task_ids` optionally scope it
+    /// (use [`ParcelReturnType::LIST`] with `task_ids` to return specific
+    /// objects). Requires parcel ownership / land rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn return_parcel_objects(
+        &mut self,
+        local_id: i32,
+        return_type: ParcelReturnType,
+        owner_ids: &[Uuid],
+        task_ids: &[Uuid],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_return_objects(local_id, return_type.0, owner_ids, task_ids, now)?;
+        Ok(())
+    }
+
+    /// Selects (highlights) objects on a parcel via `ParcelSelectObjects`.
+    /// `return_type` selects which objects; pass [`ParcelReturnType::LIST`] with
+    /// `object_ids` to select specific objects.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn select_parcel_objects(
+        &mut self,
+        local_id: i32,
+        return_type: ParcelReturnType,
+        object_ids: &[Uuid],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_select_objects(local_id, return_type.0, object_ids, now)?;
+        Ok(())
+    }
+
+    /// Deeds a parcel to a group via `ParcelDeedToGroup`. Requires parcel
+    /// ownership and membership of `group_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn deed_parcel_to_group(
+        &mut self,
+        local_id: i32,
+        group_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_deed_to_group(local_id, group_id, now)?;
+        Ok(())
+    }
+
+    /// Reclaims a parcel to the estate via `ParcelReclaim` (estate-manager
+    /// operation).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn reclaim_parcel(&mut self, local_id: i32, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_reclaim(local_id, now)?;
+        Ok(())
+    }
+
+    /// Releases (abandons) a parcel back to the estate via `ParcelRelease`.
+    /// Requires parcel ownership.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn release_parcel(&mut self, local_id: i32, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_release(local_id, now)?;
+        Ok(())
+    }
+
     /// Requests world-map blocks for the inclusive grid-coordinate rectangle
     /// `[min_x, max_x] x [min_y, max_y]` (region indices). Each region in range
     /// arrives as an [`Event::MapBlock`], giving its name, coordinates, and
@@ -4147,11 +4604,9 @@ fn parcel_info_from_llsd(body: &Llsd) -> Option<ParcelInfo> {
             .get("OwnerID")
             .and_then(Llsd::as_uuid)
             .unwrap_or_else(Uuid::nil),
-        raw_parcel_flags: data
-            .get("ParcelFlags")
-            .and_then(Llsd::as_i32)
-            .unwrap_or(0)
-            .cast_unsigned(),
+        // OpenSim encodes the `uint` ParcelFlags as a 4-byte binary LLSD element,
+        // so read it tolerantly (binary / integer / string).
+        raw_parcel_flags: data.get("ParcelFlags").map_or(0, llsd_u32),
     })
 }
 
@@ -4185,6 +4640,30 @@ fn string_member(map: &Llsd, key: &str) -> String {
 
 /// Decodes a `u64` from an LLSD value as the viewer's `ll_U64_from_sd` does:
 /// from an 8-byte big-endian binary, a hex/decimal string, or an integer.
+/// Reads a `u32` from an LLSD value that may be a 4-byte big-endian binary
+/// element (how OpenSim encodes `uint` fields such as `ParcelFlags`), an
+/// integer, or a decimal/hex string.
+fn llsd_u32(value: &Llsd) -> u32 {
+    match value {
+        Llsd::Binary(bytes) if bytes.len() >= 4 => bytes
+            .iter()
+            .take(4)
+            .fold(0u32, |acc, &byte| (acc << 8) | u32::from(byte)),
+        Llsd::String(s) => {
+            let trimmed = s.trim().trim_start_matches("0x");
+            u32::from_str_radix(trimmed, 16)
+                .ok()
+                .or_else(|| s.trim().parse().ok())
+                .unwrap_or(0)
+        }
+        Llsd::Integer(i) => u32::try_from(*i).unwrap_or(0),
+        _ => 0,
+    }
+}
+
+/// Reads a `u64` from an LLSD value that may be an 8-byte big-endian binary
+/// element (how OpenSim encodes `U64` region handles), an integer, or a
+/// decimal/hex string.
 fn llsd_u64(value: &Llsd) -> u64 {
     match value {
         Llsd::Binary(bytes) if bytes.len() >= 8 => bytes

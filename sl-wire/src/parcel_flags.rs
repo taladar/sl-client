@@ -70,6 +70,15 @@ impl ParcelFlags {
     pub const fn contains(self, other: Self) -> bool {
         self.bits & other.bits == other.bits
     }
+
+    /// Returns the union (bitwise OR) of two flag sets — used to combine flags
+    /// when building a parcel update.
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self {
+            bits: self.bits | other.bits,
+        }
+    }
 }
 
 /// The `RegionFlags` bitfield carried in `RegionHandshake`/`RegionInfo`. Only the

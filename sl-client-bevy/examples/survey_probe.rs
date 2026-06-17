@@ -167,6 +167,8 @@ fn on_events(
             | SlSessionEvent::MoneyBalance(_)
             | SlSessionEvent::EconomyData(_)
             | SlSessionEvent::MapItems { .. }
+            | SlSessionEvent::ParcelDwell { .. }
+            | SlSessionEvent::ParcelAccessList { .. }
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal => {}

@@ -30,10 +30,12 @@ pub use sl_proto::{
     GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
     InventoryFolder, InventoryItem, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest,
     MapItem, MapItemType, MapRegionInfo, Maturity, MfaChallenge, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, ParcelFlags, ParcelInfo,
-    ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity, RegionLimits, Reliability,
-    Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
+    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, ParcelAccessEntry,
+    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelOverlayInfo,
+    ParcelReturnType, ParcelUpdate, ProductType, RegionFlags, RegionIdentity, RegionLimits,
+    Reliability, Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest, Transmit, Uuid, Vector, grid_to_handle, handle_to_global,
+    handle_to_grid, sim_access,
 };
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
@@ -338,6 +340,82 @@ pub enum SlCommand {
         north: f32,
         /// A sequence id echoed back in the reply for matching.
         sequence_id: i32,
+    },
+    /// Edit a parcel's settings (`ParcelPropertiesUpdate`).
+    UpdateParcel(ParcelUpdate),
+    /// Request a parcel's allow or ban list (`ParcelAccessListRequest`); the
+    /// reply arrives as [`SlSessionEvent::ParcelAccessList`].
+    RequestParcelAccessList {
+        /// The parcel's region-local id.
+        local_id: i32,
+        /// Which list to fetch (allow or ban).
+        scope: ParcelAccessScope,
+    },
+    /// Replace a parcel's allow or ban list (`ParcelAccessListUpdate`); empty
+    /// `entries` clears it.
+    UpdateParcelAccessList {
+        /// The parcel's region-local id.
+        local_id: i32,
+        /// Which list to set (allow or ban).
+        scope: ParcelAccessScope,
+        /// The new entries.
+        entries: Vec<ParcelAccessEntry>,
+    },
+    /// Request a parcel's dwell/traffic value (`ParcelDwellRequest`); the reply
+    /// arrives as [`SlSessionEvent::ParcelDwell`].
+    RequestParcelDwell {
+        /// The parcel's region-local id.
+        local_id: i32,
+    },
+    /// Buy a parcel (`ParcelBuy`).
+    BuyParcel {
+        /// The parcel's region-local id.
+        local_id: i32,
+        /// The agreed price in L$.
+        price: i32,
+        /// The parcel area in m².
+        area: i32,
+        /// The group to buy for (nil for a personal purchase).
+        group_id: Uuid,
+        /// Whether the purchase is group-owned.
+        is_group_owned: bool,
+    },
+    /// Return objects on a parcel (`ParcelReturnObjects`).
+    ReturnParcelObjects {
+        /// The parcel's region-local id.
+        local_id: i32,
+        /// Which objects to return (combine `ParcelReturnType` constants).
+        return_type: ParcelReturnType,
+        /// Optional owner-id scope.
+        owner_ids: Vec<Uuid>,
+        /// Optional explicit object/task-id scope.
+        task_ids: Vec<Uuid>,
+    },
+    /// Select (highlight) objects on a parcel (`ParcelSelectObjects`).
+    SelectParcelObjects {
+        /// The parcel's region-local id.
+        local_id: i32,
+        /// Which objects to select (combine `ParcelReturnType` constants).
+        return_type: ParcelReturnType,
+        /// Explicit object ids (used with `ParcelReturnType::LIST`).
+        object_ids: Vec<Uuid>,
+    },
+    /// Deed a parcel to a group (`ParcelDeedToGroup`).
+    DeedParcelToGroup {
+        /// The parcel's region-local id.
+        local_id: i32,
+        /// The group to deed the parcel to.
+        group_id: Uuid,
+    },
+    /// Reclaim a parcel to the estate (`ParcelReclaim`).
+    ReclaimParcel {
+        /// The parcel's region-local id.
+        local_id: i32,
+    },
+    /// Release (abandon) a parcel back to the estate (`ParcelRelease`).
+    ReleaseParcel {
+        /// The parcel's region-local id.
+        local_id: i32,
     },
     /// Request the agent's L$ balance (`MoneyBalanceRequest`); the reply arrives
     /// as [`SlSessionEvent::MoneyBalance`].
@@ -900,6 +978,65 @@ fn advance_running(
                 session
                     .request_map_items(*item_type, *region_handle, now)
                     .ok();
+            }
+            SlCommand::UpdateParcel(update) => {
+                session.update_parcel(update, now).ok();
+            }
+            SlCommand::RequestParcelAccessList { local_id, scope } => {
+                session
+                    .request_parcel_access_list(*local_id, *scope, now)
+                    .ok();
+            }
+            SlCommand::UpdateParcelAccessList {
+                local_id,
+                scope,
+                entries,
+            } => {
+                session
+                    .update_parcel_access_list(*local_id, *scope, entries, now)
+                    .ok();
+            }
+            SlCommand::RequestParcelDwell { local_id } => {
+                session.request_parcel_dwell(*local_id, now).ok();
+            }
+            SlCommand::BuyParcel {
+                local_id,
+                price,
+                area,
+                group_id,
+                is_group_owned,
+            } => {
+                session
+                    .buy_parcel(*local_id, *price, *area, *group_id, *is_group_owned, now)
+                    .ok();
+            }
+            SlCommand::ReturnParcelObjects {
+                local_id,
+                return_type,
+                owner_ids,
+                task_ids,
+            } => {
+                session
+                    .return_parcel_objects(*local_id, *return_type, owner_ids, task_ids, now)
+                    .ok();
+            }
+            SlCommand::SelectParcelObjects {
+                local_id,
+                return_type,
+                object_ids,
+            } => {
+                session
+                    .select_parcel_objects(*local_id, *return_type, object_ids, now)
+                    .ok();
+            }
+            SlCommand::DeedParcelToGroup { local_id, group_id } => {
+                session.deed_parcel_to_group(*local_id, *group_id, now).ok();
+            }
+            SlCommand::ReclaimParcel { local_id } => {
+                session.reclaim_parcel(*local_id, now).ok();
+            }
+            SlCommand::ReleaseParcel { local_id } => {
+                session.release_parcel(*local_id, now).ok();
             }
             SlCommand::Logout => session.initiate_logout(now),
         }
