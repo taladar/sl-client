@@ -455,6 +455,316 @@ fn upload_error_message(error: &Llsd) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// Media-permission bit: no one (a `perms_interact` / `perms_control` value).
+pub const MEDIA_PERM_NONE: u8 = 0;
+/// Media-permission bit: the object owner.
+pub const MEDIA_PERM_OWNER: u8 = 1;
+/// Media-permission bit: the object's group.
+pub const MEDIA_PERM_GROUP: u8 = 2;
+/// Media-permission bit: anyone.
+pub const MEDIA_PERM_ANYONE: u8 = 4;
+/// All media permissions (owner | group | anyone) — the viewer's default.
+pub const MEDIA_PERM_ALL: u8 = 7;
+
+/// Per-face media settings for the media-on-a-prim system, as carried by the
+/// `ObjectMedia` / `ObjectMediaNavigate` capabilities. Mirrors the viewer's
+/// `LLMediaEntry`: a prim that has media enabled carries one of these per media
+/// face (faces without media are absent / `None` in the per-face list).
+///
+/// The field defaults match the viewer's `LLMediaEntry` constructor, so a
+/// [`Default`]ed entry with [`home_url`](Self::home_url) /
+/// [`current_url`](Self::current_url) set is a valid "media here" record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "mirrors the viewer's LLMediaEntry: these are independent on/off media flags, not a state enum"
+)]
+pub struct MediaEntry {
+    /// Whether the alternate (non-interactive) image is shown until the media is
+    /// interacted with (`alt_image_enable`).
+    pub alt_image_enable: bool,
+    /// The control style: `0` = standard browser controls, `1` = mini
+    /// (`controls`).
+    pub controls: i32,
+    /// The URL currently shown (`current_url`); a navigation changes this.
+    pub current_url: String,
+    /// The home URL loaded when the media (re)starts (`home_url`).
+    pub home_url: String,
+    /// Whether playback loops (`auto_loop`).
+    pub auto_loop: bool,
+    /// Whether the media plays automatically (`auto_play`).
+    pub auto_play: bool,
+    /// Whether the media is scaled to fit the face (`auto_scale`).
+    pub auto_scale: bool,
+    /// Whether the camera zooms to the media on click (`auto_zoom`).
+    pub auto_zoom: bool,
+    /// Whether the first click interacts rather than zooming/selecting
+    /// (`first_click_interact`).
+    pub first_click_interact: bool,
+    /// The media surface width in pixels (`width_pixels`).
+    pub width_pixels: i32,
+    /// The media surface height in pixels (`height_pixels`).
+    pub height_pixels: i32,
+    /// Whether the navigation white-list is enforced (`whitelist_enable`).
+    pub whitelist_enable: bool,
+    /// The navigation white-list URL patterns (`whitelist`).
+    pub whitelist: Vec<String>,
+    /// Who may interact with the media (`perms_interact`; a media-perms bitfield
+    /// of [`MEDIA_PERM_OWNER`] / [`MEDIA_PERM_GROUP`] / [`MEDIA_PERM_ANYONE`]).
+    pub perms_interact: u8,
+    /// Who may use the media controls (`perms_control`; same bitfield).
+    pub perms_control: u8,
+}
+
+impl Default for MediaEntry {
+    fn default() -> Self {
+        Self {
+            alt_image_enable: false,
+            controls: 0,
+            current_url: String::new(),
+            home_url: String::new(),
+            auto_loop: false,
+            auto_play: false,
+            auto_scale: false,
+            auto_zoom: false,
+            first_click_interact: false,
+            width_pixels: 0,
+            height_pixels: 0,
+            whitelist_enable: false,
+            whitelist: Vec::new(),
+            perms_interact: MEDIA_PERM_ALL,
+            perms_control: MEDIA_PERM_ALL,
+        }
+    }
+}
+
+impl MediaEntry {
+    /// Decodes a [`MediaEntry`] from its LLSD map form (one per-face entry of an
+    /// `ObjectMedia` response's `object_media_data` array). Missing fields fall
+    /// back to the viewer's [`Default`] values.
+    #[must_use]
+    pub fn from_llsd(value: &Llsd) -> Self {
+        let default = Self::default();
+        Self {
+            alt_image_enable: llsd_bool(value, "alt_image_enable", default.alt_image_enable),
+            controls: llsd_int(value, "controls", default.controls),
+            current_url: llsd_string(value, "current_url"),
+            home_url: llsd_string(value, "home_url"),
+            auto_loop: llsd_bool(value, "auto_loop", default.auto_loop),
+            auto_play: llsd_bool(value, "auto_play", default.auto_play),
+            auto_scale: llsd_bool(value, "auto_scale", default.auto_scale),
+            auto_zoom: llsd_bool(value, "auto_zoom", default.auto_zoom),
+            first_click_interact: llsd_bool(
+                value,
+                "first_click_interact",
+                default.first_click_interact,
+            ),
+            width_pixels: llsd_int(value, "width_pixels", default.width_pixels),
+            height_pixels: llsd_int(value, "height_pixels", default.height_pixels),
+            whitelist_enable: llsd_bool(value, "whitelist_enable", default.whitelist_enable),
+            whitelist: value
+                .get("whitelist")
+                .and_then(Llsd::as_array)
+                .map(|array| {
+                    array
+                        .iter()
+                        .filter_map(|entry| entry.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            perms_interact: llsd_perm(value, "perms_interact", default.perms_interact),
+            perms_control: llsd_perm(value, "perms_control", default.perms_control),
+        }
+    }
+
+    /// Serializes this entry as the LLSD-XML `<map>…</map>` body the viewer
+    /// sends for one face of an `ObjectMedia` UPDATE (the field order matches
+    /// the viewer's `LLMediaEntry::asLLSD`).
+    fn push_llsd_map(&self, out: &mut String) {
+        out.push_str("<map>");
+        push_bool_field(out, "alt_image_enable", self.alt_image_enable);
+        push_int_field(out, "controls", self.controls);
+        push_string_field(out, "current_url", &self.current_url);
+        push_string_field(out, "home_url", &self.home_url);
+        push_bool_field(out, "auto_loop", self.auto_loop);
+        push_bool_field(out, "auto_play", self.auto_play);
+        push_bool_field(out, "auto_scale", self.auto_scale);
+        push_bool_field(out, "auto_zoom", self.auto_zoom);
+        push_bool_field(out, "first_click_interact", self.first_click_interact);
+        push_int_field(out, "width_pixels", self.width_pixels);
+        push_int_field(out, "height_pixels", self.height_pixels);
+        push_bool_field(out, "whitelist_enable", self.whitelist_enable);
+        out.push_str("<key>whitelist</key><array>");
+        for pattern in &self.whitelist {
+            out.push_str("<string>");
+            push_escaped(out, pattern);
+            out.push_str("</string>");
+        }
+        out.push_str("</array>");
+        push_int_field(out, "perms_interact", i32::from(self.perms_interact));
+        push_int_field(out, "perms_control", i32::from(self.perms_control));
+        out.push_str("</map>");
+    }
+}
+
+/// Reads a boolean LLSD map field, falling back to `default` when absent.
+fn llsd_bool(value: &Llsd, key: &str, default: bool) -> bool {
+    value.get(key).and_then(Llsd::as_bool).unwrap_or(default)
+}
+
+/// Reads an integer LLSD map field, falling back to `default` when absent.
+fn llsd_int(value: &Llsd, key: &str, default: i32) -> i32 {
+    value.get(key).and_then(Llsd::as_i32).unwrap_or(default)
+}
+
+/// Reads a string LLSD map field, defaulting to the empty string when absent.
+fn llsd_string(value: &Llsd, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(Llsd::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// Reads a media-permission byte field, falling back to `default` when absent or
+/// out of a byte's range.
+fn llsd_perm(value: &Llsd, key: &str, default: u8) -> u8 {
+    value
+        .get(key)
+        .and_then(Llsd::as_i32)
+        .and_then(|raw| u8::try_from(raw).ok())
+        .unwrap_or(default)
+}
+
+/// Reads a UUID-valued LLSD value, accepting either a `uuid` or a `string`.
+fn llsd_uuid(value: &Llsd) -> Option<Uuid> {
+    value.as_uuid().or_else(|| {
+        value
+            .as_str()
+            .and_then(|text| Uuid::parse_str(text.trim()).ok())
+    })
+}
+
+/// Appends `<key>{key}</key><boolean>{0|1}</boolean>` to `out`.
+fn push_bool_field(out: &mut String, key: &str, value: bool) {
+    out.push_str("<key>");
+    out.push_str(key);
+    out.push_str("</key><boolean>");
+    out.push(if value { '1' } else { '0' });
+    out.push_str("</boolean>");
+}
+
+/// Appends `<key>{key}</key><integer>{value}</integer>` to `out`.
+fn push_int_field(out: &mut String, key: &str, value: i32) {
+    out.push_str("<key>");
+    out.push_str(key);
+    out.push_str("</key><integer>");
+    out.push_str(&value.to_string());
+    out.push_str("</integer>");
+}
+
+/// Appends `<key>{key}</key><string>{escaped value}</string>` to `out`.
+fn push_string_field(out: &mut String, key: &str, value: &str) {
+    out.push_str("<key>");
+    out.push_str(key);
+    out.push_str("</key><string>");
+    push_escaped(out, value);
+    out.push_str("</string>");
+}
+
+/// Builds the LLSD-XML body for an `ObjectMedia` capability **GET** request: a
+/// `{ verb: "GET", object_id }` map asking for an object's current per-face
+/// media. The simulator replies with an [`ObjectMediaResponse`].
+#[must_use]
+pub fn build_object_media_get_request(object_id: Uuid) -> String {
+    format!(
+        "<llsd><map><key>verb</key><string>GET</string><key>object_id</key><uuid>{object_id}</uuid></map></llsd>"
+    )
+}
+
+/// Builds the LLSD-XML body for an `ObjectMedia` capability **UPDATE** request:
+/// a `{ verb: "UPDATE", object_id, object_media_data: [...] }` map that sets the
+/// object's per-face media. `faces` is one entry per prim face in order; a face
+/// with no media is `None` (serialized as an LLSD `undef`, as the viewer does).
+#[must_use]
+pub fn build_object_media_update_request(object_id: Uuid, faces: &[Option<MediaEntry>]) -> String {
+    let mut out =
+        String::from("<llsd><map><key>verb</key><string>UPDATE</string><key>object_id</key><uuid>");
+    out.push_str(&object_id.to_string());
+    out.push_str("</uuid><key>object_media_data</key><array>");
+    for face in faces {
+        match face {
+            Some(entry) => entry.push_llsd_map(&mut out),
+            None => out.push_str("<undef />"),
+        }
+    }
+    out.push_str("</array></map></llsd>");
+    out
+}
+
+/// Builds the LLSD-XML body for an `ObjectMediaNavigate` capability request: a
+/// `{ object_id, current_url, texture_index }` map navigating the media on a
+/// single face (`face`) to `url`.
+#[must_use]
+pub fn build_object_media_navigate_request(object_id: Uuid, face: u8, url: &str) -> String {
+    let mut out = String::from("<llsd><map><key>object_id</key><uuid>");
+    out.push_str(&object_id.to_string());
+    out.push_str("</uuid><key>current_url</key><string>");
+    push_escaped(&mut out, url);
+    out.push_str("</string><key>texture_index</key><integer>");
+    out.push_str(&u32::from(face).to_string());
+    out.push_str("</integer></map></llsd>");
+    out
+}
+
+/// A decoded `ObjectMedia` capability GET response: the object's per-face media
+/// (one slot per prim face, `None` for a face without media) and the media
+/// version string the simulator advances on every media change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectMediaResponse {
+    /// The object the media belongs to.
+    pub object_id: Uuid,
+    /// The media version string (`x-mv:<serial>/<uuid>`); the same value the
+    /// object's `MediaURL` field carries, advanced on every media change.
+    pub version: String,
+    /// Per-face media, one slot per prim face in order; `None` for a face that
+    /// has no media.
+    pub faces: Vec<Option<MediaEntry>>,
+}
+
+impl ObjectMediaResponse {
+    /// Decodes an [`ObjectMediaResponse`] from the LLSD body of an `ObjectMedia`
+    /// GET reply (`{ object_id, object_media_version, object_media_data }`).
+    /// Returns `None` if the body carries no `object_id`.
+    #[must_use]
+    pub fn from_llsd(body: &Llsd) -> Option<Self> {
+        let object_id = body.get("object_id").and_then(llsd_uuid)?;
+        let version = body
+            .get("object_media_version")
+            .and_then(Llsd::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let faces = body
+            .get("object_media_data")
+            .and_then(Llsd::as_array)
+            .map(|array| {
+                array
+                    .iter()
+                    .map(|entry| match entry {
+                        Llsd::Map(_) => Some(MediaEntry::from_llsd(entry)),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(Self {
+            object_id,
+            version,
+            faces,
+        })
+    }
+}
+
 /// A single event from an [`EventQueueResponse`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventQueueEvent {

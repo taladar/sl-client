@@ -14,9 +14,10 @@ mod test {
         Event, FriendRights, ImDialog, ImageCodec, LindenAmount, LoginParams, MapItemType,
         Material, Maturity, MoneyTransactionType, MuteFlags, MuteType, ObjectFlagSettings,
         ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags,
-        ParcelReturnType, ParcelUpdate, PermissionField, PrimShape, ProductType, RegionInfoUpdate,
-        Reliability, SaleType, ScriptPermissions, Session, SoundFlags, TerrainLayerType, Throttle,
-        TransferStatus, Transmit, WearableType, avatar_texture, pcode,
+        ParcelMediaCommand, ParcelReturnType, ParcelUpdate, PermissionField, PrimShape,
+        ProductType, RegionInfoUpdate, Reliability, SaleType, ScriptPermissions, Session,
+        SoundFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, WearableType,
+        avatar_texture, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -63,7 +64,9 @@ mod test {
         ObjectUpdateRegionDataBlock, OfflineNotification, OfflineNotificationAgentBlockBlock,
         OnlineNotification, OnlineNotificationAgentBlockBlock, ParcelAccessListReply,
         ParcelAccessListReplyDataBlock, ParcelAccessListReplyListBlock, ParcelDwellReply,
-        ParcelDwellReplyAgentDataBlock, ParcelDwellReplyDataBlock, ParcelProperties,
+        ParcelDwellReplyAgentDataBlock, ParcelDwellReplyDataBlock, ParcelMediaCommandMessage,
+        ParcelMediaCommandMessageCommandBlockBlock, ParcelMediaUpdate,
+        ParcelMediaUpdateDataBlockBlock, ParcelMediaUpdateDataBlockExtendedBlock, ParcelProperties,
         ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
         ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
         PreloadSound, PreloadSoundDataBlockBlock, RegionHandshake, RegionHandshakeRegionInfo2Block,
@@ -2715,6 +2718,146 @@ mod test {
         assert_eq!(region_handle, 0x0000_03E8_0000_03E8);
         assert_eq!(position, vec3(128.0, 64.0, 25.0));
         assert!((gain - 0.5).abs() < f32::EPSILON);
+        Ok(())
+    }
+
+    #[test]
+    fn parcel_media_command_surfaces_command() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A scripted `llParcelMediaCommandList([PARCEL_MEDIA_COMMAND_TIME, 12.5])`:
+        // command 6 (TIME) with the seek offset in `Time`, flags marking the
+        // TIME field meaningful.
+        let message = AnyMessage::ParcelMediaCommandMessage(ParcelMediaCommandMessage {
+            command_block: ParcelMediaCommandMessageCommandBlockBlock {
+                flags: 1 << 6,
+                command: 6,
+                time: 12.5,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::ParcelMediaCommand { .. }))
+            .ok_or("expected a ParcelMediaCommand event")?;
+        let Event::ParcelMediaCommand {
+            flags,
+            command,
+            time,
+        } = event
+        else {
+            return Err("expected ParcelMediaCommand".into());
+        };
+        assert_eq!(flags, 1 << 6);
+        assert_eq!(command, ParcelMediaCommand::Time);
+        assert!((time - 12.5).abs() < f32::EPSILON);
+        Ok(())
+    }
+
+    #[test]
+    fn parcel_media_update_surfaces_settings() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let media = uuid::Uuid::from_u128(0x33ED);
+        let message = AnyMessage::ParcelMediaUpdate(ParcelMediaUpdate {
+            data_block: ParcelMediaUpdateDataBlockBlock {
+                // The wire strings are NUL-terminated.
+                media_url: b"http://example.com/movie\0".to_vec(),
+                media_id: media,
+                media_auto_scale: 1,
+            },
+            data_block_extended: ParcelMediaUpdateDataBlockExtendedBlock {
+                media_type: b"text/html\0".to_vec(),
+                media_desc: b"a web page\0".to_vec(),
+                media_width: 1024,
+                media_height: 768,
+                media_loop: 1,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::ParcelMediaUpdate(_)))
+            .ok_or("expected a ParcelMediaUpdate event")?;
+        let Event::ParcelMediaUpdate(update) = event else {
+            return Err("expected ParcelMediaUpdate".into());
+        };
+        assert_eq!(update.media_url, "http://example.com/movie");
+        assert_eq!(update.media_id, media);
+        assert!(update.media_auto_scale);
+        assert_eq!(update.media_type, "text/html");
+        assert_eq!(update.media_desc, "a web page");
+        assert_eq!(update.media_width, 1024);
+        assert_eq!(update.media_height, 768);
+        assert!(update.media_loop);
+        Ok(())
+    }
+
+    #[test]
+    fn object_media_caps_surfaces_per_face_media() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // An `ObjectMedia` GET reply: a two-face object with media on face 0
+        // (a map) and none on face 1 (an LLSD undef).
+        let object = uuid::Uuid::from_u128(0x000b_1ec7);
+        let xml = format!(
+            "<llsd><map>\
+             <key>object_id</key><uuid>{object}</uuid>\
+             <key>object_media_version</key><string>x-mv:0000000003/{object}</string>\
+             <key>object_media_data</key><array>\
+             <map>\
+             <key>current_url</key><string>http://example.com/stream</string>\
+             <key>home_url</key><string>http://example.com/home</string>\
+             <key>auto_play</key><boolean>1</boolean>\
+             <key>width_pixels</key><integer>1024</integer>\
+             <key>height_pixels</key><integer>512</integer>\
+             <key>controls</key><integer>1</integer>\
+             <key>perms_interact</key><integer>1</integer>\
+             </map>\
+             <undef />\
+             </array></map></llsd>"
+        );
+        let body = sl_proto::parse_llsd_xml(&xml)?;
+        session.handle_caps_event("ObjectMedia", &body, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::ObjectMedia { .. }))
+            .ok_or("expected an ObjectMedia event")?;
+        let Event::ObjectMedia {
+            object_id,
+            version,
+            faces,
+        } = event
+        else {
+            return Err("expected ObjectMedia".into());
+        };
+        assert_eq!(object_id, object);
+        assert_eq!(version, format!("x-mv:0000000003/{object}"));
+        assert_eq!(faces.len(), 2);
+        let face0 = faces
+            .first()
+            .ok_or("face 0")?
+            .as_ref()
+            .ok_or("face 0 media")?;
+        assert_eq!(face0.current_url, "http://example.com/stream");
+        assert_eq!(face0.home_url, "http://example.com/home");
+        assert!(face0.auto_play);
+        assert_eq!(face0.width_pixels, 1024);
+        assert_eq!(face0.height_pixels, 512);
+        assert_eq!(face0.controls, 1);
+        assert_eq!(face0.perms_interact, 1);
+        // A field absent from the LLSD falls back to the viewer default.
+        assert_eq!(face0.perms_control, sl_proto::MEDIA_PERM_ALL);
+        assert_eq!(faces.get(1).ok_or("face 1")?, &None);
         Ok(())
     }
 

@@ -318,6 +318,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::PreloadSound { sounds } => {
                 info!("preload {} sound(s): {:?}", sounds.len(), sounds);
             }
+            Event::ParcelMediaCommand {
+                command,
+                flags,
+                time,
+            } => {
+                info!("parcel media command {command:?} (flags {flags:#x}, time {time})");
+            }
+            Event::ParcelMediaUpdate(update) => {
+                info!(
+                    "parcel media update: url {:?} type {:?} {}x{} loop={}",
+                    update.media_url,
+                    update.media_type,
+                    update.media_width,
+                    update.media_height,
+                    update.media_loop,
+                );
+            }
+            Event::ObjectMedia {
+                object_id,
+                version,
+                faces,
+            } => {
+                let with_media = faces.iter().filter(|face| face.is_some()).count();
+                info!(
+                    "object media for {object_id} (version {version}): {} face(s), {with_media} with media",
+                    faces.len(),
+                );
+            }
             // This demo ignores motion-only churn and the remaining
             // profile/region/parcel/teleport/group/appearance events.
             Event::ObjectUpdated(_)

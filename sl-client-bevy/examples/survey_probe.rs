@@ -187,6 +187,9 @@ fn on_events(
             | SlSessionEvent::AttachedSound { .. }
             | SlSessionEvent::AttachedSoundGainChange { .. }
             | SlSessionEvent::PreloadSound { .. }
+            | SlSessionEvent::ParcelMediaCommand { .. }
+            | SlSessionEvent::ParcelMediaUpdate(_)
+            | SlSessionEvent::ObjectMedia { .. }
             | SlSessionEvent::ServerAppearanceUpdate { .. }
             | SlSessionEvent::CachedTextureResponse { .. }
             | SlSessionEvent::ParcelDwell { .. }

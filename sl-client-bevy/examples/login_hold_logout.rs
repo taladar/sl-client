@@ -208,6 +208,9 @@ fn on_events(
             | SlSessionEvent::EconomyData(_)
             | SlSessionEvent::ParcelProperties(_)
             | SlSessionEvent::ParcelOverlay(_)
+            | SlSessionEvent::ParcelMediaCommand { .. }
+            | SlSessionEvent::ParcelMediaUpdate(_)
+            | SlSessionEvent::ObjectMedia { .. }
             | SlSessionEvent::NeighborDiscovered(_)
             | SlSessionEvent::NeighborSeed { .. }
             | SlSessionEvent::MapBlock(_)

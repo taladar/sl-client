@@ -13,13 +13,15 @@ use std::collections::HashMap;
 
 use sl_proto::{
     CAP_FETCH_INVENTORY, CAP_GET_ASSET, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE,
-    CAP_GROUP_MEMBER_DATA, CAP_NEW_FILE_AGENT_INVENTORY, CAP_UPDATE_AVATAR_APPEARANCE,
-    CAP_UPLOAD_BAKED_TEXTURE, Llsd, REQUESTED_CAPABILITIES, Session, build_event_queue_request,
-    build_fetch_inventory_request, build_group_member_data_request,
-    build_new_file_agent_inventory_request, build_seed_request,
-    build_update_avatar_appearance_request, build_update_item_asset_request,
-    build_upload_baked_texture_request, j2c, parse_asset_upload_response,
-    parse_event_queue_response, parse_llsd_xml, parse_login_response, parse_seed_response,
+    CAP_GROUP_MEMBER_DATA, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPLOAD_BAKED_TEXTURE, Llsd,
+    REQUESTED_CAPABILITIES, Session, build_event_queue_request, build_fetch_inventory_request,
+    build_group_member_data_request, build_new_file_agent_inventory_request,
+    build_object_media_get_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_seed_request, build_update_avatar_appearance_request,
+    build_update_item_asset_request, build_upload_baked_texture_request, j2c,
+    parse_asset_upload_response, parse_event_queue_response, parse_llsd_xml, parse_login_response,
+    parse_seed_response,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
@@ -31,11 +33,13 @@ pub use sl_proto::{
     EstateAccessDelta, EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupMember,
     GroupMembership, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog,
     ImageCodec, InstantMessage, InventoryFolder, InventoryItem, InventoryType, LindenAmount,
-    LoadUrlRequest, LoginParams, LoginRequest, LoginResponse, MapItem, MapItemType, MapRegionInfo,
-    Material, Maturity, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
-    MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectFlagSettings, ObjectMotion,
-    ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
-    ParcelFlags, ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
+    LoadUrlRequest, LoginParams, LoginRequest, LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE,
+    MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
+    Material, Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction,
+    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectFlagSettings,
+    ObjectMediaResponse, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
     PlayingAnimation, PrimShape, ProductType, RegionFlags, RegionIdentity, RegionInfoUpdate,
     RegionLimits, Reliability, Rotation, SaleType, ScriptDialog, ScriptPermissionRequest,
     ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType,
@@ -852,6 +856,34 @@ pub enum Command {
         /// The new raw asset bytes.
         data: Vec<u8>,
     },
+    /// Fetch an object's per-face **media-on-a-prim** settings over the
+    /// `ObjectMedia` capability (a GET). The result arrives as
+    /// [`Event::ObjectMedia`].
+    RequestObjectMedia {
+        /// The object whose media to fetch.
+        object_id: Uuid,
+    },
+    /// Set an object's per-face media over the `ObjectMedia` capability (an
+    /// UPDATE). `faces` is one entry per prim face in order; a face with no media
+    /// is `None`. The simulator advances the object's media version (visible on a
+    /// subsequent [`Command::RequestObjectMedia`]) rather than replying.
+    SetObjectMedia {
+        /// The object whose media to set.
+        object_id: Uuid,
+        /// Per-face media, one slot per prim face in order (`None` = no media).
+        faces: Vec<Option<MediaEntry>>,
+    },
+    /// Navigate the media on a single prim face to a new URL over the
+    /// `ObjectMediaNavigate` capability. The simulator advances the object's
+    /// media version (visible on a subsequent [`Command::RequestObjectMedia`]).
+    NavigateObjectMedia {
+        /// The object whose media to navigate.
+        object_id: Uuid,
+        /// The prim face (texture index) to navigate.
+        face: u8,
+        /// The URL to navigate that face's media to.
+        url: String,
+    },
     /// Begin a clean logout.
     Logout,
 }
@@ -1411,6 +1443,23 @@ impl Client {
                                 }
                             }
                         }
+                        Some(Command::RequestObjectMedia { object_id }) => {
+                            if let Some(url) = caps.get(CAP_OBJECT_MEDIA).cloned() {
+                                tokio::spawn(fetch_object_media(url, object_id, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::SetObjectMedia { object_id, faces }) => {
+                            if let Some(url) = caps.get(CAP_OBJECT_MEDIA).cloned() {
+                                let body = build_object_media_update_request(object_id, &faces);
+                                tokio::spawn(post_object_media(url, body, http.clone()));
+                            }
+                        }
+                        Some(Command::NavigateObjectMedia { object_id, face, url: media_url }) => {
+                            if let Some(url) = caps.get(CAP_OBJECT_MEDIA_NAVIGATE).cloned() {
+                                let body = build_object_media_navigate_request(object_id, face, &media_url);
+                                tokio::spawn(post_object_media(url, body, http.clone()));
+                            }
+                        }
                         Some(Command::Logout) | None => {
                             self.session.initiate_logout(Instant::now());
                         }
@@ -1526,6 +1575,46 @@ async fn fetch_group_members(
             .await
             .ok();
     }
+}
+
+/// POSTs an `ObjectMedia` GET for `object_id`, forwarding the decoded LLSD
+/// response back over `caps_tx` to be surfaced as an [`Event::ObjectMedia`].
+async fn fetch_object_media(
+    cap_url: String,
+    object_id: Uuid,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let body = build_object_media_get_request(object_id);
+    let Ok(response) = http
+        .post(&cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+    else {
+        return;
+    };
+    let Ok(text) = response.text().await else {
+        return;
+    };
+    if let Ok(llsd) = parse_llsd_xml(&text) {
+        caps_tx.send((CAP_OBJECT_MEDIA.to_owned(), llsd)).await.ok();
+    }
+}
+
+/// POSTs an `ObjectMedia` UPDATE (or, with `navigate`, an `ObjectMediaNavigate`)
+/// to set the per-face media of `object_id`. Both are fire-and-forget: the
+/// simulator advances the object's media version rather than replying with
+/// media, so there is no event to surface — a client re-fetches with
+/// [`Command::RequestObjectMedia`] to observe the change.
+async fn post_object_media(cap_url: String, body: String, http: ReqwestClient) {
+    http.post(&cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+        .ok();
 }
 
 /// POSTs the `UpdateAvatarAppearance` capability for `cof_version` (the modern

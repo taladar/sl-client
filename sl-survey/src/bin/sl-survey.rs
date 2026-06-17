@@ -644,6 +644,9 @@ impl Survey {
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal
             | Event::ParcelOverlay(_)
+            | Event::ParcelMediaCommand { .. }
+            | Event::ParcelMediaUpdate(_)
+            | Event::ObjectMedia { .. }
             | Event::CircuitEstablished { .. } => {}
         }
         Ok(false)

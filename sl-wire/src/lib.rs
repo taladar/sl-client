@@ -19,12 +19,14 @@ pub use error::WireError;
 pub use field::{Reader, Writer};
 pub use header::{PacketFlags, ParsedDatagram, encode_datagram, parse_datagram};
 pub use llsd::{
-    AssetUploadResponse, EventQueueEvent, EventQueueResponse, Llsd, build_event_queue_request,
-    build_fetch_inventory_request, build_group_member_data_request,
-    build_new_file_agent_inventory_request, build_seed_request,
-    build_update_avatar_appearance_request, build_update_item_asset_request,
-    build_upload_baked_texture_request, parse_asset_upload_response, parse_event_queue_response,
-    parse_llsd_xml, parse_seed_response,
+    AssetUploadResponse, EventQueueEvent, EventQueueResponse, Llsd, MEDIA_PERM_ALL,
+    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MediaEntry,
+    ObjectMediaResponse, build_event_queue_request, build_fetch_inventory_request,
+    build_group_member_data_request, build_new_file_agent_inventory_request,
+    build_object_media_get_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_seed_request, build_update_avatar_appearance_request,
+    build_update_item_asset_request, build_upload_baked_texture_request,
+    parse_asset_upload_response, parse_event_queue_response, parse_llsd_xml, parse_seed_response,
 };
 pub use login::{
     BuddyListEntry, LoginFailure, LoginParseError, LoginRequest, LoginResponse, LoginSuccess,
@@ -54,9 +56,11 @@ mod test {
     use pretty_assertions::assert_eq;
 
     use super::{
-        PacketFlags, Reader, WireError, Writer, build_new_file_agent_inventory_request,
+        MediaEntry, ObjectMediaResponse, PacketFlags, Reader, WireError, Writer,
+        build_new_file_agent_inventory_request, build_object_media_get_request,
+        build_object_media_navigate_request, build_object_media_update_request,
         build_update_item_asset_request, combine_uuids, encode_datagram,
-        parse_asset_upload_response, parse_datagram, zero_decode, zero_encode,
+        parse_asset_upload_response, parse_datagram, parse_llsd_xml, zero_decode, zero_encode,
     };
 
     #[test]
@@ -287,5 +291,56 @@ mod test {
         let item = uuid::Uuid::from_u128(0x17e3);
         let body = build_update_item_asset_request(item);
         assert!(body.contains(&format!("<key>item_id</key><uuid>{item}</uuid>")));
+    }
+
+    #[test]
+    fn object_media_get_and_navigate_requests_carry_fields() {
+        let object = uuid::Uuid::from_u128(0x000b_1ec7);
+        let get = build_object_media_get_request(object);
+        assert!(get.contains("<key>verb</key><string>GET</string>"));
+        assert!(get.contains(&format!("<key>object_id</key><uuid>{object}</uuid>")));
+
+        let navigate = build_object_media_navigate_request(object, 3, "https://example.com/a&b");
+        assert!(navigate.contains(&format!("<key>object_id</key><uuid>{object}</uuid>")));
+        // The URL is XML-escaped.
+        assert!(
+            navigate.contains("<key>current_url</key><string>https://example.com/a&amp;b</string>")
+        );
+        assert!(navigate.contains("<key>texture_index</key><integer>3</integer>"));
+    }
+
+    #[test]
+    fn object_media_update_round_trips_through_a_get_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let object = uuid::Uuid::from_u128(0x000b_1ec7);
+        let entry = MediaEntry {
+            current_url: "https://example.com/stream".to_owned(),
+            home_url: "https://example.com/home".to_owned(),
+            auto_play: true,
+            auto_scale: true,
+            width_pixels: 1024,
+            height_pixels: 512,
+            controls: 1,
+            perms_interact: super::MEDIA_PERM_OWNER,
+            whitelist_enable: true,
+            whitelist: vec!["*.example.com".to_owned()],
+            ..MediaEntry::default()
+        };
+        // A two-face update: face 0 has media, face 1 has none (an LLSD undef).
+        let body = build_object_media_update_request(object, &[Some(entry.clone()), None]);
+        assert!(body.contains("<key>verb</key><string>UPDATE</string>"));
+        assert!(body.contains("<undef />"));
+
+        // The UPDATE body is itself valid LLSD with the same `object_id` /
+        // `object_media_data` shape the simulator echoes in a GET reply, so
+        // decoding it back exercises the per-face serialize → parse round-trip.
+        let parsed = parse_llsd_xml(&body)?;
+        let response =
+            ObjectMediaResponse::from_llsd(&parsed).ok_or("object_media body should decode")?;
+        assert_eq!(response.object_id, object);
+        assert_eq!(response.faces.len(), 2);
+        assert_eq!(response.faces.first(), Some(&Some(entry)));
+        assert_eq!(response.faces.get(1), Some(&None));
+        Ok(())
     }
 }
