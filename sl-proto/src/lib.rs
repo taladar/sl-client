@@ -24,11 +24,11 @@ pub use types::{
     MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object,
     ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
     ParcelAccessScope, ParcelCategory, ParcelInfo, ParcelOverlayInfo, ParcelReturnType,
-    ParcelUpdate, PermissionField, PrimShape, ProductType, RegionIdentity, RegionInfoUpdate,
-    RegionLimits, Reliability, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace,
-    Throttle, TransferStatus, Transmit, Wearable, WearableType, avatar_texture, grid_to_handle,
-    handle_to_global, handle_to_grid, pcode,
+    ParcelUpdate, PermissionField, PlayingAnimation, PrimShape, ProductType, RegionIdentity,
+    RegionInfoUpdate, RegionLimits, Reliability, SaleType, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTeleportRequest, TerrainLayerType, TerrainPatch, Texture,
+    TextureEntry, TextureFace, Throttle, TransferStatus, Transmit, Wearable, WearableType,
+    avatar_texture, grid_to_handle, handle_to_global, handle_to_grid, pcode,
 };
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,

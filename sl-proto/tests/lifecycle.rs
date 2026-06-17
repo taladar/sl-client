@@ -24,23 +24,25 @@ mod test {
         AgentGroupDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
         AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
         AgentMovementCompleteSimDataBlock, AgentWearablesUpdate,
-        AgentWearablesUpdateAgentDataBlock, AgentWearablesUpdateWearableDataBlock,
-        AvatarAppearance, AvatarAppearanceObjectDataBlock, AvatarAppearanceSenderBlock,
-        AvatarAppearanceVisualParamBlock, AvatarNotesReply, AvatarNotesReplyAgentDataBlock,
-        AvatarNotesReplyDataBlock, AvatarPicksReply, AvatarPicksReplyAgentDataBlock,
-        AvatarPicksReplyDataBlock, AvatarPropertiesReply, AvatarPropertiesReplyAgentDataBlock,
-        AvatarPropertiesReplyPropertiesDataBlock, AvatarSitResponse,
-        AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock, ChangeUserRights,
-        ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock, ChatFromSimulator,
-        ChatFromSimulatorChatDataBlock, CrossedRegion, CrossedRegionAgentDataBlock,
-        CrossedRegionInfoBlock, CrossedRegionRegionDataBlock, DisableSimulator, EconomyData,
-        EconomyDataInfoBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
-        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock, GenericMessage,
-        GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GroupMembersReply,
-        GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
-        GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
-        GroupProfileReplyGroupDataBlock, ImageData, ImageDataImageDataBlock, ImageDataImageIDBlock,
-        ImageNotInDatabase, ImageNotInDatabaseImageIDBlock, ImagePacket, ImagePacketImageDataBlock,
+        AgentWearablesUpdateAgentDataBlock, AgentWearablesUpdateWearableDataBlock, AvatarAnimation,
+        AvatarAnimationAnimationListBlock, AvatarAnimationAnimationSourceListBlock,
+        AvatarAnimationSenderBlock, AvatarAppearance, AvatarAppearanceObjectDataBlock,
+        AvatarAppearanceSenderBlock, AvatarAppearanceVisualParamBlock, AvatarNotesReply,
+        AvatarNotesReplyAgentDataBlock, AvatarNotesReplyDataBlock, AvatarPicksReply,
+        AvatarPicksReplyAgentDataBlock, AvatarPicksReplyDataBlock, AvatarPropertiesReply,
+        AvatarPropertiesReplyAgentDataBlock, AvatarPropertiesReplyPropertiesDataBlock,
+        AvatarSitResponse, AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock,
+        ChangeUserRights, ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock,
+        ChatFromSimulator, ChatFromSimulatorChatDataBlock, CrossedRegion,
+        CrossedRegionAgentDataBlock, CrossedRegionInfoBlock, CrossedRegionRegionDataBlock,
+        DisableSimulator, EconomyData, EconomyDataInfoBlock, EstateOwnerMessage,
+        EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
+        EstateOwnerMessageParamListBlock, GenericMessage, GenericMessageAgentDataBlock,
+        GenericMessageMethodDataBlock, GroupMembersReply, GroupMembersReplyAgentDataBlock,
+        GroupMembersReplyGroupDataBlock, GroupMembersReplyMemberDataBlock, GroupProfileReply,
+        GroupProfileReplyAgentDataBlock, GroupProfileReplyGroupDataBlock, ImageData,
+        ImageDataImageDataBlock, ImageDataImageIDBlock, ImageNotInDatabase,
+        ImageNotInDatabaseImageIDBlock, ImagePacket, ImagePacketImageDataBlock,
         ImagePacketImageIDBlock, ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
         ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
         ImprovedTerseObjectUpdate, ImprovedTerseObjectUpdateObjectDataBlock,
@@ -2425,6 +2427,129 @@ mod test {
         let shirt = wearables.get(1).ok_or("second wearable")?;
         assert_eq!(shirt.wearable_type, WearableType::Shirt);
         assert!(!shirt.wearable_type.is_body_part());
+        Ok(())
+    }
+
+    #[test]
+    fn avatar_animation_surfaces_playing_animations() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let avatar = uuid::Uuid::from_u128(0xA1);
+        let walk = uuid::Uuid::from_u128(0x100);
+        let scripted = uuid::Uuid::from_u128(0x200);
+        let trigger_object = uuid::Uuid::from_u128(0x300);
+
+        // Two animations: the second one is triggered by an object, named in the
+        // (positionally-correlated) AnimationSourceList. The first source slot is
+        // nil, so the first animation has no source.
+        let message = AnyMessage::AvatarAnimation(AvatarAnimation {
+            sender: AvatarAnimationSenderBlock { id: avatar },
+            animation_list: vec![
+                AvatarAnimationAnimationListBlock {
+                    anim_id: walk,
+                    anim_sequence_id: 1,
+                },
+                AvatarAnimationAnimationListBlock {
+                    anim_id: scripted,
+                    anim_sequence_id: 2,
+                },
+            ],
+            animation_source_list: vec![
+                AvatarAnimationAnimationSourceListBlock {
+                    object_id: uuid::Uuid::nil(),
+                },
+                AvatarAnimationAnimationSourceListBlock {
+                    object_id: trigger_object,
+                },
+            ],
+            physical_avatar_event_list: Vec::new(),
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let (avatar_id, animations) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AvatarAnimation {
+                    avatar_id,
+                    animations,
+                } => Some((avatar_id, animations)),
+                _ => None,
+            })
+            .ok_or("expected an AvatarAnimation event")?;
+        assert_eq!(avatar_id, avatar);
+        assert_eq!(animations.len(), 2);
+        let first = animations.first().ok_or("first animation")?;
+        assert_eq!(first.anim_id, walk);
+        assert_eq!(first.sequence_id, 1);
+        // A nil source UUID is still a populated source slot; only a *missing*
+        // slot decodes to `None`. The viewer treats nil as "no triggering object".
+        assert_eq!(first.source_id, Some(uuid::Uuid::nil()));
+        let second = animations.get(1).ok_or("second animation")?;
+        assert_eq!(second.anim_id, scripted);
+        assert_eq!(second.sequence_id, 2);
+        assert_eq!(second.source_id, Some(trigger_object));
+        Ok(())
+    }
+
+    #[test]
+    fn set_animations_sends_agent_animation() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let start = uuid::Uuid::from_u128(0x100);
+        let stop = uuid::Uuid::from_u128(0x200);
+        session.set_animations(&[(start, true), (stop, false)], now)?;
+        let sent = drain(&mut session)?;
+        let animation = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AgentAnimation(animation) => Some(animation),
+                _ => None,
+            })
+            .ok_or("expected an AgentAnimation")?;
+        let first = animation.animation_list.first().ok_or("first anim")?;
+        assert_eq!(first.anim_id, start);
+        assert!(first.start_anim);
+        let second = animation.animation_list.get(1).ok_or("second anim")?;
+        assert_eq!(second.anim_id, stop);
+        assert!(!second.start_anim);
+        // The reference viewer always appends a single empty PhysicalAvatarEventList
+        // block; some simulators reject the message without it.
+        assert_eq!(animation.physical_avatar_event_list.len(), 1);
+        assert!(
+            animation
+                .physical_avatar_event_list
+                .first()
+                .ok_or("event block")?
+                .type_data
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn play_animation_starts_single_animation() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let dance = uuid::Uuid::from_u128(0x300);
+        session.play_animation(dance, now)?;
+        let sent = drain(&mut session)?;
+        let animation = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AgentAnimation(animation) => Some(animation),
+                _ => None,
+            })
+            .ok_or("expected an AgentAnimation")?;
+        assert_eq!(animation.animation_list.len(), 1);
+        let block = animation.animation_list.first().ok_or("anim block")?;
+        assert_eq!(block.anim_id, dance);
+        assert!(block.start_anim);
         Ok(())
     }
 

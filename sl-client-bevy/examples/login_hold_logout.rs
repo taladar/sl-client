@@ -223,6 +223,7 @@ fn on_events(
             | SlSessionEvent::AssetTransferFailed { .. }
             | SlSessionEvent::AvatarAppearance(_)
             | SlSessionEvent::AgentWearables { .. }
+            | SlSessionEvent::AvatarAnimation { .. }
             | SlSessionEvent::ServerAppearanceUpdate { .. }
             | SlSessionEvent::CachedTextureResponse { .. }
             | SlSessionEvent::ParcelDwell { .. }

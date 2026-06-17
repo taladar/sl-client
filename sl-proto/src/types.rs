@@ -663,6 +663,20 @@ pub enum Event {
         /// pairs; a nil id means no cached bake for that slot.
         textures: Vec<(u8, Uuid)>,
     },
+    /// Another avatar's currently-playing animations (`AvatarAnimation`),
+    /// pushed by the simulator whenever an avatar's animation set changes. The
+    /// list is the *complete* set of animations that avatar is now playing — an
+    /// animation that stops simply drops out of a later update — so a renderer
+    /// or bot should treat each event as the authoritative state, not a delta.
+    /// Trigger the agent's own animations with
+    /// [`Session::play_animation`](crate::Session::play_animation) /
+    /// [`Session::stop_animation`](crate::Session::stop_animation).
+    AvatarAnimation {
+        /// The avatar whose animation state this describes.
+        avatar_id: Uuid,
+        /// The animations that avatar is currently playing.
+        animations: Vec<PlayingAnimation>,
+    },
     /// The session logged out cleanly (a `LogoutReply` was received).
     LoggedOut,
     /// The session disconnected for the given reason.
@@ -3586,6 +3600,24 @@ pub struct AvatarAppearance {
     /// The avatar's HUD/attachment ids and their attachment points, if the
     /// simulator sent an `AttachmentBlock`.
     pub attachments: Vec<AvatarAttachment>,
+}
+
+/// One animation an avatar is currently playing, from an `AvatarAnimation`
+/// update (surfaced inside [`Event::AvatarAnimation`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayingAnimation {
+    /// The animation asset id (a built-in animation UUID or an uploaded
+    /// animation asset; fetch custom ones with
+    /// [`Session::request_asset`](crate::Session::request_asset)).
+    pub anim_id: Uuid,
+    /// The simulator's per-avatar animation sequence number. It increments each
+    /// time an animation (re)starts, so a viewer can tell a fresh start from an
+    /// animation that has merely been re-listed.
+    pub sequence_id: i32,
+    /// The object that triggered the animation, when the simulator names one
+    /// (an `AnimationSourceList` entry — e.g. a scripted `llStartAnimation`).
+    /// `None` for animations the agent or simulator started directly.
+    pub source_id: Option<Uuid>,
 }
 
 /// One entry of an [`AvatarAppearance`] attachment block: an attached object and

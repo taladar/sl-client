@@ -630,6 +630,7 @@ impl Survey {
             | Event::AssetTransferFailed { .. }
             | Event::AvatarAppearance(_)
             | Event::AgentWearables { .. }
+            | Event::AvatarAnimation { .. }
             | Event::ServerAppearanceUpdate { .. }
             | Event::CachedTextureResponse { .. }
             | Event::TeleportStarted

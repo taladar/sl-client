@@ -36,11 +36,11 @@ pub use sl_proto::{
     MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object,
     ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
     ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, PermissionField, PrimShape, ProductType, RegionFlags,
-    RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, Rotation, SaleType, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, TerrainLayerType,
-    TerrainPatch, TextureEntry, TextureFace, Throttle, Transmit, Uuid, Vector, Wearable,
-    WearableType, avatar_texture, decode_texture_entry, grid_to_handle, handle_to_global,
+    ParcelReturnType, ParcelUpdate, PermissionField, PlayingAnimation, PrimShape, ProductType,
+    RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, Rotation, SaleType,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
+    TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, Throttle, Transmit, Uuid, Vector,
+    Wearable, WearableType, avatar_texture, decode_texture_entry, grid_to_handle, handle_to_global,
     handle_to_grid, pcode, sim_access,
 };
 #[doc(no_inline)]
@@ -781,6 +781,17 @@ pub enum SlCommand {
         /// The Current Outfit Folder version the grid should bake.
         cof_version: i32,
     },
+    /// Start and/or stop several of the agent's own animations (`AgentAnimation`):
+    /// each `(anim_id, start)` pair starts (`true`) or stops (`false`) one
+    /// animation. Other avatars observe the result as a
+    /// [`SlSessionEvent::AvatarAnimation`].
+    SetAnimations(Vec<(Uuid, bool)>),
+    /// Start one of the agent's own animations (`AgentAnimation`); convenience
+    /// for a single-element [`SlCommand::SetAnimations`].
+    PlayAnimation(Uuid),
+    /// Stop one of the agent's own animations (`AgentAnimation`); convenience for
+    /// a single-element [`SlCommand::SetAnimations`].
+    StopAnimation(Uuid),
     /// Begin a clean logout.
     Logout,
 }
@@ -1644,6 +1655,15 @@ fn advance_running(
                         run_server_appearance_update(&url, version, &events_tx);
                     });
                 }
+            }
+            SlCommand::SetAnimations(animations) => {
+                session.set_animations(animations, now).ok();
+            }
+            SlCommand::PlayAnimation(anim_id) => {
+                session.play_animation(*anim_id, now).ok();
+            }
+            SlCommand::StopAnimation(anim_id) => {
+                session.stop_animation(*anim_id, now).ok();
             }
             SlCommand::Logout => session.initiate_logout(now),
         }
