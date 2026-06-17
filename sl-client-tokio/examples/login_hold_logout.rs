@@ -217,6 +217,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::AvatarNotes { .. }
             | Event::RegionInfoHandshake(_)
             | Event::RegionLimits(_)
+            | Event::MoneyBalance(_)
+            | Event::EconomyData(_)
             | Event::ParcelProperties(_)
             | Event::ParcelOverlay(_)
             | Event::NeighborDiscovered(_)

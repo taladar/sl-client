@@ -611,6 +611,8 @@ impl Survey {
             | Event::ScriptTeleport(_)
             | Event::MuteList(_)
             | Event::MuteListUnchanged
+            | Event::MoneyBalance(_)
+            | Event::EconomyData(_)
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal

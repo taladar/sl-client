@@ -8,13 +8,14 @@ pub use error::Error;
 pub use session::{CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA, REQUESTED_CAPABILITIES, Session};
 pub use types::{
     ActiveGroup, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatAudible,
-    ChatMessage, ChatSourceType, ChatType, CreateGroupParams, DisconnectReason, Event, Friend,
-    FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
+    ChatMessage, ChatSourceType, ChatType, CreateGroupParams, DisconnectReason, EconomyData, Event,
+    Friend, FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
     GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    LoadUrlRequest, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, MuteEntry, MuteFlags,
-    MuteType, NeighborInfo, ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity,
-    RegionLimits, Reliability, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, Transmit, grid_to_handle, handle_to_global, handle_to_grid,
+    LoadUrlRequest, LoginHttpRequest, LoginParams, MapRegionInfo, Maturity, MoneyBalance,
+    MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo,
+    ParcelInfo, ParcelOverlayInfo, ProductType, RegionIdentity, RegionLimits, Reliability,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit,
+    grid_to_handle, handle_to_global, handle_to_grid,
 };
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,
@@ -32,3 +33,5 @@ pub use sl_wire::{
 };
 // Re-export the vector and rotation types used by the teleport and movement APIs.
 pub use sl_types::lsl::{Rotation, Vector};
+// Re-export the L$ amount type used by the money balance/transfer APIs.
+pub use sl_types::money::LindenAmount;

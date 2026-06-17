@@ -164,6 +164,8 @@ fn on_events(
             | SlSessionEvent::ScriptTeleport(_)
             | SlSessionEvent::MuteList(_)
             | SlSessionEvent::MuteListUnchanged
+            | SlSessionEvent::MoneyBalance(_)
+            | SlSessionEvent::EconomyData(_)
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal => {}

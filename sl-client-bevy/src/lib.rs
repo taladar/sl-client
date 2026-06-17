@@ -26,13 +26,14 @@ use sl_proto::{
 pub use sl_proto::{
     ActiveGroup, AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,
     ChatAudible, ChatMessage, ChatSourceType, ChatType, ControlFlags, CreateGroupParams,
-    DisconnectReason, Friend, FriendRights, GroupMember, GroupMembership, GroupNotice,
+    DisconnectReason, EconomyData, Friend, FriendRights, GroupMember, GroupMembership, GroupNotice,
     GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
-    InventoryFolder, InventoryItem, LoadUrlRequest, LoginParams, LoginRequest, MapRegionInfo,
-    Maturity, MfaChallenge, MuteEntry, MuteFlags, MuteType, NeighborInfo, ParcelFlags, ParcelInfo,
-    ParcelOverlayInfo, ProductType, RegionFlags, RegionIdentity, RegionLimits, Reliability,
-    Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
+    InventoryFolder, InventoryItem, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest,
+    MapRegionInfo, Maturity, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
+    MuteEntry, MuteFlags, MuteType, NeighborInfo, ParcelFlags, ParcelInfo, ParcelOverlayInfo,
+    ProductType, RegionFlags, RegionIdentity, RegionLimits, Reliability, Rotation, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit, Uuid, Vector,
+    grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
@@ -337,6 +338,23 @@ pub enum SlCommand {
         north: f32,
         /// A sequence id echoed back in the reply for matching.
         sequence_id: i32,
+    },
+    /// Request the agent's L$ balance (`MoneyBalanceRequest`); the reply arrives
+    /// as [`SlSessionEvent::MoneyBalance`].
+    RequestMoneyBalance,
+    /// Request the grid's economy data (`EconomyDataRequest`); the reply arrives
+    /// as [`SlSessionEvent::EconomyData`].
+    RequestEconomyData,
+    /// Pay L$ to an avatar or object (`MoneyTransferRequest`).
+    SendMoneyTransfer {
+        /// The payee (avatar or object id).
+        dest: Uuid,
+        /// The L$ amount to pay.
+        amount: LindenAmount,
+        /// The kind of transaction (e.g. gift, pay-object).
+        kind: MoneyTransactionType,
+        /// A description annotating the transaction.
+        description: String,
     },
     /// Set the draw distance advertised in keep-alive `AgentUpdate`s.
     SetDrawDistance(f32),
@@ -819,6 +837,22 @@ fn advance_running(
             }
             SlCommand::RequestRegionInfo => {
                 session.request_region_info(now).ok();
+            }
+            SlCommand::RequestMoneyBalance => {
+                session.request_money_balance(now).ok();
+            }
+            SlCommand::RequestEconomyData => {
+                session.request_economy_data(now).ok();
+            }
+            SlCommand::SendMoneyTransfer {
+                dest,
+                amount,
+                kind,
+                description,
+            } => {
+                session
+                    .send_money_transfer(*dest, amount.clone(), *kind, description, now)
+                    .ok();
             }
             SlCommand::RequestParcelProperties {
                 west,
