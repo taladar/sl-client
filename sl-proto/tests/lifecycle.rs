@@ -24,10 +24,12 @@ mod test {
         AvatarPropertiesReplyPropertiesDataBlock, AvatarSitResponse,
         AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock, ChangeUserRights,
         ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock, ChatFromSimulator,
-        ChatFromSimulatorChatDataBlock, GenericMessage, GenericMessageAgentDataBlock,
-        GenericMessageMethodDataBlock, GroupMembersReply, GroupMembersReplyAgentDataBlock,
-        GroupMembersReplyGroupDataBlock, GroupMembersReplyMemberDataBlock, GroupProfileReply,
-        GroupProfileReplyAgentDataBlock, GroupProfileReplyGroupDataBlock, ImprovedInstantMessage,
+        ChatFromSimulatorChatDataBlock, CrossedRegion, CrossedRegionAgentDataBlock,
+        CrossedRegionInfoBlock, CrossedRegionRegionDataBlock, GenericMessage,
+        GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GroupMembersReply,
+        GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
+        GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
+        GroupProfileReplyGroupDataBlock, ImprovedInstantMessage,
         ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
         ImprovedInstantMessageMessageBlockBlock, InventoryDescendents,
         InventoryDescendentsAgentDataBlock, InventoryDescendentsFolderDataBlock,
@@ -2509,6 +2511,267 @@ mod test {
         assert_eq!(neighbor.grid_y, 1001);
         assert_eq!(neighbor.sim.port(), 13000);
         assert_eq!(neighbor.sim.ip(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+        Ok(())
+    }
+
+    /// Feeds an `EnableSimulator` for the neighbour at 127.0.0.1:9001 (`sim_b`),
+    /// which opens a child-agent circuit there.
+    fn enable_neighbour_b(
+        session: &mut Session,
+        sequence: u32,
+        now: Instant,
+    ) -> Result<(), TestError> {
+        // Handle for grid (1001, 1000); port 9001 (0x2329) in network order.
+        let mut body = Writer::new();
+        body.put_u64(0x0003_E900_0003_E800);
+        body.bytes(&[127, 0, 0, 1]);
+        body.bytes(&[0x23, 0x29]);
+        let datagram = server_datagram(MessageId::Low(151), &body.into_bytes(), sequence, true);
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        Ok(())
+    }
+
+    /// Drains transmits, returning the first one destined for `dst`.
+    fn take_transmit_to(session: &mut Session, dst: SocketAddr) -> Option<AnyMessage> {
+        while let Some(transmit) = session.poll_transmit() {
+            if transmit.destination == dst {
+                return decode(&transmit).ok();
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn enable_simulator_opens_child_circuit() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        enable_neighbour_b(&mut session, 9, now)?;
+        // A child UseCircuitCode (but no CompleteAgentMovement) goes to the
+        // neighbour so it registers the child agent.
+        let msg =
+            take_transmit_to(&mut session, sim_b()).ok_or("expected a child UseCircuitCode")?;
+        assert!(matches!(msg, AnyMessage::UseCircuitCode(_)));
+
+        // A second EnableSimulator for the same neighbour is a no-op.
+        enable_neighbour_b(&mut session, 10, now)?;
+        assert!(
+            take_transmit_to(&mut session, sim_b()).is_none(),
+            "a child circuit should only be opened once per neighbour"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn child_circuit_replies_to_ping_on_its_own_circuit() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        enable_neighbour_b(&mut session, 9, now)?;
+        // Drain the child UseCircuitCode and any root traffic.
+        while session.poll_transmit().is_some() {}
+
+        // A ping from the child simulator is answered on the child's circuit.
+        let ping = server_datagram(MessageId::High(1), &[0x2A, 0, 0, 0, 0], 2, false);
+        session.handle_datagram(sim_b(), &ping, now)?;
+        let reply =
+            take_transmit_to(&mut session, sim_b()).ok_or("expected a ping reply to sim_b")?;
+        let AnyMessage::CompletePingCheck(reply) = reply else {
+            return Err("expected CompletePingCheck to the child".into());
+        };
+        assert_eq!(reply.ping_id.ping_id, 0x2A);
+        Ok(())
+    }
+
+    #[test]
+    fn crossed_region_promotes_child_to_root() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Pre-open the child circuit to the neighbour we will cross into.
+        enable_neighbour_b(&mut session, 9, now)?;
+        while session.poll_transmit().is_some() {}
+
+        // The avatar walks across the border: the source region hands us the
+        // destination's details (port in network order; the handler swaps it).
+        let handle = 0x0003_E900_0003_E800;
+        let crossed = AnyMessage::CrossedRegion(CrossedRegion {
+            agent_data: CrossedRegionAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            region_data: CrossedRegionRegionDataBlock {
+                sim_ip: [127, 0, 0, 1],
+                sim_port: 9001u16.swap_bytes(),
+                region_handle: handle,
+                seed_capability: b"http://x/seedB\0".to_vec(),
+            },
+            info: CrossedRegionInfoBlock {
+                position: vec3(10.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&crossed, 10, true)?, now)?;
+
+        // We promote the child to root by completing the agent movement there.
+        let msg = take_transmit_to(&mut session, sim_b())
+            .ok_or("expected a CompleteAgentMovement to sim_b")?;
+        assert!(matches!(msg, AnyMessage::CompleteAgentMovement(_)));
+
+        // The new root confirms; the crossing surfaces as a RegionChanged.
+        let amc = AnyMessage::AgentMovementComplete(AgentMovementComplete {
+            agent_data: AgentMovementCompleteAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            data: AgentMovementCompleteDataBlock {
+                position: vec3(10.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+                region_handle: handle,
+                timestamp: 0,
+            },
+            sim_data: AgentMovementCompleteSimDataBlock {
+                channel_version: b"x\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_b(), &server_message(&amc, 1, true)?, now)?;
+        let changed = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::RegionChanged { region_handle, sim } => Some((region_handle, sim)),
+                _ => None,
+            })
+            .ok_or("expected a RegionChanged event")?;
+        assert_eq!(changed.0, handle);
+        assert_eq!(changed.1, sim_b());
+        Ok(())
+    }
+
+    #[test]
+    fn disable_simulator_retires_child_circuit() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        enable_neighbour_b(&mut session, 9, now)?;
+        while session.poll_transmit().is_some() {}
+
+        // The simulator retires the child circuit.
+        let disable = server_datagram(MessageId::Low(152), &[], 3, true);
+        session.handle_datagram(sim_b(), &disable, now)?;
+
+        // A ping from that (now-closed) child is ignored — no reply.
+        let ping = server_datagram(MessageId::High(1), &[0x2A, 0, 0, 0, 0], 4, false);
+        session.handle_datagram(sim_b(), &ping, now)?;
+        assert!(
+            take_transmit_to(&mut session, sim_b()).is_none(),
+            "a retired child circuit should not answer"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn caps_enable_simulator_opens_child_circuit() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // OpenSim (and Second Life) announce neighbours over the CAPS event queue,
+        // not the UDP EnableSimulator. Handle AAPpAAAD6AA= is the U64
+        // 0x0003_E900_0003_E800; IP fwAAAQ== is 127.0.0.1; Port is a plain integer.
+        let body = sl_proto::parse_llsd_xml(
+            "<llsd><map><key>SimulatorInfo</key><array><map>\
+                <key>Handle</key><binary>AAPpAAAD6AA=</binary>\
+                <key>IP</key><binary>fwAAAQ==</binary>\
+                <key>Port</key><integer>9001</integer>\
+                </map></array></map></llsd>",
+        )?;
+        session.handle_caps_event("EnableSimulator", &body, now)?;
+
+        // The neighbour is surfaced and a child UseCircuitCode is sent to it.
+        let neighbour = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::NeighborDiscovered(info) => Some(info),
+                _ => None,
+            })
+            .ok_or("expected a NeighborDiscovered event")?;
+        assert_eq!(neighbour.sim, sim_b());
+        assert_eq!(neighbour.region_handle, 0x0003_E900_0003_E800);
+        let msg =
+            take_transmit_to(&mut session, sim_b()).ok_or("expected a child UseCircuitCode")?;
+        assert!(matches!(msg, AnyMessage::UseCircuitCode(_)));
+        Ok(())
+    }
+
+    #[test]
+    fn caps_crossed_region_promotes_child_to_root() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Pre-open the child circuit to the neighbour we will cross into.
+        enable_neighbour_b(&mut session, 9, now)?;
+        while session.poll_transmit().is_some() {}
+
+        // OpenSim signals the actual crossing over the CAPS event queue. Here the
+        // SimPort is a plain integer (no byte swap, unlike the UDP CrossedRegion).
+        let handle = 0x0003_E900_0003_E800u64;
+        let body = sl_proto::parse_llsd_xml(
+            "<llsd><map>\
+                <key>AgentData</key><array><map>\
+                    <key>AgentID</key><uuid>00000000-0000-0000-0000-000000000001</uuid>\
+                    <key>SessionID</key><uuid>00000000-0000-0000-0000-000000000002</uuid>\
+                    </map></array>\
+                <key>Info</key><array><map>\
+                    <key>LookAt</key><array><real>1</real><real>0</real><real>0</real></array>\
+                    <key>Position</key><array><real>10</real><real>128</real><real>30</real></array>\
+                    </map></array>\
+                <key>RegionData</key><array><map>\
+                    <key>RegionHandle</key><binary>AAPpAAAD6AA=</binary>\
+                    <key>SeedCapability</key><string>http://127.0.0.1:9001/seedB</string>\
+                    <key>SimIP</key><binary>fwAAAQ==</binary>\
+                    <key>SimPort</key><integer>9001</integer>\
+                    </map></array></map></llsd>",
+        )?;
+        session.handle_caps_event("CrossedRegion", &body, now)?;
+
+        // We promote the child to root by completing the agent movement there.
+        let msg = take_transmit_to(&mut session, sim_b())
+            .ok_or("expected a CompleteAgentMovement to sim_b")?;
+        assert!(matches!(msg, AnyMessage::CompleteAgentMovement(_)));
+
+        // The new root confirms; the crossing surfaces as a RegionChanged.
+        let amc = AnyMessage::AgentMovementComplete(AgentMovementComplete {
+            agent_data: AgentMovementCompleteAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            data: AgentMovementCompleteDataBlock {
+                position: vec3(10.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+                region_handle: handle,
+                timestamp: 0,
+            },
+            sim_data: AgentMovementCompleteSimDataBlock {
+                channel_version: b"x\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_b(), &server_message(&amc, 1, true)?, now)?;
+        let changed = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::RegionChanged { region_handle, sim } => Some((region_handle, sim)),
+                _ => None,
+            })
+            .ok_or("expected a RegionChanged event")?;
+        assert_eq!(changed.0, handle);
+        assert_eq!(changed.1, sim_b());
         Ok(())
     }
 
