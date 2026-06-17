@@ -292,6 +292,16 @@ pub fn build_group_member_data_request(group_id: Uuid) -> String {
     format!("<llsd><map><key>group_id</key><uuid>{group_id}</uuid></map></llsd>")
 }
 
+/// Builds the LLSD-XML body for an `UpdateAvatarAppearance` capability request
+/// (the modern Second Life server-side bake): a map carrying the Current Outfit
+/// Folder version the grid should bake. The grid replies with `{ success,
+/// error?, expected? }` and broadcasts the baked result over UDP
+/// `AvatarAppearance`.
+#[must_use]
+pub fn build_update_avatar_appearance_request(cof_version: i32) -> String {
+    format!("<llsd><map><key>cof_version</key><integer>{cof_version}</integer></map></llsd>")
+}
+
 /// A single event from an [`EventQueueResponse`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventQueueEvent {

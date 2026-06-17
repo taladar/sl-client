@@ -628,6 +628,10 @@ impl Survey {
             | Event::TextureNotFound(_)
             | Event::AssetReceived(_)
             | Event::AssetTransferFailed { .. }
+            | Event::AvatarAppearance(_)
+            | Event::AgentWearables { .. }
+            | Event::ServerAppearanceUpdate { .. }
+            | Event::CachedTextureResponse { .. }
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportLocal

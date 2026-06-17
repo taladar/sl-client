@@ -13,9 +13,10 @@ use std::collections::HashMap;
 
 use sl_proto::{
     CAP_FETCH_INVENTORY, CAP_GET_ASSET, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE,
-    CAP_GROUP_MEMBER_DATA, Llsd, REQUESTED_CAPABILITIES, Session, build_event_queue_request,
-    build_fetch_inventory_request, build_group_member_data_request, build_seed_request, j2c,
-    parse_event_queue_response, parse_llsd_xml, parse_login_response, parse_seed_response,
+    CAP_GROUP_MEMBER_DATA, CAP_UPDATE_AVATAR_APPEARANCE, Llsd, REQUESTED_CAPABILITIES, Session,
+    build_event_queue_request, build_fetch_inventory_request, build_group_member_data_request,
+    build_seed_request, build_update_avatar_appearance_request, j2c, parse_event_queue_response,
+    parse_llsd_xml, parse_login_response, parse_seed_response,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
@@ -34,7 +35,8 @@ pub use sl_proto::{
     ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PrimShape, ProductType,
     RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, Rotation, SaleType,
     ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, Uuid, Vector,
+    TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace, Throttle, TransferStatus,
+    Transmit, Uuid, Vector, Wearable, WearableType, avatar_texture, decode_texture_entry,
     grid_to_handle, handle_to_global, handle_to_grid, pcode, sim_access,
 };
 
@@ -727,6 +729,45 @@ pub enum Command {
         /// The asset's class (selects the cap query parameter).
         asset_type: AssetType,
     },
+    /// Ask the simulator to (re-)send the agent's own wearables
+    /// (`AgentWearablesRequest`); the reply arrives as [`Event::AgentWearables`].
+    RequestWearables,
+    /// Set the agent's outfit (`AgentIsNowWearing`): the complete set of
+    /// wearables to wear. The simulator acknowledges with a fresh
+    /// [`Event::AgentWearables`].
+    SetWearing(Vec<Wearable>),
+    /// Advertise the agent's own appearance (`AgentSetAppearance`): the legacy
+    /// client-side bake path (used by OpenSim and pre-server-baking regions).
+    /// `serial` must strictly increase across calls.
+    SetAppearance {
+        /// The appearance serial (strictly increasing; 0 resets).
+        serial: u32,
+        /// The agent's bounding-box size, in metres.
+        size: Vector,
+        /// The packed `TextureEntry` blob carrying the baked-texture ids.
+        texture_entry: Vec<u8>,
+        /// The visual parameter bytes (one per parameter, in viewer order).
+        visual_params: Vec<u8>,
+        /// The per-baked-slot cache hashes (`(cache id, texture slot index)`).
+        wearable_cache: Vec<(Uuid, u8)>,
+    },
+    /// Query the simulator's baked-texture cache (`AgentCachedTexture`): the
+    /// reply arrives as [`Event::CachedTextureResponse`].
+    RequestCachedTextures {
+        /// The serial echoed back in the reply.
+        serial: i32,
+        /// The queried slots, as `(cache id, texture slot index)` pairs.
+        slots: Vec<(Uuid, u8)>,
+    },
+    /// Trigger a modern server-side appearance bake over the HTTP
+    /// `UpdateAvatarAppearance` capability (Second Life "central baking"): the
+    /// grid composites the agent's Current Outfit Folder and broadcasts the
+    /// result as [`Event::AvatarAppearance`]. The POST's own reply arrives as
+    /// [`Event::ServerAppearanceUpdate`].
+    RequestServerAppearanceUpdate {
+        /// The Current Outfit Folder version the grid should bake.
+        cof_version: i32,
+    },
     /// Begin a clean logout.
     Logout,
 }
@@ -1201,6 +1242,25 @@ impl Client {
                                 ));
                             }
                         }
+                        Some(Command::RequestWearables) => {
+                            self.session.request_wearables(Instant::now())?;
+                        }
+                        Some(Command::SetWearing(wearables)) => {
+                            self.session.set_wearing(&wearables, Instant::now())?;
+                        }
+                        Some(Command::SetAppearance { serial, size, texture_entry, visual_params, wearable_cache }) => {
+                            self.session.set_appearance(serial, size, &texture_entry, &visual_params, &wearable_cache, Instant::now())?;
+                        }
+                        Some(Command::RequestCachedTextures { serial, slots }) => {
+                            self.session.request_cached_textures(serial, &slots, Instant::now())?;
+                        }
+                        Some(Command::RequestServerAppearanceUpdate { cof_version }) => {
+                            if let Some(url) = caps.get(CAP_UPDATE_AVATAR_APPEARANCE).cloned() {
+                                tokio::spawn(request_server_appearance_update(
+                                    url, cof_version, http.clone(), caps_tx.clone(),
+                                ));
+                            }
+                        }
                         Some(Command::Logout) | None => {
                             self.session.initiate_logout(Instant::now());
                         }
@@ -1313,6 +1373,37 @@ async fn fetch_group_members(
     if let Ok(llsd) = parse_llsd_xml(&text) {
         caps_tx
             .send((CAP_GROUP_MEMBER_DATA.to_owned(), llsd))
+            .await
+            .ok();
+    }
+}
+
+/// POSTs the `UpdateAvatarAppearance` capability for `cof_version` (the modern
+/// Second Life server-side bake), forwarding the LLSD reply back over `caps_tx`
+/// to be surfaced as an [`Event::ServerAppearanceUpdate`]. The baked appearance
+/// itself arrives separately as a UDP [`Event::AvatarAppearance`].
+async fn request_server_appearance_update(
+    cap_url: String,
+    cof_version: i32,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let body = build_update_avatar_appearance_request(cof_version);
+    let Ok(response) = http
+        .post(&cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+    else {
+        return;
+    };
+    let Ok(text) = response.text().await else {
+        return;
+    };
+    if let Ok(llsd) = parse_llsd_xml(&text) {
+        caps_tx
+            .send((CAP_UPDATE_AVATAR_APPEARANCE.to_owned(), llsd))
             .await
             .ok();
     }
