@@ -346,6 +346,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     faces.len(),
                 );
             }
+            Event::GltfMaterialOverride {
+                region_handle,
+                local_id,
+                faces,
+                ..
+            } => {
+                info!(
+                    "GLTF material override on object {local_id} in region {region_handle:#x}: {} face(s)",
+                    faces.len(),
+                );
+            }
+            Event::RenderMaterials(materials) => {
+                info!(
+                    "received {} legacy material(s) over RenderMaterials",
+                    materials.len(),
+                );
+            }
+            Event::MaterialParamsResult { success, message } => {
+                info!("ModifyMaterialParams result: success={success} message={message:?}");
+            }
             // This demo ignores motion-only churn and the remaining
             // profile/region/parcel/teleport/group/appearance events.
             Event::ObjectUpdated(_)

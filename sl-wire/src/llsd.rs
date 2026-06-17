@@ -222,7 +222,7 @@ fn decode_binary(text: Option<&str>) -> Vec<u8> {
 }
 
 /// Appends `value` to `out`, escaping the XML metacharacters.
-fn push_escaped(out: &mut String, value: &str) {
+pub(crate) fn push_escaped(out: &mut String, value: &str) {
     for ch in value.chars() {
         match ch {
             '&' => out.push_str("&amp;"),

@@ -647,6 +647,9 @@ impl Survey {
             | Event::ParcelMediaCommand { .. }
             | Event::ParcelMediaUpdate(_)
             | Event::ObjectMedia { .. }
+            | Event::GltfMaterialOverride { .. }
+            | Event::RenderMaterials(_)
+            | Event::MaterialParamsResult { .. }
             | Event::CircuitEstablished { .. } => {}
         }
         Ok(false)

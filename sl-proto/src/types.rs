@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
-use sl_wire::{LoginRequest, MediaEntry, ParcelFlags};
+use sl_wire::{LoginRequest, MediaEntry, ParcelFlags, RenderMaterialEntry};
 use uuid::Uuid;
 
 /// The parameters needed to start a session: where to log in and with what.
@@ -622,6 +622,40 @@ pub enum Event {
         /// that has no media.
         faces: Vec<Option<MediaEntry>>,
     },
+    /// A GLTF (PBR) material **override** pushed by the simulator in a
+    /// `GenericStreamingMessage` (method `0x4175`): the per-face material
+    /// changes layered on an object's base GLTF materials. Per the asset-fetch
+    /// scope the per-face GLTF documents are not parsed — each is surfaced as
+    /// its raw notation-LLSD bytes in [`overrides`](Event::GltfMaterialOverride::overrides),
+    /// positionally correlated with [`faces`](Event::GltfMaterialOverride::faces).
+    /// Arrives on the root and neighbouring (child) regions.
+    GltfMaterialOverride {
+        /// The region the override applies in (the source simulator's handle, or
+        /// `0` if not yet known).
+        region_handle: u64,
+        /// The region-local id of the overridden object.
+        local_id: u32,
+        /// The face indices carrying an override, in order.
+        faces: Vec<u8>,
+        /// The raw per-face override LLSD (notation-encoded), one per face in
+        /// [`faces`](Event::GltfMaterialOverride::faces); left undecoded.
+        overrides: Vec<Vec<u8>>,
+    },
+    /// The legacy (normal/specular) materials returned by a `RenderMaterials`
+    /// capability POST (the runtime `RequestRenderMaterials` command) — the
+    /// path stock OpenSim implements. Each [`RenderMaterialEntry`] pairs a
+    /// material id (referenced per face by a `TextureEntry`) with its decoded
+    /// `LegacyMaterial`.
+    RenderMaterials(Vec<RenderMaterialEntry>),
+    /// The reply to a `ModifyMaterialParams` capability POST (the runtime
+    /// `ModifyMaterialParams` command, which sets GLTF materials on object
+    /// faces): whether the simulator accepted the change, and any message.
+    MaterialParamsResult {
+        /// Whether the modification succeeded.
+        success: bool,
+        /// The simulator's status message (empty on success).
+        message: String,
+    },
     /// A decoded terrain (or wind/cloud/water) patch arrived in a `LayerData`
     /// message and was added to or refreshed in the terrain cache. For a
     /// [`Land`](TerrainLayerType::Land) patch the [`values`](TerrainPatch::values)
@@ -907,13 +941,133 @@ pub struct Object {
     pub media_url: String,
     /// The raw `TextureEntry` blob (per-face texture/colour data), undecoded.
     pub texture_entry: Vec<u8>,
-    /// The raw `ExtraParams` blob (flexi/light/sculpt/mesh parameters),
-    /// undecoded.
+    /// The raw `ExtraParams` blob (flexi/light/sculpt/mesh parameters), as
+    /// received on the wire.
     pub extra_params: Vec<u8>,
+    /// The decoded [`ExtraParams`](ObjectExtraParams) sub-blocks
+    /// (flexi/light/sculpt/light-image/extended-mesh/render-material/reflection
+    /// probe). Only populated from full `ObjectUpdate`s (the compressed update's
+    /// extra-params are left undecoded, so this is empty there).
+    pub extra: ObjectExtraParams,
     /// The object's extended properties (creator, permissions, name,
     /// description, …) once an [`Event::ObjectProperties`] has been received for
     /// it; `None` until then.
     pub properties: Option<ObjectProperties>,
+}
+
+/// The decoded `ExtraParams` sub-blocks of an [`Object`]. The `ExtraParams` blob
+/// in an `ObjectUpdate` is a list of optional typed parameters (each a Linden
+/// `LLNetworkData` subtype); each field here is present only if the object
+/// carries that parameter.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ObjectExtraParams {
+    /// Flexible-path ("flexi") parameters (`PARAMS_FLEXIBLE`, `0x10`).
+    pub flexible: Option<FlexibleData>,
+    /// Point/spot-light parameters (`PARAMS_LIGHT`, `0x20`).
+    pub light: Option<LightData>,
+    /// Sculpt / mesh parameters (`PARAMS_SCULPT` `0x30` or `PARAMS_MESH`
+    /// `0x60` — a mesh is carried in the same block).
+    pub sculpt: Option<SculptData>,
+    /// Projected-light texture parameters (`PARAMS_LIGHT_IMAGE`, `0x40`).
+    pub light_image: Option<LightImage>,
+    /// Extended-mesh flags (`PARAMS_EXTENDED_MESH`, `0x70`).
+    pub extended_mesh: Option<ExtendedMesh>,
+    /// Per-face GLTF (PBR) render-material asset references
+    /// (`PARAMS_RENDER_MATERIAL`, `0x80`); empty if the object has none.
+    pub render_material: Vec<RenderMaterialRef>,
+    /// Reflection-probe parameters (`PARAMS_REFLECTION_PROBE`, `0x90`).
+    pub reflection_probe: Option<ReflectionProbe>,
+}
+
+/// Flexible-path ("flexi") parameters (`LLFlexibleObjectData`): the prim's path
+/// bends under simulated softbody physics.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlexibleData {
+    /// The softness / simulate-LOD level (0–3): how finely the path flexes.
+    pub softness: u8,
+    /// Path stiffness (resistance to bending).
+    pub tension: f32,
+    /// Air friction (how quickly motion damps).
+    pub air_friction: f32,
+    /// Gravity applied to the path tip.
+    pub gravity: f32,
+    /// Sensitivity to region wind.
+    pub wind_sensitivity: f32,
+    /// A constant force pushing the path (zero if the sim did not send it).
+    pub user_force: Vector,
+}
+
+/// Point/spot-light parameters (`LLLightParams`): the object emits light.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LightData {
+    /// The light colour, RGBA as sent on the wire (sRGB).
+    pub color: [u8; 4],
+    /// The light radius, in metres.
+    pub radius: f32,
+    /// The spotlight cutoff angle.
+    pub cutoff: f32,
+    /// The light falloff exponent.
+    pub falloff: f32,
+}
+
+/// Sculpt or mesh parameters (`LLSculptParams`): the prim's shape comes from a
+/// sculpt texture or a mesh asset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SculptData {
+    /// The sculpt texture or mesh asset id.
+    pub texture: Uuid,
+    /// The sculpt type byte (`LL_SCULPT_TYPE_*` in the low bits — sphere/torus/
+    /// plane/cylinder/mesh — plus invert/mirror/animesh flag bits).
+    pub sculpt_type: u8,
+}
+
+/// Projected-light texture parameters (`LLLightImageParams`): a light projects
+/// an image.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LightImage {
+    /// The projected texture id.
+    pub texture: Uuid,
+    /// The projection parameters `(field-of-view, focus, ambiance)`.
+    pub params: Vector,
+}
+
+/// Extended-mesh flags (`LLExtendedMeshParams`), e.g. animated-mesh
+/// (`ANIMATED_MESH_ENABLED_FLAG`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtendedMesh {
+    /// The extended-mesh flag bits.
+    pub flags: u32,
+}
+
+/// One per-face GLTF (PBR) render-material reference
+/// (`LLRenderMaterialParams::Entry`): the material asset applied to a face.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderMaterialRef {
+    /// The texture-entry (face) index the material applies to.
+    pub face: u8,
+    /// The render-material asset id (an `AT_MATERIAL` / GLTF material).
+    pub material_id: Uuid,
+}
+
+/// A PBR **reflection probe**: a Second Life-specific per-object property
+/// (`ExtraParams` type `0x90`, `LLReflectionProbeParams`) marking an object as a
+/// probe that captures the surrounding environment for image-based lighting and
+/// reflections. The probe itself is rendered by the viewer (there is no asset to
+/// fetch); these are just its volume parameters.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReflectionProbe {
+    /// The probe's ambiance (irradiance) scale.
+    pub ambiance: f32,
+    /// The near-clip distance of the probe's reflection capture, in metres.
+    pub clip_distance: f32,
+    /// Whether the influence volume is a box (`true`) rather than a sphere
+    /// (`false`) — `FLAG_BOX_VOLUME`.
+    pub is_box: bool,
+    /// Whether dynamic objects (e.g. avatars) are rendered into the probe —
+    /// `FLAG_DYNAMIC`.
+    pub is_dynamic: bool,
+    /// Whether the probe drives a realtime mirror — `FLAG_MIRROR`.
+    pub is_mirror: bool,
 }
 
 /// An object's extended properties (`ObjectProperties`), delivered after the
@@ -3354,10 +3508,13 @@ pub enum AssetType {
     Mesh,
     /// A settings asset (`AT_SETTINGS`).
     Settings,
-    /// A render material (`AT_MATERIAL`).
+    /// A render material (`AT_MATERIAL`), an LLSD-wrapped GLTF 2.0 material
+    /// document.
     Material,
     /// A glTF document (`AT_GLTF`).
     Gltf,
+    /// A glTF binary buffer (`AT_GLTF_BIN`).
+    GltfBin,
     /// Any other / unrecognised asset class, carrying the raw `AT_*` code.
     Other(i32),
 }
@@ -3388,6 +3545,7 @@ impl AssetType {
             Self::Settings => 56,
             Self::Material => 57,
             Self::Gltf => 58,
+            Self::GltfBin => 59,
             Self::Other(code) => code,
         }
     }
@@ -3417,6 +3575,7 @@ impl AssetType {
             56 => Self::Settings,
             57 => Self::Material,
             58 => Self::Gltf,
+            59 => Self::GltfBin,
             other => Self::Other(other),
         }
     }
@@ -3445,7 +3604,10 @@ impl AssetType {
             Self::Gesture => Some("gesture_id"),
             Self::Mesh => Some("mesh_id"),
             Self::Settings => Some("settings_id"),
-            Self::Material | Self::Gltf | Self::Other(_) => None,
+            // Second Life serves materials over the `ViewerAsset` cap by
+            // `material_id`; the legacy `RenderMaterials` cap is the OpenSim path.
+            Self::Material => Some("material_id"),
+            Self::Gltf | Self::GltfBin | Self::Other(_) => None,
         }
     }
 
@@ -3474,7 +3636,10 @@ impl AssetType {
             Self::Gesture => Some("gesture"),
             Self::Mesh => Some("mesh"),
             Self::Settings => Some("settings"),
-            Self::Material | Self::Gltf | Self::Other(_) => None,
+            Self::Material => Some("material"),
+            Self::Gltf => Some("gltf"),
+            Self::GltfBin => Some("glbin"),
+            Self::Other(_) => None,
         }
     }
 
@@ -3491,6 +3656,7 @@ impl AssetType {
             Self::Notecard => Some("UpdateNotecardAgentInventory"),
             Self::LslText => Some("UpdateScriptAgent"),
             Self::Settings => Some("UpdateSettingsAgentInventory"),
+            Self::Material => Some("UpdateMaterialAgentInventory"),
             _ => None,
         }
     }
@@ -3535,6 +3701,8 @@ pub enum InventoryType {
     Mesh,
     /// A settings asset (`IT_SETTINGS`).
     Settings,
+    /// A render material (`IT_MATERIAL`).
+    Material,
     /// Any other / unrecognised inventory type, carrying the raw `IT_*` code.
     Other(i32),
 }
@@ -3559,6 +3727,7 @@ impl InventoryType {
             Self::Gesture => 20,
             Self::Mesh => 22,
             Self::Settings => 25,
+            Self::Material => 57,
             Self::Other(code) => code,
         }
     }
@@ -3583,6 +3752,7 @@ impl InventoryType {
             20 => Self::Gesture,
             22 => Self::Mesh,
             25 => Self::Settings,
+            57 => Self::Material,
             other => Self::Other(other),
         }
     }
@@ -3608,6 +3778,7 @@ impl InventoryType {
             Self::Gesture => Some("gesture"),
             Self::Mesh => Some("mesh"),
             Self::Settings => Some("settings"),
+            Self::Material => Some("material"),
             Self::Other(_) => None,
         }
     }

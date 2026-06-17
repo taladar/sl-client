@@ -190,6 +190,9 @@ fn on_events(
             | SlSessionEvent::ParcelMediaCommand { .. }
             | SlSessionEvent::ParcelMediaUpdate(_)
             | SlSessionEvent::ObjectMedia { .. }
+            | SlSessionEvent::GltfMaterialOverride { .. }
+            | SlSessionEvent::RenderMaterials(_)
+            | SlSessionEvent::MaterialParamsResult { .. }
             | SlSessionEvent::ServerAppearanceUpdate { .. }
             | SlSessionEvent::CachedTextureResponse { .. }
             | SlSessionEvent::ParcelDwell { .. }

@@ -7,7 +7,9 @@
 //! crate-wide, so every `to_*_bytes`/`from_*_bytes` conversion is confined to
 //! the two submodules below, each carrying a single localized expectation.
 
-pub(crate) use big::{u16_from_be, u16_to_be, u32_from_be, u32_to_be};
+pub(crate) use big::{
+    f64_from_be, f64_to_be, i32_from_be, i32_to_be, u16_from_be, u16_to_be, u32_from_be, u32_to_be,
+};
 pub(crate) use little::{
     f32_from_le, f32_to_le, f64_from_le, f64_to_le, i16_from_le, i16_to_le, i32_from_le, i32_to_le,
     u16_from_le, u16_to_le, u32_from_le, u32_to_le, u64_from_le, u64_to_le,
@@ -37,6 +39,26 @@ mod big {
 
     /// Writes a `u16` as two big-endian bytes.
     pub(crate) const fn u16_to_be(value: u16) -> [u8; 2] {
+        value.to_be_bytes()
+    }
+
+    /// Reads a big-endian `i32` from four bytes (binary-LLSD integers).
+    pub(crate) const fn i32_from_be(bytes: [u8; 4]) -> i32 {
+        i32::from_be_bytes(bytes)
+    }
+
+    /// Writes an `i32` as four big-endian bytes (binary-LLSD integers).
+    pub(crate) const fn i32_to_be(value: i32) -> [u8; 4] {
+        value.to_be_bytes()
+    }
+
+    /// Reads a big-endian `f64` from eight bytes (binary-LLSD reals).
+    pub(crate) const fn f64_from_be(bytes: [u8; 8]) -> f64 {
+        f64::from_be_bytes(bytes)
+    }
+
+    /// Writes an `f64` as eight big-endian bytes (binary-LLSD reals).
+    pub(crate) const fn f64_to_be(value: f64) -> [u8; 8] {
         value.to_be_bytes()
     }
 }
