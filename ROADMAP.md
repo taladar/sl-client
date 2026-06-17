@@ -37,7 +37,7 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 7 ✅ | Group support **(done)** | 8 | Group chat bot, roster tool | Local OpenSim (Groups V2 module) |
 | 8 ✅ | Script dialogs & permissions **(done)** | 3 | Vendor/scripted-object interaction bot | Local OpenSim (scripted object) |
 | 9 ✅ | Mute list **(done)** | 2 | Moderation helper | Local OpenSim (MuteList module) |
-| 10 | Seamless teleport (child circuits) | 8 | Roaming bot that keeps its session | Local OpenSim (multi-region) |
+| 10 ✅ | Seamless teleport (child circuits) **(done)** | 8 | Roaming bot that keeps its session | Local OpenSim (multi-region) |
 | 11 | Money / economy | 5 | Balance monitor, tip/vendor bot | **Money module or SL grid** |
 | 12 | Full world map | 5 | Live map: agents, POIs, land-for-sale | Local OpenSim |
 | 13 | Parcel management | 5 | Land-management tool | Local OpenSim |
@@ -255,13 +255,27 @@ muting an agent then fetching returned the parsed entry over Xfer, and unmuting
 then fetching returned an empty list. *Test: local OpenSim with `[Messaging]
 MuteListModule = MuteListModule` and a `MuteListService` (SQLite) configured.*
 
-**10. Seamless teleport via child-agent circuits — `EnableSimulator` → child
+**10. ✅ Seamless teleport via child-agent circuits — `EnableSimulator` → child
 `UseCircuitCode`, `EstablishAgentCommunication` (CAPS), `CrossedRegion`,
-`TeleportFinish` handover · 8 pts.** Not a new surface but a quality upgrade
-that *adds value to the Tier-A clients*: replace the re-login workaround with
-real child→root handover so a roaming bot keeps one continuous session (open
-IMs, group sessions, agent state) across teleports and region crossings.
-*Test: local OpenSim with adjacent regions.*
+`TeleportFinish` handover · 8 pts. (done)** Not a new surface but a quality
+upgrade that *adds value to the Tier-A clients*: replaced the re-login
+workaround with real child→root handover so a roaming bot keeps one continuous
+session (open IMs, group sessions, agent state) across teleports and region
+crossings. `Session` now holds a root circuit plus a `BTreeMap` of child-agent
+circuits keyed by simulator address; neighbours are opened with a child
+`UseCircuitCode` (no `CompleteAgentMovement`) so they hold the agent's presence
+*before* a crossing, and a crossing promotes the pre-opened child to root
+(swapping the old root back down to a child — shared neighbours are **not**
+dropped, so the general any-side topology keeps its circuits). Datagrams are
+routed per-circuit by source address; both runtimes already multiplex circuits
+over one socket via `Transmit.destination` / `recv_from`, so neither needed
+changes. **Key live finding:** OpenSim (and SL) deliver `EnableSimulator`,
+`EstablishAgentCommunication` **and** `CrossedRegion` over the **CAPS event
+queue**, not UDP — and the CAPS `Port`/`SimPort` is a plain integer (no
+byte-swap, unlike the UDP `IPPORT`). Both UDP and CAPS paths are handled.
+*Live-verified: a bot flew east across the Default→East border on one
+continuous login (3 neighbours enabled, `RegionChanged` to the East sim, no
+re-login) against the local 2×2 multi-region OpenSim.*
 
 ### Tier B — extensions of the existing survey/map strengths
 

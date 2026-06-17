@@ -1308,8 +1308,17 @@ pub struct Session {
     login: LoginParams,
     /// The current lifecycle state.
     state: SessionState,
-    /// The active circuit, once login has succeeded.
+    /// The active (root) circuit, once login has succeeded.
     circuit: Option<Circuit>,
+    /// Child-agent circuits to neighbouring regions, keyed by simulator address.
+    /// Opened from `EnableSimulator` so a neighbour already holds the agent's
+    /// presence when the avatar crosses the border (promoted to root on
+    /// `CrossedRegion`).
+    children: BTreeMap<SocketAddr, Circuit>,
+    /// The capability-seed URL for each child region (from the CAPS
+    /// `EstablishAgentCommunication` event), keyed by simulator address; used as
+    /// the new seed when a child is promoted to root.
+    child_seeds: BTreeMap<SocketAddr, String>,
     /// The draw distance (metres) advertised in keep-alive `AgentUpdate`s.
     draw_distance: f32,
     /// The agent control flags advertised in keep-alive `AgentUpdate`s; the
@@ -1350,6 +1359,8 @@ impl Session {
             login,
             state: SessionState::New,
             circuit: None,
+            children: BTreeMap::new(),
+            child_seeds: BTreeMap::new(),
             draw_distance: DEFAULT_DRAW_DISTANCE,
             controls: ControlFlags::empty(),
             body_rotation: IDENTITY_ROTATION,
@@ -1413,6 +1424,39 @@ impl Session {
                     self.begin_handover(dest, region_handle, Some(seed), now)?;
                 }
             }
+            // A neighbouring region is announced over the CAPS event queue (the
+            // modern path; OpenSim does not use the UDP `EnableSimulator`). Open a
+            // child-agent circuit so it holds the agent's presence before a
+            // crossing.
+            "EnableSimulator" => {
+                if let Some((handle, sim)) = enable_simulator_from_caps_llsd(body) {
+                    self.open_child_circuit(sim, now)?;
+                    let (grid_x, grid_y) = handle_to_grid(handle);
+                    self.events
+                        .push_back(Event::NeighborDiscovered(NeighborInfo {
+                            region_handle: handle,
+                            sim,
+                            grid_x,
+                            grid_y,
+                        }));
+                }
+            }
+            // A neighbouring region's child-agent seed capability, sent after we
+            // open the child circuit; cache it for when the child is promoted to
+            // root on a border crossing.
+            "EstablishAgentCommunication" => {
+                if let Some((sim, seed)) = establish_agent_communication_from_llsd(body) {
+                    self.child_seeds.insert(sim, seed);
+                }
+            }
+            // The agent has physically crossed a region border; OpenSim signals
+            // the handover over the CAPS event queue (not the UDP `CrossedRegion`).
+            // Promote the pre-opened child circuit for the destination to root.
+            "CrossedRegion" if matches!(self.state, SessionState::Active) => {
+                if let Some((handle, dest, seed)) = crossed_region_from_caps_llsd(body) {
+                    self.promote_child_to_root(dest, handle, Some(seed), now)?;
+                }
+            }
             CAP_FETCH_INVENTORY => {
                 for event in inventory_descendents_from_llsd(body) {
                     self.events.push_back(event);
@@ -1461,6 +1505,9 @@ impl Session {
             circuit.send_use_circuit_code(now)?;
             circuit.send_complete_agent_movement(now)?;
         }
+        // Any child circuits were neighbours of the source region; drop them.
+        self.children.clear();
+        self.child_seeds.clear();
         if seed_capability.is_some() {
             self.seed_capability = seed_capability;
         }
@@ -1494,6 +1541,80 @@ impl Session {
             }
             None => self.events.push_back(Event::RegionHandshakeComplete),
         }
+    }
+
+    /// Opens a child-agent circuit to a neighbouring simulator `sim`: a fresh
+    /// circuit reusing the agent identity and circuit code, with `UseCircuitCode`
+    /// sent but **not** `CompleteAgentMovement` (so it stays a child agent). A
+    /// no-op if `sim` is already the root or an existing child, or if there is no
+    /// root circuit yet to copy the identity from.
+    fn open_child_circuit(&mut self, sim: SocketAddr, now: Instant) -> Result<(), Error> {
+        if self.circuit.as_ref().map(|c| c.sim_addr) == Some(sim)
+            || self.children.contains_key(&sim)
+        {
+            return Ok(());
+        }
+        let Some(root) = self.circuit.as_ref() else {
+            return Ok(());
+        };
+        let mut child = Circuit::new(
+            sim,
+            root.agent_id,
+            root.session_id,
+            root.code,
+            self.draw_distance,
+            now,
+        );
+        child.send_use_circuit_code(now)?;
+        self.children.insert(sim, child);
+        Ok(())
+    }
+
+    /// Promotes a child-agent circuit at `dest` to the root after the avatar
+    /// crosses a region border (`CrossedRegion`): completes the agent movement so
+    /// the neighbour makes us a root agent, swaps it in as the active circuit
+    /// (demoting the old root to a child), drops the now-stale neighbour
+    /// circuits, records the new seed, and awaits arrival (so `complete_arrival`
+    /// emits `RegionChanged`). Falls back to a fresh circuit if no child was
+    /// pre-opened.
+    fn promote_child_to_root(
+        &mut self,
+        dest: SocketAddr,
+        region_handle: u64,
+        seed: Option<String>,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let Some(root) = self.circuit.as_ref() else {
+            return Ok(());
+        };
+        let (agent_id, session_id, code) = (root.agent_id, root.session_id, root.code);
+        // Prefer the seed from `CrossedRegion`; fall back to the one cached from
+        // the child's `EstablishAgentCommunication`.
+        let seed = seed
+            .filter(|s| !s.is_empty())
+            .or_else(|| self.child_seeds.get(&dest).cloned());
+        let mut new_root = self.children.remove(&dest).unwrap_or_else(|| {
+            Circuit::new(dest, agent_id, session_id, code, self.draw_distance, now)
+        });
+        self.child_seeds.remove(&dest);
+        new_root.send_complete_agent_movement(now)?;
+        // The old root becomes a child agent of the new region. The *other*
+        // children stay open: a neighbour of the old region is often also a
+        // neighbour of the new one (regions can border on every side), so
+        // tearing them down would be wrong. The simulator retires the ones that
+        // no longer apply via `DisableSimulator`; any that go silent expire on
+        // inactivity, and the new region announces any genuinely new neighbours
+        // via `EnableSimulator`.
+        let old_root = self.circuit.replace(new_root);
+        if let Some(old) = old_root {
+            self.children.insert(old.sim_addr, old);
+        }
+        if seed.is_some() {
+            self.seed_capability = seed;
+        }
+        self.handover = Some(HandoverPending { region_handle });
+        self.state = SessionState::AwaitingHandshake;
+        Ok(())
     }
 
     /// The XML-RPC login request the driver must perform, or `None` once login
@@ -1588,15 +1709,22 @@ impl Session {
         if matches!(self.state, SessionState::Closed | SessionState::New) {
             return Ok(());
         }
-        // Only accept traffic from the simulator we are connected to.
-        if self.circuit.as_ref().map(|c| c.sim_addr) != Some(from) {
+        // Accept traffic from the root circuit or any open child circuit; ignore
+        // anything else.
+        let is_root = self.circuit.as_ref().map(|c| c.sim_addr) == Some(from);
+        if !is_root && !self.children.contains_key(&from) {
             return Ok(());
         }
 
         let parsed = parse_datagram(datagram)?;
 
         let process = {
-            let Some(circuit) = self.circuit.as_mut() else {
+            let circuit = if is_root {
+                self.circuit.as_mut()
+            } else {
+                self.children.get_mut(&from)
+            };
+            let Some(circuit) = circuit else {
                 return Ok(());
             };
             circuit.note_received(now);
@@ -1626,7 +1754,49 @@ impl Session {
         let Ok(message) = AnyMessage::decode(id, &mut reader) else {
             return Ok(());
         };
-        self.dispatch(&message, now)
+        if is_root {
+            self.dispatch(&message, now)
+        } else {
+            self.dispatch_child(from, &message, now)
+        }
+    }
+
+    /// Handles a message that arrived on a child-agent circuit. Children carry
+    /// limited traffic; we keep the circuit healthy (ping replies, region
+    /// handshake acknowledgement) and otherwise ignore it — the crossing into a
+    /// child region is driven by `CrossedRegion` on the root circuit.
+    fn dispatch_child(
+        &mut self,
+        from: SocketAddr,
+        message: &AnyMessage,
+        now: Instant,
+    ) -> Result<(), Error> {
+        match message {
+            AnyMessage::StartPingCheck(ping) => {
+                if let Some(circuit) = self.children.get_mut(&from) {
+                    circuit.send_complete_ping_check(ping.ping_id.ping_id, now)?;
+                }
+            }
+            AnyMessage::RegionHandshake(_) => {
+                if let Some(circuit) = self.children.get_mut(&from) {
+                    circuit.send_region_handshake_reply(now)?;
+                }
+            }
+            AnyMessage::PacketAck(ack) => {
+                if let Some(circuit) = self.children.get_mut(&from) {
+                    for packet in &ack.packets {
+                        circuit.record_acks(&[packet.id]);
+                    }
+                }
+            }
+            AnyMessage::DisableSimulator(_) => {
+                // The simulator is retiring this child circuit.
+                self.children.remove(&from);
+                self.child_seeds.remove(&from);
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// Acts on a decoded inbound message.
@@ -1796,10 +1966,11 @@ impl Session {
                 });
             }
             AnyMessage::EnableSimulator(sim) => {
-                self.events
-                    .push_back(Event::NeighborDiscovered(neighbor_info(
-                        &sim.simulator_info,
-                    )));
+                let info = neighbor_info(&sim.simulator_info);
+                // Pre-open a child-agent circuit to the neighbour so it holds the
+                // agent's presence before the avatar crosses the border.
+                self.open_child_circuit(info.sim, now)?;
+                self.events.push_back(Event::NeighborDiscovered(info));
             }
             AnyMessage::MapBlockReply(reply) => {
                 for (index, data) in reply.data.iter().enumerate() {
@@ -1851,6 +2022,20 @@ impl Session {
                     let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(info.sim_ip)), port);
                     let seed = Some(String::from_utf8_lossy(&info.seed_capability).into_owned());
                     self.begin_handover(dest, info.region_handle, seed, now)?;
+                }
+            }
+            AnyMessage::CrossedRegion(crossed) => {
+                // The avatar walked across a region border; the source region
+                // hands us the destination's details. Promote the pre-opened
+                // child circuit there to root.
+                if matches!(self.state, SessionState::Active) {
+                    let region = &crossed.region_data;
+                    // IPPORT is big-endian on the wire; the generated decoder
+                    // reads it little-endian, so swap back to host order.
+                    let port = region.sim_port.swap_bytes();
+                    let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(region.sim_ip)), port);
+                    let seed = Some(String::from_utf8_lossy(&region.seed_capability).into_owned());
+                    self.promote_child_to_root(dest, region.region_handle, seed, now)?;
                 }
             }
             AnyMessage::StartPingCheck(ping) => {
@@ -2171,6 +2356,24 @@ impl Session {
                 circuit.send_agent_update(controls, body, head, now)?;
                 circuit.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
             }
+        }
+
+        // Keep child circuits healthy: flush owed acks and retransmit, and drop
+        // any that have gone silent (a dead child never fails the session).
+        let mut dead = Vec::new();
+        for (addr, child) in &mut self.children {
+            if now >= child.timers.inactivity {
+                dead.push(*addr);
+                continue;
+            }
+            child.process_resends(now);
+            if child.timers.ack_flush.is_some_and(|d| now >= d) {
+                child.flush_acks(now)?;
+            }
+        }
+        for addr in dead {
+            self.children.remove(&addr);
+            self.child_seeds.remove(&addr);
         }
 
         Ok(())
@@ -3057,14 +3260,27 @@ impl Session {
         }
     }
 
-    /// The next datagram to transmit, if any.
+    /// The next datagram to transmit, if any: the root circuit's queue first,
+    /// then each child circuit's, so the driver can multiplex all circuits onto
+    /// one socket using [`Transmit::destination`].
     pub fn poll_transmit(&mut self) -> Option<Transmit> {
-        let circuit = self.circuit.as_mut()?;
-        let payload = circuit.out.pop_front()?;
-        Some(Transmit {
-            destination: circuit.sim_addr,
-            payload,
-        })
+        if let Some(circuit) = self.circuit.as_mut()
+            && let Some(payload) = circuit.out.pop_front()
+        {
+            return Some(Transmit {
+                destination: circuit.sim_addr,
+                payload,
+            });
+        }
+        for circuit in self.children.values_mut() {
+            if let Some(payload) = circuit.out.pop_front() {
+                return Some(Transmit {
+                    destination: circuit.sim_addr,
+                    payload,
+                });
+            }
+        }
+        None
     }
 
     /// The earliest instant at which [`Self::handle_timeout`] should next run.
@@ -3080,6 +3296,11 @@ impl Session {
         merge_deadline(&mut earliest, circuit.timers.logout);
         merge_deadline(&mut earliest, circuit.timers.teleport);
         merge_deadline(&mut earliest, circuit.next_resend_deadline());
+        for child in self.children.values() {
+            merge_deadline(&mut earliest, Some(child.timers.inactivity));
+            merge_deadline(&mut earliest, child.timers.ack_flush);
+            merge_deadline(&mut earliest, child.next_resend_deadline());
+        }
         earliest
     }
 
@@ -3569,6 +3790,60 @@ fn teleport_finish_from_llsd(body: &Llsd) -> Option<(SocketAddr, String)> {
         SocketAddr::new(IpAddr::V4(Ipv4Addr::from(octets)), port),
         seed,
     ))
+}
+
+/// Extracts a neighbour's region handle and simulator address from a CAPS
+/// `EnableSimulator` event body: `{ "SimulatorInfo": [{ "Handle": <u64 binary>,
+/// "IP": <4 bytes>, "Port": <integer> }] }`. Unlike the UDP message the port is
+/// a plain integer (no byte swap).
+fn enable_simulator_from_caps_llsd(body: &Llsd) -> Option<(u64, SocketAddr)> {
+    let info = body.get("SimulatorInfo").and_then(|s| s.index(0))?;
+    let handle = info.get("Handle").map(llsd_u64)?;
+    let octets: [u8; 4] = info.get("IP").and_then(Llsd::as_binary)?.try_into().ok()?;
+    let port = u16::try_from(info.get("Port").and_then(Llsd::as_i32)?).ok()?;
+    Some((
+        handle,
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::from(octets)), port),
+    ))
+}
+
+/// Extracts the destination region handle, simulator address and seed capability
+/// from a CAPS `CrossedRegion` event body: the `RegionData` array carries
+/// `RegionHandle` (u64), `SimIP` (4 bytes), `SimPort` (plain integer, no swap)
+/// and `SeedCapability` (url).
+fn crossed_region_from_caps_llsd(body: &Llsd) -> Option<(u64, SocketAddr, String)> {
+    let region = body.get("RegionData").and_then(|r| r.index(0))?;
+    let handle = region.get("RegionHandle").map(llsd_u64)?;
+    let octets: [u8; 4] = region
+        .get("SimIP")
+        .and_then(Llsd::as_binary)?
+        .try_into()
+        .ok()?;
+    let port = u16::try_from(region.get("SimPort").and_then(Llsd::as_i32)?).ok()?;
+    let seed = region
+        .get("SeedCapability")
+        .and_then(Llsd::as_str)
+        .unwrap_or("")
+        .to_owned();
+    Some((
+        handle,
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::from(octets)), port),
+        seed,
+    ))
+}
+
+/// Extracts the child region's simulator address and seed capability from a CAPS
+/// `EstablishAgentCommunication` event body: `{ "sim-ip-and-port": "ip:port",
+/// "seed-capability": url }`.
+fn establish_agent_communication_from_llsd(body: &Llsd) -> Option<(SocketAddr, String)> {
+    let sim = body.get("sim-ip-and-port").and_then(Llsd::as_str)?;
+    let sim: SocketAddr = sim.parse().ok()?;
+    let seed = body
+        .get("seed-capability")
+        .and_then(Llsd::as_str)
+        .unwrap_or("")
+        .to_owned();
+    Some((sim, seed))
 }
 
 /// Builds a [`ParcelInfo`] from a CAPS `ParcelProperties` event body.
