@@ -34,8 +34,8 @@ pub use sl_proto::{
     MuteFlags, MuteType, NeighborInfo, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
     ParcelFlags, ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ProductType,
     RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, Rotation,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit,
-    Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Throttle,
+    Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
@@ -117,6 +117,9 @@ pub enum SlCommand {
     /// Set the agent control flags (movement); the simulator moves the agent
     /// accordingly. Pass [`ControlFlags::empty`] to stop.
     SetControls(ControlFlags),
+    /// Set the per-category bandwidth throttle (`AgentThrottle`); the simulator
+    /// allocates its UDP send budget accordingly. Re-sent on every region change.
+    SetThrottle(Throttle),
     /// Set the agent's body and head rotation (facing/steering).
     SetRotation {
         /// The body rotation.
@@ -784,6 +787,9 @@ fn advance_running(
             }
             SlCommand::SetControls(controls) => {
                 session.set_controls(*controls, now).ok();
+            }
+            SlCommand::SetThrottle(throttle) => {
+                session.set_throttle(*throttle, now).ok();
             }
             SlCommand::SetRotation { body, head } => {
                 session.set_rotation(body.clone(), head.clone(), now).ok();

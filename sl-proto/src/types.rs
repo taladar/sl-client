@@ -39,6 +39,117 @@ pub enum Reliability {
     Reliable,
 }
 
+/// Per-category bandwidth throttle, in **kilobits per second**, advertised to
+/// the simulator with `AgentThrottle`. The seven categories partition the
+/// simulator's UDP send budget; the simulator uses these caps to allocate
+/// bandwidth across the traffic it pushes to the client.
+///
+/// Without an explicit throttle the simulator applies conservative defaults
+/// that starve the bulk object / terrain / texture streams the world-rendering
+/// features (object scene graph, terrain, textures) depend on. Set one with
+/// [`Session::set_throttle`](crate::Session::set_throttle) after the circuit is
+/// established; it is re-sent automatically on every region change.
+///
+/// The values are interpreted as a total bandwidth split: the sum across all
+/// seven categories is the requested aggregate rate, which the simulator may
+/// cap to its own configured maximum. Use [`Throttle::total`] to read the sum
+/// and the [`Throttle::preset_300`] / [`Throttle::preset_500`] /
+/// [`Throttle::preset_1000`] presets (named for their total kbps) as starting
+/// points; they mirror the reference viewer's bandwidth tables.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Throttle {
+    /// Resent (reliable retransmit) traffic.
+    pub resend: f32,
+    /// Land/terrain layer (`LayerData`) traffic.
+    pub land: f32,
+    /// Wind layer traffic.
+    pub wind: f32,
+    /// Cloud layer traffic.
+    pub cloud: f32,
+    /// Task traffic: object updates (the scene graph).
+    pub task: f32,
+    /// Texture (image) traffic.
+    pub texture: f32,
+    /// Other asset traffic (sounds, animations, notecards, …).
+    pub asset: f32,
+}
+
+impl Throttle {
+    /// Builds a throttle from the seven per-category rates (kilobits per second),
+    /// in wire order: resend, land, wind, cloud, task, texture, asset.
+    #[must_use]
+    pub const fn new(
+        resend: f32,
+        land: f32,
+        wind: f32,
+        cloud: f32,
+        task: f32,
+        texture: f32,
+        asset: f32,
+    ) -> Self {
+        Self {
+            resend,
+            land,
+            wind,
+            cloud,
+            task,
+            texture,
+            asset,
+        }
+    }
+
+    /// The reference viewer's preset for a 300 kbps total bandwidth.
+    #[must_use]
+    pub const fn preset_300() -> Self {
+        Self::new(30.0, 40.0, 9.0, 9.0, 86.0, 86.0, 40.0)
+    }
+
+    /// The reference viewer's preset for a 500 kbps total bandwidth.
+    #[must_use]
+    pub const fn preset_500() -> Self {
+        Self::new(50.0, 70.0, 14.0, 14.0, 136.0, 136.0, 80.0)
+    }
+
+    /// The reference viewer's preset for a 1000 kbps total bandwidth.
+    #[must_use]
+    pub const fn preset_1000() -> Self {
+        Self::new(100.0, 100.0, 20.0, 20.0, 310.0, 310.0, 140.0)
+    }
+
+    /// The total requested bandwidth (kilobits per second), the sum of all seven
+    /// categories.
+    #[must_use]
+    pub fn total(&self) -> f32 {
+        self.resend + self.land + self.wind + self.cloud + self.task + self.texture + self.asset
+    }
+
+    /// The seven category rates in wire order (resend, land, wind, cloud, task,
+    /// texture, asset), converted to **bits per second** as the `AgentThrottle`
+    /// wire encoding expects (the simulator divides by 8 to get bytes/second).
+    #[must_use]
+    pub fn bits_per_second(&self) -> [f32; 7] {
+        // 1 kilobit = 1024 bits, matching the reference viewer's conversion.
+        const KILOBIT: f32 = 1024.0;
+        [
+            self.resend * KILOBIT,
+            self.land * KILOBIT,
+            self.wind * KILOBIT,
+            self.cloud * KILOBIT,
+            self.task * KILOBIT,
+            self.texture * KILOBIT,
+            self.asset * KILOBIT,
+        ]
+    }
+}
+
+impl Default for Throttle {
+    /// The 1000 kbps preset — a generous split suited to a client that wants the
+    /// full object/terrain/texture firehose.
+    fn default() -> Self {
+        Self::preset_1000()
+    }
+}
+
 /// A datagram ready to be sent on the wire.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Transmit {

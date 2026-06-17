@@ -10,7 +10,8 @@ use sl_types::money::LindenAmount;
 use sl_wire::messages::{
     AcceptFriendship, AcceptFriendshipAgentDataBlock, AcceptFriendshipFolderDataBlock,
     AcceptFriendshipTransactionBlockBlock, AgentRequestSit, AgentRequestSitAgentDataBlock,
-    AgentRequestSitTargetObjectBlock, AgentSit, AgentSitAgentDataBlock, AgentUpdate,
+    AgentRequestSitTargetObjectBlock, AgentSit, AgentSitAgentDataBlock, AgentThrottle,
+    AgentThrottleAgentDataBlock, AgentThrottleThrottleBlock, AgentUpdate,
     AgentUpdateAgentDataBlock, AvatarGroupsReplyGroupDataBlock,
     AvatarInterestsReplyPropertiesDataBlock, AvatarPropertiesReplyPropertiesDataBlock,
     AvatarPropertiesRequest, AvatarPropertiesRequestAgentDataBlock, ChatFromSimulatorChatDataBlock,
@@ -121,8 +122,8 @@ use crate::types::{
     MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, ParcelAccessEntry,
     ParcelAccessScope, ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ProductType,
     RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Transmit, grid_to_handle,
-    handle_to_grid,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, Throttle, Transmit,
+    grid_to_handle, handle_to_grid,
 };
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
@@ -368,6 +369,30 @@ impl Circuit {
                 code: self.code,
                 session_id: self.session_id,
                 id: self.agent_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AgentThrottle` reliably, telling the simulator how to allocate
+    /// its UDP send bandwidth across the seven traffic categories. The seven
+    /// per-category rates are packed as little-endian `f32` bits-per-second
+    /// values (the `Throttle` wire encoding); `GenCounter` is left at zero, as
+    /// the reference viewer does (the simulator does not order by it).
+    fn send_agent_throttle(&mut self, throttle: &Throttle, now: Instant) -> Result<(), WireError> {
+        let mut writer = Writer::new();
+        for rate in throttle.bits_per_second() {
+            writer.put_f32(rate);
+        }
+        let message = AnyMessage::AgentThrottle(AgentThrottle {
+            agent_data: AgentThrottleAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                circuit_code: self.code,
+            },
+            throttle: AgentThrottleThrottleBlock {
+                gen_counter: 0,
+                throttles: writer.into_bytes(),
             },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -1787,6 +1812,10 @@ pub struct Session {
     /// The agent control flags advertised in keep-alive `AgentUpdate`s; the
     /// simulator moves the agent accordingly.
     controls: ControlFlags,
+    /// The desired bandwidth throttle (`AgentThrottle`), once the application
+    /// has set one. Persisted so it can be re-sent on every region change (a new
+    /// root circuit starts with the simulator's defaults until re-told).
+    throttle: Option<Throttle>,
     /// The agent's body rotation (facing) sent in `AgentUpdate`s.
     body_rotation: Rotation,
     /// The agent's head rotation sent in `AgentUpdate`s.
@@ -1826,6 +1855,7 @@ impl Session {
             child_seeds: BTreeMap::new(),
             draw_distance: DEFAULT_DRAW_DISTANCE,
             controls: ControlFlags::empty(),
+            throttle: None,
             body_rotation: IDENTITY_ROTATION,
             head_rotation: IDENTITY_ROTATION,
             sit_requested: false,
@@ -1991,6 +2021,13 @@ impl Session {
         }
         if let Some(circuit) = self.circuit.as_mut() {
             circuit.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
+            // Re-advertise the bandwidth throttle on the new root circuit: each
+            // region starts with the simulator's conservative defaults until the
+            // client tells it otherwise. Best-effort — a wire-encode failure here
+            // must not abort arrival.
+            if let Some(throttle) = self.throttle {
+                let _ignored = circuit.send_agent_throttle(&throttle, now);
+            }
         }
         self.state = SessionState::Active;
         match self.handover.take() {
@@ -3067,6 +3104,25 @@ impl Session {
     pub fn set_controls(&mut self, controls: ControlFlags, now: Instant) -> Result<(), Error> {
         self.controls = controls;
         self.send_agent_update_now(ControlFlags::empty(), now)
+    }
+
+    /// Sets the bandwidth throttle (`AgentThrottle`) advertised to the simulator
+    /// and sends it immediately on the root circuit. The [`Throttle`] is
+    /// remembered and re-sent automatically on every region change (each new
+    /// root region starts with the simulator's conservative defaults, which
+    /// starve the bulk object / terrain / texture streams). Use a
+    /// [`Throttle::preset_1000`]-style preset or a custom split as a starting
+    /// point.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn set_throttle(&mut self, throttle: Throttle, now: Instant) -> Result<(), Error> {
+        self.throttle = Some(throttle);
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_agent_throttle(&throttle, now)?;
+        Ok(())
     }
 
     /// Sets the agent's body and head rotation (facing) advertised in

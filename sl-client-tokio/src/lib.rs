@@ -32,7 +32,7 @@ pub use sl_proto::{
     ParcelCategory, ParcelFlags, ParcelInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
     ProductType, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability,
     Rotation, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
+    Throttle, Transmit, Uuid, Vector, grid_to_handle, handle_to_global, handle_to_grid, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -115,6 +115,9 @@ pub enum Command {
     /// Set the agent control flags (movement); the simulator moves the agent
     /// accordingly. Pass [`ControlFlags::empty`] to stop.
     SetControls(ControlFlags),
+    /// Set the per-category bandwidth throttle (`AgentThrottle`); the simulator
+    /// allocates its UDP send budget accordingly. Re-sent on every region change.
+    SetThrottle(Throttle),
     /// Set the agent's body and head rotation (facing/steering).
     SetRotation {
         /// The body rotation.
@@ -643,6 +646,9 @@ impl Client {
                         }
                         Some(Command::SetControls(controls)) => {
                             self.session.set_controls(controls, Instant::now())?;
+                        }
+                        Some(Command::SetThrottle(throttle)) => {
+                            self.session.set_throttle(throttle, Instant::now())?;
                         }
                         Some(Command::SetRotation { body, head }) => {
                             self.session.set_rotation(body, head, Instant::now())?;
