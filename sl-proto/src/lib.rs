@@ -4,12 +4,14 @@ mod appearance;
 mod error;
 mod extra_params;
 pub mod j2c;
+mod particles;
 mod session;
 mod terrain;
 mod types;
 
 pub use appearance::{MAX_FACES, decode_texture_entry};
 pub use error::Error;
+pub use particles::{decode_particle_system, decode_texture_anim};
 pub use session::{
     CAP_AGENT_EXPERIENCES, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
     CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET,
@@ -39,13 +41,14 @@ pub use types::{
     NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMotion,
     ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
     ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
-    ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, PickInfo, PickUpdate,
-    PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate, ReflectionProbe,
-    RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialRef, SaleType,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData,
-    SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace,
-    Throttle, TransferStatus, Transmit, Wearable, WearableType, avatar_texture, grid_to_handle,
-    group_powers, handle_to_global, handle_to_grid, pcode,
+    ParcelReturnType, ParcelStatus, ParcelUpdate, ParticleSystem, PermissionField, PickInfo,
+    PickUpdate, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
+    ReflectionProbe, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability,
+    RenderMaterialRef, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest, SculptData, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch,
+    Texture, TextureAnimation, TextureEntry, TextureFace, Throttle, TransferStatus, Transmit,
+    Wearable, WearableType, avatar_texture, grid_to_handle, group_powers, handle_to_global,
+    handle_to_grid, particle_pattern, pcode, texture_anim_mode,
 };
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,

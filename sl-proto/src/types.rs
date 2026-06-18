@@ -1267,12 +1267,20 @@ pub struct Object {
     /// The raw texture-animation (`TextureAnim`) blob (`llSetTextureAnim`),
     /// undecoded; empty if the object has no texture animation.
     pub texture_anim: Vec<u8>,
+    /// The decoded [`TextureAnimation`] (`llSetTextureAnim`) parameters, or `None`
+    /// when the object has no texture animation (or the blob is not the expected
+    /// 16 bytes). Decoded from [`texture_anim`](Self::texture_anim).
+    pub texture_animation: Option<TextureAnimation>,
     /// The decoded path/profile [`shape`](PrimShapeParams) parameters of a volume
     /// prim. Zeroed for object classes that carry no shape (e.g. avatars).
     pub shape: PrimShapeParams,
     /// The raw particle-system (`PSBlock`) blob (`llParticleSystem`), undecoded;
     /// empty if the object has no particle system.
     pub particle_system: Vec<u8>,
+    /// The decoded [`ParticleSystem`] (`llParticleSystem`) parameters, or `None`
+    /// when the object has no particle system (or the blob fails to decode).
+    /// Decoded from [`particle_system`](Self::particle_system).
+    pub particles: Option<ParticleSystem>,
     /// The raw generic-`Data` field: tree/grass genome bytes for a tree object,
     /// or the linkset prim count for a root prim (one byte). Empty if absent.
     pub data: Vec<u8>,
@@ -1448,6 +1456,138 @@ pub struct ReflectionProbe {
     pub is_dynamic: bool,
     /// Whether the probe drives a realtime mirror — `FLAG_MIRROR`.
     pub is_mirror: bool,
+}
+
+/// Mode (`mMode`) bit flags for a [`TextureAnimation`] (`LLTextureAnim`), matching
+/// the LSL `llSetTextureAnim` flags and the reference viewer's `LLTextureAnim`
+/// enum.
+pub mod texture_anim_mode {
+    /// The animation is running (`ON`); cleared means the prim is static.
+    pub const ON: u8 = 0x01;
+    /// Loop the animation (`LOOP`).
+    pub const LOOP: u8 = 0x02;
+    /// Play the animation in reverse (`REVERSE`).
+    pub const REVERSE: u8 = 0x04;
+    /// Bounce back and forth rather than restart (`PING_PONG`).
+    pub const PING_PONG: u8 = 0x08;
+    /// Slide smoothly rather than step frame-by-frame (`SMOOTH`).
+    pub const SMOOTH: u8 = 0x10;
+    /// Rotate the texture instead of paging frames (`ROTATE`); `start`/`length`
+    /// are then start/end angles in radians.
+    pub const ROTATE: u8 = 0x20;
+    /// Scale the texture instead of paging frames (`SCALE`); `start`/`length` are
+    /// then start/end scales.
+    pub const SCALE: u8 = 0x40;
+}
+
+/// A prim's texture-animation parameters (`TextureAnim` / `LLTextureAnim`, set by
+/// `llSetTextureAnim`): a 16-byte block driving an animated, rotating, or scaling
+/// texture on one or all of a prim's faces. Decoded by
+/// [`decode_texture_anim`](crate::decode_texture_anim).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextureAnimation {
+    /// The mode bit field (see [`texture_anim_mode`]). With
+    /// [`ON`](texture_anim_mode::ON) clear the prim has no active animation.
+    pub mode: u8,
+    /// The face the animation applies to, or `-1` for all faces.
+    pub face: i8,
+    /// The number of horizontal frames in the texture grid (the `x` argument of
+    /// `llSetTextureAnim`). For a non-[`SMOOTH`](texture_anim_mode::SMOOTH)
+    /// animation a zero is treated by the viewer as 1.
+    pub size_x: u8,
+    /// The number of vertical frames in the texture grid (the `y` argument).
+    pub size_y: u8,
+    /// The start frame (or, in [`ROTATE`](texture_anim_mode::ROTATE)/
+    /// [`SCALE`](texture_anim_mode::SCALE) mode, the start angle/scale).
+    pub start: f32,
+    /// The number of frames to display (or, in rotate/scale mode, the end
+    /// angle/scale).
+    pub length: f32,
+    /// The playback rate, in frames per second (or radians/second when rotating).
+    pub rate: f32,
+}
+
+/// Particle-flow pattern (`mPattern`) values for a [`ParticleSystem`], matching
+/// the reference viewer's `LLPartSysData::LL_PART_SRC_PATTERN_*` enum.
+pub mod particle_pattern {
+    /// Particles drop from the source (`LL_PART_SRC_PATTERN_DROP`).
+    pub const DROP: u8 = 0x01;
+    /// Particles explode outward from the source (`LL_PART_SRC_PATTERN_EXPLODE`).
+    pub const EXPLODE: u8 = 0x02;
+    /// Particles emit along an angle (`LL_PART_SRC_PATTERN_ANGLE`).
+    pub const ANGLE: u8 = 0x04;
+    /// Particles emit within a cone (`LL_PART_SRC_PATTERN_ANGLE_CONE`).
+    pub const ANGLE_CONE: u8 = 0x08;
+    /// Particles emit within an empty (hollow) cone
+    /// (`LL_PART_SRC_PATTERN_ANGLE_CONE_EMPTY`).
+    pub const ANGLE_CONE_EMPTY: u8 = 0x10;
+}
+
+/// A prim's particle system (`PSBlock` / `LLPartSysData`, set by
+/// `llParticleSystem`): the source parameters plus the template particle
+/// parameters the source emits. Decoded by
+/// [`decode_particle_system`](crate::decode_particle_system) from both the legacy
+/// (86-byte) and modern (size-prefixed, glow/blend-extended) wire forms.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParticleSystem {
+    /// The system CRC (a non-zero value marks a live system; zero means "no
+    /// system").
+    pub crc: u32,
+    /// The source flags (`LL_PART_SRC_*` — object-relative accel/velocity and the
+    /// new-angle flag).
+    pub flags: u32,
+    /// The emission pattern (see [`particle_pattern`]).
+    pub pattern: u8,
+    /// The source's maximum lifetime, in seconds (0 = forever).
+    pub max_age: f32,
+    /// The age at which the system starts, in seconds.
+    pub start_age: f32,
+    /// The inner emission angle, in radians (for the angle/cone patterns).
+    pub inner_angle: f32,
+    /// The outer emission angle, in radians.
+    pub outer_angle: f32,
+    /// How often a burst of particles is emitted, in seconds.
+    pub burst_rate: f32,
+    /// The emission radius, in metres.
+    pub burst_radius: f32,
+    /// The minimum particle launch speed, in metres/second.
+    pub burst_speed_min: f32,
+    /// The maximum particle launch speed, in metres/second.
+    pub burst_speed_max: f32,
+    /// How many particles are emitted per burst.
+    pub burst_part_count: u8,
+    /// The angular velocity of the emission axis, in radians/second per axis.
+    pub angular_velocity: Vector,
+    /// The acceleration applied to each particle, in metres/second² per axis.
+    pub acceleration: Vector,
+    /// The particle texture asset id (nil for the default).
+    pub texture_id: Uuid,
+    /// The target object the particles follow/aim at (for the target patterns and
+    /// the `TARGET_POS`/`TARGET_LINEAR` particle flags); nil if none.
+    pub target_id: Uuid,
+    /// The per-particle flags (`LL_PART_*_MASK` — interpolation, bounce, wind,
+    /// follow, emissive, beam, ribbon, and the glow/blend system-set bits).
+    pub part_flags: u32,
+    /// Each particle's maximum age, in seconds.
+    pub part_max_age: f32,
+    /// The particle start colour, RGBA as sent on the wire.
+    pub part_start_color: [u8; 4],
+    /// The particle end colour, RGBA as sent on the wire.
+    pub part_end_color: [u8; 4],
+    /// The particle start scale `(x, y)`, in metres.
+    pub part_start_scale: [f32; 2],
+    /// The particle end scale `(x, y)`, in metres.
+    pub part_end_scale: [f32; 2],
+    /// The particle start glow (0–1); 0 unless the system carries glow data.
+    pub part_start_glow: f32,
+    /// The particle end glow (0–1); 0 unless the system carries glow data.
+    pub part_end_glow: f32,
+    /// The source blend function (`LL_PART_BF_*`); defaults to source-alpha unless
+    /// the system carries blend data.
+    pub part_blend_func_source: u8,
+    /// The destination blend function (`LL_PART_BF_*`); defaults to
+    /// one-minus-source-alpha unless the system carries blend data.
+    pub part_blend_func_dest: u8,
 }
 
 /// An object's extended properties (`ObjectProperties`), delivered after the
