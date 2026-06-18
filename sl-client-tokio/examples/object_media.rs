@@ -7,7 +7,7 @@
 //! Run against the local OpenSim (whose `MoapModule` serves the `ObjectMedia`
 //! and `ObjectMediaNavigate` capabilities) as a build-capable avatar (e.g. the
 //! estate owner). Configure via the same environment variables as
-//! `login_hold_logout` (`SL_LOGIN_URI`, `SL_FIRST`, `SL_LAST`, `SL_PASSWORD`).
+//! `tokio_login_hold_logout` (`SL_LOGIN_URI`, `SL_FIRST`, `SL_LAST`, `SL_PASSWORD`).
 
 use std::time::Duration;
 

@@ -14,7 +14,7 @@
 //! usually absent there — the commands then no-op (the cap is not in the map)
 //! and only a clean login/logout is observed. Configure a FreeSWITCH/Vivox voice
 //! module (or run against a Second Life region) to see real credentials. Uses
-//! the same environment variables as `login_hold_logout` (`SL_LOGIN_URI`,
+//! the same environment variables as `tokio_login_hold_logout` (`SL_LOGIN_URI`,
 //! `SL_FIRST`, `SL_LAST`, `SL_PASSWORD`).
 
 use std::time::Duration;

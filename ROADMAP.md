@@ -650,12 +650,12 @@ decoder: default fill, face override, empty blob, full round-trip) and four
 `lifecycle.rs` tests (`AvatarAppearance` baked-texture + visual-param decode,
 `AgentWearablesUpdate` worn list, and the `UpdateAvatarAppearance` reply →
 `ServerAppearanceUpdate`). *Live-verified against the local OpenSim via the
-`login_hold_logout` example: one login decoded the avatar's `AvatarAppearance`
-(218 visual params, **all 11 baked slots** carrying real texture ids) and a
-`RequestWearables` round-trip returned the 6 worn wearables (Shape/Skin/Hair/
-Eyes/Shirt/Pants). The server-side-bake cap is SL-only (OpenSim's central-bake
-version is 0, so it uses the legacy path), so `UpdateAvatarAppearance` is
-unit-tested only. Test: local OpenSim.*
+`tokio_login_hold_logout` example: one login decoded the avatar's
+`AvatarAppearance` (218 visual params, **all 11 baked slots** carrying real
+texture ids) and a `RequestWearables` round-trip returned the 6 worn wearables
+(Shape/Skin/Hair/ Eyes/Shirt/Pants). The server-side-bake cap is SL-only
+(OpenSim's central-bake version is 0, so it uses the legacy path), so
+`UpdateAvatarAppearance` is unit-tested only. Test: local OpenSim.*
 
 **21. Animations — `AgentAnimation` (send/trigger), `AvatarAnimation` (receive)
 · 5 pts. ✅ Done.** Play/stop built-in and custom animations and observe others'
@@ -677,10 +677,11 @@ each event as authoritative state. Wired as
 both runtimes. Covered by three `lifecycle.rs` tests (the `AgentAnimation` send
 encoding for batch start/stop and the single-animation wrapper, plus the
 `AvatarAnimation` decode with source correlation and nil-vs-missing source
-slots). *Live-verified against the local OpenSim via the `login_hold_logout`
-tokio example: `PlayAnimation(ANIM_AGENT_CLAP)` round-tripped — the simulator
-echoed an `Event::AvatarAnimation` for the agent listing the default stand plus
-the triggered clap animation. Test: local OpenSim.*
+slots). *Live-verified against the local OpenSim via the
+`tokio_login_hold_logout` tokio example: `PlayAnimation(ANIM_AGENT_CLAP)`
+round-tripped — the simulator echoed an `Event::AvatarAnimation` for the agent
+listing the default stand plus the triggered clap animation. Test: local
+OpenSim.*
 
 **22. Sound — `SoundTrigger`, `AttachedSound`, `PreloadSound`,
 `AttachedSoundGainChange` · 3 pts. ✅ Done.** Receive and locate spatial sound
@@ -702,7 +703,7 @@ come from a neighbouring region, the region-local `position`, and `gain`);
 command/`SlCommand` variants — nothing to send). Covered by three `lifecycle.rs`
 tests (the `SoundTrigger` decode incl. nil-parent → `None`, the `AttachedSound`
 flag decode, and the multi-entry `PreloadSound` decode). *Live-verified against
-the local OpenSim via the `login_hold_logout` tokio example and a new
+the local OpenSim via the `tokio_login_hold_logout` example and a new
 `slclient22.oar` (a scripted prim looping
 `llTriggerSound`/`llPlaySound`/`llPreloadSound` of the built-in `UISndAlert`
 sound `ed124764-…` on a 5 s timer): logging in next to the prim at
@@ -1245,9 +1246,9 @@ orthonormal-basis construction, the straight-down degenerate fallback, the
 region-centre default matching the legacy viewpoint, and a `lifecycle.rs`
 `set_camera` test asserting the `AgentUpdate` carries the camera position/axes
 and persists them on the next keep-alive). *Live-verified against the local
-OpenSim via the `login_hold_logout` example: a `SetCamera` looking from above
-the region centre toward the north-east ground round-tripped on one login (a
-real orthonormal basis `at≈(0.65,0.65,−0.40)`, `left≈(−0.71,0.71,0)`,
+OpenSim via the `tokio_login_hold_logout` example: a `SetCamera` looking from
+above the region centre toward the north-east ground round-tripped on one login
+(a real orthonormal basis `at≈(0.65,0.65,−0.40)`, `left≈(−0.71,0.71,0)`,
 `up≈(0.29,0.29,0.91)`), re-sent on each keep-alive across a 12 s hold, with a
 clean login→logout lifecycle and no protocol error. Test: local OpenSim.*
 

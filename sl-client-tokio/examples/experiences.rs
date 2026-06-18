@@ -12,7 +12,7 @@
 //! Run against a Second Life region (or an OpenSim grid with an experience
 //! module) to see real data. To look up a specific experience by name, set
 //! `SL_EXPERIENCE_QUERY`. Uses the same environment variables as
-//! `login_hold_logout` (`SL_LOGIN_URI`, `SL_FIRST`, `SL_LAST`, `SL_PASSWORD`).
+//! `tokio_login_hold_logout` (`SL_LOGIN_URI`, `SL_FIRST`, `SL_LAST`, `SL_PASSWORD`).
 
 use std::time::Duration;
 
