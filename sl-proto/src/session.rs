@@ -31,10 +31,9 @@ use sl_wire::messages::{
     MapItemRequestRequestDataBlock, MapNameRequest, MapNameRequestAgentDataBlock,
     MapNameRequestNameDataBlock, PacketAck, PacketAckPacketsBlock, ParcelProperties,
     ParcelPropertiesRequest, ParcelPropertiesRequestAgentDataBlock,
-    ParcelPropertiesRequestParcelDataBlock, RegionHandshakeRegionInfo3Block,
-    RegionHandshakeRegionInfoBlock, RegionHandshakeReply, RegionHandshakeReplyAgentDataBlock,
-    RegionHandshakeReplyRegionInfoBlock, RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock,
-    RequestRegionInfo, RequestRegionInfoAgentDataBlock, TeleportLocationRequest,
+    ParcelPropertiesRequestParcelDataBlock, RegionHandshakeReply,
+    RegionHandshakeReplyAgentDataBlock, RegionHandshakeReplyRegionInfoBlock, RequestRegionInfo,
+    RequestRegionInfoAgentDataBlock, TeleportLocationRequest,
     TeleportLocationRequestAgentDataBlock, TeleportLocationRequestInfoBlock, TerminateFriendship,
     TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock, UseCircuitCode,
     UseCircuitCodeCircuitCodeBlock,
@@ -233,10 +232,11 @@ use crate::types::{
     ParcelAccessScope, ParcelCategory, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
     ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
     PermissionField, PickInfo, PickUpdate, PlayingAnimation, PrimShape, PrimShapeParams,
-    ProductType, ProfileUpdate, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability,
-    SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus,
-    Transmit, Wearable, WearableType, avatar_texture, grid_to_handle, handle_to_grid,
+    ProductType, ProfileUpdate, RegionChatSettings, RegionCombatSettings, RegionIdentity,
+    RegionInfoUpdate, RegionLimits, Reliability, SaleType, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType,
+    TerrainPatch, Texture, Throttle, TransferStatus, Transmit, Wearable, WearableType,
+    avatar_texture, grid_to_handle, handle_to_grid,
 };
 use crate::{appearance, types::AvatarAppearance, types::AvatarAttachment};
 
@@ -4780,8 +4780,7 @@ impl Session {
                     }
                     self.events
                         .push_back(Event::RegionInfoHandshake(Box::new(region_identity(
-                            &handshake.region_info,
-                            &handshake.region_info3,
+                            handshake,
                         ))));
                     self.complete_arrival(now);
                 }
@@ -4793,10 +4792,8 @@ impl Session {
                 self.complete_arrival(now);
             }
             AnyMessage::RegionInfo(info) => {
-                self.events.push_back(Event::RegionLimits(region_limits(
-                    &info.region_info,
-                    &info.region_info2,
-                )));
+                self.events
+                    .push_back(Event::RegionLimits(region_limits(info)));
             }
             AnyMessage::MoneyBalanceReply(reply) => {
                 self.events
@@ -9280,28 +9277,43 @@ fn parse_mute_line(line: &str) -> Option<MuteEntry> {
     })
 }
 
-/// Builds a [`RegionIdentity`] from a `RegionHandshake`'s region-info blocks.
-fn region_identity(
-    info: &RegionHandshakeRegionInfoBlock,
-    info3: &RegionHandshakeRegionInfo3Block,
-) -> RegionIdentity {
+/// Builds a [`RegionIdentity`] from a `RegionHandshake`'s region-info blocks. The
+/// 64-bit flags / protocols come from the optional `RegionInfo4` block (absent on
+/// OpenSim and older grids), falling back to the zero-extended 32-bit flags.
+fn region_identity(handshake: &sl_wire::messages::RegionHandshake) -> RegionIdentity {
+    let info = &handshake.region_info;
+    let info3 = &handshake.region_info3;
     let product_sku = trimmed_string(&info3.product_sku);
     let product_name = trimmed_string(&info3.product_name);
+    let info4 = handshake.region_info4.first();
+    let region_flags_extended = info4.map_or_else(
+        || u64::from(info.region_flags),
+        |i4| i4.region_flags_extended,
+    );
+    let region_protocols = info4.map_or(0, |i4| i4.region_protocols);
     RegionIdentity {
         sim_name: trimmed_string(&info.sim_name),
         region_flags: info.region_flags,
+        region_flags_extended,
+        region_protocols,
         maturity: Maturity::from_sim_access(info.sim_access),
         product: ProductType::classify(&product_sku, &product_name),
         product_sku,
         product_name,
+        sim_owner: info.sim_owner,
+        is_estate_manager: info.is_estate_manager,
+        water_height: info.water_height,
+        billable_factor: info.billable_factor,
     }
 }
 
-/// Builds [`RegionLimits`] from a `RegionInfo` message's region-info blocks.
-fn region_limits(
-    info: &RegionInfoRegionInfoBlock,
-    info2: &RegionInfoRegionInfo2Block,
-) -> RegionLimits {
+/// Builds [`RegionLimits`] from a `RegionInfo` message's region-info blocks. The
+/// 64-bit flags come from the optional `RegionInfo3` block, and the chat / combat
+/// settings from the optional `RegionInfo5` / `CombatSettings` blocks (all absent
+/// on OpenSim and older grids).
+fn region_limits(message: &sl_wire::messages::RegionInfo) -> RegionLimits {
+    let info = &message.region_info;
+    let info2 = &message.region_info2;
     // Prefer the 32-bit agent cap; fall back to the legacy 8-bit field when the
     // grid leaves the wider one at zero.
     let max_agents = if info2.max_agents32 == 0 {
@@ -9309,13 +9321,55 @@ fn region_limits(
     } else {
         info2.max_agents32
     };
+    let region_flags_extended = message.region_info3.first().map_or_else(
+        || u64::from(info.region_flags),
+        |i3| i3.region_flags_extended,
+    );
+    let chat_settings = message
+        .region_info5
+        .first()
+        .map(|info5| RegionChatSettings {
+            whisper_range: info5.chat_whisper_range,
+            normal_range: info5.chat_normal_range,
+            shout_range: info5.chat_shout_range,
+            whisper_offset: info5.chat_whisper_offset,
+            normal_offset: info5.chat_normal_offset,
+            shout_offset: info5.chat_shout_offset,
+            flags: info5.chat_flags,
+        });
+    let combat_settings = message
+        .combat_settings
+        .first()
+        .map(|combat| RegionCombatSettings {
+            flags: combat.combat_flags,
+            on_death: combat.on_death,
+            damage_throttle: combat.damage_throttle,
+            regeneration_rate: combat.regeneration_rate,
+            invulnerability_time: combat.invulnerabily_time,
+            damage_limit: combat.damage_limit,
+        });
     RegionLimits {
         sim_name: trimmed_string(&info.sim_name),
         max_agents,
         hard_max_agents: info2.hard_max_agents,
         hard_max_objects: info2.hard_max_objects,
         region_flags: info.region_flags,
+        region_flags_extended,
         maturity: Maturity::from_sim_access(info.sim_access),
+        estate_id: info.estate_id,
+        parent_estate_id: info.parent_estate_id,
+        water_height: info.water_height,
+        billable_factor: info.billable_factor,
+        object_bonus_factor: info.object_bonus_factor,
+        terrain_raise_limit: info.terrain_raise_limit,
+        terrain_lower_limit: info.terrain_lower_limit,
+        price_per_meter: info.price_per_meter,
+        redirect_grid_x: info.redirect_grid_x,
+        redirect_grid_y: info.redirect_grid_y,
+        use_estate_sun: info.use_estate_sun,
+        sun_hour: info.sun_hour,
+        chat_settings,
+        combat_settings,
     }
 }
 
