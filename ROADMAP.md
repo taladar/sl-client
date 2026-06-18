@@ -1372,8 +1372,8 @@ rendering / voice-transport family). With this reclassified, **the roadmap's
 client protocol *feature* surface is complete: #1–#33 are done.** The only
 remaining open work is the **Tier E decode-fidelity fixes (#35–#51)** — not new
 features, but information-loss gaps where an already-shipped item decodes a wire
-field and then drops it before the caller sees it. (#35–#41 are now
-done; #42–#51 remain.)
+field and then drops it before the caller sees it. (#35–#42 are now
+done; #43–#51 remain.)
 
 ## Tier E — decode-fidelity & information-loss fixes (#35–#51)
 
@@ -1394,7 +1394,7 @@ blob items, writing a structured decoder). "Test" notes whether the local
 | 39 ✅ | `RegionInfo`/`RegionHandshake` extended fields | 3 | Region owner, estate-manager flag, water height, terrain limits, 64-bit flags, chat/combat blocks | Local OpenSim |
 | 40 ✅ | `AvatarAnimation` physical-event list | 1 | `PhysicalAvatarEventList` (physics/ragdoll) block | Local OpenSim |
 | 41 ✅ | Asset-transfer success event + size | 2 | A success event for `TransferInfo` carrying declared `Size` | Local OpenSim |
-| 42 | Group-reply pagination totals | 1 | `RoleCount` / `TotalPairs` so a client knows a set is complete | Local OpenSim (Groups V2) |
+| 42 ✅ | Group-reply pagination totals | 1 | `RoleCount` / `TotalPairs` so a client knows a set is complete | Local OpenSim (Groups V2) |
 | 43 | `MoneyBalanceReply` transaction id | 1 | `TransactionID` to correlate a balance reply to its pay/buy | Money module or SL |
 | 44 | Inventory push fidelity | 2 | All `UpdateCreateInventoryItem` entries; per-item bulk `CallbackID` | Local OpenSim |
 | 45 | `ChatterBoxInvitation` session type & bucket | 2 | `type` + `binary_bucket` (group/session name, session kind) | SL grid |
@@ -1603,12 +1603,29 @@ sound `ed12…`): the UDP `TransferRequest` path surfaced `AssetTransferStarted 
 bytes)` — the declared size matching the reassembled asset exactly. Test: local
 OpenSim.*
 
-**42. Group-reply pagination totals (extends #7, Tier A).**
-`GroupRoleDataReply` (`session.rs` ~5519) drops the `RoleCount` header and
-`GroupRoleMembersReply` (~5526) drops `TotalPairs`. These replies are
-multi-packet, and `GroupMembersReply` already surfaces its `member_count`, so a
-client can tell when the member set is complete but *not* the role or
-role-member sets. Surface both totals. *Test: local OpenSim (Groups V2).*
+**42. Group-reply pagination totals (extends #7, Tier A). ✅ Done.**
+`GroupRoleDataReply` dropped the `RoleCount` header and `GroupRoleMembersReply`
+dropped `TotalPairs`. These replies are multi-packet, and `GroupMembersReply`
+already surfaces its `member_count`, so a client could tell when the member set
+was complete but *not* the role or role-member sets. Surfaced both totals as new
+fields on the existing events: **`Event::GroupRoleData.role_count`** (`i32`,
+from the `GroupData` block) and **`Event::GroupRoleMembers.total_pairs`**
+(`u32`, from the `AgentData` block) — the simulator-reported totals across all
+packets of the
+reply, so a client comparing them against the accumulated `roles.len()` /
+`pairs.len()` knows when a (potentially multi-packet) set is complete. Both
+fields flow through both runtimes unchanged (the events are shared `sl-proto`
+types; every consumer binds them with `{ .. }`, so no command wiring was
+needed). Covered by two new `sl-proto` lifecycle tests
+(`group_role_data_reply_surfaces_role_count` and
+`group_role_members_reply_surfaces_total_pairs`, each asserting the header total
+decodes alongside a single-entry packet). *Live-verified against the local
+OpenSim (Groups V2) via the `group_admin` tokio example, extended to fetch role
+members and log both totals: a freshly-created group's `GroupRoleDataReply`
+surfaced `role_count=4` (Everyone/Officers/Owners + the new role; dropping to 3
+after the role delete) and its `GroupRoleMembersReply` surfaced `total_pairs=2`
+(the owner in Everyone + Owners) — both previously dropped. Test: local OpenSim
+with the Groups V2 module.*
 
 **43. `MoneyBalanceReply` transaction id (extends #11, Tier B).**
 `money_balance` (`session.rs` ~9326) drops `MoneyData.TransactionID`, so a
