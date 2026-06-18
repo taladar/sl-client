@@ -259,8 +259,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if joined { "joined" } else { "left" }
             ),
             Event::ConferenceInvited {
-                from_name, message, ..
-            } => info!("conference invitation from {from_name}: {message}"),
+                from_name,
+                message,
+                session_name,
+                dialog,
+                from_group,
+                ..
+            } => info!(
+                "conference invitation to {session_name:?} ({dialog:?}, from_group={from_group}) from {from_name}: {message}"
+            ),
             Event::ScriptDialog(dialog) => info!(
                 "script dialog from {:?}: {:?} [{}]",
                 dialog.object_name,
