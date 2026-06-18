@@ -44,30 +44,30 @@ use sl_proto::{
 // alone.
 pub use sl_proto::{
     ActiveGroup, AnyMessage, Asset, AssetType, AvatarClassified, AvatarGroupMembership,
-    AvatarInterests, AvatarPick, AvatarProperties, ChatAudible, ChatMessage, ChatSourceType,
-    ChatType, ClassifiedInfo, ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams,
-    DeRezDestination, DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind,
-    EstateInfo, Event, ExperienceInfo, ExperiencePermission, ExperienceProperties,
-    ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights, GltfMaterialOverride,
-    GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupProfile, GroupRole,
-    GroupRoleChange, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType,
-    GroupTitle, IceCandidate, ImDialog, ImageCodec, InstantMessage, InterestsUpdate,
-    InventoryFolder, InventoryItem, InventoryOffer, InventoryType, LegacyMaterial, LightData,
-    LightImage, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest, LoginResponse,
-    MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER,
-    MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry,
-    MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags,
-    MuteType, NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings,
-    ObjectMediaResponse, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ParcelVoiceInfo,
-    PermissionField, PickInfo, PickUpdate, PlayingAnimation, PrimShape, ProductType, ProfileUpdate,
-    ReflectionProbe, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability,
-    RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData, SoundFlags,
-    SoundPreload, TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace, Throttle,
-    TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable,
-    WearableType, avatar_texture, decode_texture_entry, grid_to_handle, group_powers,
+    AvatarInterests, AvatarPick, AvatarProperties, Camera, ChatAudible, ChatMessage,
+    ChatSourceType, ChatType, ClassifiedInfo, ClassifiedUpdate, ClickAction, ControlFlags,
+    CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData, EstateAccessDelta,
+    EstateAccessKind, EstateInfo, Event, ExperienceInfo, ExperiencePermission,
+    ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights,
+    GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
+    GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleMember,
+    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, IceCandidate, ImDialog, ImageCodec,
+    InstantMessage, InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer, InventoryType,
+    LegacyMaterial, LightData, LightImage, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest,
+    LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
+    MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate,
+    Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
+    MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, Object, ObjectExtraParams,
+    ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectProperties, ObjectTransform,
+    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
+    ParcelVoiceInfo, PermissionField, PickInfo, PickUpdate, PlayingAnimation, PrimShape,
+    ProductType, ProfileUpdate, ReflectionProbe, RegionFlags, RegionIdentity, RegionInfoUpdate,
+    RegionLimits, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData,
+    SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace,
+    Throttle, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest,
+    Wearable, WearableType, avatar_texture, decode_texture_entry, grid_to_handle, group_powers,
     handle_to_global, handle_to_grid, pcode, sim_access,
 };
 
@@ -161,6 +161,10 @@ pub enum Command {
         /// The head rotation.
         head: Rotation,
     },
+    /// Set the agent's camera viewpoint (position and look axes); the simulator
+    /// uses it to build the interest list, so the streamed scene follows where
+    /// the agent looks. Build one with [`Camera::looking_at`] or directly.
+    SetCamera(Camera),
     /// Stand the agent up (from sitting).
     Stand,
     /// Sit the agent on the ground where it stands.
@@ -1540,6 +1544,9 @@ impl Client {
                         }
                         Some(Command::SetRotation { body, head }) => {
                             self.session.set_rotation(body, head, Instant::now())?;
+                        }
+                        Some(Command::SetCamera(camera)) => {
+                            self.session.set_camera(camera, Instant::now())?;
                         }
                         Some(Command::Stand) => {
                             self.session.stand(Instant::now())?;

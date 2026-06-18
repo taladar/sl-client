@@ -220,7 +220,7 @@ use crate::error::Error;
 use crate::terrain;
 use crate::types::{
     ActiveGroup, Asset, AssetType, AvatarClassified, AvatarGroupMembership, AvatarInterests,
-    AvatarPick, AvatarProperties, ChatAudible, ChatMessage, ChatSourceType, ChatType,
+    AvatarPick, AvatarProperties, Camera, ChatAudible, ChatMessage, ChatSourceType, ChatType,
     ClassifiedInfo, ClassifiedUpdate, ClickAction, CreateGroupParams, DeRezDestination,
     DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, Event, Friend,
     FriendRights, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupProfile,
@@ -1100,41 +1100,22 @@ impl Circuit {
         self.send(&request, Reliability::Reliable, now)
     }
 
-    /// Queues an `AgentUpdate` unreliably carrying the given control flags and
-    /// body/head rotation.
+    /// Queues an `AgentUpdate` unreliably carrying the given control flags,
+    /// body/head rotation and camera viewpoint.
     ///
-    /// The camera is placed at the region centre with an orthonormal basis and
-    /// the configured draw distance, so the simulator builds an interest list
-    /// and enables the neighbouring regions (which arrive as `EnableSimulator`).
-    /// The simulator moves the agent according to `control_flags` in the
-    /// direction of `body_rotation`.
+    /// The `camera` position and axes, together with the configured draw
+    /// distance, are how the simulator builds the agent's interest list and
+    /// enables the neighbouring regions (which arrive as `EnableSimulator`), so
+    /// the streamed scene follows where the agent looks. The simulator moves the
+    /// agent according to `control_flags` in the direction of `body_rotation`.
     fn send_agent_update(
         &mut self,
         control_flags: u32,
         body_rotation: Rotation,
         head_rotation: Rotation,
+        camera: &Camera,
         now: Instant,
     ) -> Result<(), WireError> {
-        let camera_center = Vector {
-            x: 128.0,
-            y: 128.0,
-            z: 30.0,
-        };
-        let camera_at_axis = Vector {
-            x: 1.0,
-            y: 0.0,
-            z: 0.0,
-        };
-        let camera_left_axis = Vector {
-            x: 0.0,
-            y: 1.0,
-            z: 0.0,
-        };
-        let camera_up_axis = Vector {
-            x: 0.0,
-            y: 0.0,
-            z: 1.0,
-        };
         let message = AnyMessage::AgentUpdate(AgentUpdate {
             agent_data: AgentUpdateAgentDataBlock {
                 agent_id: self.agent_id,
@@ -1142,10 +1123,10 @@ impl Circuit {
                 body_rotation,
                 head_rotation,
                 state: 0,
-                camera_center,
-                camera_at_axis,
-                camera_left_axis,
-                camera_up_axis,
+                camera_center: camera.center.clone(),
+                camera_at_axis: camera.at_axis.clone(),
+                camera_left_axis: camera.left_axis.clone(),
+                camera_up_axis: camera.up_axis.clone(),
                 far: self.draw_distance,
                 control_flags,
                 flags: 0,
@@ -3789,6 +3770,12 @@ pub struct Session {
     body_rotation: Rotation,
     /// The agent's head rotation sent in `AgentUpdate`s.
     head_rotation: Rotation,
+    /// The agent's camera viewpoint advertised in keep-alive `AgentUpdate`s on
+    /// the root *and* every child circuit. Drives the simulator's interest list,
+    /// so it follows where the agent looks rather than the region origin.
+    /// Defaults to [`Camera::region_center`] until a client calls
+    /// [`Session::set_camera`].
+    camera: Camera,
     /// Set between an `AgentRequestSit` and the `AvatarSitResponse` that follows,
     /// so the response is completed with an `AgentSit`.
     sit_requested: bool,
@@ -3887,6 +3874,7 @@ impl Session {
             throttle: None,
             body_rotation: IDENTITY_ROTATION,
             head_rotation: IDENTITY_ROTATION,
+            camera: Camera::region_center(),
             sit_requested: false,
             handover: None,
             teleport_target: None,
@@ -4303,7 +4291,7 @@ impl Session {
         let controls = self.controls.bits();
         let body = self.body_rotation.clone();
         let head = self.head_rotation.clone();
-        let _ignored = child.send_agent_update(controls, body, head, now);
+        let _ignored = child.send_agent_update(controls, body, head, &self.camera, now);
         child.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
         self.children.insert(sim, child);
         Ok(())
@@ -5731,8 +5719,9 @@ impl Session {
             let controls = self.controls.bits();
             let body = self.body_rotation.clone();
             let head = self.head_rotation.clone();
+            let camera = self.camera.clone();
             if let Some(circuit) = self.circuit.as_mut() {
-                circuit.send_agent_update(controls, body, head, now)?;
+                circuit.send_agent_update(controls, body, head, &camera, now)?;
                 circuit.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
             }
         }
@@ -5743,6 +5732,7 @@ impl Session {
         let controls = self.controls.bits();
         let body = self.body_rotation.clone();
         let head = self.head_rotation.clone();
+        let camera = self.camera.clone();
         let mut dead = Vec::new();
         for (addr, child) in &mut self.children {
             if now >= child.timers.inactivity {
@@ -5754,7 +5744,7 @@ impl Session {
                 child.flush_acks(now)?;
             }
             if child.timers.agent_update.is_some_and(|d| now >= d) {
-                child.send_agent_update(controls, body.clone(), head.clone(), now)?;
+                child.send_agent_update(controls, body.clone(), head.clone(), &camera, now)?;
                 child.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
             }
         }
@@ -5922,8 +5912,9 @@ impl Session {
         let controls = self.controls.union(extra).bits();
         let body = self.body_rotation.clone();
         let head = self.head_rotation.clone();
+        let camera = self.camera.clone();
         if let Some(circuit) = self.circuit.as_mut() {
-            circuit.send_agent_update(controls, body, head, now)?;
+            circuit.send_agent_update(controls, body, head, &camera, now)?;
         } else {
             return Err(Error::NoCircuit);
         }
@@ -5985,6 +5976,47 @@ impl Session {
         self.body_rotation = body_rotation;
         self.head_rotation = head_rotation;
         self.send_agent_update_now(ControlFlags::empty(), now)
+    }
+
+    /// Sets the agent's camera viewpoint (position and look axes) advertised in
+    /// `AgentUpdate`s and sends one immediately on the root circuit and every
+    /// child circuit. The simulator uses it to build the agent's *interest list*
+    /// — which objects, avatars and regions it streams — so this steers what the
+    /// agent receives toward where it looks rather than the region origin. The
+    /// viewpoint is remembered and re-sent on every keep-alive (root and
+    /// children) and survives region changes, like the movement controls. Use
+    /// [`Camera::looking_at`] to aim at a target, or build a [`Camera`]
+    /// directly. The draw distance is set separately with
+    /// [`Session::set_draw_distance`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn set_camera(&mut self, camera: Camera, now: Instant) -> Result<(), Error> {
+        self.camera = camera;
+        let controls = self.controls.bits();
+        let body = self.body_rotation.clone();
+        let head = self.head_rotation.clone();
+        let camera = self.camera.clone();
+        // Advertise on the child circuits too, so neighbour regions update the
+        // interest list for this agent. Best-effort per child — a wire-encode
+        // failure must not abort the root send.
+        for child in self.children.values_mut() {
+            let _ignored =
+                child.send_agent_update(controls, body.clone(), head.clone(), &camera, now);
+        }
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_agent_update(controls, body, head, &camera, now)?;
+        Ok(())
+    }
+
+    /// The agent's current camera viewpoint advertised in `AgentUpdate`s
+    /// (defaults to [`Camera::region_center`] until [`Session::set_camera`] is
+    /// called).
+    #[must_use]
+    pub const fn camera(&self) -> &Camera {
+        &self.camera
     }
 
     /// Stands the agent up (from sitting), sending one `AgentUpdate` with the

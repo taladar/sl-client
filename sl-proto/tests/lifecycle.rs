@@ -9,7 +9,7 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
-        AssetType, ChatAudible, ChatSourceType, ChatType, ClassifiedUpdate, ClickAction,
+        AssetType, Camera, ChatAudible, ChatSourceType, ChatType, ClassifiedUpdate, ClickAction,
         ControlFlags, CreateGroupParams, DeRezDestination, DisconnectReason, EstateAccessDelta,
         EstateAccessKind, Event, FriendRights, GroupNoticeAttachment, GroupRoleChange,
         GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImageCodec,
@@ -693,6 +693,74 @@ mod test {
             agent_update_controls(&keepalive),
             Some((ControlFlags::AT_POS | ControlFlags::FLY).bits())
         );
+        Ok(())
+    }
+
+    /// Finds the agent-data block of the first `AgentUpdate` in a batch.
+    fn first_agent_update(
+        messages: &[AnyMessage],
+    ) -> Option<&sl_wire::messages::AgentUpdateAgentDataBlock> {
+        messages.iter().find_map(|m| match m {
+            AnyMessage::AgentUpdate(update) => Some(&update.agent_data),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn set_camera_sends_and_persists_agent_update() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A viewpoint up high looking along +X.
+        let eye = Vector {
+            x: 64.0,
+            y: 96.0,
+            z: 50.0,
+        };
+        let camera = Camera::looking_at(
+            eye.clone(),
+            Vector {
+                x: 65.0,
+                y: 96.0,
+                z: 50.0,
+            },
+        );
+        session.set_camera(camera.clone(), now)?;
+        assert_eq!(session.camera(), &camera);
+
+        // The immediate AgentUpdate carries the camera position and axes.
+        let sent = drain(&mut session)?;
+        let block = first_agent_update(&sent).ok_or("expected an AgentUpdate")?;
+        assert_eq!(block.camera_center, eye);
+        assert_eq!(block.camera_at_axis, camera.at_axis);
+        assert_eq!(block.camera_left_axis, camera.left_axis);
+        assert_eq!(block.camera_up_axis, camera.up_axis);
+        // Looking along +X yields the world-up basis (matching the legacy default
+        // axes, but at the caller's position rather than the region centre).
+        assert_eq!(
+            camera.at_axis,
+            Vector {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0
+            }
+        );
+        assert_eq!(
+            camera.left_axis,
+            Vector {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0
+            }
+        );
+
+        // It persists: the next keep-alive AgentUpdate still carries the camera.
+        session.handle_timeout(after(now, 1100)?);
+        let keepalive = drain(&mut session)?;
+        let block = first_agent_update(&keepalive).ok_or("expected an AgentUpdate")?;
+        assert_eq!(block.camera_center, eye);
+        assert_eq!(block.camera_at_axis, camera.at_axis);
         Ok(())
     }
 

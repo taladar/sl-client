@@ -59,11 +59,11 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 29 ✅ | Profile & pick/classified editing | 5 | Profile editor | Local OpenSim (profiles) |
 | 30 ✅ | Inventory mutation & AIS3 | 8 | Inventory manager, product bot | Local OpenSim |
 | 31 ✅ | Group management edits | 5 | Group admin bot | Local OpenSim (Groups V2) |
-| 32 | Camera & interest control | 3 | Look-aware roaming bot | Local OpenSim |
+| 32 ✅ | Camera & interest control | 3 | Look-aware roaming bot | Local OpenSim |
 | 33 | World-stream decode & LOD fetch | 5 | *(faithfulness for 16/19)* | Local OpenSim |
 | 34 | Experience key-value store | 3 | Experience datastore client | **SL grid only** |
 
-**Items #32–#34 are not yet built** (#28–#31 are now done). They are
+**Items #33–#34 are not yet built** (#28–#32 are now done). They are
 the **deferred follow-ups** that items #1–#27 knowingly left for later (the
 "Deferred:" / "follow-up" / "waits on #…" / "unit-tested only" notes in those
 entries), now promoted to first-class roadmap items so the gap analysis stays
@@ -1220,15 +1220,36 @@ from the 4-role list back to 3). The role-member assignment and eject paths need
 a second group member (`SL_MEMBER`), so they are unit-tested only. Test: local
 OpenSim with the Groups V2 module (MariaDB backend).*
 
-**32. Camera & interest control — real `AgentUpdate` camera fields · 3 pts.
-(extends #3; was blocked on #16, Tier C.)** Item #3 noted the camera "stays at
-region centre — true camera control waits on position tracking from the
-object/scene graph (#16)." With #16 done, this populates the `AgentUpdate`
-camera position, the at/left/up axes and the draw distance from a real,
-caller-set viewpoint (a `set_camera`-style surface, persisted and re-sent on
-keep-alive like #3's controls), so the simulator's interest list and the
-per-category bandwidth (#15) follow where the agent actually looks rather than
-the region origin. *Test: local OpenSim.*
+**32. Camera & interest control — real `AgentUpdate` camera fields · 3 pts. ✅
+Done. (extends #3; was blocked on #16, Tier C.)** Item #3 noted the camera
+"stays at region centre — true camera control waits on position tracking from
+the object/scene graph (#16)." With #16 done, the `AgentUpdate` camera position
+and at/left/up axes are now a real, caller-set viewpoint. A new `Camera` value
+type (`sl-proto`) holds the eye `center` and the orthonormal `at`/`left`/`up`
+basis, with a `Camera::looking_at(eye, target)` helper that derives the basis
+with the world-up vector exactly as the reference viewer's
+`LLCoordFrame::lookAt` does (`left = up × at`, `up = at × left`), plus
+`Camera::region_center` (the historic default). `Session::set_camera` persists
+it on the session and sends an immediate `AgentUpdate` on the root **and** every
+child circuit; the viewpoint is then re-sent on every keep-alive (root and
+neighbours) and survives region changes, exactly like #3's controls and #15's
+throttle, so the simulator's interest list — and thus the per-category bandwidth
+(#15) — follows where the agent looks rather than the region origin. The
+previously-hardcoded region-centre camera in the `AgentUpdate` builder became
+the `Camera::region_center` default, so behaviour is unchanged until a client
+calls `set_camera`. Draw distance keeps its existing separate surface
+(`Session::set_draw_distance`, the `AgentUpdate` `far` field). Wired as
+`Command`/`SlCommand::SetCamera(Camera)` through both runtimes (re-exporting
+`Camera`). Covered by four unit tests (the `looking_at` right-handed
+orthonormal-basis construction, the straight-down degenerate fallback, the
+region-centre default matching the legacy viewpoint, and a `lifecycle.rs`
+`set_camera` test asserting the `AgentUpdate` carries the camera position/axes
+and persists them on the next keep-alive). *Live-verified against the local
+OpenSim via the `login_hold_logout` example: a `SetCamera` looking from above
+the region centre toward the north-east ground round-tripped on one login (a
+real orthonormal basis `at≈(0.65,0.65,−0.40)`, `left≈(−0.71,0.71,0)`,
+`up≈(0.29,0.29,0.91)`), re-sent on each keep-alive across a 12 s hold, with a
+clean login→logout lifecycle and no protocol error. Test: local OpenSim.*
 
 **33. World-stream decode & LOD-fetch completeness — `ObjectUpdateCompressed`
 trailing fields, HTTP `Range` LOD · 5 pts. (extends #16 & #19, Tier C.)** Two
