@@ -5198,7 +5198,8 @@ mod test {
         assert_eq!(balance.balance, LindenAmount(1234));
         assert_eq!(balance.square_meters_credit, 512);
         assert_eq!(balance.square_meters_committed, 128);
-        // A plain poll carries no transaction metadata.
+        // A plain poll carries no transaction metadata and a nil transaction id.
+        assert_eq!(balance.transaction_id, uuid::Uuid::nil());
         assert!(balance.transaction.is_none());
         Ok(())
     }
@@ -5214,7 +5215,7 @@ mod test {
         let reply = AnyMessage::MoneyBalanceReply(MoneyBalanceReply {
             money_data: MoneyBalanceReplyMoneyDataBlock {
                 agent_id: uuid::Uuid::from_u128(1),
-                transaction_id: uuid::Uuid::nil(),
+                transaction_id: uuid::Uuid::from_u128(0x7A11),
                 transaction_success: true,
                 money_balance: 750,
                 square_meters_credit: 0,
@@ -5241,6 +5242,8 @@ mod test {
             })
             .ok_or("expected a MoneyBalance event")?;
         assert_eq!(balance.balance, LindenAmount(750));
+        // The transaction id correlates the reply back to the triggering pay/buy.
+        assert_eq!(balance.transaction_id, uuid::Uuid::from_u128(0x7A11));
         let transaction = balance.transaction.ok_or("expected transaction details")?;
         assert_eq!(
             MoneyTransactionType::from_i32(transaction.transaction_type),

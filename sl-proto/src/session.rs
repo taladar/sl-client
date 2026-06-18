@@ -9406,6 +9406,7 @@ fn money_balance(reply: &sl_wire::messages::MoneyBalanceReply) -> MoneyBalance {
     });
     MoneyBalance {
         agent_id: data.agent_id,
+        transaction_id: data.transaction_id,
         success: data.transaction_success,
         balance: LindenAmount(u64::try_from(data.money_balance).unwrap_or(0)),
         square_meters_credit: data.square_meters_credit,
