@@ -563,6 +563,12 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_CREATE_INVENTORY_CATEGORY,
 ];
 
+/// The maximum UDP datagram size an I/O driver should be prepared to receive.
+///
+/// Sized at the theoretical IPv4/UDP payload maximum (64 KiB) so a driver's
+/// receive buffer never truncates an inbound datagram.
+pub const RECV_BUFFER_SIZE: usize = 0x1_0000;
+
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
 fn deadline(now: Instant, duration: Duration) -> Instant {
     now.checked_add(duration).unwrap_or(now)

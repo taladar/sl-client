@@ -24,10 +24,10 @@ use sl_proto::{
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
     CAP_RENDER_MATERIALS, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
     CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Event as SessionEvent, Llsd, LoginResponse,
-    REQUESTED_CAPABILITIES, Session, ais_category_children_fetch_url, ais_category_children_url,
-    ais_category_url, ais_create_category_url, ais_item_url, build_ais_create_category_body,
-    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request, build_event_queue_request,
+    RECV_BUFFER_SIZE, REQUESTED_CAPABILITIES, Session, ais_category_children_fetch_url,
+    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
+    build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
+    build_ais_update_item_body, build_create_inventory_category_request, build_event_queue_request,
     build_fetch_inventory_request, build_group_member_data_request,
     build_modify_material_params_request, build_new_file_agent_inventory_request,
     build_object_media_get_request, build_object_media_navigate_request,
@@ -49,7 +49,7 @@ use sl_proto::{
 pub use sl_proto::{
     ActiveGroup, AnyMessage, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick,
     AvatarProperties, Camera, ChatAudible, ChatMessage, ChatSourceType, ChatType, ClassifiedInfo,
-    ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, DeRezDestination,
+    ClassifiedUpdate, ClickAction, Command, ControlFlags, CreateGroupParams, DeRezDestination,
     DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, ExperienceInfo,
     ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData,
     Friend, FriendRights, GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice,
@@ -79,9 +79,6 @@ pub use sl_proto::{
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
-
-/// The maximum UDP datagram size we are prepared to receive.
-const RECV_BUFFER_SIZE: usize = 0x1_0000;
 
 /// How long to wait for a single CAPS event-queue long-poll before retrying.
 const EVENT_QUEUE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -116,1285 +113,11 @@ pub struct SlEvent(pub SessionEvent);
 #[derive(Event, Debug, Clone)]
 pub struct SlMfaChallenge(pub MfaChallenge);
 
-/// A command to a running session, sent as a Bevy event.
+/// A command to a running session, sent as a Bevy event. Wraps the shared
+/// [`Command`] vocabulary (defined in `sl-proto`) so it can be read as a Bevy
+/// event; match on its `.0` to dispatch.
 #[derive(Event, Debug)]
-pub enum SlCommand {
-    /// Send an application message.
-    Send {
-        /// The message to send.
-        message: Box<AnyMessage>,
-        /// How to deliver it.
-        reliability: Reliability,
-    },
-    /// Send local chat via `ChatFromViewer`. Incoming chat arrives as an
-    /// [`SlSessionEvent::ChatReceived`].
-    Chat {
-        /// The message text.
-        message: String,
-        /// The chat type (whisper / normal / shout / …).
-        chat_type: ChatType,
-        /// The chat channel (`0` for ordinary local chat).
-        channel: i32,
-    },
-    /// Broadcast a local-chat typing indicator (`true` = start, `false` = stop).
-    /// Other clients see it as an [`SlSessionEvent::ChatTyping`].
-    Typing(bool),
-    /// Send a direct (1:1) instant message. Incoming IMs arrive as an
-    /// [`SlSessionEvent::InstantMessageReceived`].
-    InstantMessage {
-        /// The recipient's agent id.
-        to_agent_id: Uuid,
-        /// The message text.
-        message: String,
-    },
-    /// Send an instant-message typing indicator to `to_agent_id` (`true` = start,
-    /// `false` = stop). Other clients see it as an [`SlSessionEvent::ImTyping`].
-    ImTyping {
-        /// The correspondent's agent id.
-        to_agent_id: Uuid,
-        /// Whether typing started (`true`) or stopped (`false`).
-        typing: bool,
-    },
-    /// Set the agent control flags (movement); the simulator moves the agent
-    /// accordingly. Pass [`ControlFlags::empty`] to stop.
-    SetControls(ControlFlags),
-    /// Set the per-category bandwidth throttle (`AgentThrottle`); the simulator
-    /// allocates its UDP send budget accordingly. Re-sent on every region change.
-    SetThrottle(Throttle),
-    /// Set the agent's body and head rotation (facing/steering).
-    SetRotation {
-        /// The body rotation.
-        body: Rotation,
-        /// The head rotation.
-        head: Rotation,
-    },
-    /// Set the agent's camera viewpoint (position and look axes); the simulator
-    /// uses it to build the interest list, so the streamed scene follows where
-    /// the agent looks. Build one with [`Camera::looking_at`] or directly.
-    SetCamera(Camera),
-    /// Stand the agent up (from sitting).
-    Stand,
-    /// Sit the agent on the ground where it stands.
-    SitOnGround,
-    /// Sit the agent on the object `target` at the region-local `offset`. The
-    /// result arrives as an [`SlSessionEvent::SitResult`].
-    Sit {
-        /// The object to sit on.
-        target: Uuid,
-        /// The seat offset, in region-local metres.
-        offset: Vector,
-    },
-    /// Walk the agent to the global coordinates `(global_x, global_y, z)` using
-    /// the simulator's server-side autopilot.
-    Autopilot {
-        /// The global X coordinate, in metres.
-        global_x: f64,
-        /// The global Y coordinate, in metres.
-        global_y: f64,
-        /// The region-local height, in metres.
-        z: f64,
-    },
-    /// Request an avatar's profile. Replies arrive as
-    /// [`SlSessionEvent::AvatarProperties`], [`SlSessionEvent::AvatarInterests`],
-    /// and [`SlSessionEvent::AvatarGroups`].
-    RequestAvatarProperties(Uuid),
-    /// Request an avatar's picks. The reply arrives as
-    /// [`SlSessionEvent::AvatarPicks`].
-    RequestAvatarPicks(Uuid),
-    /// Request the agent's private notes about an avatar. The reply arrives as
-    /// [`SlSessionEvent::AvatarNotes`].
-    RequestAvatarNotes(Uuid),
-    /// Request an avatar's classified ads. The reply arrives as
-    /// [`SlSessionEvent::AvatarClassifieds`].
-    RequestAvatarClassifieds(Uuid),
-    /// Request the full details of one pick. `creator_id` is the pick's owner
-    /// (the `target_id` from [`SlSessionEvent::AvatarPicks`]). The reply arrives
-    /// as [`SlSessionEvent::PickInfo`].
-    RequestPickInfo {
-        /// The avatar that owns the pick.
-        creator_id: Uuid,
-        /// The pick id.
-        pick_id: Uuid,
-    },
-    /// Request the full details of one classified ad. The reply arrives as
-    /// [`SlSessionEvent::ClassifiedInfo`].
-    RequestClassifiedInfo(Uuid),
-    /// Replace the agent's own profile (`AvatarPropertiesUpdate`).
-    UpdateProfile(ProfileUpdate),
-    /// Replace the agent's own interests (`AvatarInterestsUpdate`).
-    UpdateInterests(InterestsUpdate),
-    /// Set the agent's private notes about an avatar (`AvatarNotesUpdate`).
-    UpdateAvatarNotes {
-        /// The avatar the notes are about.
-        target_id: Uuid,
-        /// The note text.
-        notes: String,
-    },
-    /// Create or edit one of the agent's picks (`PickInfoUpdate`).
-    UpdatePick(PickUpdate),
-    /// Delete one of the agent's picks (`PickDelete`).
-    DeletePick(Uuid),
-    /// Delete any agent's pick (`PickGodDelete`, god-only).
-    GodDeletePick {
-        /// The pick id.
-        pick_id: Uuid,
-        /// The query id for the dataserver to resend the pick list under.
-        query_id: Uuid,
-    },
-    /// Create or edit one of the agent's classifieds (`ClassifiedInfoUpdate`).
-    UpdateClassified(ClassifiedUpdate),
-    /// Delete one of the agent's classifieds (`ClassifiedDelete`).
-    DeleteClassified(Uuid),
-    /// Delete any agent's classified (`ClassifiedGodDelete`, god-only).
-    GodDeleteClassified {
-        /// The classified id.
-        classified_id: Uuid,
-        /// The query id for the dataserver to resend the classified list under.
-        query_id: Uuid,
-    },
-    /// Request the contents (sub-folders and items) of an inventory folder over
-    /// **UDP** (`FetchInventoryDescendents`). The reply arrives as
-    /// [`SlSessionEvent::InventoryDescendents`]. The full folder skeleton arrives
-    /// once at login as [`SlSessionEvent::InventorySkeleton`].
-    RequestFolderContents(Uuid),
-    /// Fetch the contents of one or more inventory folders over the **HTTP CAPS**
-    /// path (`FetchInventoryDescendents2`) — the modern path used on Second Life.
-    /// Each folder's contents arrive as an [`SlSessionEvent::InventoryDescendents`].
-    FetchInventoryFolders(Vec<Uuid>),
-    /// Create an inventory folder (`CreateInventoryFolder`, UDP). `folder_id` is a
-    /// fresh, caller-chosen id; the simulator sends no reply (cache updated
-    /// optimistically). Use [`SlCommand::CreateInventoryCategory`] for a reply.
-    CreateInventoryFolder {
-        /// The new folder's id (a fresh, caller-chosen UUID).
-        folder_id: Uuid,
-        /// The parent folder.
-        parent_id: Uuid,
-        /// The folder's preferred type (`FolderType`, or `-1` for none).
-        folder_type: i8,
-        /// The folder name.
-        name: String,
-    },
-    /// Rename / re-type / re-parent an existing folder (`UpdateInventoryFolder`).
-    UpdateInventoryFolder {
-        /// The folder to update.
-        folder_id: Uuid,
-        /// The (possibly new) parent folder.
-        parent_id: Uuid,
-        /// The folder's preferred type (`FolderType`, or `-1`).
-        folder_type: i8,
-        /// The folder name.
-        name: String,
-    },
-    /// Move a folder under a new parent (`MoveInventoryFolder`).
-    MoveInventoryFolder {
-        /// The folder to move.
-        folder_id: Uuid,
-        /// The new parent folder.
-        parent_id: Uuid,
-    },
-    /// Delete folders (to the server trash) via `RemoveInventoryFolder`.
-    RemoveInventoryFolders(Vec<Uuid>),
-    /// Create an inventory item (`CreateInventoryItem`). The simulator allocates
-    /// the id and replies with an [`SlSessionEvent::InventoryItemCreated`].
-    CreateInventoryItem(NewInventoryItem),
-    /// Rewrite an item's metadata / permissions (`UpdateInventoryItem`). A non-nil
-    /// `transaction_id` binds a freshly uploaded asset to the item.
-    UpdateInventoryItem {
-        /// The item, with its fields set to the desired values.
-        item: Box<InventoryItem>,
-        /// The asset transaction id (nil if not replacing the asset).
-        transaction_id: Uuid,
-    },
-    /// Move an item into a folder, optionally renaming it (an empty `new_name`
-    /// keeps the name), via `MoveInventoryItem`.
-    MoveInventoryItem {
-        /// The item to move.
-        item_id: Uuid,
-        /// The destination folder.
-        folder_id: Uuid,
-        /// The new name, or empty to keep the current name.
-        new_name: String,
-    },
-    /// Copy an item into a folder (`CopyInventoryItem`). The simulator answers
-    /// with an [`SlSessionEvent::InventoryBulkUpdate`] for the new item.
-    CopyInventoryItem {
-        /// The current owner of the source item.
-        old_agent_id: Uuid,
-        /// The source item.
-        old_item_id: Uuid,
-        /// The destination folder.
-        new_folder_id: Uuid,
-        /// The new item's name.
-        new_name: String,
-    },
-    /// Delete items (`RemoveInventoryItem`).
-    RemoveInventoryItems(Vec<Uuid>),
-    /// Rewrite an item's flags (`ChangeInventoryItemFlags`).
-    ChangeInventoryItemFlags {
-        /// The item to change.
-        item_id: Uuid,
-        /// The new flags bitfield.
-        flags: u32,
-    },
-    /// Empty a folder's contents (e.g. the Trash) via `PurgeInventoryDescendents`.
-    PurgeInventoryDescendents(Uuid),
-    /// Delete a mixed set of folders and items in one `RemoveInventoryObjects`.
-    RemoveInventoryObjects {
-        /// The folders to delete.
-        folder_ids: Vec<Uuid>,
-        /// The items to delete.
-        item_ids: Vec<Uuid>,
-    },
-    /// Create a folder via the `CreateInventoryCategory` capability (served by
-    /// both OpenSim and Second Life), returning a synchronous reply surfaced as
-    /// an [`SlSessionEvent::InventoryBulkUpdate`]. The runtime allocates the id.
-    CreateInventoryCategory {
-        /// The parent folder.
-        parent_id: Uuid,
-        /// The folder's preferred type (`FolderType`, or `-1`).
-        folder_type: i32,
-        /// The folder name.
-        name: String,
-    },
-    /// Create a folder over the modern **AIS3** (`InventoryAPIv3`) cap
-    /// (Second-Life only). The affected objects arrive as an
-    /// [`SlSessionEvent::InventoryBulkUpdate`].
-    Ais3CreateFolder {
-        /// The parent folder.
-        parent_id: Uuid,
-        /// The folder's preferred type (`FolderType`, or `-1`).
-        folder_type: i32,
-        /// The folder name.
-        name: String,
-    },
-    /// Rename a folder over AIS3 (`PATCH /category/<id>`). Second-Life only.
-    Ais3RenameFolder {
-        /// The folder to rename.
-        folder_id: Uuid,
-        /// The new name.
-        name: String,
-    },
-    /// Move a folder over AIS3 (`PATCH /category/<id>` with `{ parent_id }`).
-    /// Second-Life only.
-    Ais3MoveFolder {
-        /// The folder to move.
-        folder_id: Uuid,
-        /// The new parent folder.
-        parent_id: Uuid,
-    },
-    /// Delete a folder over AIS3 (`DELETE /category/<id>`). Second-Life only.
-    Ais3RemoveFolder(Uuid),
-    /// Empty a folder over AIS3 (`DELETE /category/<id>/children`). Second-Life
-    /// only.
-    Ais3PurgeFolder(Uuid),
-    /// Fetch a folder's children over AIS3 (`GET /category/<id>/children?depth=`).
-    /// Second-Life only; the result arrives as an
-    /// [`SlSessionEvent::InventoryBulkUpdate`].
-    Ais3FetchFolderChildren {
-        /// The folder whose children to fetch.
-        folder_id: Uuid,
-        /// The recursion depth (clamped to the AIS maximum).
-        depth: i32,
-    },
-    /// Update an item's name and description over AIS3 (`PATCH /item/<id>`).
-    /// Second-Life only.
-    Ais3UpdateItem {
-        /// The item to update.
-        item_id: Uuid,
-        /// The new name.
-        name: String,
-        /// The new description.
-        description: String,
-    },
-    /// Move an item over AIS3 (`PATCH /item/<id>` with `{ parent_id }`).
-    /// Second-Life only.
-    Ais3MoveItem {
-        /// The item to move.
-        item_id: Uuid,
-        /// The new parent folder.
-        parent_id: Uuid,
-    },
-    /// Delete an item over AIS3 (`DELETE /item/<id>`). Second-Life only.
-    Ais3RemoveItem(Uuid),
-    /// Fetch a single item over AIS3 (`GET /item/<id>`). Second-Life only; the
-    /// item arrives as an [`SlSessionEvent::InventoryBulkUpdate`].
-    Ais3FetchItem(Uuid),
-    /// Set the friendship rights granted to a friend (`GrantUserRights`). The
-    /// `rights` bitfield combines the [`FriendRights`] `CAN_*` flags. The change
-    /// is echoed back as an [`SlSessionEvent::FriendRightsChanged`].
-    GrantUserRights {
-        /// The friend whose granted rights to set.
-        target: Uuid,
-        /// The new rights bitfield (combine `FriendRights::CAN_*`).
-        rights: FriendRights,
-    },
-    /// Offer friendship to an agent (`ImprovedInstantMessage`,
-    /// `IM_FRIENDSHIP_OFFERED`). The offer arrives at the recipient as an
-    /// [`SlSessionEvent::InstantMessageReceived`] with
-    /// [`ImDialog::FriendshipOffered`].
-    OfferFriendship {
-        /// The agent to offer friendship to.
-        to_agent_id: Uuid,
-        /// The offer message text.
-        message: String,
-    },
-    /// End the friendship with an agent (`TerminateFriendship`).
-    TerminateFriendship(Uuid),
-    /// Accept a friendship offer (`AcceptFriendship`). The `transaction_id` is
-    /// the [`InstantMessage::id`] of the incoming friendship-offer IM; the
-    /// calling card goes into `calling_card_folder`.
-    AcceptFriendship {
-        /// The offer's transaction id (the friendship-offer IM's `id`).
-        transaction_id: Uuid,
-        /// The inventory folder to place the new calling card in.
-        calling_card_folder: Uuid,
-    },
-    /// Decline a friendship offer (`DeclineFriendship`). The `transaction_id` is
-    /// the [`InstantMessage::id`] of the incoming friendship-offer IM.
-    DeclineFriendship(Uuid),
-    /// Make a group the active group (`ActivateGroup`); nil clears it. Confirmed
-    /// by [`SlSessionEvent::ActiveGroupChanged`].
-    ActivateGroup(Uuid),
-    /// Request a group's member roster over **UDP** (`GroupMembersRequest`).
-    /// Replies arrive as [`SlSessionEvent::GroupMembers`].
-    RequestGroupMembers(Uuid),
-    /// Fetch a group's member roster over the **HTTP CAPS** path
-    /// (`GroupMemberData`) — the modern path used on Second Life. The roster
-    /// arrives as an [`SlSessionEvent::GroupMembers`].
-    FetchGroupMembers(Uuid),
-    /// Request a group's roles. The reply arrives as
-    /// [`SlSessionEvent::GroupRoleData`].
-    RequestGroupRoles(Uuid),
-    /// Request a group's role↔member pairings. The reply arrives as
-    /// [`SlSessionEvent::GroupRoleMembers`].
-    RequestGroupRoleMembers(Uuid),
-    /// Request the agent's selectable titles in a group. The reply arrives as
-    /// [`SlSessionEvent::GroupTitles`].
-    RequestGroupTitles(Uuid),
-    /// Request a group's profile. The reply arrives as
-    /// [`SlSessionEvent::GroupProfileReceived`].
-    RequestGroupProfile(Uuid),
-    /// Request a group's notice list. The reply arrives as
-    /// [`SlSessionEvent::GroupNotices`].
-    RequestGroupNotices(Uuid),
-    /// Request a single group notice's full body (by notice id).
-    RequestGroupNotice(Uuid),
-    /// Create a new group. The result arrives as
-    /// [`SlSessionEvent::CreateGroupResult`].
-    CreateGroup(CreateGroupParams),
-    /// Join an open-enrollment group. The result arrives as
-    /// [`SlSessionEvent::JoinGroupResult`].
-    JoinGroup(Uuid),
-    /// Leave a group. The result arrives as [`SlSessionEvent::LeaveGroupResult`].
-    LeaveGroup(Uuid),
-    /// Invite agents to a group, each an `(invitee_id, role_id)` pair (nil role
-    /// = the default Everyone role).
-    InviteToGroup {
-        /// The group to invite into.
-        group_id: Uuid,
-        /// The `(invitee_id, role_id)` pairs.
-        invitees: Vec<(Uuid, Uuid)>,
-    },
-    /// Set whether the agent accepts notices from a group / lists it in profile.
-    SetGroupAcceptNotices {
-        /// The group.
-        group_id: Uuid,
-        /// Whether to accept notices.
-        accept_notices: bool,
-        /// Whether to list the group in the agent's profile.
-        list_in_profile: bool,
-    },
-    /// Set the agent's L$ contribution to a group.
-    SetGroupContribution {
-        /// The group.
-        group_id: Uuid,
-        /// The new contribution amount.
-        contribution: i32,
-    },
-    /// Start (join) a group's IM session (`IM_SESSION_GROUP_START`). Group
-    /// messages then arrive as [`SlSessionEvent::GroupSessionMessage`].
-    StartGroupSession(Uuid),
-    /// Send a message into a group's IM session. Other members receive it as
-    /// [`SlSessionEvent::GroupSessionMessage`].
-    SendGroupMessage {
-        /// The group (and IM session) to post to.
-        group_id: Uuid,
-        /// The message text.
-        message: String,
-    },
-    /// Leave a group's IM session (stop receiving its chat) without leaving the
-    /// group itself.
-    LeaveGroupSession(Uuid),
-    /// Create, update, or delete group roles (`GroupRoleUpdate`), one
-    /// [`GroupRoleEdit`] per role. Re-request the roles to observe the change.
-    UpdateGroupRoles {
-        /// The group whose roles to edit.
-        group_id: Uuid,
-        /// The role create/update/delete edits.
-        roles: Vec<GroupRoleEdit>,
-    },
-    /// Add members to or remove members from group roles (`GroupRoleChanges`).
-    ChangeGroupRoleMembers {
-        /// The group whose role assignments to change.
-        group_id: Uuid,
-        /// The member↔role add/remove changes.
-        changes: Vec<GroupRoleMemberChange>,
-    },
-    /// Eject members from a group (`EjectGroupMemberRequest`). The result arrives
-    /// as [`SlSessionEvent::EjectGroupMemberResult`].
-    EjectGroupMembers {
-        /// The group to eject from.
-        group_id: Uuid,
-        /// The agent ids to eject.
-        member_ids: Vec<Uuid>,
-    },
-    /// Post a group notice (`IM_GROUP_NOTICE`), optionally attaching an inventory
-    /// item. The grid relays it to members who accept notices.
-    SendGroupNotice {
-        /// The group to post to.
-        group_id: Uuid,
-        /// The notice subject.
-        subject: String,
-        /// The notice body.
-        message: String,
-        /// An optional inventory item to attach (must be copy+transfer).
-        attachment: Option<GroupNoticeAttachment>,
-    },
-    /// Reply to a scripted-object dialog (`ScriptDialogReply`) from an
-    /// [`SlSessionEvent::ScriptDialog`] — the chosen button on its hidden
-    /// `chat_channel`.
-    ReplyScriptDialog {
-        /// The object that raised the dialog.
-        object_id: Uuid,
-        /// The dialog's hidden chat channel.
-        chat_channel: i32,
-        /// The chosen button index.
-        button_index: i32,
-        /// The chosen button label (or the typed text for an `llTextBox`).
-        button_label: String,
-    },
-    /// Answer a scripted-object permission request (`ScriptAnswerYes`) from an
-    /// [`SlSessionEvent::ScriptPermissionRequest`] — grants `permissions`
-    /// ([`ScriptPermissions::default`] denies everything).
-    AnswerScriptPermissions {
-        /// The task (object) id holding the script.
-        task_id: Uuid,
-        /// The script item id.
-        item_id: Uuid,
-        /// The permissions to grant.
-        permissions: ScriptPermissions,
-    },
-    /// Request the agent's mute (block) list (`MuteListRequest`). The list
-    /// arrives as [`SlSessionEvent::MuteList`] (or
-    /// [`SlSessionEvent::MuteListUnchanged`]).
-    RequestMuteList,
-    /// Mute (block) an entity (`UpdateMuteListEntry`).
-    Mute {
-        /// The muted entity's id (nil for a [`MuteType::ByName`] mute).
-        id: Uuid,
-        /// The muted entity's name.
-        name: String,
-        /// What kind of entity is muted.
-        mute_type: MuteType,
-        /// The per-aspect exception flags ([`MuteFlags::default`] mutes all).
-        flags: MuteFlags,
-    },
-    /// Remove a mute (`RemoveMuteListEntry`); `id`/`name` must match the entry.
-    Unmute {
-        /// The muted entity's id.
-        id: Uuid,
-        /// The muted entity's name.
-        name: String,
-    },
-    /// Teleport to `position` (region-local) in the region `region_handle`.
-    Teleport {
-        /// The destination region handle.
-        region_handle: u64,
-        /// The destination position within the region.
-        position: Vector,
-        /// The look-at direction on arrival.
-        look_at: Vector,
-    },
-    /// Request the current region's info (agent/object limits).
-    RequestRegionInfo,
-    /// Request `ParcelProperties` for a metre rectangle (region-local).
-    RequestParcelProperties {
-        /// The western edge (metres).
-        west: f32,
-        /// The southern edge (metres).
-        south: f32,
-        /// The eastern edge (metres).
-        east: f32,
-        /// The northern edge (metres).
-        north: f32,
-        /// A sequence id echoed back in the reply for matching.
-        sequence_id: i32,
-    },
-    /// Edit a parcel's settings (`ParcelPropertiesUpdate`).
-    UpdateParcel(ParcelUpdate),
-    /// Request a parcel's allow or ban list (`ParcelAccessListRequest`); the
-    /// reply arrives as [`SlSessionEvent::ParcelAccessList`].
-    RequestParcelAccessList {
-        /// The parcel's region-local id.
-        local_id: i32,
-        /// Which list to fetch (allow or ban).
-        scope: ParcelAccessScope,
-    },
-    /// Replace a parcel's allow or ban list (`ParcelAccessListUpdate`); empty
-    /// `entries` clears it.
-    UpdateParcelAccessList {
-        /// The parcel's region-local id.
-        local_id: i32,
-        /// Which list to set (allow or ban).
-        scope: ParcelAccessScope,
-        /// The new entries.
-        entries: Vec<ParcelAccessEntry>,
-    },
-    /// Request a parcel's dwell/traffic value (`ParcelDwellRequest`); the reply
-    /// arrives as [`SlSessionEvent::ParcelDwell`].
-    RequestParcelDwell {
-        /// The parcel's region-local id.
-        local_id: i32,
-    },
-    /// Buy a parcel (`ParcelBuy`).
-    BuyParcel {
-        /// The parcel's region-local id.
-        local_id: i32,
-        /// The agreed price in L$.
-        price: i32,
-        /// The parcel area in m².
-        area: i32,
-        /// The group to buy for (nil for a personal purchase).
-        group_id: Uuid,
-        /// Whether the purchase is group-owned.
-        is_group_owned: bool,
-    },
-    /// Return objects on a parcel (`ParcelReturnObjects`).
-    ReturnParcelObjects {
-        /// The parcel's region-local id.
-        local_id: i32,
-        /// Which objects to return (combine `ParcelReturnType` constants).
-        return_type: ParcelReturnType,
-        /// Optional owner-id scope.
-        owner_ids: Vec<Uuid>,
-        /// Optional explicit object/task-id scope.
-        task_ids: Vec<Uuid>,
-    },
-    /// Select (highlight) objects on a parcel (`ParcelSelectObjects`).
-    SelectParcelObjects {
-        /// The parcel's region-local id.
-        local_id: i32,
-        /// Which objects to select (combine `ParcelReturnType` constants).
-        return_type: ParcelReturnType,
-        /// Explicit object ids (used with `ParcelReturnType::LIST`).
-        object_ids: Vec<Uuid>,
-    },
-    /// Deed a parcel to a group (`ParcelDeedToGroup`).
-    DeedParcelToGroup {
-        /// The parcel's region-local id.
-        local_id: i32,
-        /// The group to deed the parcel to.
-        group_id: Uuid,
-    },
-    /// Reclaim a parcel to the estate (`ParcelReclaim`).
-    ReclaimParcel {
-        /// The parcel's region-local id.
-        local_id: i32,
-    },
-    /// Release (abandon) a parcel back to the estate (`ParcelRelease`).
-    ReleaseParcel {
-        /// The parcel's region-local id.
-        local_id: i32,
-    },
-    /// Request the region's estate config + access lists (`getinfo`); replies
-    /// arrive as [`SlSessionEvent::EstateInfo`] and [`SlSessionEvent::EstateAccessList`].
-    RequestEstateInfo,
-    /// Add/remove an agent or group on an estate access list (`estateaccessdelta`).
-    UpdateEstateAccess {
-        /// Which list change to apply.
-        delta: EstateAccessDelta,
-        /// The target agent or group id.
-        target: Uuid,
-    },
-    /// Kick (eject) an agent from the region (`kickestate`).
-    KickEstateUser {
-        /// The agent to kick.
-        target: Uuid,
-    },
-    /// Teleport an agent home (`teleporthomeuser`).
-    TeleportHomeUser {
-        /// The agent to send home.
-        target: Uuid,
-    },
-    /// Teleport every agent in the region home (`teleporthomeallusers`).
-    TeleportHomeAllUsers,
-    /// Schedule a region restart in `seconds` (`restart`); `-1` delays a pending
-    /// restart by an hour.
-    RestartRegion {
-        /// Seconds until restart (`-1` to delay).
-        seconds: i32,
-    },
-    /// Send an estate-wide blue-box notice (`simulatormessage`).
-    SendEstateMessage {
-        /// The message body.
-        message: String,
-    },
-    /// Update the region's settings (`setregioninfo`).
-    SetRegionInfo(RegionInfoUpdate),
-    /// God-level eject of an agent (`GodKickUser`; needs grid-god rights).
-    GodKickUser {
-        /// The agent to kick.
-        target: Uuid,
-        /// The kick reason.
-        reason: String,
-    },
-    /// Send a generic god-level command (`GodlikeMessage`; needs grid-god rights).
-    SendGodlikeMessage {
-        /// The god method name.
-        method: String,
-        /// The string parameters.
-        params: Vec<String>,
-    },
-    /// Request the agent's L$ balance (`MoneyBalanceRequest`); the reply arrives
-    /// as [`SlSessionEvent::MoneyBalance`].
-    RequestMoneyBalance,
-    /// Request the grid's economy data (`EconomyDataRequest`); the reply arrives
-    /// as [`SlSessionEvent::EconomyData`].
-    RequestEconomyData,
-    /// Pay L$ to an avatar or object (`MoneyTransferRequest`).
-    SendMoneyTransfer {
-        /// The payee (avatar or object id).
-        dest: Uuid,
-        /// The L$ amount to pay.
-        amount: LindenAmount,
-        /// The kind of transaction (e.g. gift, pay-object).
-        kind: MoneyTransactionType,
-        /// A description annotating the transaction.
-        description: String,
-    },
-    /// Set the draw distance advertised in keep-alive `AgentUpdate`s.
-    SetDrawDistance(f32),
-    /// Request world-map blocks for a grid-coordinate rectangle (region
-    /// indices); each region arrives as an [`SlSessionEvent::MapBlock`].
-    RequestMapBlocks {
-        /// Minimum grid x (inclusive).
-        min_x: u32,
-        /// Maximum grid x (inclusive).
-        max_x: u32,
-        /// Minimum grid y (inclusive).
-        min_y: u32,
-        /// Maximum grid y (inclusive).
-        max_y: u32,
-    },
-    /// Search the world map for regions by name (`MapNameRequest`); matches
-    /// arrive as [`SlSessionEvent::MapBlock`].
-    RequestMapByName {
-        /// The region name (or prefix) to search for.
-        name: String,
-    },
-    /// Request world-map overlay items of a given type (`MapItemRequest`); the
-    /// reply arrives as [`SlSessionEvent::MapItems`].
-    RequestMapItems {
-        /// The kind of item to request (avatars, telehubs, land for sale, …).
-        item_type: MapItemType,
-        /// The target region handle (0 = the current region).
-        region_handle: u64,
-    },
-    /// Request the full `ObjectUpdate` for the given region-local ids
-    /// (`RequestMultipleObjects`); updates arrive as [`SlSessionEvent::ObjectAdded`]
-    /// / [`SlSessionEvent::ObjectUpdated`].
-    RequestObjects {
-        /// The region-local ids to (re)fetch.
-        local_ids: Vec<u32>,
-    },
-    /// Request objects' extended properties by selecting them (`ObjectSelect`);
-    /// the reply arrives as [`SlSessionEvent::ObjectProperties`].
-    RequestObjectProperties {
-        /// The region-local ids to select.
-        local_ids: Vec<u32>,
-    },
-    /// Deselect previously selected objects (`ObjectDeselect`).
-    DeselectObjects {
-        /// The region-local ids to deselect.
-        local_ids: Vec<u32>,
-    },
-    /// Touch (left-click) an object (`ObjectGrab` + `ObjectDeGrab`).
-    TouchObject {
-        /// The object's region-local id.
-        local_id: u32,
-    },
-    /// Begin grabbing an object (`ObjectGrab`).
-    GrabObject {
-        /// The object's region-local id.
-        local_id: u32,
-        /// The grab offset from the object's centre.
-        grab_offset: Vector,
-    },
-    /// Update an in-progress grab as the object is dragged (`ObjectGrabUpdate`).
-    GrabObjectUpdate {
-        /// The object's persistent global id.
-        object_id: Uuid,
-        /// The initial grab offset.
-        grab_offset_initial: Vector,
-        /// The current region-local grab position.
-        grab_position: Vector,
-        /// Milliseconds since the previous update.
-        time_since_last: u32,
-    },
-    /// Release a grab on an object (`ObjectDeGrab`).
-    DegrabObject {
-        /// The object's region-local id.
-        local_id: u32,
-    },
-    /// Rez (create) a new primitive (`ObjectAdd`).
-    RezObject {
-        /// The shape of the prim to rez.
-        shape: PrimShape,
-        /// The group the new object is set to ([`Uuid::nil`] for none).
-        group_id: Uuid,
-    },
-    /// Duplicate objects with an offset (`ObjectDuplicate`).
-    DuplicateObjects {
-        /// The region-local ids to duplicate.
-        local_ids: Vec<u32>,
-        /// The offset to apply to the copies.
-        offset: Vector,
-        /// The group the copies are set to.
-        group_id: Uuid,
-    },
-    /// Delete objects to the trash (`ObjectDelete`).
-    DeleteObjects {
-        /// The region-local ids to delete.
-        local_ids: Vec<u32>,
-    },
-    /// Derez objects (take/return/trash; `DeRezObject`).
-    DerezObjects {
-        /// The region-local ids to derez.
-        local_ids: Vec<u32>,
-        /// Where the objects should go.
-        destination: DeRezDestination,
-        /// The destination folder/task id (meaning depends on `destination`).
-        destination_id: Uuid,
-        /// A caller-chosen id correlating the resulting inventory update.
-        transaction_id: Uuid,
-        /// The active group ([`Uuid::nil`] for none).
-        group_id: Uuid,
-    },
-    /// Move/rotate/scale an object (`MultipleObjectUpdate`).
-    UpdateObject {
-        /// The object's region-local id.
-        local_id: u32,
-        /// The transform to apply (only set components change).
-        transform: ObjectTransform,
-    },
-    /// Rename an object (`ObjectName`).
-    SetObjectName {
-        /// The object's region-local id.
-        local_id: u32,
-        /// The new name.
-        name: String,
-    },
-    /// Re-describe an object (`ObjectDescription`).
-    SetObjectDescription {
-        /// The object's region-local id.
-        local_id: u32,
-        /// The new description.
-        description: String,
-    },
-    /// Set an object's left-click behaviour (`ObjectClickAction`).
-    SetObjectClickAction {
-        /// The object's region-local id.
-        local_id: u32,
-        /// The new click action.
-        action: ClickAction,
-    },
-    /// Set an object's physical material (`ObjectMaterial`).
-    SetObjectMaterial {
-        /// The object's region-local id.
-        local_id: u32,
-        /// The new material.
-        material: Material,
-    },
-    /// Set an object's physics/temporary/phantom flags (`ObjectFlagUpdate`).
-    SetObjectFlags {
-        /// The object's region-local id.
-        local_id: u32,
-        /// The flag settings to apply.
-        flags: ObjectFlagSettings,
-    },
-    /// Set the group objects are set to (`ObjectGroup`).
-    SetObjectGroup {
-        /// The region-local ids.
-        local_ids: Vec<u32>,
-        /// The group id.
-        group_id: Uuid,
-    },
-    /// Set or clear permission bits on objects (`ObjectPermissions`).
-    SetObjectPermissions {
-        /// The region-local ids.
-        local_ids: Vec<u32>,
-        /// Which mask to change.
-        field: PermissionField,
-        /// Whether to set (true) or clear (false) the bits.
-        set: bool,
-        /// The `PERM_*` bits to set or clear.
-        mask: u32,
-    },
-    /// Set an object's sale type and price (`ObjectSaleInfo`).
-    SetObjectForSale {
-        /// The object's region-local id.
-        local_id: u32,
-        /// The sale type.
-        sale_type: SaleType,
-        /// The sale price in L$.
-        sale_price: i32,
-    },
-    /// Set an object's category code (`ObjectCategory`).
-    SetObjectCategory {
-        /// The object's region-local id.
-        local_id: u32,
-        /// The category code.
-        category: u32,
-    },
-    /// Toggle whether an object is listed in search (`ObjectIncludeInSearch`).
-    SetObjectIncludeInSearch {
-        /// The object's region-local id.
-        local_id: u32,
-        /// Whether to include the object in search.
-        include: bool,
-    },
-    /// Link objects into one linkset (`ObjectLink`); the first id is the root.
-    LinkObjects {
-        /// The region-local ids to link (first = root).
-        local_ids: Vec<u32>,
-    },
-    /// Unlink objects from their linksets (`ObjectDelink`).
-    DelinkObjects {
-        /// The region-local ids to unlink.
-        local_ids: Vec<u32>,
-    },
-    /// Request a texture over the legacy UDP image path (`RequestImage`); the
-    /// reassembled image arrives as [`SlSessionEvent::TextureReceived`] (or
-    /// [`SlSessionEvent::TextureNotFound`]).
-    RequestTexture {
-        /// The texture's asset id.
-        texture_id: Uuid,
-        /// The level of detail (0 = full resolution; higher = coarser).
-        discard_level: i8,
-        /// The download priority (larger is fetched sooner).
-        priority: f32,
-    },
-    /// Request a generic asset over the UDP transfer path (`TransferRequest`);
-    /// the reassembled asset arrives as [`SlSessionEvent::AssetReceived`] (or
-    /// [`SlSessionEvent::AssetTransferFailed`]).
-    RequestAsset {
-        /// The asset's id.
-        asset_id: Uuid,
-        /// The asset's class.
-        asset_type: AssetType,
-        /// The transfer priority.
-        priority: f32,
-    },
-    /// Fetch a texture over the HTTP `GetTexture` capability; the image arrives
-    /// as [`SlSessionEvent::TextureReceived`] (or
-    /// [`SlSessionEvent::TextureNotFound`]). When `discard_level` is non-zero the
-    /// codestream is truncated to that level-of-detail prefix via [`j2c`].
-    FetchTexture {
-        /// The texture's asset id.
-        texture_id: Uuid,
-        /// The level of detail (0 = full resolution; higher = coarser).
-        discard_level: u8,
-    },
-    /// Fetch a mesh asset over the HTTP `GetMesh2`/`GetMesh` capability; the data
-    /// arrives as [`SlSessionEvent::AssetReceived`]. An optional `byte_range`
-    /// (inclusive `(start, end)` byte offsets) issues an HTTP `Range` request so
-    /// only that span is transferred — e.g. a single mesh LOD whose offsets the
-    /// caller read from the mesh header. `None` fetches the whole asset.
-    FetchMesh {
-        /// The mesh asset's id.
-        mesh_id: Uuid,
-        /// Optional inclusive `(start, end)` byte range to fetch.
-        byte_range: Option<(u32, u32)>,
-    },
-    /// Fetch a generic asset over the HTTP `GetAsset` capability; the data
-    /// arrives as [`SlSessionEvent::AssetReceived`] (or
-    /// [`SlSessionEvent::AssetTransferFailed`]). An optional `byte_range`
-    /// (inclusive `(start, end)` byte offsets) issues an HTTP `Range` request so
-    /// only that span is transferred; `None` fetches the whole asset.
-    FetchAsset {
-        /// The asset's id.
-        asset_id: Uuid,
-        /// The asset's class (selects the cap query parameter).
-        asset_type: AssetType,
-        /// Optional inclusive `(start, end)` byte range to fetch.
-        byte_range: Option<(u32, u32)>,
-    },
-    /// Ask the simulator to (re-)send the agent's own wearables
-    /// (`AgentWearablesRequest`); the reply arrives as
-    /// [`SlSessionEvent::AgentWearables`].
-    RequestWearables,
-    /// Set the agent's outfit (`AgentIsNowWearing`): the complete set of
-    /// wearables to wear. The simulator acknowledges with a fresh
-    /// [`SlSessionEvent::AgentWearables`].
-    SetWearing(Vec<Wearable>),
-    /// Advertise the agent's own appearance (`AgentSetAppearance`): the legacy
-    /// client-side bake path (used by OpenSim and pre-server-baking regions).
-    SetAppearance {
-        /// The appearance serial (strictly increasing; 0 resets).
-        serial: u32,
-        /// The agent's bounding-box size, in metres.
-        size: Vector,
-        /// The packed `TextureEntry` blob carrying the baked-texture ids.
-        texture_entry: Vec<u8>,
-        /// The visual parameter bytes (one per parameter, in viewer order).
-        visual_params: Vec<u8>,
-        /// The per-baked-slot cache hashes (`(cache id, texture slot index)`).
-        wearable_cache: Vec<(Uuid, u8)>,
-    },
-    /// Query the simulator's baked-texture cache (`AgentCachedTexture`): the
-    /// reply arrives as [`SlSessionEvent::CachedTextureResponse`].
-    RequestCachedTextures {
-        /// The serial echoed back in the reply.
-        serial: i32,
-        /// The queried slots, as `(cache id, texture slot index)` pairs.
-        slots: Vec<(Uuid, u8)>,
-    },
-    /// Trigger a modern server-side appearance bake over the HTTP
-    /// `UpdateAvatarAppearance` capability (Second Life "central baking"): the
-    /// grid composites the Current Outfit Folder and broadcasts the result as
-    /// [`SlSessionEvent::AvatarAppearance`]; the POST reply arrives as
-    /// [`SlSessionEvent::ServerAppearanceUpdate`].
-    RequestServerAppearanceUpdate {
-        /// The Current Outfit Folder version the grid should bake.
-        cof_version: i32,
-    },
-    /// Start and/or stop several of the agent's own animations (`AgentAnimation`):
-    /// each `(anim_id, start)` pair starts (`true`) or stops (`false`) one
-    /// animation. Other avatars observe the result as a
-    /// [`SlSessionEvent::AvatarAnimation`].
-    SetAnimations(Vec<(Uuid, bool)>),
-    /// Start one of the agent's own animations (`AgentAnimation`); convenience
-    /// for a single-element [`SlCommand::SetAnimations`].
-    PlayAnimation(Uuid),
-    /// Stop one of the agent's own animations (`AgentAnimation`); convenience for
-    /// a single-element [`SlCommand::SetAnimations`].
-    StopAnimation(Uuid),
-    /// Upload a new asset over the legacy UDP path (`AssetUploadRequest`): stores
-    /// the asset bytes (small assets inline, larger ones over `Xfer`) without
-    /// creating an inventory item. Completion arrives as
-    /// [`SlSessionEvent::AssetUploadComplete`]. For an upload that also creates an
-    /// inventory item, use [`SlCommand::UploadAsset`].
-    UploadAssetUdp {
-        /// The asset class to store the bytes as.
-        asset_type: AssetType,
-        /// The raw asset bytes.
-        data: Vec<u8>,
-        /// Mark the asset temporary.
-        temp_file: bool,
-        /// Keep the asset on the simulator only (do not store it grid-wide).
-        store_local: bool,
-    },
-    /// Upload a new asset and create an inventory item for it over the modern
-    /// `NewFileAgentInventory` capability (the two-step CAPS uploader). The result
-    /// arrives as [`SlSessionEvent::AssetUploaded`] (or
-    /// [`SlSessionEvent::AssetUploadFailed`]).
-    ///
-    /// For a mesh, `data` must be the **fully-formed mesh asset bytes** —
-    /// uploading does not run the viewer's model-import pipeline (LOD / physics /
-    /// cost generation).
-    UploadAsset {
-        /// The destination inventory folder.
-        folder_id: Uuid,
-        /// The asset class (e.g. [`AssetType::Texture`], [`AssetType::Animation`]).
-        asset_type: AssetType,
-        /// The inventory-item class (e.g. [`InventoryType::Texture`],
-        /// [`InventoryType::Wearable`]).
-        inventory_type: InventoryType,
-        /// The new item's name.
-        name: String,
-        /// The new item's description.
-        description: String,
-        /// The permission bits granted to the next owner.
-        next_owner_mask: u32,
-        /// The permission bits granted to the group.
-        group_mask: u32,
-        /// The permission bits granted to everyone.
-        everyone_mask: u32,
-        /// The L$ price the client expects to be charged (0 on free grids such
-        /// as OpenSim).
-        expected_upload_cost: i32,
-        /// The raw asset bytes.
-        data: Vec<u8>,
-    },
-    /// Upload a client-computed baked avatar texture over the
-    /// `UploadBakedTexture` capability (the legacy appearance path): stores a
-    /// *temporary* asset with no inventory item. The result arrives as
-    /// [`SlSessionEvent::AssetUploaded`] (with `new_inventory_item` = `None`) or
-    /// [`SlSessionEvent::AssetUploadFailed`].
-    UploadBakedTexture {
-        /// The raw baked-texture bytes (a JPEG-2000 codestream).
-        data: Vec<u8>,
-    },
-    /// Replace the asset of an existing inventory item over the matching
-    /// `Update*AgentInventory` capability (gesture / notecard / script /
-    /// settings, selected by `asset_type`). The result arrives as
-    /// [`SlSessionEvent::AssetUploaded`] or [`SlSessionEvent::AssetUploadFailed`].
-    UpdateInventoryAsset {
-        /// The inventory item whose asset is being replaced.
-        item_id: Uuid,
-        /// The item's asset class (selects the capability; see
-        /// [`AssetType::update_item_cap`]).
-        asset_type: AssetType,
-        /// The new raw asset bytes.
-        data: Vec<u8>,
-    },
-    /// Fetch an object's per-face **media-on-a-prim** settings over the
-    /// `ObjectMedia` capability (a GET). The result arrives as
-    /// [`SlSessionEvent::ObjectMedia`].
-    RequestObjectMedia {
-        /// The object whose media to fetch.
-        object_id: Uuid,
-    },
-    /// Set an object's per-face media over the `ObjectMedia` capability (an
-    /// UPDATE). `faces` is one entry per prim face in order; a face with no media
-    /// is `None`. The simulator advances the object's media version (visible on a
-    /// subsequent [`SlCommand::RequestObjectMedia`]) rather than replying.
-    SetObjectMedia {
-        /// The object whose media to set.
-        object_id: Uuid,
-        /// Per-face media, one slot per prim face in order (`None` = no media).
-        faces: Vec<Option<MediaEntry>>,
-    },
-    /// Navigate the media on a single prim face to a new URL over the
-    /// `ObjectMediaNavigate` capability. The simulator advances the object's
-    /// media version (visible on a subsequent [`SlCommand::RequestObjectMedia`]).
-    NavigateObjectMedia {
-        /// The object whose media to navigate.
-        object_id: Uuid,
-        /// The prim face (texture index) to navigate.
-        face: u8,
-        /// The URL to navigate that face's media to.
-        url: String,
-    },
-    /// Fetch the legacy (normal/specular) materials for `material_ids` over the
-    /// `RenderMaterials` capability (the OpenSim-supported path). The result
-    /// arrives as [`SlSessionEvent::RenderMaterials`].
-    RequestRenderMaterials {
-        /// The material ids to fetch (per-face `TextureEntry` material ids).
-        material_ids: Vec<Uuid>,
-    },
-    /// Set GLTF (PBR) materials on object faces over the `ModifyMaterialParams`
-    /// capability. Each update applies an opaque `gltf_json` override and/or a
-    /// stored material `asset_id` to one face (`side`, or `-1` for all). The
-    /// `{ success, message }` reply arrives as
-    /// [`SlSessionEvent::MaterialParamsResult`].
-    ModifyMaterialParams {
-        /// The per-face material assignments to apply.
-        updates: Vec<MaterialOverrideUpdate>,
-    },
-    /// Request voice-chat account credentials over the
-    /// `ProvisionVoiceAccountRequest` capability. A [`VoiceProvisionRequest::vivox`]
-    /// asks for legacy Vivox SIP credentials; a [`VoiceProvisionRequest::webrtc`]
-    /// negotiates a WebRTC session (the JSEP offer SDP is supplied by the
-    /// caller's own — out-of-scope — WebRTC engine). The reply arrives as
-    /// [`SlSessionEvent::VoiceAccountProvisioned`]. This handles the grid
-    /// *signalling* only; the audio session itself is the caller's concern.
-    RequestVoiceAccount {
-        /// The provision request (backend selection + WebRTC offer/logout).
-        request: VoiceProvisionRequest,
-    },
-    /// Request the current parcel's voice channel over the
-    /// `ParcelVoiceInfoRequest` capability. The reply arrives as
-    /// [`SlSessionEvent::ParcelVoiceInfo`].
-    RequestParcelVoiceInfo,
-    /// Trickle WebRTC ICE candidates (or signal end-of-gathering) over the
-    /// `VoiceSignalingRequest` capability, keyed by the `viewer_session` from a
-    /// prior [`SlSessionEvent::VoiceAccountProvisioned`]. Fire-and-forget — the
-    /// simulator returns only an HTTP status. The candidates come from the
-    /// caller's out-of-scope WebRTC engine.
-    SendVoiceSignaling {
-        /// The viewer session id from the provision reply.
-        viewer_session: String,
-        /// The ICE candidates to trickle (empty with `completed` to end).
-        candidates: Vec<IceCandidate>,
-        /// Whether this marks the end of ICE gathering.
-        completed: bool,
-    },
-    /// Fetch experience metadata over the `GetExperienceInfo` capability, batching
-    /// every id into one request. The reply arrives as
-    /// [`SlSessionEvent::ExperienceInfo`].
-    RequestExperienceInfo {
-        /// The experiences whose metadata to fetch.
-        experience_ids: Vec<Uuid>,
-    },
-    /// Search experiences by name over the `FindExperienceByName` capability. The
-    /// reply (one page) arrives as [`SlSessionEvent::ExperienceSearchResults`].
-    FindExperiences {
-        /// The search text.
-        query: String,
-        /// The zero-based result page.
-        page: i32,
-    },
-    /// Fetch the agent's per-experience preferences over the `GetExperiences`
-    /// capability. The reply arrives as [`SlSessionEvent::ExperiencePermissions`].
-    RequestExperiencePermissions,
-    /// Set (or forget) the agent's preference for one experience over the
-    /// `ExperiencePreferences` capability (`Allow`/`Block` via PUT, `Forget` via
-    /// DELETE). The updated lists arrive as [`SlSessionEvent::ExperiencePermissions`].
-    SetExperiencePermission {
-        /// The experience to set the preference for.
-        experience_id: Uuid,
-        /// The preference to apply.
-        permission: ExperiencePermission,
-    },
-    /// Fetch the experiences the agent owns over the `AgentExperiences`
-    /// capability. The reply arrives as [`SlSessionEvent::OwnedExperiences`].
-    RequestOwnedExperiences,
-    /// Fetch the experiences the agent administers over the `GetAdminExperiences`
-    /// capability. The reply arrives as [`SlSessionEvent::AdminExperiences`].
-    RequestAdminExperiences,
-    /// Fetch the experiences the agent created over the `GetCreatorExperiences`
-    /// capability. The reply arrives as [`SlSessionEvent::CreatorExperiences`].
-    RequestCreatorExperiences,
-    /// Fetch the experiences a group owns over the `GroupExperiences` capability.
-    /// The reply arrives as [`SlSessionEvent::GroupExperiences`].
-    RequestGroupExperiences {
-        /// The group to query.
-        group_id: Uuid,
-    },
-    /// Test whether the agent administers an experience over the
-    /// `IsExperienceAdmin` capability. The reply arrives as
-    /// [`SlSessionEvent::ExperienceAdminStatus`].
-    RequestExperienceAdmin {
-        /// The experience to test.
-        experience_id: Uuid,
-    },
-    /// Test whether the agent contributes to an experience over the
-    /// `IsExperienceContributor` capability. The reply arrives as
-    /// [`SlSessionEvent::ExperienceContributorStatus`].
-    RequestExperienceContributor {
-        /// The experience to test.
-        experience_id: Uuid,
-    },
-    /// Edit an experience's metadata over the `UpdateExperience` capability. The
-    /// updated experience arrives as [`SlSessionEvent::ExperienceUpdated`].
-    UpdateExperience {
-        /// The editable experience metadata to write.
-        update: ExperienceUpdate,
-    },
-    /// Read the region's experience allow/block/trust lists over the
-    /// `RegionExperiences` capability. The reply arrives as
-    /// [`SlSessionEvent::RegionExperiences`].
-    RequestRegionExperiences,
-    /// Replace the region's experience allow/block/trust lists over the
-    /// `RegionExperiences` capability (estate-gated). The updated lists arrive as
-    /// [`SlSessionEvent::RegionExperiences`].
-    SetRegionExperiences {
-        /// The experiences the region allows.
-        allowed: Vec<Uuid>,
-        /// The experiences the region blocks.
-        blocked: Vec<Uuid>,
-        /// The experiences the region trusts.
-        trusted: Vec<Uuid>,
-    },
-    /// Offer a teleport ("lure") to each `targets` agent (`StartLure`, #28).
-    OfferTeleport {
-        /// The agents to invite.
-        targets: Vec<Uuid>,
-        /// The accompanying message.
-        message: String,
-    },
-    /// Accept a teleport lure (`TeleportLureRequest`); `lure_id` is the offer
-    /// IM's [`InstantMessage::id`].
-    AcceptTeleportLure {
-        /// The lure id from the offer IM.
-        lure_id: Uuid,
-    },
-    /// Decline a teleport lure (`IM_LURE_DECLINED`).
-    DeclineTeleportLure {
-        /// The offer IM's sender.
-        from_agent_id: Uuid,
-        /// The lure id from the offer IM.
-        lure_id: Uuid,
-    },
-    /// Request a teleport from `to_agent_id` (`IM_TELEPORT_REQUEST`).
-    RequestTeleport {
-        /// The agent to ask.
-        to_agent_id: Uuid,
-        /// The accompanying message.
-        message: String,
-    },
-    /// Offer an inventory item to `to_agent_id` over IM (`IM_INVENTORY_OFFERED`).
-    GiveInventory {
-        /// The recipient agent.
-        to_agent_id: Uuid,
-        /// The offered item's id.
-        item_id: Uuid,
-        /// The offered item's asset class.
-        asset_type: AssetType,
-        /// The item's name (shown to the recipient).
-        item_name: String,
-        /// A fresh transaction id echoed back on accept/decline.
-        transaction_id: Uuid,
-    },
-    /// Offer an inventory folder to `to_agent_id` over IM (`IM_INVENTORY_OFFERED`).
-    GiveInventoryFolder {
-        /// The recipient agent.
-        to_agent_id: Uuid,
-        /// The offered folder's id.
-        folder_id: Uuid,
-        /// The folder's name (shown to the recipient).
-        folder_name: String,
-        /// A fresh transaction id echoed back on accept/decline.
-        transaction_id: Uuid,
-    },
-    /// Accept an inventory offer (`IM_INVENTORY_ACCEPTED`), filing it into
-    /// `folder_id`.
-    AcceptInventoryOffer {
-        /// The decoded inventory offer.
-        offer: InventoryOffer,
-        /// The destination folder to file the item into.
-        folder_id: Uuid,
-    },
-    /// Decline an inventory offer (`IM_INVENTORY_DECLINED`); routed to
-    /// `trash_folder_id`.
-    DeclineInventoryOffer {
-        /// The decoded inventory offer.
-        offer: InventoryOffer,
-        /// The trash folder the simulator routes the declined item to.
-        trash_folder_id: Uuid,
-    },
-    /// Start (or add invitees to) an ad-hoc conference IM session
-    /// (`IM_SESSION_CONFERENCE_START`).
-    StartConference {
-        /// A fresh, caller-chosen session id naming the conference.
-        session_id: Uuid,
-        /// The agents to invite.
-        invitees: Vec<Uuid>,
-        /// The opening message.
-        message: String,
-    },
-    /// Send a message into a conference / ad-hoc IM session (`IM_SESSION_SEND`).
-    SendConferenceMessage {
-        /// The conference session id.
-        session_id: Uuid,
-        /// The message text.
-        message: String,
-    },
-    /// Leave a conference / ad-hoc IM session (`IM_SESSION_LEAVE`).
-    LeaveConference {
-        /// The conference session id.
-        session_id: Uuid,
-    },
-    /// Flush stored offline instant messages over the legacy UDP trigger
-    /// (`RetrieveInstantMessages`).
-    RetrieveInstantMessages,
-    /// Read stored offline instant messages over the modern `ReadOfflineMsgs`
-    /// capability.
-    RequestOfflineMessages,
-    /// Begin a clean logout.
-    Logout,
-}
+pub struct SlCommand(pub Command);
 
 /// The plugin configuration resource.
 #[derive(Resource, Debug)]
@@ -1642,24 +365,24 @@ fn advance_running(
 
     // Apply queued commands.
     for command in commands.read() {
-        match command {
-            SlCommand::Send {
+        match &command.0 {
+            Command::Send {
                 message,
                 reliability,
             } => {
                 session.enqueue((**message).clone(), *reliability, now).ok();
             }
-            SlCommand::Chat {
+            Command::Chat {
                 message,
                 chat_type,
                 channel,
             } => {
                 session.say(message, *chat_type, *channel, now).ok();
             }
-            SlCommand::Typing(typing) => {
+            Command::Typing(typing) => {
                 session.set_typing(*typing, now).ok();
             }
-            SlCommand::InstantMessage {
+            Command::InstantMessage {
                 to_agent_id,
                 message,
             } => {
@@ -1667,86 +390,86 @@ fn advance_running(
                     .send_instant_message(*to_agent_id, message, now)
                     .ok();
             }
-            SlCommand::ImTyping {
+            Command::ImTyping {
                 to_agent_id,
                 typing,
             } => {
                 session.send_im_typing(*to_agent_id, *typing, now).ok();
             }
-            SlCommand::SetControls(controls) => {
+            Command::SetControls(controls) => {
                 session.set_controls(*controls, now).ok();
             }
-            SlCommand::SetThrottle(throttle) => {
+            Command::SetThrottle(throttle) => {
                 session.set_throttle(*throttle, now).ok();
             }
-            SlCommand::SetRotation { body, head } => {
+            Command::SetRotation { body, head } => {
                 session.set_rotation(body.clone(), head.clone(), now).ok();
             }
-            SlCommand::SetCamera(camera) => {
+            Command::SetCamera(camera) => {
                 session.set_camera(camera.clone(), now).ok();
             }
-            SlCommand::Stand => {
+            Command::Stand => {
                 session.stand(now).ok();
             }
-            SlCommand::SitOnGround => {
+            Command::SitOnGround => {
                 session.sit_on_ground(now).ok();
             }
-            SlCommand::Sit { target, offset } => {
+            Command::Sit { target, offset } => {
                 session.sit_on(*target, offset.clone(), now).ok();
             }
-            SlCommand::Autopilot {
+            Command::Autopilot {
                 global_x,
                 global_y,
                 z,
             } => {
                 session.autopilot_to(*global_x, *global_y, *z, now).ok();
             }
-            SlCommand::RequestAvatarProperties(target) => {
+            Command::RequestAvatarProperties(target) => {
                 session.request_avatar_properties(*target, now).ok();
             }
-            SlCommand::RequestAvatarPicks(target) => {
+            Command::RequestAvatarPicks(target) => {
                 session.request_avatar_picks(*target, now).ok();
             }
-            SlCommand::RequestAvatarNotes(target) => {
+            Command::RequestAvatarNotes(target) => {
                 session.request_avatar_notes(*target, now).ok();
             }
-            SlCommand::RequestAvatarClassifieds(target) => {
+            Command::RequestAvatarClassifieds(target) => {
                 session.request_avatar_classifieds(*target, now).ok();
             }
-            SlCommand::RequestPickInfo {
+            Command::RequestPickInfo {
                 creator_id,
                 pick_id,
             } => {
                 session.request_pick_info(*creator_id, *pick_id, now).ok();
             }
-            SlCommand::RequestClassifiedInfo(classified_id) => {
+            Command::RequestClassifiedInfo(classified_id) => {
                 session.request_classified_info(*classified_id, now).ok();
             }
-            SlCommand::UpdateProfile(update) => {
+            Command::UpdateProfile(update) => {
                 session.update_profile(update, now).ok();
             }
-            SlCommand::UpdateInterests(update) => {
+            Command::UpdateInterests(update) => {
                 session.update_interests(update, now).ok();
             }
-            SlCommand::UpdateAvatarNotes { target_id, notes } => {
+            Command::UpdateAvatarNotes { target_id, notes } => {
                 session.update_avatar_notes(*target_id, notes, now).ok();
             }
-            SlCommand::UpdatePick(update) => {
+            Command::UpdatePick(update) => {
                 session.update_pick(update, now).ok();
             }
-            SlCommand::DeletePick(pick_id) => {
+            Command::DeletePick(pick_id) => {
                 session.delete_pick(*pick_id, now).ok();
             }
-            SlCommand::GodDeletePick { pick_id, query_id } => {
+            Command::GodDeletePick { pick_id, query_id } => {
                 session.god_delete_pick(*pick_id, *query_id, now).ok();
             }
-            SlCommand::UpdateClassified(update) => {
+            Command::UpdateClassified(update) => {
                 session.update_classified(update, now).ok();
             }
-            SlCommand::DeleteClassified(classified_id) => {
+            Command::DeleteClassified(classified_id) => {
                 session.delete_classified(*classified_id, now).ok();
             }
-            SlCommand::GodDeleteClassified {
+            Command::GodDeleteClassified {
                 classified_id,
                 query_id,
             } => {
@@ -1754,10 +477,10 @@ fn advance_running(
                     .god_delete_classified(*classified_id, *query_id, now)
                     .ok();
             }
-            SlCommand::RequestFolderContents(folder_id) => {
+            Command::RequestFolderContents(folder_id) => {
                 session.request_folder_contents(*folder_id, now).ok();
             }
-            SlCommand::FetchInventoryFolders(folder_ids) => {
+            Command::FetchInventoryFolders(folder_ids) => {
                 if let Some(caps) = caps.as_ref()
                     && let (Some(url), Some(owner)) = (
                         caps.map.get(CAP_FETCH_INVENTORY).cloned(),
@@ -1771,7 +494,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::CreateInventoryFolder {
+            Command::CreateInventoryFolder {
                 folder_id,
                 parent_id,
                 folder_type,
@@ -1781,7 +504,7 @@ fn advance_running(
                     .create_inventory_folder(*folder_id, *parent_id, *folder_type, name, now)
                     .ok();
             }
-            SlCommand::UpdateInventoryFolder {
+            Command::UpdateInventoryFolder {
                 folder_id,
                 parent_id,
                 folder_type,
@@ -1791,7 +514,7 @@ fn advance_running(
                     .update_inventory_folder(*folder_id, *parent_id, *folder_type, name, now)
                     .ok();
             }
-            SlCommand::MoveInventoryFolder {
+            Command::MoveInventoryFolder {
                 folder_id,
                 parent_id,
             } => {
@@ -1799,13 +522,13 @@ fn advance_running(
                     .move_inventory_folder(*folder_id, *parent_id, now)
                     .ok();
             }
-            SlCommand::RemoveInventoryFolders(folder_ids) => {
+            Command::RemoveInventoryFolders(folder_ids) => {
                 session.remove_inventory_folders(folder_ids, now).ok();
             }
-            SlCommand::CreateInventoryItem(new) => {
+            Command::CreateInventoryItem(new) => {
                 session.create_inventory_item(new, now).ok();
             }
-            SlCommand::UpdateInventoryItem {
+            Command::UpdateInventoryItem {
                 item,
                 transaction_id,
             } => {
@@ -1813,7 +536,7 @@ fn advance_running(
                     .update_inventory_item(item, *transaction_id, now)
                     .ok();
             }
-            SlCommand::MoveInventoryItem {
+            Command::MoveInventoryItem {
                 item_id,
                 folder_id,
                 new_name,
@@ -1822,7 +545,7 @@ fn advance_running(
                     .move_inventory_item(*item_id, *folder_id, new_name, now)
                     .ok();
             }
-            SlCommand::CopyInventoryItem {
+            Command::CopyInventoryItem {
                 old_agent_id,
                 old_item_id,
                 new_folder_id,
@@ -1832,18 +555,18 @@ fn advance_running(
                     .copy_inventory_item(*old_agent_id, *old_item_id, *new_folder_id, new_name, now)
                     .ok();
             }
-            SlCommand::RemoveInventoryItems(item_ids) => {
+            Command::RemoveInventoryItems(item_ids) => {
                 session.remove_inventory_items(item_ids, now).ok();
             }
-            SlCommand::ChangeInventoryItemFlags { item_id, flags } => {
+            Command::ChangeInventoryItemFlags { item_id, flags } => {
                 session
                     .change_inventory_item_flags(*item_id, *flags, now)
                     .ok();
             }
-            SlCommand::PurgeInventoryDescendents(folder_id) => {
+            Command::PurgeInventoryDescendents(folder_id) => {
                 session.purge_inventory_descendents(*folder_id, now).ok();
             }
-            SlCommand::RemoveInventoryObjects {
+            Command::RemoveInventoryObjects {
                 folder_ids,
                 item_ids,
             } => {
@@ -1851,7 +574,7 @@ fn advance_running(
                     .remove_inventory_objects(folder_ids, item_ids, now)
                     .ok();
             }
-            SlCommand::CreateInventoryCategory {
+            Command::CreateInventoryCategory {
                 parent_id,
                 folder_type,
                 name,
@@ -1871,7 +594,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::Ais3CreateFolder {
+            Command::Ais3CreateFolder {
                 parent_id,
                 folder_type,
                 name,
@@ -1890,7 +613,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::Ais3RenameFolder { folder_id, name } => {
+            Command::Ais3RenameFolder { folder_id, name } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
                 {
@@ -1902,7 +625,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::Ais3MoveFolder {
+            Command::Ais3MoveFolder {
                 folder_id,
                 parent_id,
             } => {
@@ -1917,7 +640,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::Ais3RemoveFolder(folder_id) => {
+            Command::Ais3RemoveFolder(folder_id) => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
                 {
@@ -1928,7 +651,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::Ais3PurgeFolder(folder_id) => {
+            Command::Ais3PurgeFolder(folder_id) => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
                 {
@@ -1939,7 +662,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::Ais3FetchFolderChildren { folder_id, depth } => {
+            Command::Ais3FetchFolderChildren { folder_id, depth } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
                 {
@@ -1953,7 +676,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::Ais3UpdateItem {
+            Command::Ais3UpdateItem {
                 item_id,
                 name,
                 description,
@@ -1969,7 +692,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::Ais3MoveItem { item_id, parent_id } => {
+            Command::Ais3MoveItem { item_id, parent_id } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
                 {
@@ -1981,7 +704,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::Ais3RemoveItem(item_id) => {
+            Command::Ais3RemoveItem(item_id) => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
                 {
@@ -1992,7 +715,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::Ais3FetchItem(item_id) => {
+            Command::Ais3FetchItem(item_id) => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
                 {
@@ -2003,7 +726,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::FetchGroupMembers(group_id) => {
+            Command::FetchGroupMembers(group_id) => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_GROUP_MEMBER_DATA).cloned()
                 {
@@ -2014,7 +737,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::OfferFriendship {
+            Command::OfferFriendship {
                 to_agent_id,
                 message,
             } => {
@@ -2022,13 +745,13 @@ fn advance_running(
                     .send_friendship_offer(*to_agent_id, message, now)
                     .ok();
             }
-            SlCommand::GrantUserRights { target, rights } => {
+            Command::GrantUserRights { target, rights } => {
                 session.grant_user_rights(*target, *rights, now).ok();
             }
-            SlCommand::TerminateFriendship(other) => {
+            Command::TerminateFriendship(other) => {
                 session.terminate_friendship(*other, now).ok();
             }
-            SlCommand::AcceptFriendship {
+            Command::AcceptFriendship {
                 transaction_id,
                 calling_card_folder,
             } => {
@@ -2036,46 +759,46 @@ fn advance_running(
                     .accept_friendship(*transaction_id, *calling_card_folder, now)
                     .ok();
             }
-            SlCommand::DeclineFriendship(transaction_id) => {
+            Command::DeclineFriendship(transaction_id) => {
                 session.decline_friendship(*transaction_id, now).ok();
             }
-            SlCommand::ActivateGroup(group_id) => {
+            Command::ActivateGroup(group_id) => {
                 session.activate_group(*group_id, now).ok();
             }
-            SlCommand::RequestGroupMembers(group_id) => {
+            Command::RequestGroupMembers(group_id) => {
                 session.request_group_members(*group_id, now).ok();
             }
-            SlCommand::RequestGroupRoles(group_id) => {
+            Command::RequestGroupRoles(group_id) => {
                 session.request_group_roles(*group_id, now).ok();
             }
-            SlCommand::RequestGroupRoleMembers(group_id) => {
+            Command::RequestGroupRoleMembers(group_id) => {
                 session.request_group_role_members(*group_id, now).ok();
             }
-            SlCommand::RequestGroupTitles(group_id) => {
+            Command::RequestGroupTitles(group_id) => {
                 session.request_group_titles(*group_id, now).ok();
             }
-            SlCommand::RequestGroupProfile(group_id) => {
+            Command::RequestGroupProfile(group_id) => {
                 session.request_group_profile(*group_id, now).ok();
             }
-            SlCommand::RequestGroupNotices(group_id) => {
+            Command::RequestGroupNotices(group_id) => {
                 session.request_group_notices(*group_id, now).ok();
             }
-            SlCommand::RequestGroupNotice(notice_id) => {
+            Command::RequestGroupNotice(notice_id) => {
                 session.request_group_notice(*notice_id, now).ok();
             }
-            SlCommand::CreateGroup(params) => {
+            Command::CreateGroup(params) => {
                 session.create_group(params, now).ok();
             }
-            SlCommand::JoinGroup(group_id) => {
+            Command::JoinGroup(group_id) => {
                 session.join_group(*group_id, now).ok();
             }
-            SlCommand::LeaveGroup(group_id) => {
+            Command::LeaveGroup(group_id) => {
                 session.leave_group(*group_id, now).ok();
             }
-            SlCommand::InviteToGroup { group_id, invitees } => {
+            Command::InviteToGroup { group_id, invitees } => {
                 session.invite_to_group(*group_id, invitees, now).ok();
             }
-            SlCommand::SetGroupAcceptNotices {
+            Command::SetGroupAcceptNotices {
                 group_id,
                 accept_notices,
                 list_in_profile,
@@ -2084,7 +807,7 @@ fn advance_running(
                     .set_group_accept_notices(*group_id, *accept_notices, *list_in_profile, now)
                     .ok();
             }
-            SlCommand::SetGroupContribution {
+            Command::SetGroupContribution {
                 group_id,
                 contribution,
             } => {
@@ -2092,30 +815,30 @@ fn advance_running(
                     .set_group_contribution(*group_id, *contribution, now)
                     .ok();
             }
-            SlCommand::StartGroupSession(group_id) => {
+            Command::StartGroupSession(group_id) => {
                 session.start_group_session(*group_id, now).ok();
             }
-            SlCommand::SendGroupMessage { group_id, message } => {
+            Command::SendGroupMessage { group_id, message } => {
                 session.send_group_message(*group_id, message, now).ok();
             }
-            SlCommand::LeaveGroupSession(group_id) => {
+            Command::LeaveGroupSession(group_id) => {
                 session.leave_group_session(*group_id, now).ok();
             }
-            SlCommand::UpdateGroupRoles { group_id, roles } => {
+            Command::UpdateGroupRoles { group_id, roles } => {
                 session.update_group_roles(*group_id, roles, now).ok();
             }
-            SlCommand::ChangeGroupRoleMembers { group_id, changes } => {
+            Command::ChangeGroupRoleMembers { group_id, changes } => {
                 session
                     .change_group_role_members(*group_id, changes, now)
                     .ok();
             }
-            SlCommand::EjectGroupMembers {
+            Command::EjectGroupMembers {
                 group_id,
                 member_ids,
             } => {
                 session.eject_group_members(*group_id, member_ids, now).ok();
             }
-            SlCommand::SendGroupNotice {
+            Command::SendGroupNotice {
                 group_id,
                 subject,
                 message,
@@ -2125,7 +848,7 @@ fn advance_running(
                     .send_group_notice(*group_id, subject, message, *attachment, now)
                     .ok();
             }
-            SlCommand::ReplyScriptDialog {
+            Command::ReplyScriptDialog {
                 object_id,
                 chat_channel,
                 button_index,
@@ -2141,7 +864,7 @@ fn advance_running(
                     )
                     .ok();
             }
-            SlCommand::AnswerScriptPermissions {
+            Command::AnswerScriptPermissions {
                 task_id,
                 item_id,
                 permissions,
@@ -2150,10 +873,10 @@ fn advance_running(
                     .answer_script_permissions(*task_id, *item_id, *permissions, now)
                     .ok();
             }
-            SlCommand::RequestMuteList => {
+            Command::RequestMuteList => {
                 session.request_mute_list(now).ok();
             }
-            SlCommand::Mute {
+            Command::Mute {
                 id,
                 name,
                 mute_type,
@@ -2161,10 +884,10 @@ fn advance_running(
             } => {
                 session.mute(*id, name, *mute_type, *flags, now).ok();
             }
-            SlCommand::Unmute { id, name } => {
+            Command::Unmute { id, name } => {
                 session.unmute(*id, name, now).ok();
             }
-            SlCommand::Teleport {
+            Command::Teleport {
                 region_handle,
                 position,
                 look_at,
@@ -2173,16 +896,16 @@ fn advance_running(
                     .teleport_to(*region_handle, position.clone(), look_at.clone(), now)
                     .ok();
             }
-            SlCommand::RequestRegionInfo => {
+            Command::RequestRegionInfo => {
                 session.request_region_info(now).ok();
             }
-            SlCommand::RequestMoneyBalance => {
+            Command::RequestMoneyBalance => {
                 session.request_money_balance(now).ok();
             }
-            SlCommand::RequestEconomyData => {
+            Command::RequestEconomyData => {
                 session.request_economy_data(now).ok();
             }
-            SlCommand::SendMoneyTransfer {
+            Command::SendMoneyTransfer {
                 dest,
                 amount,
                 kind,
@@ -2192,7 +915,7 @@ fn advance_running(
                     .send_money_transfer(*dest, amount.clone(), *kind, description, now)
                     .ok();
             }
-            SlCommand::RequestParcelProperties {
+            Command::RequestParcelProperties {
                 west,
                 south,
                 east,
@@ -2203,8 +926,8 @@ fn advance_running(
                     .request_parcel_properties(*west, *south, *east, *north, *sequence_id, now)
                     .ok();
             }
-            SlCommand::SetDrawDistance(far) => session.set_draw_distance(*far),
-            SlCommand::RequestMapBlocks {
+            Command::SetDrawDistance(far) => session.set_draw_distance(*far),
+            Command::RequestMapBlocks {
                 min_x,
                 max_x,
                 min_y,
@@ -2214,10 +937,10 @@ fn advance_running(
                     .request_map_blocks(*min_x, *max_x, *min_y, *max_y, now)
                     .ok();
             }
-            SlCommand::RequestMapByName { name } => {
+            Command::RequestMapByName { name } => {
                 session.request_map_by_name(name, now).ok();
             }
-            SlCommand::RequestMapItems {
+            Command::RequestMapItems {
                 item_type,
                 region_handle,
             } => {
@@ -2225,19 +948,19 @@ fn advance_running(
                     .request_map_items(*item_type, *region_handle, now)
                     .ok();
             }
-            SlCommand::RequestObjects { local_ids } => {
+            Command::RequestObjects { local_ids } => {
                 session.request_objects(local_ids, now).ok();
             }
-            SlCommand::RequestObjectProperties { local_ids } => {
+            Command::RequestObjectProperties { local_ids } => {
                 session.request_object_properties(local_ids, now).ok();
             }
-            SlCommand::DeselectObjects { local_ids } => {
+            Command::DeselectObjects { local_ids } => {
                 session.deselect_objects(local_ids, now).ok();
             }
-            SlCommand::TouchObject { local_id } => {
+            Command::TouchObject { local_id } => {
                 session.touch_object(*local_id, now).ok();
             }
-            SlCommand::GrabObject {
+            Command::GrabObject {
                 local_id,
                 grab_offset,
             } => {
@@ -2245,7 +968,7 @@ fn advance_running(
                     .grab_object(*local_id, grab_offset.clone(), now)
                     .ok();
             }
-            SlCommand::GrabObjectUpdate {
+            Command::GrabObjectUpdate {
                 object_id,
                 grab_offset_initial,
                 grab_position,
@@ -2261,13 +984,13 @@ fn advance_running(
                     )
                     .ok();
             }
-            SlCommand::DegrabObject { local_id } => {
+            Command::DegrabObject { local_id } => {
                 session.degrab_object(*local_id, now).ok();
             }
-            SlCommand::RezObject { shape, group_id } => {
+            Command::RezObject { shape, group_id } => {
                 session.rez_object(shape, *group_id, now).ok();
             }
-            SlCommand::DuplicateObjects {
+            Command::DuplicateObjects {
                 local_ids,
                 offset,
                 group_id,
@@ -2276,10 +999,10 @@ fn advance_running(
                     .duplicate_objects(local_ids, offset.clone(), *group_id, now)
                     .ok();
             }
-            SlCommand::DeleteObjects { local_ids } => {
+            Command::DeleteObjects { local_ids } => {
                 session.delete_objects(local_ids, now).ok();
             }
-            SlCommand::DerezObjects {
+            Command::DerezObjects {
                 local_ids,
                 destination,
                 destination_id,
@@ -2297,16 +1020,16 @@ fn advance_running(
                     )
                     .ok();
             }
-            SlCommand::UpdateObject {
+            Command::UpdateObject {
                 local_id,
                 transform,
             } => {
                 session.update_object(*local_id, transform, now).ok();
             }
-            SlCommand::SetObjectName { local_id, name } => {
+            Command::SetObjectName { local_id, name } => {
                 session.set_object_name(*local_id, name, now).ok();
             }
-            SlCommand::SetObjectDescription {
+            Command::SetObjectDescription {
                 local_id,
                 description,
             } => {
@@ -2314,24 +1037,24 @@ fn advance_running(
                     .set_object_description(*local_id, description, now)
                     .ok();
             }
-            SlCommand::SetObjectClickAction { local_id, action } => {
+            Command::SetObjectClickAction { local_id, action } => {
                 session
                     .set_object_click_action(*local_id, *action, now)
                     .ok();
             }
-            SlCommand::SetObjectMaterial { local_id, material } => {
+            Command::SetObjectMaterial { local_id, material } => {
                 session.set_object_material(*local_id, *material, now).ok();
             }
-            SlCommand::SetObjectFlags { local_id, flags } => {
+            Command::SetObjectFlags { local_id, flags } => {
                 session.set_object_flags(*local_id, flags, now).ok();
             }
-            SlCommand::SetObjectGroup {
+            Command::SetObjectGroup {
                 local_ids,
                 group_id,
             } => {
                 session.set_object_group(local_ids, *group_id, now).ok();
             }
-            SlCommand::SetObjectPermissions {
+            Command::SetObjectPermissions {
                 local_ids,
                 field,
                 set,
@@ -2341,7 +1064,7 @@ fn advance_running(
                     .set_object_permissions(local_ids, *field, *set, *mask, now)
                     .ok();
             }
-            SlCommand::SetObjectForSale {
+            Command::SetObjectForSale {
                 local_id,
                 sale_type,
                 sale_price,
@@ -2350,29 +1073,29 @@ fn advance_running(
                     .set_object_for_sale(*local_id, *sale_type, *sale_price, now)
                     .ok();
             }
-            SlCommand::SetObjectCategory { local_id, category } => {
+            Command::SetObjectCategory { local_id, category } => {
                 session.set_object_category(*local_id, *category, now).ok();
             }
-            SlCommand::SetObjectIncludeInSearch { local_id, include } => {
+            Command::SetObjectIncludeInSearch { local_id, include } => {
                 session
                     .set_object_include_in_search(*local_id, *include, now)
                     .ok();
             }
-            SlCommand::LinkObjects { local_ids } => {
+            Command::LinkObjects { local_ids } => {
                 session.link_objects(local_ids, now).ok();
             }
-            SlCommand::DelinkObjects { local_ids } => {
+            Command::DelinkObjects { local_ids } => {
                 session.delink_objects(local_ids, now).ok();
             }
-            SlCommand::UpdateParcel(update) => {
+            Command::UpdateParcel(update) => {
                 session.update_parcel(update, now).ok();
             }
-            SlCommand::RequestParcelAccessList { local_id, scope } => {
+            Command::RequestParcelAccessList { local_id, scope } => {
                 session
                     .request_parcel_access_list(*local_id, *scope, now)
                     .ok();
             }
-            SlCommand::UpdateParcelAccessList {
+            Command::UpdateParcelAccessList {
                 local_id,
                 scope,
                 entries,
@@ -2381,10 +1104,10 @@ fn advance_running(
                     .update_parcel_access_list(*local_id, *scope, entries, now)
                     .ok();
             }
-            SlCommand::RequestParcelDwell { local_id } => {
+            Command::RequestParcelDwell { local_id } => {
                 session.request_parcel_dwell(*local_id, now).ok();
             }
-            SlCommand::BuyParcel {
+            Command::BuyParcel {
                 local_id,
                 price,
                 area,
@@ -2395,7 +1118,7 @@ fn advance_running(
                     .buy_parcel(*local_id, *price, *area, *group_id, *is_group_owned, now)
                     .ok();
             }
-            SlCommand::ReturnParcelObjects {
+            Command::ReturnParcelObjects {
                 local_id,
                 return_type,
                 owner_ids,
@@ -2405,7 +1128,7 @@ fn advance_running(
                     .return_parcel_objects(*local_id, *return_type, owner_ids, task_ids, now)
                     .ok();
             }
-            SlCommand::SelectParcelObjects {
+            Command::SelectParcelObjects {
                 local_id,
                 return_type,
                 object_ids,
@@ -2414,47 +1137,47 @@ fn advance_running(
                     .select_parcel_objects(*local_id, *return_type, object_ids, now)
                     .ok();
             }
-            SlCommand::DeedParcelToGroup { local_id, group_id } => {
+            Command::DeedParcelToGroup { local_id, group_id } => {
                 session.deed_parcel_to_group(*local_id, *group_id, now).ok();
             }
-            SlCommand::ReclaimParcel { local_id } => {
+            Command::ReclaimParcel { local_id } => {
                 session.reclaim_parcel(*local_id, now).ok();
             }
-            SlCommand::ReleaseParcel { local_id } => {
+            Command::ReleaseParcel { local_id } => {
                 session.release_parcel(*local_id, now).ok();
             }
-            SlCommand::RequestEstateInfo => {
+            Command::RequestEstateInfo => {
                 session.request_estate_info(now).ok();
             }
-            SlCommand::UpdateEstateAccess { delta, target } => {
+            Command::UpdateEstateAccess { delta, target } => {
                 session.update_estate_access(*delta, *target, now).ok();
             }
-            SlCommand::KickEstateUser { target } => {
+            Command::KickEstateUser { target } => {
                 session.kick_estate_user(*target, now).ok();
             }
-            SlCommand::TeleportHomeUser { target } => {
+            Command::TeleportHomeUser { target } => {
                 session.teleport_home_user(*target, now).ok();
             }
-            SlCommand::TeleportHomeAllUsers => {
+            Command::TeleportHomeAllUsers => {
                 session.teleport_home_all_users(now).ok();
             }
-            SlCommand::RestartRegion { seconds } => {
+            Command::RestartRegion { seconds } => {
                 session.restart_region(*seconds, now).ok();
             }
-            SlCommand::SendEstateMessage { message } => {
+            Command::SendEstateMessage { message } => {
                 session.send_estate_message(message, now).ok();
             }
-            SlCommand::SetRegionInfo(update) => {
+            Command::SetRegionInfo(update) => {
                 session.set_region_info(update, now).ok();
             }
-            SlCommand::GodKickUser { target, reason } => {
+            Command::GodKickUser { target, reason } => {
                 session.god_kick_user(*target, reason, now).ok();
             }
-            SlCommand::SendGodlikeMessage { method, params } => {
+            Command::SendGodlikeMessage { method, params } => {
                 let refs: Vec<&str> = params.iter().map(String::as_str).collect();
                 session.send_godlike_message(method, &refs, now).ok();
             }
-            SlCommand::RequestTexture {
+            Command::RequestTexture {
                 texture_id,
                 discard_level,
                 priority,
@@ -2463,7 +1186,7 @@ fn advance_running(
                     .request_texture(*texture_id, *discard_level, *priority, now)
                     .ok();
             }
-            SlCommand::RequestAsset {
+            Command::RequestAsset {
                 asset_id,
                 asset_type,
                 priority,
@@ -2472,7 +1195,7 @@ fn advance_running(
                     .request_asset(*asset_id, *asset_type, *priority, now)
                     .ok();
             }
-            SlCommand::FetchTexture {
+            Command::FetchTexture {
                 texture_id,
                 discard_level,
             } => {
@@ -2486,7 +1209,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::FetchMesh {
+            Command::FetchMesh {
                 mesh_id,
                 byte_range,
             } => {
@@ -2511,7 +1234,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::FetchAsset {
+            Command::FetchAsset {
                 asset_id,
                 asset_type,
                 byte_range,
@@ -2526,13 +1249,13 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::RequestWearables => {
+            Command::RequestWearables => {
                 session.request_wearables(now).ok();
             }
-            SlCommand::SetWearing(wearables) => {
+            Command::SetWearing(wearables) => {
                 session.set_wearing(wearables, now).ok();
             }
-            SlCommand::SetAppearance {
+            Command::SetAppearance {
                 serial,
                 size,
                 texture_entry,
@@ -2550,10 +1273,10 @@ fn advance_running(
                     )
                     .ok();
             }
-            SlCommand::RequestCachedTextures { serial, slots } => {
+            Command::RequestCachedTextures { serial, slots } => {
                 session.request_cached_textures(*serial, slots, now).ok();
             }
-            SlCommand::RequestServerAppearanceUpdate { cof_version } => {
+            Command::RequestServerAppearanceUpdate { cof_version } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_UPDATE_AVATAR_APPEARANCE).cloned()
                 {
@@ -2564,16 +1287,16 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::SetAnimations(animations) => {
+            Command::SetAnimations(animations) => {
                 session.set_animations(animations, now).ok();
             }
-            SlCommand::PlayAnimation(anim_id) => {
+            Command::PlayAnimation(anim_id) => {
                 session.play_animation(*anim_id, now).ok();
             }
-            SlCommand::StopAnimation(anim_id) => {
+            Command::StopAnimation(anim_id) => {
                 session.stop_animation(*anim_id, now).ok();
             }
-            SlCommand::UploadAssetUdp {
+            Command::UploadAssetUdp {
                 asset_type,
                 data,
                 temp_file,
@@ -2583,7 +1306,7 @@ fn advance_running(
                     .upload_asset_udp(*asset_type, data.clone(), *temp_file, *store_local, now)
                     .ok();
             }
-            SlCommand::UploadAsset {
+            Command::UploadAsset {
                 folder_id,
                 asset_type,
                 inventory_type,
@@ -2609,7 +1332,7 @@ fn advance_running(
                     data.clone(),
                 );
             }
-            SlCommand::UploadBakedTexture { data } => {
+            Command::UploadBakedTexture { data } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_UPLOAD_BAKED_TEXTURE).cloned()
                 {
@@ -2624,7 +1347,7 @@ fn advance_running(
                     emit_upload_unavailable(caps.as_ref(), "UploadBakedTexture");
                 }
             }
-            SlCommand::UpdateInventoryAsset {
+            Command::UpdateInventoryAsset {
                 item_id,
                 asset_type,
                 data,
@@ -2649,7 +1372,7 @@ fn advance_running(
                     "asset type has no inventory-update capability".to_owned(),
                 ),
             },
-            SlCommand::RequestObjectMedia { object_id } => {
+            Command::RequestObjectMedia { object_id } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_OBJECT_MEDIA).cloned()
                 {
@@ -2660,7 +1383,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::SetObjectMedia { object_id, faces } => {
+            Command::SetObjectMedia { object_id, faces } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_OBJECT_MEDIA).cloned()
                 {
@@ -2670,7 +1393,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::NavigateObjectMedia {
+            Command::NavigateObjectMedia {
                 object_id,
                 face,
                 url: media_url,
@@ -2684,7 +1407,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::RequestRenderMaterials { material_ids } => {
+            Command::RequestRenderMaterials { material_ids } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_RENDER_MATERIALS).cloned()
                 {
@@ -2695,7 +1418,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::ModifyMaterialParams { updates } => {
+            Command::ModifyMaterialParams { updates } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_MODIFY_MATERIAL_PARAMS).cloned()
                 {
@@ -2706,7 +1429,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::RequestVoiceAccount { request } => {
+            Command::RequestVoiceAccount { request } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_PROVISION_VOICE_ACCOUNT).cloned()
                 {
@@ -2717,7 +1440,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::RequestParcelVoiceInfo => {
+            Command::RequestParcelVoiceInfo => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_PARCEL_VOICE_INFO).cloned()
                 {
@@ -2728,7 +1451,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::SendVoiceSignaling {
+            Command::SendVoiceSignaling {
                 viewer_session,
                 candidates,
                 completed,
@@ -2743,7 +1466,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::RequestExperienceInfo { experience_ids } => {
+            Command::RequestExperienceInfo { experience_ids } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(base) = caps.map.get(CAP_GET_EXPERIENCE_INFO).cloned()
                 {
@@ -2754,7 +1477,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::FindExperiences { query, page } => {
+            Command::FindExperiences { query, page } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(base) = caps.map.get(CAP_FIND_EXPERIENCE_BY_NAME).cloned()
                 {
@@ -2765,7 +1488,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::RequestExperiencePermissions => {
+            Command::RequestExperiencePermissions => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_GET_EXPERIENCES).cloned()
                 {
@@ -2775,7 +1498,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::SetExperiencePermission {
+            Command::SetExperiencePermission {
                 experience_id,
                 permission,
             } => {
@@ -2797,7 +1520,7 @@ fn advance_running(
                     }
                 }
             }
-            SlCommand::RequestOwnedExperiences => {
+            Command::RequestOwnedExperiences => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_AGENT_EXPERIENCES).cloned()
                 {
@@ -2807,7 +1530,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::RequestAdminExperiences => {
+            Command::RequestAdminExperiences => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_GET_ADMIN_EXPERIENCES).cloned()
                 {
@@ -2817,7 +1540,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::RequestCreatorExperiences => {
+            Command::RequestCreatorExperiences => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_GET_CREATOR_EXPERIENCES).cloned()
                 {
@@ -2827,7 +1550,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::RequestGroupExperiences { group_id } => {
+            Command::RequestGroupExperiences { group_id } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(base) = caps.map.get(CAP_GROUP_EXPERIENCES).cloned()
                 {
@@ -2839,7 +1562,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::RequestExperienceAdmin { experience_id } => {
+            Command::RequestExperienceAdmin { experience_id } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(base) = caps.map.get(CAP_IS_EXPERIENCE_ADMIN).cloned()
                 {
@@ -2851,7 +1574,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::RequestExperienceContributor { experience_id } => {
+            Command::RequestExperienceContributor { experience_id } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(base) = caps.map.get(CAP_IS_EXPERIENCE_CONTRIBUTOR).cloned()
                 {
@@ -2863,7 +1586,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::UpdateExperience { update } => {
+            Command::UpdateExperience { update } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_UPDATE_EXPERIENCE).cloned()
                 {
@@ -2874,7 +1597,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::RequestRegionExperiences => {
+            Command::RequestRegionExperiences => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_REGION_EXPERIENCES).cloned()
                 {
@@ -2884,7 +1607,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::SetRegionExperiences {
+            Command::SetRegionExperiences {
                 allowed,
                 blocked,
                 trusted,
@@ -2899,13 +1622,13 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::OfferTeleport { targets, message } => {
+            Command::OfferTeleport { targets, message } => {
                 session.offer_teleport(targets, message, now).ok();
             }
-            SlCommand::AcceptTeleportLure { lure_id } => {
+            Command::AcceptTeleportLure { lure_id } => {
                 session.accept_teleport_lure(*lure_id, now).ok();
             }
-            SlCommand::DeclineTeleportLure {
+            Command::DeclineTeleportLure {
                 from_agent_id,
                 lure_id,
             } => {
@@ -2913,13 +1636,13 @@ fn advance_running(
                     .decline_teleport_lure(*from_agent_id, *lure_id, now)
                     .ok();
             }
-            SlCommand::RequestTeleport {
+            Command::RequestTeleport {
                 to_agent_id,
                 message,
             } => {
                 session.request_teleport(*to_agent_id, message, now).ok();
             }
-            SlCommand::GiveInventory {
+            Command::GiveInventory {
                 to_agent_id,
                 item_id,
                 asset_type,
@@ -2937,7 +1660,7 @@ fn advance_running(
                     )
                     .ok();
             }
-            SlCommand::GiveInventoryFolder {
+            Command::GiveInventoryFolder {
                 to_agent_id,
                 folder_id,
                 folder_name,
@@ -2953,10 +1676,10 @@ fn advance_running(
                     )
                     .ok();
             }
-            SlCommand::AcceptInventoryOffer { offer, folder_id } => {
+            Command::AcceptInventoryOffer { offer, folder_id } => {
                 session.accept_inventory_offer(offer, *folder_id, now).ok();
             }
-            SlCommand::DeclineInventoryOffer {
+            Command::DeclineInventoryOffer {
                 offer,
                 trash_folder_id,
             } => {
@@ -2964,7 +1687,7 @@ fn advance_running(
                     .decline_inventory_offer(offer, *trash_folder_id, now)
                     .ok();
             }
-            SlCommand::StartConference {
+            Command::StartConference {
                 session_id,
                 invitees,
                 message,
@@ -2973,7 +1696,7 @@ fn advance_running(
                     .start_conference(*session_id, invitees, message, now)
                     .ok();
             }
-            SlCommand::SendConferenceMessage {
+            Command::SendConferenceMessage {
                 session_id,
                 message,
             } => {
@@ -2981,13 +1704,13 @@ fn advance_running(
                     .send_conference_message(*session_id, message, now)
                     .ok();
             }
-            SlCommand::LeaveConference { session_id } => {
+            Command::LeaveConference { session_id } => {
                 session.leave_conference(*session_id, now).ok();
             }
-            SlCommand::RetrieveInstantMessages => {
+            Command::RetrieveInstantMessages => {
                 session.retrieve_instant_messages(now).ok();
             }
-            SlCommand::RequestOfflineMessages => {
+            Command::RequestOfflineMessages => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_READ_OFFLINE_MSGS).cloned()
                 {
@@ -2997,7 +1720,7 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::Logout => session.initiate_logout(now),
+            Command::Logout => session.initiate_logout(now),
         }
     }
 
@@ -3282,7 +2005,7 @@ fn run_object_media_fetch(cap_url: &str, object_id: Uuid, caps_tx: &Sender<(Stri
 /// POSTs a pre-built `ObjectMedia` UPDATE or `ObjectMediaNavigate` `body` to
 /// `cap_url`. Fire-and-forget: the simulator advances the object's media version
 /// rather than replying with media, so a client re-fetches with
-/// [`SlCommand::RequestObjectMedia`] to observe the change.
+/// [`Command::RequestObjectMedia`] to observe the change.
 fn run_object_media_post(cap_url: &str, body: String) {
     let Ok(http) = ReqwestBlockingClient::builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
