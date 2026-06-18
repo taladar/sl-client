@@ -126,4 +126,109 @@ mod test {
             "expected a parse error"
         );
     }
+
+    #[test]
+    fn serializes_every_scalar_and_round_trips() -> Result<(), TestError> {
+        let uuid = uuid::Uuid::parse_str("11111111-2222-3333-4444-555555555555")?;
+        let tree = Llsd::Map(
+            [
+                ("undef".to_owned(), Llsd::Undef),
+                ("yes".to_owned(), Llsd::Boolean(true)),
+                ("no".to_owned(), Llsd::Boolean(false)),
+                ("int".to_owned(), Llsd::Integer(-42)),
+                ("real".to_owned(), Llsd::Real(1.5)),
+                (
+                    "str".to_owned(),
+                    Llsd::String("a < b & c > \"d\"".to_owned()),
+                ),
+                ("uuid".to_owned(), Llsd::Uuid(uuid)),
+                (
+                    "date".to_owned(),
+                    Llsd::Date("2026-06-18T00:00:00Z".to_owned()),
+                ),
+                (
+                    "uri".to_owned(),
+                    Llsd::Uri("http://example.com/x".to_owned()),
+                ),
+                ("bin".to_owned(), Llsd::Binary(vec![1, 2, 3, 0, 255])),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let xml = tree.to_llsd_xml();
+        assert!(xml.starts_with("<llsd>") && xml.ends_with("</llsd>"));
+        assert_eq!(parse_llsd_xml(&xml)?, tree);
+        Ok(())
+    }
+
+    #[test]
+    fn serializes_nested_arrays_and_maps() -> Result<(), TestError> {
+        let tree = Llsd::Array(vec![
+            Llsd::Array(vec![Llsd::Integer(1), Llsd::Integer(2)]),
+            Llsd::Map(
+                [
+                    ("k".to_owned(), Llsd::String("v".to_owned())),
+                    ("inner".to_owned(), Llsd::Array(vec![Llsd::Boolean(true)])),
+                ]
+                .into_iter()
+                .collect(),
+            ),
+            Llsd::Undef,
+        ]);
+        assert_eq!(parse_llsd_xml(&tree.to_llsd_xml())?, tree);
+        Ok(())
+    }
+
+    #[test]
+    fn map_keys_are_sorted_for_deterministic_output() {
+        let tree = Llsd::Map(
+            [
+                ("zebra".to_owned(), Llsd::Integer(1)),
+                ("alpha".to_owned(), Llsd::Integer(2)),
+                ("mike".to_owned(), Llsd::Integer(3)),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        assert_eq!(
+            tree.to_llsd_xml(),
+            "<llsd><map>\
+             <key>alpha</key><integer>2</integer>\
+             <key>mike</key><integer>3</integer>\
+             <key>zebra</key><integer>1</integer>\
+             </map></llsd>"
+        );
+    }
+
+    #[test]
+    fn serialized_event_queue_response_re_parses() -> Result<(), TestError> {
+        // The serializer must reproduce a structure the existing parsers read.
+        let body = Llsd::Map(
+            [("LocalID".to_owned(), Llsd::Integer(7))]
+                .into_iter()
+                .collect(),
+        );
+        let event = Llsd::Map(
+            [
+                ("message".to_owned(), Llsd::String("TestEvent".to_owned())),
+                ("body".to_owned(), body),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let response = Llsd::Map(
+            [
+                ("id".to_owned(), Llsd::Integer(99)),
+                ("events".to_owned(), Llsd::Array(vec![event])),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let parsed = parse_event_queue_response(&response.to_llsd_xml())?;
+        assert_eq!(parsed.id, 99);
+        let event = parsed.events.first().ok_or("expected one event")?;
+        assert_eq!(event.message, "TestEvent");
+        assert_eq!(event.body.get("LocalID").and_then(Llsd::as_i32), Some(7));
+        Ok(())
+    }
 }
