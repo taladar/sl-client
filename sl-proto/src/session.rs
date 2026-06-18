@@ -39,6 +39,28 @@ use sl_wire::messages::{
     TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock, UseCircuitCode,
     UseCircuitCodeCircuitCodeBlock,
 };
+// Inventory mutation (#30): the outgoing folder/item create/update/move/copy/
+// remove messages plus the inbound `UpdateCreateInventoryItem`/
+// `BulkUpdateInventory` push blocks the session decodes into the cache.
+use sl_wire::messages::{
+    BulkUpdateInventoryFolderDataBlock, BulkUpdateInventoryItemDataBlock, ChangeInventoryItemFlags,
+    ChangeInventoryItemFlagsAgentDataBlock, ChangeInventoryItemFlagsInventoryDataBlock,
+    CopyInventoryItem, CopyInventoryItemAgentDataBlock, CopyInventoryItemInventoryDataBlock,
+    CreateInventoryFolder, CreateInventoryFolderAgentDataBlock,
+    CreateInventoryFolderFolderDataBlock, CreateInventoryItem, CreateInventoryItemAgentDataBlock,
+    CreateInventoryItemInventoryBlockBlock, MoveInventoryFolder, MoveInventoryFolderAgentDataBlock,
+    MoveInventoryFolderInventoryDataBlock, MoveInventoryItem, MoveInventoryItemAgentDataBlock,
+    MoveInventoryItemInventoryDataBlock, PurgeInventoryDescendents,
+    PurgeInventoryDescendentsAgentDataBlock, PurgeInventoryDescendentsInventoryDataBlock,
+    RemoveInventoryFolder, RemoveInventoryFolderAgentDataBlock,
+    RemoveInventoryFolderFolderDataBlock, RemoveInventoryItem, RemoveInventoryItemAgentDataBlock,
+    RemoveInventoryItemInventoryDataBlock, RemoveInventoryObjects,
+    RemoveInventoryObjectsAgentDataBlock, RemoveInventoryObjectsFolderDataBlock,
+    RemoveInventoryObjectsItemDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
+    UpdateInventoryFolder, UpdateInventoryFolderAgentDataBlock,
+    UpdateInventoryFolderFolderDataBlock, UpdateInventoryItem, UpdateInventoryItemAgentDataBlock,
+    UpdateInventoryItemInventoryDataBlock,
+};
 // Script dialogs & permissions (#8): the outgoing reply messages.
 use sl_wire::messages::{
     ScriptAnswerYes, ScriptAnswerYesAgentDataBlock, ScriptAnswerYesDataBlock, ScriptDialogReply,
@@ -201,12 +223,12 @@ use crate::types::{
     GroupRoleMember, GroupTitle, ImDialog, ImageCodec, InstantMessage, InterestsUpdate,
     InventoryFolder, InventoryItem, InventoryOffer, LoadUrlRequest, LoginHttpRequest, LoginParams,
     MapItem, MapItemType, MapRegionInfo, Material, Maturity, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectExtraParams,
-    ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessScope, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, PermissionField, PickInfo, PickUpdate, PlayingAnimation,
-    PrimShape, ProductType, ProfileUpdate, RegionIdentity, RegionInfoUpdate, RegionLimits,
-    Reliability, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, Object,
+    ObjectExtraParams, ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform,
+    ParcelAccessEntry, ParcelAccessScope, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickInfo, PickUpdate,
+    PlayingAnimation, PrimShape, ProductType, ProfileUpdate, RegionIdentity, RegionInfoUpdate,
+    RegionLimits, Reliability, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
     ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture,
     Throttle, TransferStatus, Transmit, Wearable, WearableType, avatar_texture, grid_to_handle,
     handle_to_grid,
@@ -465,6 +487,23 @@ pub const CAP_REGION_EXPERIENCES: &str = "RegionExperiences";
 /// one [`Event::InstantMessageReceived`] per stored message.
 pub const CAP_READ_OFFLINE_MSGS: &str = "ReadOfflineMsgs";
 
+/// Inventory mutation (#30): the modern Second Life **AIS3** REST inventory
+/// capability (`InventoryAPIv3`). Folder/item create/update/move/remove are HTTP
+/// verbs against path suffixes under this base URL (see `sl_wire::inventory`).
+/// Served only by Second Life; stock OpenSim ships no AIS3 cap. Replies are
+/// decoded by [`Session::handle_caps_event`] into [`Event::InventoryBulkUpdate`].
+pub const CAP_INVENTORY_API_V3: &str = "InventoryAPIv3";
+
+/// Inventory mutation (#30): the AIS3 capability for the *library* inventory
+/// (read-only, same REST shape as [`CAP_INVENTORY_API_V3`]). Second-Life only.
+pub const CAP_LIBRARY_API_V3: &str = "LibraryAPIv3";
+
+/// Inventory mutation (#30): the `CreateInventoryCategory` capability — a folder
+/// create that returns a synchronous `{ folder_id, name, parent_id, type }`
+/// reply (unlike the no-reply UDP `CreateInventoryFolder`). Served by **both**
+/// OpenSim and Second Life. Decoded into [`Event::InventoryBulkUpdate`].
+pub const CAP_CREATE_INVENTORY_CATEGORY: &str = "CreateInventoryCategory";
+
 /// The viewer's `TELEPORT_FLAGS_VIA_LURE` (`1 << 2`), sent in a
 /// `TeleportLureRequest` when accepting a teleport lure (#28).
 const TELEPORT_FLAGS_VIA_LURE: u32 = 4;
@@ -513,6 +552,9 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_UPDATE_EXPERIENCE,
     CAP_REGION_EXPERIENCES,
     CAP_READ_OFFLINE_MSGS,
+    CAP_INVENTORY_API_V3,
+    CAP_LIBRARY_API_V3,
+    CAP_CREATE_INVENTORY_CATEGORY,
 ];
 
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
@@ -2160,6 +2202,311 @@ impl Circuit {
         self.send(&message, Reliability::Reliable, now)
     }
 
+    /// Queues a `CreateInventoryFolder` reliably (a new folder `folder_id` named
+    /// `name` of `folder_type` under `parent_id`). The simulator sends no reply.
+    fn send_create_inventory_folder(
+        &mut self,
+        folder_id: Uuid,
+        parent_id: Uuid,
+        folder_type: i8,
+        name: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::CreateInventoryFolder(CreateInventoryFolder {
+            agent_data: CreateInventoryFolderAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            folder_data: CreateInventoryFolderFolderDataBlock {
+                folder_id,
+                parent_id,
+                r#type: folder_type,
+                name: with_nul(name),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `UpdateInventoryFolder` reliably (rename / re-type / re-parent
+    /// the existing folder `folder_id`).
+    fn send_update_inventory_folder(
+        &mut self,
+        folder_id: Uuid,
+        parent_id: Uuid,
+        folder_type: i8,
+        name: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::UpdateInventoryFolder(UpdateInventoryFolder {
+            agent_data: UpdateInventoryFolderAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            folder_data: vec![UpdateInventoryFolderFolderDataBlock {
+                folder_id,
+                parent_id,
+                r#type: folder_type,
+                name: with_nul(name),
+            }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `MoveInventoryFolder` reliably (re-parent each `(folder, parent)`
+    /// pair). `stamp` asks the simulator to re-timestamp the moved children.
+    fn send_move_inventory_folders(
+        &mut self,
+        moves: &[(Uuid, Uuid)],
+        stamp: bool,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::MoveInventoryFolder(MoveInventoryFolder {
+            agent_data: MoveInventoryFolderAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                stamp,
+            },
+            inventory_data: moves
+                .iter()
+                .map(
+                    |&(folder_id, parent_id)| MoveInventoryFolderInventoryDataBlock {
+                        folder_id,
+                        parent_id,
+                    },
+                )
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RemoveInventoryFolder` reliably (delete each folder, moving it to
+    /// the trash on the server).
+    fn send_remove_inventory_folders(
+        &mut self,
+        folder_ids: &[Uuid],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RemoveInventoryFolder(RemoveInventoryFolder {
+            agent_data: RemoveInventoryFolderAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            folder_data: folder_ids
+                .iter()
+                .map(|&folder_id| RemoveInventoryFolderFolderDataBlock { folder_id })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `CreateInventoryItem` reliably. The simulator answers with an
+    /// `UpdateCreateInventoryItem` echoing `callback_id`
+    /// ([`Event::InventoryItemCreated`]).
+    fn send_create_inventory_item(
+        &mut self,
+        new: &NewInventoryItem,
+        callback_id: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::CreateInventoryItem(CreateInventoryItem {
+            agent_data: CreateInventoryItemAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            inventory_block: CreateInventoryItemInventoryBlockBlock {
+                callback_id,
+                folder_id: new.folder_id,
+                transaction_id: new.transaction_id,
+                next_owner_mask: new.next_owner_mask,
+                r#type: new.asset_type,
+                inv_type: new.inv_type,
+                wearable_type: new.wearable_type,
+                name: with_nul(&new.name),
+                description: with_nul(&new.description),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `UpdateInventoryItem` reliably (rewrite the metadata /
+    /// permissions of `item`). A non-nil `transaction_id` associates a freshly
+    /// uploaded asset with the item.
+    fn send_update_inventory_item(
+        &mut self,
+        item: &InventoryItem,
+        transaction_id: Uuid,
+        callback_id: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::UpdateInventoryItem(UpdateInventoryItem {
+            agent_data: UpdateInventoryItemAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                transaction_id,
+            },
+            inventory_data: vec![UpdateInventoryItemInventoryDataBlock {
+                item_id: item.item_id,
+                folder_id: item.folder_id,
+                callback_id,
+                creator_id: item.creator_id,
+                owner_id: item.owner_id,
+                group_id: item.group_id,
+                base_mask: item.base_mask,
+                owner_mask: item.owner_mask,
+                group_mask: item.group_mask,
+                everyone_mask: item.everyone_mask,
+                next_owner_mask: item.next_owner_mask,
+                group_owned: item.group_owned,
+                transaction_id,
+                r#type: item.item_type,
+                inv_type: item.inv_type,
+                flags: item.flags,
+                sale_type: item.sale_type,
+                sale_price: item.sale_price,
+                name: with_nul(&item.name),
+                description: with_nul(&item.description),
+                creation_date: item.creation_date,
+                crc: inventory_item_crc(item),
+            }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `MoveInventoryItem` reliably (re-parent each `(item, folder,
+    /// new_name)`; an empty `new_name` keeps the current name). `stamp` asks the
+    /// simulator to re-timestamp.
+    fn send_move_inventory_items(
+        &mut self,
+        moves: &[(Uuid, Uuid, String)],
+        stamp: bool,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::MoveInventoryItem(MoveInventoryItem {
+            agent_data: MoveInventoryItemAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                stamp,
+            },
+            inventory_data: moves
+                .iter()
+                .map(
+                    |(item_id, folder_id, new_name)| MoveInventoryItemInventoryDataBlock {
+                        item_id: *item_id,
+                        folder_id: *folder_id,
+                        new_name: with_nul(new_name),
+                    },
+                )
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `CopyInventoryItem` reliably (copy `old_item_id` owned by
+    /// `old_agent_id` into `new_folder_id`). The simulator answers with a
+    /// `BulkUpdateInventory` for the new item.
+    fn send_copy_inventory_item(
+        &mut self,
+        old_agent_id: Uuid,
+        old_item_id: Uuid,
+        new_folder_id: Uuid,
+        new_name: &str,
+        callback_id: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::CopyInventoryItem(CopyInventoryItem {
+            agent_data: CopyInventoryItemAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            inventory_data: vec![CopyInventoryItemInventoryDataBlock {
+                callback_id,
+                old_agent_id,
+                old_item_id,
+                new_folder_id,
+                new_name: with_nul(new_name),
+            }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RemoveInventoryItem` reliably (delete each item).
+    fn send_remove_inventory_items(
+        &mut self,
+        item_ids: &[Uuid],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RemoveInventoryItem(RemoveInventoryItem {
+            agent_data: RemoveInventoryItemAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            inventory_data: item_ids
+                .iter()
+                .map(|&item_id| RemoveInventoryItemInventoryDataBlock { item_id })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ChangeInventoryItemFlags` reliably (rewrite an item's flags).
+    fn send_change_inventory_item_flags(
+        &mut self,
+        item_id: Uuid,
+        flags: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ChangeInventoryItemFlags(ChangeInventoryItemFlags {
+            agent_data: ChangeInventoryItemFlagsAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            inventory_data: vec![ChangeInventoryItemFlagsInventoryDataBlock { item_id, flags }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `PurgeInventoryDescendents` reliably (empty a folder's contents,
+    /// e.g. the Trash).
+    fn send_purge_inventory_descendents(
+        &mut self,
+        folder_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::PurgeInventoryDescendents(PurgeInventoryDescendents {
+            agent_data: PurgeInventoryDescendentsAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            inventory_data: PurgeInventoryDescendentsInventoryDataBlock { folder_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RemoveInventoryObjects` reliably (delete a mixed set of folders
+    /// and items in one message).
+    fn send_remove_inventory_objects(
+        &mut self,
+        folder_ids: &[Uuid],
+        item_ids: &[Uuid],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RemoveInventoryObjects(RemoveInventoryObjects {
+            agent_data: RemoveInventoryObjectsAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            folder_data: folder_ids
+                .iter()
+                .map(|&folder_id| RemoveInventoryObjectsFolderDataBlock { folder_id })
+                .collect(),
+            item_data: item_ids
+                .iter()
+                .map(|&item_id| RemoveInventoryObjectsItemDataBlock { item_id })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
     /// Queues a `TeleportLocationRequest` reliably.
     fn send_teleport_location_request(
         &mut self,
@@ -3423,6 +3770,21 @@ pub struct Session {
     /// terrain patches, which the `LayerData` message does not itself tag with a
     /// region handle.
     regions: BTreeMap<SocketAddr, u64>,
+    /// The live inventory-folder cache, keyed by folder id. Seeded from the
+    /// login skeleton ([`Event::InventorySkeleton`]), grown by folder-contents
+    /// fetches ([`Event::InventoryDescendents`], both UDP and CAPS) and the
+    /// simulator's [`Event::InventoryBulkUpdate`] pushes, and kept current by the
+    /// agent's own mutations. See [`Session::inventory_folder`].
+    inventory_folders: BTreeMap<Uuid, InventoryFolder>,
+    /// The live inventory-item cache, keyed by item id. Populated by
+    /// folder-contents fetches and the simulator's
+    /// [`Event::InventoryItemCreated`] / [`Event::InventoryBulkUpdate`] pushes,
+    /// and kept current by the agent's own mutations. See
+    /// [`Session::inventory_item`].
+    inventory_items: BTreeMap<Uuid, InventoryItem>,
+    /// A monotonic counter for the async `CallbackID` of inventory create/update
+    /// requests, echoed back in the simulator's reply so a client can correlate.
+    next_inventory_callback: u32,
     /// Pending high-level events for the driver.
     events: VecDeque<Event>,
 }
@@ -3459,6 +3821,9 @@ impl Session {
             objects: BTreeMap::new(),
             terrain: BTreeMap::new(),
             regions: BTreeMap::new(),
+            inventory_folders: BTreeMap::new(),
+            inventory_items: BTreeMap::new(),
+            next_inventory_callback: 1,
             events: VecDeque::new(),
         }
     }
@@ -3555,7 +3920,51 @@ impl Session {
             }
             CAP_FETCH_INVENTORY => {
                 for event in inventory_descendents_from_llsd(body) {
+                    if let Event::InventoryDescendents { folders, items, .. } = &event {
+                        self.cache_inventory(folders, items);
+                    }
                     self.events.push_back(event);
+                }
+            }
+            // A `BulkUpdateInventory` the simulator delivers over the CAPS event
+            // queue (the modern path OpenSim prefers for copies/gives over the
+            // UDP packet). Merge it into the cache like the UDP form.
+            "BulkUpdateInventory" => {
+                if let Some((transaction_id, folders, items)) =
+                    bulk_update_inventory_from_llsd(body)
+                {
+                    self.cache_inventory(&folders, &items);
+                    self.events.push_back(Event::InventoryBulkUpdate {
+                        transaction_id,
+                        folders,
+                        items,
+                    });
+                }
+            }
+            // The reply to an AIS3 (`InventoryAPIv3`/`LibraryAPIv3`) REST
+            // operation — folders/items it created, updated, or fetched, embedded
+            // under `_embedded` (and/or at the top level). Merge into the cache.
+            CAP_INVENTORY_API_V3 | CAP_LIBRARY_API_V3 => {
+                let (folders, items) = ais_inventory_update_from_llsd(body);
+                if !folders.is_empty() || !items.is_empty() {
+                    self.cache_inventory(&folders, &items);
+                    self.events.push_back(Event::InventoryBulkUpdate {
+                        transaction_id: Uuid::nil(),
+                        folders,
+                        items,
+                    });
+                }
+            }
+            // The synchronous reply to a `CreateInventoryCategory` POST:
+            // `{ folder_id, name, parent_id, type }` for the new folder.
+            CAP_CREATE_INVENTORY_CATEGORY => {
+                if let Some(folder) = created_category_from_llsd(body) {
+                    self.cache_inventory_folder(folder.clone());
+                    self.events.push_back(Event::InventoryBulkUpdate {
+                        transaction_id: Uuid::nil(),
+                        folders: vec![folder],
+                        items: Vec::new(),
+                    });
                 }
             }
             // The modern (CAPS event-queue) delivery of group memberships; the
@@ -3931,11 +4340,16 @@ impl Session {
                 self.events
                     .push_back(Event::CircuitEstablished { sim: sim_addr });
                 if !success.inventory_skeleton.is_empty() {
-                    let folders = success
+                    let folders: Vec<InventoryFolder> = success
                         .inventory_skeleton
                         .iter()
                         .map(skeleton_folder)
                         .collect();
+                    // Seed the live inventory cache with the skeleton.
+                    for folder in &folders {
+                        self.inventory_folders
+                            .insert(folder.folder_id, folder.clone());
+                    }
                     self.events.push_back(Event::InventorySkeleton(folders));
                 }
                 if !success.buddy_list.is_empty() {
@@ -4555,12 +4969,46 @@ impl Session {
                     .push_back(Event::ClassifiedInfo(Box::new(classified_info(&reply.data))));
             }
             AnyMessage::InventoryDescendents(reply) => {
+                let folders: Vec<InventoryFolder> =
+                    reply.folder_data.iter().map(inventory_folder).collect();
+                let items: Vec<InventoryItem> =
+                    reply.item_data.iter().map(inventory_item).collect();
+                self.cache_inventory(&folders, &items);
                 self.events.push_back(Event::InventoryDescendents {
                     folder_id: reply.agent_data.folder_id,
                     version: reply.agent_data.version,
                     descendents: reply.agent_data.descendents,
-                    folders: reply.folder_data.iter().map(inventory_folder).collect(),
-                    items: reply.item_data.iter().map(inventory_item).collect(),
+                    folders,
+                    items,
+                });
+            }
+            // A single item the simulator created or whose asset it replaced
+            // (the reply to `CreateInventoryItem`, or an accepted inventory
+            // offer). Merge it into the cache.
+            AnyMessage::UpdateCreateInventoryItem(reply) => {
+                if let Some(data) = reply.inventory_data.first() {
+                    let item = inventory_item_from_create(data);
+                    self.cache_inventory_item(item.clone());
+                    self.events.push_back(Event::InventoryItemCreated {
+                        sim_approved: reply.agent_data.sim_approved,
+                        transaction_id: reply.agent_data.transaction_id,
+                        callback_id: data.callback_id,
+                        item,
+                    });
+                }
+            }
+            // A batch update the simulator pushed (after a copy, give, or
+            // server-side change). Merge folders and items into the cache.
+            AnyMessage::BulkUpdateInventory(update) => {
+                let folders: Vec<InventoryFolder> =
+                    update.folder_data.iter().map(bulk_update_folder).collect();
+                let items: Vec<InventoryItem> =
+                    update.item_data.iter().map(bulk_update_item).collect();
+                self.cache_inventory(&folders, &items);
+                self.events.push_back(Event::InventoryBulkUpdate {
+                    transaction_id: update.agent_data.transaction_id,
+                    folders,
+                    items,
                 });
             }
             AnyMessage::EnableSimulator(sim) => {
@@ -6876,6 +7324,428 @@ impl Session {
         Ok(())
     }
 
+    // ---- Inventory cache (#30) ---------------------------------------------
+
+    /// A cached inventory folder by id, if known (from the login skeleton, a
+    /// folder-contents fetch, a simulator push, or the agent's own mutations).
+    #[must_use]
+    pub fn inventory_folder(&self, folder_id: Uuid) -> Option<&InventoryFolder> {
+        self.inventory_folders.get(&folder_id)
+    }
+
+    /// A cached inventory item by id, if known (from a folder-contents fetch, a
+    /// simulator push, or the agent's own mutations).
+    #[must_use]
+    pub fn inventory_item(&self, item_id: Uuid) -> Option<&InventoryItem> {
+        self.inventory_items.get(&item_id)
+    }
+
+    /// All cached inventory folders, keyed by folder id.
+    #[must_use]
+    pub const fn inventory_folders(&self) -> &BTreeMap<Uuid, InventoryFolder> {
+        &self.inventory_folders
+    }
+
+    /// All cached inventory items, keyed by item id.
+    #[must_use]
+    pub const fn inventory_items(&self) -> &BTreeMap<Uuid, InventoryItem> {
+        &self.inventory_items
+    }
+
+    /// The cached immediate children of `folder_id`: its sub-folders and the
+    /// items directly inside it. Only as complete as the cache (fetch the folder
+    /// with [`Session::request_folder_contents`], or the modern AIS3 CAPS path,
+    /// to populate it).
+    #[must_use]
+    pub fn inventory_children(
+        &self,
+        folder_id: Uuid,
+    ) -> (Vec<&InventoryFolder>, Vec<&InventoryItem>) {
+        let folders = self
+            .inventory_folders
+            .values()
+            .filter(|folder| folder.parent_id == folder_id)
+            .collect();
+        let items = self
+            .inventory_items
+            .values()
+            .filter(|item| item.folder_id == folder_id)
+            .collect();
+        (folders, items)
+    }
+
+    /// Inserts/updates a folder in the cache. A version of `0` (as carried by a
+    /// descendents reply's sub-folders, which omit it) does not clobber a known
+    /// version from the login skeleton.
+    fn cache_inventory_folder(&mut self, mut folder: InventoryFolder) {
+        if let (0, Some(existing)) = (
+            folder.version,
+            self.inventory_folders.get(&folder.folder_id),
+        ) {
+            folder.version = existing.version;
+        }
+        self.inventory_folders.insert(folder.folder_id, folder);
+    }
+
+    /// Merges a batch of folders and items into the live cache (from a
+    /// descendents fetch or a simulator push).
+    fn cache_inventory(&mut self, folders: &[InventoryFolder], items: &[InventoryItem]) {
+        for folder in folders {
+            self.cache_inventory_folder(folder.clone());
+        }
+        for item in items {
+            self.cache_inventory_item(item.clone());
+        }
+    }
+
+    /// Inserts/updates an item in the cache.
+    fn cache_inventory_item(&mut self, item: InventoryItem) {
+        self.inventory_items.insert(item.item_id, item);
+    }
+
+    /// Recursively drops a folder's cached descendents (sub-folders and items),
+    /// used by [`Session::purge_inventory_descendents`].
+    fn purge_cached_descendents(&mut self, folder_id: Uuid) {
+        let subfolders: Vec<Uuid> = self
+            .inventory_folders
+            .values()
+            .filter(|folder| folder.parent_id == folder_id)
+            .map(|folder| folder.folder_id)
+            .collect();
+        self.inventory_items
+            .retain(|_, item| item.folder_id != folder_id);
+        for sub in subfolders {
+            self.purge_cached_descendents(sub);
+            self.inventory_folders.remove(&sub);
+        }
+    }
+
+    /// Allocates the next async inventory `CallbackID` (never zero).
+    fn next_inventory_callback(&mut self) -> u32 {
+        let id = self.next_inventory_callback;
+        self.next_inventory_callback = self.next_inventory_callback.wrapping_add(1).max(1);
+        id
+    }
+
+    // ---- Inventory mutation over UDP (#30) ---------------------------------
+
+    /// Creates a new inventory folder `folder_id` (a fresh, caller-chosen id)
+    /// named `name` of `folder_type` (a `FolderType`, or `-1` for none) under
+    /// `parent_id`, via `CreateInventoryFolder`. The simulator sends no reply, so
+    /// the folder is added to the local cache optimistically. On Second Life the
+    /// modern AIS3 CAPS path (or the `CreateInventoryCategory` cap) returns a
+    /// confirmed result instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn create_inventory_folder(
+        &mut self,
+        folder_id: Uuid,
+        parent_id: Uuid,
+        folder_type: i8,
+        name: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_create_inventory_folder(folder_id, parent_id, folder_type, name, now)?;
+        self.cache_inventory_folder(InventoryFolder {
+            folder_id,
+            parent_id,
+            name: name.to_owned(),
+            folder_type,
+            version: 1,
+        });
+        Ok(())
+    }
+
+    /// Renames / re-types / re-parents the existing folder `folder_id` via
+    /// `UpdateInventoryFolder`. The cache is updated optimistically.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn update_inventory_folder(
+        &mut self,
+        folder_id: Uuid,
+        parent_id: Uuid,
+        folder_type: i8,
+        name: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_update_inventory_folder(folder_id, parent_id, folder_type, name, now)?;
+        self.cache_inventory_folder(InventoryFolder {
+            folder_id,
+            parent_id,
+            name: name.to_owned(),
+            folder_type,
+            version: self
+                .inventory_folders
+                .get(&folder_id)
+                .map_or(1, |folder| folder.version),
+        });
+        Ok(())
+    }
+
+    /// Re-parents the folder `folder_id` under `parent_id` via
+    /// `MoveInventoryFolder` (without re-timestamping its children). Use
+    /// [`Session::move_inventory_folders`] to move several at once.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn move_inventory_folder(
+        &mut self,
+        folder_id: Uuid,
+        parent_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        self.move_inventory_folders(&[(folder_id, parent_id)], false, now)
+    }
+
+    /// Re-parents several folders in one `MoveInventoryFolder` (each a
+    /// `(folder, new_parent)` pair). `stamp` asks the simulator to re-timestamp
+    /// the moved children. The cache is updated optimistically.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn move_inventory_folders(
+        &mut self,
+        moves: &[(Uuid, Uuid)],
+        stamp: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_move_inventory_folders(moves, stamp, now)?;
+        for &(folder_id, parent_id) in moves {
+            if let Some(folder) = self.inventory_folders.get_mut(&folder_id) {
+                folder.parent_id = parent_id;
+            }
+        }
+        Ok(())
+    }
+
+    /// Deletes folders (moved to the trash server-side) via
+    /// `RemoveInventoryFolder`, dropping them and their cached descendents.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn remove_inventory_folders(
+        &mut self,
+        folder_ids: &[Uuid],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_remove_inventory_folders(folder_ids, now)?;
+        for &folder_id in folder_ids {
+            self.purge_cached_descendents(folder_id);
+            self.inventory_folders.remove(&folder_id);
+        }
+        Ok(())
+    }
+
+    /// Creates a new inventory item via `CreateInventoryItem`, returning the
+    /// async callback id the simulator echoes in its `UpdateCreateInventoryItem`
+    /// reply ([`Event::InventoryItemCreated`]). The simulator allocates the
+    /// item's id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn create_inventory_item(
+        &mut self,
+        new: &NewInventoryItem,
+        now: Instant,
+    ) -> Result<u32, Error> {
+        let callback_id = self.next_inventory_callback();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_create_inventory_item(new, callback_id, now)?;
+        Ok(callback_id)
+    }
+
+    /// Rewrites an item's metadata / permissions via `UpdateInventoryItem`. A
+    /// non-nil `transaction_id` binds a freshly uploaded asset to the item. The
+    /// cache is updated optimistically.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn update_inventory_item(
+        &mut self,
+        item: &InventoryItem,
+        transaction_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let callback_id = self.next_inventory_callback();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_update_inventory_item(item, transaction_id, callback_id, now)?;
+        self.cache_inventory_item(item.clone());
+        Ok(())
+    }
+
+    /// Moves the item `item_id` into folder `folder_id`, optionally renaming it
+    /// (an empty `new_name` keeps the current name), via `MoveInventoryItem`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn move_inventory_item(
+        &mut self,
+        item_id: Uuid,
+        folder_id: Uuid,
+        new_name: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        self.move_inventory_items(&[(item_id, folder_id, new_name.to_owned())], false, now)
+    }
+
+    /// Moves several items in one `MoveInventoryItem` (each `(item, folder,
+    /// new_name)`; an empty `new_name` keeps the name). `stamp` asks the
+    /// simulator to re-timestamp. The cache is updated optimistically.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn move_inventory_items(
+        &mut self,
+        moves: &[(Uuid, Uuid, String)],
+        stamp: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_move_inventory_items(moves, stamp, now)?;
+        for (item_id, folder_id, new_name) in moves {
+            if let Some(item) = self.inventory_items.get_mut(item_id) {
+                item.folder_id = *folder_id;
+                if !new_name.is_empty() {
+                    item.name.clone_from(new_name);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Copies the item `old_item_id` (owned by `old_agent_id`) into
+    /// `new_folder_id` under `new_name`, via `CopyInventoryItem`. The simulator
+    /// answers with a `BulkUpdateInventory` for the new item
+    /// ([`Event::InventoryBulkUpdate`]); the returned callback id correlates it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn copy_inventory_item(
+        &mut self,
+        old_agent_id: Uuid,
+        old_item_id: Uuid,
+        new_folder_id: Uuid,
+        new_name: &str,
+        now: Instant,
+    ) -> Result<u32, Error> {
+        let callback_id = self.next_inventory_callback();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_copy_inventory_item(
+            old_agent_id,
+            old_item_id,
+            new_folder_id,
+            new_name,
+            callback_id,
+            now,
+        )?;
+        Ok(callback_id)
+    }
+
+    /// Deletes items via `RemoveInventoryItem`, dropping them from the cache.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn remove_inventory_items(&mut self, item_ids: &[Uuid], now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_remove_inventory_items(item_ids, now)?;
+        for item_id in item_ids {
+            self.inventory_items.remove(item_id);
+        }
+        Ok(())
+    }
+
+    /// Rewrites the flags of item `item_id` via `ChangeInventoryItemFlags`. The
+    /// cache is updated optimistically.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn change_inventory_item_flags(
+        &mut self,
+        item_id: Uuid,
+        flags: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_change_inventory_item_flags(item_id, flags, now)?;
+        if let Some(item) = self.inventory_items.get_mut(&item_id) {
+            item.flags = flags;
+        }
+        Ok(())
+    }
+
+    /// Empties a folder's contents (e.g. the Trash) via
+    /// `PurgeInventoryDescendents`, dropping its cached descendents.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn purge_inventory_descendents(
+        &mut self,
+        folder_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_purge_inventory_descendents(folder_id, now)?;
+        self.purge_cached_descendents(folder_id);
+        Ok(())
+    }
+
+    /// Deletes a mixed set of folders and items in one `RemoveInventoryObjects`,
+    /// dropping them (and the folders' descendents) from the cache.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn remove_inventory_objects(
+        &mut self,
+        folder_ids: &[Uuid],
+        item_ids: &[Uuid],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_remove_inventory_objects(folder_ids, item_ids, now)?;
+        for &folder_id in folder_ids {
+            self.purge_cached_descendents(folder_id);
+            self.inventory_folders.remove(&folder_id);
+        }
+        for item_id in item_ids {
+            self.inventory_items.remove(item_id);
+        }
+        Ok(())
+    }
+
     /// Requests the region's info (agent and object limits) via
     /// `RequestRegionInfo`. The reply arrives as an [`Event::RegionLimits`].
     ///
@@ -8659,6 +9529,52 @@ fn inventory_folder(data: &InventoryDescendentsFolderDataBlock) -> InventoryFold
     }
 }
 
+/// The LL "CRC" of a UUID: its 16 bytes read as four little-endian `u32`s,
+/// summed (wrapping). A faithful port of `LLUUID::getCRC32`.
+fn uuid_crc(id: Uuid) -> u32 {
+    id.as_bytes().chunks_exact(4).fold(0_u32, |acc, chunk| {
+        let b0 = chunk.first().copied().unwrap_or(0);
+        let b1 = chunk.get(1).copied().unwrap_or(0);
+        let b2 = chunk.get(2).copied().unwrap_or(0);
+        let b3 = chunk.get(3).copied().unwrap_or(0);
+        let word =
+            u32::from(b0) | (u32::from(b1) << 8) | (u32::from(b2) << 16) | (u32::from(b3) << 24);
+        acc.wrapping_add(word)
+    })
+}
+
+/// The LL inventory-item "CRC" (a checksum, not a true CRC) carried in
+/// `UpdateInventoryItem`/`BulkUpdateInventory`, a faithful port of
+/// `LLInventoryItem::getCRC32` (with `LLPermissions::getCRC32` and
+/// `LLSaleInfo::getCRC32`). The simulator uses it to detect a no-op update; an
+/// `i8` asset/inventory type is sign-extended to `u32` as in the C++ promotion.
+fn inventory_item_crc(item: &InventoryItem) -> u32 {
+    let permissions_crc = uuid_crc(item.creator_id)
+        .wrapping_add(uuid_crc(item.owner_id))
+        .wrapping_add(uuid_crc(item.last_owner_id))
+        .wrapping_add(uuid_crc(item.group_id))
+        .wrapping_add(
+            item.base_mask
+                .wrapping_add(item.owner_mask)
+                .wrapping_add(item.everyone_mask)
+                .wrapping_add(item.group_mask),
+        );
+    let sale_info_crc = item
+        .sale_price
+        .cast_unsigned()
+        .wrapping_add(u32::from(item.sale_type).wrapping_mul(0x0707_3096));
+    uuid_crc(item.item_id)
+        .wrapping_add(uuid_crc(item.folder_id))
+        .wrapping_add(permissions_crc)
+        .wrapping_add(uuid_crc(item.asset_id))
+        .wrapping_add(i32::from(item.item_type).cast_unsigned())
+        .wrapping_add(i32::from(item.inv_type).cast_unsigned())
+        .wrapping_add(item.flags)
+        .wrapping_add(sale_info_crc)
+        .wrapping_add(item.creation_date.cast_unsigned())
+    // The thumbnail UUID (nil here) contributes 0 and is omitted.
+}
+
 /// Builds an [`InventoryItem`] from an `InventoryDescendents` item entry.
 fn inventory_item(data: &InventoryDescendentsItemDataBlock) -> InventoryItem {
     InventoryItem {
@@ -8674,6 +9590,74 @@ fn inventory_item(data: &InventoryDescendentsItemDataBlock) -> InventoryItem {
         sale_price: data.sale_price,
         creation_date: data.creation_date,
         owner_id: data.owner_id,
+        // The legacy UDP descendents reply carries no previous-owner id.
+        last_owner_id: Uuid::nil(),
+        creator_id: data.creator_id,
+        group_id: data.group_id,
+        group_owned: data.group_owned,
+        base_mask: data.base_mask,
+        owner_mask: data.owner_mask,
+        group_mask: data.group_mask,
+        everyone_mask: data.everyone_mask,
+        next_owner_mask: data.next_owner_mask,
+    }
+}
+
+/// Builds an [`InventoryItem`] from an `UpdateCreateInventoryItem` entry (the
+/// reply to a `CreateInventoryItem`, carrying the new asset id).
+fn inventory_item_from_create(data: &UpdateCreateInventoryItemInventoryDataBlock) -> InventoryItem {
+    InventoryItem {
+        item_id: data.item_id,
+        folder_id: data.folder_id,
+        name: trimmed_string(&data.name),
+        description: trimmed_string(&data.description),
+        asset_id: data.asset_id,
+        item_type: data.r#type,
+        inv_type: data.inv_type,
+        flags: data.flags,
+        sale_type: data.sale_type,
+        sale_price: data.sale_price,
+        creation_date: data.creation_date,
+        owner_id: data.owner_id,
+        last_owner_id: Uuid::nil(),
+        creator_id: data.creator_id,
+        group_id: data.group_id,
+        group_owned: data.group_owned,
+        base_mask: data.base_mask,
+        owner_mask: data.owner_mask,
+        group_mask: data.group_mask,
+        everyone_mask: data.everyone_mask,
+        next_owner_mask: data.next_owner_mask,
+    }
+}
+
+/// Builds an [`InventoryFolder`] from a `BulkUpdateInventory` folder entry.
+fn bulk_update_folder(data: &BulkUpdateInventoryFolderDataBlock) -> InventoryFolder {
+    InventoryFolder {
+        folder_id: data.folder_id,
+        parent_id: data.parent_id,
+        name: trimmed_string(&data.name),
+        folder_type: data.r#type,
+        version: 0,
+    }
+}
+
+/// Builds an [`InventoryItem`] from a `BulkUpdateInventory` item entry.
+fn bulk_update_item(data: &BulkUpdateInventoryItemDataBlock) -> InventoryItem {
+    InventoryItem {
+        item_id: data.item_id,
+        folder_id: data.folder_id,
+        name: trimmed_string(&data.name),
+        description: trimmed_string(&data.description),
+        asset_id: data.asset_id,
+        item_type: data.r#type,
+        inv_type: data.inv_type,
+        flags: data.flags,
+        sale_type: data.sale_type,
+        sale_price: data.sale_price,
+        creation_date: data.creation_date,
+        owner_id: data.owner_id,
+        last_owner_id: Uuid::nil(),
         creator_id: data.creator_id,
         group_id: data.group_id,
         group_owned: data.group_owned,
@@ -9246,6 +10230,123 @@ fn inventory_descendents_from_llsd(body: &Llsd) -> Vec<Event> {
         .collect()
 }
 
+/// Parses a `BulkUpdateInventory` CAPS event-queue body (`AgentData` /
+/// `FolderData` / `ItemData` arrays of `CamelCase`-keyed maps, mirroring the UDP
+/// message blocks) into its transaction id, folders, and items. Returns `None`
+/// if the body is not a `BulkUpdateInventory` map. Nil-id placeholder folders
+/// (which OpenSim emits) are skipped.
+fn bulk_update_inventory_from_llsd(
+    body: &Llsd,
+) -> Option<(Uuid, Vec<InventoryFolder>, Vec<InventoryItem>)> {
+    let transaction_id = body
+        .get("AgentData")
+        .and_then(Llsd::as_array)
+        .and_then(<[Llsd]>::first)
+        .map_or_else(Uuid::nil, |agent| uuid_member(agent, "TransactionID"));
+    let folders = body
+        .get("FolderData")
+        .and_then(Llsd::as_array)
+        .unwrap_or(&[])
+        .iter()
+        .map(|folder| InventoryFolder {
+            folder_id: uuid_member(folder, "FolderID"),
+            parent_id: uuid_member(folder, "ParentID"),
+            name: string_member(folder, "Name"),
+            folder_type: i8::try_from(i32_member(folder, "Type")).unwrap_or(-1),
+            version: 0,
+        })
+        .filter(|folder| !folder.folder_id.is_nil())
+        .collect();
+    let items = body
+        .get("ItemData")
+        .and_then(Llsd::as_array)
+        .unwrap_or(&[])
+        .iter()
+        .map(bulk_update_item_from_llsd)
+        .filter(|item| !item.item_id.is_nil())
+        .collect();
+    Some((transaction_id, folders, items))
+}
+
+/// Builds an [`InventoryItem`] from a `BulkUpdateInventory` CAPS `ItemData`
+/// entry (`CamelCase` keys, flat — permissions are not nested as in AIS).
+fn bulk_update_item_from_llsd(item: &Llsd) -> InventoryItem {
+    InventoryItem {
+        item_id: uuid_member(item, "ItemID"),
+        folder_id: uuid_member(item, "FolderID"),
+        name: string_member(item, "Name"),
+        description: string_member(item, "Description"),
+        asset_id: uuid_member(item, "AssetID"),
+        item_type: i8::try_from(i32_member(item, "Type")).unwrap_or(-1),
+        inv_type: i8::try_from(i32_member(item, "InvType")).unwrap_or(-1),
+        flags: i32_member(item, "Flags").cast_unsigned(),
+        sale_type: u8::try_from(i32_member(item, "SaleType")).unwrap_or(0),
+        sale_price: i32_member(item, "SalePrice"),
+        creation_date: i32_member(item, "CreationDate"),
+        owner_id: uuid_member(item, "OwnerID"),
+        last_owner_id: Uuid::nil(),
+        creator_id: uuid_member(item, "CreatorID"),
+        group_id: uuid_member(item, "GroupID"),
+        group_owned: item
+            .get("GroupOwned")
+            .and_then(Llsd::as_bool)
+            .unwrap_or(false),
+        base_mask: i32_member(item, "BaseMask").cast_unsigned(),
+        owner_mask: i32_member(item, "OwnerMask").cast_unsigned(),
+        group_mask: i32_member(item, "GroupMask").cast_unsigned(),
+        everyone_mask: i32_member(item, "EveryoneMask").cast_unsigned(),
+        next_owner_mask: i32_member(item, "NextOwnerMask").cast_unsigned(),
+    }
+}
+
+/// Parses an AIS3 (`InventoryAPIv3`) response into the folders and items it
+/// carries. AIS embeds the affected objects under `_embedded` as uuid-keyed maps
+/// (`categories`, `items`, `links`), and a single-object fetch returns the object
+/// at the top level. Both are gathered, reusing the AIS-shaped folder/item
+/// decoders ([`inventory_folder_from_llsd`] / [`inventory_item_from_llsd`]).
+fn ais_inventory_update_from_llsd(body: &Llsd) -> (Vec<InventoryFolder>, Vec<InventoryItem>) {
+    let mut folders = Vec::new();
+    let mut items = Vec::new();
+    // Top-level single object (e.g. a GET /item/<id> or GET /category/<id>).
+    if body.get("item_id").is_some() {
+        items.push(inventory_item_from_llsd(body));
+    }
+    if body.get("category_id").is_some() {
+        folders.push(inventory_folder_from_llsd(body));
+    }
+    // Embedded objects (the affected set of a create/update/move).
+    if let Some(embedded) = body.get("_embedded") {
+        if let Some(categories) = embedded.get("categories").and_then(Llsd::as_map) {
+            folders.extend(categories.values().map(inventory_folder_from_llsd));
+        }
+        if let Some(embedded_items) = embedded.get("items").and_then(Llsd::as_map) {
+            items.extend(embedded_items.values().map(inventory_item_from_llsd));
+        }
+        if let Some(links) = embedded.get("links").and_then(Llsd::as_map) {
+            items.extend(links.values().map(inventory_item_from_llsd));
+        }
+    }
+    folders.retain(|folder| !folder.folder_id.is_nil());
+    items.retain(|item| !item.item_id.is_nil());
+    (folders, items)
+}
+
+/// Parses the synchronous `CreateInventoryCategory` reply
+/// (`{ folder_id, name, parent_id, type }`) into the created folder.
+fn created_category_from_llsd(body: &Llsd) -> Option<InventoryFolder> {
+    let folder_id = uuid_member(body, "folder_id");
+    if folder_id.is_nil() {
+        return None;
+    }
+    Some(InventoryFolder {
+        folder_id,
+        parent_id: uuid_member(body, "parent_id"),
+        name: string_member(body, "name"),
+        folder_type: i8::try_from(i32_member(body, "type")).unwrap_or(-1),
+        version: 1,
+    })
+}
+
 /// Builds an [`InventoryFolder`] from a CAPS `categories` entry.
 fn inventory_folder_from_llsd(category: &Llsd) -> InventoryFolder {
     InventoryFolder {
@@ -9281,6 +10382,7 @@ fn inventory_item_from_llsd(item: &Llsd) -> InventoryItem {
         sale_price: sale_info.map_or(0, |s| i32_member(s, "sale_price")),
         creation_date: i32_member(item, "created_at"),
         owner_id: perm_uuid("owner_id"),
+        last_owner_id: perm_uuid("last_owner_id"),
         creator_id: perm_uuid("creator_id"),
         group_id: perm_uuid("group_id"),
         group_owned: permissions

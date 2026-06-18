@@ -11,13 +11,14 @@ mod test {
     use sl_proto::{
         AssetType, ChatAudible, ChatSourceType, ChatType, ClassifiedUpdate, ClickAction,
         ControlFlags, CreateGroupParams, DeRezDestination, DisconnectReason, EstateAccessDelta,
-        EstateAccessKind, Event, FriendRights, ImDialog, ImageCodec, InterestsUpdate, LindenAmount,
-        LoginParams, MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType,
-        ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
-        ParcelFlags, ParcelMediaCommand, ParcelReturnType, ParcelUpdate, PermissionField,
-        PickUpdate, PrimShape, ProductType, ProfileUpdate, RegionInfoUpdate, Reliability, SaleType,
-        ScriptPermissions, Session, SoundFlags, TerrainLayerType, Throttle, TransferStatus,
-        Transmit, WearableType, avatar_texture, pcode,
+        EstateAccessKind, Event, FriendRights, ImDialog, ImageCodec, InterestsUpdate,
+        InventoryItem, LindenAmount, LoginParams, MapItemType, Material, Maturity,
+        MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, ObjectFlagSettings,
+        ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags,
+        ParcelMediaCommand, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PrimShape,
+        ProductType, ProfileUpdate, RegionInfoUpdate, Reliability, SaleType, ScriptPermissions,
+        Session, SoundFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, WearableType,
+        avatar_texture, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -36,14 +37,16 @@ mod test {
         AvatarPicksReplyAgentDataBlock, AvatarPicksReplyDataBlock, AvatarPropertiesReply,
         AvatarPropertiesReplyAgentDataBlock, AvatarPropertiesReplyPropertiesDataBlock,
         AvatarSitResponse, AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock,
-        ChangeUserRights, ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock,
-        ChatFromSimulator, ChatFromSimulatorChatDataBlock, ClassifiedInfoReply,
-        ClassifiedInfoReplyAgentDataBlock, ClassifiedInfoReplyDataBlock, ConfirmXferPacket,
-        ConfirmXferPacketXferIDBlock, CrossedRegion, CrossedRegionAgentDataBlock,
-        CrossedRegionInfoBlock, CrossedRegionRegionDataBlock, DisableSimulator, EconomyData,
-        EconomyDataInfoBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
-        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock, GenericMessage,
-        GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GenericStreamingMessage,
+        BulkUpdateInventory, BulkUpdateInventoryAgentDataBlock, BulkUpdateInventoryFolderDataBlock,
+        BulkUpdateInventoryItemDataBlock, ChangeUserRights, ChangeUserRightsAgentDataBlock,
+        ChangeUserRightsRightsBlock, ChatFromSimulator, ChatFromSimulatorChatDataBlock,
+        ClassifiedInfoReply, ClassifiedInfoReplyAgentDataBlock, ClassifiedInfoReplyDataBlock,
+        ConfirmXferPacket, ConfirmXferPacketXferIDBlock, CrossedRegion,
+        CrossedRegionAgentDataBlock, CrossedRegionInfoBlock, CrossedRegionRegionDataBlock,
+        DisableSimulator, EconomyData, EconomyDataInfoBlock, EstateOwnerMessage,
+        EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
+        EstateOwnerMessageParamListBlock, GenericMessage, GenericMessageAgentDataBlock,
+        GenericMessageMethodDataBlock, GenericStreamingMessage,
         GenericStreamingMessageDataBlockBlock, GenericStreamingMessageMethodDataBlock,
         GroupMembersReply, GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
         GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
@@ -81,7 +84,9 @@ mod test {
         ScriptQuestionExperienceBlock, SendXferPacket, SendXferPacketDataPacketBlock,
         SendXferPacketXferIDBlock, SoundTrigger, SoundTriggerSoundDataBlock, TeleportFailed,
         TeleportFailedInfoBlock, TransferInfo, TransferInfoTransferInfoBlock, TransferPacket,
-        TransferPacketTransferDataBlock, UseCachedMuteList, UseCachedMuteListAgentDataBlock,
+        TransferPacketTransferDataBlock, UpdateCreateInventoryItem,
+        UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
+        UseCachedMuteList, UseCachedMuteListAgentDataBlock,
     };
     use sl_wire::{
         AnyMessage, LoginFailure, LoginRequest, LoginResponse, LoginSuccess, MessageId,
@@ -7190,6 +7195,323 @@ mod test {
         assert_eq!(from_agent_id, from);
         assert_eq!(from_name, "Inviter");
         assert_eq!(message, "join us");
+        Ok(())
+    }
+
+    // ---- Inventory mutation (#30) ------------------------------------------
+
+    /// Builds an [`InventoryItem`] with a single non-default field for tests.
+    fn sample_item(item_id: uuid::Uuid, folder_id: uuid::Uuid, name: &str) -> InventoryItem {
+        InventoryItem {
+            item_id,
+            folder_id,
+            name: name.to_owned(),
+            description: String::new(),
+            asset_id: uuid::Uuid::nil(),
+            item_type: 0,
+            inv_type: 0,
+            flags: 0,
+            sale_type: 0,
+            sale_price: 0,
+            creation_date: 0,
+            owner_id: uuid::Uuid::nil(),
+            last_owner_id: uuid::Uuid::nil(),
+            creator_id: uuid::Uuid::nil(),
+            group_id: uuid::Uuid::nil(),
+            group_owned: false,
+            base_mask: 0,
+            owner_mask: 0,
+            group_mask: 0,
+            everyone_mask: 0,
+            next_owner_mask: 0,
+        }
+    }
+
+    #[test]
+    fn create_inventory_folder_sends_and_caches() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let folder_id = uuid::Uuid::from_u128(0xF0);
+        let parent_id = uuid::Uuid::from_u128(0x10);
+        session.create_inventory_folder(folder_id, parent_id, 8, "Toys & Co", now)?;
+        let sent = drain(&mut session)?;
+        let create = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::CreateInventoryFolder(create) => Some(create),
+                _ => None,
+            })
+            .ok_or("expected a CreateInventoryFolder")?;
+        assert_eq!(create.folder_data.folder_id, folder_id);
+        assert_eq!(create.folder_data.parent_id, parent_id);
+        assert_eq!(create.folder_data.r#type, 8);
+        // The name carries a trailing NUL, as a real viewer sends.
+        assert_eq!(create.folder_data.name, b"Toys & Co\0");
+
+        // The folder is in the cache optimistically (no reply on this path).
+        let cached = session
+            .inventory_folder(folder_id)
+            .ok_or("folder should be cached")?;
+        assert_eq!(cached.name, "Toys & Co");
+        assert_eq!(cached.parent_id, parent_id);
+
+        // Removing it drops it from the cache.
+        session.remove_inventory_folders(&[folder_id], now)?;
+        let sent = drain(&mut session)?;
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::RemoveInventoryFolder(_))),
+            "expected a RemoveInventoryFolder"
+        );
+        assert!(
+            session.inventory_folder(folder_id).is_none(),
+            "folder should be uncached after removal"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn create_inventory_item_sends_with_callback() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let new = NewInventoryItem {
+            folder_id: uuid::Uuid::from_u128(0x11),
+            transaction_id: uuid::Uuid::nil(),
+            next_owner_mask: 0x0008_e000,
+            asset_type: 7, // notecard
+            inv_type: 7,
+            wearable_type: 0,
+            name: "Notes".to_owned(),
+            description: "a note".to_owned(),
+        };
+        let callback_id = session.create_inventory_item(&new, now)?;
+        assert_eq!(callback_id, 1, "first callback id should be 1");
+        let sent = drain(&mut session)?;
+        let create = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::CreateInventoryItem(create) => Some(create),
+                _ => None,
+            })
+            .ok_or("expected a CreateInventoryItem")?;
+        assert_eq!(create.inventory_block.callback_id, 1);
+        assert_eq!(
+            create.inventory_block.folder_id,
+            uuid::Uuid::from_u128(0x11)
+        );
+        assert_eq!(create.inventory_block.r#type, 7);
+        assert_eq!(create.inventory_block.name, b"Notes\0");
+        assert_eq!(create.inventory_block.description, b"a note\0");
+        Ok(())
+    }
+
+    #[test]
+    fn update_inventory_item_sends_golden_crc() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // An item whose only non-nil field is item_id == 1. Its LL checksum is
+        // uuid_crc(1) = the low 16 bytes read as four LE u32s, summed: the last
+        // chunk [0,0,0,1] => 1 << 24.
+        let item = sample_item(uuid::Uuid::from_u128(1), uuid::Uuid::nil(), "Renamed");
+        session.update_inventory_item(&item, uuid::Uuid::nil(), now)?;
+        let sent = drain(&mut session)?;
+        let update = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::UpdateInventoryItem(update) => Some(update),
+                _ => None,
+            })
+            .ok_or("expected an UpdateInventoryItem")?;
+        let data = update
+            .inventory_data
+            .first()
+            .ok_or("expected one inventory-data block")?;
+        assert_eq!(data.item_id, uuid::Uuid::from_u128(1));
+        assert_eq!(data.name, b"Renamed\0");
+        assert_eq!(data.crc, 0x0100_0000);
+
+        // The optimistic cache holds the updated item.
+        let cached = session
+            .inventory_item(uuid::Uuid::from_u128(1))
+            .ok_or("item should be cached")?;
+        assert_eq!(cached.name, "Renamed");
+        Ok(())
+    }
+
+    #[test]
+    fn move_inventory_item_sends_move() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let item_id = uuid::Uuid::from_u128(0x21);
+        let folder_id = uuid::Uuid::from_u128(0x22);
+        session.move_inventory_item(item_id, folder_id, "NewName", now)?;
+        let sent = drain(&mut session)?;
+        let mv = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::MoveInventoryItem(mv) => Some(mv),
+                _ => None,
+            })
+            .ok_or("expected a MoveInventoryItem")?;
+        assert!(!mv.agent_data.stamp);
+        let data = mv.inventory_data.first().ok_or("expected one move block")?;
+        assert_eq!(data.item_id, item_id);
+        assert_eq!(data.folder_id, folder_id);
+        assert_eq!(data.new_name, b"NewName\0");
+        Ok(())
+    }
+
+    #[test]
+    fn update_create_inventory_item_surfaces_event_and_caches() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let item_id = uuid::Uuid::from_u128(0x31);
+        let message = AnyMessage::UpdateCreateInventoryItem(UpdateCreateInventoryItem {
+            agent_data: UpdateCreateInventoryItemAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                sim_approved: true,
+                transaction_id: uuid::Uuid::from_u128(0x99),
+            },
+            inventory_data: vec![UpdateCreateInventoryItemInventoryDataBlock {
+                item_id,
+                folder_id: uuid::Uuid::from_u128(0x32),
+                callback_id: 7,
+                creator_id: uuid::Uuid::from_u128(2),
+                owner_id: uuid::Uuid::from_u128(1),
+                group_id: uuid::Uuid::nil(),
+                base_mask: 0x7fff_ffff,
+                owner_mask: 0x7fff_ffff,
+                group_mask: 0,
+                everyone_mask: 0,
+                next_owner_mask: 0x0008_e000,
+                group_owned: false,
+                asset_id: uuid::Uuid::from_u128(0x55),
+                r#type: 7,
+                inv_type: 7,
+                flags: 0,
+                sale_type: 0,
+                sale_price: 0,
+                name: b"Fresh Note\0".to_vec(),
+                description: b"\0".to_vec(),
+                creation_date: 1234,
+                crc: 0,
+            }],
+        });
+        let datagram = server_message(&message, 40, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::InventoryItemCreated { .. }))
+            .ok_or("expected an InventoryItemCreated event")?;
+        let Event::InventoryItemCreated {
+            sim_approved,
+            callback_id,
+            item,
+            ..
+        } = event
+        else {
+            return Err("expected InventoryItemCreated".into());
+        };
+        assert!(sim_approved);
+        assert_eq!(callback_id, 7);
+        assert_eq!(item.name, "Fresh Note");
+        assert_eq!(item.asset_id, uuid::Uuid::from_u128(0x55));
+
+        let cached = session
+            .inventory_item(item_id)
+            .ok_or("item should be cached")?;
+        assert_eq!(cached.name, "Fresh Note");
+        Ok(())
+    }
+
+    #[test]
+    fn bulk_update_inventory_surfaces_event_and_caches() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let folder_id = uuid::Uuid::from_u128(0x41);
+        let item_id = uuid::Uuid::from_u128(0x42);
+        let message = AnyMessage::BulkUpdateInventory(BulkUpdateInventory {
+            agent_data: BulkUpdateInventoryAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                transaction_id: uuid::Uuid::from_u128(0xAB),
+            },
+            folder_data: vec![BulkUpdateInventoryFolderDataBlock {
+                folder_id,
+                parent_id: uuid::Uuid::from_u128(0x40),
+                r#type: 8,
+                name: b"Copied Folder\0".to_vec(),
+            }],
+            item_data: vec![BulkUpdateInventoryItemDataBlock {
+                item_id,
+                callback_id: 0,
+                folder_id,
+                creator_id: uuid::Uuid::from_u128(2),
+                owner_id: uuid::Uuid::from_u128(1),
+                group_id: uuid::Uuid::nil(),
+                base_mask: 0x7fff_ffff,
+                owner_mask: 0x7fff_ffff,
+                group_mask: 0,
+                everyone_mask: 0,
+                next_owner_mask: 0,
+                group_owned: false,
+                asset_id: uuid::Uuid::from_u128(0x56),
+                r#type: 0,
+                inv_type: 0,
+                flags: 0,
+                sale_type: 0,
+                sale_price: 0,
+                name: b"Copied Item\0".to_vec(),
+                description: b"\0".to_vec(),
+                creation_date: 99,
+                crc: 0,
+            }],
+        });
+        let datagram = server_message(&message, 41, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::InventoryBulkUpdate { .. }))
+            .ok_or("expected an InventoryBulkUpdate event")?;
+        let Event::InventoryBulkUpdate {
+            transaction_id,
+            folders,
+            items,
+        } = event
+        else {
+            return Err("expected InventoryBulkUpdate".into());
+        };
+        assert_eq!(transaction_id, uuid::Uuid::from_u128(0xAB));
+        assert_eq!(folders.len(), 1);
+        assert_eq!(items.len(), 1);
+
+        assert_eq!(
+            session
+                .inventory_folder(folder_id)
+                .ok_or("folder should be cached")?
+                .name,
+            "Copied Folder"
+        );
+        assert_eq!(
+            session
+                .inventory_item(item_id)
+                .ok_or("item should be cached")?
+                .name,
+            "Copied Item"
+        );
         Ok(())
     }
 }

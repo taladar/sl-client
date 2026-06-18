@@ -147,6 +147,16 @@ fn on_events(
                     items.len()
                 );
             }
+            SlSessionEvent::InventoryItemCreated { item, .. } => {
+                info!("inventory item created: {}", item.name);
+            }
+            SlSessionEvent::InventoryBulkUpdate { folders, items, .. } => {
+                info!(
+                    "bulk inventory update: {} folder(s), {} item(s)",
+                    folders.len(),
+                    items.len()
+                );
+            }
             SlSessionEvent::FriendList(friends) => {
                 info!("friend list: {} friend(s)", friends.len());
             }

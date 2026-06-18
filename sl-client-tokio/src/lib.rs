@@ -12,26 +12,30 @@ use tokio::sync::mpsc;
 use std::collections::HashMap;
 
 use sl_proto::{
-    CAP_AGENT_EXPERIENCES, CAP_EXPERIENCE_PREFERENCES, CAP_FETCH_INVENTORY,
-    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET,
+    CAP_AGENT_EXPERIENCES, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
+    CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH,
     CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
-    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_MODIFY_MATERIAL_PARAMS,
-    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
-    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_RENDER_MATERIALS, CAP_UPDATE_AVATAR_APPEARANCE,
-    CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Llsd,
-    REQUESTED_CAPABILITIES, Session, build_event_queue_request, build_fetch_inventory_request,
-    build_group_member_data_request, build_modify_material_params_request,
-    build_new_file_agent_inventory_request, build_object_media_get_request,
-    build_object_media_navigate_request, build_object_media_update_request,
-    build_parcel_voice_info_request, build_provision_voice_account_request,
-    build_region_experiences_request, build_render_materials_request, build_seed_request,
-    build_set_experience_permission_request, build_update_avatar_appearance_request,
-    build_update_experience_request, build_update_item_asset_request,
-    build_upload_baked_texture_request, build_voice_signaling_request, experience_id_query,
-    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
-    j2c, parse_asset_upload_response, parse_event_queue_response, parse_experience_ids,
+    CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
+    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_RENDER_MATERIALS,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE,
+    CAP_VOICE_SIGNALING, Llsd, REQUESTED_CAPABILITIES, Session, ais_category_children_fetch_url,
+    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
+    build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
+    build_ais_update_item_body, build_create_inventory_category_request, build_event_queue_request,
+    build_fetch_inventory_request, build_group_member_data_request,
+    build_modify_material_params_request, build_new_file_agent_inventory_request,
+    build_object_media_get_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_parcel_voice_info_request,
+    build_provision_voice_account_request, build_region_experiences_request,
+    build_render_materials_request, build_seed_request, build_set_experience_permission_request,
+    build_update_avatar_appearance_request, build_update_experience_request,
+    build_update_item_asset_request, build_upload_baked_texture_request,
+    build_voice_signaling_request, experience_id_query, experience_info_query,
+    find_experience_query, forget_experience_query, group_experiences_query, j2c,
+    parse_asset_upload_response, parse_event_queue_response, parse_experience_ids,
     parse_experience_status, parse_llsd_xml, parse_login_response, parse_render_materials_response,
     parse_seed_response,
 };
@@ -52,18 +56,18 @@ pub use sl_proto::{
     MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER,
     MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry,
     MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags,
-    MuteType, NeighborInfo, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse,
-    ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
-    ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ParcelVoiceInfo, PermissionField, PickInfo,
-    PickUpdate, PlayingAnimation, PrimShape, ProductType, ProfileUpdate, ReflectionProbe,
-    RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry,
-    RenderMaterialRef, Rotation, SaleType, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTeleportRequest, SculptData, SoundFlags, SoundPreload,
-    TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace, Throttle, TransferStatus,
-    Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType,
-    avatar_texture, decode_texture_entry, grid_to_handle, handle_to_global, handle_to_grid, pcode,
-    sim_access,
+    MuteType, NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings,
+    ObjectMediaResponse, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ParcelVoiceInfo,
+    PermissionField, PickInfo, PickUpdate, PlayingAnimation, PrimShape, ProductType, ProfileUpdate,
+    ReflectionProbe, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability,
+    RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData, SoundFlags,
+    SoundPreload, TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace, Throttle,
+    TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable,
+    WearableType, avatar_texture, decode_texture_entry, grid_to_handle, handle_to_global,
+    handle_to_grid, pcode, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -243,6 +247,165 @@ pub enum Command {
     /// path (`FetchInventoryDescendents2`) — the modern path used on Second Life.
     /// Each folder's contents arrive as an [`Event::InventoryDescendents`].
     FetchInventoryFolders(Vec<Uuid>),
+    /// Create an inventory folder (`CreateInventoryFolder`, UDP). `folder_id` is a
+    /// fresh, caller-chosen id. The simulator sends no reply; the folder is added
+    /// to the local cache optimistically. Use [`Command::CreateInventoryCategory`]
+    /// for a confirmed reply.
+    CreateInventoryFolder {
+        /// The new folder's id (a fresh, caller-chosen UUID).
+        folder_id: Uuid,
+        /// The parent folder.
+        parent_id: Uuid,
+        /// The folder's preferred type (`FolderType`, or `-1` for none).
+        folder_type: i8,
+        /// The folder name.
+        name: String,
+    },
+    /// Rename / re-type / re-parent an existing folder (`UpdateInventoryFolder`).
+    UpdateInventoryFolder {
+        /// The folder to update.
+        folder_id: Uuid,
+        /// The (possibly new) parent folder.
+        parent_id: Uuid,
+        /// The folder's preferred type (`FolderType`, or `-1`).
+        folder_type: i8,
+        /// The folder name.
+        name: String,
+    },
+    /// Move a folder under a new parent (`MoveInventoryFolder`).
+    MoveInventoryFolder {
+        /// The folder to move.
+        folder_id: Uuid,
+        /// The new parent folder.
+        parent_id: Uuid,
+    },
+    /// Delete folders (to the server trash) via `RemoveInventoryFolder`.
+    RemoveInventoryFolders(Vec<Uuid>),
+    /// Create an inventory item (`CreateInventoryItem`). The simulator allocates
+    /// the id and replies with an [`Event::InventoryItemCreated`].
+    CreateInventoryItem(NewInventoryItem),
+    /// Rewrite an item's metadata / permissions (`UpdateInventoryItem`). A non-nil
+    /// `transaction_id` binds a freshly uploaded asset to the item.
+    UpdateInventoryItem {
+        /// The item, with its fields set to the desired values.
+        item: Box<InventoryItem>,
+        /// The asset transaction id (nil if not replacing the asset).
+        transaction_id: Uuid,
+    },
+    /// Move an item into a folder, optionally renaming it (an empty `new_name`
+    /// keeps the name), via `MoveInventoryItem`.
+    MoveInventoryItem {
+        /// The item to move.
+        item_id: Uuid,
+        /// The destination folder.
+        folder_id: Uuid,
+        /// The new name, or empty to keep the current name.
+        new_name: String,
+    },
+    /// Copy an item into a folder (`CopyInventoryItem`). The simulator answers
+    /// with an [`Event::InventoryBulkUpdate`] for the new item.
+    CopyInventoryItem {
+        /// The current owner of the source item.
+        old_agent_id: Uuid,
+        /// The source item.
+        old_item_id: Uuid,
+        /// The destination folder.
+        new_folder_id: Uuid,
+        /// The new item's name.
+        new_name: String,
+    },
+    /// Delete items (`RemoveInventoryItem`).
+    RemoveInventoryItems(Vec<Uuid>),
+    /// Rewrite an item's flags (`ChangeInventoryItemFlags`).
+    ChangeInventoryItemFlags {
+        /// The item to change.
+        item_id: Uuid,
+        /// The new flags bitfield.
+        flags: u32,
+    },
+    /// Empty a folder's contents (e.g. the Trash) via `PurgeInventoryDescendents`.
+    PurgeInventoryDescendents(Uuid),
+    /// Delete a mixed set of folders and items in one `RemoveInventoryObjects`.
+    RemoveInventoryObjects {
+        /// The folders to delete.
+        folder_ids: Vec<Uuid>,
+        /// The items to delete.
+        item_ids: Vec<Uuid>,
+    },
+    /// Create a folder via the `CreateInventoryCategory` capability (served by
+    /// both OpenSim and Second Life). Unlike the UDP `CreateInventoryFolder`, the
+    /// grid replies synchronously, surfaced as an [`Event::InventoryBulkUpdate`]
+    /// with the created folder. The runtime allocates the new folder id.
+    CreateInventoryCategory {
+        /// The parent folder.
+        parent_id: Uuid,
+        /// The folder's preferred type (`FolderType`, or `-1`).
+        folder_type: i32,
+        /// The folder name.
+        name: String,
+    },
+    /// Create a folder over the modern **AIS3** (`InventoryAPIv3`) cap
+    /// (Second-Life only). The affected objects arrive as an
+    /// [`Event::InventoryBulkUpdate`].
+    Ais3CreateFolder {
+        /// The parent folder.
+        parent_id: Uuid,
+        /// The folder's preferred type (`FolderType`, or `-1`).
+        folder_type: i32,
+        /// The folder name.
+        name: String,
+    },
+    /// Rename a folder over AIS3 (`PATCH /category/<id>`). Second-Life only.
+    Ais3RenameFolder {
+        /// The folder to rename.
+        folder_id: Uuid,
+        /// The new name.
+        name: String,
+    },
+    /// Move a folder over AIS3 (`PATCH /category/<id>` with `{ parent_id }`).
+    /// Second-Life only.
+    Ais3MoveFolder {
+        /// The folder to move.
+        folder_id: Uuid,
+        /// The new parent folder.
+        parent_id: Uuid,
+    },
+    /// Delete a folder over AIS3 (`DELETE /category/<id>`). Second-Life only.
+    Ais3RemoveFolder(Uuid),
+    /// Empty a folder over AIS3 (`DELETE /category/<id>/children`). Second-Life
+    /// only.
+    Ais3PurgeFolder(Uuid),
+    /// Fetch a folder's children over AIS3 (`GET /category/<id>/children?depth=`).
+    /// Second-Life only; the result arrives as an [`Event::InventoryBulkUpdate`].
+    Ais3FetchFolderChildren {
+        /// The folder whose children to fetch.
+        folder_id: Uuid,
+        /// The recursion depth (clamped to the AIS maximum).
+        depth: i32,
+    },
+    /// Update an item's name and description over AIS3 (`PATCH /item/<id>`).
+    /// Second-Life only.
+    Ais3UpdateItem {
+        /// The item to update.
+        item_id: Uuid,
+        /// The new name.
+        name: String,
+        /// The new description.
+        description: String,
+    },
+    /// Move an item over AIS3 (`PATCH /item/<id>` with `{ parent_id }`).
+    /// Second-Life only.
+    Ais3MoveItem {
+        /// The item to move.
+        item_id: Uuid,
+        /// The new parent folder.
+        parent_id: Uuid,
+    },
+    /// Delete an item over AIS3 (`DELETE /item/<id>`). Second-Life only.
+    Ais3RemoveItem(Uuid),
+    /// Fetch a single item over AIS3 (`GET /item/<id>`). Second-Life only; the
+    /// item arrives as an [`Event::InventoryBulkUpdate`].
+    Ais3FetchItem(Uuid),
     /// Set the friendship rights granted to a friend (`GrantUserRights`). The
     /// `rights` bitfield combines the [`FriendRights`] `CAN_*` flags. The change
     /// is echoed back as an [`Event::FriendRightsChanged`].
@@ -1427,6 +1590,109 @@ impl Client {
                                 ));
                             }
                         }
+                        Some(Command::CreateInventoryFolder { folder_id, parent_id, folder_type, name }) => {
+                            self.session.create_inventory_folder(folder_id, parent_id, folder_type, &name, Instant::now())?;
+                        }
+                        Some(Command::UpdateInventoryFolder { folder_id, parent_id, folder_type, name }) => {
+                            self.session.update_inventory_folder(folder_id, parent_id, folder_type, &name, Instant::now())?;
+                        }
+                        Some(Command::MoveInventoryFolder { folder_id, parent_id }) => {
+                            self.session.move_inventory_folder(folder_id, parent_id, Instant::now())?;
+                        }
+                        Some(Command::RemoveInventoryFolders(folder_ids)) => {
+                            self.session.remove_inventory_folders(&folder_ids, Instant::now())?;
+                        }
+                        Some(Command::CreateInventoryItem(new)) => {
+                            self.session.create_inventory_item(&new, Instant::now())?;
+                        }
+                        Some(Command::UpdateInventoryItem { item, transaction_id }) => {
+                            self.session.update_inventory_item(&item, transaction_id, Instant::now())?;
+                        }
+                        Some(Command::MoveInventoryItem { item_id, folder_id, new_name }) => {
+                            self.session.move_inventory_item(item_id, folder_id, &new_name, Instant::now())?;
+                        }
+                        Some(Command::CopyInventoryItem { old_agent_id, old_item_id, new_folder_id, new_name }) => {
+                            self.session.copy_inventory_item(old_agent_id, old_item_id, new_folder_id, &new_name, Instant::now())?;
+                        }
+                        Some(Command::RemoveInventoryItems(item_ids)) => {
+                            self.session.remove_inventory_items(&item_ids, Instant::now())?;
+                        }
+                        Some(Command::ChangeInventoryItemFlags { item_id, flags }) => {
+                            self.session.change_inventory_item_flags(item_id, flags, Instant::now())?;
+                        }
+                        Some(Command::PurgeInventoryDescendents(folder_id)) => {
+                            self.session.purge_inventory_descendents(folder_id, Instant::now())?;
+                        }
+                        Some(Command::RemoveInventoryObjects { folder_ids, item_ids }) => {
+                            self.session.remove_inventory_objects(&folder_ids, &item_ids, Instant::now())?;
+                        }
+                        Some(Command::CreateInventoryCategory { parent_id, folder_type, name }) => {
+                            if let Some(url) = caps.get(CAP_CREATE_INVENTORY_CATEGORY).cloned() {
+                                let body = build_create_inventory_category_request(Uuid::new_v4(), parent_id, folder_type, &name);
+                                tokio::spawn(post_voice_cap(url, body, CAP_CREATE_INVENTORY_CATEGORY, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::Ais3CreateFolder { parent_id, folder_type, name }) => {
+                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                let url = format!("{base}{}", ais_create_category_url(parent_id, Uuid::new_v4()));
+                                let body = build_ais_create_category_body(folder_type, &name);
+                                tokio::spawn(post_voice_cap(url, body, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::Ais3RenameFolder { folder_id, name }) => {
+                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                let url = format!("{base}{}", ais_category_url(folder_id));
+                                tokio::spawn(patch_caps_llsd(url, build_ais_rename_category_body(&name), CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::Ais3MoveFolder { folder_id, parent_id }) => {
+                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                let url = format!("{base}{}", ais_category_url(folder_id));
+                                tokio::spawn(patch_caps_llsd(url, build_ais_move_body(parent_id), CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::Ais3RemoveFolder(folder_id)) => {
+                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                let url = format!("{base}{}", ais_category_url(folder_id));
+                                tokio::spawn(delete_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::Ais3PurgeFolder(folder_id)) => {
+                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                let url = format!("{base}{}", ais_category_children_url(folder_id));
+                                tokio::spawn(delete_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::Ais3FetchFolderChildren { folder_id, depth }) => {
+                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                let url = format!("{base}{}", ais_category_children_fetch_url(folder_id, depth));
+                                tokio::spawn(get_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::Ais3UpdateItem { item_id, name, description }) => {
+                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                let url = format!("{base}{}", ais_item_url(item_id));
+                                tokio::spawn(patch_caps_llsd(url, build_ais_update_item_body(&name, &description), CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::Ais3MoveItem { item_id, parent_id }) => {
+                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                let url = format!("{base}{}", ais_item_url(item_id));
+                                tokio::spawn(patch_caps_llsd(url, build_ais_move_body(parent_id), CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::Ais3RemoveItem(item_id)) => {
+                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                let url = format!("{base}{}", ais_item_url(item_id));
+                                tokio::spawn(delete_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::Ais3FetchItem(item_id)) => {
+                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                                let url = format!("{base}{}", ais_item_url(item_id));
+                                tokio::spawn(get_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                            }
+                        }
                         Some(Command::FetchGroupMembers(group_id)) => {
                             if let Some(url) = caps.get(CAP_GROUP_MEMBER_DATA).cloned() {
                                 tokio::spawn(fetch_group_members(url, group_id, http.clone(), caps_tx.clone()));
@@ -2248,6 +2514,32 @@ async fn put_caps_llsd(
 ) {
     let Ok(response) = http
         .put(&cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+    else {
+        return;
+    };
+    let Ok(text) = response.text().await else {
+        return;
+    };
+    if let Ok(llsd) = parse_llsd_xml(&text) {
+        caps_tx.send((cap.to_owned(), llsd)).await.ok();
+    }
+}
+
+/// Sends an HTTP PATCH of `body` to an AIS3 inventory capability URL (a folder /
+/// item update or move) and forwards the LLSD reply to `caps_tx` tagged `cap`.
+async fn patch_caps_llsd(
+    cap_url: String,
+    body: String,
+    cap: &'static str,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let Ok(response) = http
+        .patch(&cap_url)
         .header("Content-Type", "application/llsd+xml")
         .body(body)
         .send()

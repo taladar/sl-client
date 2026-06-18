@@ -66,6 +66,16 @@ impl Llsd {
         }
     }
 
+    /// Returns the map entries, if this is a map. Useful for iterating the
+    /// uuid-keyed `_embedded` maps of an AIS3 inventory response.
+    #[must_use]
+    pub const fn as_map(&self) -> Option<&HashMap<String, Self>> {
+        match self {
+            Self::Map(map) => Some(map),
+            _ => None,
+        }
+    }
+
     /// Returns the string, if this is a string (or URI/date).
     #[must_use]
     pub fn as_str(&self) -> Option<&str> {

@@ -143,6 +143,8 @@ fn on_events(
             | SlSessionEvent::ClassifiedInfo(_)
             | SlSessionEvent::InventorySkeleton(_)
             | SlSessionEvent::InventoryDescendents { .. }
+            | SlSessionEvent::InventoryItemCreated { .. }
+            | SlSessionEvent::InventoryBulkUpdate { .. }
             | SlSessionEvent::FriendList(_)
             | SlSessionEvent::FriendsOnline(_)
             | SlSessionEvent::FriendsOffline(_)

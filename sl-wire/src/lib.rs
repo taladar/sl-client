@@ -6,6 +6,7 @@ mod error;
 mod experience;
 mod field;
 mod header;
+mod inventory;
 mod llsd;
 mod login;
 mod material;
@@ -30,6 +31,12 @@ pub use experience::{
 };
 pub use field::{Reader, Writer};
 pub use header::{PacketFlags, ParsedDatagram, encode_datagram, parse_datagram};
+pub use inventory::{
+    AIS_MAX_FOLDER_DEPTH, ais_category_children_fetch_url, ais_category_children_url,
+    ais_category_url, ais_create_category_url, ais_item_url, build_ais_create_category_body,
+    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
+    build_create_inventory_category_request,
+};
 pub use llsd::{
     AssetUploadResponse, EventQueueEvent, EventQueueResponse, Llsd, MEDIA_PERM_ALL,
     MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MediaEntry,

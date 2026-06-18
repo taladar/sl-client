@@ -590,6 +590,8 @@ impl Survey {
             | Event::ClassifiedInfo(_)
             | Event::InventorySkeleton(_)
             | Event::InventoryDescendents { .. }
+            | Event::InventoryItemCreated { .. }
+            | Event::InventoryBulkUpdate { .. }
             | Event::FriendList(_)
             | Event::FriendsOnline(_)
             | Event::FriendsOffline(_)
