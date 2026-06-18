@@ -141,7 +141,9 @@ fn on_events(
             | SlSessionEvent::AvatarClassifieds { .. }
             | SlSessionEvent::PickInfo(_)
             | SlSessionEvent::ClassifiedInfo(_)
+            | SlSessionEvent::Account(_)
             | SlSessionEvent::InventorySkeleton(_)
+            | SlSessionEvent::LibraryInventory(_)
             | SlSessionEvent::InventoryDescendents { .. }
             | SlSessionEvent::InventoryItemCreated { .. }
             | SlSessionEvent::InventoryBulkUpdate { .. }

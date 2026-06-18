@@ -13,14 +13,14 @@ mod test {
         ControlFlags, CreateGroupParams, DeRezDestination, DisconnectReason, EstateAccessDelta,
         EstateAccessKind, Event, FriendRights, GroupNoticeAttachment, GroupRoleChange,
         GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImageCodec,
-        InterestsUpdate, InventoryItem, LandingType, LindenAmount, LoginParams, MapItemType,
-        Material, Maturity, MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem,
-        ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-        ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelMediaCommand, ParcelRequestResult,
-        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, PickUpdate, PrimShape,
-        ProductType, ProfileUpdate, RegionInfoUpdate, Reliability, SaleType, ScriptPermissions,
-        Session, SoundFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, WearableType,
-        avatar_texture, group_powers, pcode,
+        InterestsUpdate, InventoryItem, LandingType, LindenAmount, LoginAccount, LoginParams,
+        MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType,
+        NewInventoryItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
+        ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelMediaCommand,
+        ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField,
+        PickUpdate, PrimShape, ProductType, ProfileUpdate, RegionInfoUpdate, Reliability, SaleType,
+        ScriptPermissions, Session, SoundFlags, TerrainLayerType, Throttle, TransferStatus,
+        Transmit, WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -97,8 +97,8 @@ mod test {
         UseCachedMuteListAgentDataBlock,
     };
     use sl_wire::{
-        AnyMessage, LoginFailure, LoginRequest, LoginResponse, LoginSuccess, MessageId,
-        PacketFlags, Reader, SkeletonFolder, Writer, encode_datagram, parse_datagram,
+        AnyMessage, HomeLocation, LoginFailure, LoginRequest, LoginResponse, LoginSuccess,
+        MessageId, PacketFlags, Reader, SkeletonFolder, Writer, encode_datagram, parse_datagram,
         parse_llsd_xml,
     };
 
@@ -146,6 +146,14 @@ mod test {
             inventory_root: None,
             inventory_skeleton: Vec::new(),
             buddy_list: Vec::new(),
+            home: None,
+            look_at: None,
+            agent_access: None,
+            agent_access_max: None,
+            max_agent_groups: None,
+            library_root: None,
+            library_owner: None,
+            library_skeleton: Vec::new(),
         }))
     }
 
@@ -218,9 +226,22 @@ mod test {
             sent.get(1),
             Some(AnyMessage::CompleteAgentMovement(_))
         ));
+        // Login always emits the account facts right after the circuit comes up;
+        // the `success()` fixture carries none, so they are all empty/unknown.
         assert_eq!(
             drain_events(&mut session),
-            vec![Event::CircuitEstablished { sim: sim_addr() }]
+            vec![
+                Event::CircuitEstablished { sim: sim_addr() },
+                Event::Account(Box::new(LoginAccount {
+                    home: None,
+                    look_at: None,
+                    agent_access: Maturity::Unknown,
+                    agent_access_max: Maturity::Unknown,
+                    max_agent_groups: None,
+                    library_root: None,
+                    library_owner: None,
+                })),
+            ]
         );
 
         // RegionHandshake (all-zero body decodes to zeroed fields/empty blocks).
@@ -3941,6 +3962,14 @@ mod test {
                 },
             ],
             buddy_list: Vec::new(),
+            home: None,
+            look_at: None,
+            agent_access: None,
+            agent_access_max: None,
+            max_agent_groups: None,
+            library_root: None,
+            library_owner: None,
+            library_skeleton: Vec::new(),
         }));
         session.handle_login_response(login, now)?;
 
@@ -3957,6 +3986,77 @@ mod test {
         assert_eq!(first.name, "My Inventory");
         assert_eq!(first.folder_id, root);
         assert_eq!(folders.get(1).ok_or("second folder")?.parent_id, root);
+        Ok(())
+    }
+
+    #[test]
+    fn login_emits_account_and_library_and_stores_them() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = new_session();
+        let lib_root = uuid::Uuid::from_u128(0x0112);
+        let lib_owner = uuid::Uuid::from_u128(0xAB);
+        let login = LoginResponse::Success(Box::new(LoginSuccess {
+            agent_id: uuid::Uuid::from_u128(1),
+            session_id: uuid::Uuid::from_u128(2),
+            secure_session_id: uuid::Uuid::from_u128(3),
+            circuit_code: 0x0011_2233,
+            sim_ip: Ipv4Addr::new(127, 0, 0, 1),
+            sim_port: 9000,
+            seed_capability: "http://127.0.0.1:9000/seed".to_owned(),
+            message: None,
+            mfa_hash: None,
+            inventory_root: None,
+            inventory_skeleton: Vec::new(),
+            buddy_list: Vec::new(),
+            home: Some(HomeLocation {
+                region_handle: (256_000, 256_256),
+                position: [128.0, 127.0, 25.0],
+                look_at: [1.0, 0.0, 0.0],
+            }),
+            look_at: Some([0.5, 0.5, 0.0]),
+            agent_access: Some("M".to_owned()),
+            agent_access_max: Some("A".to_owned()),
+            max_agent_groups: Some(42),
+            library_root: Some(lib_root),
+            library_owner: Some(lib_owner),
+            library_skeleton: vec![SkeletonFolder {
+                folder_id: lib_root,
+                parent_id: uuid::Uuid::nil(),
+                name: "Library".to_owned(),
+                type_default: 8,
+                version: 1,
+            }],
+        }));
+        session.handle_login_response(login, now)?;
+
+        // The account facts are stored on the session...
+        let stored: &LoginAccount = session.login_account().ok_or("expected login account")?;
+        assert_eq!(stored.agent_access, Maturity::Mature);
+        assert_eq!(stored.agent_access_max, Maturity::Adult);
+        assert_eq!(stored.max_agent_groups, Some(42));
+        assert_eq!(stored.library_root, Some(lib_root));
+        assert_eq!(stored.library_owner, Some(lib_owner));
+        assert_eq!(stored.home.ok_or("home")?.region_handle, (256_000, 256_256));
+
+        // ...and also emitted as events.
+        let events = drain_events(&mut session);
+        let account = events
+            .iter()
+            .find_map(|event| match event {
+                Event::Account(account) => Some(account),
+                _ => None,
+            })
+            .ok_or("expected an Account event")?;
+        assert_eq!(account.max_agent_groups, Some(42));
+        let library = events
+            .iter()
+            .find_map(|event| match event {
+                Event::LibraryInventory(folders) => Some(folders),
+                _ => None,
+            })
+            .ok_or("expected a LibraryInventory event")?;
+        assert_eq!(library.len(), 1);
+        assert_eq!(library.first().ok_or("library root")?.name, "Library");
         Ok(())
     }
 

@@ -49,8 +49,9 @@ pub use llsd::{
     parse_llsd_xml, parse_seed_response,
 };
 pub use login::{
-    BuddyListEntry, LoginFailure, LoginParseError, LoginRequest, LoginResponse, LoginSuccess,
-    MfaChallenge, SkeletonFolder, build_login_request, parse_login_response, password_hash,
+    BuddyListEntry, HomeLocation, LoginFailure, LoginParseError, LoginRequest, LoginResponse,
+    LoginSuccess, MfaChallenge, SkeletonFolder, build_login_request, parse_login_response,
+    password_hash,
 };
 pub use material::{
     GLTF_MATERIAL_OVERRIDE_METHOD, GltfMaterialOverride, LegacyMaterial, MaterialOverrideUpdate,

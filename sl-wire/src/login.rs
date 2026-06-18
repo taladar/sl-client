@@ -71,11 +71,18 @@ impl LoginRequest {
             token: String::new(),
             mfa_hash: String::new(),
             // Request the inventory root and folder skeleton so the login
-            // response carries the agent's full folder tree, and the buddy
-            // list so it carries the agent's friends and their rights.
+            // response carries the agent's full folder tree, the matching
+            // Library ("OpenSim Library" / "Library") roots and skeleton so it
+            // carries the shared read-only library tree, and the buddy list so
+            // it carries the agent's friends and their rights. (`home`,
+            // `look_at`, `agent_access[_max]`, and `max-agent-groups` are
+            // standard top-level fields and need no option.)
             options: vec![
                 "inventory-root".to_owned(),
                 "inventory-skeleton".to_owned(),
+                "inventory-lib-root".to_owned(),
+                "inventory-lib-owner".to_owned(),
+                "inventory-skel-lib".to_owned(),
                 "buddy-list".to_owned(),
             ],
         }
@@ -181,7 +188,7 @@ fn push_escaped(out: &mut String, value: &str) {
 }
 
 /// A parsed login response: success, a multi-factor challenge, or a failure.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LoginResponse {
     /// The login succeeded.
     Success(Box<LoginSuccess>),
@@ -204,7 +211,7 @@ pub struct MfaChallenge {
 }
 
 /// The fields of a successful login needed to bring up the UDP circuit.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LoginSuccess {
     /// The avatar/agent id.
     pub agent_id: Uuid,
@@ -238,6 +245,48 @@ pub struct LoginSuccess {
     /// response field. Empty if not requested/provided or the agent has no
     /// friends.
     pub buddy_list: Vec<BuddyListEntry>,
+    /// The agent's home location (region handle, position, and look-at), parsed
+    /// from the `home` response field, if present and well-formed.
+    pub home: Option<HomeLocation>,
+    /// The camera look-at direction at the start location, parsed from the
+    /// top-level `look_at` response field, if present and well-formed.
+    pub look_at: Option<[f32; 3]>,
+    /// The account's current maturity/content rating (`agent_access`), as the
+    /// grid's short code: `"PG"`, `"M"` (mature), or `"A"` (adult). `None` if
+    /// the grid did not provide it.
+    pub agent_access: Option<String>,
+    /// The maximum maturity rating the account is entitled to
+    /// (`agent_access_max`), in the same short-code form as
+    /// [`agent_access`](Self::agent_access).
+    pub agent_access_max: Option<String>,
+    /// The maximum number of groups this account may join (`max-agent-groups`).
+    /// A client should check this before joining a group. `None` if the grid did
+    /// not provide it.
+    pub max_agent_groups: Option<u32>,
+    /// The shared Library inventory's root folder id, from the
+    /// `inventory-lib-root` response field (if requested and provided).
+    pub library_root: Option<Uuid>,
+    /// The agent id that owns the shared Library inventory, from the
+    /// `inventory-lib-owner` response field (if requested and provided). The
+    /// library's folder contents are fetched as that owner's inventory.
+    pub library_owner: Option<Uuid>,
+    /// The shared Library inventory's folder skeleton, from the
+    /// `inventory-skel-lib` response field. Empty if not requested/provided.
+    pub library_skeleton: Vec<SkeletonFolder>,
+}
+
+/// An agent's home location, parsed from the `home` login response field (a
+/// quasi-LLSD string such as `{'region_handle':[r256000,r256000],
+/// 'position':[r128.0,r128.0,r25.0], 'look_at':[r1.0,r0.0,r0.0]}`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HomeLocation {
+    /// The home region's grid-corner world coordinates in metres — the two
+    /// components of the region handle (`region_handle`: `(x, y)`).
+    pub region_handle: (u32, u32),
+    /// The home position within the region (`position`).
+    pub position: [f32; 3],
+    /// The camera look-at direction at home (`look_at`).
+    pub look_at: [f32; 3],
 }
 
 /// One folder of the inventory skeleton carried in a login response
@@ -361,27 +410,119 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
         seed_capability: required(&members, "seed_capability")?.clone(),
         message: members.get("message").cloned(),
         mfa_hash: members.get("mfa_hash").cloned(),
-        inventory_root: parse_inventory_root(response_struct),
-        inventory_skeleton: parse_inventory_skeleton(response_struct),
+        inventory_root: parse_array_struct_uuid(response_struct, "inventory-root", "folder_id"),
+        inventory_skeleton: parse_skeleton(response_struct, "inventory-skeleton"),
         buddy_list: parse_buddy_list(response_struct),
+        home: members.get("home").and_then(|h| parse_home(h)),
+        look_at: members.get("look_at").and_then(|l| parse_vector3(l)),
+        agent_access: members.get("agent_access").cloned(),
+        agent_access_max: members.get("agent_access_max").cloned(),
+        max_agent_groups: members
+            .get("max-agent-groups")
+            .and_then(|g| g.trim().parse().ok()),
+        library_root: parse_array_struct_uuid(response_struct, "inventory-lib-root", "folder_id"),
+        library_owner: parse_array_struct_uuid(response_struct, "inventory-lib-owner", "agent_id"),
+        library_skeleton: parse_skeleton(response_struct, "inventory-skel-lib"),
     })))
 }
 
-/// Extracts the inventory root folder id from the `inventory-root` member: an
-/// array holding one struct with a `folder_id` string.
-fn parse_inventory_root(response_struct: roxmltree::Node<'_, '_>) -> Option<Uuid> {
-    let value = member_value_node(response_struct, "inventory-root")?;
-    let folder_struct = array_structs(value).next()?;
-    let members = collect_members(folder_struct);
-    members
-        .get("folder_id")
-        .and_then(|id| Uuid::parse_str(id).ok())
+/// Extracts a UUID from the named member: an array holding one struct with a
+/// `field` string (e.g. `inventory-root` → `folder_id`, `inventory-lib-owner` →
+/// `agent_id`).
+fn parse_array_struct_uuid(
+    response_struct: roxmltree::Node<'_, '_>,
+    member: &str,
+    field: &str,
+) -> Option<Uuid> {
+    let value = member_value_node(response_struct, member)?;
+    let entry = array_structs(value).next()?;
+    let members = collect_members(entry);
+    members.get(field).and_then(|id| Uuid::parse_str(id).ok())
 }
 
-/// Extracts the inventory folder skeleton from the `inventory-skeleton` member:
-/// an array of structs, one per folder.
-fn parse_inventory_skeleton(response_struct: roxmltree::Node<'_, '_>) -> Vec<SkeletonFolder> {
-    let Some(value) = member_value_node(response_struct, "inventory-skeleton") else {
+/// Parses the `home` field: a quasi-LLSD string `{'region_handle':[rX,rY],
+/// 'position':[rX,rY,rZ], 'look_at':[rX,rY,rZ]}`. The numbers are prefixed with
+/// `r` (the LLSD-over-XML-RPC real-number marker). Returns `None` if any of the
+/// three sections is missing or malformed.
+fn parse_home(value: &str) -> Option<HomeLocation> {
+    let handle = r_numbers(section(value, "region_handle")?);
+    let position = parse_vector3(section(value, "position")?)?;
+    let look_at = parse_vector3(section(value, "look_at")?)?;
+    let [x, y, ..] = handle.as_slice() else {
+        return None;
+    };
+    Some(HomeLocation {
+        region_handle: (round_to_u32(*x), round_to_u32(*y)),
+        position,
+        look_at,
+    })
+}
+
+/// Parses a three-component vector from a quasi-LLSD `r`-prefixed list (e.g.
+/// `[r1.0,r0.0,r0.0]`), tolerating surrounding brackets and whitespace.
+fn parse_vector3(value: &str) -> Option<[f32; 3]> {
+    let numbers = r_numbers(value);
+    let [x, y, z, ..] = numbers.as_slice() else {
+        return None;
+    };
+    Some([f64_to_f32(*x), f64_to_f32(*y), f64_to_f32(*z)])
+}
+
+/// Returns the contents between the `[` and `]` that follow the first occurrence
+/// of `key` in `s` (e.g. `section("…'position':[r1,r2]…", "position")` →
+/// `"r1,r2"`).
+fn section<'a>(s: &'a str, key: &str) -> Option<&'a str> {
+    let after = s.get(s.find(key)?.checked_add(key.len())?..)?;
+    let open = after.find('[')?;
+    let inner = after.get(open.checked_add(1)?..)?;
+    let close = inner.find(']')?;
+    inner.get(..close)
+}
+
+/// Parses a comma-separated list of `r`-prefixed real numbers, ignoring any
+/// stray brackets and whitespace and skipping unparsable tokens.
+fn r_numbers(list: &str) -> Vec<f64> {
+    list.split(',')
+        .filter_map(|token| {
+            token
+                .trim()
+                .trim_matches(|c| c == '[' || c == ']')
+                .trim()
+                .trim_start_matches('r')
+                .trim()
+                .parse::<f64>()
+                .ok()
+        })
+        .collect()
+}
+
+/// Narrows an `f64` to an `f32` (login coordinates are well within `f32` range).
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    reason = "login position/look-at values are within f32 range"
+)]
+const fn f64_to_f32(value: f64) -> f32 {
+    value as f32
+}
+
+/// Rounds a non-negative `f64` world coordinate to a `u32` (region handle
+/// components are integer-valued metres).
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "region-handle world coordinates are non-negative integers within u32"
+)]
+const fn round_to_u32(value: f64) -> u32 {
+    value.round() as u32
+}
+
+/// Extracts an inventory folder skeleton from the named member (e.g.
+/// `inventory-skeleton` or `inventory-skel-lib`): an array of structs, one per
+/// folder.
+fn parse_skeleton(response_struct: roxmltree::Node<'_, '_>, member: &str) -> Vec<SkeletonFolder> {
+    let Some(value) = member_value_node(response_struct, member) else {
         return Vec::new();
     };
     array_structs(value)
