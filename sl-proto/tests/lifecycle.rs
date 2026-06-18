@@ -5899,6 +5899,11 @@ mod test {
         assert_eq!(object.region_handle, OBJ_REGION);
         assert_eq!(object.motion.position, position);
         assert_eq!(object.material, 3);
+        // The path/profile shape is decoded from the full update's fields.
+        assert_eq!(object.shape.path_curve, 16);
+        assert_eq!(object.shape.profile_curve, 1);
+        assert_eq!(object.shape.path_scale_x, 100);
+        assert_eq!(object.shape.path_scale_y, 100);
 
         // The object is in the public cache.
         assert!(session.object(100).is_some());
@@ -6306,6 +6311,147 @@ mod test {
         assert_eq!(object.crc, 99);
         assert_eq!(object.owner_id, uuid::Uuid::from_u128(0x44));
         assert_eq!(object.motion.position, position);
+        Ok(())
+    }
+
+    #[test]
+    fn compressed_update_decodes_trailing_fields() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let position = Vector {
+            x: 10.0,
+            y: 20.0,
+            z: 30.0,
+        };
+        let sound_id = uuid::Uuid::from_u128(0x5011);
+        let te_bytes: Vec<u8> = vec![0xAA, 0xBB, 0xCC, 0xDD, 0xEE];
+
+        // Fixed prefix.
+        let mut writer = Writer::new();
+        writer.put_uuid(uuid::Uuid::from_u128(0xDEAD));
+        writer.put_u32(700);
+        writer.put_u8(pcode::PRIMITIVE);
+        writer.put_u8(0);
+        writer.put_u32(99);
+        writer.put_u8(3);
+        writer.put_u8(0);
+        writer.put_vector3(&Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        });
+        writer.put_vector3(&position);
+        writer.put_quaternion(&Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            s: 1.0,
+        });
+        // text | legacy-particles | sound | texture-anim | name-values | media-url
+        let cflags: u32 = 0x04 | 0x08 | 0x10 | 0x40 | 0x100 | 0x200;
+        writer.put_u32(cflags);
+        writer.put_uuid(uuid::Uuid::from_u128(0x44));
+        // Floating text (NUL-terminated) + RGBA colour.
+        writer.bytes(b"hello\0");
+        writer.bytes(&[10, 20, 30, 200]);
+        // Media URL (NUL-terminated).
+        writer.bytes(b"http://example/\0");
+        // Legacy particle system: a fixed 86-byte block (a recognisable fill).
+        let particle_bytes: Vec<u8> = (0..86_u8).collect();
+        writer.bytes(&particle_bytes);
+        // ExtraParams: one light parameter (RGBA + radius/cutoff/falloff = 16 bytes).
+        let extra_params_start = writer.as_bytes().len();
+        writer.put_u8(1);
+        writer.put_u16(0x20);
+        writer.put_u32(16);
+        writer.bytes(&[255, 128, 64, 255]);
+        writer.put_f32(5.0);
+        writer.put_f32(0.5);
+        writer.put_f32(1.0);
+        let extra_params: Vec<u8> = writer
+            .as_bytes()
+            .get(extra_params_start..)
+            .ok_or("extra-params slice")?
+            .to_vec();
+        // Attached sound: id, gain, flags, radius.
+        writer.put_uuid(sound_id);
+        writer.put_f32(0.75);
+        writer.put_u8(0x01);
+        writer.put_f32(20.0);
+        // Name-value pairs (NUL-terminated).
+        writer.bytes(b"AttachItemID STRING RW SV abc\0");
+        // Path+profile shape: a fixed 23-byte block (path block then profile
+        // block, in the simulator's pack order).
+        writer.put_u8(0x10); // path_curve
+        writer.put_u16(100); // path_begin
+        writer.put_u16(200); // path_end
+        writer.put_u8(50); // path_scale_x
+        writer.put_u8(60); // path_scale_y
+        writer.put_u8(0); // path_shear_x
+        writer.put_u8(0); // path_shear_y
+        writer.put_i8(0); // path_twist
+        writer.put_i8(0); // path_twist_begin
+        writer.put_i8(0); // path_radius_offset
+        writer.put_i8(0); // path_taper_x
+        writer.put_i8(0); // path_taper_y
+        writer.put_u8(0); // path_revolutions
+        writer.put_i8(0); // path_skew
+        writer.put_u8(0x01); // profile_curve
+        writer.put_u16(300); // profile_begin
+        writer.put_u16(400); // profile_end
+        writer.put_u16(500); // profile_hollow
+        // Packed texture entry: a little-endian u32 length then that many bytes.
+        writer.put_u32(u32::try_from(te_bytes.len())?);
+        writer.bytes(&te_bytes);
+        // Texture animation: a u32 length then that many bytes.
+        let texture_anim: Vec<u8> = vec![1, 2, 3, 4];
+        writer.put_u32(u32::try_from(texture_anim.len())?);
+        writer.bytes(&texture_anim);
+
+        let compressed = AnyMessage::ObjectUpdateCompressed(ObjectUpdateCompressed {
+            region_data: ObjectUpdateCompressedRegionDataBlock {
+                region_handle: OBJ_REGION,
+                time_dilation: 0xFFFF,
+            },
+            object_data: vec![ObjectUpdateCompressedObjectDataBlock {
+                update_flags: 0,
+                data: writer.into_bytes(),
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&compressed, 6, true)?, now)?;
+        let events = drain_events(&mut session);
+        let Some(Event::ObjectAdded(object)) =
+            events.iter().find(|e| matches!(e, Event::ObjectAdded(_)))
+        else {
+            return Err(format!("expected ObjectAdded from compressed, got {events:?}").into());
+        };
+        assert_eq!(object.local_id, 700);
+        assert_eq!(object.text, "hello");
+        assert_eq!(object.text_color, [10, 20, 30, 200]);
+        assert_eq!(object.media_url, "http://example/");
+        assert_eq!(object.sound, sound_id);
+        assert!((object.gain - 0.75).abs() < f32::EPSILON);
+        assert_eq!(object.sound_flags, 0x01);
+        assert!((object.sound_radius - 20.0).abs() < f32::EPSILON);
+        assert_eq!(object.name_value, "AttachItemID STRING RW SV abc");
+        assert_eq!(object.texture_entry, te_bytes);
+        assert_eq!(object.texture_anim, texture_anim);
+        assert_eq!(object.particle_system, particle_bytes);
+        assert_eq!(object.extra_params, extra_params);
+        let light = object.extra.light.as_ref().ok_or("decoded light param")?;
+        assert!((light.radius - 5.0).abs() < f32::EPSILON);
+        // The path/profile shape decoded in the simulator's pack order.
+        assert_eq!(object.shape.path_curve, 0x10);
+        assert_eq!(object.shape.path_begin, 100);
+        assert_eq!(object.shape.path_end, 200);
+        assert_eq!(object.shape.path_scale_x, 50);
+        assert_eq!(object.shape.path_scale_y, 60);
+        assert_eq!(object.shape.profile_curve, 0x01);
+        assert_eq!(object.shape.profile_begin, 300);
+        assert_eq!(object.shape.profile_end, 400);
+        assert_eq!(object.shape.profile_hollow, 500);
         Ok(())
     }
 

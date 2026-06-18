@@ -1261,19 +1261,78 @@ pub struct Object {
     /// The media URL set on the object, empty if none.
     pub media_url: String,
     /// The raw `TextureEntry` blob (per-face texture/colour data), undecoded.
+    /// Decode with
+    /// [`decode_texture_entry`](crate::decode_texture_entry).
     pub texture_entry: Vec<u8>,
+    /// The raw texture-animation (`TextureAnim`) blob (`llSetTextureAnim`),
+    /// undecoded; empty if the object has no texture animation.
+    pub texture_anim: Vec<u8>,
+    /// The decoded path/profile [`shape`](PrimShapeParams) parameters of a volume
+    /// prim. Zeroed for object classes that carry no shape (e.g. avatars).
+    pub shape: PrimShapeParams,
+    /// The raw particle-system (`PSBlock`) blob (`llParticleSystem`), undecoded;
+    /// empty if the object has no particle system.
+    pub particle_system: Vec<u8>,
+    /// The raw generic-`Data` field: tree/grass genome bytes for a tree object,
+    /// or the linkset prim count for a root prim (one byte). Empty if absent.
+    pub data: Vec<u8>,
     /// The raw `ExtraParams` blob (flexi/light/sculpt/mesh parameters), as
     /// received on the wire.
     pub extra_params: Vec<u8>,
     /// The decoded [`ExtraParams`](ObjectExtraParams) sub-blocks
     /// (flexi/light/sculpt/light-image/extended-mesh/render-material/reflection
-    /// probe). Only populated from full `ObjectUpdate`s (the compressed update's
-    /// extra-params are left undecoded, so this is empty there).
+    /// probe), populated from both full and compressed `ObjectUpdate`s.
     pub extra: ObjectExtraParams,
     /// The object's extended properties (creator, permissions, name,
     /// description, …) once an [`Event::ObjectProperties`] has been received for
     /// it; `None` until then.
     pub properties: Option<ObjectProperties>,
+}
+
+/// The path/profile shape parameters of a volume prim, as carried (in raw
+/// quantized wire form) by both full and compressed `ObjectUpdate`s. The values
+/// are the simulator's quantized integers — the same encoding [`PrimShape`] uses
+/// to *send* a shape — not dequantized floats; the quantization for each field
+/// matches the like-named [`PrimShape`] field (e.g. `path_begin / 0.00002`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PrimShapeParams {
+    /// The path curve byte (`LL_PCODE_PATH_*`).
+    pub path_curve: u8,
+    /// The profile curve byte (`LL_PCODE_PROFILE_*`, hollow shape in the high
+    /// nibble).
+    pub profile_curve: u8,
+    /// The path cut start, quantized (`begin / 0.00002`).
+    pub path_begin: u16,
+    /// The path cut end, quantized (`50000 - end / 0.00002`).
+    pub path_end: u16,
+    /// The path top-size X, quantized (`200 - scale_x / 0.01`).
+    pub path_scale_x: u8,
+    /// The path top-size Y, quantized (`200 - scale_y / 0.01`).
+    pub path_scale_y: u8,
+    /// The path shear X, quantized (`shear_x / 0.01`).
+    pub path_shear_x: u8,
+    /// The path shear Y, quantized (`shear_y / 0.01`).
+    pub path_shear_y: u8,
+    /// The path twist end, quantized (`twist / 0.01`).
+    pub path_twist: i8,
+    /// The path twist start, quantized (`twist_begin / 0.01`).
+    pub path_twist_begin: i8,
+    /// The path radius offset, quantized (`radius_offset / 0.01`).
+    pub path_radius_offset: i8,
+    /// The path taper X, quantized (`taper_x / 0.01`).
+    pub path_taper_x: i8,
+    /// The path taper Y, quantized (`taper_y / 0.01`).
+    pub path_taper_y: i8,
+    /// The path revolutions, quantized (`(revolutions - 1) / 0.015`).
+    pub path_revolutions: u8,
+    /// The path skew, quantized (`skew / 0.01`).
+    pub path_skew: i8,
+    /// The profile cut start, quantized (`begin / 0.00002`).
+    pub profile_begin: u16,
+    /// The profile cut end, quantized (`50000 - end / 0.00002`).
+    pub profile_end: u16,
+    /// The profile hollow fraction, quantized (`hollow / 0.00002`).
+    pub profile_hollow: u16,
 }
 
 /// The decoded `ExtraParams` sub-blocks of an [`Object`]. The `ExtraParams` blob

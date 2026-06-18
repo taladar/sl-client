@@ -65,13 +65,13 @@ pub use sl_proto::{
     ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
     ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
     ParcelVoiceInfo, PermissionField, PickInfo, PickUpdate, PlayingAnimation, PrimShape,
-    ProductType, ProfileUpdate, ReflectionProbe, RegionFlags, RegionIdentity, RegionInfoUpdate,
-    RegionLimits, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData,
-    SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, Throttle,
-    Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType,
-    avatar_texture, decode_texture_entry, grid_to_handle, group_powers, handle_to_global,
-    handle_to_grid, pcode, sim_access,
+    PrimShapeParams, ProductType, ProfileUpdate, ReflectionProbe, RegionFlags, RegionIdentity,
+    RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation,
+    SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
+    SculptData, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, TextureEntry,
+    TextureFace, Throttle, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest,
+    Wearable, WearableType, avatar_texture, decode_texture_entry, grid_to_handle, group_powers,
+    handle_to_global, handle_to_grid, pcode, sim_access,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -1003,19 +1003,28 @@ pub enum SlCommand {
         discard_level: u8,
     },
     /// Fetch a mesh asset over the HTTP `GetMesh2`/`GetMesh` capability; the data
-    /// arrives as [`SlSessionEvent::AssetReceived`].
+    /// arrives as [`SlSessionEvent::AssetReceived`]. An optional `byte_range`
+    /// (inclusive `(start, end)` byte offsets) issues an HTTP `Range` request so
+    /// only that span is transferred — e.g. a single mesh LOD whose offsets the
+    /// caller read from the mesh header. `None` fetches the whole asset.
     FetchMesh {
         /// The mesh asset's id.
         mesh_id: Uuid,
+        /// Optional inclusive `(start, end)` byte range to fetch.
+        byte_range: Option<(u32, u32)>,
     },
     /// Fetch a generic asset over the HTTP `GetAsset` capability; the data
     /// arrives as [`SlSessionEvent::AssetReceived`] (or
-    /// [`SlSessionEvent::AssetTransferFailed`]).
+    /// [`SlSessionEvent::AssetTransferFailed`]). An optional `byte_range`
+    /// (inclusive `(start, end)` byte offsets) issues an HTTP `Range` request so
+    /// only that span is transferred; `None` fetches the whole asset.
     FetchAsset {
         /// The asset's id.
         asset_id: Uuid,
         /// The asset's class (selects the cap query parameter).
         asset_type: AssetType,
+        /// Optional inclusive `(start, end)` byte range to fetch.
+        byte_range: Option<(u32, u32)>,
     },
     /// Ask the simulator to (re-)send the agent's own wearables
     /// (`AgentWearablesRequest`); the reply arrives as
@@ -2474,7 +2483,10 @@ fn advance_running(
                     });
                 }
             }
-            SlCommand::FetchMesh { mesh_id } => {
+            SlCommand::FetchMesh {
+                mesh_id,
+                byte_range,
+            } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps
                         .map
@@ -2483,13 +2495,14 @@ fn advance_running(
                         .cloned()
                 {
                     let asset_tx = caps.asset_tx.clone();
-                    let id = *mesh_id;
+                    let (id, range) = (*mesh_id, *byte_range);
                     std::thread::spawn(move || {
                         run_asset_fetch(
                             &url,
                             &format!("?mesh_id={id}"),
                             id,
                             AssetType::Mesh,
+                            range,
                             &asset_tx,
                         );
                     });
@@ -2498,14 +2511,15 @@ fn advance_running(
             SlCommand::FetchAsset {
                 asset_id,
                 asset_type,
+                byte_range,
             } => {
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(CAP_GET_ASSET).cloned()
                 {
                     let asset_tx = caps.asset_tx.clone();
-                    let (id, asset_type) = (*asset_id, *asset_type);
+                    let (id, asset_type, range) = (*asset_id, *asset_type, *byte_range);
                     std::thread::spawn(move || {
-                        run_generic_asset_fetch(&url, id, asset_type, &asset_tx);
+                        run_generic_asset_fetch(&url, id, asset_type, range, &asset_tx);
                     });
                 }
             }
@@ -3663,13 +3677,36 @@ fn caps_upload_step(
 }
 
 /// Performs a blocking HTTP `GET`, returning the body bytes on a 2xx response,
-/// or `None` on any network/HTTP failure.
-fn blocking_get_bytes(url: &str) -> Option<Vec<u8>> {
+/// or `None` on any network/HTTP failure. When `max_bytes` is `Some`, requests
+/// only the first `max_bytes` via a `Range: bytes=0-(max_bytes-1)` header.
+fn blocking_get_bytes(url: &str, max_bytes: Option<usize>) -> Option<Vec<u8>> {
     let http = ReqwestBlockingClient::builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
         .ok()?;
-    let response = http.get(url).send().ok()?;
+    let mut request = http.get(url);
+    if let Some(max) = max_bytes {
+        request = request.header("Range", format!("bytes=0-{}", max.saturating_sub(1)));
+    }
+    let response = request.send().ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    response.bytes().ok().map(|bytes| bytes.to_vec())
+}
+
+/// Performs a blocking HTTP `GET` for an inclusive `(start, end)` byte range via
+/// a `Range: bytes=start-end` header, returning the body on a 2xx response.
+fn blocking_get_range(url: &str, start: u32, end: u32) -> Option<Vec<u8>> {
+    let http = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+        .ok()?;
+    let response = http
+        .get(url)
+        .header("Range", format!("bytes={start}-{end}"))
+        .send()
+        .ok()?;
     if !response.status().is_success() {
         return None;
     }
@@ -3677,9 +3714,9 @@ fn blocking_get_bytes(url: &str) -> Option<Vec<u8>> {
 }
 
 /// GETs a texture from the `GetTexture` capability and forwards a
-/// [`SlSessionEvent::TextureReceived`] (its bytes truncated to the
-/// `discard_level` LOD prefix via [`j2c::truncate_to_discard`] when non-zero) or
-/// a [`SlSessionEvent::TextureNotFound`] over `asset_tx`.
+/// [`SlSessionEvent::TextureReceived`] or a [`SlSessionEvent::TextureNotFound`]
+/// over `asset_tx`. For a non-zero `discard_level` only the level-of-detail
+/// prefix is fetched, using HTTP `Range` requests (see [`fetch_texture_lod`]).
 fn run_texture_fetch(
     cap_url: &str,
     texture_id: Uuid,
@@ -3687,32 +3724,57 @@ fn run_texture_fetch(
     asset_tx: &Sender<SessionEvent>,
 ) {
     let url = format!("{cap_url}/?texture_id={texture_id}");
-    let event = match blocking_get_bytes(&url) {
-        Some(bytes) => {
-            let data = j2c::truncate_to_discard(&bytes, discard_level).to_vec();
-            SessionEvent::TextureReceived(Box::new(Texture {
-                id: texture_id,
-                codec: ImageCodec::J2c,
-                data,
-            }))
-        }
+    let event = match fetch_texture_lod(&url, discard_level) {
+        Some(data) => SessionEvent::TextureReceived(Box::new(Texture {
+            id: texture_id,
+            codec: ImageCodec::J2c,
+            data,
+        })),
         None => SessionEvent::TextureNotFound(texture_id),
     };
     asset_tx.send(event).ok();
 }
 
+/// Fetches the codestream bytes for a texture at `discard_level` using HTTP
+/// `Range` requests to transfer only the needed LOD prefix: a small probe reads
+/// the J2C [`j2c::Header`], from which the prefix length is computed, then a
+/// second `Range` request fetches exactly that prefix when the probe did not
+/// already cover it. Returns `None` on a 404 / network failure.
+fn fetch_texture_lod(url: &str, discard_level: u8) -> Option<Vec<u8>> {
+    if discard_level == 0 {
+        return blocking_get_bytes(url, None);
+    }
+    let probe = blocking_get_bytes(url, Some(j2c::FIRST_PACKET_SIZE))?;
+    let Some(header) = j2c::parse_header(&probe) else {
+        return Some(probe);
+    };
+    let target = header.discard_data_size(discard_level);
+    if probe.len() >= target {
+        return Some(probe.get(..target).unwrap_or(&probe).to_vec());
+    }
+    let body = blocking_get_bytes(url, Some(target))?;
+    let size = target.min(body.len());
+    Some(body.get(..size).unwrap_or(&body).to_vec())
+}
+
 /// GETs an asset from `{cap_url}/{query}` and forwards a
 /// [`SlSessionEvent::AssetReceived`] (or a [`SlSessionEvent::AssetTransferFailed`]
 /// with the 404-equivalent [`TransferStatus::UnknownSource`]) over `asset_tx`.
+/// An inclusive `byte_range` issues an HTTP `Range` request for just that span.
 fn run_asset_fetch(
     cap_url: &str,
     query: &str,
     asset_id: Uuid,
     asset_type: AssetType,
+    byte_range: Option<(u32, u32)>,
     asset_tx: &Sender<SessionEvent>,
 ) {
     let url = format!("{cap_url}/{query}");
-    let event = match blocking_get_bytes(&url) {
+    let bytes = match byte_range {
+        Some((start, end)) => blocking_get_range(&url, start, end),
+        None => blocking_get_bytes(&url, None),
+    };
+    let event = match bytes {
         Some(data) => SessionEvent::AssetReceived(Box::new(Asset {
             id: asset_id,
             asset_type,
@@ -3729,11 +3791,13 @@ fn run_asset_fetch(
 
 /// GETs a generic asset from the `GetAsset` capability using the asset class's
 /// query key, forwarding the result over `asset_tx` (or an
-/// [`SlSessionEvent::AssetTransferFailed`] for a class the cap cannot serve).
+/// [`SlSessionEvent::AssetTransferFailed`] for a class the cap cannot serve). An
+/// inclusive `byte_range` issues an HTTP `Range` request for just that span.
 fn run_generic_asset_fetch(
     cap_url: &str,
     asset_id: Uuid,
     asset_type: AssetType,
+    byte_range: Option<(u32, u32)>,
     asset_tx: &Sender<SessionEvent>,
 ) {
     match asset_type.get_asset_query_key() {
@@ -3743,6 +3807,7 @@ fn run_generic_asset_fetch(
                 &format!("?{key}={asset_id}"),
                 asset_id,
                 asset_type,
+                byte_range,
                 asset_tx,
             );
         }

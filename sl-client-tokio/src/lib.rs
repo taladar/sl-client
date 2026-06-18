@@ -62,13 +62,13 @@ pub use sl_proto::{
     ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
     ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
     ParcelVoiceInfo, PermissionField, PickInfo, PickUpdate, PlayingAnimation, PrimShape,
-    ProductType, ProfileUpdate, ReflectionProbe, RegionFlags, RegionIdentity, RegionInfoUpdate,
-    RegionLimits, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData,
-    SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace,
-    Throttle, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest,
-    Wearable, WearableType, avatar_texture, decode_texture_entry, grid_to_handle, group_powers,
-    handle_to_global, handle_to_grid, pcode, sim_access,
+    PrimShapeParams, ProductType, ProfileUpdate, ReflectionProbe, RegionFlags, RegionIdentity,
+    RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation,
+    SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
+    SculptData, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture, TextureEntry,
+    TextureFace, Throttle, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo,
+    VoiceProvisionRequest, Wearable, WearableType, avatar_texture, decode_texture_entry,
+    grid_to_handle, group_powers, handle_to_global, handle_to_grid, pcode, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -993,18 +993,28 @@ pub enum Command {
         discard_level: u8,
     },
     /// Fetch a mesh asset over the HTTP `GetMesh2`/`GetMesh` capability; the data
-    /// arrives as [`Event::AssetReceived`].
+    /// arrives as [`Event::AssetReceived`]. An optional `byte_range` (inclusive
+    /// `(start, end)` byte offsets) issues an HTTP `Range` request so only that
+    /// span is transferred — e.g. a single mesh LOD whose offsets the caller read
+    /// from the mesh header. `None` fetches the whole asset.
     FetchMesh {
         /// The mesh asset's id.
         mesh_id: Uuid,
+        /// Optional inclusive `(start, end)` byte range to fetch.
+        byte_range: Option<(u32, u32)>,
     },
     /// Fetch a generic asset over the HTTP `GetAsset` capability; the data
     /// arrives as [`Event::AssetReceived`] (or [`Event::AssetTransferFailed`]).
+    /// An optional `byte_range` (inclusive `(start, end)` byte offsets) issues an
+    /// HTTP `Range` request so only that span is transferred; `None` fetches the
+    /// whole asset.
     FetchAsset {
         /// The asset's id.
         asset_id: Uuid,
         /// The asset's class (selects the cap query parameter).
         asset_type: AssetType,
+        /// Optional inclusive `(start, end)` byte range to fetch.
+        byte_range: Option<(u32, u32)>,
     },
     /// Ask the simulator to (re-)send the agent's own wearables
     /// (`AgentWearablesRequest`); the reply arrives as [`Event::AgentWearables`].
@@ -2014,16 +2024,16 @@ impl Client {
                                 ));
                             }
                         }
-                        Some(Command::FetchMesh { mesh_id }) => {
+                        Some(Command::FetchMesh { mesh_id, byte_range }) => {
                             // GetMesh2 is preferred when offered; fall back to GetMesh.
                             if let Some(url) = caps.get(CAP_GET_MESH2).or_else(|| caps.get(CAP_GET_MESH)).cloned() {
-                                tokio::spawn(fetch_mesh_http(url, mesh_id, http.clone(), events.clone()));
+                                tokio::spawn(fetch_mesh_http(url, mesh_id, byte_range, http.clone(), events.clone()));
                             }
                         }
-                        Some(Command::FetchAsset { asset_id, asset_type }) => {
+                        Some(Command::FetchAsset { asset_id, asset_type, byte_range }) => {
                             if let Some(url) = caps.get(CAP_GET_ASSET).cloned() {
                                 tokio::spawn(fetch_asset_http(
-                                    url, asset_id, asset_type, http.clone(), events.clone(),
+                                    url, asset_id, asset_type, byte_range, http.clone(), events.clone(),
                                 ));
                             }
                         }
@@ -2810,9 +2820,16 @@ async fn caps_upload_step(
 }
 
 /// GETs a texture from the `GetTexture` capability and surfaces it as an
-/// [`Event::TextureReceived`] (its bytes truncated to the `discard_level` LOD
-/// prefix via [`j2c::truncate_to_discard`] when non-zero), or an
-/// [`Event::TextureNotFound`] on a 404 / network failure.
+/// [`Event::TextureReceived`], or an [`Event::TextureNotFound`] on a 404 /
+/// network failure.
+///
+/// For a non-zero `discard_level` this fetches only the level-of-detail prefix
+/// using real HTTP `Range` requests (so the rest of the codestream is never
+/// transferred): a small first request reads the J2C [`j2c::Header`], from which
+/// the prefix byte length is computed, then a second `Range` request fetches
+/// exactly that prefix when the first did not already cover it. A server that
+/// ignores `Range` (replying `200` with the whole image) still yields the right
+/// prefix, just without the bandwidth saving.
 async fn fetch_texture_http(
     cap_url: String,
     texture_id: Uuid,
@@ -2821,50 +2838,97 @@ async fn fetch_texture_http(
     events: mpsc::Sender<Event>,
 ) {
     let url = format!("{cap_url}/?texture_id={texture_id}");
-    let event = match http.get(&url).header("Accept", "image/x-j2c").send().await {
-        Ok(response) if response.status().is_success() => match response.bytes().await {
-            Ok(bytes) => {
-                let data = j2c::truncate_to_discard(&bytes, discard_level).to_vec();
-                Event::TextureReceived(Box::new(Texture {
-                    id: texture_id,
-                    codec: ImageCodec::J2c,
-                    data,
-                }))
-            }
-            Err(_error) => Event::TextureNotFound(texture_id),
-        },
-        _ => Event::TextureNotFound(texture_id),
+    let event = match fetch_texture_bytes(&http, &url, discard_level).await {
+        Some(data) => Event::TextureReceived(Box::new(Texture {
+            id: texture_id,
+            codec: ImageCodec::J2c,
+            data,
+        })),
+        None => Event::TextureNotFound(texture_id),
     };
     events.send(event).await.ok();
 }
 
+/// Fetches the codestream bytes for a texture at `discard_level`, using HTTP
+/// `Range` requests to transfer only the needed LOD prefix. Returns `None` on a
+/// 404 / network failure.
+async fn fetch_texture_bytes(
+    http: &ReqwestClient,
+    url: &str,
+    discard_level: u8,
+) -> Option<Vec<u8>> {
+    // Full resolution: one plain GET of the entire codestream.
+    if discard_level == 0 {
+        return http_get_prefix(http, url, None).await;
+    }
+    // Probe the header with a small Range request, then size the LOD prefix.
+    let probe = http_get_prefix(http, url, Some(j2c::FIRST_PACKET_SIZE)).await?;
+    let Some(header) = j2c::parse_header(&probe) else {
+        // Not a recognisable J2C codestream: return whatever the probe yielded.
+        return Some(probe);
+    };
+    let target = header.discard_data_size(discard_level);
+    if probe.len() >= target {
+        // The probe already covers the prefix (a coarse LOD, or a server that
+        // ignored Range and sent the whole image).
+        return Some(probe.get(..target).unwrap_or(&probe).to_vec());
+    }
+    // Fetch exactly the prefix the LOD needs.
+    let body = http_get_prefix(http, url, Some(target)).await?;
+    let size = target.min(body.len());
+    Some(body.get(..size).unwrap_or(&body).to_vec())
+}
+
+/// Performs an HTTP `GET` for `url`, optionally requesting only the first
+/// `max_bytes` via a `Range: bytes=0-(max_bytes-1)` header. Returns the response
+/// body on a success status (`200` or `206`), or `None` on any failure.
+async fn http_get_prefix(
+    http: &ReqwestClient,
+    url: &str,
+    max_bytes: Option<usize>,
+) -> Option<Vec<u8>> {
+    let mut request = http.get(url).header("Accept", "image/x-j2c");
+    if let Some(max) = max_bytes {
+        request = request.header("Range", format!("bytes=0-{}", max.saturating_sub(1)));
+    }
+    let response = request.send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    response.bytes().await.ok().map(|bytes| bytes.to_vec())
+}
+
 /// GETs a mesh asset from the `GetMesh2`/`GetMesh` capability and surfaces it as
 /// an [`Event::AssetReceived`] (or [`Event::AssetTransferFailed`] on failure).
+/// An inclusive `byte_range` issues an HTTP `Range` request for just that span.
 async fn fetch_mesh_http(
     cap_url: String,
     mesh_id: Uuid,
+    byte_range: Option<(u32, u32)>,
     http: ReqwestClient,
     events: mpsc::Sender<Event>,
 ) {
     let url = format!("{cap_url}/?mesh_id={mesh_id}");
-    let event = http_asset_event(&http, &url, mesh_id, AssetType::Mesh).await;
+    let event = http_asset_event(&http, &url, mesh_id, AssetType::Mesh, byte_range).await;
     events.send(event).await.ok();
 }
 
 /// GETs a generic asset from the `GetAsset` capability (using the asset class's
 /// query parameter) and surfaces it as an [`Event::AssetReceived`] (or
-/// [`Event::AssetTransferFailed`] on failure / an unsupported class).
+/// [`Event::AssetTransferFailed`] on failure / an unsupported class). An
+/// inclusive `byte_range` issues an HTTP `Range` request for just that span.
 async fn fetch_asset_http(
     cap_url: String,
     asset_id: Uuid,
     asset_type: AssetType,
+    byte_range: Option<(u32, u32)>,
     http: ReqwestClient,
     events: mpsc::Sender<Event>,
 ) {
     let event = match asset_type.get_asset_query_key() {
         Some(key) => {
             let url = format!("{cap_url}/?{key}={asset_id}");
-            http_asset_event(&http, &url, asset_id, asset_type).await
+            http_asset_event(&http, &url, asset_id, asset_type, byte_range).await
         }
         None => Event::AssetTransferFailed {
             asset_id,
@@ -2878,18 +2942,24 @@ async fn fetch_asset_http(
 /// Performs an HTTP `GET` for an asset and builds the resulting event: an
 /// [`Event::AssetReceived`] on success, or an [`Event::AssetTransferFailed`]
 /// (with [`TransferStatus::UnknownSource`], the 404 equivalent) on any failure.
+/// An inclusive `byte_range` adds a `Range: bytes=start-end` header.
 async fn http_asset_event(
     http: &ReqwestClient,
     url: &str,
     asset_id: Uuid,
     asset_type: AssetType,
+    byte_range: Option<(u32, u32)>,
 ) -> Event {
     let failed = Event::AssetTransferFailed {
         asset_id,
         asset_type,
         status: TransferStatus::UnknownSource,
     };
-    match http.get(url).send().await {
+    let mut request = http.get(url);
+    if let Some((start, end)) = byte_range {
+        request = request.header("Range", format!("bytes={start}-{end}"));
+    }
+    match request.send().await {
         Ok(response) if response.status().is_success() => match response.bytes().await {
             Ok(bytes) => Event::AssetReceived(Box::new(Asset {
                 id: asset_id,

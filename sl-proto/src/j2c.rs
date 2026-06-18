@@ -20,7 +20,9 @@
 
 /// The viewer's `FIRST_PACKET_SIZE`: a lower bound on the estimated byte size
 /// of any discard level, large enough to always cover the codestream header.
-const FIRST_PACKET_SIZE: usize = 600;
+/// Also the size of the initial HTTP `Range` probe a runtime issues to read a
+/// texture's [`Header`] before requesting the full LOD prefix.
+pub const FIRST_PACKET_SIZE: usize = 600;
 
 /// The J2C marker prefix byte: every two-byte marker starts with `0xFF`.
 const MARKER_PREFIX: u8 = 0xFF;
