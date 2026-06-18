@@ -938,7 +938,6 @@ mod test {
 
     /// Builds an inbound `AvatarSitResponse` for the object `sit_object`.
     fn sit_response(sit_object: uuid::Uuid) -> AnyMessage {
-        let zero = vec3(0.0, 0.0, 0.0);
         AnyMessage::AvatarSitResponse(AvatarSitResponse {
             sit_object: AvatarSitResponseSitObjectBlock { id: sit_object },
             sit_transform: AvatarSitResponseSitTransformBlock {
@@ -947,12 +946,12 @@ mod test {
                 sit_rotation: Rotation {
                     x: 0.0,
                     y: 0.0,
-                    z: 0.0,
-                    s: 1.0,
+                    z: 0.707,
+                    s: 0.707,
                 },
-                camera_eye_offset: zero.clone(),
-                camera_at_offset: zero,
-                force_mouselook: false,
+                camera_eye_offset: vec3(1.0, 2.0, 3.0),
+                camera_at_offset: vec3(4.0, 5.0, 6.0),
+                force_mouselook: true,
             },
         })
     }
@@ -989,11 +988,36 @@ mod test {
         let result = drain_events(&mut session)
             .into_iter()
             .find_map(|event| match event {
-                Event::SitResult { sit_object, .. } => Some(sit_object),
+                Event::SitResult { .. } => Some(event),
                 _ => None,
             })
             .ok_or("expected a SitResult event")?;
-        assert_eq!(result, target);
+        let Event::SitResult {
+            sit_object,
+            autopilot,
+            sit_position,
+            sit_rotation,
+            camera_eye_offset,
+            camera_at_offset,
+            force_mouselook,
+        } = result
+        else {
+            return Err("expected a SitResult event".into());
+        };
+        assert_eq!(sit_object, target);
+        assert!(!autopilot);
+        assert_eq!(sit_position, vec3(0.0, 0.0, 0.5));
+        // The full SitTransform — rotation, scripted-sit camera offsets, and the
+        // force-mouselook flag — must reach the caller, not just the position.
+        // The wire stores a quaternion as (x, y, z) and reconstructs `s`, so the
+        // decoded `s` differs slightly from the sent value; compare with epsilon.
+        assert!((sit_rotation.x - 0.0).abs() < 1e-4);
+        assert!((sit_rotation.y - 0.0).abs() < 1e-4);
+        assert!((sit_rotation.z - 0.707).abs() < 1e-4);
+        assert!((sit_rotation.s - 0.707).abs() < 1e-3);
+        assert_eq!(camera_eye_offset, vec3(1.0, 2.0, 3.0));
+        assert_eq!(camera_at_offset, vec3(4.0, 5.0, 6.0));
+        assert!(force_mouselook);
         Ok(())
     }
 

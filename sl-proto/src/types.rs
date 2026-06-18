@@ -823,7 +823,21 @@ pub enum Event {
         /// first (the target was out of immediate sit range).
         autopilot: bool,
         /// The seat position relative to the object, in metres.
-        sit_position: (f32, f32, f32),
+        sit_position: Vector,
+        /// The seated orientation relative to the object — which way the avatar
+        /// faces once seated.
+        sit_rotation: Rotation,
+        /// The scripted-sit camera eye position relative to the seat
+        /// (`llSetCameraEyeOffset`); the zero vector when the seat's script sets
+        /// no custom camera.
+        camera_eye_offset: Vector,
+        /// The scripted-sit camera focus point relative to the seat
+        /// (`llSetCameraAtOffset`); the zero vector when the seat's script sets
+        /// no custom camera.
+        camera_at_offset: Vector,
+        /// Whether sitting forces the avatar into mouselook (set by vehicles and
+        /// weapon huds).
+        force_mouselook: bool,
     },
     /// An object entered the current region's scene graph: the first
     /// `ObjectUpdate`/`ObjectUpdateCompressed` seen for its local id (or the
