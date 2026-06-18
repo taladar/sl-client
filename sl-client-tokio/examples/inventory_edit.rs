@@ -157,9 +157,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Event::InventoryItemCreated { item, .. } => {
                 info!("item created: {} ({})", item.name, item.item_id);
+                // Only drive the edit cycle off the *first* creation; the copy
+                // below also arrives as an `UpdateCreateInventoryItem` on OpenSim
+                // (Second Life answers a copy with `BulkUpdateInventory`), so
+                // guarding here avoids an endless copy loop.
+                let first = created_item.is_none();
                 created_item = Some(item.item_id);
-                if !readonly {
-                    // Rename the new item, then delete it and its folder.
+                if !readonly && first {
+                    // Rename the new item.
                     let mut renamed = item.clone();
                     "sl-client #30 note (renamed)".clone_into(&mut renamed.name);
                     command_tx
@@ -169,6 +174,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         })
                         .await
                         .ok();
+                    // Copy it: the reply is a `BulkUpdateInventory` carrying the
+                    // async callback id (#44), surfaced as `item_callbacks` below.
+                    command_tx
+                        .send(Command::CopyInventoryItem {
+                            old_agent_id: agent_id,
+                            old_item_id: item.item_id,
+                            new_folder_id: test_folder,
+                            new_name: "sl-client #44 copy".to_owned(),
+                        })
+                        .await
+                        .ok();
+                    // Then delete the item and its folder (purging the copy too).
                     command_tx
                         .send(Command::RemoveInventoryItems(vec![item.item_id]))
                         .await
@@ -177,17 +194,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .send(Command::RemoveInventoryFolders(vec![test_folder]))
                         .await
                         .ok();
-                    info!("renamed, then removed the item and folder");
+                    info!("renamed and copied, then removed the item and folder");
                 }
             }
-            Event::InventoryBulkUpdate { folders, items, .. } => {
+            Event::InventoryBulkUpdate {
+                folders,
+                items,
+                item_callbacks,
+                ..
+            } => {
                 info!(
-                    "bulk inventory update: {} folder(s), {} item(s)",
+                    "bulk inventory update: {} folder(s), {} item(s), {} callback(s)",
                     folders.len(),
-                    items.len()
+                    items.len(),
+                    item_callbacks.len()
                 );
                 for folder in &folders {
                     info!("  folder {} \"{}\"", folder.folder_id, folder.name);
+                }
+                for (item_id, callback_id) in &item_callbacks {
+                    info!("  item {item_id} correlates to callback {callback_id}");
                 }
             }
             Event::LoggedOut => {

@@ -4010,6 +4010,7 @@ impl Session {
                         transaction_id,
                         folders,
                         items,
+                        item_callbacks: Vec::new(),
                     });
                 }
             }
@@ -4024,6 +4025,7 @@ impl Session {
                         transaction_id: Uuid::nil(),
                         folders,
                         items,
+                        item_callbacks: Vec::new(),
                     });
                 }
             }
@@ -4036,6 +4038,7 @@ impl Session {
                         transaction_id: Uuid::nil(),
                         folders: vec![folder],
                         items: Vec::new(),
+                        item_callbacks: Vec::new(),
                     });
                 }
             }
@@ -5053,7 +5056,10 @@ impl Session {
             // (the reply to `CreateInventoryItem`, or an accepted inventory
             // offer). Merge it into the cache.
             AnyMessage::UpdateCreateInventoryItem(reply) => {
-                if let Some(data) = reply.inventory_data.first() {
+                // The `InventoryData` block is repeatable: the simulator can batch
+                // several created/updated items into one message, so surface every
+                // entry (and cache each), not just the first.
+                for data in &reply.inventory_data {
                     let item = inventory_item_from_create(data);
                     self.cache_inventory_item(item.clone());
                     self.events.push_back(Event::InventoryItemCreated {
@@ -5071,11 +5077,22 @@ impl Session {
                     update.folder_data.iter().map(bulk_update_folder).collect();
                 let items: Vec<InventoryItem> =
                     update.item_data.iter().map(bulk_update_item).collect();
+                // Carry each item's async `CallbackID` (when non-zero) so a client
+                // that issued a create/copy can correlate the returned callback id
+                // to the resulting item even though the reply arrived here rather
+                // than as an `UpdateCreateInventoryItem`.
+                let item_callbacks: Vec<(Uuid, u32)> = update
+                    .item_data
+                    .iter()
+                    .filter(|data| data.callback_id != 0)
+                    .map(|data| (data.item_id, data.callback_id))
+                    .collect();
                 self.cache_inventory(&folders, &items);
                 self.events.push_back(Event::InventoryBulkUpdate {
                     transaction_id: update.agent_data.transaction_id,
                     folders,
                     items,
+                    item_callbacks,
                 });
             }
             AnyMessage::EnableSimulator(sim) => {
