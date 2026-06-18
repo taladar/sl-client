@@ -88,13 +88,15 @@ mod test {
         RegionInfoCombatSettingsBlock, RegionInfoRegionInfo2Block, RegionInfoRegionInfo3Block,
         RegionInfoRegionInfo5Block, RegionInfoRegionInfoBlock, RequestXfer, RequestXferXferIDBlock,
         ScriptDialog, ScriptDialogButtonsBlock, ScriptDialogDataBlock, ScriptDialogOwnerDataBlock,
-        ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock, SendXferPacket,
-        SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock, SoundTrigger,
-        SoundTriggerSoundDataBlock, TeleportFailed, TeleportFailedInfoBlock, TeleportFinish,
-        TeleportFinishInfoBlock, TransferInfo, TransferInfoTransferInfoBlock, TransferPacket,
-        TransferPacketTransferDataBlock, UpdateCreateInventoryItem,
-        UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
-        UseCachedMuteList, UseCachedMuteListAgentDataBlock,
+        ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock,
+        ScriptTeleportRequest, ScriptTeleportRequestDataBlock, ScriptTeleportRequestOptionsBlock,
+        SendXferPacket, SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock, SoundTrigger,
+        SoundTriggerSoundDataBlock, TeleportFailed, TeleportFailedAlertInfoBlock,
+        TeleportFailedInfoBlock, TeleportFinish, TeleportFinishInfoBlock, TransferInfo,
+        TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
+        UpdateCreateInventoryItem, UpdateCreateInventoryItemAgentDataBlock,
+        UpdateCreateInventoryItemInventoryDataBlock, UseCachedMuteList,
+        UseCachedMuteListAgentDataBlock,
     };
     use sl_wire::{
         AnyMessage, HomeLocation, LoginFailure, LoginRequest, LoginResponse, LoginSuccess,
@@ -6074,19 +6076,29 @@ mod test {
                     agent_id: uuid::Uuid::from_u128(1),
                     reason: b"no access".to_vec(),
                 },
-                alert_info: Vec::new(),
+                alert_info: vec![TeleportFailedAlertInfoBlock {
+                    message: b"RegionEntryAccessBlocked".to_vec(),
+                    extra_params: b"[REGION_NAME]=Foo".to_vec(),
+                }],
             }),
             2,
             true,
         )?;
         session.handle_datagram(sim_addr(), &failed, now)?;
         let events = drain_events(&mut session);
-        assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, Event::TeleportFailed { .. })),
-            "expected a TeleportFailed event, got {events:?}"
-        );
+        let alert = events
+            .iter()
+            .find_map(|e| match e {
+                Event::TeleportFailed { reason, alert_info } => {
+                    Some((reason.clone(), alert_info.clone()))
+                }
+                _ => None,
+            })
+            .ok_or("expected a TeleportFailed event")?;
+        assert_eq!(alert.0, "no access");
+        let info = alert.1.ok_or("expected an AlertInfo block")?;
+        assert_eq!(info.message, "RegionEntryAccessBlocked");
+        assert_eq!(info.extra_params, "[REGION_NAME]=Foo");
 
         // Back in the active state, a second teleport is accepted.
         session.teleport_to(handle, vec3(128.0, 128.0, 30.0), vec3(1.0, 0.0, 0.0), now)?;
@@ -6113,7 +6125,7 @@ mod test {
         let reason = events
             .iter()
             .find_map(|e| match e {
-                Event::TeleportFailed { reason } => Some(reason.clone()),
+                Event::TeleportFailed { reason, .. } => Some(reason.clone()),
                 _ => None,
             })
             .ok_or("expected a TeleportFailed event")?;
@@ -6298,6 +6310,8 @@ mod test {
         assert_eq!(region.grid_x, 1000);
         assert_eq!(region.grid_y, 1001);
         assert_eq!(region.maturity, Maturity::Mature);
+        assert_eq!(region.water_height, 20);
+        assert_eq!(region.agents, 3);
         assert_eq!(region.region_handle, sl_proto::grid_to_handle(1000, 1001));
         Ok(())
     }
@@ -6869,6 +6883,188 @@ mod test {
         assert_eq!(
             session.object(200).map(|o| o.motion.position.clone()),
             Some(new_pos)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn script_teleport_request_surfaces_options_flags() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let msg = AnyMessage::ScriptTeleportRequest(ScriptTeleportRequest {
+            data: ScriptTeleportRequestDataBlock {
+                object_name: b"Beacon\0".to_vec(),
+                sim_name: b"Foo\0".to_vec(),
+                sim_position: Vector {
+                    x: 128.0,
+                    y: 64.0,
+                    z: 30.0,
+                },
+                look_at: zero_vec(),
+            },
+            options: vec![ScriptTeleportRequestOptionsBlock { flags: 7 }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&msg, 5, true)?, now)?;
+        let events = drain_events(&mut session);
+        let request = events
+            .iter()
+            .find_map(|e| match e {
+                Event::ScriptTeleport(request) => Some(request.clone()),
+                _ => None,
+            })
+            .ok_or("expected a ScriptTeleport event")?;
+        assert_eq!(request.region_name, "Foo");
+        assert_eq!(request.object_name, "Beacon");
+        assert_eq!(request.flags, 7);
+        Ok(())
+    }
+
+    #[test]
+    fn object_update_surfaces_time_dilation_on_change() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // A half-dilation update emits a TimeDilation event for the region.
+        let mut update = object_update(300, 0x1, zero_vec());
+        if let AnyMessage::ObjectUpdate(message) = &mut update {
+            message.region_data.time_dilation = 0x8000;
+        }
+        session.handle_datagram(sim_addr(), &server_message(&update, 5, true)?, now)?;
+        let events = drain_events(&mut session);
+        let dilation = events
+            .iter()
+            .find_map(|e| match e {
+                Event::TimeDilation {
+                    region_handle,
+                    dilation,
+                } => Some((*region_handle, *dilation)),
+                _ => None,
+            })
+            .ok_or("expected a TimeDilation event")?;
+        assert_eq!(dilation.0, OBJ_REGION);
+        // 0x8000 / 0xFFFF ≈ 0.5.
+        assert!(
+            (dilation.1 - 0.5).abs() < 1e-4,
+            "unexpected dilation {}",
+            dilation.1
+        );
+
+        // A second update with the *same* dilation does not re-emit.
+        session.handle_datagram(sim_addr(), &server_message(&update, 6, true)?, now)?;
+        let events = drain_events(&mut session);
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Event::TimeDilation { .. })),
+            "an unchanged dilation must not re-emit, got {events:?}"
+        );
+
+        // A changed dilation emits again.
+        let mut full = object_update(300, 0x1, zero_vec());
+        if let AnyMessage::ObjectUpdate(message) = &mut full {
+            message.region_data.time_dilation = 0xFFFF;
+        }
+        session.handle_datagram(sim_addr(), &server_message(&full, 7, true)?, now)?;
+        let events = drain_events(&mut session);
+        let again = events
+            .iter()
+            .find_map(|e| match e {
+                Event::TimeDilation { dilation, .. } => Some(*dilation),
+                _ => None,
+            })
+            .ok_or("expected a second TimeDilation event")?;
+        assert!((again - 1.0).abs() < f32::EPSILON, "expected full dilation");
+        Ok(())
+    }
+
+    #[test]
+    fn object_update_surfaces_joint_fields() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let pivot = Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        let axis = Vector {
+            x: 4.0,
+            y: 5.0,
+            z: 6.0,
+        };
+        let mut update = object_update(310, 0x2, zero_vec());
+        if let AnyMessage::ObjectUpdate(message) = &mut update {
+            let block = message.object_data.first_mut().ok_or("one block")?;
+            block.joint_type = 2;
+            block.joint_pivot = pivot.clone();
+            block.joint_axis_or_anchor = axis.clone();
+        }
+        session.handle_datagram(sim_addr(), &server_message(&update, 5, true)?, now)?;
+        let events = drain_events(&mut session);
+        let Some(Event::ObjectAdded(object)) =
+            events.iter().find(|e| matches!(e, Event::ObjectAdded(_)))
+        else {
+            return Err(format!("expected ObjectAdded, got {events:?}").into());
+        };
+        assert_eq!(object.joint_type, 2);
+        assert_eq!(object.joint_pivot, pivot);
+        assert_eq!(object.joint_axis_or_anchor, axis);
+        Ok(())
+    }
+
+    #[test]
+    fn terse_update_surfaces_avatar_collision_plane() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Establish the object via a full update first.
+        let update = object_update(320, 0x3, zero_vec());
+        session.handle_datagram(sim_addr(), &server_message(&update, 5, true)?, now)?;
+        drain_events(&mut session);
+
+        // A terse blob *with* a collision plane (the has-plane flag set, then an
+        // LLVector4) — as the simulator sends for an avatar.
+        let plane = [0.0, 0.0, 1.0, 0.5];
+        let mut writer = Writer::new();
+        writer.put_u32(320);
+        writer.put_u8(0);
+        writer.put_u8(1); // has collision plane
+        writer.put_vector4(plane);
+        writer.put_vector3(&zero_vec());
+        for _ in 0..(3 + 3 + 4 + 3) {
+            writer.put_u16(0x8000);
+        }
+        let terse = AnyMessage::ImprovedTerseObjectUpdate(ImprovedTerseObjectUpdate {
+            region_data: ImprovedTerseObjectUpdateRegionDataBlock {
+                region_handle: OBJ_REGION,
+                time_dilation: 0xFFFF,
+            },
+            object_data: vec![ImprovedTerseObjectUpdateObjectDataBlock {
+                data: writer.into_bytes(),
+                texture_entry: Vec::new(),
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&terse, 6, true)?, now)?;
+        drain_events(&mut session);
+        assert_eq!(
+            session.object(320).and_then(|o| o.motion.collision_plane),
+            Some(plane)
+        );
+        // A plain prim (the full update above) carries no collision plane.
+        let prim = object_update(321, 0x4, zero_vec());
+        session.handle_datagram(sim_addr(), &server_message(&prim, 7, true)?, now)?;
+        drain_events(&mut session);
+        assert_eq!(
+            session.object(321).and_then(|o| o.motion.collision_plane),
+            None
         );
         Ok(())
     }

@@ -218,25 +218,26 @@ use uuid::Uuid;
 use crate::error::Error;
 use crate::terrain;
 use crate::types::{
-    ActiveGroup, Asset, AssetType, AvatarClassified, AvatarGroupMembership, AvatarInterests,
-    AvatarPick, AvatarProperties, Camera, ChatAudible, ChatMessage, ChatSourceType, ChatType,
-    ClassifiedInfo, ClassifiedUpdate, ClickAction, CreateGroupParams, DeRezDestination,
-    DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, Event, Friend,
-    FriendRights, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupProfile,
-    GroupRole, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, GroupTitle, ImDialog,
-    ImageCodec, InstantMessage, InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer,
-    LandingType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItem, MapItemType,
-    MapRegionInfo, Material, Maturity, MoneyBalance, MoneyTransaction, MoneyTransactionType,
-    MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, Object, ObjectExtraParams,
-    ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelInfo, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-    ParcelUpdate, PermissionField, PickInfo, PickUpdate, PlayingAnimation, PrimShape,
-    PrimShapeParams, ProductType, ProfileUpdate, RegionChatSettings, RegionCombatSettings,
-    RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, SaleType, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload,
-    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit,
-    Wearable, WearableType, avatar_texture, grid_to_handle, handle_to_grid,
+    ActiveGroup, AlertInfo, Asset, AssetType, AvatarClassified, AvatarGroupMembership,
+    AvatarInterests, AvatarPick, AvatarProperties, Camera, ChatAudible, ChatMessage,
+    ChatSourceType, ChatType, ClassifiedInfo, ClassifiedUpdate, ClickAction, CreateGroupParams,
+    DeRezDestination, DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind,
+    EstateInfo, Event, Friend, FriendRights, GroupMember, GroupMembership, GroupNotice,
+    GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleEdit, GroupRoleMember,
+    GroupRoleMemberChange, GroupTitle, ImDialog, ImageCodec, InstantMessage, InterestsUpdate,
+    InventoryFolder, InventoryItem, InventoryOffer, LandingType, LoadUrlRequest, LoginAccount,
+    LoginHttpRequest, LoginParams, MapItem, MapItemType, MapRegionInfo, Material, Maturity,
+    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
+    NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMotion,
+    ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+    ParcelCategory, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo,
+    ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, PickInfo,
+    PickUpdate, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
+    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionInfoUpdate, RegionLimits,
+    Reliability, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest, SoundFlags, SoundPreload, TeleportFlags, TerrainLayerType, TerrainPatch,
+    Texture, Throttle, TransferStatus, Transmit, Wearable, WearableType, avatar_texture,
+    grid_to_handle, handle_to_grid,
 };
 use crate::{appearance, types::AvatarAppearance, types::AvatarAttachment};
 
@@ -3844,6 +3845,11 @@ pub struct Session {
     /// terrain patches, which the `LayerData` message does not itself tag with a
     /// region handle.
     regions: BTreeMap<SocketAddr, u64>,
+    /// The most recent raw `RegionData.TimeDilation` (a `u16`) seen for each
+    /// simulator, used to de-duplicate [`Event::TimeDilation`] so it is emitted
+    /// only when the region's frame time-dilation actually changes (every
+    /// object-update message carries the field). See [`Session::note_time_dilation`].
+    time_dilation: BTreeMap<SocketAddr, u16>,
     /// The live inventory-folder cache, keyed by folder id. Seeded from the
     /// login skeleton ([`Event::InventorySkeleton`]), grown by folder-contents
     /// fetches ([`Event::InventoryDescendents`], both UDP and CAPS) and the
@@ -3897,6 +3903,7 @@ impl Session {
             objects: BTreeMap::new(),
             terrain: BTreeMap::new(),
             regions: BTreeMap::new(),
+            time_dilation: BTreeMap::new(),
             inventory_folders: BTreeMap::new(),
             inventory_items: BTreeMap::new(),
             next_inventory_callback: 1,
@@ -4229,6 +4236,7 @@ impl Session {
         self.objects.clear();
         self.terrain.clear();
         self.regions.clear();
+        self.time_dilation.clear();
         if seed_capability.is_some() {
             self.seed_capability = seed_capability;
         }
@@ -4420,6 +4428,7 @@ impl Session {
                 self.objects.clear();
                 self.terrain.clear();
                 self.regions.clear();
+                self.time_dilation.clear();
                 self.seed_capability = Some(success.seed_capability.clone());
                 self.inventory_root = success.inventory_root;
                 self.secure_session_id = success.secure_session_id;
@@ -4593,12 +4602,14 @@ impl Session {
         match message {
             AnyMessage::ObjectUpdate(update) => {
                 let region_handle = update.region_data.region_handle;
+                self.note_time_dilation(from, region_handle, update.region_data.time_dilation);
                 for block in &update.object_data {
                     self.upsert_object(from, object_from_full_update(block, region_handle));
                 }
             }
             AnyMessage::ObjectUpdateCompressed(update) => {
                 let region_handle = update.region_data.region_handle;
+                self.note_time_dilation(from, region_handle, update.region_data.time_dilation);
                 for block in &update.object_data {
                     if let Some(object) =
                         compressed_object(&block.data, region_handle, block.update_flags)
@@ -4608,6 +4619,11 @@ impl Session {
                 }
             }
             AnyMessage::ObjectUpdateCached(update) => {
+                self.note_time_dilation(
+                    from,
+                    update.region_data.region_handle,
+                    update.region_data.time_dilation,
+                );
                 // We keep no persistent object cache across sessions, so any entry
                 // not already held with a matching CRC is a miss; fetch the full
                 // update for the misses (a full `ObjectUpdate` follows).
@@ -4625,6 +4641,11 @@ impl Session {
                 self.request_object_ids(from, &misses, now);
             }
             AnyMessage::ImprovedTerseObjectUpdate(update) => {
+                self.note_time_dilation(
+                    from,
+                    update.region_data.region_handle,
+                    update.region_data.time_dilation,
+                );
                 // Terse updates carry only motion. Apply to known objects; for
                 // unknown ones (which lack identity here), fetch the full update.
                 let mut misses = Vec::new();
@@ -4708,6 +4729,21 @@ impl Session {
         for patch in emit {
             self.events.push_back(Event::TerrainPatch(Box::new(patch)));
         }
+    }
+
+    /// Records the `RegionData.TimeDilation` carried by an object-update message
+    /// from simulator `from`, emitting [`Event::TimeDilation`] when the raw value
+    /// differs from the last one seen for that sim (so a steady region does not
+    /// re-emit on every update). `raw` is the 16-bit wire value; the event carries
+    /// the `0.0`..=`1.0` fraction.
+    fn note_time_dilation(&mut self, from: SocketAddr, region_handle: u64, raw: u16) {
+        if self.time_dilation.insert(from, raw) == Some(raw) {
+            return;
+        }
+        self.events.push_back(Event::TimeDilation {
+            region_handle,
+            dilation: f32::from(raw) / f32::from(u16::MAX),
+        });
     }
 
     /// Inserts or refreshes a scene object in the cache for simulator `from`,
@@ -4794,9 +4830,11 @@ impl Session {
     /// Drops every cached object for simulator `addr` (its circuit has gone away),
     /// emitting an [`Event::ObjectRemoved`] for each so consumers can prune.
     fn forget_sim_objects(&mut self, addr: SocketAddr) {
-        // The terrain and region-handle caches for this sim go stale too.
+        // The terrain, region-handle, and time-dilation caches for this sim go
+        // stale too.
         self.terrain.remove(&addr);
         self.regions.remove(&addr);
+        self.time_dilation.remove(&addr);
         let Some(sim) = self.objects.remove(&addr) else {
             return;
         };
@@ -5191,6 +5229,10 @@ impl Session {
                 }
                 self.events.push_back(Event::TeleportFailed {
                     reason: String::from_utf8_lossy(&failed.info.reason).into_owned(),
+                    alert_info: failed.alert_info.first().map(|block| AlertInfo {
+                        message: String::from_utf8_lossy(&block.message).into_owned(),
+                        extra_params: String::from_utf8_lossy(&block.extra_params).into_owned(),
+                    }),
                 });
             }
             AnyMessage::TeleportFinish(finish) => {
@@ -5574,6 +5616,7 @@ impl Session {
                             data.sim_position.z,
                         ),
                         look_at: (data.look_at.x, data.look_at.y, data.look_at.z),
+                        flags: request.options.first().map_or(0, |option| option.flags),
                     })));
             }
             AnyMessage::AgentDataUpdate(update) => {
@@ -5768,6 +5811,7 @@ impl Session {
             }
             self.events.push_back(Event::TeleportFailed {
                 reason: "teleport timed out".to_owned(),
+                alert_info: None,
             });
             return Ok(());
         }
@@ -10157,6 +10201,7 @@ fn map_region_info(
             .filter(|&value| value != 0)
             .unwrap_or(256),
         agents: data.agents,
+        water_height: data.water_height,
         map_image_id: data.map_image_id,
     })
 }
@@ -11143,6 +11188,7 @@ const fn zero_motion() -> ObjectMotion {
         acceleration: ZERO_VECTOR,
         rotation: IDENTITY_ROTATION,
         angular_velocity: ZERO_VECTOR,
+        collision_plane: None,
     }
 }
 
@@ -11157,10 +11203,13 @@ fn full_object_motion(blob: &[u8]) -> ObjectMotion {
 /// The fallible inner of [`full_object_motion`].
 fn full_object_motion_inner(blob: &[u8]) -> Result<ObjectMotion, WireError> {
     let mut reader = Reader::new(blob);
-    if matches!(blob.len(), 76 | 140) {
-        // Avatar collision plane (LLVector4) prefix — read and discard.
-        let _plane = reader.vector4()?;
-    }
+    // Avatar variants carry a collision-plane (LLVector4) prefix; ordinary
+    // objects do not.
+    let collision_plane = if matches!(blob.len(), 76 | 140) {
+        Some(reader.vector4()?)
+    } else {
+        None
+    };
     let position = reader.vector3()?;
     let velocity = reader.vector3()?;
     let acceleration = reader.vector3()?;
@@ -11173,6 +11222,7 @@ fn full_object_motion_inner(blob: &[u8]) -> Result<ObjectMotion, WireError> {
         acceleration,
         rotation,
         angular_velocity,
+        collision_plane,
     })
 }
 
@@ -11195,10 +11245,12 @@ fn terse_update(blob: &[u8]) -> Option<TerseUpdate> {
     let local_id = reader.u32().ok()?;
     let state = reader.u8().ok()?;
     let has_collision_plane = reader.u8().ok()? != 0;
-    if has_collision_plane {
-        // Avatar collision plane (LLVector4) — read and discard.
-        let _plane = reader.vector4().ok()?;
-    }
+    // Avatar updates carry a collision plane (LLVector4); other objects do not.
+    let collision_plane = if has_collision_plane {
+        Some(reader.vector4().ok()?)
+    } else {
+        None
+    };
     let position = reader.vector3().ok()?;
     let velocity = read_quantized_vector(&mut reader, 128.0).ok()?;
     let acceleration = read_quantized_vector(&mut reader, 64.0).ok()?;
@@ -11223,6 +11275,7 @@ fn terse_update(blob: &[u8]) -> Option<TerseUpdate> {
             acceleration,
             rotation,
             angular_velocity,
+            collision_plane,
         },
     })
 }
@@ -11293,6 +11346,9 @@ fn object_from_full_update(block: &ObjectUpdateObjectDataBlock, region_handle: u
         extra: crate::extra_params::decode_extra_params(&block.extra_params),
         extra_params: block.extra_params.clone(),
         properties: None,
+        joint_type: block.joint_type,
+        joint_pivot: block.joint_pivot.clone(),
+        joint_axis_or_anchor: block.joint_axis_or_anchor.clone(),
     }
 }
 
@@ -11447,6 +11503,9 @@ fn compressed_object(blob: &[u8], region_handle: u64, update_flags: u32) -> Opti
             acceleration: ZERO_VECTOR,
             rotation,
             angular_velocity,
+            // Compressed updates carry no collision plane (avatars use the full
+            // or terse path).
+            collision_plane: None,
         },
         owner_id,
         sound: Uuid::nil(),
@@ -11467,6 +11526,10 @@ fn compressed_object(blob: &[u8], region_handle: u64, update_flags: u32) -> Opti
         extra: ObjectExtraParams::default(),
         extra_params: Vec::new(),
         properties: None,
+        // The deprecated joint fields are not carried by compressed updates.
+        joint_type: 0,
+        joint_pivot: ZERO_VECTOR,
+        joint_axis_or_anchor: ZERO_VECTOR,
     };
     // Best-effort decode of the trailing fields: a short/garbled tail leaves the
     // remaining fields at their defaults rather than discarding the whole object.

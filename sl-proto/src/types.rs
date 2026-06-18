@@ -461,8 +461,14 @@ pub enum Event {
     /// A teleport failed (`TeleportFailed` or a teleport timeout); the session
     /// remains connected to the current region.
     TeleportFailed {
-        /// The failure reason.
+        /// The failure reason (the plain, server-supplied message string).
         reason: String,
+        /// The structured alert, if the simulator attached one (`AlertInfo`): a
+        /// localizable message *key* plus its substitution parameters, which a
+        /// localized client looks up instead of showing the raw
+        /// [`reason`](Self::TeleportFailed::reason). `None` for the timeout path
+        /// and for simulators that send no alert block.
+        alert_info: Option<AlertInfo>,
     },
     /// A teleport completed at the protocol level (`TeleportFinish`, delivered
     /// over UDP or the CAPS event queue): the destination region's identity,
@@ -919,6 +925,20 @@ pub enum Event {
     /// [`Object::motion`] of an already-cached object). Carries the merged
     /// [`Object`].
     ObjectUpdated(Box<Object>),
+    /// The simulator's frame time-dilation changed (`RegionData.TimeDilation`,
+    /// carried by every object-update message). The value is the fraction of
+    /// real time the region's physics frame is achieving, `0.0`..=`1.0`: `1.0`
+    /// is a healthy, fully-keeping-up region, lower values mean the sim is
+    /// lagging and an object's interpolated (dead-reckoned) motion should be
+    /// scaled down accordingly between updates. Emitted only when the value
+    /// changes for a region (the raw 16-bit value is de-duplicated), not on every
+    /// object update.
+    TimeDilation {
+        /// The region whose time dilation this is.
+        region_handle: u64,
+        /// The time dilation, `0.0`..=`1.0` (the raw `u16` divided by `65535`).
+        dilation: f32,
+    },
     /// An object left the scene (`KillObject`): it was removed from the region
     /// cache.
     ObjectRemoved {
@@ -1313,6 +1333,13 @@ pub struct ObjectMotion {
     pub rotation: Rotation,
     /// Angular velocity (the rotation axis scaled by radians/second).
     pub angular_velocity: Vector,
+    /// The avatar collision (foot/standing) plane, present only for avatar
+    /// updates and `None` for ordinary objects. The four components are the
+    /// plane equation `[nx, ny, nz, d]`: a unit normal and a distance, giving
+    /// the surface the avatar is standing on (niche, for inverse-kinematics /
+    /// grounding). Decoded from the `LLVector4` prefix the simulator prepends to
+    /// an avatar's motion blob.
+    pub collision_plane: Option<[f32; 4]>,
 }
 
 /// A cached scene object (a primitive or avatar) for the current region,
@@ -1404,6 +1431,134 @@ pub struct Object {
     /// description, …) once an [`Event::ObjectProperties`] has been received for
     /// it; `None` until then.
     pub properties: Option<ObjectProperties>,
+    /// The deprecated legacy joint type (`JointType`). Part of the long-obsolete
+    /// physical-joint mechanism; carried by a full `ObjectUpdate` but virtually
+    /// always zero on modern grids. Surfaced verbatim for fidelity. Not carried
+    /// by compressed updates (left zero there).
+    pub joint_type: u8,
+    /// The deprecated legacy joint pivot point (`JointPivot`), in object-local
+    /// metres. See [`joint_type`](Self::joint_type); usually the zero vector.
+    pub joint_pivot: Vector,
+    /// The deprecated legacy joint axis or anchor (`JointAxisOrAnchor`). See
+    /// [`joint_type`](Self::joint_type); usually the zero vector.
+    pub joint_axis_or_anchor: Vector,
+}
+
+impl Object {
+    /// The object's [`name_value`](Self::name_value) pairs, parsed from the raw
+    /// newline-separated string into structured [`NameValue`] entries (e.g. an
+    /// attachment's `AttachItemID`). Empty when the object carries none. Lines
+    /// that have no name/type are skipped. The parse mirrors the reference
+    /// viewer's `LLNameValue` string constructor: each line is
+    /// `name type [class] [sendto] data`, where `class` and `sendto` are present
+    /// only when the token is one of the recognized keywords.
+    #[must_use]
+    pub fn name_values(&self) -> Vec<NameValue> {
+        self.name_value
+            .lines()
+            .filter_map(NameValue::parse_line)
+            .collect()
+    }
+
+    /// The data value of the first [`name_value`](Self::name_value) pair named
+    /// `name`, or `None` if the object has no such pair. A convenience over
+    /// [`name_values`](Self::name_values) for the common single-key lookup (e.g.
+    /// `object.name_value_data("AttachItemID")`).
+    #[must_use]
+    pub fn name_value_data(&self, name: &str) -> Option<String> {
+        self.name_value
+            .lines()
+            .filter_map(NameValue::parse_line)
+            .find(|pair| pair.name == name)
+            .map(|pair| pair.value)
+    }
+}
+
+/// One parsed entry of an object's packed `name_value` string (the reference
+/// viewer's `LLNameValue`). Produced by [`Object::name_values`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NameValue {
+    /// The entry's name (the lookup key, e.g. `AttachItemID`).
+    pub name: String,
+    /// The declared value type token (`STRING`, `F32`, `S32`, `VEC3`, `U32`,
+    /// `ASSET`, `U64`, …); empty if the line carried none.
+    pub value_type: String,
+    /// The access class token: `R` (read-only) or `RW` (read-write). Defaults to
+    /// `RW` when the line omits it (matching the viewer).
+    pub class: String,
+    /// The send-to token: `S`/`DS`/`SV`/`DSV`. Defaults to `S` (sim only) when the
+    /// line omits it (matching the viewer).
+    pub sendto: String,
+    /// The entry's data value, as the verbatim remainder of the line.
+    pub value: String,
+}
+
+impl NameValue {
+    /// Parses one `name_value` line into a [`NameValue`], or `None` when the line
+    /// has no name or no type. The `class` and `sendto` tokens are optional and
+    /// recognized only by the viewer's keyword sets; anything else is taken as the
+    /// start of the data value.
+    fn parse_line(line: &str) -> Option<Self> {
+        const CLASS_TOKENS: [&str; 5] = ["R", "RW", "READ_ONLY", "READ_WRITE", "CALLBACK"];
+        const SENDTO_TOKENS: [&str; 8] = [
+            "S",
+            "DS",
+            "SV",
+            "DSV",
+            "SIM",
+            "SIM_SPACE",
+            "SIM_VIEWER",
+            "SIM_SPACE_VIEWER",
+        ];
+        let mut rest = line.trim_start();
+        let take = |rest: &mut &str| -> Option<String> {
+            let trimmed = rest.trim_start();
+            if trimmed.is_empty() {
+                return None;
+            }
+            let end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
+            let token = trimmed.get(..end)?.to_owned();
+            *rest = trimmed.get(end..).unwrap_or("");
+            Some(token)
+        };
+        let name = take(&mut rest)?;
+        let value_type = take(&mut rest)?;
+        // `class` is present only if the next token is a recognized keyword.
+        let next = rest.trim_start();
+        let class = if CLASS_TOKENS
+            .iter()
+            .any(|token| starts_with_token(next, token))
+        {
+            take(&mut rest).unwrap_or_default()
+        } else {
+            "RW".to_owned()
+        };
+        // `sendto` is likewise present only for a recognized keyword.
+        let next = rest.trim_start();
+        let sendto = if SENDTO_TOKENS
+            .iter()
+            .any(|token| starts_with_token(next, token))
+        {
+            take(&mut rest).unwrap_or_default()
+        } else {
+            "S".to_owned()
+        };
+        Some(Self {
+            name,
+            value_type,
+            class,
+            sendto,
+            value: rest.trim_start().to_owned(),
+        })
+    }
+}
+
+/// Whether `text` begins with the whitespace-delimited token `token` (the token
+/// followed by whitespace or end-of-string), used to decide whether an optional
+/// `name_value` class/sendto keyword is present.
+fn starts_with_token(text: &str, token: &str) -> bool {
+    text.strip_prefix(token)
+        .is_some_and(|tail| tail.is_empty() || tail.starts_with(char::is_whitespace))
 }
 
 /// The path/profile shape parameters of a volume prim, as carried (in raw
@@ -3497,6 +3652,9 @@ pub struct MapRegionInfo {
     pub size_y: u32,
     /// The number of agents the map reports in the region (often 0).
     pub agents: u8,
+    /// The region's water height, in metres (`WaterHeight`; default 20 on most
+    /// regions).
+    pub water_height: u8,
     /// The region's map tile image id.
     pub map_image_id: Uuid,
 }
@@ -4776,6 +4934,26 @@ pub struct ScriptTeleportRequest {
     pub position: (f32, f32, f32),
     /// The look-at direction on arrival.
     pub look_at: (f32, f32, f32),
+    /// The request's option flags (`Options.Flags`). Reserved by the protocol;
+    /// usually zero. The wire message carries a variable list of option blocks —
+    /// this is the first block's flags (the only one a simulator sends).
+    pub flags: u32,
+}
+
+/// A structured, localizable alert (`AlertInfo`): a message *key* the client
+/// looks up in its `alerts.xml` (or equivalent) to produce a localized string,
+/// together with the substitution parameters for that template. Carried by
+/// messages such as `TeleportFailed` and `AlertMessage` alongside a plain
+/// fallback string. Mirrors the viewer's `AlertInfo` block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlertInfo {
+    /// The localizable message key (`Message`), e.g. `RegionEntryAccessBlocked`.
+    /// Empty if the simulator sent no key.
+    pub message: String,
+    /// The substitution parameters for the keyed template (`ExtraParams`), as the
+    /// raw string the simulator sent (a `key=value`/`|`-separated blob the viewer
+    /// parses per-alert). Empty when the alert takes no parameters.
+    pub extra_params: String,
 }
 
 /// The kind of thing a mute-list entry blocks, from the `MuteType` field.
@@ -5634,6 +5812,47 @@ pub struct TextureFace {
     pub material_id: Uuid,
 }
 
+impl TextureFace {
+    /// The bump-map (normal/emboss) code packed into
+    /// [`bump_shiny_fullbright`](Self::bump_shiny_fullbright) — the low 5 bits
+    /// (LL's `getBumpmap()`; `0` = none, otherwise a `BE_*` bump type).
+    #[must_use]
+    pub const fn bumpmap(self) -> u8 {
+        self.bump_shiny_fullbright & 0x1f
+    }
+
+    /// Whether the face is full-bright (unlit), from bit 5 of
+    /// [`bump_shiny_fullbright`](Self::bump_shiny_fullbright) (LL's
+    /// `getFullbright()`).
+    #[must_use]
+    pub const fn fullbright(self) -> bool {
+        (self.bump_shiny_fullbright >> 5) & 0x01 != 0
+    }
+
+    /// The shininess code, from the top 2 bits of
+    /// [`bump_shiny_fullbright`](Self::bump_shiny_fullbright) (LL's `getShiny()`):
+    /// `0` = none, `1` = low, `2` = medium, `3` = high.
+    #[must_use]
+    pub const fn shininess(self) -> u8 {
+        (self.bump_shiny_fullbright >> 6) & 0x03
+    }
+
+    /// Whether **media** is enabled on the face, from bit 0 of
+    /// [`media_flags`](Self::media_flags) (LL's `getMediaFlags()`).
+    #[must_use]
+    pub const fn media_enabled(self) -> bool {
+        self.media_flags & 0x01 != 0
+    }
+
+    /// The texture-coordinate generation mode, from bits 1–2 of
+    /// [`media_flags`](Self::media_flags) (LL's `getTexGen()`): `0` = default
+    /// (per-face), `2` = planar, with the other values reserved.
+    #[must_use]
+    pub const fn tex_gen(self) -> u8 {
+        self.media_flags & 0x06
+    }
+}
+
 /// A decoded `TextureEntry`: one [`TextureFace`] per face. For an avatar (from
 /// `AvatarAppearance`) the faces are indexed by the [`avatar_texture`] slot
 /// constants; for an object they follow the prim's face numbering. Decode a raw
@@ -5880,5 +6099,184 @@ mod tests {
         assert!(approx_eq(&looked.at_axis, &camera.at_axis));
         assert!(approx_eq(&looked.left_axis, &camera.left_axis));
         assert!(approx_eq(&looked.up_axis, &camera.up_axis));
+    }
+
+    /// A bare [`TextureFace`] with a given packed `bump_shiny_fullbright` and
+    /// `media_flags`, all other fields irrelevant to the accessor under test.
+    fn face(bump_shiny_fullbright: u8, media_flags: u8) -> super::TextureFace {
+        super::TextureFace {
+            texture_id: super::Uuid::nil(),
+            color: [255; 4],
+            scale_s: 1.0,
+            scale_t: 1.0,
+            offset_s: 0.0,
+            offset_t: 0.0,
+            rotation: 0.0,
+            bump_shiny_fullbright,
+            media_flags,
+            glow: 0.0,
+            material_id: super::Uuid::nil(),
+        }
+    }
+
+    #[test]
+    fn texture_face_unpacks_bump_shiny_fullbright() {
+        // bump = 0x05 (low 5 bits), fullbright = bit 5, shiny = top 2 bits = 2.
+        let f = face(0x05 | 0x20 | (0b10 << 6), 0);
+        assert_eq!(f.bumpmap(), 0x05);
+        assert!(f.fullbright());
+        assert_eq!(f.shininess(), 0b10);
+        // A plain face: nothing set.
+        let plain = face(0, 0);
+        assert_eq!(plain.bumpmap(), 0);
+        assert!(!plain.fullbright());
+        assert_eq!(plain.shininess(), 0);
+    }
+
+    #[test]
+    fn texture_face_unpacks_media_flags() {
+        // media bit set, tex-gen = planar (0b10 in bits 1-2 -> value 0x02).
+        let f = face(0, 0x01 | 0x02);
+        assert!(f.media_enabled());
+        assert_eq!(f.tex_gen(), 0x02);
+        let plain = face(0, 0);
+        assert!(!plain.media_enabled());
+        assert_eq!(plain.tex_gen(), 0);
+    }
+
+    /// An [`Object`] carrying only the given raw `name_value` string; all other
+    /// fields are defaulted to values irrelevant to the parser under test.
+    fn object_with_name_value(name_value: &str) -> super::Object {
+        super::Object {
+            region_handle: 0,
+            local_id: 0,
+            full_id: super::Uuid::nil(),
+            parent_id: 0,
+            pcode: 0,
+            state: 0,
+            crc: 0,
+            material: 0,
+            click_action: 0,
+            update_flags: 0,
+            scale: Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            motion: super::ObjectMotion {
+                position: Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                velocity: Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                acceleration: Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                rotation: super::Rotation {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    s: 1.0,
+                },
+                angular_velocity: Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                collision_plane: None,
+            },
+            owner_id: super::Uuid::nil(),
+            sound: super::Uuid::nil(),
+            gain: 0.0,
+            sound_flags: 0,
+            sound_radius: 0.0,
+            text: String::new(),
+            text_color: [0; 4],
+            name_value: name_value.to_owned(),
+            media_url: String::new(),
+            texture_entry: Vec::new(),
+            texture_anim: Vec::new(),
+            texture_animation: None,
+            shape: super::PrimShapeParams::default(),
+            particle_system: Vec::new(),
+            particles: None,
+            data: Vec::new(),
+            extra_params: Vec::new(),
+            extra: super::ObjectExtraParams::default(),
+            properties: None,
+            joint_type: 0,
+            joint_pivot: Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            joint_axis_or_anchor: Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        }
+    }
+
+    #[test]
+    fn name_value_parses_class_and_sendto() -> Result<(), String> {
+        // The common attachment form: name type class sendto data.
+        let object = object_with_name_value(
+            "AttachItemID STRING RW SV 11111111-2222-3333-4444-555555555555",
+        );
+        let pairs = object.name_values();
+        let pair = pairs.first().ok_or("expected one pair")?;
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pair.name, "AttachItemID");
+        assert_eq!(pair.value_type, "STRING");
+        assert_eq!(pair.class, "RW");
+        assert_eq!(pair.sendto, "SV");
+        assert_eq!(pair.value, "11111111-2222-3333-4444-555555555555");
+        assert_eq!(
+            object.name_value_data("AttachItemID").as_deref(),
+            Some("11111111-2222-3333-4444-555555555555")
+        );
+        assert_eq!(object.name_value_data("Missing"), None);
+        Ok(())
+    }
+
+    #[test]
+    fn name_value_defaults_omitted_class_and_sendto() -> Result<(), String> {
+        // No class/sendto keyword: the token after the type starts the data, and
+        // class/sendto default to RW/S (matching the viewer).
+        let object = object_with_name_value("FooBar STRING hello world");
+        let pairs = object.name_values();
+        let pair = pairs.first().ok_or("expected one pair")?;
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pair.name, "FooBar");
+        assert_eq!(pair.value_type, "STRING");
+        assert_eq!(pair.class, "RW");
+        assert_eq!(pair.sendto, "S");
+        assert_eq!(pair.value, "hello world");
+        Ok(())
+    }
+
+    #[test]
+    fn name_value_parses_multiple_lines_and_skips_blanks() -> Result<(), String> {
+        let object =
+            object_with_name_value("A STRING RW S one\n\nB S32 RW DSV 42\n   \nincomplete");
+        let pairs = object.name_values();
+        // The blank lines are skipped; "incomplete" (name only, no type) too.
+        let first = pairs.first().ok_or("expected a first pair")?;
+        let second = pairs.get(1).ok_or("expected a second pair")?;
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(first.name, "A");
+        assert_eq!(first.value, "one");
+        assert_eq!(second.name, "B");
+        assert_eq!(second.sendto, "DSV");
+        assert_eq!(second.value, "42");
+        Ok(())
     }
 }

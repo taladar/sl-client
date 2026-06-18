@@ -569,7 +569,7 @@ impl Survey {
                 self.names.insert(region.region_handle, region.name.clone());
                 self.queue_region(region.region_handle, region.grid_x, region.grid_y);
             }
-            Event::TeleportFailed { reason } => {
+            Event::TeleportFailed { reason, .. } => {
                 // Ignore stray/duplicate failures (a teleport that times out also
                 // draws a failure message from the simulator); only the one that
                 // clears our in-flight teleport handle is acted upon.
@@ -647,6 +647,7 @@ impl Survey {
             | Event::NeighborSeed { .. }
             | Event::ObjectAdded(_)
             | Event::ObjectUpdated(_)
+            | Event::TimeDilation { .. }
             | Event::ObjectRemoved { .. }
             | Event::ObjectProperties(_)
             | Event::TerrainPatch(_)
