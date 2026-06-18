@@ -2462,6 +2462,11 @@ pub struct RegionCombatSettings {
 pub struct MoneyBalance {
     /// The agent the balance belongs to (the client's own id).
     pub agent_id: Uuid,
+    /// The id of the transaction that triggered this reply, correlating it back to
+    /// the pay/buy that caused it (e.g. the `TransactionID` echoed by a
+    /// [`Session::send_money_transfer`](crate::Session::send_money_transfer)). Nil
+    /// for a plain unsolicited balance poll, which has no triggering transaction.
+    pub transaction_id: Uuid,
     /// Whether the transaction that triggered this reply succeeded. Always `true`
     /// for a plain balance poll.
     pub success: bool,
