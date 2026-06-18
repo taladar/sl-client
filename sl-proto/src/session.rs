@@ -11302,9 +11302,26 @@ fn object_properties(block: &ObjectPropertiesObjectDataBlock) -> ObjectPropertie
         sale_type: block.sale_type,
         sale_price: block.sale_price,
         category: block.category,
+        inventory_serial: block.inventory_serial,
+        item_id: block.item_id,
+        folder_id: block.folder_id,
+        from_task_id: block.from_task_id,
+        aggregate_perms: block.aggregate_perms,
+        aggregate_perm_textures: block.aggregate_perm_textures,
+        aggregate_perm_textures_owner: block.aggregate_perm_textures_owner,
         name: trimmed_string(&block.name),
         description: trimmed_string(&block.description),
         touch_name: trimmed_string(&block.touch_name),
         sit_name: trimmed_string(&block.sit_name),
+        texture_ids: concatenated_uuids(&block.texture_id),
     }
+}
+
+/// Splits a wire blob of back-to-back 16-byte UUIDs into a vector of ids,
+/// ignoring any trailing bytes that do not form a complete UUID.
+fn concatenated_uuids(bytes: &[u8]) -> Vec<Uuid> {
+    bytes
+        .chunks_exact(16)
+        .filter_map(|chunk| Uuid::from_slice(chunk).ok())
+        .collect()
 }

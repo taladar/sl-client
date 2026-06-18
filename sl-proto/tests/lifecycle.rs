@@ -6430,20 +6430,24 @@ mod test {
                 ownership_cost: 0,
                 sale_type: 0,
                 sale_price: 0,
-                aggregate_perms: 0,
-                aggregate_perm_textures: 0,
-                aggregate_perm_textures_owner: 0,
+                aggregate_perms: 0x0E,
+                aggregate_perm_textures: 0x0F,
+                aggregate_perm_textures_owner: 0x0D,
                 category: 0,
-                inventory_serial: 1,
-                item_id: uuid::Uuid::nil(),
-                folder_id: uuid::Uuid::nil(),
-                from_task_id: uuid::Uuid::nil(),
+                inventory_serial: 7,
+                item_id: uuid::Uuid::from_u128(0x44),
+                folder_id: uuid::Uuid::from_u128(0x55),
+                from_task_id: uuid::Uuid::from_u128(0x66),
                 last_owner_id: uuid::Uuid::from_u128(0x33),
                 name: b"Test Prim\0".to_vec(),
                 description: b"a description\0".to_vec(),
                 touch_name: Vec::new(),
                 sit_name: Vec::new(),
-                texture_id: Vec::new(),
+                texture_id: {
+                    let mut blob = uuid::Uuid::from_u128(0x77).as_bytes().to_vec();
+                    blob.extend_from_slice(uuid::Uuid::from_u128(0x88).as_bytes());
+                    blob
+                },
             }],
         });
         session.handle_datagram(sim_addr(), &server_message(&props, 6, true)?, now)?;
@@ -6456,6 +6460,18 @@ mod test {
         };
         assert_eq!(properties.name, "Test Prim");
         assert_eq!(properties.description, "a description");
+        // Recovered ObjectData fields (#36).
+        assert_eq!(properties.inventory_serial, 7);
+        assert_eq!(properties.item_id, uuid::Uuid::from_u128(0x44));
+        assert_eq!(properties.folder_id, uuid::Uuid::from_u128(0x55));
+        assert_eq!(properties.from_task_id, uuid::Uuid::from_u128(0x66));
+        assert_eq!(properties.aggregate_perms, 0x0E);
+        assert_eq!(properties.aggregate_perm_textures, 0x0F);
+        assert_eq!(properties.aggregate_perm_textures_owner, 0x0D);
+        assert_eq!(
+            properties.texture_ids,
+            vec![uuid::Uuid::from_u128(0x77), uuid::Uuid::from_u128(0x88)]
+        );
         // Merged into the cached object.
         assert_eq!(
             session
