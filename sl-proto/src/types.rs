@@ -630,6 +630,15 @@ pub enum Event {
         /// The group the agent is no longer in.
         group_id: Uuid,
     },
+    /// The result of an
+    /// [`Session::eject_group_members`](crate::Session::eject_group_members)
+    /// (`EjectGroupMemberReply`).
+    EjectGroupMemberResult {
+        /// The group a member was ejected from.
+        group_id: Uuid,
+        /// Whether the ejection succeeded.
+        success: bool,
+    },
     /// A scripted object showed a dialog (`ScriptDialog`, i.e. `llDialog` or
     /// `llTextBox`). Respond with
     /// [`Session::reply_script_dialog`](crate::Session::reply_script_dialog).
@@ -3565,6 +3574,147 @@ pub struct GroupNotice {
     pub has_attachment: bool,
     /// The attachment's asset type (meaningful only if `has_attachment`).
     pub asset_type: u8,
+}
+
+/// How a [`GroupRoleEdit`] changes a group role (`GroupRoleUpdate`'s
+/// `UpdateType`). The wire bytes match the viewer's `LLRoleChangeType`
+/// (`roles_constants.h`) and OpenSim's `OpenMetaverse.GroupRoleUpdate` enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupRoleUpdateType {
+    /// No change (a no-op `RoleData` block).
+    NoUpdate,
+    /// Update the role's name/title/description only.
+    UpdateData,
+    /// Update the role's powers only.
+    UpdatePowers,
+    /// Update both data and powers.
+    UpdateAll,
+    /// Create a new role (the simulator may assign a fresh `role_id`).
+    Create,
+    /// Delete the role.
+    Delete,
+}
+
+impl GroupRoleUpdateType {
+    /// The wire byte for this update type.
+    #[must_use]
+    pub const fn to_u8(self) -> u8 {
+        match self {
+            Self::NoUpdate => 0,
+            Self::UpdateData => 1,
+            Self::UpdatePowers => 2,
+            Self::UpdateAll => 3,
+            Self::Create => 4,
+            Self::Delete => 5,
+        }
+    }
+}
+
+/// One role create/update/delete in a `GroupRoleUpdate`, passed to
+/// [`Session::update_group_roles`](crate::Session::update_group_roles). For a
+/// [`GroupRoleUpdateType::Create`] the `role_id` is the client-chosen id (the
+/// simulator may substitute its own); for update/delete it names the existing
+/// role. The `powers` bitfield is built from the [`group_powers`] constants.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupRoleEdit {
+    /// The role id (a fresh id for `Create`, the existing role for the rest).
+    pub role_id: Uuid,
+    /// The role name.
+    pub name: String,
+    /// The role description.
+    pub description: String,
+    /// The title members holding the role wear.
+    pub title: String,
+    /// The powers granted by the role (see [`group_powers`]).
+    pub powers: u64,
+    /// Which fields of the role this edit changes.
+    pub update_type: GroupRoleUpdateType,
+}
+
+/// Whether a [`GroupRoleMemberChange`] adds a member to a role or removes them
+/// (`GroupRoleChanges`'s `Change`). Add = 0, Remove = 1, matching OpenSim's
+/// `GroupRoleChanges` handler and the viewer's `LLRoleMemberChangeType`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupRoleChange {
+    /// Assign the member to the role.
+    Add,
+    /// Remove the member from the role.
+    Remove,
+}
+
+impl GroupRoleChange {
+    /// The wire `Change` value for this role-member change.
+    #[must_use]
+    pub const fn to_u32(self) -> u32 {
+        match self {
+            Self::Add => 0,
+            Self::Remove => 1,
+        }
+    }
+}
+
+/// One member↔role assignment change in a `GroupRoleChanges`, passed to
+/// [`Session::change_group_role_members`](crate::Session::change_group_role_members).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GroupRoleMemberChange {
+    /// The role to add the member to or remove them from.
+    pub role_id: Uuid,
+    /// The member's agent id.
+    pub member_id: Uuid,
+    /// Whether to add or remove the member.
+    pub change: GroupRoleChange,
+}
+
+/// An inventory item attached to a group notice, passed to
+/// [`Session::send_group_notice`](crate::Session::send_group_notice). The item
+/// must be copy+transfer for the grid to accept it. The notice's recipients
+/// receive an `IM_GROUP_NOTICE` they can accept to copy the item into their
+/// inventory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GroupNoticeAttachment {
+    /// The attached inventory item's id.
+    pub item_id: Uuid,
+    /// The item owner's agent id (usually the sender).
+    pub owner_id: Uuid,
+}
+
+/// Group role power bits (`GP_*` in the viewer's `roles_constants.h`), combined
+/// into the `powers` bitfield of a [`GroupRoleEdit`]. Only the commonly-set
+/// powers are named; any bit may be set directly. Bit 0 is unused (the "none"
+/// marker), so the enrollment power is bit 1, etc.
+pub mod group_powers {
+    /// No powers.
+    pub const NONE: u64 = 0x0;
+    /// All powers (the owner role).
+    pub const ALL: u64 = 0xFFFF_FFFF_FFFF_FFFF;
+    /// Invite members to the group.
+    pub const MEMBER_INVITE: u64 = 1 << 1;
+    /// Eject members from the group.
+    pub const MEMBER_EJECT: u64 = 1 << 2;
+    /// Toggle "Open Enrollment" and the join fee.
+    pub const MEMBER_OPTIONS: u64 = 1 << 3;
+    /// Create new roles.
+    pub const ROLE_CREATE: u64 = 1 << 4;
+    /// Delete roles.
+    pub const ROLE_DELETE: u64 = 1 << 5;
+    /// Change a role's properties (name, title, description, powers).
+    pub const ROLE_PROPERTIES: u64 = 1 << 6;
+    /// Assign a member to a role the assigner does not hold "owner" over.
+    pub const ROLE_ASSIGN_MEMBER_LIMITED: u64 = 1 << 7;
+    /// Assign a member to any role.
+    pub const ROLE_ASSIGN_MEMBER: u64 = 1 << 8;
+    /// Remove a member from a role.
+    pub const ROLE_REMOVE_MEMBER: u64 = 1 << 9;
+    /// Change role/actions and members of roles.
+    pub const ROLE_CHANGE_ACTIONS: u64 = 1 << 10;
+    /// Change the group's identity (charter, insignia, listing, maturity).
+    pub const GROUP_CHANGE_IDENTITY: u64 = 1 << 11;
+    /// Deed land and buy land for the group.
+    pub const LAND_DEED: u64 = 1 << 12;
+    /// Send group notices.
+    pub const NOTICES_SEND: u64 = 1 << 42;
+    /// Receive group notices and view notice history.
+    pub const NOTICES_RECEIVE: u64 = 1 << 43;
 }
 
 /// A scripted-object dialog (`llDialog`/`llTextBox`), parsed from a

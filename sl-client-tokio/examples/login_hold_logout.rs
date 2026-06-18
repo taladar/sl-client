@@ -411,6 +411,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::JoinGroupResult { .. }
             | Event::LeaveGroupResult { .. }
             | Event::DroppedFromGroup { .. }
+            | Event::EjectGroupMemberResult { .. }
             | Event::AvatarInterests(_)
             | Event::AvatarGroups { .. }
             | Event::AvatarNotes { .. }

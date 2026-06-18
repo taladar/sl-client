@@ -53,23 +53,25 @@ pub use sl_proto::{
     DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, ExperienceInfo,
     ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData,
     Friend, FriendRights, GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice,
-    GroupProfile, GroupRole, GroupRoleMember, GroupTitle, IceCandidate, ImDialog, InstantMessage,
-    InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer, InventoryType, LegacyMaterial,
-    LightData, LightImage, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest, MEDIA_PERM_ALL,
-    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
-    MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge,
-    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings,
-    ObjectMediaResponse, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ParcelVoiceInfo,
-    PermissionField, PickInfo, PickUpdate, PlayingAnimation, PrimShape, ProductType, ProfileUpdate,
-    ReflectionProbe, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability,
-    RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData, SoundFlags,
-    SoundPreload, TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, Throttle, Transmit,
-    Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, avatar_texture,
-    decode_texture_entry, grid_to_handle, handle_to_global, handle_to_grid, pcode, sim_access,
+    GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit,
+    GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, IceCandidate,
+    ImDialog, InstantMessage, InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer,
+    InventoryType, LegacyMaterial, LightData, LightImage, LindenAmount, LoadUrlRequest,
+    LoginParams, LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
+    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
+    MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction,
+    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, Object,
+    ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectProperties,
+    ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
+    ParcelVoiceInfo, PermissionField, PickInfo, PickUpdate, PlayingAnimation, PrimShape,
+    ProductType, ProfileUpdate, ReflectionProbe, RegionFlags, RegionIdentity, RegionInfoUpdate,
+    RegionLimits, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData,
+    SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, Throttle,
+    Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType,
+    avatar_texture, decode_texture_entry, grid_to_handle, group_powers, handle_to_global,
+    handle_to_grid, pcode, sim_access,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -516,6 +518,41 @@ pub enum SlCommand {
     /// Leave a group's IM session (stop receiving its chat) without leaving the
     /// group itself.
     LeaveGroupSession(Uuid),
+    /// Create, update, or delete group roles (`GroupRoleUpdate`), one
+    /// [`GroupRoleEdit`] per role. Re-request the roles to observe the change.
+    UpdateGroupRoles {
+        /// The group whose roles to edit.
+        group_id: Uuid,
+        /// The role create/update/delete edits.
+        roles: Vec<GroupRoleEdit>,
+    },
+    /// Add members to or remove members from group roles (`GroupRoleChanges`).
+    ChangeGroupRoleMembers {
+        /// The group whose role assignments to change.
+        group_id: Uuid,
+        /// The member↔role add/remove changes.
+        changes: Vec<GroupRoleMemberChange>,
+    },
+    /// Eject members from a group (`EjectGroupMemberRequest`). The result arrives
+    /// as [`SlSessionEvent::EjectGroupMemberResult`].
+    EjectGroupMembers {
+        /// The group to eject from.
+        group_id: Uuid,
+        /// The agent ids to eject.
+        member_ids: Vec<Uuid>,
+    },
+    /// Post a group notice (`IM_GROUP_NOTICE`), optionally attaching an inventory
+    /// item. The grid relays it to members who accept notices.
+    SendGroupNotice {
+        /// The group to post to.
+        group_id: Uuid,
+        /// The notice subject.
+        subject: String,
+        /// The notice body.
+        message: String,
+        /// An optional inventory item to attach (must be copy+transfer).
+        attachment: Option<GroupNoticeAttachment>,
+    },
     /// Reply to a scripted-object dialog (`ScriptDialogReply`) from an
     /// [`SlSessionEvent::ScriptDialog`] — the chosen button on its hidden
     /// `chat_channel`.
@@ -2044,6 +2081,30 @@ fn advance_running(
             }
             SlCommand::LeaveGroupSession(group_id) => {
                 session.leave_group_session(*group_id, now).ok();
+            }
+            SlCommand::UpdateGroupRoles { group_id, roles } => {
+                session.update_group_roles(*group_id, roles, now).ok();
+            }
+            SlCommand::ChangeGroupRoleMembers { group_id, changes } => {
+                session
+                    .change_group_role_members(*group_id, changes, now)
+                    .ok();
+            }
+            SlCommand::EjectGroupMembers {
+                group_id,
+                member_ids,
+            } => {
+                session.eject_group_members(*group_id, member_ids, now).ok();
+            }
+            SlCommand::SendGroupNotice {
+                group_id,
+                subject,
+                message,
+                attachment,
+            } => {
+                session
+                    .send_group_notice(*group_id, subject, message, *attachment, now)
+                    .ok();
             }
             SlCommand::ReplyScriptDialog {
                 object_id,

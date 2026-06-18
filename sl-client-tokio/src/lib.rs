@@ -49,7 +49,8 @@ pub use sl_proto::{
     DeRezDestination, DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind,
     EstateInfo, Event, ExperienceInfo, ExperiencePermission, ExperienceProperties,
     ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights, GltfMaterialOverride,
-    GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole, GroupRoleMember,
+    GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupProfile, GroupRole,
+    GroupRoleChange, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType,
     GroupTitle, IceCandidate, ImDialog, ImageCodec, InstantMessage, InterestsUpdate,
     InventoryFolder, InventoryItem, InventoryOffer, InventoryType, LegacyMaterial, LightData,
     LightImage, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest, LoginResponse,
@@ -66,8 +67,8 @@ pub use sl_proto::{
     ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData, SoundFlags,
     SoundPreload, TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace, Throttle,
     TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable,
-    WearableType, avatar_texture, decode_texture_entry, grid_to_handle, handle_to_global,
-    handle_to_grid, pcode, sim_access,
+    WearableType, avatar_texture, decode_texture_entry, grid_to_handle, group_powers,
+    handle_to_global, handle_to_grid, pcode, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -509,6 +510,41 @@ pub enum Command {
     /// Leave a group's IM session (stop receiving its chat) without leaving the
     /// group itself.
     LeaveGroupSession(Uuid),
+    /// Create, update, or delete group roles (`GroupRoleUpdate`), one
+    /// [`GroupRoleEdit`] per role. Re-request the roles to observe the change.
+    UpdateGroupRoles {
+        /// The group whose roles to edit.
+        group_id: Uuid,
+        /// The role create/update/delete edits.
+        roles: Vec<GroupRoleEdit>,
+    },
+    /// Add members to or remove members from group roles (`GroupRoleChanges`).
+    ChangeGroupRoleMembers {
+        /// The group whose role assignments to change.
+        group_id: Uuid,
+        /// The member↔role add/remove changes.
+        changes: Vec<GroupRoleMemberChange>,
+    },
+    /// Eject members from a group (`EjectGroupMemberRequest`). The result arrives
+    /// as [`Event::EjectGroupMemberResult`].
+    EjectGroupMembers {
+        /// The group to eject from.
+        group_id: Uuid,
+        /// The agent ids to eject.
+        member_ids: Vec<Uuid>,
+    },
+    /// Post a group notice (`IM_GROUP_NOTICE`), optionally attaching an inventory
+    /// item. The grid relays it to members who accept notices.
+    SendGroupNotice {
+        /// The group to post to.
+        group_id: Uuid,
+        /// The notice subject.
+        subject: String,
+        /// The notice body.
+        message: String,
+        /// An optional inventory item to attach (must be copy+transfer).
+        attachment: Option<GroupNoticeAttachment>,
+    },
     /// Reply to a scripted-object dialog (`ScriptDialogReply`) from an
     /// [`Event::ScriptDialog`] — the chosen button on its hidden `chat_channel`.
     ReplyScriptDialog {
@@ -1763,6 +1799,18 @@ impl Client {
                         }
                         Some(Command::LeaveGroupSession(group_id)) => {
                             self.session.leave_group_session(group_id, Instant::now())?;
+                        }
+                        Some(Command::UpdateGroupRoles { group_id, roles }) => {
+                            self.session.update_group_roles(group_id, &roles, Instant::now())?;
+                        }
+                        Some(Command::ChangeGroupRoleMembers { group_id, changes }) => {
+                            self.session.change_group_role_members(group_id, &changes, Instant::now())?;
+                        }
+                        Some(Command::EjectGroupMembers { group_id, member_ids }) => {
+                            self.session.eject_group_members(group_id, &member_ids, Instant::now())?;
+                        }
+                        Some(Command::SendGroupNotice { group_id, subject, message, attachment }) => {
+                            self.session.send_group_notice(group_id, &subject, &message, attachment, Instant::now())?;
                         }
                         Some(Command::ReplyScriptDialog { object_id, chat_channel, button_index, button_label }) => {
                             self.session.reply_script_dialog(object_id, chat_channel, button_index, &button_label, Instant::now())?;

@@ -11,14 +11,15 @@ mod test {
     use sl_proto::{
         AssetType, ChatAudible, ChatSourceType, ChatType, ClassifiedUpdate, ClickAction,
         ControlFlags, CreateGroupParams, DeRezDestination, DisconnectReason, EstateAccessDelta,
-        EstateAccessKind, Event, FriendRights, ImDialog, ImageCodec, InterestsUpdate,
-        InventoryItem, LindenAmount, LoginParams, MapItemType, Material, Maturity,
+        EstateAccessKind, Event, FriendRights, GroupNoticeAttachment, GroupRoleChange,
+        GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImageCodec,
+        InterestsUpdate, InventoryItem, LindenAmount, LoginParams, MapItemType, Material, Maturity,
         MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, ObjectFlagSettings,
         ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags,
         ParcelMediaCommand, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PrimShape,
         ProductType, ProfileUpdate, RegionInfoUpdate, Reliability, SaleType, ScriptPermissions,
         Session, SoundFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, WearableType,
-        avatar_texture, pcode,
+        avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -43,10 +44,11 @@ mod test {
         ClassifiedInfoReply, ClassifiedInfoReplyAgentDataBlock, ClassifiedInfoReplyDataBlock,
         ConfirmXferPacket, ConfirmXferPacketXferIDBlock, CrossedRegion,
         CrossedRegionAgentDataBlock, CrossedRegionInfoBlock, CrossedRegionRegionDataBlock,
-        DisableSimulator, EconomyData, EconomyDataInfoBlock, EstateOwnerMessage,
-        EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
-        EstateOwnerMessageParamListBlock, GenericMessage, GenericMessageAgentDataBlock,
-        GenericMessageMethodDataBlock, GenericStreamingMessage,
+        DisableSimulator, EconomyData, EconomyDataInfoBlock, EjectGroupMemberReply,
+        EjectGroupMemberReplyAgentDataBlock, EjectGroupMemberReplyEjectDataBlock,
+        EjectGroupMemberReplyGroupDataBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
+        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock, GenericMessage,
+        GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GenericStreamingMessage,
         GenericStreamingMessageDataBlockBlock, GenericStreamingMessageMethodDataBlock,
         GroupMembersReply, GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
         GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
@@ -2093,6 +2095,209 @@ mod test {
             invite.invite_data.first().map(|d| d.invitee_id),
             Some(invitee)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn update_group_roles_packs_role_data() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6711);
+        let role = uuid::Uuid::from_u128(0x6712);
+        session.update_group_roles(
+            group,
+            &[
+                GroupRoleEdit {
+                    role_id: role,
+                    name: "Officers".to_owned(),
+                    description: "the officers".to_owned(),
+                    title: "Officer".to_owned(),
+                    powers: group_powers::MEMBER_INVITE | group_powers::NOTICES_SEND,
+                    update_type: GroupRoleUpdateType::Create,
+                },
+                GroupRoleEdit {
+                    role_id: uuid::Uuid::from_u128(0x6713),
+                    name: String::new(),
+                    description: String::new(),
+                    title: String::new(),
+                    powers: 0,
+                    update_type: GroupRoleUpdateType::Delete,
+                },
+            ],
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let update = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::GroupRoleUpdate(u) => Some(u),
+                _ => None,
+            })
+            .ok_or("expected a GroupRoleUpdate")?;
+        assert_eq!(update.agent_data.group_id, group);
+        assert_eq!(update.role_data.len(), 2);
+        let create = update.role_data.first().ok_or("first role")?;
+        assert_eq!(create.role_id, role);
+        assert_eq!(trimmed(&create.name), "Officers");
+        assert_eq!(create.update_type, 4); // Create
+        assert_eq!(
+            create.powers,
+            group_powers::MEMBER_INVITE | group_powers::NOTICES_SEND
+        );
+        let delete = update.role_data.get(1).ok_or("second role")?;
+        assert_eq!(delete.update_type, 5); // Delete
+        Ok(())
+    }
+
+    #[test]
+    fn change_group_role_members_packs_changes() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6714);
+        let role = uuid::Uuid::from_u128(0x6715);
+        let member = uuid::Uuid::from_u128(0x6716);
+        session.change_group_role_members(
+            group,
+            &[
+                GroupRoleMemberChange {
+                    role_id: role,
+                    member_id: member,
+                    change: GroupRoleChange::Add,
+                },
+                GroupRoleMemberChange {
+                    role_id: role,
+                    member_id: uuid::Uuid::from_u128(0x6717),
+                    change: GroupRoleChange::Remove,
+                },
+            ],
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let changes = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::GroupRoleChanges(c) => Some(c),
+                _ => None,
+            })
+            .ok_or("expected a GroupRoleChanges")?;
+        assert_eq!(changes.agent_data.group_id, group);
+        assert_eq!(changes.role_change.len(), 2);
+        let add = changes.role_change.first().ok_or("first change")?;
+        assert_eq!(add.role_id, role);
+        assert_eq!(add.member_id, member);
+        assert_eq!(add.change, 0); // Add
+        let remove = changes.role_change.get(1).ok_or("second change")?;
+        assert_eq!(remove.change, 1); // Remove
+        Ok(())
+    }
+
+    #[test]
+    fn eject_group_members_packs_request() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6718);
+        let ejectee = uuid::Uuid::from_u128(0x6719);
+        session.eject_group_members(group, &[ejectee], now)?;
+        let sent = drain(&mut session)?;
+        let eject = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::EjectGroupMemberRequest(e) => Some(e),
+                _ => None,
+            })
+            .ok_or("expected an EjectGroupMemberRequest")?;
+        assert_eq!(eject.group_data.group_id, group);
+        assert_eq!(
+            eject.eject_data.first().map(|d| d.ejectee_id),
+            Some(ejectee)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn eject_group_member_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x671A);
+        let message = AnyMessage::EjectGroupMemberReply(EjectGroupMemberReply {
+            agent_data: EjectGroupMemberReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+            group_data: EjectGroupMemberReplyGroupDataBlock { group_id: group },
+            eject_data: EjectGroupMemberReplyEjectDataBlock { success: true },
+        });
+        let datagram = server_message(&message, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let (group_id, success) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::EjectGroupMemberResult { group_id, success } => Some((group_id, success)),
+                _ => None,
+            })
+            .ok_or("expected an EjectGroupMemberResult event")?;
+        assert_eq!(group_id, group);
+        assert!(success);
+        Ok(())
+    }
+
+    #[test]
+    fn send_group_notice_packs_im_with_attachment() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x671B);
+        let item = uuid::Uuid::from_u128(0x671C);
+        let owner = uuid::Uuid::from_u128(0x671D);
+        // A plain notice (empty bucket).
+        session.send_group_notice(group, "Subject", "Body text", None, now)?;
+        // A notice with an inventory attachment (LLSD bucket).
+        session.send_group_notice(
+            group,
+            "Gift",
+            "Here you go",
+            Some(GroupNoticeAttachment {
+                item_id: item,
+                owner_id: owner,
+            }),
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let notices: Vec<_> = sent
+            .iter()
+            .filter_map(|m| match m {
+                AnyMessage::ImprovedInstantMessage(im)
+                    if im.message_block.dialog == ImDialog::GroupNotice.to_u8() =>
+                {
+                    Some(&im.message_block)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(notices.len(), 2);
+        let plain = notices.first().ok_or("plain notice")?;
+        // The session id and recipient are the group; subject|body is joined.
+        assert_eq!(plain.to_agent_id, group);
+        assert!(!plain.from_group);
+        assert_eq!(trimmed(&plain.message), "Subject|Body text");
+        // No attachment: the one-byte empty bucket.
+        assert_eq!(plain.binary_bucket, vec![0_u8]);
+        let gift = notices.get(1).ok_or("gift notice")?;
+        assert_eq!(trimmed(&gift.message), "Gift|Here you go");
+        // The attachment bucket carries the 15-byte LLSD header and both ids.
+        let bucket = String::from_utf8_lossy(&gift.binary_bucket);
+        assert!(bucket.starts_with("<? LLSD/XML ?>\n"));
+        assert!(bucket.contains(&item.to_string()));
+        assert!(bucket.contains(&owner.to_string()));
         Ok(())
     }
 

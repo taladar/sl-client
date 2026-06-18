@@ -610,6 +610,7 @@ impl Survey {
             | Event::JoinGroupResult { .. }
             | Event::LeaveGroupResult { .. }
             | Event::DroppedFromGroup { .. }
+            | Event::EjectGroupMemberResult { .. }
             | Event::ScriptDialog(_)
             | Event::ScriptPermissionRequest(_)
             | Event::LoadUrl(_)

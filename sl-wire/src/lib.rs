@@ -41,11 +41,12 @@ pub use llsd::{
     AssetUploadResponse, EventQueueEvent, EventQueueResponse, Llsd, MEDIA_PERM_ALL,
     MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MediaEntry,
     ObjectMediaResponse, build_event_queue_request, build_fetch_inventory_request,
-    build_group_member_data_request, build_new_file_agent_inventory_request,
-    build_object_media_get_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_seed_request, build_update_avatar_appearance_request,
-    build_update_item_asset_request, build_upload_baked_texture_request,
-    parse_asset_upload_response, parse_event_queue_response, parse_llsd_xml, parse_seed_response,
+    build_group_member_data_request, build_group_notice_bucket,
+    build_new_file_agent_inventory_request, build_object_media_get_request,
+    build_object_media_navigate_request, build_object_media_update_request, build_seed_request,
+    build_update_avatar_appearance_request, build_update_item_asset_request,
+    build_upload_baked_texture_request, parse_asset_upload_response, parse_event_queue_response,
+    parse_llsd_xml, parse_seed_response,
 };
 pub use login::{
     BuddyListEntry, LoginFailure, LoginParseError, LoginRequest, LoginResponse, LoginSuccess,
@@ -86,11 +87,32 @@ mod test {
 
     use super::{
         MediaEntry, ObjectMediaResponse, PacketFlags, Reader, WireError, Writer,
-        build_new_file_agent_inventory_request, build_object_media_get_request,
-        build_object_media_navigate_request, build_object_media_update_request,
-        build_update_item_asset_request, combine_uuids, encode_datagram,
-        parse_asset_upload_response, parse_datagram, parse_llsd_xml, zero_decode, zero_encode,
+        build_group_notice_bucket, build_new_file_agent_inventory_request,
+        build_object_media_get_request, build_object_media_navigate_request,
+        build_object_media_update_request, build_update_item_asset_request, combine_uuids,
+        encode_datagram, parse_asset_upload_response, parse_datagram, parse_llsd_xml, zero_decode,
+        zero_encode,
     };
+
+    #[test]
+    fn group_notice_bucket_has_llsd_header() -> Result<(), WireError> {
+        let item = uuid::Uuid::from_u128(0x4001);
+        let owner = uuid::Uuid::from_u128(0x4002);
+        let bucket = build_group_notice_bucket(item, owner);
+        // OpenSim strips exactly 15 bytes of LLSD pre-header before parsing the
+        // remaining map, so it must lead with the viewer's `<? LLSD/XML ?>\n`.
+        let header = b"<? LLSD/XML ?>\n";
+        assert_eq!(header.len(), 15);
+        assert_eq!(bucket.get(..15), Some(header.as_slice()));
+        // The remaining bytes are a parseable LLSD map carrying both ids.
+        let body = String::from_utf8_lossy(bucket.get(15..).ok_or(WireError::ShortHeader)?);
+        let parsed = parse_llsd_xml(&body).map_err(|_e| WireError::ShortHeader)?;
+        assert!(body.contains(&item.to_string()));
+        assert!(body.contains(&owner.to_string()));
+        // Sanity: it really is a map.
+        assert!(matches!(parsed, super::Llsd::Map(_)));
+        Ok(())
+    }
 
     #[test]
     fn field_round_trip() -> Result<(), WireError> {

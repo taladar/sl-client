@@ -163,6 +163,7 @@ fn on_events(
             | SlSessionEvent::JoinGroupResult { .. }
             | SlSessionEvent::LeaveGroupResult { .. }
             | SlSessionEvent::DroppedFromGroup { .. }
+            | SlSessionEvent::EjectGroupMemberResult { .. }
             | SlSessionEvent::ScriptDialog(_)
             | SlSessionEvent::ScriptPermissionRequest(_)
             | SlSessionEvent::LoadUrl(_)
