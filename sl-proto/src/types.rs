@@ -552,10 +552,20 @@ pub enum Event {
     /// response to
     /// [`Session::request_classified_info`](crate::Session::request_classified_info).
     ClassifiedInfo(Box<ClassifiedInfo>),
+    /// Account-level facts from the login response (home, start look-at,
+    /// maturity ratings, group limit, and the shared Library roots). Emitted
+    /// once, right after [`Event::CircuitEstablished`].
+    Account(Box<LoginAccount>),
     /// The agent's inventory folder skeleton (every folder, without item
     /// contents), parsed from the login response. Emitted once, right after
     /// [`Event::CircuitEstablished`], when the login provided it.
     InventorySkeleton(Vec<InventoryFolder>),
+    /// The shared Library inventory's folder skeleton (every folder, without
+    /// item contents), parsed from the login response (`inventory-skel-lib`).
+    /// Emitted once, right after [`Event::CircuitEstablished`], when the login
+    /// provided a non-empty library tree. The owning agent is
+    /// [`LoginAccount::library_owner`].
+    LibraryInventory(Vec<InventoryFolder>),
     /// The contents of an inventory folder (`InventoryDescendents`), in response
     /// to [`Session::request_folder_contents`](crate::Session::request_folder_contents):
     /// its immediate sub-folders and items.
@@ -2316,6 +2326,19 @@ impl Maturity {
             Self::Mature => sl_wire::sim_access::MATURE,
             Self::Adult => sl_wire::sim_access::ADULT,
             Self::Pg | Self::Unknown => sl_wire::sim_access::PG,
+        }
+    }
+
+    /// Classifies the short maturity code carried by the login response
+    /// `agent_access`/`agent_access_max` fields: `"PG"`, `"M"` (mature), or
+    /// `"A"` (adult). Unrecognised or absent codes map to [`Maturity::Unknown`].
+    #[must_use]
+    pub fn from_login_access(code: Option<&str>) -> Self {
+        match code {
+            Some("PG") => Self::Pg,
+            Some("M") => Self::Mature,
+            Some("A") => Self::Adult,
+            _ => Self::Unknown,
         }
     }
 }
@@ -4191,6 +4214,36 @@ pub struct Friend {
     pub rights_granted: FriendRights,
     /// The rights the friend grants this agent.
     pub rights_received: FriendRights,
+}
+
+/// Account-level facts carried by the login response beyond what is needed to
+/// bring up the circuit (parsed from the XML-RPC `login_to_simulator` reply).
+/// Emitted once as [`Event::Account`] right after [`Event::CircuitEstablished`],
+/// and also available from
+/// [`Session::login_account`](crate::Session::login_account).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoginAccount {
+    /// The agent's home location (region handle, position, look-at), if the grid
+    /// provided a well-formed `home` field.
+    pub home: Option<sl_wire::HomeLocation>,
+    /// The camera look-at direction at the start location (`look_at`), if the
+    /// grid provided it.
+    pub look_at: Option<[f32; 3]>,
+    /// The account's current maturity / content rating (`agent_access`).
+    pub agent_access: Maturity,
+    /// The maximum maturity rating the account is entitled to
+    /// (`agent_access_max`); a client may not raise its preference above this.
+    pub agent_access_max: Maturity,
+    /// The maximum number of groups this account may join (`max-agent-groups`),
+    /// or `None` if the grid did not report a limit. Check before joining a
+    /// group.
+    pub max_agent_groups: Option<u32>,
+    /// The shared Library inventory's root folder id (`inventory-lib-root`), if
+    /// provided. The folder tree is delivered as [`Event::LibraryInventory`].
+    pub library_root: Option<Uuid>,
+    /// The agent id owning the shared Library (`inventory-lib-owner`), if
+    /// provided. Library folder contents are fetched as this owner's inventory.
+    pub library_owner: Option<Uuid>,
 }
 
 /// The agent's active group and title, parsed from `AgentDataUpdate` (pushed on

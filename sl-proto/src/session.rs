@@ -225,7 +225,7 @@ use crate::types::{
     FriendRights, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupProfile,
     GroupRole, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, GroupTitle, ImDialog,
     ImageCodec, InstantMessage, InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer,
-    LandingType, LoadUrlRequest, LoginHttpRequest, LoginParams, MapItem, MapItemType,
+    LandingType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItem, MapItemType,
     MapRegionInfo, Material, Maturity, MoneyBalance, MoneyTransaction, MoneyTransactionType,
     MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, Object, ObjectExtraParams,
     ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
@@ -3791,6 +3791,9 @@ pub struct Session {
     /// The agent's inventory root ("My Inventory") folder id, from the login
     /// response.
     inventory_root: Option<Uuid>,
+    /// Account-level facts from the login response (home, maturity, group limit,
+    /// Library roots), or `None` before login.
+    login_account: Option<LoginAccount>,
     /// In-flight mute-list file downloads (`Xfer` id → accumulated file bytes),
     /// started when a `MuteListUpdate` arrives.
     mute_xfers: BTreeMap<u64, Vec<u8>>,
@@ -3881,6 +3884,7 @@ impl Session {
             teleport_target: None,
             seed_capability: None,
             inventory_root: None,
+            login_account: None,
             mute_xfers: BTreeMap::new(),
             next_xfer_id: 1,
             texture_downloads: BTreeMap::new(),
@@ -4414,6 +4418,27 @@ impl Session {
                 self.state = SessionState::AwaitingHandshake;
                 self.events
                     .push_back(Event::CircuitEstablished { sim: sim_addr });
+                let account = LoginAccount {
+                    home: success.home,
+                    look_at: success.look_at,
+                    agent_access: Maturity::from_login_access(success.agent_access.as_deref()),
+                    agent_access_max: Maturity::from_login_access(
+                        success.agent_access_max.as_deref(),
+                    ),
+                    max_agent_groups: success.max_agent_groups,
+                    library_root: success.library_root,
+                    library_owner: success.library_owner,
+                };
+                self.login_account = Some(account.clone());
+                self.events.push_back(Event::Account(Box::new(account)));
+                if !success.library_skeleton.is_empty() {
+                    let library: Vec<InventoryFolder> = success
+                        .library_skeleton
+                        .iter()
+                        .map(skeleton_folder)
+                        .collect();
+                    self.events.push_back(Event::LibraryInventory(library));
+                }
                 if !success.inventory_skeleton.is_empty() {
                     let folders: Vec<InventoryFolder> = success
                         .inventory_skeleton
@@ -7586,6 +7611,14 @@ impl Session {
     #[must_use]
     pub const fn inventory_root(&self) -> Option<Uuid> {
         self.inventory_root
+    }
+
+    /// Account-level facts from the login response (home, start look-at, maturity
+    /// ratings, group limit, and the shared Library roots), or `None` before
+    /// login. The same data is also emitted once as [`Event::Account`].
+    #[must_use]
+    pub const fn login_account(&self) -> Option<&LoginAccount> {
+        self.login_account.as_ref()
     }
 
     /// Requests the contents (sub-folders and items) of the inventory folder

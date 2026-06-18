@@ -606,7 +606,9 @@ impl Survey {
             | Event::AvatarClassifieds { .. }
             | Event::PickInfo(_)
             | Event::ClassifiedInfo(_)
+            | Event::Account(_)
             | Event::InventorySkeleton(_)
+            | Event::LibraryInventory(_)
             | Event::InventoryDescendents { .. }
             | Event::InventoryItemCreated { .. }
             | Event::InventoryBulkUpdate { .. }

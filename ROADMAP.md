@@ -1373,7 +1373,7 @@ client protocol *feature* surface is complete: #1–#33 are done.** The only
 remaining open work is the **Tier E decode-fidelity fixes (#35–#51)** — not new
 features, but information-loss gaps where an already-shipped item decodes a wire
 field and then drops it before the caller sees it. (#35–#47 are now
-done; #48–#51 remain.)
+done; #49–#51 remain.)
 
 ## Tier E — decode-fidelity & information-loss fixes (#35–#51)
 
@@ -1400,7 +1400,7 @@ blob items, writing a structured decoder). "Test" notes whether the local
 | 45 ✅ | `ChatterBoxInvitation` session type & bucket | 2 | `type` + `binary_bucket` (group/session name, session kind) | SL grid |
 | 46 ✅ | Terse-update trailing `TextureEntry` | 2 | Texture/colour change delivered via a terse update | SL grid |
 | 47 ✅ | `ParcelAccessListReply` per-entry flags | 1 | The per-entry access-vs-ban `Flags` | Local OpenSim |
-| 48 | Login-response extra fields | 2 | `home`, `look_at`, `agent_access[_max]`, `max-agent-groups`, Library inventory roots | Local OpenSim |
+| 48 ✅ | Login-response extra fields | 2 | `home`, `look_at`, `agent_access[_max]`, `max-agent-groups`, Library inventory roots | Local OpenSim |
 | 49 | `TeleportFinish` (CAPS) maturity & flags | 1 | Destination `SimAccess` (maturity), `TeleportFlags` (cause) | SL grid |
 | 50 | Minor dropped-field batch | 3 | `TimeDilation`, `AlertInfo`, `MapBlockReply` water height, joint fields, collision plane, `Options.Flags`, NameValue/bump-shiny accessors | Local OpenSim |
 | 51 | Attachment-point `state` un-swizzle helper | 1 | Correct attachment point from the swizzled `state` byte | Local OpenSim |
@@ -1765,16 +1765,26 @@ flag. Re-exported through both runtimes. Covered by the two existing
 echoes the scope as the per-entry flags, so the experience sub-types are
 unit-tested only — they need the SL grid).*
 
-**48. Login-response extra fields (extends #5, Tier A).**
-`handle_login_response` (`session.rs` ~4389) plus the requested options
-(`sl-wire/src/login.rs` ~76) and parser (~354) capture only
-`inventory-root`/`inventory-skeleton`/`buddy-list`. Request and parse the
-broadly-useful extras: `home`, `look_at`, `agent_access`/`agent_access_max`
-(account maturity rating), `max-agent-groups` (needed before group joins), and
-the Library inventory roots
-(`inventory-lib-root`/`inventory-lib-owner`/`inventory-skel-lib`). `gestures`,
-`global-textures`, `login-flags`, and the category lists are lower-value but in
-the same response. *Test: local OpenSim.*
+**48. Login-response extra fields (extends #5, Tier A). ✅ Done.**
+`handle_login_response` (`session.rs`) plus the requested options and parser
+(`sl-wire/src/login.rs`) previously captured only
+`inventory-root`/`inventory-skeleton`/`buddy-list`. Now the login request also
+asks for the Library options
+(`inventory-lib-root`/`inventory-lib-owner`/`inventory-skel-lib`), and
+[`LoginSuccess`](sl-wire/src/login.rs) carries the broadly-useful extras: the
+**`home`** location (a new `HomeLocation { region_handle, position, look_at }`,
+parsed from the quasi-LLSD `r`-prefixed string), the start **`look_at`**,
+**`agent_access`/`agent_access_max`** (the account maturity short codes), the
+**`max-agent-groups`** join limit, and the **Library** root/owner ids and folder
+skeleton. `sl-proto` classifies the access codes into the typed `Maturity`
+(`Maturity::from_login_access`), stores the lot in a new `LoginAccount`
+reachable via `Session::login_account()`, and emits it once as `Event::Account`
+(plus `Event::LibraryInventory` for the library tree) right after
+`Event::CircuitEstablished`. Both runtimes forward the new events. Verified
+against local OpenSim: `access Mature/Adult, max groups 42, region_handle
+(256000, 256000)`, library skeleton of 19 folders. The lower-value
+`gestures`/`global-textures`/`login-flags`/category lists in the same response
+were left out. *Test: local OpenSim.*
 
 **49. `TeleportFinish` (CAPS) maturity & flags (extends #10, Tier A).**
 `teleport_finish_from_llsd` (`session.rs` ~10046) reads `SimIP`/`SimPort`/

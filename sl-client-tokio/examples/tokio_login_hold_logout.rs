@@ -202,8 +202,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::ClassifiedInfo(classified) => {
                 info!("classified details: {}", classified.name);
             }
+            Event::Account(account) => {
+                info!(
+                    "account: access {:?}/{:?}, max groups {:?}, home {:?}",
+                    account.agent_access,
+                    account.agent_access_max,
+                    account.max_agent_groups,
+                    account.home
+                );
+            }
             Event::InventorySkeleton(folders) => {
                 info!("inventory skeleton: {} folders", folders.len());
+            }
+            Event::LibraryInventory(folders) => {
+                info!("library skeleton: {} folders", folders.len());
             }
             Event::InventoryDescendents { folders, items, .. } => {
                 info!(

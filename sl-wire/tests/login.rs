@@ -9,6 +9,14 @@ mod test {
         LoginRequest, LoginResponse, build_login_request, parse_login_response, password_hash,
     };
 
+    /// Asserts two three-component vectors are equal within a small tolerance
+    /// (the login reals round-trip through `f64` parsing then narrow to `f32`).
+    fn assert_vec3_approx(actual: [f32; 3], expected: [f32; 3]) {
+        for (a, e) in actual.iter().zip(expected.iter()) {
+            assert!((a - e).abs() < 1e-4, "{actual:?} != {expected:?}");
+        }
+    }
+
     /// A minimal XML-RPC response struct wrapper around the given members.
     fn response(members: &str) -> String {
         format!(
@@ -177,6 +185,132 @@ mod test {
         let request = LoginRequest::new("Test", "User", "secret", "last", "MyViewer", "1.2.3");
         let body = build_login_request(&request);
         assert!(body.contains("<value><string>buddy-list</string></value>"));
+    }
+
+    #[test]
+    fn request_carries_library_options() {
+        let request = LoginRequest::new("Test", "User", "secret", "last", "MyViewer", "1.2.3");
+        let body = build_login_request(&request);
+        for option in [
+            "inventory-lib-root",
+            "inventory-lib-owner",
+            "inventory-skel-lib",
+        ] {
+            assert!(
+                body.contains(&format!("<value><string>{option}</string></value>")),
+                "missing {option} option"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_home_look_at_access_and_groups() -> Result<(), Box<dyn std::error::Error>> {
+        // The home/look_at fields are quasi-LLSD strings with `r`-prefixed reals,
+        // exactly as OpenSim/Second Life format them.
+        let members = concat!(
+            "<member><name>login</name><value><string>true</string></value></member>",
+            "<member><name>agent_id</name><value><string>11111111-1111-1111-1111-111111111111</string></value></member>",
+            "<member><name>session_id</name><value><string>22222222-2222-2222-2222-222222222222</string></value></member>",
+            "<member><name>secure_session_id</name><value><string>33333333-3333-3333-3333-333333333333</string></value></member>",
+            "<member><name>circuit_code</name><value><i4>1</i4></value></member>",
+            "<member><name>sim_ip</name><value><string>127.0.0.1</string></value></member>",
+            "<member><name>sim_port</name><value><i4>9000</i4></value></member>",
+            "<member><name>seed_capability</name><value><string>http://x/seed</string></value></member>",
+            "<member><name>home</name><value><string>{'region_handle':[r256000,r256256], 'position':[r128.5,r127.0,r25.75], 'look_at':[r1.0,r0.0,r0.0]}</string></value></member>",
+            "<member><name>look_at</name><value><string>[r0.9994,r0.0316,r0]</string></value></member>",
+            "<member><name>agent_access</name><value><string>M</string></value></member>",
+            "<member><name>agent_access_max</name><value><string>A</string></value></member>",
+            "<member><name>max-agent-groups</name><value><i4>42</i4></value></member>",
+        );
+        let xml = response(members);
+
+        let LoginResponse::Success(success) = parse_login_response(&xml)? else {
+            return Err("expected a successful login".into());
+        };
+        let home = success.home.ok_or("home location")?;
+        assert_eq!(home.region_handle, (256_000, 256_256));
+        assert_vec3_approx(home.position, [128.5, 127.0, 25.75]);
+        assert_vec3_approx(home.look_at, [1.0, 0.0, 0.0]);
+        let look_at = success.look_at.ok_or("start look-at")?;
+        assert_vec3_approx(look_at, [0.9994, 0.0316, 0.0]);
+        assert_eq!(success.agent_access.as_deref(), Some("M"));
+        assert_eq!(success.agent_access_max.as_deref(), Some("A"));
+        assert_eq!(success.max_agent_groups, Some(42));
+        Ok(())
+    }
+
+    #[test]
+    fn parses_library_roots_and_skeleton() -> Result<(), Box<dyn std::error::Error>> {
+        let members = concat!(
+            "<member><name>login</name><value><string>true</string></value></member>",
+            "<member><name>agent_id</name><value><string>11111111-1111-1111-1111-111111111111</string></value></member>",
+            "<member><name>session_id</name><value><string>22222222-2222-2222-2222-222222222222</string></value></member>",
+            "<member><name>secure_session_id</name><value><string>33333333-3333-3333-3333-333333333333</string></value></member>",
+            "<member><name>circuit_code</name><value><i4>1</i4></value></member>",
+            "<member><name>sim_ip</name><value><string>127.0.0.1</string></value></member>",
+            "<member><name>sim_port</name><value><i4>9000</i4></value></member>",
+            "<member><name>seed_capability</name><value><string>http://x/seed</string></value></member>",
+            "<member><name>inventory-lib-root</name><value><array><data>",
+            "<value><struct><member><name>folder_id</name><value><string>00000112-000f-0000-0000-000100bba000</string></value></member></struct></value>",
+            "</data></array></value></member>",
+            "<member><name>inventory-lib-owner</name><value><array><data>",
+            "<value><struct><member><name>agent_id</name><value><string>11111111-1111-0000-0000-000000000000</string></value></member></struct></value>",
+            "</data></array></value></member>",
+            "<member><name>inventory-skel-lib</name><value><array><data>",
+            "<value><struct>",
+            "<member><name>folder_id</name><value><string>00000112-000f-0000-0000-000100bba000</string></value></member>",
+            "<member><name>parent_id</name><value><string>00000000-0000-0000-0000-000000000000</string></value></member>",
+            "<member><name>name</name><value><string>Library</string></value></member>",
+            "<member><name>type_default</name><value><i4>8</i4></value></member>",
+            "<member><name>version</name><value><i4>1</i4></value></member>",
+            "</struct></value>",
+            "</data></array></value></member>",
+        );
+        let xml = response(members);
+
+        let LoginResponse::Success(success) = parse_login_response(&xml)? else {
+            return Err("expected a successful login".into());
+        };
+        assert_eq!(
+            success.library_root,
+            Some("00000112-000f-0000-0000-000100bba000".parse::<uuid::Uuid>()?)
+        );
+        assert_eq!(
+            success.library_owner,
+            Some("11111111-1111-0000-0000-000000000000".parse::<uuid::Uuid>()?)
+        );
+        assert_eq!(success.library_skeleton.len(), 1);
+        let root = success.library_skeleton.first().ok_or("library root")?;
+        assert_eq!(root.name, "Library");
+        Ok(())
+    }
+
+    #[test]
+    fn tolerates_a_missing_or_malformed_home() -> Result<(), Box<dyn std::error::Error>> {
+        // A success with no home/look_at/access fields leaves them as None.
+        let members = concat!(
+            "<member><name>login</name><value><string>true</string></value></member>",
+            "<member><name>agent_id</name><value><string>11111111-1111-1111-1111-111111111111</string></value></member>",
+            "<member><name>session_id</name><value><string>22222222-2222-2222-2222-222222222222</string></value></member>",
+            "<member><name>secure_session_id</name><value><string>33333333-3333-3333-3333-333333333333</string></value></member>",
+            "<member><name>circuit_code</name><value><i4>1</i4></value></member>",
+            "<member><name>sim_ip</name><value><string>127.0.0.1</string></value></member>",
+            "<member><name>sim_port</name><value><i4>9000</i4></value></member>",
+            "<member><name>seed_capability</name><value><string>http://x/seed</string></value></member>",
+            "<member><name>home</name><value><string>{'region_handle':[r256000]}</string></value></member>",
+        );
+        let xml = response(members);
+        let LoginResponse::Success(success) = parse_login_response(&xml)? else {
+            return Err("expected a successful login".into());
+        };
+        // The home string lacks position/look_at, so it parses to None rather
+        // than a partial value.
+        assert!(success.home.is_none());
+        assert!(success.look_at.is_none());
+        assert!(success.agent_access.is_none());
+        assert!(success.max_agent_groups.is_none());
+        assert!(success.library_root.is_none());
+        Ok(())
     }
 
     #[test]

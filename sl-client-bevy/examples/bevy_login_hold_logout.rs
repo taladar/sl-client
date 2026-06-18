@@ -142,8 +142,20 @@ fn on_events(
             SlSessionEvent::ClassifiedInfo(classified) => {
                 info!("classified details: {}", classified.name);
             }
+            SlSessionEvent::Account(account) => {
+                info!(
+                    "account: access {:?}/{:?}, max groups {:?}, home {:?}",
+                    account.agent_access,
+                    account.agent_access_max,
+                    account.max_agent_groups,
+                    account.home
+                );
+            }
             SlSessionEvent::InventorySkeleton(folders) => {
                 info!("inventory skeleton: {} folders", folders.len());
+            }
+            SlSessionEvent::LibraryInventory(folders) => {
+                info!("library skeleton: {} folders", folders.len());
             }
             SlSessionEvent::InventoryDescendents { folders, items, .. } => {
                 info!(
