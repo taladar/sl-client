@@ -1896,15 +1896,164 @@ a live exercise would need to attach an inventory object to the avatar (an
 attach flow this headless client does not drive). Test: local OpenSim
 (rez/attach an object).*
 
-### Out of scope (not LLUDP/CAPS protocol)
+**Server-side protocol support (2026-06-18) — #52–#65, Tier F.** Everything
+above is the *client* direction of the protocol: the workspace encodes what a
+viewer sends and decodes what a simulator sends. Tier F adds the **server** side
+so `sl-wire`/`sl-proto` can act as the *other* peer — a complete
+bidirectional protocol library plus a sans-I/O skeleton per grid server role.
+The generated LLUDP message codec is already symmetric (`build.rs` emits both
+`encode_body` and `decode_body` for all 483 messages, and the
+framing/ack/zerocode layer is direction-agnostic), so Tier F is *not* about
+that layer. The work is the one-directional **hand-written sub-codecs** —
+every bespoke binary blob and CAPS/LLSD payload currently has only the client
+direction — plus the per-role state skeletons that have no equivalent today.
+Each item is the literal inverse of an existing decoder/encoder (the existing
+direction is the spec), validated by round-trip tests with that counterpart as
+the oracle. The grid is several distinct servers, so the skeleton is split by
+role (login server vs. simulator vs. the CAPS/grid services) rather than one
+monolithic "server". Story points and the "Test" column follow the same
+convention as the other tiers; most items are
+unit round-trip tests (no live grid), and the `SimSession` is exercised by an
+in-memory loopback against the existing client `Session`.
+
+## Tier F — server / simulator role (#52–#65)
+
+| # | Feature | Pts | Inverse of | Test |
+|---|---------|-----|-----------|------|
+| 52 | Generic LLSD-XML serializer (`Llsd` → XML) | 2 | `parse_llsd_xml` | Unit round-trip |
+| 53 | Login request parse / response build (`LoginServer`) | 3 | `build_login_request` / `parse_login_response` | Unit round-trip |
+| 54 | `TextureEntry` encoder | 3 | `decode_texture_entry` | Unit round-trip |
+| 55 | `ExtraParams` encoder (all subtypes) | 3 | `decode_extra_params` | Unit round-trip |
+| 56 | `ParticleSystem` + `TextureAnim` encoders | 3 | `decode_particle_system` / `decode_texture_anim` | Unit round-trip |
+| 57 | Object-motion encoders (full / terse / compressed) | 5 | `full_object_motion` / `terse_update` / `compressed_object` | Unit round-trip |
+| 58 | Terrain `LayerData` compressor | 8 | `decode_layer` | Unit (heightmap round-trip) |
+| 59 | CAPS event serializers + `EventQueueGet` response | 5 | the `*_from_llsd` parsers / `build_event_queue_request` | Unit round-trip |
+| 60 | `SimSession` skeleton (sans-I/O simulator session) | 8 | client `Session` | Loopback vs. `Session` |
+| 61 | AIS3 inventory service pairing | 5 | the AIS3 URL/body builders | Unit round-trip |
+| 62 | Experiences service pairing | 3 | `parse_experience_*` | Unit round-trip |
+| 63 | Voice service pairing | 3 | `*::from_llsd` / voice request builders | Unit round-trip |
+| 64 | Materials service pairing | 3 | `parse_render_materials_response` / `parse_gltf_material_override` | Unit round-trip |
+| 65 | Map service pairing (`MapBlockReply` / `MapItemReply`) | 2 | the map request encoders | Unit round-trip |
+
+Ordered foundation-first; each is one commit with reverse-direction round-trip
+tests. "Inverse of" names the existing function/path the new code mirrors
+field-for-field — same field order, fixed-point scales, and length-prefix
+conventions.
+
+### Foundation
+
+**52. Generic LLSD-XML serializer (new, foundation for #53/#59/#61–#64).**
+`sl-wire/src/llsd.rs` parses LLSD-XML into an [`Llsd`] tree but can only
+*serialize* via the bespoke per-request string builders. Add an
+`Llsd::to_llsd_xml` that emits any tree as a complete `<llsd>…</llsd>` document
+(the inverse of `parse_llsd_xml`), reusing `push_escaped` and sorting map keys
+for deterministic output. Everything CAPS- and login-side that must *produce*
+LLSD builds an `Llsd` tree and calls this, rather than hand-concatenating XML.
+
+### Login server role
+
+**53. Login request parse / response build (extends #5/#48, Tier A).**
+`sl-wire/src/login.rs` has `build_login_request` + `parse_login_response` (the
+client direction). Add `parse_login_request` and `build_login_response`
+(reusing #52), plus a small `LoginServer` helper that maps a parsed request +
+supplied account/sim facts to a success / failure / MFA response — the
+XML-RPC/LLSD login endpoint a grid exposes.
+
+### Simulator role — binary sub-codec encoders
+
+**54. `TextureEntry` encoder (extends #16/#20, Tier C).** `sl-proto/src/`
+`appearance.rs` has `decode_texture_entry` only. Add the inverse encoder: the
+run-length default-plus-overrides packing with the wire colour re-inversion, so
+the simulator can serialize per-face texture state into `ObjectUpdate` bodies.
+
+**55. `ExtraParams` encoder (extends #16, Tier C).** `extra_params.rs` decodes
+the flex/light/sculpt/light-image/extended-mesh/render-material/reflection-probe
+container. Add the inverse: container framing (count + per-param type/size/
+payload) and an encoder per subtype.
+
+**56. `ParticleSystem` + `TextureAnim` encoders (extends #37, Tier E).**
+`particles.rs` decodes the legacy 86-byte and modern size-prefixed particle
+forms and the 16-byte texture-anim block. Add the inverse encoders (with the
+matching fixed-point re-quantization).
+
+**57. Object-motion encoders (extends #16/#33/#46, Tier C).** The motion
+decoders live in `session.rs` (`full_object_motion`, `terse_update`,
+`compressed_object` + `compressed_object_trailing`). Extract them into a new
+`sl-proto/src/object_update.rs` so the pair is co-located, and add encoders
+that assemble `ObjectUpdate` `ObjectData`, `ImprovedTerseObjectUpdate`, and
+`ObjectUpdateCompressed` bodies (reusing #54/#55/#56).
+
+**58. Terrain `LayerData` compressor (extends #18, Tier C).** `terrain.rs` has
+`decode_layer` (bitstream → patches, via inverse DCT). Add the inverse pipeline:
+quantize, zigzag, forward DCT, entropy-code, and write the group header +
+`END_OF_PATCHES` with a `BitWriter`. Port OpenSim's reference
+`TerrainCompressor`. Largest item; validated by encode-then-decode of a known
+heightmap within the quantization tolerance.
+
+### Simulator role — CAPS event queue & session
+
+**59. CAPS event serializers + `EventQueueGet` response (extends the CAPS
+items #10/#13/#28/#30).** For each inbound CAPS parser in `session.rs`
+(`parcel_info_from_llsd`, `teleport_finish_from_llsd`,
+`enable_simulator_from_caps_llsd`, `crossed_region_from_caps_llsd`,
+`establish_agent_communication_from_llsd`, and the
+group/inventory/bulk-update/chatterbox/offline/appearance variants) add the
+inverse `*_to_llsd`, plus `build_event_queue_response` (a `{ events:
+[{message, body}…], id }` batch — the inverse of the client's
+`build_event_queue_request`). Built on #52.
+
+**60. `SimSession` skeleton (new; mirror of the client `Session`).** A sans-I/O
+type in `sl-proto` that accepts a circuit (`UseCircuitCode` +
+`CompleteAgentMovement`), tracks sequence / pending acks (reusing the symmetric
+`sl-wire` ack & seq machinery), answers `StartPingCheck`/`CompletePingCheck`,
+handles `LogoutRequest`, exposes a typed API to push server messages
+(`RegionHandshake`, `ChatFromSimulator`, `ObjectUpdate`, `LayerData`, …) and to
+enqueue CAPS events (#59), and decodes the ~123 client-only messages into a
+server-side `ServerEvent` enum (the inverse of the client `Command`/`Event`
+split). Tested by driving a `SimSession` and a client `Session` against each
+other in memory through the real framing/ack/zerocode path.
+
+### Grid / CAPS service roles
+
+**61. AIS3 inventory service pairing (extends #30, Tier A).**
+`sl-wire/src/inventory.rs` has the AIS3 URL + request-body builders. Add the
+`parse_ais_*` request-body parsers and the AIS3 response builders.
+
+**62. Experiences service pairing (extends #27, Tier D).**
+`sl-wire/src/experience.rs` has query builders + the `parse_experience_*`
+response parsers. Add the request parsers (`parse_set_experience_permission_`
+`request`, update, region) and the response builders.
+
+**63. Voice service pairing (extends #26, Tier D).** `sl-wire/src/voice.rs` has
+the request builders + `VoiceAccountInfo`/`ParcelVoiceInfo::from_llsd`. Add
+`parse_provision_voice_account_request`, `parse_voice_signaling_request`,
+and the account/parcel-info response builders. (The voice *audio* transport
+stays out of scope — this is only the signalling-endpoint pairing.)
+
+**64. Materials service pairing (extends #25, Tier C).**
+`sl-wire/src/material.rs` is partially bidirectional. Add the gaps:
+`build_gltf_material_override`,
+`parse_modify_material_params_request`, and `build_render_materials_response`
+(the zipped binary-LLSD legacy-materials reply).
+
+**65. Map service pairing (extends #12, Tier B).** Encoders for the
+`MapBlockReply` / `MapItemReply` payloads the map server returns, mirroring the
+existing client request encoders.
+
+## Out of scope (not LLUDP/CAPS protocol)
 
 Rendering/physics engines, J2C/mesh *display* (vs. decode), the in-viewer UI,
 and the Marketplace (web, not protocol) are deliberately excluded — this roadmap
-covers protocol features only. The same scope as #19/#23/#25/#26/#27 holds for
-the follow-ups above: J2C/JPEG-2000 pixel decode, the glTF 2.0 document decode,
-the mesh model-import (LOD/physics/cost) pipeline, the voice audio media
-transport (SIP/RTP/WebRTC), and an experience's event/asset *byte contents*
-remain out — those are large items an existing crate would own, not protocol
-wiring. The **experience key-value store (#34)** is out for a different reason:
-it has no client capability at all (the viewer never accesses it — see #34's
-entry), so there is no client wire protocol to own.
+covers protocol features only. **Server roles are in scope as of Tier F
+(#52–#65) — the bidirectional codec and the per-role sans-I/O skeletons — but
+a *running* grid is not: world authority, persistence, multi-client broadcast,
+and the socket/event-loop I/O remain the consumer's job, not these crates'.**
+The same
+scope as #19/#23/#25/#26/#27 holds for the follow-ups above: J2C/JPEG-2000 pixel
+*encode/decode*, the glTF 2.0 document decode, the mesh model-import
+(LOD/physics/cost) pipeline, the voice audio media transport (SIP/RTP/WebRTC),
+and an experience's event/asset *byte contents* remain out — those are large
+items an existing crate would own, not protocol wiring. The **experience
+key-value store (#34)** is out for a different reason: it has no client
+capability at all (the viewer never accesses it — see #34's entry), so there is
+no client wire protocol to own.
