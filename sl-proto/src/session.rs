@@ -235,8 +235,8 @@ use crate::types::{
     PrimShapeParams, ProductType, ProfileUpdate, RegionChatSettings, RegionCombatSettings,
     RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, SaleType, ScriptDialog,
     ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload,
-    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, Wearable,
-    WearableType, avatar_texture, grid_to_handle, handle_to_grid,
+    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit,
+    Wearable, WearableType, avatar_texture, grid_to_handle, handle_to_grid,
 };
 use crate::{appearance, types::AvatarAppearance, types::AvatarAttachment};
 
@@ -3947,9 +3947,17 @@ impl Session {
                 }
             }
             "TeleportFinish" => {
-                if let Some((dest, seed)) = teleport_finish_from_llsd(body) {
+                if let Some(finish) = teleport_finish_from_llsd(body) {
                     let region_handle = self.teleport_target.unwrap_or(0);
-                    self.begin_handover(dest, region_handle, Some(seed), now)?;
+                    if matches!(self.state, SessionState::Teleporting) {
+                        self.events.push_back(Event::TeleportFinished {
+                            region_handle,
+                            sim: finish.dest,
+                            maturity: Maturity::from_sim_access(finish.sim_access),
+                            flags: TeleportFlags(finish.teleport_flags),
+                        });
+                    }
+                    self.begin_handover(finish.dest, region_handle, Some(finish.seed), now)?;
                 }
             }
             // A neighbouring region is announced over the CAPS event queue (the
@@ -5196,6 +5204,12 @@ impl Session {
                     let port = info.sim_port.swap_bytes();
                     let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(info.sim_ip)), port);
                     let seed = Some(String::from_utf8_lossy(&info.seed_capability).into_owned());
+                    self.events.push_back(Event::TeleportFinished {
+                        region_handle: info.region_handle,
+                        sim: dest,
+                        maturity: Maturity::from_sim_access(info.sim_access),
+                        flags: TeleportFlags(info.teleport_flags),
+                    });
                     self.begin_handover(dest, info.region_handle, seed, now)?;
                 }
             }
@@ -10228,11 +10242,27 @@ fn estate_access_from_params(params: &[EstateOwnerMessageParamListBlock]) -> Opt
     })
 }
 
-/// Extracts the destination UDP address and seed capability from a CAPS
-/// `TeleportFinish` event body: `{ "Info": [ { "SimIP": <binary 4 bytes>,
-/// "SimPort": <integer>, "SeedCapability": <string>, … } ] }`. The CAPS `SimPort`
-/// is a plain host-order integer port (unlike the byte-swapped generated-UDP field).
-fn teleport_finish_from_llsd(body: &Llsd) -> Option<(SocketAddr, String)> {
+/// A decoded CAPS `TeleportFinish` event: the destination simulator address and
+/// seed capability plus the destination region's maturity (`SimAccess`) and the
+/// teleport flags (how/why the teleport happened).
+struct CapsTeleportFinish {
+    /// The destination simulator's UDP address.
+    dest: SocketAddr,
+    /// The destination region's seed capability URL.
+    seed: String,
+    /// The destination region's maturity byte (`SimAccess`).
+    sim_access: u8,
+    /// The `TeleportFlags` bitfield.
+    teleport_flags: u32,
+}
+
+/// Extracts the destination UDP address, seed capability, maturity and teleport
+/// flags from a CAPS `TeleportFinish` event body: `{ "Info": [ { "SimIP":
+/// <binary 4 bytes>, "SimPort": <integer>, "SeedCapability": <string>,
+/// "SimAccess": <integer>, "TeleportFlags": <integer>, … } ] }`. The CAPS
+/// `SimPort` is a plain host-order integer port (unlike the byte-swapped
+/// generated-UDP field).
+fn teleport_finish_from_llsd(body: &Llsd) -> Option<CapsTeleportFinish> {
     let info = body.get("Info").and_then(|info| info.index(0))?;
     let octets: [u8; 4] = info
         .get("SimIP")
@@ -10245,10 +10275,21 @@ fn teleport_finish_from_llsd(body: &Llsd) -> Option<(SocketAddr, String)> {
         .and_then(Llsd::as_str)
         .unwrap_or("")
         .to_owned();
-    Some((
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::from(octets)), port),
+    // `SimAccess` is encoded as an LLSD integer; clamp into the maturity byte.
+    let sim_access = info
+        .get("SimAccess")
+        .and_then(Llsd::as_i32)
+        .and_then(|access| u8::try_from(access).ok())
+        .unwrap_or(0);
+    // `TeleportFlags` is a U32 bitfield carried as an LLSD integer (and some
+    // grids encode the high U32 fields as binary), so read it tolerantly.
+    let teleport_flags = info.get("TeleportFlags").map_or(0, llsd_u32);
+    Some(CapsTeleportFinish {
+        dest: SocketAddr::new(IpAddr::V4(Ipv4Addr::from(octets)), port),
         seed,
-    ))
+        sim_access,
+        teleport_flags,
+    })
 }
 
 /// Extracts a neighbour's region handle and simulator address from a CAPS

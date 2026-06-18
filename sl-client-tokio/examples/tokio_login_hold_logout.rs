@@ -478,6 +478,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::MapItems { .. }
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
+            | Event::TeleportFinished { .. }
             | Event::TeleportLocal
             | Event::TeleportFailed { .. }
             | Event::TerrainPatch(_)
