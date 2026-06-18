@@ -43,12 +43,12 @@ pub use types::{
     ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
     ParcelReturnType, ParcelStatus, ParcelUpdate, ParticleSystem, PermissionField, PickInfo,
     PickUpdate, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
-    ReflectionProbe, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability,
-    RenderMaterialRef, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, SculptData, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch,
-    Texture, TextureAnimation, TextureEntry, TextureFace, Throttle, TransferStatus, Transmit,
-    Wearable, WearableType, avatar_texture, grid_to_handle, group_powers, handle_to_global,
-    handle_to_grid, particle_pattern, pcode, texture_anim_mode,
+    ReflectionProbe, RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionInfoUpdate,
+    RegionLimits, Reliability, RenderMaterialRef, SaleType, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTeleportRequest, SculptData, SoundFlags, SoundPreload,
+    TerrainLayerType, TerrainPatch, Texture, TextureAnimation, TextureEntry, TextureFace, Throttle,
+    TransferStatus, Transmit, Wearable, WearableType, avatar_texture, grid_to_handle, group_powers,
+    handle_to_global, handle_to_grid, particle_pattern, pcode, texture_anim_mode,
 };
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,

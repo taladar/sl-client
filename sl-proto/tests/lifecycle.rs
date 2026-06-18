@@ -80,16 +80,18 @@ mod test {
         ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
         PickInfoReply, PickInfoReplyAgentDataBlock, PickInfoReplyDataBlock, PreloadSound,
         PreloadSoundDataBlockBlock, RegionHandshake, RegionHandshakeRegionInfo2Block,
-        RegionHandshakeRegionInfo3Block, RegionHandshakeRegionInfoBlock, RegionInfo,
-        RegionInfoAgentDataBlock, RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock,
-        RequestXfer, RequestXferXferIDBlock, ScriptDialog, ScriptDialogButtonsBlock,
-        ScriptDialogDataBlock, ScriptDialogOwnerDataBlock, ScriptQuestion, ScriptQuestionDataBlock,
-        ScriptQuestionExperienceBlock, SendXferPacket, SendXferPacketDataPacketBlock,
-        SendXferPacketXferIDBlock, SoundTrigger, SoundTriggerSoundDataBlock, TeleportFailed,
-        TeleportFailedInfoBlock, TransferInfo, TransferInfoTransferInfoBlock, TransferPacket,
-        TransferPacketTransferDataBlock, UpdateCreateInventoryItem,
-        UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
-        UseCachedMuteList, UseCachedMuteListAgentDataBlock,
+        RegionHandshakeRegionInfo3Block, RegionHandshakeRegionInfo4Block,
+        RegionHandshakeRegionInfoBlock, RegionInfo, RegionInfoAgentDataBlock,
+        RegionInfoCombatSettingsBlock, RegionInfoRegionInfo2Block, RegionInfoRegionInfo3Block,
+        RegionInfoRegionInfo5Block, RegionInfoRegionInfoBlock, RequestXfer, RequestXferXferIDBlock,
+        ScriptDialog, ScriptDialogButtonsBlock, ScriptDialogDataBlock, ScriptDialogOwnerDataBlock,
+        ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock, SendXferPacket,
+        SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock, SoundTrigger,
+        SoundTriggerSoundDataBlock, TeleportFailed, TeleportFailedInfoBlock, TransferInfo,
+        TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
+        UpdateCreateInventoryItem, UpdateCreateInventoryItemAgentDataBlock,
+        UpdateCreateInventoryItemInventoryDataBlock, UseCachedMuteList,
+        UseCachedMuteListAgentDataBlock,
     };
     use sl_wire::{
         AnyMessage, LoginFailure, LoginRequest, LoginResponse, LoginSuccess, MessageId,
@@ -4214,6 +4216,48 @@ mod test {
         assert_eq!(identity.maturity, Maturity::Mature);
         assert_eq!(identity.product, ProductType::Homestead);
         assert_eq!(identity.region_flags, 0x40);
+        // No RegionInfo4 block: the 64-bit flags fall back to the zero-extended
+        // 32-bit flags, and protocols default to 0.
+        assert_eq!(identity.region_flags_extended, 0x40);
+        assert_eq!(identity.region_protocols, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn region_handshake_surfaces_extended_fields() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = awaiting_handshake(now)?;
+
+        let owner = uuid::Uuid::from_u128(0x1234);
+        let mut msg = region_handshake_msg(13, 0x40, "TestRegion", "", "");
+        if let AnyMessage::RegionHandshake(ref mut handshake) = msg {
+            handshake.region_info.sim_owner = owner;
+            handshake.region_info.is_estate_manager = true;
+            handshake.region_info.water_height = 20.5;
+            handshake.region_info.billable_factor = 1.0;
+            handshake.region_info4 = vec![RegionHandshakeRegionInfo4Block {
+                region_flags_extended: 0x1_0000_0040,
+                region_protocols: 0x5,
+            }];
+        }
+        let datagram = server_message(&msg, 1, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let events = drain_events(&mut session);
+        let identity = events
+            .iter()
+            .find_map(|e| match e {
+                Event::RegionInfoHandshake(identity) => Some(identity),
+                _ => None,
+            })
+            .ok_or("expected a RegionInfoHandshake event")?;
+        assert_eq!(identity.sim_owner, owner);
+        assert!(identity.is_estate_manager);
+        assert!((identity.water_height - 20.5).abs() < f32::EPSILON);
+        assert!((identity.billable_factor - 1.0).abs() < f32::EPSILON);
+        // RegionInfo4 supplies the full 64-bit flags and the protocols bitfield.
+        assert_eq!(identity.region_flags_extended, 0x1_0000_0040);
+        assert_eq!(identity.region_protocols, 0x5);
         Ok(())
     }
 
@@ -4239,6 +4283,90 @@ mod test {
         assert_eq!(limits.max_agents, 40);
         assert_eq!(limits.hard_max_objects, 15000);
         assert_eq!(limits.maturity, Maturity::Pg);
+        // No RegionInfo3/5/CombatSettings blocks: the 64-bit flags fall back to
+        // the 32-bit flags and the optional blocks are absent.
+        assert_eq!(limits.region_flags_extended, 0);
+        assert!(limits.chat_settings.is_none());
+        assert!(limits.combat_settings.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn region_info_surfaces_extended_fields() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let mut msg = region_info_msg("TestRegion", 13, 0, 50, 60, 15000);
+        if let AnyMessage::RegionInfo(ref mut info) = msg {
+            info.region_info.estate_id = 101;
+            info.region_info.parent_estate_id = 1;
+            info.region_info.region_flags = 0x40;
+            info.region_info.water_height = 20.0;
+            info.region_info.billable_factor = 1.0;
+            info.region_info.object_bonus_factor = 2.0;
+            info.region_info.terrain_raise_limit = 4.0;
+            info.region_info.terrain_lower_limit = -4.0;
+            info.region_info.price_per_meter = 1;
+            info.region_info.use_estate_sun = true;
+            info.region_info.sun_hour = 12.0;
+            info.region_info3 = vec![RegionInfoRegionInfo3Block {
+                region_flags_extended: 0x1_0000_0040,
+            }];
+            info.region_info5 = vec![RegionInfoRegionInfo5Block {
+                chat_whisper_range: 10.0,
+                chat_normal_range: 20.0,
+                chat_shout_range: 100.0,
+                chat_whisper_offset: 0.0,
+                chat_normal_offset: 0.0,
+                chat_shout_offset: 0.0,
+                chat_flags: 3,
+            }];
+            info.combat_settings = vec![RegionInfoCombatSettingsBlock {
+                combat_flags: 7,
+                on_death: 2,
+                damage_throttle: 1.5,
+                regeneration_rate: 0.25,
+                invulnerabily_time: 5.0,
+                damage_limit: 100.0,
+            }];
+        }
+        let datagram = server_message(&msg, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let events = drain_events(&mut session);
+        let limits = events
+            .iter()
+            .find_map(|e| match e {
+                Event::RegionLimits(limits) => Some(limits),
+                _ => None,
+            })
+            .ok_or("expected a RegionLimits event")?;
+        assert_eq!(limits.max_agents, 50);
+        assert_eq!(limits.hard_max_agents, 60);
+        assert_eq!(limits.estate_id, 101);
+        assert_eq!(limits.parent_estate_id, 1);
+        assert!((limits.water_height - 20.0).abs() < f32::EPSILON);
+        assert!((limits.object_bonus_factor - 2.0).abs() < f32::EPSILON);
+        assert!((limits.terrain_raise_limit - 4.0).abs() < f32::EPSILON);
+        assert!((limits.terrain_lower_limit + 4.0).abs() < f32::EPSILON);
+        assert!(limits.use_estate_sun);
+        assert!((limits.sun_hour - 12.0).abs() < f32::EPSILON);
+        assert_eq!(limits.region_flags_extended, 0x1_0000_0040);
+        let chat = limits
+            .chat_settings
+            .as_ref()
+            .ok_or("expected chat settings")?;
+        assert!((chat.shout_range - 100.0).abs() < f32::EPSILON);
+        assert_eq!(chat.flags, 3);
+        let combat = limits
+            .combat_settings
+            .as_ref()
+            .ok_or("expected combat settings")?;
+        assert_eq!(combat.flags, 7);
+        assert_eq!(combat.on_death, 2);
+        assert!((combat.invulnerability_time - 5.0).abs() < f32::EPSILON);
         Ok(())
     }
 
