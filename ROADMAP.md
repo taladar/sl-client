@@ -61,17 +61,28 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 31 ✅ | Group management edits | 5 | Group admin bot | Local OpenSim (Groups V2) |
 | 32 ✅ | Camera & interest control | 3 | Look-aware roaming bot | Local OpenSim |
 | 33 ✅ | World-stream decode & LOD fetch | 5 | *(faithfulness for 16/19)* | Local OpenSim |
-| 34 | Experience key-value store | 3 | Experience datastore client | **SL grid only** |
+| 34 ⛔ | Experience key-value store | 3 | *(out of scope — no client cap)* | **n/a** |
 
-**Item #34 is not yet built** (#28–#33 are now done). They are
-the **deferred follow-ups** that items #1–#27 knowingly left for later (the
-"Deferred:" / "follow-up" / "waits on #…" / "unit-tested only" notes in those
-entries), now promoted to first-class roadmap items so the gap analysis stays
-complete. Each is grouped under and extends an earlier item; their full prose is
-in **"Planned — deferred follow-ups"** below the done items. They carry no ✅
-and the prose is forward-looking. Out-of-scope large items (J2C/glTF/mesh
-decode, rendering, the voice audio transport) are *not* among them — see the
-closing "Out of scope" note.
+**Every client protocol feature in this roadmap is now implemented (#1–#33).**
+The deferred follow-ups #28–#33 — the bits items #1–#27 knowingly left for later
+(the "Deferred:" / "follow-up" / "waits on #…" / "unit-tested only" notes in
+those entries), promoted to first-class roadmap items so the gap analysis stays
+complete — are done. Each was grouped under and extends an earlier item; their
+full prose is in **"Planned — deferred follow-ups"** below the done items.
+
+**Item #34 turned out not to be a client protocol feature and is reclassified
+out of scope (⛔).** The experience key-value store has **no viewer/client
+capability**: the reference viewer (Firestorm) requests all 13 experience caps
+(`GetExperienceInfo`, `GetExperiences`, `RegionExperiences`, …) — every one of
+which #27 already implements — but no KV cap; the SL wiki's authoritative
+"Current Sim Capabilities" list contains no `ExperienceKeyValue` (or any
+`KeyValue`) capability; and `llReadKeyValue`/`llCreateKeyValue`/… appear in the
+viewer source only as *script-editor keywords*, never as cap calls. The KV store
+is reached **only by in-world LSL scripts** running server-side; the simulator
+talks to an internal Linden datastore over a service-to-service path never
+exposed to clients. There is therefore nothing for a client to wire — it joins
+the other out-of-scope items (J2C/glTF/mesh decode, rendering, the voice audio
+transport). See the closing "Out of scope" note.
 
 ## Tier A — self-sufficient interactive clients (text & bot viewers)
 
@@ -1317,15 +1328,36 @@ is unit-tested only — stock OpenSim sends full, not compressed, `ObjectUpdate`
 (as #16 noted) — and is the SL-grid path; the mesh/asset `byte_range` rounds out
 the `Range` surface for those caps. Test: local OpenSim.*
 
-**34. Experience key-value store — `ExperienceKeyValue` datastore CAPS · 3 pts.
-(extends #27, Tier D.)** Item #27 implemented the experience metadata and
-permission CAPS but deferred the experience's server-side **key-value store** as
-out of scope; reconsidered, it is a small CAPS protocol API (not a large
-external-crate item), so it is promoted here. Will add the `ExperienceKeyValue`
-datastore verbs — read / write / delete / list keys for an experience, with the
-quota the viewer's experience cache tracks — the store an experience-keyed
-script reads and writes server-side. *Test: SL grid (or an OpenSim grid with an
-experience module); the caps are absent on stock OpenSim, as with #27.*
+**34. Experience key-value store · ⛔ out of scope (not a client protocol
+feature).** Item #27 implemented the experience metadata and permission CAPS and
+deferred the experience's server-side **key-value store**, which a later pass
+promoted here on the assumption it was a small client CAPS API. On
+investigation it is **not** a client-facing protocol feature at all, so it is
+reclassified out of scope:
+
+- The reference viewer (Firestorm) requests all 13 experience capabilities in
+  `indra/newview/llviewerregion.cpp` (`GetExperiences`, `AgentExperiences`,
+  `FindExperienceByName`, `GetExperienceInfo`, `GetAdminExperiences`,
+  `GetCreatorExperiences`, `ExperiencePreferences`, `GroupExperiences`,
+  `UpdateExperience`, `IsExperienceAdmin`, `IsExperienceContributor`,
+  `RegionExperiences`, `ExperienceQuery`) — **all implemented by #27** — and
+  **no** key-value capability.
+- The SL wiki's authoritative *Current Sim Capabilities* list contains no
+  `ExperienceKeyValue` (nor any `KeyValue`) capability.
+- `llReadKeyValue` / `llCreateKeyValue` / `llUpdateKeyValue` /
+  `llDeleteKeyValue` / `llKeysKeyValue` / `llDataSizeKeyValue` appear in the
+  viewer tree only inside `app_settings/keywords_lsl_default.xml` — the
+  script-editor keyword list — never as cap requests or HTTP calls.
+
+The key-value store is an **in-world LSL surface only**: scripts call those
+functions and the simulator services them against an internal Linden datastore
+over a service-to-service path that is never surfaced to a viewer/client. A
+client cannot read or write it (not even its own experience's store — that too
+is script-only). There is consequently no client wire protocol to implement, so
+this joins the other out-of-scope items below (the asset-byte *decode* /
+rendering / voice-transport family). With this reclassified, **the roadmap's
+client protocol surface is complete: #1–#33 are done and nothing remains
+unbuilt.**
 
 ### Out of scope (not LLUDP/CAPS protocol)
 
@@ -1336,4 +1368,6 @@ the follow-ups above: J2C/JPEG-2000 pixel decode, the glTF 2.0 document decode,
 the mesh model-import (LOD/physics/cost) pipeline, the voice audio media
 transport (SIP/RTP/WebRTC), and an experience's event/asset *byte contents*
 remain out — those are large items an existing crate would own, not protocol
-wiring.
+wiring. The **experience key-value store (#34)** is out for a different reason:
+it has no client capability at all (the viewer never accesses it — see #34's
+entry), so there is no client wire protocol to own.
