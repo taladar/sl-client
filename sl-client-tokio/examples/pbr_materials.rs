@@ -11,7 +11,7 @@
 //! per-face notation documents.
 //!
 //! Run against the local OpenSim or a Second Life region. Configure via the same
-//! environment variables as `login_hold_logout` (`SL_LOGIN_URI`, `SL_FIRST`,
+//! environment variables as `tokio_login_hold_logout` (`SL_LOGIN_URI`, `SL_FIRST`,
 //! `SL_LAST`, `SL_PASSWORD`). Note: stock OpenSim only returns a material over
 //! `RenderMaterials` once a viewer has applied one, so an empty result there
 //! still confirms the cap round-trips.
