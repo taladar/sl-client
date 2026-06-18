@@ -153,6 +153,154 @@ impl Default for Throttle {
     }
 }
 
+/// The agent's camera viewpoint, advertised to the simulator in every
+/// `AgentUpdate`.
+///
+/// The simulator uses the camera position and look direction (together with the
+/// draw distance — see [`Session::set_draw_distance`](crate::Session::set_draw_distance))
+/// to build the agent's **interest list**: which objects, avatars and regions it
+/// streams, and how the per-category bandwidth (the throttle) is spent. So the
+/// camera follows where the agent actually *looks*, not where it stands.
+///
+/// The three axes form a right-handed orthonormal frame in the SL convention
+/// (`at × left = up`): `at_axis` is the forward look direction, `left_axis`
+/// points to the camera's left, and `up_axis` is its up vector. Until a client
+/// sets one with [`Session::set_camera`](crate::Session::set_camera), the
+/// session advertises [`Camera::region_center`] — the historic region-centre
+/// viewpoint looking along +X.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Camera {
+    /// The camera's region-local position (the eye point).
+    pub center: Vector,
+    /// The unit vector the camera looks along (forward / "at").
+    pub at_axis: Vector,
+    /// The camera's unit left vector.
+    pub left_axis: Vector,
+    /// The camera's unit up vector.
+    pub up_axis: Vector,
+}
+
+impl Camera {
+    /// Builds a camera from an explicit position and orthonormal basis. The
+    /// caller is responsible for the axes being unit-length and mutually
+    /// orthogonal in the SL convention (`at × left = up`); use
+    /// [`Camera::looking_at`] to derive them from a target point instead.
+    #[must_use]
+    pub const fn new(center: Vector, at_axis: Vector, left_axis: Vector, up_axis: Vector) -> Self {
+        Self {
+            center,
+            at_axis,
+            left_axis,
+            up_axis,
+        }
+    }
+
+    /// The default camera advertised before any [`Session::set_camera`](crate::Session::set_camera):
+    /// positioned at the centre of a standard 256 m region (128, 128, 30),
+    /// looking along +X with the world-up basis. This is the viewpoint the
+    /// session used unconditionally before camera control existed, so it keeps
+    /// the interest list anchored at the region origin until a real viewpoint is
+    /// supplied.
+    #[must_use]
+    pub const fn region_center() -> Self {
+        Self::new(
+            Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 30.0,
+            },
+            Vector {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Vector {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+        )
+    }
+
+    /// Builds a camera at `eye` looking toward `target`, deriving the
+    /// orthonormal `at`/`left`/`up` basis with the world up vector (+Z), exactly
+    /// as the reference viewer's `LLCoordFrame::lookAt` does
+    /// (`left = up × at`, `up = at × left`).
+    ///
+    /// Degenerate inputs fall back gracefully: if `eye` and `target` coincide the
+    /// camera looks along +X, and if the look direction is vertical (so the
+    /// world-up cross product vanishes) the left axis defaults to +Y.
+    #[must_use]
+    pub fn looking_at(eye: Vector, target: Vector) -> Self {
+        const FORWARD: Vector = Vector {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        const SIDE: Vector = Vector {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        };
+        const WORLD_UP: Vector = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        };
+        let at = normalize(&sub(&target, &eye)).unwrap_or(FORWARD);
+        let left = normalize(&cross(&WORLD_UP, &at)).unwrap_or(SIDE);
+        // `at` and `left` are unit and orthogonal, so their cross product is
+        // already unit-length — no further normalisation needed.
+        let up = cross(&at, &left);
+        Self::new(eye, at, left, up)
+    }
+}
+
+impl Default for Camera {
+    /// [`Camera::region_center`] — the region-centre viewpoint used before any
+    /// explicit camera was set.
+    fn default() -> Self {
+        Self::region_center()
+    }
+}
+
+/// Vector difference `a - b`.
+fn sub(a: &Vector, b: &Vector) -> Vector {
+    Vector {
+        x: a.x - b.x,
+        y: a.y - b.y,
+        z: a.z - b.z,
+    }
+}
+
+/// The cross product `a × b`.
+fn cross(a: &Vector, b: &Vector) -> Vector {
+    Vector {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x,
+    }
+}
+
+/// Normalises `v` to unit length, returning `None` if it is too short to give a
+/// stable direction (so callers can substitute a sensible default axis).
+fn normalize(v: &Vector) -> Option<Vector> {
+    let length = (v.x * v.x + v.y * v.y + v.z * v.z).sqrt();
+    if length < 1e-6 {
+        return None;
+    }
+    Some(Vector {
+        x: v.x / length,
+        y: v.y / length,
+        z: v.z / length,
+    })
+}
+
 /// A datagram ready to be sent on the wire.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Transmit {
@@ -4847,4 +4995,112 @@ pub struct AvatarAttachment {
     pub id: Uuid,
     /// The attachment point byte (LL's attachment-point enumeration).
     pub attachment_point: u8,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Camera, Vector, cross};
+    use pretty_assertions::assert_eq;
+
+    /// The dot product `a · b`.
+    fn dot(a: &Vector, b: &Vector) -> f32 {
+        a.x * b.x + a.y * b.y + a.z * b.z
+    }
+
+    fn is_unit(v: &Vector) -> bool {
+        (dot(v, v) - 1.0).abs() < 1e-5
+    }
+
+    fn approx_eq(a: &Vector, b: &Vector) -> bool {
+        (a.x - b.x).abs() < 1e-5 && (a.y - b.y).abs() < 1e-5 && (a.z - b.z).abs() < 1e-5
+    }
+
+    #[test]
+    fn looking_at_builds_right_handed_orthonormal_basis() {
+        // An oblique look direction so all three axes are non-trivial.
+        let eye = Vector {
+            x: 10.0,
+            y: 20.0,
+            z: 5.0,
+        };
+        let target = Vector {
+            x: 13.0,
+            y: 24.0,
+            z: 7.0,
+        };
+        let camera = Camera::looking_at(eye.clone(), target);
+        // The eye point is kept verbatim.
+        assert_eq!(camera.center, eye);
+        // All three axes are unit length.
+        assert!(is_unit(&camera.at_axis));
+        assert!(is_unit(&camera.left_axis));
+        assert!(is_unit(&camera.up_axis));
+        // They are mutually orthogonal.
+        assert!(dot(&camera.at_axis, &camera.left_axis).abs() < 1e-5);
+        assert!(dot(&camera.at_axis, &camera.up_axis).abs() < 1e-5);
+        assert!(dot(&camera.left_axis, &camera.up_axis).abs() < 1e-5);
+        // Right-handed in the SL convention: at × left = up.
+        assert!(approx_eq(
+            &cross(&camera.at_axis, &camera.left_axis),
+            &camera.up_axis
+        ));
+    }
+
+    #[test]
+    fn looking_straight_down_falls_back_gracefully() {
+        // A vertical look direction makes `world_up × at` vanish; the left axis
+        // must still come out unit-length (the +Y fallback) and the basis stay
+        // orthonormal rather than producing NaNs.
+        let eye = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 10.0,
+        };
+        let target = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let camera = Camera::looking_at(eye, target);
+        assert!(is_unit(&camera.at_axis));
+        assert!(is_unit(&camera.left_axis));
+        assert!(is_unit(&camera.up_axis));
+        // Looking straight down: at = -Z.
+        assert!(approx_eq(
+            &camera.at_axis,
+            &Vector {
+                x: 0.0,
+                y: 0.0,
+                z: -1.0,
+            }
+        ));
+    }
+
+    #[test]
+    fn region_center_is_the_legacy_default() {
+        // The default camera matches the historic hardcoded viewpoint: region
+        // centre, looking along +X with the world-up basis.
+        let camera = Camera::default();
+        assert_eq!(camera, Camera::region_center());
+        assert_eq!(
+            camera.center,
+            Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 30.0,
+            }
+        );
+        // Equivalent to looking from the centre toward +X.
+        let looked = Camera::looking_at(
+            camera.center.clone(),
+            Vector {
+                x: 129.0,
+                y: 128.0,
+                z: 30.0,
+            },
+        );
+        assert!(approx_eq(&looked.at_axis, &camera.at_axis));
+        assert!(approx_eq(&looked.left_axis, &camera.left_axis));
+        assert!(approx_eq(&looked.up_axis, &camera.up_axis));
+    }
 }

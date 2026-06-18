@@ -12,8 +12,8 @@
 use std::time::Duration;
 
 use sl_client_tokio::{
-    Client, Command, DisconnectReason, Error, Event, LoginParams, LoginRequest, Throttle, Uuid,
-    avatar_texture, pcode,
+    Camera, Client, Command, DisconnectReason, Error, Event, LoginParams, LoginRequest, Throttle,
+    Uuid, Vector, avatar_texture, pcode,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -94,6 +94,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .send(Command::SetThrottle(Throttle::preset_1000()))
                     .await
                     .ok();
+                // Point the camera at a real viewpoint (looking from above the
+                // region centre toward the north-east ground) so the simulator's
+                // interest list follows where the agent looks rather than the
+                // region origin. Re-sent on every keep-alive and region change.
+                let camera = Camera::looking_at(
+                    Vector {
+                        x: 128.0,
+                        y: 128.0,
+                        z: 40.0,
+                    },
+                    Vector {
+                        x: 160.0,
+                        y: 160.0,
+                        z: 20.0,
+                    },
+                );
+                info!(
+                    "setting camera: at={:?} left={:?} up={:?}",
+                    camera.at_axis, camera.left_axis, camera.up_axis
+                );
+                command_tx.send(Command::SetCamera(camera)).await.ok();
                 // Ask the simulator for the agent's current outfit; the reply
                 // arrives as an `Event::AgentWearables`.
                 command_tx.send(Command::RequestWearables).await.ok();

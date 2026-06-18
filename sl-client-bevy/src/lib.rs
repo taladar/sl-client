@@ -48,7 +48,7 @@ use sl_proto::{
 // Bevy's `Event` derive.
 pub use sl_proto::{
     ActiveGroup, AnyMessage, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick,
-    AvatarProperties, ChatAudible, ChatMessage, ChatSourceType, ChatType, ClassifiedInfo,
+    AvatarProperties, Camera, ChatAudible, ChatMessage, ChatSourceType, ChatType, ClassifiedInfo,
     ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, DeRezDestination,
     DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, ExperienceInfo,
     ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData,
@@ -165,6 +165,10 @@ pub enum SlCommand {
         /// The head rotation.
         head: Rotation,
     },
+    /// Set the agent's camera viewpoint (position and look axes); the simulator
+    /// uses it to build the interest list, so the streamed scene follows where
+    /// the agent looks. Build one with [`Camera::looking_at`] or directly.
+    SetCamera(Camera),
     /// Stand the agent up (from sitting).
     Stand,
     /// Sit the agent on the ground where it stands.
@@ -1665,6 +1669,9 @@ fn advance_running(
             }
             SlCommand::SetRotation { body, head } => {
                 session.set_rotation(body.clone(), head.clone(), now).ok();
+            }
+            SlCommand::SetCamera(camera) => {
+                session.set_camera(camera.clone(), now).ok();
             }
             SlCommand::Stand => {
                 session.stand(now).ok();
