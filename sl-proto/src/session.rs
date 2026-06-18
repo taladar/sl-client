@@ -5387,6 +5387,11 @@ impl Session {
                 self.events.push_back(Event::AvatarAnimation {
                     avatar_id: animation.sender.id,
                     animations: avatar_animations(animation),
+                    physical_events: animation
+                        .physical_avatar_event_list
+                        .iter()
+                        .map(|block| block.type_data.clone())
+                        .collect(),
                 });
             }
             // A one-shot spatial sound played at a fixed region-local position

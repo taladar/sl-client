@@ -1118,6 +1118,13 @@ pub enum Event {
         avatar_id: Uuid,
         /// The animations that avatar is currently playing.
         animations: Vec<PlayingAnimation>,
+        /// The raw `PhysicalAvatarEventList` blocks — one opaque `TypeData`
+        /// byte blob per block. These carry physics/ragdoll events; neither
+        /// the reference viewer's `process_avatar_animation` nor OpenSim
+        /// assigns the payload any documented structure (the viewer ignores
+        /// the block and OpenSim never populates it), so the bytes are
+        /// surfaced verbatim rather than decoded. Almost always empty.
+        physical_events: Vec<Vec<u8>>,
     },
     /// A one-shot spatial sound the simulator wants played at a fixed location
     /// (`SoundTrigger` — e.g. a scripted `llTriggerSound`, a collision sound, or
