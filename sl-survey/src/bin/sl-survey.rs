@@ -663,7 +663,10 @@ impl Survey {
             | Event::ExperienceAdminStatus { .. }
             | Event::ExperienceContributorStatus { .. }
             | Event::ExperienceUpdated(_)
-            | Event::RegionExperiences { .. } => {}
+            | Event::RegionExperiences { .. }
+            | Event::ConferenceSessionMessage { .. }
+            | Event::ConferenceSessionParticipant { .. }
+            | Event::ConferenceInvited { .. } => {}
         }
         Ok(false)
     }

@@ -516,6 +516,45 @@ pub enum Event {
         /// `true` when the participant joined, `false` when they left.
         joined: bool,
     },
+    /// A message was received in an ad-hoc conference IM session (an
+    /// `ImprovedInstantMessage` with the `IM_SESSION_SEND` dialog and
+    /// `from_group` clear). The session id distinguishes a conference from a
+    /// group session ([`Event::GroupSessionMessage`], where `from_group` is set).
+    ConferenceSessionMessage {
+        /// The conference's IM session id.
+        session_id: Uuid,
+        /// The sender's agent id.
+        from_agent_id: Uuid,
+        /// The sender's display name.
+        from_name: String,
+        /// The message text.
+        message: String,
+    },
+    /// A participant joined or left an ad-hoc conference IM session (an
+    /// `ImprovedInstantMessage` with the `IM_SESSION_INVITE`/`SessionAdd` or
+    /// `IM_SESSION_LEAVE` dialog and `from_group` clear).
+    ConferenceSessionParticipant {
+        /// The conference's IM session id.
+        session_id: Uuid,
+        /// The participant's agent id.
+        agent_id: Uuid,
+        /// `true` when the participant joined, `false` when they left.
+        joined: bool,
+    },
+    /// The agent was invited to an ad-hoc conference / group IM session, delivered
+    /// over the CAPS event queue as a `ChatterBoxInvitation` (the modern path).
+    /// Join by sending into the session
+    /// ([`Session::send_conference_message`](crate::Session::send_conference_message)).
+    ConferenceInvited {
+        /// The IM session id to join.
+        session_id: Uuid,
+        /// The inviting agent's id.
+        from_agent_id: Uuid,
+        /// The inviting agent's display name.
+        from_name: String,
+        /// The accompanying message text.
+        message: String,
+    },
     /// The result of a [`Session::create_group`](crate::Session::create_group)
     /// (`CreateGroupReply`).
     CreateGroupResult {
@@ -2940,6 +2979,51 @@ pub struct InstantMessage {
     pub binary_bucket: Vec<u8>,
 }
 
+impl InstantMessage {
+    /// Decodes the inventory-offer descriptor from this message's binary bucket,
+    /// for an [`ImDialog::InventoryOffered`] or [`ImDialog::TaskInventoryOffered`]
+    /// message. The bucket is `[asset-type byte] ++ [16-byte item/folder id]`
+    /// (a folder offer leads with [`AssetType::Folder`]); only the first entry is
+    /// returned. Returns `None` for any other dialog or a malformed bucket.
+    #[must_use]
+    pub fn inventory_offer(&self) -> Option<InventoryOffer> {
+        if !matches!(
+            self.dialog,
+            ImDialog::InventoryOffered | ImDialog::TaskInventoryOffered
+        ) {
+            return None;
+        }
+        let type_byte = *self.binary_bucket.first()?;
+        let id_bytes: [u8; 16] = self.binary_bucket.get(1..17)?.try_into().ok()?;
+        Some(InventoryOffer {
+            asset_type: AssetType::from_code(i32::from(type_byte)),
+            item_id: Uuid::from_bytes(id_bytes),
+            transaction_id: self.id,
+            from_agent_id: self.from_agent_id,
+            from_task: matches!(self.dialog, ImDialog::TaskInventoryOffered),
+        })
+    }
+}
+
+/// An inventory offer received over IM, decoded from the binary bucket of an
+/// [`ImDialog::InventoryOffered`] / [`ImDialog::TaskInventoryOffered`]
+/// [`InstantMessage`] (see [`InstantMessage::inventory_offer`]). Reply with
+/// [`Session::accept_inventory_offer`](crate::Session::accept_inventory_offer)
+/// or [`Session::decline_inventory_offer`](crate::Session::decline_inventory_offer).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InventoryOffer {
+    /// The offered asset's class ([`AssetType::Folder`] for a whole folder).
+    pub asset_type: AssetType,
+    /// The offered item's (or folder's) id.
+    pub item_id: Uuid,
+    /// The offer's transaction id (the IM's `id`), echoed back when replying.
+    pub transaction_id: Uuid,
+    /// The agent (or, for a task offer, the object owner) that made the offer.
+    pub from_agent_id: Uuid,
+    /// Whether the offer came from an in-world object/task rather than an agent.
+    pub from_task: bool,
+}
+
 /// An avatar's profile properties, parsed from `AvatarPropertiesReply`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AvatarProperties {
@@ -3597,6 +3681,9 @@ pub enum AssetType {
     Gltf,
     /// A glTF binary buffer (`AT_GLTF_BIN`).
     GltfBin,
+    /// An inventory folder / category (`AT_CATEGORY`), used as the leading
+    /// byte of an inventory-offer binary bucket when a whole folder is offered.
+    Folder,
     /// Any other / unrecognised asset class, carrying the raw `AT_*` code.
     Other(i32),
 }
@@ -3628,6 +3715,7 @@ impl AssetType {
             Self::Material => 57,
             Self::Gltf => 58,
             Self::GltfBin => 59,
+            Self::Folder => 8,
             Self::Other(code) => code,
         }
     }
@@ -3658,6 +3746,7 @@ impl AssetType {
             57 => Self::Material,
             58 => Self::Gltf,
             59 => Self::GltfBin,
+            8 => Self::Folder,
             other => Self::Other(other),
         }
     }
@@ -3689,7 +3778,7 @@ impl AssetType {
             // Second Life serves materials over the `ViewerAsset` cap by
             // `material_id`; the legacy `RenderMaterials` cap is the OpenSim path.
             Self::Material => Some("material_id"),
-            Self::Gltf | Self::GltfBin | Self::Other(_) => None,
+            Self::Gltf | Self::GltfBin | Self::Folder | Self::Other(_) => None,
         }
     }
 
@@ -3721,7 +3810,7 @@ impl AssetType {
             Self::Material => Some("material"),
             Self::Gltf => Some("gltf"),
             Self::GltfBin => Some("glbin"),
-            Self::Other(_) => None,
+            Self::Folder | Self::Other(_) => None,
         }
     }
 

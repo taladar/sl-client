@@ -55,7 +55,7 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 25 ✅ | PBR materials / GLTF | 8 | Modern materials in a renderer | **Recent SL grid; OpenSim varies** |
 | 26 ✅ | Voice chat **(signalling)** | 13 | Voice-enabled client | **SL Vivox/WebRTC or FreeSWITCH** |
 | 27 ✅ | Experiences | 5 | Experience-permission client | **SL grid only** |
-| 28 | Complete the IM surface | 8 | Offer-handler / IM bot (full) | Local OpenSim (2 accts) |
+| 28 ✅ | Complete the IM surface | 8 | Offer-handler / IM bot (full) | Local OpenSim (2 accts) |
 | 29 | Profile & pick/classified editing | 5 | Profile editor | Local OpenSim (profiles) |
 | 30 | Inventory mutation & AIS3 | 8 | Inventory manager, product bot | Local OpenSim |
 | 31 | Group management edits | 5 | Group admin bot | Local OpenSim (Groups V2) |
@@ -63,7 +63,8 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 33 | World-stream decode & LOD fetch | 5 | *(faithfulness for 16/19)* | Local OpenSim |
 | 34 | Experience key-value store | 3 | Experience datastore client | **SL grid only** |
 
-**Items #28–#34 are not yet built.** They are the **deferred follow-ups** that
+**Items #29–#34 are not yet built** (#28 is now done). They are the **deferred
+follow-ups** that
 items #1–#27 knowingly left for later (the "Deferred:" / "follow-up" /
 "waits on #…" / "unit-tested only" notes in those entries), now promoted to
 first-class roadmap items so the gap analysis stays complete. Each is grouped
@@ -1025,25 +1026,54 @@ down" ordering of #1–#27 does not apply to them. Out-of-scope large items
 (J2C/glTF/mesh *decode*, rendering, the voice audio transport, experience
 asset-byte contents) are deliberately **excluded** — see the closing note.
 
-**28. Complete the IM surface — `ImprovedInstantMessage` offer/session flows,
-`RetrieveInstantMessages`, `ReadOfflineMsgs` CAPS · 8 pts. (extends #2, Tier
-A.)** Item #2 implemented 1:1 IM send/receive and surfaced every inbound
-`ImDialog` sub-type, but several reply/send flows were deferred; this finishes
-them. Will add: **offer reply flows** — accept/decline a **teleport** offer/lure
-(the `TeleportLureRequest` / lure-accept handshake) and accept/decline an
-**inventory** offer received over IM (`IM_INVENTORY_OFFERED`, replying with the
-accepted/declined dialog so the sim files the offered item into the target
-folder or drops it); **give inventory** — an outgoing inventory-offer helper
-(`IM_INVENTORY_OFFERED` send with the binary-bucket asset/folder reference, the
-counterpart to #5's inventory and #30's mutation); **conference / ad-hoc
-multi-party sessions** — start/invite/leave a non-group conference
-(`IM_SESSION_CONFERENCE_START` and the ad-hoc session dialogs), the sibling of
-item #7's group sessions over the same IM multiplexing; and **offline-IM
-history** — the legacy `RetrieveInstantMessages` UDP trigger plus the modern SL
-`ReadOfflineMsgs` CAPS path. New `Command`/`SlCommand` variants + `Event`s
-through both runtimes. *Test: local OpenSim — two accounts for the
-offer/conference round-trips; the grid's offline-IM module plus an
-offline-then-relogin test for history.*
+**28. Complete the IM surface (done) ✅ — `ImprovedInstantMessage` offer/session
+flows, `StartLure`/`TeleportLureRequest`, `RetrieveInstantMessages`,
+`ReadOfflineMsgs` CAPS · 8 pts. (extends #2, Tier A.)** Item #2 implemented 1:1
+IM send/receive and surfaced every inbound `ImDialog` sub-type, but several
+reply/send flows were deferred; this finishes them. Implemented:
+**teleport offer/lure** — `offer_teleport` (`StartLure`), `accept_teleport_lure`
+(`TeleportLureRequest` with `TELEPORT_FLAGS_VIA_LURE`, driving the existing
+teleport handover; the lure id's encoded region handle is parsed via OpenSim's
+`BuildFakeParcelID` layout), `decline_teleport_lure` (`IM_LURE_DECLINED`), and
+`request_teleport` (`IM_TELEPORT_REQUEST`). **Inventory offers** —
+`give_inventory` / `give_inventory_folder` (`IM_INVENTORY_OFFERED` with the
+`[asset-type byte] ++ [16-byte id]` binary bucket, a new `AssetType::Folder`
+leading a folder offer), and `accept_inventory_offer` /
+`decline_inventory_offer` (`IM_INVENTORY_ACCEPTED` / `_DECLINED`, the bucket
+carrying the destination / trash folder id). Incoming offers decode via a new
+`InstantMessage::inventory_offer` → `InventoryOffer` value type (asset type,
+item id, transaction id, sender, task-vs-agent).
+**Conference / ad-hoc sessions** — `start_conference`
+(`IM_SESSION_CONFERENCE_START`, invitee ids packed in the bucket; call again to
+add invitees), `send_conference_message` (`IM_SESSION_SEND`), `leave_conference`
+(`IM_SESSION_LEAVE`), with incoming traffic surfaced as
+`Event::Conference{SessionMessage,SessionParticipant,Invited}` (the
+`from_group`-clear siblings of #7's group-session events; the modern CAPS
+`ChatterBoxInvitation` is decoded too). **Offline-IM history** — the legacy
+`retrieve_instant_messages` (`RetrieveInstantMessages` UDP, replies re-delivered
+as offline `Event::InstantMessageReceived`) plus the modern `ReadOfflineMsgs`
+capability (added to the seed; GET decoded by `handle_caps_event` into one
+offline `Event::InstantMessageReceived` per stored record). All wired as
+`Command`/`SlCommand` variants through both runtimes. Field values and the
+binary-bucket layouts were cross-checked against the Firestorm viewer
+(`llgiveinventory.cpp`, `llviewermessage.cpp`, `llavataractions.cpp`,
+`llimview.cpp`, `llteleportflags.h`) and OpenSim's `LureModule` /
+`InventoryTransferModule` / `OfflineMessageModule`. Covered by thirteen
+`lifecycle.rs` tests (the lure offer/accept/decline encodings, give-item and
+give-folder buckets, the inventory-offer decode + accept/decline round-trip, the
+conference start/send/leave encodings and inbound decode, the
+`RetrieveInstantMessages` trigger, the `ReadOfflineMsgs` array decode, and the
+`ChatterBoxInvitation` decode). *Live-verified against the local OpenSim with
+two accounts (Avatar Tester + Friend Tester): A offered B a teleport (B received
+the `LureUser` IM and declined), and A gave B a worn body-part item — B received
+the `InventoryOffered` IM (OpenSim having rewritten the session id to the copy
+id, as the viewer expects), accepted it into B's inventory root, and the
+`InventoryAccepted` reply round-tripped back to A. The offline-IM and conference
+caps are SL-shaped (stock OpenSim's `InstantMessageModule` handles only 1:1 IMs,
+and `ReadOfflineMsgs` is absent), so those are unit-tested only and the commands
+no-op cleanly on OpenSim. Test: local OpenSim — two accounts for the offer
+round-trips; the grid's offline-IM module plus an offline-then-relogin test for
+UDP history.*
 
 **29. Profile & pick/classified editing — `AvatarPropertiesUpdate`,
 pick/classified create-update-delete, `PickInfoRequest`/`ClassifiedInfoRequest`

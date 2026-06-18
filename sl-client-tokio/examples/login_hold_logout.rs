@@ -206,6 +206,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::GroupSessionMessage {
                 from_name, message, ..
             } => info!("group chat from {from_name}: {message}"),
+            Event::ConferenceSessionMessage {
+                from_name, message, ..
+            } => info!("conference chat from {from_name}: {message}"),
+            Event::ConferenceSessionParticipant {
+                agent_id, joined, ..
+            } => info!(
+                "conference participant {agent_id} {}",
+                if joined { "joined" } else { "left" }
+            ),
+            Event::ConferenceInvited {
+                from_name, message, ..
+            } => info!("conference invitation from {from_name}: {message}"),
             Event::ScriptDialog(dialog) => info!(
                 "script dialog from {:?}: {:?} [{}]",
                 dialog.object_name,
