@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::prelude::*;
 use sl_client_bevy::{
-    LoginParams, LoginRequest, SessionDisconnectReason, SlClientPlugin, SlCommand, SlEvent,
-    SlSessionEvent,
+    Command, LoginParams, LoginRequest, SessionDisconnectReason, SlClientPlugin, SlCommand,
+    SlEvent, SlSessionEvent,
 };
 use tracing::{info, warn};
 
@@ -315,7 +315,7 @@ fn maybe_logout(mut hold: ResMut<HoldState>, mut commands: EventWriter<SlCommand
         && Instant::now() >= deadline
     {
         info!("hold elapsed; requesting logout");
-        commands.write(SlCommand::Logout);
+        commands.write(SlCommand(Command::Logout));
         hold.requested = true;
     }
 }

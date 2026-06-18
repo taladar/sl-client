@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 mod appearance;
+mod command;
 mod error;
 mod extra_params;
 pub mod j2c;
@@ -10,6 +11,7 @@ mod terrain;
 mod types;
 
 pub use appearance::{MAX_FACES, decode_texture_entry};
+pub use command::Command;
 pub use error::Error;
 pub use particles::{decode_particle_system, decode_texture_anim};
 pub use session::{
@@ -24,7 +26,7 @@ pub use session::{
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_GESTURE_AGENT_INVENTORY,
     CAP_UPDATE_MATERIAL_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
     CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPLOAD_BAKED_TEXTURE,
-    CAP_VOICE_SIGNALING, REQUESTED_CAPABILITIES, Session,
+    CAP_VOICE_SIGNALING, RECV_BUFFER_SIZE, REQUESTED_CAPABILITIES, Session,
 };
 pub use types::{
     ActiveGroup, AlertInfo, Asset, AssetType, AvatarAppearance, AvatarAttachment, AvatarClassified,

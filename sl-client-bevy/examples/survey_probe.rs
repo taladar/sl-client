@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::prelude::*;
 use sl_client_bevy::{
-    LoginParams, LoginRequest, SessionDisconnectReason, SlClientPlugin, SlCommand, SlEvent,
-    SlSessionEvent,
+    Command, LoginParams, LoginRequest, SessionDisconnectReason, SlClientPlugin, SlCommand,
+    SlEvent, SlSessionEvent,
 };
 use tracing::{info, warn};
 
@@ -92,21 +92,21 @@ fn on_events(
                 // Draw distance, then the three survey requests. The parcel
                 // query covers the whole 256m region so at least one parcel
                 // overlaps it.
-                commands.write(SlCommand::SetDrawDistance(128.0));
-                commands.write(SlCommand::RequestRegionInfo);
-                commands.write(SlCommand::RequestParcelProperties {
+                commands.write(SlCommand(Command::SetDrawDistance(128.0)));
+                commands.write(SlCommand(Command::RequestRegionInfo));
+                commands.write(SlCommand(Command::RequestParcelProperties {
                     west: 0.0,
                     south: 0.0,
                     east: 256.0,
                     north: 256.0,
                     sequence_id: 1,
-                });
-                commands.write(SlCommand::RequestMapBlocks {
+                }));
+                commands.write(SlCommand(Command::RequestMapBlocks {
                     min_x: 999,
                     max_x: 1001,
                     min_y: 999,
                     max_y: 1001,
-                });
+                }));
             }
             SlSessionEvent::RegionInfoHandshake(identity) => {
                 info!("region info handshake: {identity:?}");
@@ -260,7 +260,7 @@ fn maybe_logout(mut state: ResMut<ProbeState>, mut commands: EventWriter<SlComma
         && Instant::now() >= deadline
     {
         info!("collection window elapsed; requesting logout");
-        commands.write(SlCommand::Logout);
+        commands.write(SlCommand(Command::Logout));
         state.requested = true;
     }
 }
