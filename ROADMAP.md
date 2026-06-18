@@ -1393,7 +1393,7 @@ blob items, writing a structured decoder). "Test" notes whether the local
 | 38 | `AvatarSitResponse` complete `SitTransform` | 1 | Sit rotation, sit-camera eye/at offsets, force-mouselook | Local OpenSim |
 | 39 ✅ | `RegionInfo`/`RegionHandshake` extended fields | 3 | Region owner, estate-manager flag, water height, terrain limits, 64-bit flags, chat/combat blocks | Local OpenSim |
 | 40 ✅ | `AvatarAnimation` physical-event list | 1 | `PhysicalAvatarEventList` (physics/ragdoll) block | Local OpenSim |
-| 41 | Asset-transfer success event + size | 2 | A success event for `TransferInfo` carrying declared `Size` | Local OpenSim |
+| 41 ✅ | Asset-transfer success event + size | 2 | A success event for `TransferInfo` carrying declared `Size` | Local OpenSim |
 | 42 | Group-reply pagination totals | 1 | `RoleCount` / `TotalPairs` so a client knows a set is complete | Local OpenSim (Groups V2) |
 | 43 | `MoneyBalanceReply` transaction id | 1 | `TransactionID` to correlate a balance reply to its pay/buy | Money module or SL |
 | 44 | Inventory push fidelity | 2 | All `UpdateCreateInventoryItem` entries; per-item bulk `CallbackID` | Local OpenSim |
@@ -1582,11 +1582,26 @@ OpenSim sends an empty `PhysicalAvatarEventList`, so the field is empty as
 designed, confirming the path decodes end-to-end with no protocol error. Test:
 local OpenSim.*
 
-**41. Asset-transfer success event + declared size (extends #19, Tier C).** The
-`TransferInfo` handler (`session.rs` ~5311) emits an event only on the *failure*
-path; a successful transfer produces nothing, so `Size` (the total asset byte
-size, useful for progress / preallocation) and `Params` are lost. Add a
-transfer-started/success event carrying `Size`. *Test: local OpenSim.*
+**41. Asset-transfer success event + declared size (extends #19, Tier C). ✅
+Done.** The `TransferInfo` handler (`session.rs`) emitted an event only on the
+*failure* path; a successful transfer produced nothing, so `Size` (the total
+asset byte size, useful for progress / preallocation) was lost. Added a new
+**`Event::AssetTransferStarted { asset_id, asset_type, size }`** emitted on the
+success path (status `LLTS_OK`/`LLTS_DONE`) — looking the in-flight transfer up
+*without* removing it (the bytes still follow as `TransferPacket`s, reassembled
+into the existing `Event::AssetReceived`); the failure path is unchanged
+(`AssetTransferFailed`, which removes the transfer). `size` is surfaced as the
+wire's `i32` (the simulator may send `0` when it does not know the size up
+front). Re-exported through both runtimes via the shared `Event` type; the
+`asset_fetch` tokio example logs the started event. Covered by the extended
+`request_asset_reassembles_transfer_packets` `sl-proto` lifecycle test (asserts
+the `AssetTransferStarted { sound, Sound, 6 }` fires on the `TransferInfo`
+before the packets, then the `AssetReceived` reassembly). *Live-verified against
+the local OpenSim via the `asset_fetch` example (`SL_ASSET_ID` = the default
+sound `ed12…`): the UDP `TransferRequest` path surfaced `AssetTransferStarted …
+(Sound, declared 9431 bytes)` immediately before `AssetReceived … (Sound, 9431
+bytes)` — the declared size matching the reassembled asset exactly. Test: local
+OpenSim.*
 
 **42. Group-reply pagination totals (extends #7, Tier A).**
 `GroupRoleDataReply` (`session.rs` ~5519) drops the `RoleCount` header and

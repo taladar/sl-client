@@ -5309,9 +5309,18 @@ impl Session {
                 // (e.g. the asset is missing or denied) means no data follows.
                 let transfer_id = info.transfer_info.transfer_id;
                 let status = TransferStatus::from_code(info.transfer_info.status);
-                if !matches!(status, TransferStatus::Ok | TransferStatus::Done)
-                    && let Some(transfer) = self.asset_transfers.remove(&transfer_id)
-                {
+                if matches!(status, TransferStatus::Ok | TransferStatus::Done) {
+                    // Success: the asset exists and its bytes follow as
+                    // `TransferPacket`s. Surface the declared total size so a
+                    // caller can show progress / preallocate before they arrive.
+                    if let Some(transfer) = self.asset_transfers.get(&transfer_id) {
+                        self.events.push_back(Event::AssetTransferStarted {
+                            asset_id: transfer.asset_id,
+                            asset_type: transfer.asset_type,
+                            size: info.transfer_info.size,
+                        });
+                    }
+                } else if let Some(transfer) = self.asset_transfers.remove(&transfer_id) {
                     self.events.push_back(Event::AssetTransferFailed {
                         asset_id: transfer.asset_id,
                         asset_type: transfer.asset_type,

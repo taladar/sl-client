@@ -156,6 +156,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
             Event::TextureNotFound(id) => warn!("TextureNotFound {id}"),
+            Event::AssetTransferStarted {
+                asset_id,
+                asset_type,
+                size,
+            } => {
+                info!("AssetTransferStarted {asset_id} ({asset_type:?}, declared {size} bytes)");
+            }
             Event::AssetReceived(asset) => {
                 info!(
                     "AssetReceived {} ({:?}, {} bytes)",

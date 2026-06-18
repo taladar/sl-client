@@ -249,6 +249,7 @@ fn on_events(
             | SlSessionEvent::TextureReceived(_)
             | SlSessionEvent::TextureNotFound(_)
             | SlSessionEvent::AssetReceived(_)
+            | SlSessionEvent::AssetTransferStarted { .. }
             | SlSessionEvent::AssetTransferFailed { .. }
             | SlSessionEvent::AssetUploadComplete { .. }
             | SlSessionEvent::AssetUploaded { .. }
