@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 
+use sl_types::attachment::AttachmentPoint;
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::{
@@ -1361,7 +1362,11 @@ pub struct Object {
     pub parent_id: u32,
     /// The object class (see the [`pcode`] constants).
     pub pcode: u8,
-    /// The object/attachment state byte (e.g. attachment point for attachments).
+    /// The raw object `state` byte, passed through verbatim. Its meaning
+    /// depends on [`pcode`](Self::pcode): for a tree/grass it is the species,
+    /// and for an *attachment* (a non-zero-state prim) it holds the
+    /// attachment-point id with its nibbles swapped — read it via
+    /// [`attachment_point`](Self::attachment_point), not directly.
     pub state: u8,
     /// The simulator's per-object CRC (used for object-cache validation).
     pub crc: u32,
@@ -1444,7 +1449,65 @@ pub struct Object {
     pub joint_axis_or_anchor: Vector,
 }
 
+/// The `ATTACHMENT_ADD` flag the simulator may OR into a freshly un-swizzled
+/// attachment id to mark an "add" (rather than "replace") attach. It is not
+/// part of the attachment point itself and is stripped before the point is
+/// returned. Mirrors the reference viewer's `ATTACHMENT_ADD` constant.
+const ATTACHMENT_ADD: u8 = 0x80;
+
+/// Reverse the simulator's attachment-point nibble-swap on an object `state`
+/// byte and strip the [`ATTACHMENT_ADD`] flag, yielding the plain attachment
+/// point. For an attachment the point id is hidden in `state` with its upper
+/// and lower nibbles swapped (kept for backward compatibility with old objects
+/// that used only the upper nibble); this mirrors the reference viewer's
+/// `ATTACHMENT_ID_FROM_STATE` macro.
+const fn attachment_point_from_state(state: u8) -> u8 {
+    (((state & 0xf0) >> 4) | ((state & 0x0f) << 4)) & !ATTACHMENT_ADD
+}
+
 impl Object {
+    /// The raw, un-swizzled attachment-point id this object is worn on, or
+    /// `None` if it is not an attachment.
+    ///
+    /// For an attachment the simulator hides the attachment-point id inside the
+    /// raw [`state`](Self::state) byte with its upper and lower nibbles swapped
+    /// (kept for backward compatibility with very old objects that used only the
+    /// upper nibble), so reading `state` directly yields the wrong number. This
+    /// accessor reverses the swap — the reference viewer's
+    /// `ATTACHMENT_ID_FROM_STATE` — and strips the transient `ATTACHMENT_ADD`
+    /// (`0x80`) bit, returning the plain attachment-point id (e.g. `1` = chest,
+    /// `6` = right hand, `35` = HUD center 1).
+    ///
+    /// Returns `None` for anything that is not a non-zero-`state` prim: plain
+    /// prims (`state == 0`) and trees/grass (whose `state` byte instead carries
+    /// the species), mirroring the viewer's `LLVOVolume::isAttachment`.
+    ///
+    /// Prefer [`attachment_point`](Self::attachment_point) for a named point;
+    /// this raw form additionally covers any future id the [`AttachmentPoint`]
+    /// enum does not yet name.
+    #[must_use]
+    pub const fn attachment_point_id(&self) -> Option<u8> {
+        if self.pcode == pcode::PRIMITIVE && self.state != 0 {
+            Some(attachment_point_from_state(self.state))
+        } else {
+            None
+        }
+    }
+
+    /// The named attachment point this object is worn on, or `None` if it is not
+    /// an attachment (or is attached to an id the [`AttachmentPoint`] enum does
+    /// not name — see [`attachment_point_id`](Self::attachment_point_id) for the
+    /// raw form).
+    ///
+    /// Decodes the un-swizzled [`attachment_point_id`](Self::attachment_point_id)
+    /// into the shared [`AttachmentPoint`] enum, covering both avatar points
+    /// (e.g. chest, right hand) and HUD points (e.g. top-left, center).
+    #[must_use]
+    pub fn attachment_point(&self) -> Option<AttachmentPoint> {
+        self.attachment_point_id()
+            .and_then(|id| AttachmentPoint::from_repr(usize::from(id)))
+    }
+
     /// The object's [`name_value`](Self::name_value) pairs, parsed from the raw
     /// newline-separated string into structured [`NameValue`] entries (e.g. an
     /// attachment's `AttachItemID`). Empty when the object carries none. Lines
@@ -6147,13 +6210,17 @@ mod tests {
     /// An [`Object`] carrying only the given raw `name_value` string; all other
     /// fields are defaulted to values irrelevant to the parser under test.
     fn object_with_name_value(name_value: &str) -> super::Object {
+        test_object(0, 0, name_value)
+    }
+
+    fn test_object(pcode: u8, state: u8, name_value: &str) -> super::Object {
         super::Object {
             region_handle: 0,
             local_id: 0,
             full_id: super::Uuid::nil(),
             parent_id: 0,
-            pcode: 0,
-            state: 0,
+            pcode,
+            state,
             crc: 0,
             material: 0,
             click_action: 0,
@@ -6278,5 +6345,64 @@ mod tests {
         assert_eq!(second.sendto, "DSV");
         assert_eq!(second.value, "42");
         Ok(())
+    }
+
+    #[test]
+    fn attachment_point_unswizzles_state_nibbles() {
+        use super::AttachmentPoint;
+        use sl_types::attachment::AvatarAttachmentPoint;
+        // The simulator swaps the nibbles of the point id. Right hand (6 = 0x06)
+        // travels the wire as 0x60; chest (1 = 0x01) as 0x10. The accessor must
+        // swap back, both as a raw id and as the named enum variant.
+        for (point, wire) in [
+            (AvatarAttachmentPoint::RightHand, 0x60_u8),
+            (AvatarAttachmentPoint::Chest, 0x10),
+        ] {
+            let object = test_object(super::pcode::PRIMITIVE, wire, "");
+            assert_eq!(
+                object.attachment_point(),
+                Some(AttachmentPoint::Avatar(point))
+            );
+        }
+        // Right hand (6) as the raw id.
+        let hand = test_object(super::pcode::PRIMITIVE, 0x60, "");
+        assert_eq!(hand.attachment_point_id(), Some(6));
+        // The transient ATTACHMENT_ADD (0x80) bit is stripped: un-swizzling
+        // 0x68 gives 0x86, and stripping 0x80 leaves right hand (6).
+        let adding = test_object(super::pcode::PRIMITIVE, 0x68, "");
+        assert_eq!(adding.attachment_point_id(), Some(6));
+        assert_eq!(
+            adding.attachment_point(),
+            Some(AttachmentPoint::Avatar(AvatarAttachmentPoint::RightHand))
+        );
+    }
+
+    #[test]
+    fn attachment_point_decodes_hud_points() {
+        use super::AttachmentPoint;
+        use sl_types::attachment::HudAttachmentPoint;
+        // HUD center 1 (id 35 = 0x23) travels the wire nibble-swapped as 0x32.
+        // The unified AttachmentPoint enum names HUD points, so both accessors
+        // surface it.
+        let hud = test_object(super::pcode::PRIMITIVE, 0x32, "");
+        assert_eq!(hud.attachment_point_id(), Some(35));
+        assert_eq!(
+            hud.attachment_point(),
+            Some(AttachmentPoint::Hud(HudAttachmentPoint::Center))
+        );
+    }
+
+    #[test]
+    fn attachment_point_none_for_non_attachments() {
+        // A plain prim (state 0) is not an attachment.
+        let prim = test_object(super::pcode::PRIMITIVE, 0, "");
+        assert_eq!(prim.attachment_point_id(), None);
+        assert_eq!(prim.attachment_point(), None);
+        // A tree's non-zero state byte is its species, not an attachment point.
+        let tree = test_object(super::pcode::TREE, 3, "");
+        assert_eq!(tree.attachment_point_id(), None);
+        // Grass likewise.
+        let grass = test_object(super::pcode::GRASS, 1, "");
+        assert_eq!(grass.attachment_point_id(), None);
     }
 }

@@ -1403,7 +1403,7 @@ blob items, writing a structured decoder). "Test" notes whether the local
 | 48 ✅ | Login-response extra fields | 2 | `home`, `look_at`, `agent_access[_max]`, `max-agent-groups`, Library inventory roots | Local OpenSim |
 | 49 ✅ | `TeleportFinish` (CAPS) maturity & flags | 1 | Destination `SimAccess` (maturity), `TeleportFlags` (cause) | SL grid |
 | 50 ✅ | Minor dropped-field batch | 3 | `TimeDilation`, `AlertInfo`, `MapBlockReply` water height, joint fields, collision plane, `Options.Flags`, NameValue/bump-shiny accessors | Local OpenSim |
-| 51 | Attachment-point `state` un-swizzle helper | 1 | Correct attachment point from the swizzled `state` byte | Local OpenSim |
+| 51 ✅ | Attachment-point `state` un-swizzle helper | 1 | Correct attachment point from the swizzled `state` byte | Local OpenSim |
 
 ### Critical — large structural losses
 
@@ -1857,15 +1857,44 @@ and its `name_value` pairs parsed into `FirstName`/`LastName`/`Title` entries.*
 
 ### Interpretation trap (not loss — but a correctness footgun)
 
-**51. Attachment-point `state` un-swizzle helper (extends #16, Tier C).** The
-object `state` byte is passed through verbatim (no data loss), but for an
-*attachment* OpenSim/SL send a **swizzled** attachment-point value
+**51. Attachment-point `state` un-swizzle helper (extends #16, Tier C). ✅
+Done.** The object `state` byte is passed through verbatim (no data loss), but
+for an *attachment* OpenSim/SL send a **swizzled** attachment-point value
 (`((st & 0xf0) >> 4) + ((st & 0x0f) << 4)`, OpenSim `LLClientView.cs`
-~6841/7454) in that same byte. A consumer reading `Object::state` as the
-attachment point gets the wrong value unless it un-swizzles. Add a documented
-accessor (e.g. `Object::attachment_point()`) that returns the un-swizzled point
-for attachments, and a doc note on the raw field.
-*Test: local OpenSim (rez/attach an object).*
+~7208/7454/7730) in that same byte. A consumer reading `Object::state` as the
+attachment point gets the wrong value unless it un-swizzles. Added two
+documented accessors. **`Object::attachment_point_id() -> Option<u8>`** reverses
+the nibble-swap — the reference viewer's `ATTACHMENT_ID_FROM_STATE`
+(`indra_constants.h`, the macro `((st & 0xf0) >> 4) | ((st & 0x0f) << 4)`) — and
+strips the transient `ATTACHMENT_ADD` (`0x80`) bit, returning the plain
+attachment-point id (`1` = chest, `6` = right hand, `35` = HUD center 1).
+**`Object::attachment_point() -> Option<AttachmentPoint>`** decodes that id into
+the shared **`sl_types::attachment::AttachmentPoint`** enum (via its
+`from_repr`, whose discriminants already match the wire ids), giving a named
+point — covering both avatar points (`AttachmentPoint::Avatar`, e.g. chest,
+right hand) and HUD points (`AttachmentPoint::Hud`, e.g. top-left, center) in
+one value. Both return `None` for anything that is not an attachment, mirroring
+the viewer's `LLVOVolume::isAttachment` (`mAttachmentState != 0`): a plain prim
+(`state == 0`) and trees/grass (whose `state` byte instead carries the species,
+so they are excluded by `pcode`). The typed form also returns `None` for any
+id the enum does not yet name — those remain reachable via the lossless
+`attachment_point_id`. The raw
+`Object::state` field now carries a doc note pointing at the accessors and
+explaining the per-`pcode` meanings. Backed by a small
+`const fn attachment_point_from_state` helper and an `ATTACHMENT_ADD` constant;
+available through both runtimes via the re-exported `Object` type with no
+further wiring (`AttachmentPoint` is reached from `sl-types` directly, as #38's
+geometry types are). Covered by three new `types.rs` unit tests
+(`attachment_point_unswizzles_state_nibbles` — chest/right-hand nibble swaps,
+the raw id, and the `ATTACHMENT_ADD`-strip case as both id and enum;
+`attachment_point_decodes_hud_points` — a HUD id surfaces as both the raw id and
+a typed `AttachmentPoint::Hud`; and `attachment_point_none_for_non_attachments`
+— plain prim, tree, grass). *Unit-tested only: the transform is a deterministic
+bit-swizzle cross-checked against both the OpenSim encoder and the viewer
+decoder, operating on the `state` byte that #16/#50 already surface correctly;
+a live exercise would need to attach an inventory object to the avatar (an
+attach flow this headless client does not drive). Test: local OpenSim
+(rez/attach an object).*
 
 ### Out of scope (not LLUDP/CAPS protocol)
 
