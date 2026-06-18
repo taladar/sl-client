@@ -3086,6 +3086,48 @@ impl ParcelAccessScope {
     }
 }
 
+/// The per-entry classification flags (`AL_*`) on one parcel access-list entry.
+///
+/// A bitfield carried by every `List` entry of a `ParcelAccessListReply`
+/// (alongside the whole-list [`ParcelAccessScope`]). On Second Life an entry can
+/// be flagged as an experience allow/block in addition to the plain
+/// access/ban list it belongs to; OpenSim sets the per-entry flags equal to the
+/// list's [`ParcelAccessScope`]. Combine the constants with
+/// [`ParcelAccessFlags::union`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ParcelAccessFlags(pub u32);
+
+impl ParcelAccessFlags {
+    /// No flags set.
+    pub const NONE: Self = Self(0);
+    /// The entry is on the access (allow) list (`AL_ACCESS`, `1 << 0`).
+    pub const ACCESS: Self = Self(1 << 0);
+    /// The entry is on the ban list (`AL_BAN`, `1 << 1`).
+    pub const BAN: Self = Self(1 << 1);
+    /// The entry allows an experience (`AL_ALLOW_EXPERIENCE`, `1 << 3`).
+    pub const ALLOW_EXPERIENCE: Self = Self(1 << 3);
+    /// The entry blocks an experience (`AL_BLOCK_EXPERIENCE`, `1 << 4`).
+    pub const BLOCK_EXPERIENCE: Self = Self(1 << 4);
+
+    /// Combines two sets of access flags.
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    /// Whether every bit of `other` is set in `self`.
+    #[must_use]
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// Whether no flags are set.
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
 /// One entry of a parcel access (allow) or ban list, from an
 /// [`Event::ParcelAccessList`] or supplied to
 /// [`Session::update_parcel_access_list`](crate::Session::update_parcel_access_list).
@@ -3095,6 +3137,12 @@ pub struct ParcelAccessEntry {
     pub id: Uuid,
     /// The Unix expiry time (`time_t`); `0` means the entry never expires.
     pub time: i32,
+    /// The per-entry classification flags (`AL_*`). On a received reply these
+    /// carry the entry's access/ban/experience sub-type; when supplied to
+    /// [`Session::update_parcel_access_list`](crate::Session::update_parcel_access_list)
+    /// they are OR'd onto the list's [`ParcelAccessScope`] (leave
+    /// [`ParcelAccessFlags::NONE`] to send just the scope).
+    pub flags: ParcelAccessFlags,
 }
 
 /// The kinds of objects to return or select on a parcel, as the `ReturnType` of

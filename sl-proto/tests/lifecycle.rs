@@ -15,12 +15,12 @@ mod test {
         GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImageCodec,
         InterestsUpdate, InventoryItem, LandingType, LindenAmount, LoginParams, MapItemType,
         Material, Maturity, MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem,
-        ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
-        ParcelFlags, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-        ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProductType, ProfileUpdate,
-        RegionInfoUpdate, Reliability, SaleType, ScriptPermissions, Session, SoundFlags,
-        TerrainLayerType, Throttle, TransferStatus, Transmit, WearableType, avatar_texture,
-        group_powers, pcode,
+        ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+        ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelMediaCommand, ParcelRequestResult,
+        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, PickUpdate, PrimShape,
+        ProductType, ProfileUpdate, RegionInfoUpdate, Reliability, SaleType, ScriptPermissions,
+        Session, SoundFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, WearableType,
+        avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -5448,6 +5448,8 @@ mod test {
             &[ParcelAccessEntry {
                 id: uuid::Uuid::from_u128(0x55),
                 time: 0,
+                // An experience allow flag must be OR'd onto the scope on the wire.
+                flags: ParcelAccessFlags::ALLOW_EXPERIENCE,
             }],
             now,
         )?;
@@ -5483,7 +5485,8 @@ mod test {
         assert_eq!(upd.data.flags, 0x1);
         let entry = upd.list.first().ok_or("expected one access entry")?;
         assert_eq!(entry.id, uuid::Uuid::from_u128(0x55));
-        assert_eq!(entry.flags, 0x1);
+        // Scope (AL_ACCESS, 0x1) OR'd with the per-entry AL_ALLOW_EXPERIENCE (0x8).
+        assert_eq!(entry.flags, 0x1 | 0x8);
 
         assert!(
             sent.iter()
@@ -5574,7 +5577,8 @@ mod test {
                 ParcelAccessListReplyListBlock {
                     id: uuid::Uuid::from_u128(0x11),
                     time: 1234,
-                    flags: 0x2,
+                    // A banned experience entry: AL_BAN (0x2) | AL_BLOCK_EXPERIENCE (0x10).
+                    flags: 0x2 | 0x10,
                 },
             ],
         });
@@ -5594,9 +5598,16 @@ mod test {
         assert_eq!(local_id, 7);
         assert_eq!(scope, ParcelAccessScope::Ban);
         assert_eq!(entries.len(), 2);
+        let first = entries.first().ok_or("expected a first entry")?;
+        assert_eq!(first.flags, ParcelAccessFlags::BAN);
         let second = entries.get(1).ok_or("expected a second entry")?;
         assert_eq!(second.id, uuid::Uuid::from_u128(0x11));
         assert_eq!(second.time, 1234);
+        assert_eq!(
+            second.flags,
+            ParcelAccessFlags::BAN.union(ParcelAccessFlags::BLOCK_EXPERIENCE)
+        );
+        assert!(second.flags.contains(ParcelAccessFlags::BLOCK_EXPERIENCE));
         Ok(())
     }
 

@@ -1372,8 +1372,8 @@ rendering / voice-transport family). With this reclassified, **the roadmap's
 client protocol *feature* surface is complete: #1–#33 are done.** The only
 remaining open work is the **Tier E decode-fidelity fixes (#35–#51)** — not new
 features, but information-loss gaps where an already-shipped item decodes a wire
-field and then drops it before the caller sees it. (#35–#46 are now
-done; #47–#51 remain.)
+field and then drops it before the caller sees it. (#35–#47 are now
+done; #48–#51 remain.)
 
 ## Tier E — decode-fidelity & information-loss fixes (#35–#51)
 
@@ -1399,7 +1399,7 @@ blob items, writing a structured decoder). "Test" notes whether the local
 | 44 ✅ | Inventory push fidelity | 2 | All `UpdateCreateInventoryItem` entries; per-item bulk `CallbackID` | Local OpenSim |
 | 45 ✅ | `ChatterBoxInvitation` session type & bucket | 2 | `type` + `binary_bucket` (group/session name, session kind) | SL grid |
 | 46 ✅ | Terse-update trailing `TextureEntry` | 2 | Texture/colour change delivered via a terse update | SL grid |
-| 47 | `ParcelAccessListReply` per-entry flags | 1 | The per-entry access-vs-ban `Flags` | Local OpenSim |
+| 47 ✅ | `ParcelAccessListReply` per-entry flags | 1 | The per-entry access-vs-ban `Flags` | Local OpenSim |
 | 48 | Login-response extra fields | 2 | `home`, `look_at`, `agent_access[_max]`, `max-agent-groups`, Library inventory roots | Local OpenSim |
 | 49 | `TeleportFinish` (CAPS) maturity & flags | 1 | Destination `SimAccess` (maturity), `TeleportFlags` (cause) | SL grid |
 | 50 | Minor dropped-field batch | 3 | `TimeDilation`, `AlertInfo`, `MapBlockReply` water height, joint fields, collision plane, `Options.Flags`, NameValue/bump-shiny accessors | Local OpenSim |
@@ -1743,10 +1743,27 @@ rapidly — the same OAR-only constraint as #37 — so the decode is exercised b
 the deterministic lifecycle test rather than the local grid. Test: SL grid (the
 texture-flagged terse path).*
 
-**47. `ParcelAccessListReply` per-entry flags (extends #13, Tier B).** Each
-`List` entry (`session.rs` ~4858) has `ID`, `Time`, **and `Flags`**, but only id
-and time are mapped into `ParcelAccessEntry` — the per-entry flags (access vs.
-ban / whitelist sub-type) are lost. Add the flags. *Test: local OpenSim.*
+**47. `ParcelAccessListReply` per-entry flags (extends #13, Tier B). ✅ Done.**
+Each `List` entry of a `ParcelAccessListReply` (`session.rs`) carries `ID`,
+`Time`, **and `Flags`**, but only id and time were mapped into
+`ParcelAccessEntry` — the per-entry `AL_*` flags (the access/ban classification,
+plus the Second Life experience allow/block sub-types) were dropped. Added a
+`ParcelAccessFlags(u32)` bitfield value type (`ACCESS`/`BAN`/`ALLOW_EXPERIENCE`/
+`BLOCK_EXPERIENCE`, with `union`/`contains`/`is_empty`, mirroring Firestorm's
+`llparcelflags.h` `AL_*` constants) and a `flags` field on `ParcelAccessEntry`.
+The reply handler now decodes each entry's wire `Flags` into it. The *update*
+(send) path OR's any per-entry `ParcelAccessFlags` onto the list-level
+`ParcelAccessScope` (so existing callers that leave it `NONE` still send just
+the scope, while a Second Life client can flag an entry as an experience
+allow/block) — matching OpenSim, whose `SendLandAccessListData`
+(`LLClientView.cs` ~6651) sets each entry's `Flags` equal to the list's access
+flag. Re-exported through both runtimes. Covered by the two existing
+`lifecycle.rs` parcel-access tests, extended to assert the per-entry decode (a
+`AL_BAN | AL_BLOCK_EXPERIENCE` entry) and the OR-onto-scope encode (an
+`AL_ALLOW_EXPERIENCE` entry sent on an `AL_ACCESS` list). *Test: local OpenSim
+(the existing #13 access-list round-trip already exercises the path; OpenSim
+echoes the scope as the per-entry flags, so the experience sub-types are
+unit-tested only — they need the SL grid).*
 
 **48. Login-response extra fields (extends #5, Tier A).**
 `handle_login_response` (`session.rs` ~4389) plus the requested options

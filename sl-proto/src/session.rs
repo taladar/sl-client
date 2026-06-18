@@ -229,14 +229,14 @@ use crate::types::{
     MapRegionInfo, Material, Maturity, MoneyBalance, MoneyTransaction, MoneyTransactionType,
     MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, Object, ObjectExtraParams,
     ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessScope, ParcelCategory, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
-    PermissionField, PickInfo, PickUpdate, PlayingAnimation, PrimShape, PrimShapeParams,
-    ProductType, ProfileUpdate, RegionChatSettings, RegionCombatSettings, RegionIdentity,
-    RegionInfoUpdate, RegionLimits, Reliability, SaleType, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType,
-    TerrainPatch, Texture, Throttle, TransferStatus, Transmit, Wearable, WearableType,
-    avatar_texture, grid_to_handle, handle_to_grid,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelInfo, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus,
+    ParcelUpdate, PermissionField, PickInfo, PickUpdate, PlayingAnimation, PrimShape,
+    PrimShapeParams, ProductType, ProfileUpdate, RegionChatSettings, RegionCombatSettings,
+    RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, SaleType, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload,
+    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, Wearable,
+    WearableType, avatar_texture, grid_to_handle, handle_to_grid,
 };
 use crate::{appearance, types::AvatarAppearance, types::AvatarAttachment};
 
@@ -2776,7 +2776,7 @@ impl Circuit {
                 .map(|entry| ParcelAccessListUpdateListBlock {
                     id: entry.id,
                     time: entry.time,
-                    flags,
+                    flags: flags | entry.flags.0,
                 })
                 .collect()
         };
@@ -4876,6 +4876,7 @@ impl Session {
                         .map(|entry| ParcelAccessEntry {
                             id: entry.id,
                             time: entry.time,
+                            flags: ParcelAccessFlags(entry.flags),
                         })
                         .collect(),
                 });
