@@ -186,6 +186,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     items.len()
                 );
             }
+            Event::InventoryItemCreated { item, .. } => {
+                info!("inventory item created: {}", item.name);
+            }
+            Event::InventoryBulkUpdate { folders, items, .. } => {
+                info!(
+                    "bulk inventory update: {} folder(s), {} item(s)",
+                    folders.len(),
+                    items.len()
+                );
+            }
             Event::FriendList(friends) => {
                 info!("friend list: {} friend(s)", friends.len());
             }

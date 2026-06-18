@@ -423,6 +423,34 @@ pub enum Event {
         /// The items directly in the folder.
         items: Vec<InventoryItem>,
     },
+    /// A single inventory item was created or its asset replaced by the
+    /// simulator (`UpdateCreateInventoryItem`) — typically the reply to a
+    /// [`Session::create_inventory_item`](crate::Session::create_inventory_item)
+    /// or an item the sim materialised (e.g. an accepted inventory offer). The
+    /// item is also merged into the session's live inventory cache.
+    InventoryItemCreated {
+        /// Whether the simulator approved (accepted) the creation.
+        sim_approved: bool,
+        /// The transaction id echoed from the originating request (nil if none).
+        transaction_id: Uuid,
+        /// The async callback id echoed from the originating request (`0` if
+        /// none), used by a client to correlate the reply with its request.
+        callback_id: u32,
+        /// The created/updated item.
+        item: InventoryItem,
+    },
+    /// A batch inventory update the simulator pushed (`BulkUpdateInventory`),
+    /// e.g. after a copy, a give, or a server-side reorganisation. The folders
+    /// and items are merged into the session's live inventory cache, keeping the
+    /// cached tree current without a re-fetch.
+    InventoryBulkUpdate {
+        /// The transaction id of the originating operation (nil if none).
+        transaction_id: Uuid,
+        /// Created or updated folders.
+        folders: Vec<InventoryFolder>,
+        /// Created or updated items.
+        items: Vec<InventoryItem>,
+    },
     /// The agent's friends (the buddy list), parsed from the login response.
     /// Emitted once, right after [`Event::CircuitEstablished`], when the login
     /// provided a non-empty list.
@@ -3800,6 +3828,10 @@ pub struct InventoryItem {
     pub creation_date: i32,
     /// The current owner's id.
     pub owner_id: Uuid,
+    /// The previous owner's id. Only the CAPS/AIS inventory path carries this;
+    /// it is nil for items fetched over the legacy UDP path (and is part of the
+    /// item's permissions checksum, the `CRC` of `UpdateInventoryItem`).
+    pub last_owner_id: Uuid,
     /// The creator's id.
     pub creator_id: Uuid,
     /// The group associated with the item.
@@ -3816,6 +3848,32 @@ pub struct InventoryItem {
     pub everyone_mask: u32,
     /// The next-owner permissions mask.
     pub next_owner_mask: u32,
+}
+
+/// Parameters for creating a new inventory item via
+/// [`Session::create_inventory_item`](crate::Session::create_inventory_item)
+/// (`CreateInventoryItem`). The simulator allocates the item's id and replies
+/// with an [`Event::InventoryItemCreated`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct NewInventoryItem {
+    /// The folder the new item is created in.
+    pub folder_id: Uuid,
+    /// The transaction id associating a freshly uploaded asset with the item
+    /// (nil for an item with no backing asset, e.g. a fresh notecard the sim
+    /// fills in).
+    pub transaction_id: Uuid,
+    /// The next-owner permissions mask for the new item.
+    pub next_owner_mask: u32,
+    /// The asset type (`AssetType`).
+    pub asset_type: i8,
+    /// The inventory type (`InventoryType`).
+    pub inv_type: i8,
+    /// The wearable type (only meaningful for clothing/body-part items).
+    pub wearable_type: u8,
+    /// The item name.
+    pub name: String,
+    /// The item description.
+    pub description: String,
 }
 
 /// Splits a region handle into its global south-west corner in metres,
