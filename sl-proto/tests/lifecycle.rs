@@ -8393,16 +8393,12 @@ mod test {
         drain(&mut session)?;
 
         let item_id = uuid::Uuid::from_u128(0x31);
-        let message = AnyMessage::UpdateCreateInventoryItem(UpdateCreateInventoryItem {
-            agent_data: UpdateCreateInventoryItemAgentDataBlock {
-                agent_id: uuid::Uuid::from_u128(1),
-                sim_approved: true,
-                transaction_id: uuid::Uuid::from_u128(0x99),
-            },
-            inventory_data: vec![UpdateCreateInventoryItemInventoryDataBlock {
+        let second_item_id = uuid::Uuid::from_u128(0x33);
+        let block = |item_id, callback_id, asset_id, name: &[u8]| {
+            UpdateCreateInventoryItemInventoryDataBlock {
                 item_id,
                 folder_id: uuid::Uuid::from_u128(0x32),
-                callback_id: 7,
+                callback_id,
                 creator_id: uuid::Uuid::from_u128(2),
                 owner_id: uuid::Uuid::from_u128(1),
                 group_id: uuid::Uuid::nil(),
@@ -8412,43 +8408,69 @@ mod test {
                 everyone_mask: 0,
                 next_owner_mask: 0x0008_e000,
                 group_owned: false,
-                asset_id: uuid::Uuid::from_u128(0x55),
+                asset_id,
                 r#type: 7,
                 inv_type: 7,
                 flags: 0,
                 sale_type: 0,
                 sale_price: 0,
-                name: b"Fresh Note\0".to_vec(),
+                name: name.to_vec(),
                 description: b"\0".to_vec(),
                 creation_date: 1234,
                 crc: 0,
-            }],
+            }
+        };
+        let message = AnyMessage::UpdateCreateInventoryItem(UpdateCreateInventoryItem {
+            agent_data: UpdateCreateInventoryItemAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                sim_approved: true,
+                transaction_id: uuid::Uuid::from_u128(0x99),
+            },
+            // The simulator may batch several created items into one message;
+            // every entry must surface and cache, not just the first.
+            inventory_data: vec![
+                block(item_id, 7, uuid::Uuid::from_u128(0x55), b"Fresh Note\0"),
+                block(
+                    second_item_id,
+                    8,
+                    uuid::Uuid::from_u128(0x57),
+                    b"Second Note\0",
+                ),
+            ],
         });
         let datagram = server_message(&message, 40, false)?;
         session.handle_datagram(sim_addr(), &datagram, now)?;
 
-        let event = drain_events(&mut session)
+        let created: Vec<_> = drain_events(&mut session)
             .into_iter()
-            .find(|event| matches!(event, Event::InventoryItemCreated { .. }))
-            .ok_or("expected an InventoryItemCreated event")?;
-        let Event::InventoryItemCreated {
-            sim_approved,
-            callback_id,
-            item,
-            ..
-        } = event
-        else {
-            return Err("expected InventoryItemCreated".into());
-        };
-        assert!(sim_approved);
-        assert_eq!(callback_id, 7);
+            .filter_map(|event| match event {
+                Event::InventoryItemCreated {
+                    sim_approved,
+                    callback_id,
+                    item,
+                    ..
+                } => Some((sim_approved, callback_id, item)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(created.len(), 2);
+        let (sim_approved, callback_id, item) = created.first().ok_or("first item")?;
+        assert!(*sim_approved);
+        assert_eq!(*callback_id, 7);
         assert_eq!(item.name, "Fresh Note");
         assert_eq!(item.asset_id, uuid::Uuid::from_u128(0x55));
+        let (_, second_callback, second_item) = created.get(1).ok_or("second item")?;
+        assert_eq!(*second_callback, 8);
+        assert_eq!(second_item.name, "Second Note");
 
         let cached = session
             .inventory_item(item_id)
             .ok_or("item should be cached")?;
         assert_eq!(cached.name, "Fresh Note");
+        let second_cached = session
+            .inventory_item(second_item_id)
+            .ok_or("second item should be cached")?;
+        assert_eq!(second_cached.name, "Second Note");
         Ok(())
     }
 
@@ -8473,7 +8495,7 @@ mod test {
             }],
             item_data: vec![BulkUpdateInventoryItemDataBlock {
                 item_id,
-                callback_id: 0,
+                callback_id: 13,
                 folder_id,
                 creator_id: uuid::Uuid::from_u128(2),
                 owner_id: uuid::Uuid::from_u128(1),
@@ -8507,6 +8529,7 @@ mod test {
             transaction_id,
             folders,
             items,
+            item_callbacks,
         } = event
         else {
             return Err("expected InventoryBulkUpdate".into());
@@ -8514,6 +8537,9 @@ mod test {
         assert_eq!(transaction_id, uuid::Uuid::from_u128(0xAB));
         assert_eq!(folders.len(), 1);
         assert_eq!(items.len(), 1);
+        // The per-item async callback id round-trips so a copy/create can be
+        // correlated even when its result arrives as a `BulkUpdateInventory`.
+        assert_eq!(item_callbacks, vec![(item_id, 13)]);
 
         assert_eq!(
             session

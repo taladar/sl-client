@@ -1372,8 +1372,8 @@ rendering / voice-transport family). With this reclassified, **the roadmap's
 client protocol *feature* surface is complete: #1–#33 are done.** The only
 remaining open work is the **Tier E decode-fidelity fixes (#35–#51)** — not new
 features, but information-loss gaps where an already-shipped item decodes a wire
-field and then drops it before the caller sees it. (#35–#43 are now
-done; #44–#51 remain.)
+field and then drops it before the caller sees it. (#35–#44 are now
+done; #45–#51 remain.)
 
 ## Tier E — decode-fidelity & information-loss fixes (#35–#51)
 
@@ -1396,7 +1396,7 @@ blob items, writing a structured decoder). "Test" notes whether the local
 | 41 ✅ | Asset-transfer success event + size | 2 | A success event for `TransferInfo` carrying declared `Size` | Local OpenSim |
 | 42 ✅ | Group-reply pagination totals | 1 | `RoleCount` / `TotalPairs` so a client knows a set is complete | Local OpenSim (Groups V2) |
 | 43 ✅ | `MoneyBalanceReply` transaction id | 1 | `TransactionID` to correlate a balance reply to its pay/buy | Money module or SL |
-| 44 | Inventory push fidelity | 2 | All `UpdateCreateInventoryItem` entries; per-item bulk `CallbackID` | Local OpenSim |
+| 44 ✅ | Inventory push fidelity | 2 | All `UpdateCreateInventoryItem` entries; per-item bulk `CallbackID` | Local OpenSim |
 | 45 | `ChatterBoxInvitation` session type & bucket | 2 | `type` + `binary_bucket` (group/session name, session kind) | SL grid |
 | 46 | Terse-update trailing `TextureEntry` | 2 | Texture/colour change delivered via a terse update | SL grid |
 | 47 | `ParcelAccessListReply` per-entry flags | 1 | The per-entry access-vs-ban `Flags` | Local OpenSim |
@@ -1651,14 +1651,34 @@ Test: money module or SL grid.*
 
 ### Medium
 
-**44. Inventory push fidelity (extends #30, Tier A).**
-`UpdateCreateInventoryItem` (`session.rs` ~5059) uses `.first()` on the
-repeatable `InventoryData` block, so if the simulator batches more than one
-created item into one message all but the first are dropped (from both the event
-and the cache); and `bulk_update_item` (~9883) drops the per-item `CallbackID`,
-breaking create-callback correlation when a result arrives as a
-`BulkUpdateInventory` rather than an `UpdateCreateInventoryItem`. Iterate all
-entries and carry the bulk callback id. *Test: local OpenSim.*
+**44. Inventory push fidelity (extends #30, Tier A). ✅ Done.**
+`UpdateCreateInventoryItem` (`session.rs`) used `.first()` on the repeatable
+`InventoryData` block, so when the simulator batched more than one created item
+into one message all but the first were dropped (from both the event and the
+cache); and `bulk_update_item` dropped the per-item `CallbackID`, breaking
+create-callback correlation when a result arrives as a `BulkUpdateInventory`
+rather than an `UpdateCreateInventoryItem`. Fixed both: the handler now iterates
+**every** `InventoryData` entry — caching each item and emitting an
+[`Event::InventoryItemCreated`] per entry — and the `BulkUpdateInventory` path
+collects each item's non-zero `CallbackID` into a new
+**`InventoryBulkUpdate::item_callbacks: Vec<(Uuid, u32)>`** field (`(item_id,
+callback_id)` pairs), so a client that issued a `copy_inventory_item` /
+`create_inventory_item` (each returning a callback id) can correlate the result
+to the resulting item id even when it lands as a bulk update. The three CAPS
+delivery paths (event-queue `BulkUpdateInventory`, AIS3, category-create), which
+carry no callback id, pass an empty `item_callbacks`. The new field flows
+unchanged through both runtimes (events pass through), and the
+`inventory_edit` example now copies the item it creates and logs any surfaced
+callback correlation. Covered by the extended `update_create_inventory_item_*`
+(two batched `InventoryData` entries → two cached items + two events) and
+`bulk_update_inventory_*` (a non-zero `CallbackID` round-trips into
+`item_callbacks`) `sl-proto` lifecycle tests. *Live-verified against the local
+OpenSim via `inventory_edit`: create → rename → **copy** → remove ran with no
+protocol error and both the original create and the copy surfaced as
+`InventoryItemCreated` (a live finding: OpenSim answers `CopyInventoryItem` with
+`UpdateCreateInventoryItem`, not the `BulkUpdateInventory` Second Life sends, so
+the bulk-callback path is exercised by the deterministic lifecycle test rather
+than this grid). Test: local OpenSim.*
 
 **45. `ChatterBoxInvitation` session type & bucket (extends #28, Tier A).**
 `chatterbox_invitation_from_llsd` (`session.rs` ~10319) reads only

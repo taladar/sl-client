@@ -598,6 +598,15 @@ pub enum Event {
         folders: Vec<InventoryFolder>,
         /// Created or updated items.
         items: Vec<InventoryItem>,
+        /// Per-item async callback correlation: `(item_id, callback_id)` pairs for
+        /// every updated item carrying a non-zero `CallbackID`. The simulator
+        /// echoes the callback id allocated by the originating request (e.g.
+        /// [`Session::copy_inventory_item`](crate::Session::copy_inventory_item)),
+        /// so a client can match the returned callback id to the resulting item
+        /// even when the result arrives as a `BulkUpdateInventory` rather than an
+        /// [`Event::InventoryItemCreated`]. Empty for delivery paths that carry no
+        /// callback id (the CAPS event-queue / AIS3 forms).
+        item_callbacks: Vec<(Uuid, u32)>,
     },
     /// The agent's friends (the buddy list), parsed from the login response.
     /// Emitted once, right after [`Event::CircuitEstablished`], when the login
