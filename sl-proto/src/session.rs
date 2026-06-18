@@ -5530,6 +5530,7 @@ impl Session {
                 self.events.push_back(Event::GroupRoleData {
                     group_id: reply.group_data.group_id,
                     request_id: reply.group_data.request_id,
+                    role_count: reply.group_data.role_count,
                     roles: reply.role_data.iter().map(group_role).collect(),
                 });
             }
@@ -5537,6 +5538,7 @@ impl Session {
                 self.events.push_back(Event::GroupRoleMembers {
                     group_id: reply.agent_data.group_id,
                     request_id: reply.agent_data.request_id,
+                    total_pairs: reply.agent_data.total_pairs,
                     pairs: reply
                         .member_data
                         .iter()

@@ -156,8 +156,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .await
                     .ok();
             }
-            Event::GroupRoleData { roles, .. } => {
-                info!("group has {} role(s):", roles.len());
+            Event::GroupRoleData {
+                role_count, roles, ..
+            } => {
+                info!(
+                    "group has {} of {role_count} role(s) in this packet:",
+                    roles.len()
+                );
                 for role in &roles {
                     info!(
                         "  role {} \"{}\" powers {:#x}",
@@ -165,6 +170,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
                 let Some(group) = group_id else { continue };
+                // Fetch the role↔member pairings so we can observe TotalPairs (#42).
+                command_tx
+                    .send(Command::RequestGroupRoleMembers(group))
+                    .await
+                    .ok();
                 if let Some(found) = roles.iter().find(|role| role.name == ROLE_NAME) {
                     if role_id.is_none() {
                         // First sighting: update the role's title/powers.
@@ -239,6 +249,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else if role_updated {
                     info!("role \"{ROLE_NAME}\" is gone — delete confirmed");
                 }
+            }
+            Event::GroupRoleMembers {
+                total_pairs, pairs, ..
+            } => {
+                info!(
+                    "group has {} of {total_pairs} role/member pairing(s) in this packet",
+                    pairs.len()
+                );
             }
             Event::EjectGroupMemberResult {
                 group_id: g,

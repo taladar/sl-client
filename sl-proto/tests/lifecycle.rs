@@ -53,8 +53,11 @@ mod test {
         GenericStreamingMessageDataBlockBlock, GenericStreamingMessageMethodDataBlock,
         GroupMembersReply, GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
         GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
-        GroupProfileReplyGroupDataBlock, ImageData, ImageDataImageDataBlock, ImageDataImageIDBlock,
-        ImageNotInDatabase, ImageNotInDatabaseImageIDBlock, ImagePacket, ImagePacketImageDataBlock,
+        GroupProfileReplyGroupDataBlock, GroupRoleDataReply, GroupRoleDataReplyAgentDataBlock,
+        GroupRoleDataReplyGroupDataBlock, GroupRoleDataReplyRoleDataBlock, GroupRoleMembersReply,
+        GroupRoleMembersReplyAgentDataBlock, GroupRoleMembersReplyMemberDataBlock, ImageData,
+        ImageDataImageDataBlock, ImageDataImageIDBlock, ImageNotInDatabase,
+        ImageNotInDatabaseImageIDBlock, ImagePacket, ImagePacketImageDataBlock,
         ImagePacketImageIDBlock, ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
         ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
         ImprovedTerseObjectUpdate, ImprovedTerseObjectUpdateObjectDataBlock,
@@ -1958,6 +1961,105 @@ mod test {
         assert_eq!(first.title, "Owner");
         assert!(first.is_owner);
         assert_eq!(first.agent_powers, 0xABCD);
+        Ok(())
+    }
+
+    #[test]
+    fn group_role_data_reply_surfaces_role_count() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6707);
+        let role = uuid::Uuid::from_u128(0x6708);
+        // The simulator reports 5 roles in the header but splits them across
+        // packets; this packet carries only one, so a client needs the header
+        // count to know the set is incomplete.
+        let message = AnyMessage::GroupRoleDataReply(GroupRoleDataReply {
+            agent_data: GroupRoleDataReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+            group_data: GroupRoleDataReplyGroupDataBlock {
+                group_id: group,
+                request_id: uuid::Uuid::nil(),
+                role_count: 5,
+            },
+            role_data: vec![GroupRoleDataReplyRoleDataBlock {
+                role_id: role,
+                name: b"Officers\0".to_vec(),
+                title: b"Officer\0".to_vec(),
+                description: b"can manage the group\0".to_vec(),
+                powers: 0xABCD,
+                members: 3,
+            }],
+        });
+        let datagram = server_message(&message, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let (group_id, role_count, roles) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::GroupRoleData {
+                    group_id,
+                    role_count,
+                    roles,
+                    ..
+                } => Some((group_id, role_count, roles)),
+                _ => None,
+            })
+            .ok_or("expected a GroupRoleData event")?;
+        assert_eq!(group_id, group);
+        assert_eq!(role_count, 5);
+        assert_eq!(roles.len(), 1);
+        let first = roles.first().ok_or("first role")?;
+        assert_eq!(first.role_id, role);
+        assert_eq!(first.name, "Officers");
+        Ok(())
+    }
+
+    #[test]
+    fn group_role_members_reply_surfaces_total_pairs() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6709);
+        let role = uuid::Uuid::from_u128(0x670A);
+        let member = uuid::Uuid::from_u128(0x670B);
+        // 12 pairings in total across the multi-packet reply; this packet has one.
+        let message = AnyMessage::GroupRoleMembersReply(GroupRoleMembersReply {
+            agent_data: GroupRoleMembersReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                group_id: group,
+                request_id: uuid::Uuid::nil(),
+                total_pairs: 12,
+            },
+            member_data: vec![GroupRoleMembersReplyMemberDataBlock {
+                role_id: role,
+                member_id: member,
+            }],
+        });
+        let datagram = server_message(&message, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let (group_id, total_pairs, pairs) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::GroupRoleMembers {
+                    group_id,
+                    total_pairs,
+                    pairs,
+                    ..
+                } => Some((group_id, total_pairs, pairs)),
+                _ => None,
+            })
+            .ok_or("expected a GroupRoleMembers event")?;
+        assert_eq!(group_id, group);
+        assert_eq!(total_pairs, 12);
+        assert_eq!(pairs.len(), 1);
+        let first = pairs.first().ok_or("first pair")?;
+        assert_eq!(first.role_id, role);
+        assert_eq!(first.member_id, member);
         Ok(())
     }
 

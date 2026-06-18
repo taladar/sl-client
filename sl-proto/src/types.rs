@@ -649,6 +649,10 @@ pub enum Event {
         group_id: Uuid,
         /// The request id echoed from the request.
         request_id: Uuid,
+        /// The total role count the simulator reports across all packets of this
+        /// (potentially multi-packet) reply, so a client can tell when the role
+        /// set is complete.
+        role_count: i32,
         /// The roles.
         roles: Vec<GroupRole>,
     },
@@ -659,6 +663,10 @@ pub enum Event {
         group_id: Uuid,
         /// The request id echoed from the request.
         request_id: Uuid,
+        /// The total role↔member pair count the simulator reports across all
+        /// packets of this (potentially multi-packet) reply, so a client can tell
+        /// when the pairing set is complete.
+        total_pairs: u32,
         /// The role↔member pairs in this reply.
         pairs: Vec<GroupRoleMember>,
     },
