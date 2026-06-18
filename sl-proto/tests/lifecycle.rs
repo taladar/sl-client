@@ -9,15 +9,15 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
-        AssetType, ChatAudible, ChatSourceType, ChatType, ClickAction, ControlFlags,
-        CreateGroupParams, DeRezDestination, DisconnectReason, EstateAccessDelta, EstateAccessKind,
-        Event, FriendRights, ImDialog, ImageCodec, LindenAmount, LoginParams, MapItemType,
-        Material, Maturity, MoneyTransactionType, MuteFlags, MuteType, ObjectFlagSettings,
-        ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags,
-        ParcelMediaCommand, ParcelReturnType, ParcelUpdate, PermissionField, PrimShape,
-        ProductType, RegionInfoUpdate, Reliability, SaleType, ScriptPermissions, Session,
-        SoundFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, WearableType,
-        avatar_texture, pcode,
+        AssetType, ChatAudible, ChatSourceType, ChatType, ClassifiedUpdate, ClickAction,
+        ControlFlags, CreateGroupParams, DeRezDestination, DisconnectReason, EstateAccessDelta,
+        EstateAccessKind, Event, FriendRights, ImDialog, ImageCodec, InterestsUpdate, LindenAmount,
+        LoginParams, MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType,
+        ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
+        ParcelFlags, ParcelMediaCommand, ParcelReturnType, ParcelUpdate, PermissionField,
+        PickUpdate, PrimShape, ProductType, ProfileUpdate, RegionInfoUpdate, Reliability, SaleType,
+        ScriptPermissions, Session, SoundFlags, TerrainLayerType, Throttle, TransferStatus,
+        Transmit, WearableType, avatar_texture, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -30,18 +30,20 @@ mod test {
         AttachedSoundDataBlockBlock, AvatarAnimation, AvatarAnimationAnimationListBlock,
         AvatarAnimationAnimationSourceListBlock, AvatarAnimationSenderBlock, AvatarAppearance,
         AvatarAppearanceObjectDataBlock, AvatarAppearanceSenderBlock,
-        AvatarAppearanceVisualParamBlock, AvatarNotesReply, AvatarNotesReplyAgentDataBlock,
-        AvatarNotesReplyDataBlock, AvatarPicksReply, AvatarPicksReplyAgentDataBlock,
-        AvatarPicksReplyDataBlock, AvatarPropertiesReply, AvatarPropertiesReplyAgentDataBlock,
-        AvatarPropertiesReplyPropertiesDataBlock, AvatarSitResponse,
-        AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock, ChangeUserRights,
-        ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock, ChatFromSimulator,
-        ChatFromSimulatorChatDataBlock, ConfirmXferPacket, ConfirmXferPacketXferIDBlock,
-        CrossedRegion, CrossedRegionAgentDataBlock, CrossedRegionInfoBlock,
-        CrossedRegionRegionDataBlock, DisableSimulator, EconomyData, EconomyDataInfoBlock,
-        EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
-        EstateOwnerMessageParamListBlock, GenericMessage, GenericMessageAgentDataBlock,
-        GenericMessageMethodDataBlock, GenericStreamingMessage,
+        AvatarAppearanceVisualParamBlock, AvatarClassifiedReply,
+        AvatarClassifiedReplyAgentDataBlock, AvatarClassifiedReplyDataBlock, AvatarNotesReply,
+        AvatarNotesReplyAgentDataBlock, AvatarNotesReplyDataBlock, AvatarPicksReply,
+        AvatarPicksReplyAgentDataBlock, AvatarPicksReplyDataBlock, AvatarPropertiesReply,
+        AvatarPropertiesReplyAgentDataBlock, AvatarPropertiesReplyPropertiesDataBlock,
+        AvatarSitResponse, AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock,
+        ChangeUserRights, ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock,
+        ChatFromSimulator, ChatFromSimulatorChatDataBlock, ClassifiedInfoReply,
+        ClassifiedInfoReplyAgentDataBlock, ClassifiedInfoReplyDataBlock, ConfirmXferPacket,
+        ConfirmXferPacketXferIDBlock, CrossedRegion, CrossedRegionAgentDataBlock,
+        CrossedRegionInfoBlock, CrossedRegionRegionDataBlock, DisableSimulator, EconomyData,
+        EconomyDataInfoBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
+        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock, GenericMessage,
+        GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GenericStreamingMessage,
         GenericStreamingMessageDataBlockBlock, GenericStreamingMessageMethodDataBlock,
         GroupMembersReply, GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
         GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
@@ -70,7 +72,8 @@ mod test {
         ParcelMediaUpdateDataBlockBlock, ParcelMediaUpdateDataBlockExtendedBlock, ParcelProperties,
         ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
         ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
-        PreloadSound, PreloadSoundDataBlockBlock, RegionHandshake, RegionHandshakeRegionInfo2Block,
+        PickInfoReply, PickInfoReplyAgentDataBlock, PickInfoReplyDataBlock, PreloadSound,
+        PreloadSoundDataBlockBlock, RegionHandshake, RegionHandshakeRegionInfo2Block,
         RegionHandshakeRegionInfo3Block, RegionHandshakeRegionInfoBlock, RegionInfo,
         RegionInfoAgentDataBlock, RegionInfoRegionInfo2Block, RegionInfoRegionInfoBlock,
         RequestXfer, RequestXferXferIDBlock, ScriptDialog, ScriptDialogButtonsBlock,
@@ -1087,6 +1090,365 @@ mod test {
             })
             .ok_or("expected an AvatarNotes event")?;
         assert_eq!(notes, "met at the welcome area");
+        Ok(())
+    }
+
+    #[test]
+    fn request_avatar_classifieds_packs_generic_message() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let target = uuid::Uuid::from_u128(0xA1);
+        session.request_avatar_classifieds(target, now)?;
+        let sent = drain(&mut session)?;
+        let generic = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::GenericMessage(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a GenericMessage")?;
+        assert_eq!(generic.method_data.method, b"avatarclassifiedsrequest");
+        assert_eq!(
+            generic.param_list.first().map(|p| p.parameter.as_slice()),
+            Some(target.to_string().as_bytes())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn avatar_classified_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let target = uuid::Uuid::from_u128(0xA1);
+        let reply = AnyMessage::AvatarClassifiedReply(AvatarClassifiedReply {
+            agent_data: AvatarClassifiedReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                target_id: target,
+            },
+            data: vec![AvatarClassifiedReplyDataBlock {
+                classified_id: uuid::Uuid::from_u128(0xD1),
+                name: b"Land for rent\0".to_vec(),
+            }],
+        });
+        let datagram = server_message(&reply, 9, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let classifieds = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AvatarClassifieds {
+                    target_id,
+                    classifieds,
+                } if target_id == target => Some(classifieds),
+                _ => None,
+            })
+            .ok_or("expected an AvatarClassifieds event")?;
+        assert_eq!(classifieds.len(), 1);
+        let classified = classifieds.first().ok_or("expected one classified")?;
+        assert_eq!(classified.classified_id, uuid::Uuid::from_u128(0xD1));
+        assert_eq!(classified.name, "Land for rent");
+        Ok(())
+    }
+
+    #[test]
+    fn request_pick_info_packs_generic_message() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let creator = uuid::Uuid::from_u128(0xA1);
+        let pick = uuid::Uuid::from_u128(0xC1);
+        session.request_pick_info(creator, pick, now)?;
+        let sent = drain(&mut session)?;
+        let generic = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::GenericMessage(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a GenericMessage")?;
+        assert_eq!(generic.method_data.method, b"pickinforequest");
+        // The viewer sends [creator_id, pick_id] in that order.
+        assert_eq!(
+            generic.param_list.first().map(|p| p.parameter.as_slice()),
+            Some(creator.to_string().as_bytes())
+        );
+        assert_eq!(
+            generic.param_list.get(1).map(|p| p.parameter.as_slice()),
+            Some(pick.to_string().as_bytes())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pick_info_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let pick = uuid::Uuid::from_u128(0xC1);
+        let reply = AnyMessage::PickInfoReply(PickInfoReply {
+            agent_data: PickInfoReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+            data: PickInfoReplyDataBlock {
+                pick_id: pick,
+                creator_id: uuid::Uuid::from_u128(0xA1),
+                top_pick: false,
+                parcel_id: uuid::Uuid::from_u128(0xB1),
+                name: b"My favourite spot\0".to_vec(),
+                desc: b"a lovely beach\0".to_vec(),
+                snapshot_id: uuid::Uuid::from_u128(0xE1),
+                user: b"Resident\0".to_vec(),
+                original_name: b"Beach Parcel\0".to_vec(),
+                sim_name: b"Sandbox\0".to_vec(),
+                pos_global: [256_000.0, 256_128.0, 25.5],
+                sort_order: 0,
+                enabled: true,
+            },
+        });
+        let datagram = server_message(&reply, 9, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let info = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::PickInfo(info) if info.pick_id == pick => Some(info),
+                _ => None,
+            })
+            .ok_or("expected a PickInfo event")?;
+        assert_eq!(info.name, "My favourite spot");
+        assert_eq!(info.description, "a lovely beach");
+        assert_eq!(info.sim_name, "Sandbox");
+        let (px, py, pz) = info.pos_global;
+        assert!((px - 256_000.0).abs() < f64::EPSILON);
+        assert!((py - 256_128.0).abs() < f64::EPSILON);
+        assert!((pz - 25.5).abs() < f64::EPSILON);
+        assert!(info.enabled);
+        Ok(())
+    }
+
+    #[test]
+    fn classified_info_request_and_reply_round_trip() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let classified = uuid::Uuid::from_u128(0xD1);
+        session.request_classified_info(classified, now)?;
+        let sent = drain(&mut session)?;
+        let request = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ClassifiedInfoRequest(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a ClassifiedInfoRequest")?;
+        assert_eq!(request.agent_data.agent_id, uuid::Uuid::from_u128(1));
+        assert_eq!(request.data.classified_id, classified);
+
+        let reply = AnyMessage::ClassifiedInfoReply(ClassifiedInfoReply {
+            agent_data: ClassifiedInfoReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+            data: ClassifiedInfoReplyDataBlock {
+                classified_id: classified,
+                creator_id: uuid::Uuid::from_u128(0xA1),
+                creation_date: 1_700_000_000,
+                expiration_date: 1_710_000_000,
+                category: 3,
+                name: b"Land for rent\0".to_vec(),
+                desc: b"prime waterfront\0".to_vec(),
+                parcel_id: uuid::Uuid::from_u128(0xB1),
+                parent_estate: 1,
+                snapshot_id: uuid::Uuid::from_u128(0xE1),
+                sim_name: b"Sandbox\0".to_vec(),
+                pos_global: [256_000.0, 256_128.0, 25.5],
+                parcel_name: b"Beach Parcel\0".to_vec(),
+                classified_flags: 0x4,
+                price_for_listing: 50,
+            },
+        });
+        let datagram = server_message(&reply, 9, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let info = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ClassifiedInfo(info) if info.classified_id == classified => Some(info),
+                _ => None,
+            })
+            .ok_or("expected a ClassifiedInfo event")?;
+        assert_eq!(info.name, "Land for rent");
+        assert_eq!(info.description, "prime waterfront");
+        assert_eq!(info.parcel_name, "Beach Parcel");
+        assert_eq!(info.category, 3);
+        assert_eq!(info.price_for_listing, 50);
+        assert_eq!(info.classified_flags, 0x4);
+        Ok(())
+    }
+
+    #[test]
+    fn profile_and_interests_and_notes_updates_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.update_profile(
+            &ProfileUpdate {
+                image_id: uuid::Uuid::from_u128(0x5E),
+                about_text: "Hello world".to_owned(),
+                allow_publish: true,
+                profile_url: "https://example.com".to_owned(),
+                ..ProfileUpdate::default()
+            },
+            now,
+        )?;
+        session.update_interests(
+            &InterestsUpdate {
+                want_to_mask: 0x7,
+                want_to_text: "build, explore".to_owned(),
+                skills_mask: 0x2,
+                skills_text: "scripting".to_owned(),
+                languages_text: "English".to_owned(),
+            },
+            now,
+        )?;
+        let target = uuid::Uuid::from_u128(0xA1);
+        session.update_avatar_notes(target, "a good friend", now)?;
+        let sent = drain(&mut session)?;
+
+        let props = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AvatarPropertiesUpdate(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected an AvatarPropertiesUpdate")?;
+        assert_eq!(props.agent_data.agent_id, uuid::Uuid::from_u128(1));
+        assert_eq!(props.properties_data.image_id, uuid::Uuid::from_u128(0x5E));
+        assert_eq!(trimmed(&props.properties_data.about_text), "Hello world");
+        assert!(props.properties_data.allow_publish);
+        assert_eq!(
+            trimmed(&props.properties_data.profile_url),
+            "https://example.com"
+        );
+
+        let interests = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AvatarInterestsUpdate(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected an AvatarInterestsUpdate")?;
+        assert_eq!(interests.properties_data.want_to_mask, 0x7);
+        assert_eq!(
+            trimmed(&interests.properties_data.want_to_text),
+            "build, explore"
+        );
+        assert_eq!(trimmed(&interests.properties_data.skills_text), "scripting");
+
+        let notes = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AvatarNotesUpdate(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected an AvatarNotesUpdate")?;
+        assert_eq!(notes.data.target_id, target);
+        assert_eq!(trimmed(&notes.data.notes), "a good friend");
+        Ok(())
+    }
+
+    #[test]
+    fn pick_and_classified_edits_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let pick = uuid::Uuid::from_u128(0xC1);
+        session.update_pick(
+            &PickUpdate {
+                pick_id: pick,
+                name: "New pick".to_owned(),
+                description: "a place".to_owned(),
+                pos_global: (256_000.0, 256_128.0, 25.5),
+                ..PickUpdate::default()
+            },
+            now,
+        )?;
+        session.delete_pick(pick, now)?;
+
+        let classified = uuid::Uuid::from_u128(0xD1);
+        session.update_classified(
+            &ClassifiedUpdate {
+                classified_id: classified,
+                category: 3,
+                name: "New classified".to_owned(),
+                description: "for sale".to_owned(),
+                price_for_listing: 100,
+                classified_flags: 0x4,
+                ..ClassifiedUpdate::default()
+            },
+            now,
+        )?;
+        session.delete_classified(classified, now)?;
+        let sent = drain(&mut session)?;
+
+        let pick_update = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::PickInfoUpdate(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a PickInfoUpdate")?;
+        assert_eq!(pick_update.data.pick_id, pick);
+        // The session fills the creator with the agent itself, and never sets
+        // the god-only top-pick flag.
+        assert_eq!(pick_update.data.creator_id, uuid::Uuid::from_u128(1));
+        assert!(!pick_update.data.top_pick);
+        assert_eq!(trimmed(&pick_update.data.name), "New pick");
+        let [px, py, pz] = pick_update.data.pos_global;
+        assert!((px - 256_000.0).abs() < f64::EPSILON);
+        assert!((py - 256_128.0).abs() < f64::EPSILON);
+        assert!((pz - 25.5).abs() < f64::EPSILON);
+
+        let pick_delete = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::PickDelete(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a PickDelete")?;
+        assert_eq!(pick_delete.data.pick_id, pick);
+
+        let classified_update = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ClassifiedInfoUpdate(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a ClassifiedInfoUpdate")?;
+        assert_eq!(classified_update.data.classified_id, classified);
+        assert_eq!(classified_update.data.category, 3);
+        assert_eq!(trimmed(&classified_update.data.name), "New classified");
+        assert_eq!(classified_update.data.price_for_listing, 100);
+        assert_eq!(classified_update.data.classified_flags, 0x4);
+        // Set on the simulator as the message passes through.
+        assert_eq!(classified_update.data.parent_estate, 0);
+
+        let classified_delete = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ClassifiedDelete(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a ClassifiedDelete")?;
+        assert_eq!(classified_delete.data.classified_id, classified);
         Ok(())
     }
 

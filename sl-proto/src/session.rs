@@ -148,6 +148,21 @@ use sl_wire::messages::{
     GroupProfileReplyGroupDataBlock, GroupRoleDataReplyRoleDataBlock,
     GroupTitlesReplyGroupDataBlock,
 };
+// Profile & pick/classified editing (#29): the outgoing edit/detail messages,
+// their blocks, and the reply data blocks the decoders read.
+use sl_wire::messages::{
+    AvatarInterestsUpdate, AvatarInterestsUpdateAgentDataBlock,
+    AvatarInterestsUpdatePropertiesDataBlock, AvatarNotesUpdate, AvatarNotesUpdateAgentDataBlock,
+    AvatarNotesUpdateDataBlock, AvatarPropertiesUpdate, AvatarPropertiesUpdateAgentDataBlock,
+    AvatarPropertiesUpdatePropertiesDataBlock, ClassifiedDelete, ClassifiedDeleteAgentDataBlock,
+    ClassifiedDeleteDataBlock, ClassifiedGodDelete, ClassifiedGodDeleteAgentDataBlock,
+    ClassifiedGodDeleteDataBlock, ClassifiedInfoReplyDataBlock, ClassifiedInfoRequest,
+    ClassifiedInfoRequestAgentDataBlock, ClassifiedInfoRequestDataBlock, ClassifiedInfoUpdate,
+    ClassifiedInfoUpdateAgentDataBlock, ClassifiedInfoUpdateDataBlock, PickDelete,
+    PickDeleteAgentDataBlock, PickDeleteDataBlock, PickGodDelete, PickGodDeleteAgentDataBlock,
+    PickGodDeleteDataBlock, PickInfoReplyDataBlock, PickInfoUpdate, PickInfoUpdateAgentDataBlock,
+    PickInfoUpdateDataBlock,
+};
 // Group support (#7): the outgoing group messages and their blocks.
 use sl_wire::messages::{
     ActivateGroup, ActivateGroupAgentDataBlock, CreateGroupRequest,
@@ -178,18 +193,19 @@ use uuid::Uuid;
 use crate::error::Error;
 use crate::terrain;
 use crate::types::{
-    ActiveGroup, Asset, AssetType, AvatarGroupMembership, AvatarInterests, AvatarPick,
-    AvatarProperties, ChatAudible, ChatMessage, ChatSourceType, ChatType, ClickAction,
-    CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData, EstateAccessDelta,
-    EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupMember, GroupMembership,
-    GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, ImageCodec,
-    InstantMessage, InventoryFolder, InventoryItem, InventoryOffer, LoadUrlRequest,
-    LoginHttpRequest, LoginParams, MapItem, MapItemType, MapRegionInfo, Material, Maturity,
-    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMotion, ObjectProperties,
-    ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelInfo, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
-    PlayingAnimation, PrimShape, ProductType, RegionIdentity, RegionInfoUpdate, RegionLimits,
+    ActiveGroup, Asset, AssetType, AvatarClassified, AvatarGroupMembership, AvatarInterests,
+    AvatarPick, AvatarProperties, ChatAudible, ChatMessage, ChatSourceType, ChatType,
+    ClassifiedInfo, ClassifiedUpdate, ClickAction, CreateGroupParams, DeRezDestination,
+    DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, Event, Friend,
+    FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
+    GroupRoleMember, GroupTitle, ImDialog, ImageCodec, InstantMessage, InterestsUpdate,
+    InventoryFolder, InventoryItem, InventoryOffer, LoadUrlRequest, LoginHttpRequest, LoginParams,
+    MapItem, MapItemType, MapRegionInfo, Material, Maturity, MoneyBalance, MoneyTransaction,
+    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectExtraParams,
+    ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessScope, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo,
+    ParcelReturnType, ParcelUpdate, PermissionField, PickInfo, PickUpdate, PlayingAnimation,
+    PrimShape, ProductType, ProfileUpdate, RegionIdentity, RegionInfoUpdate, RegionLimits,
     Reliability, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
     ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture,
     Throttle, TransferStatus, Transmit, Wearable, WearableType, avatar_texture, grid_to_handle,
@@ -1162,6 +1178,221 @@ impl Circuit {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
                 avatar_id: target,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AvatarPropertiesUpdate` reliably, replacing the agent's own
+    /// profile (#29).
+    fn send_avatar_properties_update(
+        &mut self,
+        update: &ProfileUpdate,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AvatarPropertiesUpdate(AvatarPropertiesUpdate {
+            agent_data: AvatarPropertiesUpdateAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            properties_data: AvatarPropertiesUpdatePropertiesDataBlock {
+                image_id: update.image_id,
+                fl_image_id: update.fl_image_id,
+                about_text: with_nul(&update.about_text),
+                fl_about_text: with_nul(&update.fl_about_text),
+                allow_publish: update.allow_publish,
+                mature_publish: update.mature_publish,
+                profile_url: with_nul(&update.profile_url),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AvatarInterestsUpdate` reliably, replacing the agent's own
+    /// interests (#29).
+    fn send_avatar_interests_update(
+        &mut self,
+        update: &InterestsUpdate,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AvatarInterestsUpdate(AvatarInterestsUpdate {
+            agent_data: AvatarInterestsUpdateAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            properties_data: AvatarInterestsUpdatePropertiesDataBlock {
+                want_to_mask: update.want_to_mask,
+                want_to_text: with_nul(&update.want_to_text),
+                skills_mask: update.skills_mask,
+                skills_text: with_nul(&update.skills_text),
+                languages_text: with_nul(&update.languages_text),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AvatarNotesUpdate` reliably, setting the agent's private notes
+    /// about `target` (#29).
+    fn send_avatar_notes_update(
+        &mut self,
+        target: Uuid,
+        notes: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AvatarNotesUpdate(AvatarNotesUpdate {
+            agent_data: AvatarNotesUpdateAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: AvatarNotesUpdateDataBlock {
+                target_id: target,
+                notes: with_nul(notes),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ClassifiedInfoRequest` reliably for the classified
+    /// `classified_id` (#29).
+    fn send_classified_info_request(
+        &mut self,
+        classified_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ClassifiedInfoRequest(ClassifiedInfoRequest {
+            agent_data: ClassifiedInfoRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: ClassifiedInfoRequestDataBlock { classified_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `PickInfoUpdate` reliably, creating or editing one of the
+    /// agent's picks (#29). `creator_id` is set to the agent itself.
+    fn send_pick_info_update(
+        &mut self,
+        update: &PickUpdate,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let (x, y, z) = update.pos_global;
+        let message = AnyMessage::PickInfoUpdate(PickInfoUpdate {
+            agent_data: PickInfoUpdateAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: PickInfoUpdateDataBlock {
+                pick_id: update.pick_id,
+                creator_id: self.agent_id,
+                // Only gods may set the legacy "top pick" flag; the viewer
+                // always sends false.
+                top_pick: false,
+                parcel_id: update.parcel_id,
+                name: with_nul(&update.name),
+                desc: with_nul(&update.description),
+                snapshot_id: update.snapshot_id,
+                pos_global: [x, y, z],
+                sort_order: update.sort_order,
+                enabled: update.enabled,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `PickDelete` reliably, removing one of the agent's picks (#29).
+    fn send_pick_delete(&mut self, pick_id: Uuid, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::PickDelete(PickDelete {
+            agent_data: PickDeleteAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: PickDeleteDataBlock { pick_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `PickGodDelete` reliably (god-only; `query_id` lets the
+    /// dataserver resend the affected agent's pick list) (#29).
+    fn send_pick_god_delete(
+        &mut self,
+        pick_id: Uuid,
+        query_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::PickGodDelete(PickGodDelete {
+            agent_data: PickGodDeleteAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: PickGodDeleteDataBlock { pick_id, query_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ClassifiedInfoUpdate` reliably, creating or editing one of the
+    /// agent's classifieds (#29). The simulator fills in the parent estate.
+    fn send_classified_info_update(
+        &mut self,
+        update: &ClassifiedUpdate,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let (x, y, z) = update.pos_global;
+        let message = AnyMessage::ClassifiedInfoUpdate(ClassifiedInfoUpdate {
+            agent_data: ClassifiedInfoUpdateAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: ClassifiedInfoUpdateDataBlock {
+                classified_id: update.classified_id,
+                category: update.category,
+                name: with_nul(&update.name),
+                desc: with_nul(&update.description),
+                parcel_id: update.parcel_id,
+                // Set on the simulator as the message passes through.
+                parent_estate: 0,
+                snapshot_id: update.snapshot_id,
+                pos_global: [x, y, z],
+                classified_flags: update.classified_flags,
+                price_for_listing: update.price_for_listing,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ClassifiedDelete` reliably, removing one of the agent's
+    /// classifieds (#29).
+    fn send_classified_delete(
+        &mut self,
+        classified_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ClassifiedDelete(ClassifiedDelete {
+            agent_data: ClassifiedDeleteAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: ClassifiedDeleteDataBlock { classified_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ClassifiedGodDelete` reliably (god-only; `query_id` lets the
+    /// dataserver resend the affected agent's classified list) (#29).
+    fn send_classified_god_delete(
+        &mut self,
+        classified_id: Uuid,
+        query_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ClassifiedGodDelete(ClassifiedGodDelete {
+            agent_data: ClassifiedGodDeleteAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: ClassifiedGodDeleteDataBlock {
+                classified_id,
+                query_id,
             },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -4302,6 +4533,27 @@ impl Session {
                     notes: trimmed_string(&reply.data.notes),
                 });
             }
+            AnyMessage::AvatarClassifiedReply(reply) => {
+                self.events.push_back(Event::AvatarClassifieds {
+                    target_id: reply.agent_data.target_id,
+                    classifieds: reply
+                        .data
+                        .iter()
+                        .map(|classified| AvatarClassified {
+                            classified_id: classified.classified_id,
+                            name: trimmed_string(&classified.name),
+                        })
+                        .collect(),
+                });
+            }
+            AnyMessage::PickInfoReply(reply) => {
+                self.events
+                    .push_back(Event::PickInfo(Box::new(pick_info(&reply.data))));
+            }
+            AnyMessage::ClassifiedInfoReply(reply) => {
+                self.events
+                    .push_back(Event::ClassifiedInfo(Box::new(classified_info(&reply.data))));
+            }
             AnyMessage::InventoryDescendents(reply) => {
                 self.events.push_back(Event::InventoryDescendents {
                     folder_id: reply.agent_data.folder_id,
@@ -5298,6 +5550,206 @@ impl Session {
     pub fn request_avatar_notes(&mut self, target: Uuid, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_generic_message("avatarnotesrequest", &[target.to_string()], now)?;
+        Ok(())
+    }
+
+    /// Requests the classified ads of the avatar `target` (a `GenericMessage`
+    /// `avatarclassifiedsrequest`). The reply arrives as
+    /// [`Event::AvatarClassifieds`]; fetch a classified's full details with
+    /// [`Session::request_classified_info`]. (#29)
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_avatar_classifieds(&mut self, target: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_generic_message("avatarclassifiedsrequest", &[target.to_string()], now)?;
+        Ok(())
+    }
+
+    /// Requests the full details of one pick (a `GenericMessage`
+    /// `pickinforequest`). `creator_id` is the avatar that owns the pick (the
+    /// `target_id` from [`Event::AvatarPicks`]) and `pick_id` the pick's id. The
+    /// reply arrives as [`Event::PickInfo`]. (#29)
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_pick_info(
+        &mut self,
+        creator_id: Uuid,
+        pick_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_generic_message(
+            "pickinforequest",
+            &[creator_id.to_string(), pick_id.to_string()],
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Requests the full details of one classified ad (`ClassifiedInfoRequest`).
+    /// The reply arrives as [`Event::ClassifiedInfo`]. (#29)
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_classified_info(
+        &mut self,
+        classified_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_classified_info_request(classified_id, now)?;
+        Ok(())
+    }
+
+    /// Replaces the agent's own profile via `AvatarPropertiesUpdate` (#29). This
+    /// overwrites every field, so read the current values with
+    /// [`Session::request_avatar_properties`] first and build the
+    /// [`ProfileUpdate`] from there.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn update_profile(&mut self, update: &ProfileUpdate, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_avatar_properties_update(update, now)?;
+        Ok(())
+    }
+
+    /// Replaces the agent's own interests via `AvatarInterestsUpdate` (#29).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn update_interests(
+        &mut self,
+        update: &InterestsUpdate,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_avatar_interests_update(update, now)?;
+        Ok(())
+    }
+
+    /// Sets the agent's private notes about the avatar `target` via
+    /// `AvatarNotesUpdate` (#29). Read the current notes with
+    /// [`Session::request_avatar_notes`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn update_avatar_notes(
+        &mut self,
+        target: Uuid,
+        notes: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_avatar_notes_update(target, notes, now)?;
+        Ok(())
+    }
+
+    /// Creates or edits one of the agent's picks via `PickInfoUpdate` (#29).
+    /// Supply a fresh [`PickUpdate::pick_id`] to create a pick, or an existing
+    /// one to edit it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn update_pick(&mut self, update: &PickUpdate, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_pick_info_update(update, now)?;
+        Ok(())
+    }
+
+    /// Deletes one of the agent's picks via `PickDelete` (#29).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn delete_pick(&mut self, pick_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_pick_delete(pick_id, now)?;
+        Ok(())
+    }
+
+    /// Deletes any agent's pick via `PickGodDelete` (god-only). `query_id` lets
+    /// the dataserver resend the affected agent's pick list. (#29)
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn god_delete_pick(
+        &mut self,
+        pick_id: Uuid,
+        query_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_pick_god_delete(pick_id, query_id, now)?;
+        Ok(())
+    }
+
+    /// Creates or edits one of the agent's classifieds via
+    /// `ClassifiedInfoUpdate` (#29). Supply a fresh
+    /// [`ClassifiedUpdate::classified_id`] to create a classified, or an
+    /// existing one to edit it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn update_classified(
+        &mut self,
+        update: &ClassifiedUpdate,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_classified_info_update(update, now)?;
+        Ok(())
+    }
+
+    /// Deletes one of the agent's classifieds via `ClassifiedDelete` (#29).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn delete_classified(&mut self, classified_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_classified_delete(classified_id, now)?;
+        Ok(())
+    }
+
+    /// Deletes any agent's classified via `ClassifiedGodDelete` (god-only).
+    /// `query_id` lets the dataserver resend the affected agent's classified
+    /// list. (#29)
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn god_delete_classified(
+        &mut self,
+        classified_id: Uuid,
+        query_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_classified_god_delete(classified_id, query_id, now)?;
         Ok(())
     }
 
@@ -8000,6 +8452,48 @@ fn avatar_group(data: &AvatarGroupsReplyGroupDataBlock) -> AvatarGroupMembership
         group_powers: data.group_powers,
         accept_notices: data.accept_notices,
         group_insignia_id: data.group_insignia_id,
+    }
+}
+
+/// Builds [`PickInfo`] from a `PickInfoReply` data block (#29).
+fn pick_info(data: &PickInfoReplyDataBlock) -> PickInfo {
+    let [x, y, z] = data.pos_global;
+    PickInfo {
+        pick_id: data.pick_id,
+        creator_id: data.creator_id,
+        top_pick: data.top_pick,
+        parcel_id: data.parcel_id,
+        name: trimmed_string(&data.name),
+        description: trimmed_string(&data.desc),
+        snapshot_id: data.snapshot_id,
+        user: trimmed_string(&data.user),
+        original_name: trimmed_string(&data.original_name),
+        sim_name: trimmed_string(&data.sim_name),
+        pos_global: (x, y, z),
+        sort_order: data.sort_order,
+        enabled: data.enabled,
+    }
+}
+
+/// Builds [`ClassifiedInfo`] from a `ClassifiedInfoReply` data block (#29).
+fn classified_info(data: &ClassifiedInfoReplyDataBlock) -> ClassifiedInfo {
+    let [x, y, z] = data.pos_global;
+    ClassifiedInfo {
+        classified_id: data.classified_id,
+        creator_id: data.creator_id,
+        creation_date: data.creation_date,
+        expiration_date: data.expiration_date,
+        category: data.category,
+        name: trimmed_string(&data.name),
+        description: trimmed_string(&data.desc),
+        parcel_id: data.parcel_id,
+        parent_estate: data.parent_estate,
+        snapshot_id: data.snapshot_id,
+        sim_name: trimmed_string(&data.sim_name),
+        pos_global: (x, y, z),
+        parcel_name: trimmed_string(&data.parcel_name),
+        classified_flags: data.classified_flags,
+        price_for_listing: data.price_for_listing,
     }
 }
 

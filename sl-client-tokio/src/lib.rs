@@ -39,13 +39,14 @@ use sl_proto::{
 // Re-export the core types a consumer needs so they can depend on this crate
 // alone.
 pub use sl_proto::{
-    ActiveGroup, AnyMessage, Asset, AssetType, AvatarGroupMembership, AvatarInterests, AvatarPick,
-    AvatarProperties, ChatAudible, ChatMessage, ChatSourceType, ChatType, ClickAction,
-    ControlFlags, CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData,
-    EstateAccessDelta, EstateAccessKind, EstateInfo, Event, ExperienceInfo, ExperiencePermission,
-    ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights,
-    GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
-    GroupRoleMember, GroupTitle, IceCandidate, ImDialog, ImageCodec, InstantMessage,
+    ActiveGroup, AnyMessage, Asset, AssetType, AvatarClassified, AvatarGroupMembership,
+    AvatarInterests, AvatarPick, AvatarProperties, ChatAudible, ChatMessage, ChatSourceType,
+    ChatType, ClassifiedInfo, ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams,
+    DeRezDestination, DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind,
+    EstateInfo, Event, ExperienceInfo, ExperiencePermission, ExperienceProperties,
+    ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights, GltfMaterialOverride,
+    GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole, GroupRoleMember,
+    GroupTitle, IceCandidate, ImDialog, ImageCodec, InstantMessage, InterestsUpdate,
     InventoryFolder, InventoryItem, InventoryOffer, InventoryType, LegacyMaterial, LightData,
     LightImage, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest, LoginResponse,
     MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER,
@@ -54,14 +55,15 @@ pub use sl_proto::{
     MuteType, NeighborInfo, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse,
     ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
     ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ParcelVoiceInfo, PermissionField,
-    PlayingAnimation, PrimShape, ProductType, ReflectionProbe, RegionFlags, RegionIdentity,
-    RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation,
-    SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    SculptData, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture, TextureEntry,
-    TextureFace, Throttle, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo,
-    VoiceProvisionRequest, Wearable, WearableType, avatar_texture, decode_texture_entry,
-    grid_to_handle, handle_to_global, handle_to_grid, pcode, sim_access,
+    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ParcelVoiceInfo, PermissionField, PickInfo,
+    PickUpdate, PlayingAnimation, PrimShape, ProductType, ProfileUpdate, ReflectionProbe,
+    RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry,
+    RenderMaterialRef, Rotation, SaleType, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTeleportRequest, SculptData, SoundFlags, SoundPreload,
+    TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace, Throttle, TransferStatus,
+    Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType,
+    avatar_texture, decode_texture_entry, grid_to_handle, handle_to_global, handle_to_grid, pcode,
+    sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -184,6 +186,54 @@ pub enum Command {
     /// Request the agent's private notes about an avatar. The reply arrives as
     /// [`Event::AvatarNotes`].
     RequestAvatarNotes(Uuid),
+    /// Request an avatar's classified ads. The reply arrives as
+    /// [`Event::AvatarClassifieds`].
+    RequestAvatarClassifieds(Uuid),
+    /// Request the full details of one pick. `creator_id` is the pick's owner
+    /// (the `target_id` from [`Event::AvatarPicks`]). The reply arrives as
+    /// [`Event::PickInfo`].
+    RequestPickInfo {
+        /// The avatar that owns the pick.
+        creator_id: Uuid,
+        /// The pick id.
+        pick_id: Uuid,
+    },
+    /// Request the full details of one classified ad. The reply arrives as
+    /// [`Event::ClassifiedInfo`].
+    RequestClassifiedInfo(Uuid),
+    /// Replace the agent's own profile (`AvatarPropertiesUpdate`).
+    UpdateProfile(ProfileUpdate),
+    /// Replace the agent's own interests (`AvatarInterestsUpdate`).
+    UpdateInterests(InterestsUpdate),
+    /// Set the agent's private notes about an avatar (`AvatarNotesUpdate`).
+    UpdateAvatarNotes {
+        /// The avatar the notes are about.
+        target_id: Uuid,
+        /// The note text.
+        notes: String,
+    },
+    /// Create or edit one of the agent's picks (`PickInfoUpdate`).
+    UpdatePick(PickUpdate),
+    /// Delete one of the agent's picks (`PickDelete`).
+    DeletePick(Uuid),
+    /// Delete any agent's pick (`PickGodDelete`, god-only).
+    GodDeletePick {
+        /// The pick id.
+        pick_id: Uuid,
+        /// The query id for the dataserver to resend the pick list under.
+        query_id: Uuid,
+    },
+    /// Create or edit one of the agent's classifieds (`ClassifiedInfoUpdate`).
+    UpdateClassified(ClassifiedUpdate),
+    /// Delete one of the agent's classifieds (`ClassifiedDelete`).
+    DeleteClassified(Uuid),
+    /// Delete any agent's classified (`ClassifiedGodDelete`, god-only).
+    GodDeleteClassified {
+        /// The classified id.
+        classified_id: Uuid,
+        /// The query id for the dataserver to resend the classified list under.
+        query_id: Uuid,
+    },
     /// Request the contents (sub-folders and items) of an inventory folder over
     /// **UDP** (`FetchInventoryDescendents`). The reply arrives as
     /// [`Event::InventoryDescendents`]. The full folder skeleton arrives once at
@@ -1179,6 +1229,14 @@ impl Client {
         })
     }
 
+    /// The agent's own id, available once logged in. Useful for self-directed
+    /// requests (e.g. reading one's own picks or classifieds) before
+    /// [`Client::run`] consumes the client.
+    #[must_use]
+    pub fn agent_id(&self) -> Option<Uuid> {
+        self.session.agent_id()
+    }
+
     /// Runs the session until it is disconnected or logged out, forwarding
     /// events to `events` and applying commands from `commands`.
     ///
@@ -1304,6 +1362,58 @@ impl Client {
                         }
                         Some(Command::RequestAvatarNotes(target)) => {
                             self.session.request_avatar_notes(target, Instant::now())?;
+                        }
+                        Some(Command::RequestAvatarClassifieds(target)) => {
+                            self.session
+                                .request_avatar_classifieds(target, Instant::now())?;
+                        }
+                        Some(Command::RequestPickInfo {
+                            creator_id,
+                            pick_id,
+                        }) => {
+                            self.session
+                                .request_pick_info(creator_id, pick_id, Instant::now())?;
+                        }
+                        Some(Command::RequestClassifiedInfo(classified_id)) => {
+                            self.session
+                                .request_classified_info(classified_id, Instant::now())?;
+                        }
+                        Some(Command::UpdateProfile(update)) => {
+                            self.session.update_profile(&update, Instant::now())?;
+                        }
+                        Some(Command::UpdateInterests(update)) => {
+                            self.session.update_interests(&update, Instant::now())?;
+                        }
+                        Some(Command::UpdateAvatarNotes { target_id, notes }) => {
+                            self.session
+                                .update_avatar_notes(target_id, &notes, Instant::now())?;
+                        }
+                        Some(Command::UpdatePick(update)) => {
+                            self.session.update_pick(&update, Instant::now())?;
+                        }
+                        Some(Command::DeletePick(pick_id)) => {
+                            self.session.delete_pick(pick_id, Instant::now())?;
+                        }
+                        Some(Command::GodDeletePick { pick_id, query_id }) => {
+                            self.session
+                                .god_delete_pick(pick_id, query_id, Instant::now())?;
+                        }
+                        Some(Command::UpdateClassified(update)) => {
+                            self.session.update_classified(&update, Instant::now())?;
+                        }
+                        Some(Command::DeleteClassified(classified_id)) => {
+                            self.session
+                                .delete_classified(classified_id, Instant::now())?;
+                        }
+                        Some(Command::GodDeleteClassified {
+                            classified_id,
+                            query_id,
+                        }) => {
+                            self.session.god_delete_classified(
+                                classified_id,
+                                query_id,
+                                Instant::now(),
+                            )?;
                         }
                         Some(Command::RequestFolderContents(folder_id)) => {
                             self.session.request_folder_contents(folder_id, Instant::now())?;

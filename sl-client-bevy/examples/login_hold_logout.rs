@@ -130,6 +130,13 @@ fn on_events(
                 );
             }
             SlSessionEvent::AvatarPicks { picks, .. } => info!("avatar has {} picks", picks.len()),
+            SlSessionEvent::AvatarClassifieds { classifieds, .. } => {
+                info!("avatar has {} classifieds", classifieds.len());
+            }
+            SlSessionEvent::PickInfo(pick) => info!("pick details: {}", pick.name),
+            SlSessionEvent::ClassifiedInfo(classified) => {
+                info!("classified details: {}", classified.name);
+            }
             SlSessionEvent::InventorySkeleton(folders) => {
                 info!("inventory skeleton: {} folders", folders.len());
             }

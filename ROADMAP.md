@@ -56,15 +56,15 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 26 ✅ | Voice chat **(signalling)** | 13 | Voice-enabled client | **SL Vivox/WebRTC or FreeSWITCH** |
 | 27 ✅ | Experiences | 5 | Experience-permission client | **SL grid only** |
 | 28 ✅ | Complete the IM surface | 8 | Offer-handler / IM bot (full) | Local OpenSim (2 accts) |
-| 29 | Profile & pick/classified editing | 5 | Profile editor | Local OpenSim (profiles) |
+| 29 ✅ | Profile & pick/classified editing | 5 | Profile editor | Local OpenSim (profiles) |
 | 30 | Inventory mutation & AIS3 | 8 | Inventory manager, product bot | Local OpenSim |
 | 31 | Group management edits | 5 | Group admin bot | Local OpenSim (Groups V2) |
 | 32 | Camera & interest control | 3 | Look-aware roaming bot | Local OpenSim |
 | 33 | World-stream decode & LOD fetch | 5 | *(faithfulness for 16/19)* | Local OpenSim |
 | 34 | Experience key-value store | 3 | Experience datastore client | **SL grid only** |
 
-**Items #29–#34 are not yet built** (#28 is now done). They are the **deferred
-follow-ups** that
+**Items #30–#34 are not yet built** (#28 and #29 are now done). They are the
+**deferred follow-ups** that
 items #1–#27 knowingly left for later (the "Deferred:" / "follow-up" /
 "waits on #…" / "unit-tested only" notes in those entries), now promoted to
 first-class roadmap items so the gap analysis stays complete. Each is grouped
@@ -1075,17 +1075,61 @@ no-op cleanly on OpenSim. Test: local OpenSim — two accounts for the offer
 round-trips; the grid's offline-IM module plus an offline-then-relogin test for
 UDP history.*
 
-**29. Profile & pick/classified editing — `AvatarPropertiesUpdate`,
-pick/classified create-update-delete, `PickInfoRequest`/`ClassifiedInfoRequest`
-detail · 5 pts. (extends #4, Tier A.)** Item #4 delivered the read side
-(`request_avatar_properties`/`picks`/`notes`); the write side and the per-item
-detail fetches were the deferred half. Will add: editing one's own profile
-(`AvatarPropertiesUpdate`), create/update/delete of picks and of classifieds,
-and the pick/classified **detail** fetches (`PickInfoRequest`/`PickInfoReply`,
-`ClassifiedInfoRequest`/`ClassifiedInfoReply`) — the picks/notes lists item #4
-returns carry only summaries. New `Session` setters + detail events through both
-runtimes. *Test: local OpenSim with the profile module enabled (`[UserProfiles]
-ProfileServiceURL`).*
+**29. Profile & pick/classified editing (done) ✅ — `AvatarPropertiesUpdate`,
+`AvatarInterestsUpdate`, `AvatarNotesUpdate`, pick/classified
+create-update-delete, `pickinforequest`/`ClassifiedInfoRequest` detail · 5 pts.
+(extends #4, Tier A.)** Item #4 delivered the read side
+(`request_avatar_properties`/`picks`/`notes`); this finishes the deferred write
+side and the per-item detail fetches. Implemented: **profile editing** —
+`update_profile` (`AvatarPropertiesUpdate`, a `ProfileUpdate` builder: second/
+first-life images + about text, allow/mature-publish flags, web URL),
+`update_interests` (`AvatarInterestsUpdate`, an `InterestsUpdate`:
+want-to/skills masks + free text, languages), and `update_avatar_notes`
+(`AvatarNotesUpdate`). **The classifieds *list*** item #4 never had —
+`request_avatar_classifieds` (the `GenericMessage` `avatarclassifiedsrequest` →
+`Event::AvatarClassifieds`, the `AvatarClassifiedReply` siblings of #4's picks
+list, each a header-only `AvatarClassified` id+name). **Detail fetches** —
+`request_pick_info` (`pickinforequest` `GenericMessage`, params
+`[creator_id, pick_id]` as the viewer sends → `PickInfoReply` →
+`Event::PickInfo`, a full `PickInfo`: creator, parcel, name/desc, snapshot, sim
+name, global position, sort order, enabled) and `request_classified_info`
+(`ClassifiedInfoRequest` → `ClassifiedInfoReply` → `Event::ClassifiedInfo`, a
+full `ClassifiedInfo`: creator, creation/expiration dates, category, name/desc,
+parcel, snapshot, sim name, global position, flags, listing price) — the
+picks/classifieds lists carry only summaries. **Pick CRUD** — `update_pick`
+(`PickInfoUpdate`, a `PickUpdate` builder; the session fills `creator_id` with
+the agent and never sets the god-only `TopPick` flag, as the viewer does —
+supply a fresh id to create, an existing one to edit), `delete_pick`
+(`PickDelete`), and the god-gated `god_delete_pick` (`PickGodDelete`).
+**Classified CRUD** — `update_classified` (`ClassifiedInfoUpdate`, a
+`ClassifiedUpdate` builder; the sim fills the parent estate),
+`delete_classified` (`ClassifiedDelete`), and `god_delete_classified`
+(`ClassifiedGodDelete`). New value types `ProfileUpdate`, `InterestsUpdate`,
+`AvatarClassified`, `PickInfo`, `ClassifiedInfo`, `PickUpdate`,
+`ClassifiedUpdate`, and events `AvatarClassifieds`/`PickInfo`/`ClassifiedInfo`,
+all wired as `Command`/`SlCommand` variants through both runtimes (plus a new
+`Client::agent_id()` accessor on the tokio runtime for self-directed requests).
+Field layouts and the `pickinforequest` `[creator_id, pick_id]` param order were
+cross-checked against the Firestorm viewer (`llavatarpropertiesprocessor.cpp`)
+and OpenSim's `UserProfileModule` / `LLClientView`. Covered by six
+`lifecycle.rs` tests (the classifieds-list generic message +
+`AvatarClassifiedReply` decode, the `pickinforequest` params + `PickInfoReply`
+decode, the `ClassifiedInfoRequest`→`Reply` round-trip, the
+profile/interests/notes update encodings, and the pick/classified create+delete
+encodings). *Live-verified against the local OpenSim with the profile module
+enabled (`[UserProfilesService] Enabled = true` plus pointing `[UserProfiles]
+ProfileServiceURL` at the standalone's own `:9000`, not the unbound ROBUST
+`:8002`) via the new `profile_edit` tokio example: a full round-trip —
+`update_profile` set the about text (confirmed persisted in the `userprofile`
+SQLite row and read back cold as "Edited by sl-client #29"), a pick was created
+(`PickInfoUpdate`), listed (`AvatarPicksReply`), its details fetched
+(`pickinforequest` → `PickInfoReply` with parcel/sim/desc) and deleted
+(`PickDelete`; the roster went 1 → 0), and the same create → detail → delete
+cycle for a classified (`ClassifiedInfoUpdate`/`Request`/`Reply`/`Delete`). The
+interests/notes updates and the two god-delete ops are unit-tested only (the
+former need a second observer to see; the latter are god-gated). Test: local
+OpenSim — `[UserProfilesService] Enabled = true` (off by default; the SQLite
+`UserProfiles` realm auto-migrates) with `ProfileServiceURL` reachable.*
 
 **30. Inventory mutation & AIS3 — `CreateInventoryFolder`/`Item`,
 `MoveInventory*`, `CopyInventoryItem`, `RemoveInventoryItem`,

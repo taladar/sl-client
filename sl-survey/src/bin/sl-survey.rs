@@ -585,6 +585,9 @@ impl Survey {
             | Event::AvatarGroups { .. }
             | Event::AvatarPicks { .. }
             | Event::AvatarNotes { .. }
+            | Event::AvatarClassifieds { .. }
+            | Event::PickInfo(_)
+            | Event::ClassifiedInfo(_)
             | Event::InventorySkeleton(_)
             | Event::InventoryDescendents { .. }
             | Event::FriendList(_)

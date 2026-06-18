@@ -43,23 +43,24 @@ use sl_proto::{
 // survey commands, and read events. `Event` is aliased to avoid clashing with
 // Bevy's `Event` derive.
 pub use sl_proto::{
-    ActiveGroup, AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,
-    ChatAudible, ChatMessage, ChatSourceType, ChatType, ClickAction, ControlFlags,
-    CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData, EstateAccessDelta,
-    EstateAccessKind, EstateInfo, ExperienceInfo, ExperiencePermission, ExperienceProperties,
-    ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights, GltfMaterialOverride,
-    GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole, GroupRoleMember,
-    GroupTitle, IceCandidate, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    InventoryOffer, InventoryType, LegacyMaterial, LightData, LightImage, LindenAmount,
-    LoadUrlRequest, LoginParams, LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
-    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
-    MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectExtraParams,
-    ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectProperties, ObjectTransform,
-    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
-    ParcelVoiceInfo, PermissionField, PlayingAnimation, PrimShape, ProductType, ReflectionProbe,
-    RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry,
+    ActiveGroup, AnyMessage, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick,
+    AvatarProperties, ChatAudible, ChatMessage, ChatSourceType, ChatType, ClassifiedInfo,
+    ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, DeRezDestination,
+    DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, ExperienceInfo,
+    ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData,
+    Friend, FriendRights, GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice,
+    GroupProfile, GroupRole, GroupRoleMember, GroupTitle, IceCandidate, ImDialog, InstantMessage,
+    InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer, InventoryType, LegacyMaterial,
+    LightData, LightImage, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest, MEDIA_PERM_ALL,
+    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
+    MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge,
+    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
+    NeighborInfo, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion,
+    ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
+    ParcelFlags, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo,
+    ParcelReturnType, ParcelUpdate, ParcelVoiceInfo, PermissionField, PickInfo, PickUpdate,
+    PlayingAnimation, PrimShape, ProductType, ProfileUpdate, ReflectionProbe, RegionFlags,
+    RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry,
     RenderMaterialRef, Rotation, SaleType, ScriptDialog, ScriptPermissionRequest,
     ScriptPermissions, ScriptTeleportRequest, SculptData, SoundFlags, SoundPreload,
     TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, Throttle, Transmit, Uuid, Vector,
@@ -190,6 +191,54 @@ pub enum SlCommand {
     /// Request the agent's private notes about an avatar. The reply arrives as
     /// [`SlSessionEvent::AvatarNotes`].
     RequestAvatarNotes(Uuid),
+    /// Request an avatar's classified ads. The reply arrives as
+    /// [`SlSessionEvent::AvatarClassifieds`].
+    RequestAvatarClassifieds(Uuid),
+    /// Request the full details of one pick. `creator_id` is the pick's owner
+    /// (the `target_id` from [`SlSessionEvent::AvatarPicks`]). The reply arrives
+    /// as [`SlSessionEvent::PickInfo`].
+    RequestPickInfo {
+        /// The avatar that owns the pick.
+        creator_id: Uuid,
+        /// The pick id.
+        pick_id: Uuid,
+    },
+    /// Request the full details of one classified ad. The reply arrives as
+    /// [`SlSessionEvent::ClassifiedInfo`].
+    RequestClassifiedInfo(Uuid),
+    /// Replace the agent's own profile (`AvatarPropertiesUpdate`).
+    UpdateProfile(ProfileUpdate),
+    /// Replace the agent's own interests (`AvatarInterestsUpdate`).
+    UpdateInterests(InterestsUpdate),
+    /// Set the agent's private notes about an avatar (`AvatarNotesUpdate`).
+    UpdateAvatarNotes {
+        /// The avatar the notes are about.
+        target_id: Uuid,
+        /// The note text.
+        notes: String,
+    },
+    /// Create or edit one of the agent's picks (`PickInfoUpdate`).
+    UpdatePick(PickUpdate),
+    /// Delete one of the agent's picks (`PickDelete`).
+    DeletePick(Uuid),
+    /// Delete any agent's pick (`PickGodDelete`, god-only).
+    GodDeletePick {
+        /// The pick id.
+        pick_id: Uuid,
+        /// The query id for the dataserver to resend the pick list under.
+        query_id: Uuid,
+    },
+    /// Create or edit one of the agent's classifieds (`ClassifiedInfoUpdate`).
+    UpdateClassified(ClassifiedUpdate),
+    /// Delete one of the agent's classifieds (`ClassifiedDelete`).
+    DeleteClassified(Uuid),
+    /// Delete any agent's classified (`ClassifiedGodDelete`, god-only).
+    GodDeleteClassified {
+        /// The classified id.
+        classified_id: Uuid,
+        /// The query id for the dataserver to resend the classified list under.
+        query_id: Uuid,
+    },
     /// Request the contents (sub-folders and items) of an inventory folder over
     /// **UDP** (`FetchInventoryDescendents`). The reply arrives as
     /// [`SlSessionEvent::InventoryDescendents`]. The full folder skeleton arrives
@@ -1442,6 +1491,50 @@ fn advance_running(
             }
             SlCommand::RequestAvatarNotes(target) => {
                 session.request_avatar_notes(*target, now).ok();
+            }
+            SlCommand::RequestAvatarClassifieds(target) => {
+                session.request_avatar_classifieds(*target, now).ok();
+            }
+            SlCommand::RequestPickInfo {
+                creator_id,
+                pick_id,
+            } => {
+                session.request_pick_info(*creator_id, *pick_id, now).ok();
+            }
+            SlCommand::RequestClassifiedInfo(classified_id) => {
+                session.request_classified_info(*classified_id, now).ok();
+            }
+            SlCommand::UpdateProfile(update) => {
+                session.update_profile(update, now).ok();
+            }
+            SlCommand::UpdateInterests(update) => {
+                session.update_interests(update, now).ok();
+            }
+            SlCommand::UpdateAvatarNotes { target_id, notes } => {
+                session.update_avatar_notes(*target_id, notes, now).ok();
+            }
+            SlCommand::UpdatePick(update) => {
+                session.update_pick(update, now).ok();
+            }
+            SlCommand::DeletePick(pick_id) => {
+                session.delete_pick(*pick_id, now).ok();
+            }
+            SlCommand::GodDeletePick { pick_id, query_id } => {
+                session.god_delete_pick(*pick_id, *query_id, now).ok();
+            }
+            SlCommand::UpdateClassified(update) => {
+                session.update_classified(update, now).ok();
+            }
+            SlCommand::DeleteClassified(classified_id) => {
+                session.delete_classified(*classified_id, now).ok();
+            }
+            SlCommand::GodDeleteClassified {
+                classified_id,
+                query_id,
+            } => {
+                session
+                    .god_delete_classified(*classified_id, *query_id, now)
+                    .ok();
             }
             SlCommand::RequestFolderContents(folder_id) => {
                 session.request_folder_contents(*folder_id, now).ok();
