@@ -77,6 +77,38 @@ pub(crate) fn decode_extra_params(blob: &[u8]) -> ObjectExtraParams {
     out
 }
 
+/// Measures how many leading bytes of `blob` the `ExtraParams` container
+/// occupies (its `u8` count plus each parameter's `u16` type, `u32` size, and
+/// payload). Used by the compressed-object decoder, where the container is
+/// embedded in a larger length-prefix-less stream and the bytes that follow it
+/// (sound, name-values, shape, texture entry) can only be reached once the
+/// container's extent is known. A truncated container is clamped to `blob.len()`.
+#[must_use]
+pub(crate) fn extra_params_len(blob: &[u8]) -> usize {
+    let mut reader = Reader::new(blob);
+    let Ok(count) = reader.u8() else {
+        return 0;
+    };
+    for _ in 0..count {
+        if reader.u16().is_err() {
+            break;
+        }
+        let Ok(size) = reader.u32() else {
+            break;
+        };
+        let Ok(size) = usize::try_from(size) else {
+            break;
+        };
+        if reader.take(size).is_err() {
+            // A declared payload that runs past the buffer means the container
+            // is truncated; treat it as consuming the rest of the blob so the
+            // caller does not misread later fields out of overflow bytes.
+            return blob.len();
+        }
+    }
+    blob.len().saturating_sub(reader.remaining())
+}
+
 /// Decodes `LLFlexibleObjectData`: four packed bytes (tension, drag, gravity,
 /// wind) and an optional trailing user-force vector.
 fn decode_flexible(reader: &mut Reader<'_>) -> Option<FlexibleData> {
@@ -172,4 +204,57 @@ fn decode_reflection_probe(reader: &mut Reader<'_>) -> Option<ReflectionProbe> {
         is_dynamic: flags & 0x02 != 0,
         is_mirror: flags & 0x04 != 0,
     })
+}
+
+#[cfg(test)]
+mod len_tests {
+    use pretty_assertions::assert_eq;
+
+    use super::extra_params_len;
+
+    /// Appends `value` to `out` as `width` little-endian bytes (avoiding the
+    /// crate's endian-byte-method lint).
+    fn push_le(out: &mut Vec<u8>, value: u32, width: u32) {
+        let mut emitted = 0_u32;
+        while emitted < width {
+            let shift = emitted.saturating_mul(8);
+            out.push(u8::try_from((value >> shift) & 0xFF).unwrap_or(0));
+            emitted = emitted.saturating_add(1);
+        }
+    }
+
+    /// Builds an `ExtraParams` blob: a count byte then `(type, payload)` entries.
+    fn build(entries: &[(u16, &[u8])]) -> Vec<u8> {
+        let mut out = vec![u8::try_from(entries.len()).unwrap_or(0)];
+        for &(param_type, payload) in entries {
+            push_le(&mut out, u32::from(param_type), 2);
+            push_le(&mut out, u32::try_from(payload.len()).unwrap_or(0), 4);
+            out.extend_from_slice(payload);
+        }
+        out
+    }
+
+    #[test]
+    fn measures_empty_and_populated_containers() {
+        // A lone zero count byte: just the one byte.
+        assert_eq!(extra_params_len(&[0]), 1);
+        // One 16-byte light parameter: 1 (count) + 2 (type) + 4 (size) + 16.
+        let blob = build(&[(0x20, &[0_u8; 16])]);
+        assert_eq!(extra_params_len(&blob), 23);
+        assert_eq!(extra_params_len(&blob), blob.len());
+        // Trailing bytes after the container are not counted.
+        let mut with_tail = blob.clone();
+        with_tail.extend_from_slice(&[0xAB, 0xCD]);
+        assert_eq!(extra_params_len(&with_tail), blob.len());
+    }
+
+    #[test]
+    fn clamps_a_truncated_container_to_the_available_bytes() {
+        // count=1, type=0x20, size=16, but only 3 payload bytes follow: the
+        // declared payload overruns the blob, so the whole blob is consumed.
+        let truncated = [1, 0x20, 0, 16, 0, 0, 0, 1, 2, 3];
+        assert_eq!(extra_params_len(&truncated), truncated.len());
+        // An empty blob has no count byte at all.
+        assert_eq!(extra_params_len(&[]), 0);
+    }
 }

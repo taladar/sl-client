@@ -70,6 +70,15 @@ impl<'a> Reader<'a> {
         rest
     }
 
+    /// Returns the not-yet-consumed bytes without advancing the reader.
+    ///
+    /// Useful for measuring a self-delimiting sub-structure (e.g. an
+    /// `ExtraParams` container) before consuming it with [`take`](Self::take).
+    #[must_use]
+    pub fn peek_rest(&self) -> &'a [u8] {
+        self.buf.get(self.pos..).unwrap_or(&[])
+    }
+
     /// Consumes the next `N` bytes as a fixed-size array.
     ///
     /// # Errors

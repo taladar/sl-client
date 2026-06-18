@@ -106,6 +106,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     })
                     .await
                     .ok();
+                // Also fetch a coarse LOD: this exercises the HTTP `Range`
+                // path, transferring only the level-of-detail prefix.
+                command_tx
+                    .send(Command::FetchTexture {
+                        texture_id,
+                        discard_level: 3,
+                    })
+                    .await
+                    .ok();
                 command_tx
                     .send(Command::RequestTexture {
                         texture_id,
@@ -119,6 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .send(Command::FetchAsset {
                             asset_id,
                             asset_type,
+                            byte_range: None,
                         })
                         .await
                         .ok();
