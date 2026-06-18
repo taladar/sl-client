@@ -179,9 +179,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::SitResult {
                 sit_object,
                 sit_position,
+                sit_rotation,
+                force_mouselook,
                 ..
             } => {
-                info!("sat on {sit_object} at {sit_position:?}");
+                info!(
+                    "sat on {sit_object} at {sit_position:?} facing {sit_rotation:?} \
+                     (force_mouselook = {force_mouselook})"
+                );
             }
             Event::AvatarProperties(props) => {
                 info!(

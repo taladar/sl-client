@@ -119,9 +119,14 @@ fn on_events(
             SlSessionEvent::SitResult {
                 sit_object,
                 sit_position,
+                sit_rotation,
+                force_mouselook,
                 ..
             } => {
-                info!("sat on {sit_object} at {sit_position:?}");
+                info!(
+                    "sat on {sit_object} at {sit_position:?} facing {sit_rotation:?} \
+                     (force_mouselook = {force_mouselook})"
+                );
             }
             SlSessionEvent::AvatarProperties(props) => {
                 info!(

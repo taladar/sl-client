@@ -4969,11 +4969,11 @@ impl Session {
                     self.events.push_back(Event::SitResult {
                         sit_object: response.sit_object.id,
                         autopilot: transform.auto_pilot,
-                        sit_position: (
-                            transform.sit_position.x,
-                            transform.sit_position.y,
-                            transform.sit_position.z,
-                        ),
+                        sit_position: transform.sit_position.clone(),
+                        sit_rotation: transform.sit_rotation.clone(),
+                        camera_eye_offset: transform.camera_eye_offset.clone(),
+                        camera_at_offset: transform.camera_at_offset.clone(),
+                        force_mouselook: transform.force_mouselook,
                     });
                 }
             }
