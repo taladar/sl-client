@@ -1922,7 +1922,7 @@ in-memory loopback against the existing client `Session`.
 |---|---------|-----|-----------|------|
 | 52 ✅ | Generic LLSD-XML serializer (`Llsd` → XML) | 2 | `parse_llsd_xml` | Unit round-trip |
 | 53 ✅ | Login request parse / response build (`LoginServer`) | 3 | `build_login_request` / `parse_login_response` | Unit round-trip |
-| 54 | `TextureEntry` encoder | 3 | `decode_texture_entry` | Unit round-trip |
+| 54 ✅ | `TextureEntry` encoder | 3 | `decode_texture_entry` | Unit round-trip |
 | 55 | `ExtraParams` encoder (all subtypes) | 3 | `decode_extra_params` | Unit round-trip |
 | 56 | `ParticleSystem` + `TextureAnim` encoders | 3 | `decode_particle_system` / `decode_texture_anim` | Unit round-trip |
 | 57 | Object-motion encoders (full / terse / compressed) | 5 | `full_object_motion` / `terse_update` / `compressed_object` | Unit round-trip |
@@ -1996,10 +1996,29 @@ unit round-trip (no grid).*
 
 ### Simulator role — binary sub-codec encoders
 
-**54. `TextureEntry` encoder (extends #16/#20, Tier C).** `sl-proto/src/`
-`appearance.rs` has `decode_texture_entry` only. Add the inverse encoder: the
-run-length default-plus-overrides packing with the wire colour re-inversion, so
-the simulator can serialize per-face texture state into `ObjectUpdate` bodies.
+**54. `TextureEntry` encoder (extends #16/#20, Tier C). ✅ Done.**
+`sl-proto/src/appearance.rs` had `decode_texture_entry` only. Added the inverse
+`encode_texture_entry`, a faithful port of the reference viewer's
+`LLPrimitive::packTEMessage`/`packTEField`: the **last** face's value becomes
+each field's default, then faces are scanned high→low and every value not
+already carried by a higher-indexed face is emitted as a `(face bitmask, value)`
+override (the bitmask flagging all at-or-below faces that share it), with the
+per-field terminating zero bitmask written between the eleven fields — and none
+after the trailing material field, which the decoder self-terminates. The
+natural-unit values are re-quantized to the wire grid (colour re-inverted to
+`255 − channel`; offsets `clamp(−1,1)·0x7FFF`; rotation `fmod(·,2π)/2π·0x8000`;
+glow `clamp(0,1)·0xFF`) — the exact inverses of the decoder's de-quantization —
+and faces beyond [`MAX_FACES`] (64, the wire bitmask width) are dropped to match
+the decoder's cap. The variable-length face bitmask is emitted as the
+most-significant-first base-128 integer the decoder reassembles. Exported from
+`sl-proto` alongside `decode_texture_entry`; no runtime wiring (a server-side
+binary sub-codec, reused by #57's `ObjectUpdate` body assembly and #60's
+`SimSession`). Covered by three new `appearance.rs` tests (empty entry → empty
+blob; an `encode`→`decode` round trip over exactly-representable values with a
+shared run that exercises the default-plus-override packing and colour
+re-inversion; and `decode`→`encode`→`decode` idempotency over a hand-built blob
+with non-trivial quantized offset/rotation/glow and a multi-face override).
+*Test: unit round-trip (no grid).*
 
 **55. `ExtraParams` encoder (extends #16, Tier C).** `extra_params.rs` decodes
 the flex/light/sculpt/light-image/extended-mesh/render-material/reflection-probe

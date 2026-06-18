@@ -10,7 +10,7 @@ mod session;
 mod terrain;
 mod types;
 
-pub use appearance::{MAX_FACES, decode_texture_entry};
+pub use appearance::{MAX_FACES, decode_texture_entry, encode_texture_entry};
 pub use command::Command;
 pub use error::Error;
 pub use particles::{decode_particle_system, decode_texture_anim};
