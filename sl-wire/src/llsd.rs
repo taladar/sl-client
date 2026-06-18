@@ -138,6 +138,95 @@ impl Llsd {
             _ => None,
         }
     }
+
+    /// Serializes this value as a complete LLSD-XML document
+    /// (`<llsd>…</llsd>`) — the inverse of [`parse_llsd_xml`].
+    ///
+    /// Map keys are emitted in sorted order so two equal [`Llsd`] trees always
+    /// serialize byte-for-byte identically (LLSD maps are unordered, so the
+    /// order is a free choice; sorting makes it deterministic). Re-parsing the
+    /// output with [`parse_llsd_xml`] yields an equal tree for every value kind:
+    /// booleans round-trip via `true`/`false`, binary via standard base64, and
+    /// `Date`/`Uri` as their verbatim strings. This is the foundation every
+    /// CAPS- and login-side LLSD producer builds on rather than concatenating
+    /// XML by hand.
+    #[must_use]
+    pub fn to_llsd_xml(&self) -> String {
+        let mut out = String::from("<llsd>");
+        self.push_llsd_xml(&mut out);
+        out.push_str("</llsd>");
+        out
+    }
+
+    /// Appends this value's LLSD-XML element(s) to `out` without the `<llsd>`
+    /// document wrapper, recursing into arrays and maps. The element-by-element
+    /// inverse of [`node_to_llsd`].
+    fn push_llsd_xml(&self, out: &mut String) {
+        match self {
+            Self::Undef => out.push_str("<undef />"),
+            Self::Boolean(value) => out.push_str(if *value {
+                "<boolean>true</boolean>"
+            } else {
+                "<boolean>false</boolean>"
+            }),
+            Self::Integer(value) => {
+                out.push_str("<integer>");
+                out.push_str(&value.to_string());
+                out.push_str("</integer>");
+            }
+            Self::Real(value) => {
+                out.push_str("<real>");
+                // Rust's shortest float formatting round-trips for finite reals;
+                // LLSD trees from the wire never carry NaN/infinity.
+                out.push_str(&value.to_string());
+                out.push_str("</real>");
+            }
+            Self::String(value) => {
+                out.push_str("<string>");
+                push_escaped(out, value);
+                out.push_str("</string>");
+            }
+            Self::Uuid(value) => {
+                out.push_str("<uuid>");
+                out.push_str(&value.to_string());
+                out.push_str("</uuid>");
+            }
+            Self::Date(value) => {
+                out.push_str("<date>");
+                push_escaped(out, value);
+                out.push_str("</date>");
+            }
+            Self::Uri(value) => {
+                out.push_str("<uri>");
+                push_escaped(out, value);
+                out.push_str("</uri>");
+            }
+            Self::Binary(value) => {
+                out.push_str("<binary>");
+                out.push_str(&base64::engine::general_purpose::STANDARD.encode(value));
+                out.push_str("</binary>");
+            }
+            Self::Array(values) => {
+                out.push_str("<array>");
+                for value in values {
+                    value.push_llsd_xml(out);
+                }
+                out.push_str("</array>");
+            }
+            Self::Map(map) => {
+                out.push_str("<map>");
+                let mut entries: Vec<(&String, &Self)> = map.iter().collect();
+                entries.sort_by(|left, right| left.0.cmp(right.0));
+                for (key, value) in entries {
+                    out.push_str("<key>");
+                    push_escaped(out, key);
+                    out.push_str("</key>");
+                    value.push_llsd_xml(out);
+                }
+                out.push_str("</map>");
+            }
+        }
+    }
 }
 
 /// Narrows an LLSD real (`f64`) to the `f32` used for vector components.
