@@ -260,7 +260,10 @@ fn on_events(
             | SlSessionEvent::ExperienceAdminStatus { .. }
             | SlSessionEvent::ExperienceContributorStatus { .. }
             | SlSessionEvent::ExperienceUpdated(_)
-            | SlSessionEvent::RegionExperiences { .. } => {}
+            | SlSessionEvent::RegionExperiences { .. }
+            | SlSessionEvent::ConferenceSessionMessage { .. }
+            | SlSessionEvent::ConferenceSessionParticipant { .. }
+            | SlSessionEvent::ConferenceInvited { .. } => {}
         }
     }
 }

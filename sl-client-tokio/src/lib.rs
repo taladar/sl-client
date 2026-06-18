@@ -18,20 +18,20 @@ use sl_proto::{
     CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
     CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_MODIFY_MATERIAL_PARAMS,
     CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
-    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_REGION_EXPERIENCES,
-    CAP_RENDER_MATERIALS, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
-    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Llsd, REQUESTED_CAPABILITIES, Session,
-    build_event_queue_request, build_fetch_inventory_request, build_group_member_data_request,
-    build_modify_material_params_request, build_new_file_agent_inventory_request,
-    build_object_media_get_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_parcel_voice_info_request,
-    build_provision_voice_account_request, build_region_experiences_request,
-    build_render_materials_request, build_seed_request, build_set_experience_permission_request,
-    build_update_avatar_appearance_request, build_update_experience_request,
-    build_update_item_asset_request, build_upload_baked_texture_request,
-    build_voice_signaling_request, experience_id_query, experience_info_query,
-    find_experience_query, forget_experience_query, group_experiences_query, j2c,
-    parse_asset_upload_response, parse_event_queue_response, parse_experience_ids,
+    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
+    CAP_REGION_EXPERIENCES, CAP_RENDER_MATERIALS, CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Llsd,
+    REQUESTED_CAPABILITIES, Session, build_event_queue_request, build_fetch_inventory_request,
+    build_group_member_data_request, build_modify_material_params_request,
+    build_new_file_agent_inventory_request, build_object_media_get_request,
+    build_object_media_navigate_request, build_object_media_update_request,
+    build_parcel_voice_info_request, build_provision_voice_account_request,
+    build_region_experiences_request, build_render_materials_request, build_seed_request,
+    build_set_experience_permission_request, build_update_avatar_appearance_request,
+    build_update_experience_request, build_update_item_asset_request,
+    build_upload_baked_texture_request, build_voice_signaling_request, experience_id_query,
+    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
+    j2c, parse_asset_upload_response, parse_event_queue_response, parse_experience_ids,
     parse_experience_status, parse_llsd_xml, parse_login_response, parse_render_materials_response,
     parse_seed_response,
 };
@@ -46,22 +46,22 @@ pub use sl_proto::{
     ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights,
     GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
     GroupRoleMember, GroupTitle, IceCandidate, ImDialog, ImageCodec, InstantMessage,
-    InventoryFolder, InventoryItem, InventoryType, LegacyMaterial, LightData, LightImage,
-    LindenAmount, LoadUrlRequest, LoginParams, LoginRequest, LoginResponse, MEDIA_PERM_ALL,
-    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
-    MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge,
-    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion,
-    ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
-    ParcelFlags, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, ParcelVoiceInfo, PermissionField, PlayingAnimation, PrimShape,
-    ProductType, ReflectionProbe, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits,
-    Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData, SoundFlags,
-    SoundPreload, TerrainLayerType, TerrainPatch, Texture, TextureEntry, TextureFace, Throttle,
-    TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable,
-    WearableType, avatar_texture, decode_texture_entry, grid_to_handle, handle_to_global,
-    handle_to_grid, pcode, sim_access,
+    InventoryFolder, InventoryItem, InventoryOffer, InventoryType, LegacyMaterial, LightData,
+    LightImage, LindenAmount, LoadUrlRequest, LoginParams, LoginRequest, LoginResponse,
+    MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER,
+    MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry,
+    MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags,
+    MuteType, NeighborInfo, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse,
+    ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
+    ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, ParcelVoiceInfo, PermissionField,
+    PlayingAnimation, PrimShape, ProductType, ReflectionProbe, RegionFlags, RegionIdentity,
+    RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation,
+    SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
+    SculptData, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture, TextureEntry,
+    TextureFace, Throttle, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo,
+    VoiceProvisionRequest, Wearable, WearableType, avatar_texture, decode_texture_entry,
+    grid_to_handle, handle_to_global, handle_to_grid, pcode, sim_access,
 };
 
 /// The maximum UDP datagram size we are prepared to receive.
@@ -1020,6 +1020,108 @@ pub enum Command {
         /// The experiences the region trusts.
         trusted: Vec<Uuid>,
     },
+    /// Offer a teleport ("lure") to each `targets` agent (`StartLure`, #28). Each
+    /// recipient receives an [`Event::InstantMessageReceived`] with
+    /// [`ImDialog::LureUser`].
+    OfferTeleport {
+        /// The agents to invite.
+        targets: Vec<Uuid>,
+        /// The accompanying message.
+        message: String,
+    },
+    /// Accept a teleport lure (`TeleportLureRequest`), teleporting to the offer's
+    /// location. `lure_id` is the [`InstantMessage::id`] of the received
+    /// [`ImDialog::LureUser`] IM.
+    AcceptTeleportLure {
+        /// The lure id from the offer IM.
+        lure_id: Uuid,
+    },
+    /// Decline a teleport lure (`IM_LURE_DECLINED`).
+    DeclineTeleportLure {
+        /// The offer IM's sender.
+        from_agent_id: Uuid,
+        /// The lure id from the offer IM.
+        lure_id: Uuid,
+    },
+    /// Request a teleport from `to_agent_id` (`IM_TELEPORT_REQUEST`): ask them to
+    /// offer this agent a teleport.
+    RequestTeleport {
+        /// The agent to ask.
+        to_agent_id: Uuid,
+        /// The accompanying message.
+        message: String,
+    },
+    /// Offer an inventory item to `to_agent_id` over IM (`IM_INVENTORY_OFFERED`).
+    GiveInventory {
+        /// The recipient agent.
+        to_agent_id: Uuid,
+        /// The offered item's id.
+        item_id: Uuid,
+        /// The offered item's asset class.
+        asset_type: AssetType,
+        /// The item's name (shown to the recipient).
+        item_name: String,
+        /// A fresh transaction id echoed back on accept/decline.
+        transaction_id: Uuid,
+    },
+    /// Offer an inventory folder to `to_agent_id` over IM (`IM_INVENTORY_OFFERED`).
+    GiveInventoryFolder {
+        /// The recipient agent.
+        to_agent_id: Uuid,
+        /// The offered folder's id.
+        folder_id: Uuid,
+        /// The folder's name (shown to the recipient).
+        folder_name: String,
+        /// A fresh transaction id echoed back on accept/decline.
+        transaction_id: Uuid,
+    },
+    /// Accept an inventory offer (`IM_INVENTORY_ACCEPTED`), filing it into
+    /// `folder_id`. `offer` is decoded from the incoming
+    /// [`InstantMessage::inventory_offer`].
+    AcceptInventoryOffer {
+        /// The decoded inventory offer.
+        offer: InventoryOffer,
+        /// The destination folder to file the item into.
+        folder_id: Uuid,
+    },
+    /// Decline an inventory offer (`IM_INVENTORY_DECLINED`); the item is routed to
+    /// `trash_folder_id`.
+    DeclineInventoryOffer {
+        /// The decoded inventory offer.
+        offer: InventoryOffer,
+        /// The trash folder the simulator routes the declined item to.
+        trash_folder_id: Uuid,
+    },
+    /// Start (or add invitees to) an ad-hoc conference IM session
+    /// (`IM_SESSION_CONFERENCE_START`). Messages arrive as
+    /// [`Event::ConferenceSessionMessage`].
+    StartConference {
+        /// A fresh, caller-chosen session id naming the conference.
+        session_id: Uuid,
+        /// The agents to invite.
+        invitees: Vec<Uuid>,
+        /// The opening message.
+        message: String,
+    },
+    /// Send a message into a conference / ad-hoc IM session (`IM_SESSION_SEND`).
+    SendConferenceMessage {
+        /// The conference session id.
+        session_id: Uuid,
+        /// The message text.
+        message: String,
+    },
+    /// Leave a conference / ad-hoc IM session (`IM_SESSION_LEAVE`).
+    LeaveConference {
+        /// The conference session id.
+        session_id: Uuid,
+    },
+    /// Flush stored offline instant messages over the legacy UDP trigger
+    /// (`RetrieveInstantMessages`); they arrive as offline
+    /// [`Event::InstantMessageReceived`]s.
+    RetrieveInstantMessages,
+    /// Read stored offline instant messages over the modern `ReadOfflineMsgs`
+    /// capability; they arrive as offline [`Event::InstantMessageReceived`]s.
+    RequestOfflineMessages,
     /// Begin a clean logout.
     Logout,
 }
@@ -1701,6 +1803,47 @@ impl Client {
                             if let Some(url) = caps.get(CAP_REGION_EXPERIENCES).cloned() {
                                 let body = build_region_experiences_request(&allowed, &blocked, &trusted);
                                 tokio::spawn(post_voice_cap(url, body, CAP_REGION_EXPERIENCES, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::OfferTeleport { targets, message }) => {
+                            self.session.offer_teleport(&targets, &message, Instant::now())?;
+                        }
+                        Some(Command::AcceptTeleportLure { lure_id }) => {
+                            self.session.accept_teleport_lure(lure_id, Instant::now())?;
+                        }
+                        Some(Command::DeclineTeleportLure { from_agent_id, lure_id }) => {
+                            self.session.decline_teleport_lure(from_agent_id, lure_id, Instant::now())?;
+                        }
+                        Some(Command::RequestTeleport { to_agent_id, message }) => {
+                            self.session.request_teleport(to_agent_id, &message, Instant::now())?;
+                        }
+                        Some(Command::GiveInventory { to_agent_id, item_id, asset_type, item_name, transaction_id }) => {
+                            self.session.give_inventory(to_agent_id, item_id, asset_type, &item_name, transaction_id, Instant::now())?;
+                        }
+                        Some(Command::GiveInventoryFolder { to_agent_id, folder_id, folder_name, transaction_id }) => {
+                            self.session.give_inventory_folder(to_agent_id, folder_id, &folder_name, transaction_id, Instant::now())?;
+                        }
+                        Some(Command::AcceptInventoryOffer { offer, folder_id }) => {
+                            self.session.accept_inventory_offer(&offer, folder_id, Instant::now())?;
+                        }
+                        Some(Command::DeclineInventoryOffer { offer, trash_folder_id }) => {
+                            self.session.decline_inventory_offer(&offer, trash_folder_id, Instant::now())?;
+                        }
+                        Some(Command::StartConference { session_id, invitees, message }) => {
+                            self.session.start_conference(session_id, &invitees, &message, Instant::now())?;
+                        }
+                        Some(Command::SendConferenceMessage { session_id, message }) => {
+                            self.session.send_conference_message(session_id, &message, Instant::now())?;
+                        }
+                        Some(Command::LeaveConference { session_id }) => {
+                            self.session.leave_conference(session_id, Instant::now())?;
+                        }
+                        Some(Command::RetrieveInstantMessages) => {
+                            self.session.retrieve_instant_messages(Instant::now())?;
+                        }
+                        Some(Command::RequestOfflineMessages) => {
+                            if let Some(url) = caps.get(CAP_READ_OFFLINE_MSGS).cloned() {
+                                tokio::spawn(get_caps_llsd(url, CAP_READ_OFFLINE_MSGS, http.clone(), caps_tx.clone()));
                             }
                         }
                         Some(Command::Logout) | None => {

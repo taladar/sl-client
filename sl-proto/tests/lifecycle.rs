@@ -6428,4 +6428,406 @@ mod test {
         assert_eq!(trusted.len(), 1);
         Ok(())
     }
+
+    // -- Complete the IM surface (#28) -------------------------------------
+
+    /// Finds the first `ImprovedInstantMessage` message block in `sent`.
+    fn first_im(
+        sent: &[AnyMessage],
+    ) -> Result<&ImprovedInstantMessageMessageBlockBlock, TestError> {
+        sent.iter()
+            .find_map(|m| match m {
+                AnyMessage::ImprovedInstantMessage(im) => Some(&im.message_block),
+                _ => None,
+            })
+            .ok_or_else(|| "expected an ImprovedInstantMessage".into())
+    }
+
+    /// Builds an inbound `ImprovedInstantMessage` with a chosen dialog, sender,
+    /// id and binary bucket (for the offer / conference decode paths).
+    fn inbound_offer_im(
+        dialog: u8,
+        from: uuid::Uuid,
+        id: uuid::Uuid,
+        bucket: Vec<u8>,
+    ) -> AnyMessage {
+        AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
+            agent_data: ImprovedInstantMessageAgentDataBlock {
+                agent_id: from,
+                session_id: uuid::Uuid::nil(),
+            },
+            message_block: ImprovedInstantMessageMessageBlockBlock {
+                from_group: false,
+                to_agent_id: uuid::Uuid::from_u128(1),
+                parent_estate_id: 1,
+                region_id: uuid::Uuid::from_u128(0x7),
+                position: vec3(1.0, 2.0, 3.0),
+                offline: 0,
+                dialog,
+                id,
+                timestamp: 0,
+                from_agent_name: b"Sender Name\0".to_vec(),
+                message: b"an item\0".to_vec(),
+                binary_bucket: bucket,
+            },
+            estate_block: ImprovedInstantMessageEstateBlockBlock { estate_id: 1 },
+            meta_data: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn offer_teleport_packs_start_lure() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let a = uuid::Uuid::from_u128(0xA1);
+        let b = uuid::Uuid::from_u128(0xB2);
+        session.offer_teleport(&[a, b], "come over", now)?;
+        let sent = drain(&mut session)?;
+        let lure = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::StartLure(l) => Some(l),
+                _ => None,
+            })
+            .ok_or("expected a StartLure")?;
+        assert_eq!(lure.info.lure_type, 0);
+        assert_eq!(trimmed(&lure.info.message), "come over");
+        let targets: Vec<_> = lure.target_data.iter().map(|t| t.target_id).collect();
+        assert_eq!(targets, vec![a, b]);
+        Ok(())
+    }
+
+    #[test]
+    fn accept_teleport_lure_packs_request() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let lure_id = uuid::Uuid::from_u128(0xCAFE);
+        session.accept_teleport_lure(lure_id, now)?;
+        let sent = drain(&mut session)?;
+        let req = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::TeleportLureRequest(r) => Some(r),
+                _ => None,
+            })
+            .ok_or("expected a TeleportLureRequest")?;
+        assert_eq!(req.info.lure_id, lure_id);
+        assert_eq!(req.info.teleport_flags, 4); // TELEPORT_FLAGS_VIA_LURE
+        Ok(())
+    }
+
+    #[test]
+    fn decline_teleport_lure_packs_im() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let from = uuid::Uuid::from_u128(0x55);
+        let lure_id = uuid::Uuid::from_u128(0xCAFE);
+        session.decline_teleport_lure(from, lure_id, now)?;
+        let sent = drain(&mut session)?;
+        let block = first_im(&sent)?;
+        assert_eq!(block.dialog, 24); // IM_LURE_DECLINED
+        assert_eq!(block.id, lure_id);
+        assert_eq!(block.to_agent_id, from);
+        assert_eq!(block.message, b"\0");
+        Ok(())
+    }
+
+    #[test]
+    fn request_teleport_packs_im() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let target = uuid::Uuid::from_u128(0x77);
+        session.request_teleport(target, "please tp me", now)?;
+        let sent = drain(&mut session)?;
+        let block = first_im(&sent)?;
+        assert_eq!(block.dialog, 26); // IM_TELEPORT_REQUEST
+        assert_eq!(block.id, uuid::Uuid::nil());
+        assert_eq!(block.to_agent_id, target);
+        assert_eq!(trimmed(&block.message), "please tp me");
+        Ok(())
+    }
+
+    #[test]
+    fn give_inventory_packs_offer() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let to = uuid::Uuid::from_u128(0xD1);
+        let item = uuid::Uuid::from_u128(0x1234);
+        let tx = uuid::Uuid::from_u128(0x9999);
+        session.give_inventory(to, item, AssetType::Notecard, "My Card", tx, now)?;
+        let sent = drain(&mut session)?;
+        let block = first_im(&sent)?;
+        assert_eq!(block.dialog, 4); // IM_INVENTORY_OFFERED
+        assert_eq!(block.id, tx);
+        assert_eq!(block.to_agent_id, to);
+        assert_eq!(trimmed(&block.message), "My Card");
+        // Bucket: [asset-type byte][16-byte item id]; AT_NOTECARD = 7.
+        assert_eq!(block.binary_bucket.first().copied(), Some(7u8));
+        let id_bytes = block
+            .binary_bucket
+            .get(1..17)
+            .ok_or("inventory-offer bucket too short")?;
+        assert_eq!(id_bytes, item.as_bytes());
+        Ok(())
+    }
+
+    #[test]
+    fn give_inventory_folder_leads_with_folder_type() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let folder = uuid::Uuid::from_u128(0x4321);
+        session.give_inventory_folder(
+            uuid::Uuid::from_u128(0xD1),
+            folder,
+            "My Folder",
+            uuid::Uuid::from_u128(0x9999),
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let block = first_im(&sent)?;
+        assert_eq!(block.dialog, 4);
+        // A folder offer leads with AT_CATEGORY (8).
+        assert_eq!(block.binary_bucket.first().copied(), Some(8u8));
+        let id_bytes = block
+            .binary_bucket
+            .get(1..17)
+            .ok_or("folder-offer bucket too short")?;
+        assert_eq!(id_bytes, folder.as_bytes());
+        Ok(())
+    }
+
+    #[test]
+    fn inventory_offer_decodes_and_accepts() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let item = uuid::Uuid::from_u128(0x1234);
+        let from = uuid::Uuid::from_u128(0x55);
+        let tx = uuid::Uuid::from_u128(0xABC);
+        let mut bucket = vec![7u8]; // AT_NOTECARD
+        bucket.extend_from_slice(item.as_bytes());
+        let im = inbound_offer_im(4, from, tx, bucket);
+        let datagram = server_message(&im, 9, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        let received = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InstantMessageReceived(im) => Some(im),
+                _ => None,
+            })
+            .ok_or("expected an InstantMessageReceived event")?;
+        let offer = received
+            .inventory_offer()
+            .ok_or("expected a decoded inventory offer")?;
+        assert_eq!(offer.asset_type, AssetType::Notecard);
+        assert_eq!(offer.item_id, item);
+        assert_eq!(offer.transaction_id, tx);
+        assert_eq!(offer.from_agent_id, from);
+        assert!(!offer.from_task);
+
+        // Accept files the item into a destination folder.
+        let folder = uuid::Uuid::from_u128(0xF0);
+        session.accept_inventory_offer(&offer, folder, now)?;
+        let accept = drain(&mut session)?;
+        let block = first_im(&accept)?;
+        assert_eq!(block.dialog, 5); // IM_INVENTORY_ACCEPTED
+        assert_eq!(block.id, tx);
+        assert_eq!(block.to_agent_id, from);
+        assert_eq!(block.binary_bucket, folder.as_bytes());
+
+        // Decline routes to the trash folder.
+        let trash = uuid::Uuid::from_u128(0x7A);
+        session.decline_inventory_offer(&offer, trash, now)?;
+        let decline = drain(&mut session)?;
+        let block = first_im(&decline)?;
+        assert_eq!(block.dialog, 6); // IM_INVENTORY_DECLINED
+        assert_eq!(block.binary_bucket, trash.as_bytes());
+        Ok(())
+    }
+
+    #[test]
+    fn start_conference_packs_conference_start() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let session_id = uuid::Uuid::from_u128(0x5E51);
+        let a = uuid::Uuid::from_u128(0xA1);
+        let b = uuid::Uuid::from_u128(0xB2);
+        session.start_conference(session_id, &[a, b], "hello all", now)?;
+        let sent = drain(&mut session)?;
+        let block = first_im(&sent)?;
+        assert_eq!(block.dialog, 16); // IM_SESSION_CONFERENCE_START
+        assert_eq!(block.id, session_id);
+        assert_eq!(block.to_agent_id, a); // first invitee
+        assert_eq!(trimmed(&block.message), "hello all");
+        let mut expected = a.as_bytes().to_vec();
+        expected.extend_from_slice(b.as_bytes());
+        assert_eq!(block.binary_bucket, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn send_and_leave_conference_pack_session_ims() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let session_id = uuid::Uuid::from_u128(0x5E51);
+        session.send_conference_message(session_id, "hi", now)?;
+        session.leave_conference(session_id, now)?;
+        let sent = drain(&mut session)?;
+        let blocks: Vec<_> = sent
+            .iter()
+            .filter_map(|m| match m {
+                AnyMessage::ImprovedInstantMessage(im) => Some(&im.message_block),
+                _ => None,
+            })
+            .collect();
+        let send = blocks
+            .iter()
+            .find(|b| b.dialog == 17)
+            .ok_or("expected a SessionSend IM")?;
+        assert!(!send.from_group); // a conference, not a group
+        assert_eq!(send.id, session_id);
+        assert_eq!(send.to_agent_id, session_id);
+        assert_eq!(trimmed(&send.message), "hi");
+        let leave = blocks
+            .iter()
+            .find(|b| b.dialog == 18)
+            .ok_or("expected a SessionLeave IM")?;
+        assert_eq!(leave.id, session_id);
+        Ok(())
+    }
+
+    #[test]
+    fn inbound_conference_send_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Dialog 17 (IM_SESSION_SEND) with from_group clear is a conference.
+        let session_id = uuid::Uuid::from_u128(0xABC);
+        let im = inbound_offer_im(17, uuid::Uuid::from_u128(0x55), session_id, Vec::new());
+        let datagram = server_message(&im, 9, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::ConferenceSessionMessage { .. }))
+            .ok_or("expected a ConferenceSessionMessage event")?;
+        let Event::ConferenceSessionMessage {
+            session_id: got, ..
+        } = event
+        else {
+            return Err("expected ConferenceSessionMessage".into());
+        };
+        assert_eq!(got, session_id);
+        Ok(())
+    }
+
+    #[test]
+    fn retrieve_instant_messages_packs_request() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.retrieve_instant_messages(now)?;
+        let sent = drain(&mut session)?;
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::RetrieveInstantMessages(_))),
+            "expected a RetrieveInstantMessages"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn read_offline_msgs_caps_surfaces_offline_ims() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let from = uuid::Uuid::from_u128(0x55);
+        let xml = format!(
+            "<llsd><array><map>\
+               <key>from_agent_id</key><uuid>{from}</uuid>\
+               <key>from_agent_name</key><string>Sender Name</string>\
+               <key>to_agent_id</key><uuid>{}</uuid>\
+               <key>dialog</key><integer>0</integer>\
+               <key>message</key><string>stored hello</string>\
+               <key>timestamp</key><integer>1700000000</integer>\
+               <key>transaction-id</key><uuid>{}</uuid>\
+             </map></array></llsd>",
+            uuid::Uuid::from_u128(1),
+            uuid::Uuid::from_u128(0xABC),
+        );
+        let body = parse_llsd_xml(&xml)?;
+        session.handle_caps_event("ReadOfflineMsgs", &body, now)?;
+        let received = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InstantMessageReceived(im) => Some(im),
+                _ => None,
+            })
+            .ok_or("expected an InstantMessageReceived event")?;
+        assert!(received.offline);
+        assert_eq!(received.from_agent_id, from);
+        assert_eq!(received.from_agent_name, "Sender Name");
+        assert_eq!(received.message, "stored hello");
+        assert_eq!(received.timestamp, 1_700_000_000);
+        assert_eq!(received.id, uuid::Uuid::from_u128(0xABC));
+        Ok(())
+    }
+
+    #[test]
+    fn chatterbox_invitation_surfaces_conference_invited() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let session_id = uuid::Uuid::from_u128(0x5E51);
+        let from = uuid::Uuid::from_u128(0x55);
+        let xml = format!(
+            "<llsd><map><key>instantmessage</key><map>\
+               <key>message_params</key><map>\
+                 <key>id</key><uuid>{session_id}</uuid>\
+                 <key>from_id</key><uuid>{from}</uuid>\
+                 <key>from_name</key><string>Inviter</string>\
+                 <key>message</key><string>join us</string>\
+               </map></map></map></llsd>"
+        );
+        let body = parse_llsd_xml(&xml)?;
+        session.handle_caps_event("ChatterBoxInvitation", &body, now)?;
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::ConferenceInvited { .. }))
+            .ok_or("expected a ConferenceInvited event")?;
+        let Event::ConferenceInvited {
+            session_id: got,
+            from_agent_id,
+            from_name,
+            message,
+        } = event
+        else {
+            return Err("expected ConferenceInvited".into());
+        };
+        assert_eq!(got, session_id);
+        assert_eq!(from_agent_id, from);
+        assert_eq!(from_name, "Inviter");
+        assert_eq!(message, "join us");
+        Ok(())
+    }
 }

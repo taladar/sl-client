@@ -44,6 +44,12 @@ use sl_wire::messages::{
     ScriptAnswerYes, ScriptAnswerYesAgentDataBlock, ScriptAnswerYesDataBlock, ScriptDialogReply,
     ScriptDialogReplyAgentDataBlock, ScriptDialogReplyDataBlock,
 };
+// Complete the IM surface (#28): teleport offers/lures and offline-IM retrieval.
+use sl_wire::messages::{
+    RetrieveInstantMessages, RetrieveInstantMessagesAgentDataBlock, StartLure,
+    StartLureAgentDataBlock, StartLureInfoBlock, StartLureTargetDataBlock, TeleportLureRequest,
+    TeleportLureRequestInfoBlock,
+};
 // Mute list (#9): the outgoing mute-edit messages and the Xfer download messages.
 use sl_wire::messages::{
     ConfirmXferPacket, ConfirmXferPacketXferIDBlock, MuteListRequest,
@@ -177,16 +183,17 @@ use crate::types::{
     CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData, EstateAccessDelta,
     EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupMember, GroupMembership,
     GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, ImageCodec,
-    InstantMessage, InventoryFolder, InventoryItem, LoadUrlRequest, LoginHttpRequest, LoginParams,
-    MapItem, MapItemType, MapRegionInfo, Material, Maturity, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectExtraParams,
-    ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessScope, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, PermissionField, PlayingAnimation, PrimShape, ProductType,
-    RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, SaleType, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload,
-    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, Wearable,
-    WearableType, avatar_texture, grid_to_handle, handle_to_grid,
+    InstantMessage, InventoryFolder, InventoryItem, InventoryOffer, LoadUrlRequest,
+    LoginHttpRequest, LoginParams, MapItem, MapItemType, MapRegionInfo, Material, Maturity,
+    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
+    NeighborInfo, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMotion, ObjectProperties,
+    ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelInfo, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
+    PlayingAnimation, PrimShape, ProductType, RegionIdentity, RegionInfoUpdate, RegionLimits,
+    Reliability, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture,
+    Throttle, TransferStatus, Transmit, Wearable, WearableType, avatar_texture, grid_to_handle,
+    handle_to_grid,
 };
 use crate::{appearance, types::AvatarAppearance, types::AvatarAttachment};
 
@@ -436,6 +443,16 @@ pub const CAP_UPDATE_EXPERIENCE: &str = "UpdateExperience";
 /// [`Event::RegionExperiences`].
 pub const CAP_REGION_EXPERIENCES: &str = "RegionExperiences";
 
+/// Completing the IM surface (#28): the modern Second Life capability that
+/// returns the agent's stored offline instant messages as an LLSD array (the
+/// legacy path is the UDP `RetrieveInstantMessages` trigger). GET; decoded into
+/// one [`Event::InstantMessageReceived`] per stored message.
+pub const CAP_READ_OFFLINE_MSGS: &str = "ReadOfflineMsgs";
+
+/// The viewer's `TELEPORT_FLAGS_VIA_LURE` (`1 << 2`), sent in a
+/// `TeleportLureRequest` when accepting a teleport lure (#28).
+const TELEPORT_FLAGS_VIA_LURE: u32 = 4;
+
 /// The capability names the client requests from the region seed. A driver POSTs
 /// these to the seed URL to obtain the capability map, then uses `EventQueueGet`
 /// for the event-queue long-poll, [`CAP_FETCH_INVENTORY`] for inventory fetches,
@@ -479,6 +496,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_IS_EXPERIENCE_CONTRIBUTOR,
     CAP_UPDATE_EXPERIENCE,
     CAP_REGION_EXPERIENCES,
+    CAP_READ_OFFLINE_MSGS,
 ];
 
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
@@ -922,6 +940,102 @@ impl Circuit {
             meta_data: Vec::new(),
         });
         self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a fully-specified `ImprovedInstantMessage` reliably. Unlike
+    /// [`send_instant_message_raw`](Self::send_instant_message_raw) the caller
+    /// controls every dialog-dependent field (`id`, `from_group`, the binary
+    /// bucket), so this backs the offer-reply, give-inventory and conference
+    /// flows (#28). The wire strings carry trailing NULs, as a viewer sends.
+    fn send_im(&mut self, params: &OutgoingIm<'_>, now: Instant) -> Result<(), WireError> {
+        let im = AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
+            agent_data: ImprovedInstantMessageAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            message_block: ImprovedInstantMessageMessageBlockBlock {
+                from_group: params.from_group,
+                to_agent_id: params.to_agent_id,
+                parent_estate_id: 0,
+                region_id: Uuid::nil(),
+                position: Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                offline: 0, // IM_ONLINE
+                dialog: params.dialog.to_u8(),
+                id: params.id,
+                timestamp: 0,
+                from_agent_name: with_nul(params.from_name),
+                message: with_nul(params.message),
+                binary_bucket: params.binary_bucket.clone(),
+            },
+            estate_block: ImprovedInstantMessageEstateBlockBlock { estate_id: 0 },
+            meta_data: Vec::new(),
+        });
+        self.send(&im, Reliability::Reliable, now)
+    }
+
+    /// Queues a `StartLure` reliably: offers a teleport to each agent in
+    /// `targets` (a teleport "lure"). The simulator turns it into an
+    /// `IM_LURE_USER` instant message carrying a lure id the recipient echoes
+    /// back via [`Session::accept_teleport_lure`].
+    fn send_start_lure(
+        &mut self,
+        targets: &[Uuid],
+        message: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let lure = AnyMessage::StartLure(StartLure {
+            agent_data: StartLureAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            info: StartLureInfoBlock {
+                // The viewer sends 0; the simulator fills in the real lure type.
+                lure_type: 0,
+                message: with_nul(message),
+            },
+            target_data: targets
+                .iter()
+                .map(|&target_id| StartLureTargetDataBlock { target_id })
+                .collect(),
+        });
+        self.send(&lure, Reliability::Reliable, now)
+    }
+
+    /// Queues a `TeleportLureRequest` reliably: accepts a teleport lure,
+    /// requesting the teleport the offer's `lure_id` (the `IM_LURE_USER` IM's
+    /// `id`) describes. `teleport_flags` is the viewer's `TELEPORT_FLAGS_VIA_LURE`.
+    fn send_teleport_lure_request(
+        &mut self,
+        lure_id: Uuid,
+        teleport_flags: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let request = AnyMessage::TeleportLureRequest(TeleportLureRequest {
+            info: TeleportLureRequestInfoBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                lure_id,
+                teleport_flags,
+            },
+        });
+        self.send(&request, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RetrieveInstantMessages` reliably: asks the simulator to flush
+    /// the agent's stored offline instant messages, which then arrive as
+    /// ordinary `ImprovedInstantMessage`s with the offline flag set.
+    fn send_retrieve_instant_messages(&mut self, now: Instant) -> Result<(), WireError> {
+        let request = AnyMessage::RetrieveInstantMessages(RetrieveInstantMessages {
+            agent_data: RetrieveInstantMessagesAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+        });
+        self.send(&request, Reliability::Reliable, now)
     }
 
     /// Queues an `AgentUpdate` unreliably carrying the given control flags and
@@ -3331,6 +3445,25 @@ impl Session {
                     trusted,
                 });
             }
+            // The reply to a `ReadOfflineMsgs` GET (the modern Second Life
+            // offline-IM history, #28): an array of stored instant messages, each
+            // surfaced as an offline [`Event::InstantMessageReceived`] (the legacy
+            // UDP `RetrieveInstantMessages` path re-delivers them as UDP IMs
+            // instead).
+            CAP_READ_OFFLINE_MSGS => {
+                for im in offline_messages_from_llsd(body) {
+                    self.events
+                        .push_back(Event::InstantMessageReceived(Box::new(im)));
+                }
+            }
+            // A conference / group IM-session invitation delivered over the CAPS
+            // event queue (the modern path, #28). Join by sending into the session
+            // with [`Session::send_conference_message`].
+            "ChatterBoxInvitation" => {
+                if let Some(event) = chatterbox_invitation_from_llsd(body) {
+                    self.events.push_back(event);
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -4079,6 +4212,24 @@ impl Session {
                     {
                         self.events.push_back(Event::GroupSessionParticipant {
                             group_id: block.id,
+                            agent_id: im.agent_data.agent_id,
+                            joined: matches!(dialog, ImDialog::SessionAdd),
+                        });
+                    }
+                    // Ad-hoc conference session traffic mirrors the group-session
+                    // arms above but with `from_group` clear (#28); the session id
+                    // is the conference id, not a group id.
+                    ImDialog::SessionSend => {
+                        self.events.push_back(Event::ConferenceSessionMessage {
+                            session_id: block.id,
+                            from_agent_id: im.agent_data.agent_id,
+                            from_name: trimmed_string(&block.from_agent_name),
+                            message: trimmed_string(&block.message),
+                        });
+                    }
+                    dialog @ (ImDialog::SessionAdd | ImDialog::SessionLeave) => {
+                        self.events.push_back(Event::ConferenceSessionParticipant {
+                            session_id: block.id,
                             agent_id: im.agent_data.agent_id,
                             joined: matches!(dialog, ImDialog::SessionAdd),
                         });
@@ -5483,6 +5634,360 @@ impl Session {
         let from_name = self.agent_name();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_session_im(group_id, ImDialog::SessionLeave, "", &from_name, now)?;
+        Ok(())
+    }
+
+    // -- Complete the IM surface (#28) -------------------------------------
+
+    /// Offers a teleport ("lure") to each agent in `targets` via `StartLure`.
+    /// Each recipient receives an [`Event::InstantMessageReceived`] with
+    /// [`ImDialog::LureUser`]; its [`InstantMessage::id`] is the lure id they
+    /// pass to [`Session::accept_teleport_lure`] to teleport to this agent (or
+    /// to [`Session::decline_teleport_lure`] to refuse).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn offer_teleport(
+        &mut self,
+        targets: &[Uuid],
+        message: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_start_lure(targets, message, now)?;
+        Ok(())
+    }
+
+    /// Accepts a teleport lure via `TeleportLureRequest`, teleporting this agent
+    /// to the location the lure describes. `lure_id` is the
+    /// [`InstantMessage::id`] of the received [`ImDialog::LureUser`] IM. This
+    /// drives the same teleport handover as
+    /// [`Session::teleport_to`](crate::Session::teleport_to): on success the
+    /// session re-establishes at the destination and emits
+    /// [`Event::RegionChanged`]; on failure it emits [`Event::TeleportFailed`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotActive`] if the session is not active,
+    /// [`Error::NoCircuit`] if no circuit is established, or [`Error::Wire`] if
+    /// the request fails to encode.
+    pub fn accept_teleport_lure(&mut self, lure_id: Uuid, now: Instant) -> Result<(), Error> {
+        if !matches!(self.state, SessionState::Active) {
+            return Err(Error::NotActive);
+        }
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_teleport_lure_request(lure_id, TELEPORT_FLAGS_VIA_LURE, now)?;
+        circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
+        // Best-effort destination hint; a cross-region lure's TeleportFinish
+        // carries the authoritative handle, so a non-fake-parcel id is harmless.
+        self.teleport_target = Some(parse_lure_region_handle(lure_id));
+        self.state = SessionState::Teleporting;
+        Ok(())
+    }
+
+    /// Declines a teleport lure via an `IM_LURE_DECLINED` instant message to the
+    /// offerer. `from_agent_id` is the offer IM's [`InstantMessage::from_agent_id`]
+    /// and `lure_id` its [`InstantMessage::id`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn decline_teleport_lure(
+        &mut self,
+        from_agent_id: Uuid,
+        lure_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_im(
+            &OutgoingIm {
+                to_agent_id: from_agent_id,
+                from_group: false,
+                dialog: ImDialog::LureDeclined,
+                id: lure_id,
+                message: "",
+                from_name: &from_name,
+                binary_bucket: Vec::new(),
+            },
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Requests a teleport from `to_agent_id` (asks them to offer this agent a
+    /// teleport) via an `IM_TELEPORT_REQUEST` instant message.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn request_teleport(
+        &mut self,
+        to_agent_id: Uuid,
+        message: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_im(
+            &OutgoingIm {
+                to_agent_id,
+                from_group: false,
+                dialog: ImDialog::TeleportRequest,
+                id: Uuid::nil(),
+                message,
+                from_name: &from_name,
+                binary_bucket: Vec::new(),
+            },
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Offers an inventory item to `to_agent_id` over IM (`IM_INVENTORY_OFFERED`).
+    /// `transaction_id` is a fresh, caller-chosen id the recipient echoes back
+    /// when accepting or declining. The recipient sees an
+    /// [`Event::InstantMessageReceived`] with [`ImDialog::InventoryOffered`];
+    /// decode the offer with [`InstantMessage::inventory_offer`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn give_inventory(
+        &mut self,
+        to_agent_id: Uuid,
+        item_id: Uuid,
+        asset_type: AssetType,
+        item_name: &str,
+        transaction_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        let bucket = inventory_offer_bucket(asset_type, item_id);
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_im(
+            &OutgoingIm {
+                to_agent_id,
+                from_group: false,
+                dialog: ImDialog::InventoryOffered,
+                id: transaction_id,
+                message: item_name,
+                from_name: &from_name,
+                binary_bucket: bucket,
+            },
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Offers an inventory folder to `to_agent_id` over IM (`IM_INVENTORY_OFFERED`,
+    /// the binary bucket led by [`AssetType::Folder`]). `transaction_id` is a
+    /// fresh, caller-chosen id echoed back on accept/decline.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn give_inventory_folder(
+        &mut self,
+        to_agent_id: Uuid,
+        folder_id: Uuid,
+        folder_name: &str,
+        transaction_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        let bucket = inventory_offer_bucket(AssetType::Folder, folder_id);
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_im(
+            &OutgoingIm {
+                to_agent_id,
+                from_group: false,
+                dialog: ImDialog::InventoryOffered,
+                id: transaction_id,
+                message: folder_name,
+                from_name: &from_name,
+                binary_bucket: bucket,
+            },
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Accepts an inventory offer received over IM (`IM_INVENTORY_ACCEPTED`),
+    /// filing the offered item/folder into `folder_id`. The `offer` is the
+    /// decoded [`InventoryOffer`] from the incoming
+    /// [`InstantMessage::inventory_offer`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn accept_inventory_offer(
+        &mut self,
+        offer: &InventoryOffer,
+        folder_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_im(
+            &OutgoingIm {
+                to_agent_id: offer.from_agent_id,
+                from_group: false,
+                dialog: ImDialog::InventoryAccepted,
+                id: offer.transaction_id,
+                message: "",
+                from_name: &from_name,
+                binary_bucket: folder_id.as_bytes().to_vec(),
+            },
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Declines an inventory offer received over IM (`IM_INVENTORY_DECLINED`);
+    /// the simulator routes the offered item/folder into `trash_folder_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn decline_inventory_offer(
+        &mut self,
+        offer: &InventoryOffer,
+        trash_folder_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_im(
+            &OutgoingIm {
+                to_agent_id: offer.from_agent_id,
+                from_group: false,
+                dialog: ImDialog::InventoryDeclined,
+                id: offer.transaction_id,
+                message: "",
+                from_name: &from_name,
+                binary_bucket: trash_folder_id.as_bytes().to_vec(),
+            },
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Starts (or adds invitees to) an ad-hoc conference IM session
+    /// (`IM_SESSION_CONFERENCE_START`). `session_id` is a fresh, caller-chosen id
+    /// naming the session; `invitees` are packed into the binary bucket as raw
+    /// 16-byte ids. Call again with the same `session_id` and further invitees to
+    /// invite more people. Conference messages arrive as
+    /// [`Event::ConferenceSessionMessage`], joins/leaves as
+    /// [`Event::ConferenceSessionParticipant`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn start_conference(
+        &mut self,
+        session_id: Uuid,
+        invitees: &[Uuid],
+        message: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        let bucket = pack_uuids(invitees);
+        let to_agent_id = invitees.first().copied().unwrap_or(session_id);
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_im(
+            &OutgoingIm {
+                to_agent_id,
+                from_group: false,
+                dialog: ImDialog::SessionConferenceStart,
+                id: session_id,
+                message,
+                from_name: &from_name,
+                binary_bucket: bucket,
+            },
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Sends a message into an ad-hoc conference / multi-party IM session
+    /// (`IM_SESSION_SEND`, session id = `session_id`). Other participants receive
+    /// it as [`Event::ConferenceSessionMessage`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn send_conference_message(
+        &mut self,
+        session_id: Uuid,
+        message: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_im(
+            &OutgoingIm {
+                to_agent_id: session_id,
+                from_group: false,
+                dialog: ImDialog::SessionSend,
+                id: session_id,
+                message,
+                from_name: &from_name,
+                binary_bucket: Vec::new(),
+            },
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Leaves an ad-hoc conference / multi-party IM session (`IM_SESSION_LEAVE`),
+    /// so the agent stops receiving its chat.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn leave_conference(&mut self, session_id: Uuid, now: Instant) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_im(
+            &OutgoingIm {
+                to_agent_id: session_id,
+                from_group: false,
+                dialog: ImDialog::SessionLeave,
+                id: session_id,
+                message: "",
+                from_name: &from_name,
+                binary_bucket: Vec::new(),
+            },
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Requests the agent's stored offline instant messages over the legacy UDP
+    /// trigger (`RetrieveInstantMessages`). The simulator re-delivers each as an
+    /// ordinary [`Event::InstantMessageReceived`] with [`InstantMessage::offline`]
+    /// set. The modern Second Life path is the `ReadOfflineMsgs` capability
+    /// (driven from the runtimes), decoded into the same events.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn retrieve_instant_messages(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_retrieve_instant_messages(now)?;
         Ok(())
     }
 
@@ -7137,6 +7642,55 @@ fn with_nul(s: &str) -> Vec<u8> {
     bytes
 }
 
+/// Builds an inventory-offer binary bucket: the asset-type byte followed by the
+/// item's (or folder's) 16 raw id bytes, as the viewer's give-inventory path
+/// packs it (#28).
+fn inventory_offer_bucket(asset_type: AssetType, id: Uuid) -> Vec<u8> {
+    let mut bucket = Vec::with_capacity(17);
+    bucket.push(u8::try_from(asset_type.to_code()).unwrap_or(0));
+    bucket.extend_from_slice(id.as_bytes());
+    bucket
+}
+
+/// Concatenates the raw 16-byte ids of `uuids` (the conference-start invitee
+/// bucket form, #28).
+fn pack_uuids(uuids: &[Uuid]) -> Vec<u8> {
+    let mut packed = Vec::with_capacity(uuids.len().saturating_mul(16));
+    for id in uuids {
+        packed.extend_from_slice(id.as_bytes());
+    }
+    packed
+}
+
+/// Extracts the region handle encoded in a teleport lure id (OpenSim's
+/// `BuildFakeParcelID`: the handle is the first eight little-endian bytes).
+/// Returns `0` for an id that is not a fake parcel id (e.g. a Second Life lure
+/// id), in which case the destination is learned from `TeleportFinish` instead.
+fn parse_lure_region_handle(lure_id: Uuid) -> u64 {
+    sl_wire::Reader::new(lure_id.as_bytes()).u64().unwrap_or(0)
+}
+
+/// A fully-specified outgoing `ImprovedInstantMessage`, the argument of
+/// [`send_im`](Circuit::send_im). Groups the dialog-dependent fields so the
+/// offer-reply / give-inventory / conference flows (#28) share one builder.
+struct OutgoingIm<'a> {
+    /// The recipient agent id (or session id for a conference message).
+    to_agent_id: Uuid,
+    /// Whether the message is from a group (sets the `FromGroup` flag).
+    from_group: bool,
+    /// The IM dialog (sub-type).
+    dialog: ImDialog,
+    /// The dialog-dependent id (session id, transaction id, or lure id).
+    id: Uuid,
+    /// The message text (encoded NUL-terminated).
+    message: &'a str,
+    /// The sender's display name (encoded NUL-terminated).
+    from_name: &'a str,
+    /// The dialog-dependent binary payload (e.g. a destination folder id, an
+    /// offered asset's type+id, or a conference's invitee ids).
+    binary_bucket: Vec<u8>,
+}
+
 /// Parses a downloaded mute-list file into [`MuteEntry`] values. Each non-empty
 /// line is `<type> <uuid> <name>|<flags>` (the viewer's on-disk format).
 fn parse_mute_list(bytes: &[u8]) -> Vec<MuteEntry> {
@@ -7925,6 +8479,26 @@ fn i32_member(map: &Llsd, key: &str) -> i32 {
     map.get(key).and_then(Llsd::as_i32).unwrap_or(0)
 }
 
+/// Reads a UUID from an LLSD value tolerantly: a `uuid` element, or a string
+/// holding the canonical UUID text (Second Life's offline-IM and conference
+/// records encode ids either way). Defaults to nil.
+fn llsd_uuid(value: &Llsd) -> Uuid {
+    value
+        .as_uuid()
+        .or_else(|| value.as_str().and_then(|s| Uuid::parse_str(s.trim()).ok()))
+        .unwrap_or_else(Uuid::nil)
+}
+
+/// Reads a UUID from an LLSD map member tolerantly (see [`llsd_uuid`]).
+fn uuid_member_lenient(map: &Llsd, key: &str) -> Uuid {
+    map.get(key).map_or_else(Uuid::nil, llsd_uuid)
+}
+
+/// Reads a `u32` from an LLSD map member tolerantly (see [`llsd_u32`]).
+fn u32_member(map: &Llsd, key: &str) -> u32 {
+    map.get(key).map_or(0, llsd_u32)
+}
+
 /// Reads a string from an LLSD map member, defaulting to empty.
 fn string_member(map: &Llsd, key: &str) -> String {
     map.get(key).and_then(Llsd::as_str).unwrap_or("").to_owned()
@@ -7951,6 +8525,90 @@ fn llsd_u32(value: &Llsd) -> u32 {
         Llsd::Integer(i) => u32::try_from(*i).unwrap_or(0),
         _ => 0,
     }
+}
+
+/// Decodes the `ReadOfflineMsgs` capability reply (#28) into [`InstantMessage`]s.
+/// The body is either an array of per-message maps or a map with a `messages`
+/// array (both forms the viewer accepts); each record mirrors an
+/// `ImprovedInstantMessage` and is marked [`InstantMessage::offline`].
+fn offline_messages_from_llsd(body: &Llsd) -> Vec<InstantMessage> {
+    let records = body
+        .as_array()
+        .or_else(|| body.get("messages").and_then(Llsd::as_array))
+        .unwrap_or_default();
+    records
+        .iter()
+        .filter_map(offline_message_from_record)
+        .collect()
+}
+
+/// Decodes one offline-IM record map into an [`InstantMessage`]; returns `None`
+/// for a non-map element.
+fn offline_message_from_record(record: &Llsd) -> Option<InstantMessage> {
+    if !matches!(record, Llsd::Map(_)) {
+        return None;
+    }
+    let dialog = ImDialog::from_u8(u8::try_from(i32_member(record, "dialog")).unwrap_or(0));
+    // The session/transaction id falls back to the asset id for task messages,
+    // matching the viewer's offline-message processing.
+    let id = record
+        .get("transaction-id")
+        .or_else(|| record.get("transaction_id"))
+        .or_else(|| record.get("asset_id"))
+        .map_or_else(Uuid::nil, llsd_uuid);
+    let binary_bucket = record
+        .get("binary_bucket")
+        .and_then(Llsd::as_binary)
+        .map(<[u8]>::to_vec)
+        .unwrap_or_default();
+    Some(InstantMessage {
+        from_agent_id: uuid_member_lenient(record, "from_agent_id"),
+        from_agent_name: string_member(record, "from_agent_name"),
+        to_agent_id: uuid_member_lenient(record, "to_agent_id"),
+        dialog,
+        from_group: record
+            .get("from_group")
+            .and_then(Llsd::as_bool)
+            .unwrap_or(false),
+        region_id: uuid_member_lenient(record, "region_id"),
+        position: offline_message_position(record),
+        offline: true,
+        timestamp: u32_member(record, "timestamp"),
+        id,
+        parent_estate_id: u32_member(record, "parent_estate_id"),
+        message: string_member(record, "message"),
+        binary_bucket,
+    })
+}
+
+/// Reads an offline-IM record's region-local position, from either a `position`
+/// `[x, y, z]` array or the `local_x`/`local_y`/`local_z` members.
+fn offline_message_position(record: &Llsd) -> (f32, f32, f32) {
+    if let Some(array) = record.get("position").and_then(Llsd::as_array) {
+        return (
+            array.first().and_then(Llsd::as_f32).unwrap_or(0.0),
+            array.get(1).and_then(Llsd::as_f32).unwrap_or(0.0),
+            array.get(2).and_then(Llsd::as_f32).unwrap_or(0.0),
+        );
+    }
+    (
+        record.get("local_x").and_then(Llsd::as_f32).unwrap_or(0.0),
+        record.get("local_y").and_then(Llsd::as_f32).unwrap_or(0.0),
+        record.get("local_z").and_then(Llsd::as_f32).unwrap_or(0.0),
+    )
+}
+
+/// Decodes a `ChatterBoxInvitation` CAPS event body (#28) into an
+/// [`Event::ConferenceInvited`], reading the nested
+/// `instantmessage.message_params`. Returns `None` if the structure is absent.
+fn chatterbox_invitation_from_llsd(body: &Llsd) -> Option<Event> {
+    let params = body.get("instantmessage")?.get("message_params")?;
+    Some(Event::ConferenceInvited {
+        session_id: uuid_member_lenient(params, "id"),
+        from_agent_id: uuid_member_lenient(params, "from_id"),
+        from_name: string_member(params, "from_name"),
+        message: string_member(params, "message"),
+    })
 }
 
 /// Reads a `u64` from an LLSD value that may be an 8-byte big-endian binary
