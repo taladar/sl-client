@@ -255,6 +255,7 @@ fn on_events(
             | SlSessionEvent::MapItems { .. }
             | SlSessionEvent::ObjectAdded(_)
             | SlSessionEvent::ObjectUpdated(_)
+            | SlSessionEvent::TimeDilation { .. }
             | SlSessionEvent::ObjectRemoved { .. }
             | SlSessionEvent::ObjectProperties(_)
             | SlSessionEvent::TerrainPatch(_)

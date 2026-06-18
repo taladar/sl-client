@@ -178,6 +178,7 @@ fn on_events(
             | SlSessionEvent::NeighborSeed { .. }
             | SlSessionEvent::ObjectAdded(_)
             | SlSessionEvent::ObjectUpdated(_)
+            | SlSessionEvent::TimeDilation { .. }
             | SlSessionEvent::ObjectRemoved { .. }
             | SlSessionEvent::ObjectProperties(_)
             | SlSessionEvent::TerrainPatch(_)
@@ -228,7 +229,7 @@ fn on_events(
             | SlSessionEvent::ConferenceSessionMessage { .. }
             | SlSessionEvent::ConferenceSessionParticipant { .. }
             | SlSessionEvent::ConferenceInvited { .. } => {}
-            SlSessionEvent::TeleportFailed { reason } => warn!("teleport failed: {reason}"),
+            SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged { region_handle, sim } => {
                 info!("region changed: handle={region_handle} sim={sim}");
             }
