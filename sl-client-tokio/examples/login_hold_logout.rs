@@ -169,6 +169,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
             Event::AvatarPicks { picks, .. } => info!("avatar has {} picks", picks.len()),
+            Event::AvatarClassifieds { classifieds, .. } => {
+                info!("avatar has {} classifieds", classifieds.len());
+            }
+            Event::PickInfo(pick) => info!("pick details: {}", pick.name),
+            Event::ClassifiedInfo(classified) => {
+                info!("classified details: {}", classified.name);
+            }
             Event::InventorySkeleton(folders) => {
                 info!("inventory skeleton: {} folders", folders.len());
             }

@@ -138,6 +138,9 @@ fn on_events(
             | SlSessionEvent::AvatarGroups { .. }
             | SlSessionEvent::AvatarPicks { .. }
             | SlSessionEvent::AvatarNotes { .. }
+            | SlSessionEvent::AvatarClassifieds { .. }
+            | SlSessionEvent::PickInfo(_)
+            | SlSessionEvent::ClassifiedInfo(_)
             | SlSessionEvent::InventorySkeleton(_)
             | SlSessionEvent::InventoryDescendents { .. }
             | SlSessionEvent::FriendList(_)

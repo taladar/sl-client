@@ -389,6 +389,21 @@ pub enum Event {
         /// The note text.
         notes: String,
     },
+    /// An avatar's classified ads (`AvatarClassifiedReply`), in response to
+    /// [`Session::request_avatar_classifieds`](crate::Session::request_avatar_classifieds).
+    AvatarClassifieds {
+        /// The avatar whose classifieds these are.
+        target_id: Uuid,
+        /// The classifieds (id and name only; fetch details separately).
+        classifieds: Vec<AvatarClassified>,
+    },
+    /// The full details of one pick (`PickInfoReply`), in response to
+    /// [`Session::request_pick_info`](crate::Session::request_pick_info).
+    PickInfo(Box<PickInfo>),
+    /// The full details of one classified ad (`ClassifiedInfoReply`), in
+    /// response to
+    /// [`Session::request_classified_info`](crate::Session::request_classified_info).
+    ClassifiedInfo(Box<ClassifiedInfo>),
     /// The agent's inventory folder skeleton (every folder, without item
     /// contents), parsed from the login response. Emitted once, right after
     /// [`Event::CircuitEstablished`], when the login provided it.
@@ -3090,6 +3105,212 @@ pub struct AvatarPick {
     pub pick_id: Uuid,
     /// The pick name.
     pub name: String,
+}
+
+/// One classified ad from an `AvatarClassifiedReply` (header data only: id and
+/// name). Fetch the full details with
+/// [`Session::request_classified_info`](crate::Session::request_classified_info).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvatarClassified {
+    /// The classified id (use to fetch full details).
+    pub classified_id: Uuid,
+    /// The classified name.
+    pub name: String,
+}
+
+/// The full details of one pick, parsed from `PickInfoReply` in response to
+/// [`Session::request_pick_info`](crate::Session::request_pick_info).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PickInfo {
+    /// The pick id.
+    pub pick_id: Uuid,
+    /// The avatar that created the pick.
+    pub creator_id: Uuid,
+    /// Whether this is a "top pick" (a god-only legacy flag, normally `false`).
+    pub top_pick: bool,
+    /// The parcel the pick points at.
+    pub parcel_id: Uuid,
+    /// The pick name.
+    pub name: String,
+    /// The pick description.
+    pub description: String,
+    /// The pick snapshot texture id.
+    pub snapshot_id: Uuid,
+    /// The owner's account name, as the grid resolves it.
+    pub user: String,
+    /// The parcel's original name.
+    pub original_name: String,
+    /// The region name the pick is in.
+    pub sim_name: String,
+    /// The pick's global position (metres, grid-wide coordinates).
+    pub pos_global: (f64, f64, f64),
+    /// The sort order (only meaningful for top picks).
+    pub sort_order: i32,
+    /// Whether the pick is enabled (shown in the profile).
+    pub enabled: bool,
+}
+
+/// The full details of one classified ad, parsed from `ClassifiedInfoReply` in
+/// response to
+/// [`Session::request_classified_info`](crate::Session::request_classified_info).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassifiedInfo {
+    /// The classified id.
+    pub classified_id: Uuid,
+    /// The avatar that created the classified.
+    pub creator_id: Uuid,
+    /// The creation date (Unix timestamp, seconds).
+    pub creation_date: u32,
+    /// The expiration date (Unix timestamp, seconds).
+    pub expiration_date: u32,
+    /// The classified's search category.
+    pub category: u32,
+    /// The classified name.
+    pub name: String,
+    /// The classified description.
+    pub description: String,
+    /// The parcel the classified points at.
+    pub parcel_id: Uuid,
+    /// The parent estate id.
+    pub parent_estate: u32,
+    /// The classified snapshot texture id.
+    pub snapshot_id: Uuid,
+    /// The region name the classified is in.
+    pub sim_name: String,
+    /// The classified's global position (metres, grid-wide coordinates).
+    pub pos_global: (f64, f64, f64),
+    /// The parcel name.
+    pub parcel_name: String,
+    /// The classified flags bitfield (e.g. mature, auto-renew).
+    pub classified_flags: u8,
+    /// The amount paid to list this classified (L$).
+    pub price_for_listing: i32,
+}
+
+/// An update to the agent's own profile, sent via
+/// [`Session::update_profile`](crate::Session::update_profile)
+/// (`AvatarPropertiesUpdate`). This replaces the whole profile, so read the
+/// current values with
+/// [`Session::request_avatar_properties`](crate::Session::request_avatar_properties)
+/// first and edit from there.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ProfileUpdate {
+    /// The "second life" profile image (texture id).
+    pub image_id: Uuid,
+    /// The "first life" profile image (texture id).
+    pub fl_image_id: Uuid,
+    /// The "second life" about text.
+    pub about_text: String,
+    /// The "first life" about text.
+    pub fl_about_text: String,
+    /// Whether the profile may be published in search.
+    pub allow_publish: bool,
+    /// Whether the profile is flagged as "mature".
+    pub mature_publish: bool,
+    /// The web profile URL.
+    pub profile_url: String,
+}
+
+/// An update to the agent's own interests, sent via
+/// [`Session::update_interests`](crate::Session::update_interests)
+/// (`AvatarInterestsUpdate`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct InterestsUpdate {
+    /// The "want to" category bitmask.
+    pub want_to_mask: u32,
+    /// The "want to" free text.
+    pub want_to_text: String,
+    /// The "skills" category bitmask.
+    pub skills_mask: u32,
+    /// The "skills" free text.
+    pub skills_text: String,
+    /// The languages free text.
+    pub languages_text: String,
+}
+
+/// A create-or-update of one of the agent's picks, sent via
+/// [`Session::update_pick`](crate::Session::update_pick) (`PickInfoUpdate`).
+/// Supply a fresh [`pick_id`](Self::pick_id) to create a pick, or an existing
+/// one to edit it; the simulator fills in [`parcel_id`](Self::parcel_id) from
+/// the agent's current parcel when it is nil.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PickUpdate {
+    /// The pick id (a fresh id to create; an existing id to edit).
+    pub pick_id: Uuid,
+    /// The parcel the pick points at (nil to use the agent's current parcel).
+    pub parcel_id: Uuid,
+    /// The pick name.
+    pub name: String,
+    /// The pick description.
+    pub description: String,
+    /// The pick snapshot texture id.
+    pub snapshot_id: Uuid,
+    /// The pick's global position (metres; nil/zero to use the agent's).
+    pub pos_global: (f64, f64, f64),
+    /// The sort order (only meaningful for top picks; normally `0`).
+    pub sort_order: i32,
+    /// Whether the pick is enabled (shown in the profile).
+    pub enabled: bool,
+}
+
+impl Default for PickUpdate {
+    fn default() -> Self {
+        Self {
+            pick_id: Uuid::nil(),
+            parcel_id: Uuid::nil(),
+            name: String::new(),
+            description: String::new(),
+            snapshot_id: Uuid::nil(),
+            pos_global: (0.0, 0.0, 0.0),
+            sort_order: 0,
+            enabled: true,
+        }
+    }
+}
+
+/// A create-or-update of one of the agent's classifieds, sent via
+/// [`Session::update_classified`](crate::Session::update_classified)
+/// (`ClassifiedInfoUpdate`). Supply a fresh
+/// [`classified_id`](Self::classified_id) to create a classified, or an
+/// existing one to edit it; the simulator fills in
+/// [`parcel_id`](Self::parcel_id) and the parent estate from the agent's
+/// current parcel when the parcel is nil.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassifiedUpdate {
+    /// The classified id (a fresh id to create; an existing id to edit).
+    pub classified_id: Uuid,
+    /// The classified's search category.
+    pub category: u32,
+    /// The classified name.
+    pub name: String,
+    /// The classified description.
+    pub description: String,
+    /// The parcel the classified points at (nil to use the agent's current).
+    pub parcel_id: Uuid,
+    /// The classified snapshot texture id.
+    pub snapshot_id: Uuid,
+    /// The classified's global position (metres; nil/zero to use the agent's).
+    pub pos_global: (f64, f64, f64),
+    /// The classified flags bitfield (e.g. mature, auto-renew).
+    pub classified_flags: u8,
+    /// The amount to pay to list this classified (L$).
+    pub price_for_listing: i32,
+}
+
+impl Default for ClassifiedUpdate {
+    fn default() -> Self {
+        Self {
+            classified_id: Uuid::nil(),
+            category: 0,
+            name: String::new(),
+            description: String::new(),
+            parcel_id: Uuid::nil(),
+            snapshot_id: Uuid::nil(),
+            pos_global: (0.0, 0.0, 0.0),
+            classified_flags: 0,
+            price_for_listing: 0,
+        }
+    }
 }
 
 /// The rights one party grants the other in a Second Life friendship: a
