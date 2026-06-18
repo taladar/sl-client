@@ -2274,17 +2274,147 @@ pub struct EconomyData {
     pub price_group_create: i32,
 }
 
+/// How many parcels a `ParcelProperties` reply describes, the `RequestResult`
+/// field. A "not found / no access" reply arrives as [`NoData`](Self::NoData)
+/// and must be distinguished from a normal parcel (mirrors the viewer's
+/// `PARCEL_RESULT_*` constants).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ParcelRequestResult {
+    /// No parcel data (the query found nothing, or access was denied)
+    /// (`PARCEL_RESULT_NO_DATA`, `-1`).
+    NoData,
+    /// Exactly one parcel was selected (`PARCEL_RESULT_SUCCESS`, `0`).
+    #[default]
+    Single,
+    /// Multiple parcels were selected (`PARCEL_RESULT_MULTIPLE`, `1`).
+    Multiple,
+    /// An unrecognised result code, preserved verbatim.
+    Unknown(i32),
+}
+
+impl ParcelRequestResult {
+    /// Classifies a `RequestResult` wire value.
+    #[must_use]
+    pub const fn from_i32(value: i32) -> Self {
+        match value {
+            -1 => Self::NoData,
+            0 => Self::Single,
+            1 => Self::Multiple,
+            other => Self::Unknown(other),
+        }
+    }
+
+    /// Whether the reply carries real parcel data (anything but
+    /// [`NoData`](Self::NoData)).
+    #[must_use]
+    pub const fn has_data(self) -> bool {
+        !matches!(self, Self::NoData)
+    }
+}
+
+/// A parcel's ownership status, the `Status` field of `ParcelProperties` (the
+/// viewer's `LLParcel::EOwnershipStatus`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ParcelStatus {
+    /// The parcel is leased (owned) (`OS_LEASED`, `0`).
+    #[default]
+    Leased,
+    /// A lease is pending (`OS_LEASE_PENDING`, `1`).
+    LeasePending,
+    /// The parcel has been abandoned (`OS_ABANDONED`, `2`).
+    Abandoned,
+    /// No ownership status (`OS_NONE`, `-1`).
+    None,
+    /// An unrecognised status value, preserved verbatim.
+    Unknown(i32),
+}
+
+impl ParcelStatus {
+    /// Classifies a `Status` wire value (the UDP `U8` widened to `i32`, or the
+    /// CAPS integer which may be the negative `OS_NONE`).
+    #[must_use]
+    pub const fn from_i32(value: i32) -> Self {
+        match value {
+            0 => Self::Leased,
+            1 => Self::LeasePending,
+            2 => Self::Abandoned,
+            -1 => Self::None,
+            other => Self::Unknown(other),
+        }
+    }
+}
+
+/// How an avatar arrives on a parcel, the `LandingType` field of
+/// `ParcelProperties` (the viewer's `LLParcel::ELandingType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LandingType {
+    /// Teleport routing is blocked (`L_NONE`, `0`).
+    #[default]
+    Blocked,
+    /// Arrivals are routed to the parcel's landing point (`L_LANDING_POINT`, `1`).
+    LandingPoint,
+    /// Arrivals land directly at the requested spot (`L_DIRECT`, `2`).
+    Anywhere,
+    /// An unrecognised landing type, preserved verbatim.
+    Unknown(u8),
+}
+
+impl LandingType {
+    /// Classifies a `LandingType` wire value.
+    #[must_use]
+    pub const fn from_u8(value: u8) -> Self {
+        match value {
+            0 => Self::Blocked,
+            1 => Self::LandingPoint,
+            2 => Self::Anywhere,
+            other => Self::Unknown(other),
+        }
+    }
+}
+
 /// A parcel's geometry, flags, and limits, parsed from `ParcelProperties`.
 ///
 /// The parcel flag bits are exposed through the boolean accessor methods
 /// ([`ParcelInfo::create_objects`], [`ParcelInfo::use_ban_list`], …); the raw
 /// bitfield is available via [`ParcelInfo::flags`] / [`ParcelInfo::raw_parcel_flags`].
+/// The `region_deny_*` / `region_*_override` booleans are *region*-level
+/// settings echoed into the parcel reply, distinct from the parcel's own
+/// [`ParcelFlags`](sl_wire::ParcelFlags) bits.
 #[derive(Debug, Clone, PartialEq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "faithfully mirrors the distinct ParcelProperties wire booleans"
+)]
 pub struct ParcelInfo {
     /// The request sequence id echoed back (used to match an outstanding query).
     pub sequence_id: i32,
+    /// How many parcels this reply describes; [`NoData`](ParcelRequestResult::NoData)
+    /// means "not found / no access" rather than a real parcel.
+    pub request_result: ParcelRequestResult,
+    /// Whether the viewer should snap its selection to the returned parcel.
+    pub snap_selection: bool,
+    /// The number of the requesting agent's own avatars on the parcel.
+    pub self_count: i32,
+    /// The number of other agents on the parcel.
+    pub other_count: i32,
+    /// The number of public/anonymous agents on the parcel.
+    pub public_count: i32,
     /// The parcel's region-local id.
     pub local_id: i32,
+    /// The parcel owner's id (an agent, or a group when [`is_group_owned`](Self::is_group_owned)).
+    pub owner_id: Uuid,
+    /// Whether [`owner_id`](Self::owner_id) names a group rather than an agent.
+    pub is_group_owned: bool,
+    /// The group the parcel is set to (nil if none).
+    pub group_id: Uuid,
+    /// The auction id, if the parcel is being auctioned (`0` if not).
+    pub auction_id: u32,
+    /// When the parcel was claimed, as a Unix timestamp (`time_t`).
+    pub claim_date: i32,
+    /// The price paid to claim the parcel, in L$.
+    pub claim_price: i32,
+    /// The parcel's rent price, in L$.
+    pub rent_price: i32,
     /// The minimum corner of the parcel's axis-aligned bounding box, in metres.
     pub aabb_min: (f32, f32, f32),
     /// The maximum corner of the parcel's axis-aligned bounding box, in metres.
@@ -2294,16 +2424,38 @@ pub struct ParcelInfo {
     /// One bit per 4×4 m region square, marking which squares belong to this
     /// parcel (row-major, least-significant-bit first).
     pub bitmap: Vec<u8>,
+    /// The parcel's ownership status (leased / abandoned / …).
+    pub status: ParcelStatus,
+    /// The parcel's search category.
+    pub category: ParcelCategory,
     /// The parcel's maximum object/prim capacity (without bonus).
     pub max_prims: i32,
     /// The region-wide maximum object/prim capacity.
     pub sim_wide_max_prims: i32,
     /// The region-wide current object/prim count.
     pub sim_wide_total_prims: i32,
-    /// The parcel owner's id.
-    pub owner_id: Uuid,
+    /// The total objects/prims currently on the parcel.
+    pub total_prims: i32,
+    /// The objects/prims on the parcel owned by the parcel owner.
+    pub owner_prims: i32,
+    /// The objects/prims on the parcel set to the parcel's group.
+    pub group_prims: i32,
+    /// The objects/prims on the parcel owned by anyone else.
+    pub other_prims: i32,
+    /// The objects/prims on the parcel that are currently selected.
+    pub selected_prims: i32,
+    /// The parcel's object-bonus multiplier applied to [`max_prims`](Self::max_prims).
+    pub parcel_prim_bonus: f32,
+    /// The auto-return time for other people's objects, in minutes (`0` = never).
+    pub other_clean_time: i32,
     /// The raw `ParcelFlags` bitfield (decode with [`sl_wire::ParcelFlags`]).
     pub raw_parcel_flags: u32,
+    /// The parcel's sale price, in L$.
+    pub sale_price: i32,
+    /// The parcel's name.
+    pub name: String,
+    /// The parcel's description.
+    pub description: String,
     /// The parcel's streaming-audio URL (the "music" stream), empty if none.
     /// Set it with [`ParcelUpdate::music_url`].
     pub music_url: String,
@@ -2315,6 +2467,45 @@ pub struct ParcelInfo {
     pub media_id: Uuid,
     /// Whether the media is auto-scaled to fit the surface it replaces.
     pub media_auto_scale: bool,
+    /// The only agent allowed to buy the parcel (nil for anyone).
+    pub auth_buyer_id: Uuid,
+    /// The parcel's snapshot texture id (nil if none).
+    pub snapshot_id: Uuid,
+    /// The price of a parcel pass, in L$.
+    pub pass_price: i32,
+    /// How many hours a parcel pass lasts.
+    pub pass_hours: f32,
+    /// The teleport-landing location within the parcel, in region metres.
+    pub user_location: (f32, f32, f32),
+    /// The direction an arriving agent faces at the landing point.
+    pub user_look_at: (f32, f32, f32),
+    /// How an avatar arrives on the parcel (blocked / landing point / anywhere).
+    pub landing_type: LandingType,
+    /// Region setting: pushing (`llPushObject`) is overridden/blocked region-wide.
+    pub region_push_override: bool,
+    /// Region setting: anonymous (non-account) avatars are denied region-wide.
+    pub region_deny_anonymous: bool,
+    /// Region setting: identified-but-not-payment avatars are denied region-wide.
+    pub region_deny_identified: bool,
+    /// Region setting: avatars without a payment-info-on-file are denied region-wide.
+    pub region_deny_transacted: bool,
+    /// Region setting: age-unverified avatars are denied region-wide.
+    pub region_deny_age_unverified: bool,
+    /// Region setting: per-parcel access restrictions are allowed (estate not tax-free).
+    pub region_allow_access_override: bool,
+    /// The parcel's environment (EEP) version, or `-1` when overrides are off.
+    pub parcel_environment_version: i32,
+    /// Region setting: per-parcel environment (EEP) overrides are allowed.
+    pub region_allow_environment_override: bool,
+    /// Whether avatars on the parcel are visible from outside it
+    /// (`SeeAVs`); `None` when not provided (the UDP path omits it).
+    pub see_avs: Option<bool>,
+    /// Whether anyone's avatar sounds (gestures, footsteps) play on the parcel
+    /// (`AnyAVSounds`); `None` when not provided (the UDP path omits it).
+    pub any_av_sounds: Option<bool>,
+    /// Whether group members' avatar sounds play on the parcel
+    /// (`GroupAVSounds`); `None` when not provided (the UDP path omits it).
+    pub group_av_sounds: Option<bool>,
 }
 
 impl ParcelInfo {

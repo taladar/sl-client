@@ -1372,7 +1372,8 @@ rendering / voice-transport family). With this reclassified, **the roadmap's
 client protocol *feature* surface is complete: #1–#33 are done.** The only
 remaining open work is the **Tier E decode-fidelity fixes (#35–#51)** — not new
 features, but information-loss gaps where an already-shipped item decodes a wire
-field and then drops it before the caller sees it.
+field and then drops it before the caller sees it. (#35, the `ParcelProperties`
+full field surface, is now done; #36–#51 remain.)
 
 ## Tier E — decode-fidelity & information-loss fixes (#35–#51)
 
@@ -1386,7 +1387,7 @@ blob items, writing a structured decoder). "Test" notes whether the local
 
 | # | Fix | Pts | Recovers | Test |
 |---|-----|-----|----------|------|
-| 35 | `ParcelProperties` full field surface | 3 | Parcel name/desc, group-ownership, sale/pass pricing, prim accounting, landing point, access/env flags, `RequestResult` | Local OpenSim |
+| 35 ✅ | `ParcelProperties` full field surface | 3 | Parcel name/desc, group-ownership, sale/pass pricing, prim accounting, landing point, access/env flags, `RequestResult` | Local OpenSim |
 | 36 | `ObjectProperties` full field surface | 2 | `ItemID`/`FolderID`/`FromTaskID`, `InventorySerial`, aggregate perms, texture-id list | Local OpenSim |
 | 37 | `TextureAnim` & particle-system decoders | 3 | Structured prim texture-animation and particle (`llParticleSystem`) params | Local OpenSim |
 | 38 | `AvatarSitResponse` complete `SitTransform` | 1 | Sit rotation, sit-camera eye/at offsets, force-mouselook | Local OpenSim |
@@ -1406,27 +1407,41 @@ blob items, writing a structured decoder). "Test" notes whether the local
 
 ### Critical — large structural losses
 
-**35. `ParcelProperties` full field surface (extends #13, Tier B).** The
-`ParcelInfo` value type (`sl-proto/src/types.rs`, ~line 2283) carries only ~16
-of the ~50 `ParcelData` fields, and *both* decode paths populate it: the UDP
-`parcel_info` (`session.rs` ~9443) and the CAPS `parcel_info_from_llsd`
-(`session.rs` ~10120). Decoded-but-dropped fields a land tool needs:
-**`Name`, `Desc`** (the parcel's name and description are decoded and thrown
-away), `GroupID` + `IsGroupOwned` (without these `owner_id` can't tell a
-group-owned parcel),
-`SalePrice`/`AuthBuyerID`/`AuctionID`/`ClaimDate`/`ClaimPrice`/
-`RentPrice`/`PassPrice`/`PassHours`, the full prim accounting
+**35. `ParcelProperties` full field surface (extends #13, Tier B). ✅ Done.**
+`ParcelInfo` (`sl-proto/src/types.rs`) previously carried only ~16 of the ~50
+`ParcelData` fields. Added the full surface and populated it in *both* decode
+paths — the UDP `parcel_info` (now taking the whole `ParcelProperties` message
+so it can read the three trailing single-blocks) and the CAPS
+`parcel_info_from_llsd`. Recovered fields: **`Name`/`Desc`** (decoded and thrown
+away before), `GroupID` + `IsGroupOwned` (a group-owned parcel can now be told
+from `owner_id`), `SalePrice`/`AuthBuyerID`/`AuctionID`/`ClaimDate`/
+`ClaimPrice`/`RentPrice`/`PassPrice`/`PassHours`, the full prim accounting
 (`OwnerPrims`/`GroupPrims`/`OtherPrims`/`SelectedPrims`/`TotalPrims`/
-`ParcelPrimBonus` — only the *max* prim fields are surfaced), avatar counts
-(`SelfCount`/`OtherCount`/`PublicCount`), `Status`/`Category`/`LandingType`,
-`SnapshotID`, `UserLocation`/`UserLookAt` (the teleport landing point), and the
-dedicated region access/environment booleans
-(`RegionDenyAnonymous`/`…Identified`/ `…Transacted`/`…AgeUnverified`, push
-override, `SeeAVs`/`GroupAVSounds`/ `AnyAVSounds`, and the
-`ParcelEnvironmentBlock`). Critically, `RequestResult` is also dropped, so a "no
-access / not found" result is silently surfaced as a normal parcel. Add the
-fields to `ParcelInfo` and populate them in both decoders.
-*Test: local OpenSim (both the UDP and CAPS parcel paths).*
+`ParcelPrimBonus`), avatar counts (`SelfCount`/`OtherCount`/`PublicCount`),
+`Status`/`Category`/`LandingType` (as typed `ParcelStatus`/`ParcelCategory`/
+`LandingType` enums), `SnapshotID`, `UserLocation`/`UserLookAt` (the teleport
+landing point), and the region access/environment booleans
+(`RegionDenyAnonymous`/`…Identified`/`…Transacted`/`…AgeUnverified`, push
+override, `SeeAVs`/`AnyAVSounds`/`GroupAVSounds` as `Option<bool>` since the UDP
+form omits them, and the `ParcelEnvironmentBlock`). **`RequestResult`** is now a
+typed `ParcelRequestResult` (`NoData`/`Single`/`Multiple`) with a `has_data()`
+helper, so a "no access / not found" reply is no longer silently surfaced as a
+normal parcel. `ClaimDate` is read tolerantly — an integer `time_t` (SL/UDP) or
+an ISO-8601 `date` (OpenSim CAPS), via a small clippy-clean
+`parse_iso8601_to_unix` + `days_from_civil` helper. The three new enums and the
+extended struct are re-exported through both runtimes, and `sl-survey`'s
+`ParcelRecord` JSON now carries the parcel name/description, owner,
+group-ownership, sale price and prim total. Covered by `sl-proto` lifecycle
+tests (full UDP field surface, the `NoData` result, and the full CAPS LLSD form
+incl. the ISO-date `ClaimDate` and the per-parcel AV-sound booleans).
+*Live-verified against the local OpenSim via the `survey_probe` example: a
+whole-region `ParcelProperties` over the CAPS event queue decoded `name="Your
+Parcel"`, `request_result=Single`, owner id, `claim_date` (ISO date parsed to a
+Unix `time_t`), `status=Leased`, `total_prims`/`other_prims`,
+`parcel_prim_bonus=1.0`, `region_allow_access_override=true`,
+`parcel_environment_version=-1`, and the three `Some(true)` AV-sound booleans
+(`see_avs`/`any_av_sounds`/`group_av_sounds`) — all previously dropped. Test:
+local OpenSim (both the UDP and CAPS parcel paths).*
 
 **36. `ObjectProperties` full field surface (extends #17, Tier C).** The
 `ObjectProperties` struct (`types.rs` ~1457) ends at `sit_name`; the decoder

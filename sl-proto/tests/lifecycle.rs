@@ -13,13 +13,14 @@ mod test {
         ControlFlags, CreateGroupParams, DeRezDestination, DisconnectReason, EstateAccessDelta,
         EstateAccessKind, Event, FriendRights, GroupNoticeAttachment, GroupRoleChange,
         GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImageCodec,
-        InterestsUpdate, InventoryItem, LindenAmount, LoginParams, MapItemType, Material, Maturity,
-        MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, ObjectFlagSettings,
-        ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelFlags,
-        ParcelMediaCommand, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PrimShape,
-        ProductType, ProfileUpdate, RegionInfoUpdate, Reliability, SaleType, ScriptPermissions,
-        Session, SoundFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, WearableType,
-        avatar_texture, group_powers, pcode,
+        InterestsUpdate, InventoryItem, LandingType, LindenAmount, LoginParams, MapItemType,
+        Material, Maturity, MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem,
+        ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
+        ParcelFlags, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
+        ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProductType, ProfileUpdate,
+        RegionInfoUpdate, Reliability, SaleType, ScriptPermissions, Session, SoundFlags,
+        TerrainLayerType, Throttle, TransferStatus, Transmit, WearableType, avatar_texture,
+        group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -4291,6 +4292,217 @@ mod test {
         assert_eq!(parcel.media_url, "http://example.com/movie");
         assert_eq!(parcel.media_id, media_id);
         assert!(parcel.media_auto_scale);
+        Ok(())
+    }
+
+    #[test]
+    fn parcel_properties_reports_full_field_surface() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let owner = uuid::Uuid::from_u128(0x0E1);
+        let group = uuid::Uuid::from_u128(0x0E2);
+        let buyer = uuid::Uuid::from_u128(0x0E3);
+        let snapshot = uuid::Uuid::from_u128(0x0E4);
+        let mut message = parcel_properties_msg(5, 9, 1024, 0, 200, 4000, vec3(32.0, 32.0, 0.0));
+        if let AnyMessage::ParcelProperties(props) = &mut message {
+            let data = &mut props.parcel_data;
+            data.request_result = 0;
+            data.name = b"Sunset Cove\0".to_vec();
+            data.desc = b"A quiet beach parcel".to_vec();
+            data.owner_id = owner;
+            data.is_group_owned = true;
+            data.group_id = group;
+            data.auction_id = 7;
+            data.claim_date = 1_700_000_000;
+            data.claim_price = 512;
+            data.rent_price = 30;
+            data.status = 2; // OS_ABANDONED
+            data.category = 2; // Residential
+            data.total_prims = 150;
+            data.owner_prims = 100;
+            data.group_prims = 20;
+            data.other_prims = 30;
+            data.selected_prims = 4;
+            data.parcel_prim_bonus = 1.5;
+            data.other_clean_time = 15;
+            data.sale_price = 9999;
+            data.auth_buyer_id = buyer;
+            data.snapshot_id = snapshot;
+            data.pass_price = 25;
+            data.pass_hours = 4.0;
+            data.user_location = vec3(12.0, 13.0, 14.0);
+            data.user_look_at = vec3(1.0, 0.0, 0.0);
+            data.landing_type = 2; // L_DIRECT (anywhere)
+            data.region_push_override = true;
+            data.region_deny_anonymous = true;
+            data.region_deny_identified = false;
+            data.region_deny_transacted = true;
+            props.age_verification_block.region_deny_age_unverified = true;
+            props.region_allow_access_block.region_allow_access_override = true;
+            props.parcel_environment_block.parcel_environment_version = 3;
+            props
+                .parcel_environment_block
+                .region_allow_environment_override = true;
+        }
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let events = drain_events(&mut session);
+        let parcel = events
+            .iter()
+            .find_map(|e| match e {
+                Event::ParcelProperties(parcel) => Some(parcel),
+                _ => None,
+            })
+            .ok_or("expected a ParcelProperties event")?;
+        assert_eq!(parcel.request_result, ParcelRequestResult::Single);
+        assert!(parcel.request_result.has_data());
+        assert_eq!(parcel.name, "Sunset Cove");
+        assert_eq!(parcel.description, "A quiet beach parcel");
+        assert_eq!(parcel.owner_id, owner);
+        assert!(parcel.is_group_owned);
+        assert_eq!(parcel.group_id, group);
+        assert_eq!(parcel.auction_id, 7);
+        assert_eq!(parcel.claim_date, 1_700_000_000);
+        assert_eq!(parcel.claim_price, 512);
+        assert_eq!(parcel.rent_price, 30);
+        assert_eq!(parcel.status, ParcelStatus::Abandoned);
+        assert_eq!(parcel.category, ParcelCategory::Residential);
+        assert_eq!(parcel.total_prims, 150);
+        assert_eq!(parcel.owner_prims, 100);
+        assert_eq!(parcel.group_prims, 20);
+        assert_eq!(parcel.other_prims, 30);
+        assert_eq!(parcel.selected_prims, 4);
+        assert_eq!(parcel.parcel_prim_bonus.to_bits(), 1.5_f32.to_bits());
+        assert_eq!(parcel.other_clean_time, 15);
+        assert_eq!(parcel.sale_price, 9999);
+        assert_eq!(parcel.auth_buyer_id, buyer);
+        assert_eq!(parcel.snapshot_id, snapshot);
+        assert_eq!(parcel.pass_price, 25);
+        assert_eq!(parcel.pass_hours.to_bits(), 4.0_f32.to_bits());
+        assert_eq!(parcel.user_location.0.to_bits(), 12.0_f32.to_bits());
+        assert_eq!(parcel.user_look_at.0.to_bits(), 1.0_f32.to_bits());
+        assert_eq!(parcel.landing_type, LandingType::Anywhere);
+        assert!(parcel.region_push_override);
+        assert!(parcel.region_deny_anonymous);
+        assert!(!parcel.region_deny_identified);
+        assert!(parcel.region_deny_transacted);
+        assert!(parcel.region_deny_age_unverified);
+        assert!(parcel.region_allow_access_override);
+        assert_eq!(parcel.parcel_environment_version, 3);
+        assert!(parcel.region_allow_environment_override);
+        // The UDP message omits the per-parcel AV-sound booleans.
+        assert_eq!(parcel.see_avs, None);
+        assert_eq!(parcel.any_av_sounds, None);
+        assert_eq!(parcel.group_av_sounds, None);
+        Ok(())
+    }
+
+    #[test]
+    fn parcel_properties_no_data_result_is_distinguished() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let mut message = parcel_properties_msg(2, 0, 0, 0, 0, 0, vec3(0.0, 0.0, 0.0));
+        if let AnyMessage::ParcelProperties(props) = &mut message {
+            props.parcel_data.request_result = -1; // PARCEL_RESULT_NO_DATA
+        }
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let events = drain_events(&mut session);
+        let parcel = events
+            .iter()
+            .find_map(|e| match e {
+                Event::ParcelProperties(parcel) => Some(parcel),
+                _ => None,
+            })
+            .ok_or("expected a ParcelProperties event")?;
+        assert_eq!(parcel.request_result, ParcelRequestResult::NoData);
+        assert!(!parcel.request_result.has_data());
+        Ok(())
+    }
+
+    #[test]
+    fn parcel_properties_caps_llsd_full_field_surface() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // The CAPS event-queue form OpenSim emits: a `ParcelData` block plus the
+        // three trailing single-element blocks. `ClaimDate` is an LLSD `date`,
+        // `Category`/`Status`/`LandingType` are integers, and the per-parcel
+        // AV-sound booleans (`SeeAVs`/…) are present only here.
+        let xml = "<llsd><map>\
+            <key>ParcelData</key><array><map>\
+            <key>SequenceID</key><integer>3</integer>\
+            <key>RequestResult</key><integer>0</integer>\
+            <key>LocalID</key><integer>11</integer>\
+            <key>Name</key><string>Harbor Lot</string>\
+            <key>Desc</key><string>dockside</string>\
+            <key>OwnerID</key><uuid>00000000-0000-0000-0000-000000000111</uuid>\
+            <key>IsGroupOwned</key><boolean>true</boolean>\
+            <key>GroupID</key><uuid>00000000-0000-0000-0000-000000000222</uuid>\
+            <key>ClaimDate</key><date>2023-11-14T22:13:20Z</date>\
+            <key>SalePrice</key><integer>4500</integer>\
+            <key>Status</key><integer>1</integer>\
+            <key>Category</key><integer>3</integer>\
+            <key>TotalPrims</key><integer>77</integer>\
+            <key>LandingType</key><integer>1</integer>\
+            <key>RegionDenyAnonymous</key><boolean>true</boolean>\
+            <key>SeeAVs</key><boolean>false</boolean>\
+            <key>AnyAVSounds</key><boolean>true</boolean>\
+            <key>GroupAVSounds</key><boolean>false</boolean>\
+            </map></array>\
+            <key>AgeVerificationBlock</key><array><map>\
+            <key>RegionDenyAgeUnverified</key><boolean>true</boolean>\
+            </map></array>\
+            <key>RegionAllowAccessBlock</key><array><map>\
+            <key>RegionAllowAccessOverride</key><boolean>true</boolean>\
+            </map></array>\
+            <key>ParcelEnvironmentBlock</key><array><map>\
+            <key>ParcelEnvironmentVersion</key><integer>5</integer>\
+            <key>RegionAllowEnvironmentOverride</key><boolean>true</boolean>\
+            </map></array>\
+            </map></llsd>";
+        let body = parse_llsd_xml(xml)?;
+        session.handle_caps_event("ParcelProperties", &body, now)?;
+
+        let events = drain_events(&mut session);
+        let parcel = events
+            .iter()
+            .find_map(|e| match e {
+                Event::ParcelProperties(parcel) => Some(parcel),
+                _ => None,
+            })
+            .ok_or("expected a ParcelProperties event")?;
+        assert_eq!(parcel.sequence_id, 3);
+        assert_eq!(parcel.request_result, ParcelRequestResult::Single);
+        assert_eq!(parcel.local_id, 11);
+        assert_eq!(parcel.name, "Harbor Lot");
+        assert_eq!(parcel.description, "dockside");
+        assert_eq!(parcel.owner_id, uuid::Uuid::from_u128(0x111));
+        assert!(parcel.is_group_owned);
+        assert_eq!(parcel.group_id, uuid::Uuid::from_u128(0x222));
+        // 2023-11-14T22:13:20Z == 1_700_000_000 Unix seconds.
+        assert_eq!(parcel.claim_date, 1_700_000_000);
+        assert_eq!(parcel.sale_price, 4500);
+        assert_eq!(parcel.status, ParcelStatus::LeasePending);
+        assert_eq!(parcel.category, ParcelCategory::Commercial);
+        assert_eq!(parcel.total_prims, 77);
+        assert_eq!(parcel.landing_type, LandingType::LandingPoint);
+        assert!(parcel.region_deny_anonymous);
+        assert!(parcel.region_deny_age_unverified);
+        assert!(parcel.region_allow_access_override);
+        assert_eq!(parcel.parcel_environment_version, 5);
+        assert!(parcel.region_allow_environment_override);
+        assert_eq!(parcel.see_avs, Some(false));
+        assert_eq!(parcel.any_av_sounds, Some(true));
+        assert_eq!(parcel.group_av_sounds, Some(false));
         Ok(())
     }
 

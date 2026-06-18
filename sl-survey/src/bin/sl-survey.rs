@@ -214,6 +214,16 @@ impl Bounds {
 struct ParcelRecord {
     /// The parcel's region-local id.
     local_id: i32,
+    /// The parcel's name.
+    name: String,
+    /// The parcel's description.
+    description: String,
+    /// The parcel owner's id (an agent, or a group when `is_group_owned`).
+    owner_id: String,
+    /// Whether `owner_id` names a group rather than an agent.
+    is_group_owned: bool,
+    /// The parcel's sale price, in L$ (`0` if not for sale).
+    sale_price: i32,
     /// The parcel area in square metres.
     area: i32,
     /// The minimum corner of the parcel bounding box.
@@ -230,6 +240,8 @@ struct ParcelRecord {
     use_access_list: bool,
     /// Anonymous avatars are denied.
     deny_anonymous: bool,
+    /// The total objects/prims currently on the parcel.
+    total_prims: i32,
     /// The parcel's maximum object/prim capacity.
     max_prims: i32,
     /// The region-wide maximum object/prim capacity.
@@ -238,9 +250,14 @@ struct ParcelRecord {
 
 impl ParcelRecord {
     /// Builds a record from a [`ParcelInfo`].
-    const fn from_info(info: &ParcelInfo) -> Self {
+    fn from_info(info: &ParcelInfo) -> Self {
         Self {
             local_id: info.local_id,
+            name: info.name.clone(),
+            description: info.description.clone(),
+            owner_id: info.owner_id.to_string(),
+            is_group_owned: info.is_group_owned,
+            sale_price: info.sale_price,
             area: info.area,
             aabb_min: [info.aabb_min.0, info.aabb_min.1, info.aabb_min.2],
             aabb_max: [info.aabb_max.0, info.aabb_max.1, info.aabb_max.2],
@@ -249,6 +266,7 @@ impl ParcelRecord {
             use_ban_list: info.use_ban_list(),
             use_access_list: info.use_access_list(),
             deny_anonymous: info.deny_anonymous(),
+            total_prims: info.total_prims,
             max_prims: info.max_prims,
             sim_wide_max_prims: info.sim_wide_max_prims,
         }

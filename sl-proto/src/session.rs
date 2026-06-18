@@ -29,7 +29,7 @@ use sl_wire::messages::{
     MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapBlockRequest, MapBlockRequestAgentDataBlock,
     MapBlockRequestPositionDataBlock, MapItemRequest, MapItemRequestAgentDataBlock,
     MapItemRequestRequestDataBlock, MapNameRequest, MapNameRequestAgentDataBlock,
-    MapNameRequestNameDataBlock, PacketAck, PacketAckPacketsBlock, ParcelPropertiesParcelDataBlock,
+    MapNameRequestNameDataBlock, PacketAck, PacketAckPacketsBlock, ParcelProperties,
     ParcelPropertiesRequest, ParcelPropertiesRequestAgentDataBlock,
     ParcelPropertiesRequestParcelDataBlock, RegionHandshakeRegionInfo3Block,
     RegionHandshakeRegionInfoBlock, RegionHandshakeReply, RegionHandshakeReplyAgentDataBlock,
@@ -226,11 +226,12 @@ use crate::types::{
     FriendRights, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupProfile,
     GroupRole, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, GroupTitle, ImDialog,
     ImageCodec, InstantMessage, InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer,
-    LoadUrlRequest, LoginHttpRequest, LoginParams, MapItem, MapItemType, MapRegionInfo, Material,
-    Maturity, MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMotion,
-    ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
+    LandingType, LoadUrlRequest, LoginHttpRequest, LoginParams, MapItem, MapItemType,
+    MapRegionInfo, Material, Maturity, MoneyBalance, MoneyTransaction, MoneyTransactionType,
+    MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, Object, ObjectExtraParams,
+    ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessScope, ParcelCategory, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
     PermissionField, PickInfo, PickUpdate, PlayingAnimation, PrimShape, PrimShapeParams,
     ProductType, ProfileUpdate, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability,
     SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
@@ -4807,9 +4808,7 @@ impl Session {
             }
             AnyMessage::ParcelProperties(props) => {
                 self.events
-                    .push_back(Event::ParcelProperties(Box::new(parcel_info(
-                        &props.parcel_data,
-                    ))));
+                    .push_back(Event::ParcelProperties(Box::new(parcel_info(props))));
             }
             AnyMessage::ParcelOverlay(overlay) => {
                 self.events
@@ -9439,24 +9438,80 @@ const fn economy_data(data: &sl_wire::messages::EconomyData) -> EconomyData {
     }
 }
 
-/// Builds a [`ParcelInfo`] from a `ParcelProperties` parcel-data block.
-fn parcel_info(data: &ParcelPropertiesParcelDataBlock) -> ParcelInfo {
+/// Builds a [`ParcelInfo`] from a `ParcelProperties` message. The `ParcelData`
+/// block carries the bulk of the fields; the three trailing single blocks add
+/// the age-verification, access-override and environment-override settings. The
+/// `SeeAVs`/`AnyAVSounds`/`GroupAVSounds` booleans are only sent over the CAPS
+/// LLSD form, so they are `None` here (see [`parcel_info_from_llsd`]).
+fn parcel_info(msg: &ParcelProperties) -> ParcelInfo {
+    let data = &msg.parcel_data;
     ParcelInfo {
         sequence_id: data.sequence_id,
+        request_result: ParcelRequestResult::from_i32(data.request_result),
+        snap_selection: data.snap_selection,
+        self_count: data.self_count,
+        other_count: data.other_count,
+        public_count: data.public_count,
         local_id: data.local_id,
+        owner_id: data.owner_id,
+        is_group_owned: data.is_group_owned,
+        group_id: data.group_id,
+        auction_id: data.auction_id,
+        claim_date: data.claim_date,
+        claim_price: data.claim_price,
+        rent_price: data.rent_price,
         aabb_min: (data.aabb_min.x, data.aabb_min.y, data.aabb_min.z),
         aabb_max: (data.aabb_max.x, data.aabb_max.y, data.aabb_max.z),
         area: data.area,
         bitmap: data.bitmap.clone(),
+        status: ParcelStatus::from_i32(i32::from(data.status)),
+        category: ParcelCategory::from_u8(data.category),
         max_prims: data.max_prims,
         sim_wide_max_prims: data.sim_wide_max_prims,
         sim_wide_total_prims: data.sim_wide_total_prims,
-        owner_id: data.owner_id,
+        total_prims: data.total_prims,
+        owner_prims: data.owner_prims,
+        group_prims: data.group_prims,
+        other_prims: data.other_prims,
+        selected_prims: data.selected_prims,
+        parcel_prim_bonus: data.parcel_prim_bonus,
+        other_clean_time: data.other_clean_time,
         raw_parcel_flags: data.parcel_flags,
+        sale_price: data.sale_price,
+        name: trimmed_string(&data.name),
+        description: trimmed_string(&data.desc),
         music_url: trimmed_string(&data.music_url),
         media_url: trimmed_string(&data.media_url),
         media_id: data.media_id,
         media_auto_scale: data.media_auto_scale != 0,
+        auth_buyer_id: data.auth_buyer_id,
+        snapshot_id: data.snapshot_id,
+        pass_price: data.pass_price,
+        pass_hours: data.pass_hours,
+        user_location: (
+            data.user_location.x,
+            data.user_location.y,
+            data.user_location.z,
+        ),
+        user_look_at: (
+            data.user_look_at.x,
+            data.user_look_at.y,
+            data.user_look_at.z,
+        ),
+        landing_type: LandingType::from_u8(data.landing_type),
+        region_push_override: data.region_push_override,
+        region_deny_anonymous: data.region_deny_anonymous,
+        region_deny_identified: data.region_deny_identified,
+        region_deny_transacted: data.region_deny_transacted,
+        region_deny_age_unverified: msg.age_verification_block.region_deny_age_unverified,
+        region_allow_access_override: msg.region_allow_access_block.region_allow_access_override,
+        parcel_environment_version: msg.parcel_environment_block.parcel_environment_version,
+        region_allow_environment_override: msg
+            .parcel_environment_block
+            .region_allow_environment_override,
+        see_avs: None,
+        any_av_sounds: None,
+        group_av_sounds: None,
     }
 }
 
@@ -10121,54 +10176,201 @@ fn parcel_info_from_llsd(body: &Llsd) -> Option<ParcelInfo> {
     let data = body
         .get("ParcelData")
         .and_then(|parcel_data| parcel_data.index(0))?;
+    // The three trailing single-blocks are each encoded as a one-element array
+    // holding a map, mirroring the UDP message's `ParcelData` block (read above).
+    let block = |key: &str| body.get(key).and_then(|array| array.index(0));
+    let age_verification = block("AgeVerificationBlock");
+    let region_allow_access = block("RegionAllowAccessBlock");
+    let parcel_environment = block("ParcelEnvironmentBlock");
+    let i32_field = |key: &str| data.get(key).and_then(Llsd::as_i32).unwrap_or(0);
+    let bool_field = |key: &str| data.get(key).and_then(Llsd::as_bool).unwrap_or(false);
+    let str_field = |key: &str| {
+        data.get(key)
+            .and_then(Llsd::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let uuid_field = |key: &str| {
+        data.get(key)
+            .and_then(Llsd::as_uuid)
+            .unwrap_or_else(Uuid::nil)
+    };
     Some(ParcelInfo {
-        sequence_id: data.get("SequenceID").and_then(Llsd::as_i32).unwrap_or(0),
-        local_id: data.get("LocalID").and_then(Llsd::as_i32).unwrap_or(0),
+        sequence_id: i32_field("SequenceID"),
+        request_result: ParcelRequestResult::from_i32(i32_field("RequestResult")),
+        snap_selection: bool_field("SnapSelection"),
+        self_count: i32_field("SelfCount"),
+        other_count: i32_field("OtherCount"),
+        public_count: i32_field("PublicCount"),
+        local_id: i32_field("LocalID"),
+        owner_id: uuid_field("OwnerID"),
+        is_group_owned: bool_field("IsGroupOwned"),
+        group_id: uuid_field("GroupID"),
+        // OpenSim encodes the `uint` AuctionID as a 4-byte binary LLSD element,
+        // so read it tolerantly (binary / integer / string).
+        auction_id: data.get("AuctionID").map_or(0, llsd_u32),
+        // OpenSim sends ClaimDate as an LLSD `date`; the SL/UDP form is an integer
+        // `time_t`. Accept either.
+        claim_date: llsd_unix_time(data.get("ClaimDate")),
+        claim_price: i32_field("ClaimPrice"),
+        rent_price: i32_field("RentPrice"),
         aabb_min: vec3_from_llsd(data.get("AABBMin")),
         aabb_max: vec3_from_llsd(data.get("AABBMax")),
-        area: data.get("Area").and_then(Llsd::as_i32).unwrap_or(0),
+        area: i32_field("Area"),
         bitmap: data
             .get("Bitmap")
             .and_then(Llsd::as_binary)
             .map(<[u8]>::to_vec)
             .unwrap_or_default(),
-        max_prims: data.get("MaxPrims").and_then(Llsd::as_i32).unwrap_or(0),
-        sim_wide_max_prims: data
-            .get("SimWideMaxPrims")
-            .and_then(Llsd::as_i32)
-            .unwrap_or(0),
-        sim_wide_total_prims: data
-            .get("SimWideTotalPrims")
-            .and_then(Llsd::as_i32)
-            .unwrap_or(0),
-        owner_id: data
-            .get("OwnerID")
-            .and_then(Llsd::as_uuid)
-            .unwrap_or_else(Uuid::nil),
+        status: ParcelStatus::from_i32(i32_field("Status")),
+        category: ParcelCategory::from_u8(u8::try_from(i32_field("Category")).unwrap_or(0)),
+        max_prims: i32_field("MaxPrims"),
+        sim_wide_max_prims: i32_field("SimWideMaxPrims"),
+        sim_wide_total_prims: i32_field("SimWideTotalPrims"),
+        total_prims: i32_field("TotalPrims"),
+        owner_prims: i32_field("OwnerPrims"),
+        group_prims: i32_field("GroupPrims"),
+        other_prims: i32_field("OtherPrims"),
+        selected_prims: i32_field("SelectedPrims"),
+        parcel_prim_bonus: data
+            .get("ParcelPrimBonus")
+            .and_then(Llsd::as_f32)
+            .unwrap_or(0.0),
+        other_clean_time: i32_field("OtherCleanTime"),
         // OpenSim encodes the `uint` ParcelFlags as a 4-byte binary LLSD element,
         // so read it tolerantly (binary / integer / string).
         raw_parcel_flags: data.get("ParcelFlags").map_or(0, llsd_u32),
-        music_url: data
-            .get("MusicURL")
-            .and_then(Llsd::as_str)
-            .unwrap_or_default()
-            .to_owned(),
-        media_url: data
-            .get("MediaURL")
-            .and_then(Llsd::as_str)
-            .unwrap_or_default()
-            .to_owned(),
-        media_id: data
-            .get("MediaID")
-            .and_then(Llsd::as_uuid)
-            .unwrap_or_else(Uuid::nil),
+        sale_price: i32_field("SalePrice"),
+        name: str_field("Name"),
+        description: str_field("Desc"),
+        music_url: str_field("MusicURL"),
+        media_url: str_field("MediaURL"),
+        media_id: uuid_field("MediaID"),
         // OpenSim encodes MediaAutoScale as an LLSD boolean; `as_bool` also
         // tolerates the integer form.
-        media_auto_scale: data
-            .get("MediaAutoScale")
+        media_auto_scale: bool_field("MediaAutoScale"),
+        auth_buyer_id: uuid_field("AuthBuyerID"),
+        snapshot_id: uuid_field("SnapshotID"),
+        pass_price: i32_field("PassPrice"),
+        pass_hours: data.get("PassHours").and_then(Llsd::as_f32).unwrap_or(0.0),
+        user_location: vec3_from_llsd(data.get("UserLocation")),
+        user_look_at: vec3_from_llsd(data.get("UserLookAt")),
+        landing_type: LandingType::from_u8(u8::try_from(i32_field("LandingType")).unwrap_or(0)),
+        region_push_override: bool_field("RegionPushOverride"),
+        region_deny_anonymous: bool_field("RegionDenyAnonymous"),
+        region_deny_identified: bool_field("RegionDenyIdentified"),
+        region_deny_transacted: bool_field("RegionDenyTransacted"),
+        region_deny_age_unverified: age_verification
+            .and_then(|map| map.get("RegionDenyAgeUnverified"))
             .and_then(Llsd::as_bool)
             .unwrap_or(false),
+        region_allow_access_override: region_allow_access
+            .and_then(|map| map.get("RegionAllowAccessOverride"))
+            .and_then(Llsd::as_bool)
+            .unwrap_or(false),
+        parcel_environment_version: parcel_environment
+            .and_then(|map| map.get("ParcelEnvironmentVersion"))
+            .and_then(Llsd::as_i32)
+            .unwrap_or(0),
+        region_allow_environment_override: parcel_environment
+            .and_then(|map| map.get("RegionAllowEnvironmentOverride"))
+            .and_then(Llsd::as_bool)
+            .unwrap_or(false),
+        // Sent only over the CAPS LLSD form (the UDP message omits them).
+        see_avs: data.get("SeeAVs").and_then(Llsd::as_bool),
+        any_av_sounds: data.get("AnyAVSounds").and_then(Llsd::as_bool),
+        group_av_sounds: data.get("GroupAVSounds").and_then(Llsd::as_bool),
     })
+}
+
+/// Reads a Unix `time_t` (seconds) from an LLSD value that is either an integer
+/// (a `time_t` directly, as Second Life sends) or an ISO-8601 `date` element
+/// (`YYYY-MM-DDThh:mm:ssZ`, as OpenSim's parcel encoder emits `ClaimDate`).
+/// Returns `0` when absent or unparsable.
+fn llsd_unix_time(value: Option<&Llsd>) -> i32 {
+    let Some(value) = value else { return 0 };
+    if let Some(seconds) = value.as_i32() {
+        return seconds;
+    }
+    value
+        .as_str()
+        .and_then(parse_iso8601_to_unix)
+        .and_then(|seconds| i32::try_from(seconds).ok())
+        .unwrap_or(0)
+}
+
+/// Parses an ISO-8601 UTC timestamp (`YYYY-MM-DDThh:mm:ss[.fff][Z]`, or a bare
+/// `YYYY-MM-DD`) into a Unix timestamp in seconds. Fractional seconds and the
+/// trailing `Z` are ignored and UTC is assumed (the only form the LLSD wire
+/// uses). Returns `None` on a malformed string.
+fn parse_iso8601_to_unix(text: &str) -> Option<i64> {
+    let text = text.trim();
+    let (date_part, time_part) = text.split_once('T').unwrap_or((text, ""));
+
+    let mut date_fields = date_part.split('-');
+    let year: i64 = date_fields.next()?.parse().ok()?;
+    let month: i64 = date_fields.next()?.parse().ok()?;
+    let day: i64 = date_fields.next()?.parse().ok()?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+
+    // Drop the trailing `Z` and any fractional-seconds suffix.
+    let time_part = time_part.trim_end_matches('Z');
+    let time_part = time_part.split('.').next().unwrap_or("");
+    let mut time_fields = time_part.split(':');
+    let parse_unit = |field: Option<&str>| -> Option<i64> {
+        match field {
+            None | Some("") => Some(0),
+            Some(value) => value.parse().ok(),
+        }
+    };
+    let hour = parse_unit(time_fields.next())?;
+    let minute = parse_unit(time_fields.next())?;
+    let second = parse_unit(time_fields.next())?;
+
+    let days = days_from_civil(year, month, day)?;
+    days.checked_mul(86_400)?
+        .checked_add(hour.checked_mul(3_600)?)?
+        .checked_add(minute.checked_mul(60)?)?
+        .checked_add(second)
+}
+
+/// Days since the Unix epoch (1970-01-01) for a proleptic-Gregorian date, via
+/// Howard Hinnant's `days_from_civil` algorithm. Returns `None` only on
+/// arithmetic overflow (impossible for any realistic year).
+fn days_from_civil(year: i64, month: i64, day: i64) -> Option<i64> {
+    let year = if month <= 2 {
+        year.checked_sub(1)?
+    } else {
+        year
+    };
+    let shifted = if year >= 0 {
+        year
+    } else {
+        year.checked_sub(399)?
+    };
+    let era = shifted.checked_div(400)?;
+    let year_of_era = year.checked_sub(era.checked_mul(400)?)?;
+    let month_index = if month > 2 {
+        month.checked_sub(3)?
+    } else {
+        month.checked_add(9)?
+    };
+    let day_of_year = month_index
+        .checked_mul(153)?
+        .checked_add(2)?
+        .checked_div(5)?
+        .checked_add(day)?
+        .checked_sub(1)?;
+    let day_of_era = year_of_era
+        .checked_mul(365)?
+        .checked_add(year_of_era.checked_div(4)?)?
+        .checked_sub(year_of_era.checked_div(100)?)?
+        .checked_add(day_of_year)?;
+    era.checked_mul(146_097)?
+        .checked_add(day_of_era)?
+        .checked_sub(719_468)
 }
 
 /// Reads a three-component vector (`[x, y, z]` reals) from an LLSD array.
