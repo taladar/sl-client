@@ -335,11 +335,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::AvatarAnimation {
                 avatar_id,
                 animations,
+                physical_events,
             } => {
                 info!(
-                    "avatar {avatar_id} playing {} animation(s): {:?}",
+                    "avatar {avatar_id} playing {} animation(s): {:?} ({} physical event block(s))",
                     animations.len(),
                     animations.iter().map(|a| a.anim_id).collect::<Vec<_>>(),
+                    physical_events.len(),
                 );
             }
             Event::SoundTrigger {

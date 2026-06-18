@@ -31,9 +31,9 @@ mod test {
         AgentWearablesUpdateAgentDataBlock, AgentWearablesUpdateWearableDataBlock,
         AssetUploadComplete, AssetUploadCompleteAssetBlockBlock, AttachedSound,
         AttachedSoundDataBlockBlock, AvatarAnimation, AvatarAnimationAnimationListBlock,
-        AvatarAnimationAnimationSourceListBlock, AvatarAnimationSenderBlock, AvatarAppearance,
-        AvatarAppearanceObjectDataBlock, AvatarAppearanceSenderBlock,
-        AvatarAppearanceVisualParamBlock, AvatarClassifiedReply,
+        AvatarAnimationAnimationSourceListBlock, AvatarAnimationPhysicalAvatarEventListBlock,
+        AvatarAnimationSenderBlock, AvatarAppearance, AvatarAppearanceObjectDataBlock,
+        AvatarAppearanceSenderBlock, AvatarAppearanceVisualParamBlock, AvatarClassifiedReply,
         AvatarClassifiedReplyAgentDataBlock, AvatarClassifiedReplyDataBlock, AvatarNotesReply,
         AvatarNotesReplyAgentDataBlock, AvatarNotesReplyDataBlock, AvatarPicksReply,
         AvatarPicksReplyAgentDataBlock, AvatarPicksReplyDataBlock, AvatarPropertiesReply,
@@ -3309,22 +3309,29 @@ mod test {
                     object_id: trigger_object,
                 },
             ],
-            physical_avatar_event_list: Vec::new(),
+            // A single opaque PhysicalAvatarEventList block: the simulator
+            // assigns no documented structure to TypeData, so we surface the
+            // raw bytes verbatim.
+            physical_avatar_event_list: vec![AvatarAnimationPhysicalAvatarEventListBlock {
+                type_data: vec![0xDE, 0xAD, 0xBE, 0xEF],
+            }],
         });
         session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
 
-        let (avatar_id, animations) = drain_events(&mut session)
+        let (avatar_id, animations, physical_events) = drain_events(&mut session)
             .into_iter()
             .find_map(|event| match event {
                 Event::AvatarAnimation {
                     avatar_id,
                     animations,
-                } => Some((avatar_id, animations)),
+                    physical_events,
+                } => Some((avatar_id, animations, physical_events)),
                 _ => None,
             })
             .ok_or("expected an AvatarAnimation event")?;
         assert_eq!(avatar_id, avatar);
         assert_eq!(animations.len(), 2);
+        assert_eq!(physical_events, vec![vec![0xDE, 0xAD, 0xBE, 0xEF]]);
         let first = animations.first().ok_or("first animation")?;
         assert_eq!(first.anim_id, walk);
         assert_eq!(first.sequence_id, 1);

@@ -1372,8 +1372,8 @@ rendering / voice-transport family). With this reclassified, **the roadmap's
 client protocol *feature* surface is complete: #1–#33 are done.** The only
 remaining open work is the **Tier E decode-fidelity fixes (#35–#51)** — not new
 features, but information-loss gaps where an already-shipped item decodes a wire
-field and then drops it before the caller sees it. (#35, the `ParcelProperties`
-full field surface, is now done; #36–#51 remain.)
+field and then drops it before the caller sees it. (#35–#40 are now
+done; #41–#51 remain.)
 
 ## Tier E — decode-fidelity & information-loss fixes (#35–#51)
 
@@ -1392,7 +1392,7 @@ blob items, writing a structured decoder). "Test" notes whether the local
 | 37 ✅ | `TextureAnim` & particle-system decoders | 3 | Structured prim texture-animation and particle (`llParticleSystem`) params | Local OpenSim |
 | 38 | `AvatarSitResponse` complete `SitTransform` | 1 | Sit rotation, sit-camera eye/at offsets, force-mouselook | Local OpenSim |
 | 39 ✅ | `RegionInfo`/`RegionHandshake` extended fields | 3 | Region owner, estate-manager flag, water height, terrain limits, 64-bit flags, chat/combat blocks | Local OpenSim |
-| 40 | `AvatarAnimation` physical-event list | 1 | `PhysicalAvatarEventList` (physics/ragdoll) block | Local OpenSim |
+| 40 ✅ | `AvatarAnimation` physical-event list | 1 | `PhysicalAvatarEventList` (physics/ragdoll) block | Local OpenSim |
 | 41 | Asset-transfer success event + size | 2 | A success event for `TransferInfo` carrying declared `Size` | Local OpenSim |
 | 42 | Group-reply pagination totals | 1 | `RoleCount` / `TotalPairs` so a client knows a set is complete | Local OpenSim (Groups V2) |
 | 43 | `MoneyBalanceReply` transaction id | 1 | `TransactionID` to correlate a balance reply to its pay/buy | Money module or SL |
@@ -1562,11 +1562,25 @@ local OpenSim via `survey_probe`: the handshake decoded `sim_owner`,
 `RegionInfo3`/`5`/`CombatSettings`, so those fall back / are `None` as designed.
 Test: local OpenSim.*
 
-**40. `AvatarAnimation` physical-event list (extends #21, Tier C).**
-`avatar_animations` (`session.rs` ~9389) reads `animation_list` and
-`animation_source_list` but never the `PhysicalAvatarEventList` block (physics /
-ragdoll events the reference viewer processes), which is decoded into the struct
-and dropped. Surface it on `Event::AvatarAnimation`. *Test: local OpenSim.*
+**40. `AvatarAnimation` physical-event list (extends #21, Tier C). ✅ Done.**
+The `AvatarAnimation` handler (`session.rs`) read `animation_list` and
+`animation_source_list` but never the `PhysicalAvatarEventList` block, which the
+codec decodes into the struct and the handler then dropped. Surfaced it as a new
+**`physical_events: Vec<Vec<u8>>`** field on `Event::AvatarAnimation` — one
+opaque `TypeData` byte blob per block, **verbatim, not decoded**: neither the
+reference viewer's `process_avatar_animation` (which reads only the two
+animation lists and ignores this block) nor OpenSim (which never populates it)
+assigns the payload any documented structure, so a faithful surface is the raw
+bytes (almost always empty). Re-exported through both runtimes via the shared
+`Event` type; the `tokio_login_hold_logout` example now logs the block count.
+Covered by the extended `avatar_animation_surfaces_playing_animations`
+`sl-proto` lifecycle test (a populated single block round-trips to
+`physical_events == [[0xDE, 0xAD, 0xBE, 0xEF]]`). *Live-verified against the
+local OpenSim via `tokio_login_hold_logout`: a `PlayAnimation` round-trip echoed
+`Event::AvatarAnimation` with 2 animations and `0 physical event block(s)` —
+OpenSim sends an empty `PhysicalAvatarEventList`, so the field is empty as
+designed, confirming the path decodes end-to-end with no protocol error. Test:
+local OpenSim.*
 
 **41. Asset-transfer success event + declared size (extends #19, Tier C).** The
 `TransferInfo` handler (`session.rs` ~5311) emits an event only on the *failure*
