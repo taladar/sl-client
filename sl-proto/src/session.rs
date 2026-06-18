@@ -4600,7 +4600,8 @@ impl Session {
                         continue;
                     };
                     let local_id = terse.local_id;
-                    if !self.apply_terse_update(from, terse) {
+                    let texture_entry = terse_texture_entry(&block.texture_entry);
+                    if !self.apply_terse_update(from, terse, texture_entry) {
                         misses.push(local_id);
                     }
                 }
@@ -4704,10 +4705,18 @@ impl Session {
         }
     }
 
-    /// Applies a motion-only terse update to an object already cached for
-    /// simulator `from`, emitting [`Event::ObjectUpdated`]. Returns `false` if the
-    /// object is not cached (the caller should fetch its full update).
-    fn apply_terse_update(&mut self, from: SocketAddr, update: TerseUpdate) -> bool {
+    /// Applies a terse update to an object already cached for simulator `from`,
+    /// emitting [`Event::ObjectUpdated`]. Carries the object's new motion and
+    /// state, plus the trailing raw `TextureEntry` blob when the simulator flagged
+    /// the update with a texture/colour change (`texture_entry`, otherwise `None`,
+    /// which leaves the cached entry untouched). Returns `false` if the object is
+    /// not cached (the caller should fetch its full update).
+    fn apply_terse_update(
+        &mut self,
+        from: SocketAddr,
+        update: TerseUpdate,
+        texture_entry: Option<Vec<u8>>,
+    ) -> bool {
         let Some(object) = self
             .objects
             .get_mut(&from)
@@ -4717,6 +4726,9 @@ impl Session {
         };
         object.state = update.state;
         object.motion = update.motion;
+        if let Some(texture_entry) = texture_entry {
+            object.texture_entry = texture_entry;
+        }
         let snapshot = object.clone();
         self.events
             .push_back(Event::ObjectUpdated(Box::new(snapshot)));
@@ -11138,6 +11150,25 @@ fn terse_update(blob: &[u8]) -> Option<TerseUpdate> {
             angular_velocity,
         },
     })
+}
+
+/// Extracts the raw `TextureEntry` blob from the trailing `TextureEntry` field
+/// of an `ImprovedTerseObjectUpdate` block, or `None` when the simulator sent no
+/// texture change (the common case — the field is empty unless the update is
+/// flagged `Textures`).
+///
+/// Unlike a full `ObjectUpdate`, whose `TextureEntry` field is the bare blob, the
+/// terse field is wrapped: a 2-byte inner length, two zero bytes, then the
+/// `TextureEntry` (OpenSim `CreateImprovedTerseBlock`; the codec has already
+/// stripped the outer 2-byte field length). Skip the four-byte wrapper to recover
+/// the blob, which decodes with
+/// [`decode_texture_entry`](crate::decode_texture_entry).
+fn terse_texture_entry(field: &[u8]) -> Option<Vec<u8>> {
+    let blob = field.get(4..)?;
+    if blob.is_empty() {
+        return None;
+    }
+    Some(blob.to_vec())
 }
 
 /// Reads a NUL-terminated UTF-8 string from `reader` (consuming the terminator).

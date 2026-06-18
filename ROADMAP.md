@@ -1372,8 +1372,8 @@ rendering / voice-transport family). With this reclassified, **the roadmap's
 client protocol *feature* surface is complete: #1–#33 are done.** The only
 remaining open work is the **Tier E decode-fidelity fixes (#35–#51)** — not new
 features, but information-loss gaps where an already-shipped item decodes a wire
-field and then drops it before the caller sees it. (#35–#45 are now
-done; #46–#51 remain.)
+field and then drops it before the caller sees it. (#35–#46 are now
+done; #47–#51 remain.)
 
 ## Tier E — decode-fidelity & information-loss fixes (#35–#51)
 
@@ -1398,7 +1398,7 @@ blob items, writing a structured decoder). "Test" notes whether the local
 | 43 ✅ | `MoneyBalanceReply` transaction id | 1 | `TransactionID` to correlate a balance reply to its pay/buy | Money module or SL |
 | 44 ✅ | Inventory push fidelity | 2 | All `UpdateCreateInventoryItem` entries; per-item bulk `CallbackID` | Local OpenSim |
 | 45 ✅ | `ChatterBoxInvitation` session type & bucket | 2 | `type` + `binary_bucket` (group/session name, session kind) | SL grid |
-| 46 | Terse-update trailing `TextureEntry` | 2 | Texture/colour change delivered via a terse update | SL grid |
+| 46 ✅ | Terse-update trailing `TextureEntry` | 2 | Texture/colour change delivered via a terse update | SL grid |
 | 47 | `ParcelAccessListReply` per-entry flags | 1 | The per-entry access-vs-ban `Flags` | Local OpenSim |
 | 48 | Login-response extra fields | 2 | `home`, `look_at`, `agent_access[_max]`, `max-agent-groups`, Library inventory roots | Local OpenSim |
 | 49 | `TeleportFinish` (CAPS) maturity & flags | 1 | Destination `SimAccess` (maturity), `TeleportFlags` (cause) | SL grid |
@@ -1714,15 +1714,34 @@ IM uses the UDP `ImprovedInstantMessage` path #7 already covers), so the CAPS
 delivery is exercised by the deterministic lifecycle test rather than the local
 grid. Test: SL grid.*
 
-**46. Terse-update trailing `TextureEntry` (extends #16/#33, Tier C).**
-`terse_update` (`session.rs` ~10776) stops after `angular_velocity` and never
-consumes the optional trailing `TextureEntry` the simulator appends when the
-update is flagged `Textures` (OpenSim `CreateImprovedTerseBlock`: 2-byte total
-len, 2-byte inner len, 2 zero bytes, then the `TextureEntry`). A texture/colour
-change delivered via a terse update is silently dropped, leaving a stale cached
-`texture_entry`. Decode the trailing block and plumb it through
-`apply_terse_update` (`session.rs` ~4706, which currently copies only `state`
-and `motion`). *Test: SL grid (the texture-flagged terse path).*
+**46. Terse-update trailing `TextureEntry` (extends #16/#33, Tier C). ✅ Done.**
+`terse_update` (`session.rs`) decoded only the motion blob, and the
+`ImprovedTerseObjectUpdate` handler ignored the block's separate `TextureEntry`
+field — so a texture/colour change the simulator delivers via a terse update
+(when it flags the update `Textures`) was silently dropped, leaving a stale
+cached `texture_entry`. Fixed: the handler now extracts that field via a new
+`terse_texture_entry` helper and `apply_terse_update` writes it onto the cached
+[`Object::texture_entry`] (the raw blob, decodable with
+[`decode_texture_entry`], consistent with how the full `ObjectUpdate` surfaces
+its own texture entry), emitting the usual [`Event::ObjectUpdated`]; a terse
+update with no texture change passes `None` and leaves the cached entry
+untouched. The key wire detail (cross-checked against OpenSim's
+`CreateImprovedTerseBlock` vs. the full-update `CreatePrimUpdateBlock`):
+unlike a full update — whose `TextureEntry` field is the bare blob — the
+**terse** field is wrapped as a 2-byte inner length, two zero bytes, then the
+`TextureEntry` (the outer 2-byte field length the codec already strips), so the
+helper skips the four-byte wrapper to recover the blob. No new command/event
+variant and no runtime wiring: `Object` already flows through both runtimes
+via `Event::ObjectUpdated`. Covered by a new `sl-proto`
+`terse_update_applies_trailing_texture_entry` lifecycle test (a full update
+establishes an object with an empty texture entry, then a wrapped terse
+`TextureEntry` field round-trips the unwrapped blob into both the event and the
+cache). *Unit-/lifecycle-tested only: the reference viewer itself ignores the
+terse `TextureEntry` (it reads it only on full updates), and triggering a
+texture-flagged terse update needs an in-world scripted object changing a face
+rapidly — the same OAR-only constraint as #37 — so the decode is exercised by
+the deterministic lifecycle test rather than the local grid. Test: SL grid (the
+texture-flagged terse path).*
 
 **47. `ParcelAccessListReply` per-entry flags (extends #13, Tier B).** Each
 `List` entry (`session.rs` ~4858) has `ID`, `Time`, **and `Flags`**, but only id

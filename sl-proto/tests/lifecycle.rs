@@ -6684,6 +6684,74 @@ mod test {
     }
 
     #[test]
+    fn terse_update_applies_trailing_texture_entry() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Establish the object via a full update (no texture entry).
+        let update = object_update(210, 0x1234, zero_vec());
+        session.handle_datagram(sim_addr(), &server_message(&update, 5, true)?, now)?;
+        drain_events(&mut session);
+        assert!(
+            session
+                .object(210)
+                .is_some_and(|o| o.texture_entry.is_empty())
+        );
+
+        // A terse update flagged `Textures`: motion blob plus the trailing
+        // `TextureEntry` field, which the simulator wraps as inner-length + two
+        // zero bytes + the blob (the codec strips the outer field length).
+        let mut writer = Writer::new();
+        writer.put_u32(210);
+        writer.put_u8(0);
+        writer.put_u8(0);
+        writer.put_vector3(&zero_vec());
+        for _ in 0..(3 + 3 + 4 + 3) {
+            writer.put_u16(0x8000);
+        }
+
+        // The bare TextureEntry blob: one nil default texture for all faces.
+        let mut te = Writer::new();
+        te.put_uuid(uuid::Uuid::nil());
+        te.put_u8(0); // terminator for the texture field
+        let te_blob = te.into_bytes();
+
+        // Wrap it as the terse field: 2-byte inner length, two zero bytes, blob.
+        let mut field = Writer::new();
+        let inner_len = u16::try_from(te_blob.len())?;
+        field.put_u16(inner_len);
+        field.put_u8(0);
+        field.put_u8(0);
+        field.bytes(&te_blob);
+
+        let terse = AnyMessage::ImprovedTerseObjectUpdate(ImprovedTerseObjectUpdate {
+            region_data: ImprovedTerseObjectUpdateRegionDataBlock {
+                region_handle: OBJ_REGION,
+                time_dilation: 0xFFFF,
+            },
+            object_data: vec![ImprovedTerseObjectUpdateObjectDataBlock {
+                data: writer.into_bytes(),
+                texture_entry: field.into_bytes(),
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&terse, 6, true)?, now)?;
+        let events = drain_events(&mut session);
+        let Some(Event::ObjectUpdated(object)) =
+            events.iter().find(|e| matches!(e, Event::ObjectUpdated(_)))
+        else {
+            return Err(format!("expected ObjectUpdated, got {events:?}").into());
+        };
+        // The unwrapped TextureEntry blob reached the object (event and cache).
+        assert_eq!(object.texture_entry, te_blob);
+        assert_eq!(
+            session.object(210).map(|o| o.texture_entry.clone()),
+            Some(te_blob)
+        );
+        Ok(())
+    }
+
+    #[test]
     fn terse_update_for_unknown_requests_full() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
