@@ -1013,6 +1013,24 @@ pub enum Event {
     /// ([`Session::request_asset`](crate::Session::request_asset)) or the HTTP
     /// `GetAsset`/`GetMesh` capability.
     AssetReceived(Box<Asset>),
+    /// A generic asset [transfer](crate::Session::request_asset) has begun: the
+    /// simulator answered the `TransferRequest` with a success `TransferInfo`,
+    /// so the asset exists and its bytes will follow as `TransferPacket`s
+    /// (surfaced together as a single [`AssetReceived`](Event::AssetReceived)).
+    /// Carries the declared total asset [`size`](Event::AssetTransferStarted::size)
+    /// in bytes — useful for a progress indicator or buffer preallocation before
+    /// the packets arrive. A *non*-success `TransferInfo` instead surfaces
+    /// [`AssetTransferFailed`](Event::AssetTransferFailed) and no data follows.
+    AssetTransferStarted {
+        /// The asset UUID that is being transferred.
+        asset_id: Uuid,
+        /// The asset class being transferred.
+        asset_type: AssetType,
+        /// The declared total size of the asset in bytes (the `TransferInfo`
+        /// `Size` field). The simulator can send `0` when it does not know the
+        /// size up front.
+        size: i32,
+    },
     /// A generic asset [transfer](crate::Session::request_asset) failed: the
     /// simulator reported a non-success [`TransferStatus`] (e.g. the asset is
     /// missing or permission was denied), or the HTTP fetch failed.

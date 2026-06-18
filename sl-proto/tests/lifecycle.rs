@@ -2879,7 +2879,20 @@ mod test {
             },
         });
         session.handle_datagram(sim_addr(), &server_message(&info, 9, true)?, now)?;
-        assert!(drain_events(&mut session).is_empty());
+        // A success TransferInfo surfaces a transfer-started event carrying the
+        // declared total size; the asset bytes still follow as TransferPackets.
+        let started = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AssetTransferStarted {
+                    asset_id,
+                    asset_type,
+                    size,
+                } => Some((asset_id, asset_type, size)),
+                _ => None,
+            })
+            .ok_or("expected an AssetTransferStarted event")?;
+        assert_eq!(started, (sound, AssetType::Sound, 6));
 
         let packet0 = AnyMessage::TransferPacket(TransferPacket {
             transfer_data: TransferPacketTransferDataBlock {
