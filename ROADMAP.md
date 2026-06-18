@@ -1372,8 +1372,8 @@ rendering / voice-transport family). With this reclassified, **the roadmap's
 client protocol *feature* surface is complete: #1–#33 are done.** The only
 remaining open work is the **Tier E decode-fidelity fixes (#35–#51)** — not new
 features, but information-loss gaps where an already-shipped item decodes a wire
-field and then drops it before the caller sees it. (#35–#44 are now
-done; #45–#51 remain.)
+field and then drops it before the caller sees it. (#35–#45 are now
+done; #46–#51 remain.)
 
 ## Tier E — decode-fidelity & information-loss fixes (#35–#51)
 
@@ -1397,7 +1397,7 @@ blob items, writing a structured decoder). "Test" notes whether the local
 | 42 ✅ | Group-reply pagination totals | 1 | `RoleCount` / `TotalPairs` so a client knows a set is complete | Local OpenSim (Groups V2) |
 | 43 ✅ | `MoneyBalanceReply` transaction id | 1 | `TransactionID` to correlate a balance reply to its pay/buy | Money module or SL |
 | 44 ✅ | Inventory push fidelity | 2 | All `UpdateCreateInventoryItem` entries; per-item bulk `CallbackID` | Local OpenSim |
-| 45 | `ChatterBoxInvitation` session type & bucket | 2 | `type` + `binary_bucket` (group/session name, session kind) | SL grid |
+| 45 ✅ | `ChatterBoxInvitation` session type & bucket | 2 | `type` + `binary_bucket` (group/session name, session kind) | SL grid |
 | 46 | Terse-update trailing `TextureEntry` | 2 | Texture/colour change delivered via a terse update | SL grid |
 | 47 | `ParcelAccessListReply` per-entry flags | 1 | The per-entry access-vs-ban `Flags` | Local OpenSim |
 | 48 | Login-response extra fields | 2 | `home`, `look_at`, `agent_access[_max]`, `max-agent-groups`, Library inventory roots | Local OpenSim |
@@ -1680,14 +1680,39 @@ protocol error and both the original create and the copy surfaced as
 the bulk-callback path is exercised by the deterministic lifecycle test rather
 than this grid). Test: local OpenSim.*
 
-**45. `ChatterBoxInvitation` session type & bucket (extends #28, Tier A).**
-`chatterbox_invitation_from_llsd` (`session.rs` ~10319) reads only
+**45. `ChatterBoxInvitation` session type & bucket (extends #28, Tier A). ✅
+Done.** `chatterbox_invitation_from_llsd` (`session.rs`) read only
 `id`/`from_id`/`from_name`/`message` from `message_params`, dropping `type` (the
 session kind — group vs. ad-hoc conference vs. P2P) and `binary_bucket` (which
 for a group IM carries the group/session name used to label the session), plus
-`from_group`/`region_id`/`position`/`timestamp`. Surface enough to classify and
-name the session. *Test: SL grid (stock OpenSim emits no CAPS
-`ChatterBoxInvitation`).*
+`from_group`/`region_id`/`position`/`timestamp` — so a client could surface that
+*an* invitation arrived but not classify or name the session it was being asked
+to join. Added the full surface to `Event::ConferenceInvited`: **`dialog`** (a
+typed `ImDialog` from the `type` byte — `SessionGroupStart` vs.
+`SessionConferenceStart` vs. a plain add), **`from_group`** (group IM vs. ad-hoc
+conference; for a group IM the `session_id` is the group id), **`session_name`**
+(the human-readable label, taken from the event body's top-level `session_name`
+that OpenSim supplies), **`binary_bucket`** (the dialog-dependent payload — for
+a group IM the group/session name — read from the
+`message_params.data.binary_bucket` nesting both OpenSim and the reference
+viewer use, with a fallback to a flat `binary_bucket`), and the source
+`region_id`/`position`/`parent_estate_id`/`timestamp`. The cross-checks:
+OpenSim's `EventQueueGetHandlers.InstantMessageBody`
+(field names, the `data.binary_bucket` nesting, `type`/`from_group`) and the
+viewer's `LLViewerChatterBoxInvitation::post` (which reads the same
+`message_params["data"]["binary_bucket"]`, `region_id`, `position`,
+`parent_estate_id`, `timestamp`). A new `llsd_position` helper reads the
+`[x, y, z]` real array. The event flows unchanged through both runtimes (every
+consumer binds it with `{ .. }`; the `tokio_login_hold_logout` example now logs
+the session name, dialog, and `from_group`). Covered by the extended
+`chatterbox_invitation_surfaces_conference_invited` `sl-proto` lifecycle test (a
+group-start invite with the `data`-nested bucket → `dialog=SessionGroupStart`,
+`from_group=true`, `session_name="My Group"`, the decoded bucket, region id,
+`position=(1.5, 2.5, 3.5)`, estate id, and timestamp all round-trip).
+*Unit-tested only: stock OpenSim emits no CAPS `ChatterBoxInvitation` (its group
+IM uses the UDP `ImprovedInstantMessage` path #7 already covers), so the CAPS
+delivery is exercised by the deterministic lifecycle test rather than the local
+grid. Test: SL grid.*
 
 **46. Terse-update trailing `TextureEntry` (extends #16/#33, Tier C).**
 `terse_update` (`session.rs` ~10776) stops after `angular_velocity` and never

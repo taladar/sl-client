@@ -8184,12 +8184,25 @@ mod test {
 
         let session_id = uuid::Uuid::from_u128(0x5E51);
         let from = uuid::Uuid::from_u128(0x55);
+        let region = uuid::Uuid::from_u128(0x4E61);
+        // The `binary_bucket` is nested under `message_params.data`, and the
+        // `type` is the group-start dialog (15) — exactly OpenSim's encoding.
         let xml = format!(
-            "<llsd><map><key>instantmessage</key><map>\
+            "<llsd><map>\
+               <key>session_name</key><string>My Group</string>\
+               <key>instantmessage</key><map>\
                <key>message_params</key><map>\
                  <key>id</key><uuid>{session_id}</uuid>\
                  <key>from_id</key><uuid>{from}</uuid>\
                  <key>from_name</key><string>Inviter</string>\
+                 <key>type</key><integer>15</integer>\
+                 <key>from_group</key><boolean>1</boolean>\
+                 <key>region_id</key><uuid>{region}</uuid>\
+                 <key>position</key><array><real>1.5</real><real>2.5</real><real>3.5</real></array>\
+                 <key>parent_estate_id</key><integer>101</integer>\
+                 <key>timestamp</key><integer>1700000000</integer>\
+                 <key>data</key><map><key>binary_bucket</key>\
+                   <binary>TXkgR3JvdXA=</binary></map>\
                  <key>message</key><string>join us</string>\
                </map></map></map></llsd>"
         );
@@ -8203,7 +8216,15 @@ mod test {
             session_id: got,
             from_agent_id,
             from_name,
+            dialog,
+            from_group,
+            session_name,
             message,
+            region_id,
+            position,
+            parent_estate_id,
+            timestamp,
+            binary_bucket,
         } = event
         else {
             return Err("expected ConferenceInvited".into());
@@ -8211,7 +8232,16 @@ mod test {
         assert_eq!(got, session_id);
         assert_eq!(from_agent_id, from);
         assert_eq!(from_name, "Inviter");
+        assert_eq!(dialog, ImDialog::SessionGroupStart);
+        assert!(from_group);
+        assert_eq!(session_name, "My Group");
         assert_eq!(message, "join us");
+        assert_eq!(region_id, region);
+        assert_eq!(position, (1.5, 2.5, 3.5));
+        assert_eq!(parent_estate_id, 101);
+        assert_eq!(timestamp, 1_700_000_000);
+        // "My Group" base64-decoded — the group/session label.
+        assert_eq!(binary_bucket, b"My Group");
         Ok(())
     }
 

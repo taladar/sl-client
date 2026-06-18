@@ -10603,17 +10603,57 @@ fn offline_message_position(record: &Llsd) -> (f32, f32, f32) {
     )
 }
 
-/// Decodes a `ChatterBoxInvitation` CAPS event body (#28) into an
+/// Decodes a `ChatterBoxInvitation` CAPS event body (#28, #45) into an
 /// [`Event::ConferenceInvited`], reading the nested
 /// `instantmessage.message_params`. Returns `None` if the structure is absent.
+///
+/// Beyond the session id, inviter and message, this surfaces the session
+/// classification and labelling fields the simulator carries but the viewer's
+/// `LLViewerChatterBoxInvitation` reads: the `type` dialog byte (group vs.
+/// ad-hoc conference vs. P2P), `from_group`, the region/position/estate/
+/// timestamp source fields, and the `binary_bucket` (nested under
+/// `message_params.data`, as both OpenSim and the reference viewer encode it).
 fn chatterbox_invitation_from_llsd(body: &Llsd) -> Option<Event> {
     let params = body.get("instantmessage")?.get("message_params")?;
+    // OpenSim/SL nest the bucket under `data`; tolerate a flat `binary_bucket`.
+    let binary_bucket = params
+        .get("data")
+        .and_then(|data| data.get("binary_bucket"))
+        .or_else(|| params.get("binary_bucket"))
+        .and_then(Llsd::as_binary)
+        .map_or_else(Vec::new, <[u8]>::to_vec);
     Some(Event::ConferenceInvited {
         session_id: uuid_member_lenient(params, "id"),
         from_agent_id: uuid_member_lenient(params, "from_id"),
         from_name: string_member(params, "from_name"),
+        dialog: ImDialog::from_u8(u8::try_from(i32_member(params, "type")).unwrap_or(0)),
+        from_group: params
+            .get("from_group")
+            .and_then(Llsd::as_bool)
+            .unwrap_or(false),
+        session_name: string_member(body, "session_name"),
         message: string_member(params, "message"),
+        region_id: uuid_member_lenient(params, "region_id"),
+        position: llsd_position(params),
+        parent_estate_id: u32_member(params, "parent_estate_id"),
+        timestamp: u32_member(params, "timestamp"),
+        binary_bucket,
     })
+}
+
+/// Reads a region-local position from an LLSD map's `position` member, encoded
+/// as a `[x, y, z]` real array (how the simulator encodes an LLSD `Vector3`).
+/// Defaults each missing component to `0.0`.
+fn llsd_position(map: &Llsd) -> (f32, f32, f32) {
+    map.get("position")
+        .and_then(Llsd::as_array)
+        .map_or((0.0, 0.0, 0.0), |array| {
+            (
+                array.first().and_then(Llsd::as_f32).unwrap_or(0.0),
+                array.get(1).and_then(Llsd::as_f32).unwrap_or(0.0),
+                array.get(2).and_then(Llsd::as_f32).unwrap_or(0.0),
+            )
+        })
 }
 
 /// Reads a `u64` from an LLSD value that may be an 8-byte big-endian binary

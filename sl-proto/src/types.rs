@@ -760,8 +760,35 @@ pub enum Event {
         from_agent_id: Uuid,
         /// The inviting agent's display name.
         from_name: String,
+        /// The session kind multiplexed over the invitation (from the
+        /// `message_params.type` dialog byte): a group chat
+        /// ([`ImDialog::SessionGroupStart`]), an ad-hoc conference
+        /// ([`ImDialog::SessionConferenceStart`]), or a plain session add — so a
+        /// client can tell a group IM from an ad-hoc conference before joining.
+        dialog: ImDialog,
+        /// Whether the invitation comes from a group (a group IM) rather than an
+        /// ad-hoc conference of individual agents. For a group IM the
+        /// [`session_id`](Self::ConferenceInvited::session_id) is the group id.
+        from_group: bool,
+        /// The session's human-readable name (the group or conference name),
+        /// supplied directly in the event body; for a group IM the same label is
+        /// also carried inside
+        /// [`binary_bucket`](Self::ConferenceInvited::binary_bucket).
+        session_name: String,
         /// The accompanying message text.
         message: String,
+        /// The source region's id (nil if not provided — OpenSim sends nil).
+        region_id: Uuid,
+        /// The inviting agent's region-local position, in metres.
+        position: (f32, f32, f32),
+        /// The parent estate id of the source.
+        parent_estate_id: u32,
+        /// The inviting agent's timestamp (`0` when unset).
+        timestamp: u32,
+        /// The dialog-dependent binary payload. For a group IM this carries the
+        /// group/session name used to label the session; empty for an ordinary
+        /// conference invite.
+        binary_bucket: Vec<u8>,
     },
     /// The result of a [`Session::create_group`](crate::Session::create_group)
     /// (`CreateGroupReply`).
