@@ -11051,8 +11051,10 @@ fn object_from_full_update(block: &ObjectUpdateObjectDataBlock, region_handle: u
         media_url: trimmed_string(&block.media_url),
         texture_entry: block.texture_entry.clone(),
         texture_anim: block.texture_anim.clone(),
+        texture_animation: crate::particles::decode_texture_anim(&block.texture_anim),
         shape: shape_from_full_block(block),
         particle_system: block.ps_block.clone(),
+        particles: crate::particles::decode_particle_system(&block.ps_block),
         data: block.data.clone(),
         extra: crate::extra_params::decode_extra_params(&block.extra_params),
         extra_params: block.extra_params.clone(),
@@ -11223,8 +11225,10 @@ fn compressed_object(blob: &[u8], region_handle: u64, update_flags: u32) -> Opti
         media_url,
         texture_entry: Vec::new(),
         texture_anim: Vec::new(),
+        texture_animation: None,
         shape: PrimShapeParams::default(),
         particle_system: Vec::new(),
+        particles: None,
         data,
         extra: ObjectExtraParams::default(),
         extra_params: Vec::new(),
@@ -11249,6 +11253,7 @@ fn compressed_object_trailing(
     // Legacy particle system: a fixed-size block with no length prefix.
     if cflags & COMPRESSED_HAS_PARTICLES_LEGACY != 0 {
         object.particle_system = reader.take(COMPRESSED_LEGACY_PARTICLE_SIZE).ok()?.to_vec();
+        object.particles = crate::particles::decode_particle_system(&object.particle_system);
     }
     // ExtraParams container (always present, if only as a zero count byte).
     let extra_len = crate::extra_params::extra_params_len(reader.peek_rest());
@@ -11275,11 +11280,13 @@ fn compressed_object_trailing(
     if cflags & COMPRESSED_TEXTURE_ANIM != 0 {
         let anim_len = usize::try_from(reader.u32().ok()?).ok()?;
         object.texture_anim = reader.take(anim_len).ok()?.to_vec();
+        object.texture_animation = crate::particles::decode_texture_anim(&object.texture_anim);
     }
     // The "new" (> 86-byte) particle system, when present, is the final field —
     // it carries its own internal size, so the rest of the blob is its payload.
     if cflags & COMPRESSED_HAS_PARTICLES_NEW != 0 {
         object.particle_system = reader.take_rest().to_vec();
+        object.particles = crate::particles::decode_particle_system(&object.particle_system);
     }
     Some(())
 }

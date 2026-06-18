@@ -6256,6 +6256,99 @@ mod test {
     }
 
     #[test]
+    fn object_update_decodes_texture_anim_and_particles() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A 16-byte TextureAnim block: ON | ROTATE on all faces, 2×3 grid.
+        let mut anim = Writer::new();
+        anim.put_u8(0x01 | 0x20); // ON | ROTATE
+        anim.put_i8(-1); // all faces
+        anim.put_u8(2);
+        anim.put_u8(3);
+        anim.put_f32(0.0); // start
+        anim.put_f32(5.0); // length
+        anim.put_f32(4.0); // rate
+
+        // An 86-byte legacy particle system (68-byte source + 18-byte particle).
+        let part_image = uuid::Uuid::from_u128(0x9A1D);
+        let target = uuid::Uuid::from_u128(0x7A26);
+        let mut ps = Writer::new();
+        ps.put_u32(0x00CA_FE00); // crc (non-zero)
+        ps.put_u32(0x02); // flags: USE_NEW_ANGLE
+        ps.put_u8(0x02); // pattern EXPLODE
+        ps.put_u16(256); // max_age 1.0
+        ps.put_u16(0); // start_age 0.0
+        ps.put_u8(0); // inner_angle 0.0
+        ps.put_u8(32); // outer_angle 1.0
+        ps.put_u16(256); // burst_rate 1.0
+        ps.put_u16(0); // burst_radius 0.0
+        ps.put_u16(256); // burst_speed_min 1.0
+        ps.put_u16(512); // burst_speed_max 2.0
+        ps.put_u8(20); // burst_part_count
+        for _ in 0..6 {
+            ps.put_u16(0x8000); // angvel + accel = 0.0
+        }
+        ps.put_uuid(part_image);
+        ps.put_uuid(target);
+        // Legacy particle block.
+        ps.put_u32(0x40); // part flags: TARGET_POS
+        ps.put_u16(2560); // part_max_age 10.0
+        ps.bytes(&[255, 255, 255, 255]); // start color
+        ps.bytes(&[0, 0, 0, 0]); // end color
+        ps.put_u8(32); // start scale x 1.0
+        ps.put_u8(32); // start scale y 1.0
+        ps.put_u8(0); // end scale x 0.0
+        ps.put_u8(0); // end scale y 0.0
+
+        let AnyMessage::ObjectUpdate(mut update) = object_update(310, 0xA117, zero_vec()) else {
+            return Err("expected ObjectUpdate".into());
+        };
+        if let Some(block) = update.object_data.first_mut() {
+            block.texture_anim = anim.into_bytes();
+            block.ps_block = ps.into_bytes();
+        }
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&AnyMessage::ObjectUpdate(update), 5, true)?,
+            now,
+        )?;
+
+        let events = drain_events(&mut session);
+        let Some(Event::ObjectAdded(object)) =
+            events.iter().find(|e| matches!(e, Event::ObjectAdded(_)))
+        else {
+            return Err(format!("expected ObjectAdded, got {events:?}").into());
+        };
+
+        let anim = object
+            .texture_animation
+            .as_ref()
+            .ok_or("expected texture animation")?;
+        assert_eq!(anim.mode, 0x01 | 0x20);
+        assert_eq!(anim.face, -1);
+        assert_eq!((anim.size_x, anim.size_y), (2, 3));
+        assert!((anim.rate - 4.0).abs() < f32::EPSILON);
+
+        let ps = object.particles.as_ref().ok_or("expected particles")?;
+        assert_eq!(ps.crc, 0x00CA_FE00);
+        assert_eq!(ps.pattern, 0x02);
+        assert!((ps.max_age - 1.0).abs() < f32::EPSILON);
+        assert!((ps.outer_angle - 1.0).abs() < f32::EPSILON);
+        assert!((ps.burst_speed_max - 2.0).abs() < f32::EPSILON);
+        assert_eq!(ps.burst_part_count, 20);
+        assert_eq!(ps.texture_id, part_image);
+        assert_eq!(ps.target_id, target);
+        assert_eq!(ps.part_flags, 0x40);
+        assert!((ps.part_max_age - 10.0).abs() < f32::EPSILON);
+        assert_eq!(ps.part_start_color, [255, 255, 255, 255]);
+        assert!((ps.part_start_scale[0] - 1.0).abs() < f32::EPSILON);
+        assert!((ps.part_start_scale[1] - 1.0).abs() < f32::EPSILON);
+        Ok(())
+    }
+
+    #[test]
     fn terse_update_moves_known_object() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;

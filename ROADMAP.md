@@ -1389,7 +1389,7 @@ blob items, writing a structured decoder). "Test" notes whether the local
 |---|-----|-----|----------|------|
 | 35 ✅ | `ParcelProperties` full field surface | 3 | Parcel name/desc, group-ownership, sale/pass pricing, prim accounting, landing point, access/env flags, `RequestResult` | Local OpenSim |
 | 36 | `ObjectProperties` full field surface | 2 | `ItemID`/`FolderID`/`FromTaskID`, `InventorySerial`, aggregate perms, texture-id list | Local OpenSim |
-| 37 | `TextureAnim` & particle-system decoders | 3 | Structured prim texture-animation and particle (`llParticleSystem`) params | Local OpenSim |
+| 37 ✅ | `TextureAnim` & particle-system decoders | 3 | Structured prim texture-animation and particle (`llParticleSystem`) params | Local OpenSim |
 | 38 | `AvatarSitResponse` complete `SitTransform` | 1 | Sit rotation, sit-camera eye/at offsets, force-mouselook | Local OpenSim |
 | 39 | `RegionInfo`/`RegionHandshake` extended fields | 3 | Region owner, estate-manager flag, water height, terrain limits, 64-bit flags, chat/combat blocks | Local OpenSim |
 | 40 | `AvatarAnimation` physical-event list | 1 | `PhysicalAvatarEventList` (physics/ragdoll) block | Local OpenSim |
@@ -1471,18 +1471,42 @@ and OpenSim sends no texture-id blob in its `ObjectProperties`); the
 non-trivial values are covered by the unit test. Test: local OpenSim.*
 
 **37. `TextureAnim` & particle-system structured decoders (extends #16/#33, Tier
-C).** `Object::texture_anim` (`types.rs` ~1267) and `Object::particle_system`
-(~1273) are retained only as raw `Vec<u8>` — there is
-**no decoder anywhere in the crate** (confirmed: only `decode_texture_entry` and
-`j2c::parse_header` exist). Write the two parsers the viewer has: the
-`TextureAnim`/`llSetTextureAnim` 16-byte struct (flags `u8`, face `u8`, sizeX
-`u8`, sizeY `u8`, then `start`, `length`, `rate` as `f32`) and the
-`llParticleSystem` block (`LLPartSysData::unpackBlock` / `unpackLegacy`:
-pattern, max-age, start/end colour+alpha+scale, burst rate/count/radius/speed,
-accel, particle-texture UUID, target object, blend funcs). Surface them as
-structured value types on `Object` alongside the existing raw blobs. *Test:
-local OpenSim (rez a scripted object running
-`llSetTextureAnim`/`llParticleSystem`).*
+C). ✅ Done.** `Object::texture_anim` and `Object::particle_system` were
+retained only as raw `Vec<u8>` with no decoder in the crate. Added a new
+`sl-proto/src/particles.rs` with two faithful ports of the viewer's parsers, and
+two new value types on `Object` alongside the (kept) raw blobs:
+**`Object::texture_animation: Option<TextureAnimation>`** — the 16-byte
+`TextureAnim` / `LLTextureAnim::unpackTAMessage` block (`mode` bit field, `face`
+as `i8` with `-1` = all faces, the `size_x`/`size_y` frame grid, and
+`start`/`length`/`rate` `f32`s), with a `texture_anim_mode` constants module
+(`ON`/`LOOP`/`REVERSE`/`PING_PONG`/`SMOOTH`/`ROTATE`/`SCALE`) and the viewer's
+non-`SMOOTH` "floor the grid at 1" behaviour. **`Object::particles:
+Option<ParticleSystem>`** — the `PSBlock` / `LLPartSysData::unpackBlock`,
+handling **both** wire forms: the legacy fixed 86-byte block (`unpackLegacy`)
+and the modern size-prefixed form (`unpack` → `LLPartData::unpack`) with the
+optional
+trailing glow / blend-func fields gated by the `LL_PART_DATA_GLOW` /
+`LL_PART_DATA_BLEND` particle flags. Recovered the full source surface (CRC,
+flags, `pattern` — with a `particle_pattern` constants module —
+inner/outer angle, burst rate/radius/speed-min/max/part-count, source max/start
+age, angular velocity, particle acceleration, particle-texture id, target id)
+**and** the per-particle template (flags, max age, start/end colour, start/end
+scale, start/end glow, source/dest blend funcs). The viewer's `unpackFixed`
+fixed-point reads are ported as small unsigned-`u8`/`u16` and signed-`u16`
+helpers. Both decoders run at every site that fills the raw blobs — the full
+`ObjectUpdate` and both the legacy and "new" particle paths of the compressed
+update. The two value types, the two `decode_*` functions, and the two constants
+modules are re-exported through both runtimes. Covered by five `sl-proto` unit
+tests (texture-anim decode + wrong-size/grid-floor; particle legacy form,
+modern-with-glow/blend form, and empty/bad-size rejection) and a `lifecycle.rs`
+end-to-end test (a full `ObjectUpdate` carrying both blobs → the decoded
+`Object::texture_animation` and `Object::particles`). *Unit- and
+lifecycle-tested only: a live exercise needs an in-world scripted object running
+`llSetTextureAnim`/`llParticleSystem` (no headless rez path — it must arrive via
+an OAR or a viewer), the same constraint that left #16's compressed/terse
+decoders unit-tested. The decoders are deterministic ports of
+`lltextureanim.cpp`/`llpartdata.cpp`. Test: local OpenSim (rez a scripted object
+running `llSetTextureAnim`/`llParticleSystem`).*
 
 ### High — fields the user clearly wants
 
