@@ -377,6 +377,238 @@ mod test {
     }
 
     #[test]
+    fn parse_login_request_round_trips_the_builder() -> Result<(), Box<dyn std::error::Error>> {
+        use sl_wire::{parse_login_request, password_hash};
+
+        let mut request = LoginRequest::new("Test", "User", "secret", "last", "MyViewer", "1.2.3")
+            .with_mfa("123456", Some("storedhash".to_owned()));
+        request.options = vec!["inventory-root".to_owned(), "buddy-list".to_owned()];
+        let body = build_login_request(&request);
+
+        let parsed = parse_login_request(&body)?;
+        assert_eq!(parsed.first_name, "Test");
+        assert_eq!(parsed.last_name, "User");
+        // The server only ever sees the hashed password, never the plaintext.
+        assert_eq!(parsed.password_hash, password_hash("secret"));
+        assert_eq!(parsed.start, "last");
+        assert_eq!(parsed.channel, "MyViewer");
+        assert_eq!(parsed.version, "1.2.3");
+        assert_eq!(parsed.platform, "lin");
+        assert_eq!(parsed.token, "123456");
+        assert_eq!(parsed.mfa_hash, "storedhash");
+        assert!(parsed.agree_to_tos);
+        assert!(parsed.read_critical);
+        assert!(parsed.extended_errors);
+        assert_eq!(parsed.options, vec!["inventory-root", "buddy-list"]);
+        Ok(())
+    }
+
+    /// A full success with every optional payload, to exercise `build_login_response`.
+    fn full_success() -> Result<sl_wire::LoginSuccess, Box<dyn std::error::Error>> {
+        use sl_wire::{BuddyListEntry, HomeLocation, SkeletonFolder};
+
+        let folder = |id: &str,
+                      parent: &str,
+                      name: &str,
+                      type_default,
+                      version|
+         -> Result<SkeletonFolder, Box<dyn std::error::Error>> {
+            Ok(SkeletonFolder {
+                folder_id: id.parse()?,
+                parent_id: parent.parse()?,
+                name: name.to_owned(),
+                type_default,
+                version,
+            })
+        };
+        Ok(sl_wire::LoginSuccess {
+            agent_id: "11111111-1111-1111-1111-111111111111".parse()?,
+            session_id: "22222222-2222-2222-2222-222222222222".parse()?,
+            secure_session_id: "33333333-3333-3333-3333-333333333333".parse()?,
+            circuit_code: 123_456,
+            sim_ip: Ipv4Addr::new(127, 0, 0, 1),
+            sim_port: 9000,
+            seed_capability: "http://127.0.0.1:9000/CAPS/seed".to_owned(),
+            message: Some("Welcome <home> & enjoy".to_owned()),
+            mfa_hash: Some("rememberme".to_owned()),
+            inventory_root: Some("aaaaaaaa-0000-0000-0000-000000000000".parse()?),
+            inventory_skeleton: vec![
+                folder(
+                    "aaaaaaaa-0000-0000-0000-000000000000",
+                    "00000000-0000-0000-0000-000000000000",
+                    "My Inventory",
+                    8,
+                    5,
+                )?,
+                folder(
+                    "bbbbbbbb-0000-0000-0000-000000000000",
+                    "aaaaaaaa-0000-0000-0000-000000000000",
+                    "Objects",
+                    6,
+                    2,
+                )?,
+            ],
+            buddy_list: vec![BuddyListEntry {
+                buddy_id: "cccccccc-0000-0000-0000-000000000000".parse()?,
+                rights_granted: 3,
+                rights_has: 1,
+            }],
+            home: Some(HomeLocation {
+                region_handle: (256_000, 256_256),
+                position: [128.5, 127.0, 25.75],
+                look_at: [1.0, 0.0, 0.0],
+            }),
+            look_at: Some([0.9994, 0.0316, 0.0]),
+            agent_access: Some("M".to_owned()),
+            agent_access_max: Some("A".to_owned()),
+            max_agent_groups: Some(42),
+            library_root: Some("00000112-000f-0000-0000-000100bba000".parse()?),
+            library_owner: Some("11111111-1111-0000-0000-000000000000".parse()?),
+            library_skeleton: vec![folder(
+                "00000112-000f-0000-0000-000100bba000",
+                "00000000-0000-0000-0000-000000000000",
+                "Library",
+                8,
+                1,
+            )?],
+        })
+    }
+
+    #[test]
+    fn build_login_response_round_trips_a_full_success() -> Result<(), Box<dyn std::error::Error>> {
+        use sl_wire::{build_login_response, parse_login_response};
+
+        let success = full_success()?;
+        let xml = build_login_response(&LoginResponse::Success(Box::new(success.clone())));
+        let LoginResponse::Success(parsed) = parse_login_response(&xml)? else {
+            return Err("expected a successful login".into());
+        };
+
+        assert_eq!(parsed.agent_id, success.agent_id);
+        assert_eq!(parsed.session_id, success.session_id);
+        assert_eq!(parsed.secure_session_id, success.secure_session_id);
+        assert_eq!(parsed.circuit_code, success.circuit_code);
+        assert_eq!(parsed.sim_ip, success.sim_ip);
+        assert_eq!(parsed.sim_port, success.sim_port);
+        assert_eq!(parsed.seed_capability, success.seed_capability);
+        // The metacharacters in the message survive XML escaping.
+        assert_eq!(parsed.message.as_deref(), Some("Welcome <home> & enjoy"));
+        assert_eq!(parsed.mfa_hash.as_deref(), Some("rememberme"));
+        assert_eq!(parsed.inventory_root, success.inventory_root);
+        assert_eq!(parsed.inventory_skeleton, success.inventory_skeleton);
+        assert_eq!(parsed.buddy_list, success.buddy_list);
+        let home = parsed.home.ok_or("home")?;
+        assert_eq!(home.region_handle, (256_000, 256_256));
+        assert_vec3_approx(home.position, [128.5, 127.0, 25.75]);
+        assert_vec3_approx(home.look_at, [1.0, 0.0, 0.0]);
+        assert_vec3_approx(parsed.look_at.ok_or("look_at")?, [0.9994, 0.0316, 0.0]);
+        assert_eq!(parsed.agent_access.as_deref(), Some("M"));
+        assert_eq!(parsed.agent_access_max.as_deref(), Some("A"));
+        assert_eq!(parsed.max_agent_groups, Some(42));
+        assert_eq!(parsed.library_root, success.library_root);
+        assert_eq!(parsed.library_owner, success.library_owner);
+        assert_eq!(parsed.library_skeleton, success.library_skeleton);
+        Ok(())
+    }
+
+    #[test]
+    fn build_login_response_round_trips_a_failure() -> Result<(), Box<dyn std::error::Error>> {
+        use sl_wire::{LoginFailure, build_login_response, parse_login_response};
+
+        let failure = LoginFailure {
+            reason: "key".to_owned(),
+            message: "Could not authenticate your avatar.".to_owned(),
+        };
+        let xml = build_login_response(&LoginResponse::Failure(failure.clone()));
+        let LoginResponse::Failure(parsed) = parse_login_response(&xml)? else {
+            return Err("expected a failure".into());
+        };
+        assert_eq!(parsed, failure);
+        Ok(())
+    }
+
+    #[test]
+    fn build_login_response_round_trips_an_mfa_challenge() -> Result<(), Box<dyn std::error::Error>>
+    {
+        use sl_wire::{MfaChallenge, build_login_response, parse_login_response};
+
+        let challenge = MfaChallenge {
+            mfa_hash: Some("challengehash".to_owned()),
+            message: "Enter your token".to_owned(),
+        };
+        let xml = build_login_response(&LoginResponse::MfaChallenge(challenge.clone()));
+        let LoginResponse::MfaChallenge(parsed) = parse_login_response(&xml)? else {
+            return Err("expected an MFA challenge".into());
+        };
+        assert_eq!(parsed, challenge);
+        Ok(())
+    }
+
+    #[test]
+    fn login_server_authenticates_and_challenges() -> Result<(), Box<dyn std::error::Error>> {
+        use sl_wire::{Credential, LoginServer, MfaPolicy, parse_login_request, password_hash};
+
+        let make_request = |password: &str, token: &str, mfa_hash: Option<String>| {
+            let request = LoginRequest::new("Test", "User", password, "last", "MyViewer", "1.2.3")
+                .with_mfa(token, mfa_hash);
+            parse_login_request(&build_login_request(&request))
+        };
+
+        let no_mfa = Credential {
+            password_hash: password_hash("secret"),
+            mfa: None,
+        };
+
+        // Correct password, no MFA → success.
+        let ok = make_request("secret", "", None)?;
+        assert!(matches!(
+            LoginServer::respond(&ok, &no_mfa, Box::new(full_success()?)),
+            LoginResponse::Success(_)
+        ));
+
+        // Wrong password → failure with the "key" reason.
+        let bad = make_request("wrong", "", None)?;
+        let LoginResponse::Failure(failure) =
+            LoginServer::respond(&bad, &no_mfa, Box::new(full_success()?))
+        else {
+            return Err("expected a failure".into());
+        };
+        assert_eq!(failure.reason, LoginServer::BAD_CREDENTIALS_REASON);
+
+        // MFA required, no token → challenge handing out the remembered hash.
+        let mfa = Credential {
+            password_hash: password_hash("secret"),
+            mfa: Some(MfaPolicy {
+                expected_token: "999999".to_owned(),
+                mfa_hash: "remember-this-device".to_owned(),
+                challenge_message: "Enter your code".to_owned(),
+            }),
+        };
+        let first = make_request("secret", "", None)?;
+        let LoginResponse::MfaChallenge(challenge) =
+            LoginServer::respond(&first, &mfa, Box::new(full_success()?))
+        else {
+            return Err("expected an MFA challenge".into());
+        };
+        assert_eq!(challenge.mfa_hash.as_deref(), Some("remember-this-device"));
+
+        // MFA satisfied by the one-time token → success.
+        let with_token = make_request("secret", "999999", None)?;
+        assert!(matches!(
+            LoginServer::respond(&with_token, &mfa, Box::new(full_success()?)),
+            LoginResponse::Success(_)
+        ));
+
+        // MFA satisfied by echoing the remembered hash → success.
+        let with_hash = make_request("secret", "", Some("remember-this-device".to_owned()))?;
+        assert!(matches!(
+            LoginServer::respond(&with_hash, &mfa, Box::new(full_success()?)),
+            LoginResponse::Success(_)
+        ));
+        Ok(())
+    }
+
+    #[test]
     fn round_trips_through_the_builder_field_names() -> Result<(), Box<dyn std::error::Error>> {
         // The fields the builder writes must match the names OpenSim expects.
         let request = LoginRequest::new("First", "Last", "pw", "home", "MyViewer", "1.2.3");
