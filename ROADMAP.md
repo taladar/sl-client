@@ -1372,8 +1372,8 @@ rendering / voice-transport family). With this reclassified, **the roadmap's
 client protocol *feature* surface is complete: #1–#33 are done.** The only
 remaining open work is the **Tier E decode-fidelity fixes (#35–#51)** — not new
 features, but information-loss gaps where an already-shipped item decodes a wire
-field and then drops it before the caller sees it. (#35–#40 are now
-done; #41–#51 remain.)
+field and then drops it before the caller sees it. (#35–#41 are now
+done; #42–#51 remain.)
 
 ## Tier E — decode-fidelity & information-loss fixes (#35–#51)
 
@@ -1388,9 +1388,9 @@ blob items, writing a structured decoder). "Test" notes whether the local
 | # | Fix | Pts | Recovers | Test |
 |---|-----|-----|----------|------|
 | 35 ✅ | `ParcelProperties` full field surface | 3 | Parcel name/desc, group-ownership, sale/pass pricing, prim accounting, landing point, access/env flags, `RequestResult` | Local OpenSim |
-| 36 | `ObjectProperties` full field surface | 2 | `ItemID`/`FolderID`/`FromTaskID`, `InventorySerial`, aggregate perms, texture-id list | Local OpenSim |
+| 36 ✅ | `ObjectProperties` full field surface | 2 | `ItemID`/`FolderID`/`FromTaskID`, `InventorySerial`, aggregate perms, texture-id list | Local OpenSim |
 | 37 ✅ | `TextureAnim` & particle-system decoders | 3 | Structured prim texture-animation and particle (`llParticleSystem`) params | Local OpenSim |
-| 38 | `AvatarSitResponse` complete `SitTransform` | 1 | Sit rotation, sit-camera eye/at offsets, force-mouselook | Local OpenSim |
+| 38 ✅ | `AvatarSitResponse` complete `SitTransform` | 1 | Sit rotation, sit-camera eye/at offsets, force-mouselook | Local OpenSim |
 | 39 ✅ | `RegionInfo`/`RegionHandshake` extended fields | 3 | Region owner, estate-manager flag, water height, terrain limits, 64-bit flags, chat/combat blocks | Local OpenSim |
 | 40 ✅ | `AvatarAnimation` physical-event list | 1 | `PhysicalAvatarEventList` (physics/ragdoll) block | Local OpenSim |
 | 41 ✅ | Asset-transfer success event + size | 2 | A success event for `TransferInfo` carrying declared `Size` | Local OpenSim |
