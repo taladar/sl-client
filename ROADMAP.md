@@ -84,6 +84,19 @@ exposed to clients. There is therefore nothing for a client to wire — it joins
 the other out-of-scope items (J2C/glTF/mesh decode, rendering, the voice audio
 transport). See the closing "Out of scope" note.
 
+**Decode-fidelity audit (2026-06-18) — #35–#51, Tier E.** A pass over the
+inbound decode path (the struct→`Event` translation in `sl-proto`'s
+`session.rs`, the hand-written binary-blob decoders, and the CAPS/LLSD decoders)
+found *information loss*: fields that are present on the wire and fully decoded,
+but then dropped before reaching the library user — usually because the
+user-facing type has no field to hold them. These are **not** missing features;
+each is a faithfulness gap in an already-shipped item (#1–#33). They are
+collected as a new **Tier E** below, ordered by severity, and do not change the
+"client protocol surface is complete" claim above — they make the *data* that
+surface already carries reach the caller. (Wire encoding is unaffected; the
+generated codec already decodes every field — the loss is purely in what
+`session.rs` forwards.)
+
 ## Tier A — self-sufficient interactive clients (text & bot viewers)
 
 Each works as a complete, useful client on top of today's connection layer.
@@ -1356,8 +1369,217 @@ client cannot read or write it (not even its own experience's store — that too
 is script-only). There is consequently no client wire protocol to implement, so
 this joins the other out-of-scope items below (the asset-byte *decode* /
 rendering / voice-transport family). With this reclassified, **the roadmap's
-client protocol surface is complete: #1–#33 are done and nothing remains
-unbuilt.**
+client protocol *feature* surface is complete: #1–#33 are done.** The only
+remaining open work is the **Tier E decode-fidelity fixes (#35–#51)** — not new
+features, but information-loss gaps where an already-shipped item decodes a wire
+field and then drops it before the caller sees it.
+
+## Tier E — decode-fidelity & information-loss fixes (#35–#51)
+
+Gaps found by the 2026-06-18 decode audit (see the note above the tiers). Each
+recovers data the wire already carries and the codec already decodes, but which
+`session.rs` drops before the caller sees it. Ordered by severity. Story points
+are mostly small because the wire decode exists — the work is adding fields to
+the user-facing value/`Event` types and forwarding them (and, for the two
+blob items, writing a structured decoder). "Test" notes whether the local
+`opensim.service` exercises the path.
+
+| # | Fix | Pts | Recovers | Test |
+|---|-----|-----|----------|------|
+| 35 | `ParcelProperties` full field surface | 3 | Parcel name/desc, group-ownership, sale/pass pricing, prim accounting, landing point, access/env flags, `RequestResult` | Local OpenSim |
+| 36 | `ObjectProperties` full field surface | 2 | `ItemID`/`FolderID`/`FromTaskID`, `InventorySerial`, aggregate perms, texture-id list | Local OpenSim |
+| 37 | `TextureAnim` & particle-system decoders | 3 | Structured prim texture-animation and particle (`llParticleSystem`) params | Local OpenSim |
+| 38 | `AvatarSitResponse` complete `SitTransform` | 1 | Sit rotation, sit-camera eye/at offsets, force-mouselook | Local OpenSim |
+| 39 | `RegionInfo`/`RegionHandshake` extended fields | 3 | Region owner, estate-manager flag, water height, terrain limits, 64-bit flags, chat/combat blocks | Local OpenSim |
+| 40 | `AvatarAnimation` physical-event list | 1 | `PhysicalAvatarEventList` (physics/ragdoll) block | Local OpenSim |
+| 41 | Asset-transfer success event + size | 2 | A success event for `TransferInfo` carrying declared `Size` | Local OpenSim |
+| 42 | Group-reply pagination totals | 1 | `RoleCount` / `TotalPairs` so a client knows a set is complete | Local OpenSim (Groups V2) |
+| 43 | `MoneyBalanceReply` transaction id | 1 | `TransactionID` to correlate a balance reply to its pay/buy | Money module or SL |
+| 44 | Inventory push fidelity | 2 | All `UpdateCreateInventoryItem` entries; per-item bulk `CallbackID` | Local OpenSim |
+| 45 | `ChatterBoxInvitation` session type & bucket | 2 | `type` + `binary_bucket` (group/session name, session kind) | SL grid |
+| 46 | Terse-update trailing `TextureEntry` | 2 | Texture/colour change delivered via a terse update | SL grid |
+| 47 | `ParcelAccessListReply` per-entry flags | 1 | The per-entry access-vs-ban `Flags` | Local OpenSim |
+| 48 | Login-response extra fields | 2 | `home`, `look_at`, `agent_access[_max]`, `max-agent-groups`, Library inventory roots | Local OpenSim |
+| 49 | `TeleportFinish` (CAPS) maturity & flags | 1 | Destination `SimAccess` (maturity), `TeleportFlags` (cause) | SL grid |
+| 50 | Minor dropped-field batch | 3 | `TimeDilation`, `AlertInfo`, `MapBlockReply` water height, joint fields, collision plane, `Options.Flags`, NameValue/bump-shiny accessors | Local OpenSim |
+| 51 | Attachment-point `state` un-swizzle helper | 1 | Correct attachment point from the swizzled `state` byte | Local OpenSim |
+
+### Critical — large structural losses
+
+**35. `ParcelProperties` full field surface (extends #13, Tier B).** The
+`ParcelInfo` value type (`sl-proto/src/types.rs`, ~line 2283) carries only ~16
+of the ~50 `ParcelData` fields, and *both* decode paths populate it: the UDP
+`parcel_info` (`session.rs` ~9443) and the CAPS `parcel_info_from_llsd`
+(`session.rs` ~10120). Decoded-but-dropped fields a land tool needs:
+**`Name`, `Desc`** (the parcel's name and description are decoded and thrown
+away), `GroupID` + `IsGroupOwned` (without these `owner_id` can't tell a
+group-owned parcel),
+`SalePrice`/`AuthBuyerID`/`AuctionID`/`ClaimDate`/`ClaimPrice`/
+`RentPrice`/`PassPrice`/`PassHours`, the full prim accounting
+(`OwnerPrims`/`GroupPrims`/`OtherPrims`/`SelectedPrims`/`TotalPrims`/
+`ParcelPrimBonus` — only the *max* prim fields are surfaced), avatar counts
+(`SelfCount`/`OtherCount`/`PublicCount`), `Status`/`Category`/`LandingType`,
+`SnapshotID`, `UserLocation`/`UserLookAt` (the teleport landing point), and the
+dedicated region access/environment booleans
+(`RegionDenyAnonymous`/`…Identified`/ `…Transacted`/`…AgeUnverified`, push
+override, `SeeAVs`/`GroupAVSounds`/ `AnyAVSounds`, and the
+`ParcelEnvironmentBlock`). Critically, `RequestResult` is also dropped, so a "no
+access / not found" result is silently surfaced as a normal parcel. Add the
+fields to `ParcelInfo` and populate them in both decoders.
+*Test: local OpenSim (both the UDP and CAPS parcel paths).*
+
+**36. `ObjectProperties` full field surface (extends #17, Tier C).** The
+`ObjectProperties` struct (`types.rs` ~1457) ends at `sit_name`; the decoder
+`object_properties` (`session.rs` ~11086) drops 8 wire fields of the
+`ObjectData` block: **`ItemID`** (correlate an in-world object back to the
+inventory item it was rezzed from — needed for attachments and "find in
+inventory"), `FolderID`, `FromTaskID`, `InventorySerial` (detect task-inventory
+changes), the three aggregate-permission rollups
+(`AggregatePerms`/`AggregatePermTextures`/`AggregatePermTexturesOwner` — the
+build-floater "next owner can…" summary), and `TextureID` (the linkset's
+concatenated texture-asset ids). Add the fields and populate them. *Test: local
+OpenSim.*
+
+**37. `TextureAnim` & particle-system structured decoders (extends #16/#33, Tier
+C).** `Object::texture_anim` (`types.rs` ~1267) and `Object::particle_system`
+(~1273) are retained only as raw `Vec<u8>` — there is
+**no decoder anywhere in the crate** (confirmed: only `decode_texture_entry` and
+`j2c::parse_header` exist). Write the two parsers the viewer has: the
+`TextureAnim`/`llSetTextureAnim` 16-byte struct (flags `u8`, face `u8`, sizeX
+`u8`, sizeY `u8`, then `start`, `length`, `rate` as `f32`) and the
+`llParticleSystem` block (`LLPartSysData::unpackBlock` / `unpackLegacy`:
+pattern, max-age, start/end colour+alpha+scale, burst rate/count/radius/speed,
+accel, particle-texture UUID, target object, blend funcs). Surface them as
+structured value types on `Object` alongside the existing raw blobs. *Test:
+local OpenSim (rez a scripted object running
+`llSetTextureAnim`/`llParticleSystem`).*
+
+### High — fields the user clearly wants
+
+**38. `AvatarSitResponse` complete `SitTransform` (extends #17, Tier C).**
+`Event::SitResult` (`session.rs` ~4961) surfaces only `sit_object`, `autopilot`,
+and `sit_position`, dropping the rest of `SitTransform`: **`SitRotation`** (the
+seated orientation — which way the avatar faces), `CameraEyeOffset` /
+`CameraAtOffset` (scripted sit cameras, `llSetCameraEyeOffset`/`…AtOffset`), and
+**`ForceMouselook`** (vehicles/weapons force mouselook on sit). Add them to the
+event. *Test: local OpenSim (a scripted sit target).*
+
+**39. `RegionInfo` / `RegionHandshake` extended fields (extends #14, Tier B).**
+`region_identity` (`session.rs` ~9285) and `region_limits` (~9302) surface only
+the agent/object limits, maturity, product, and the 32-bit flags. Dropped:
+`SimOwner` (region owner id), `IsEstateManager` (whether *this* agent manages
+the estate — gates estate UI), `WaterHeight`, `BillableFactor`, terrain
+raise/lower limits, sun settings, the **64-bit `RegionFlagsExtended`** (only the
+low 32 bits are surfaced) and `RegionProtocols`, and the entire `RegionInfo5`
+chat-range and `CombatSettings` blocks. Extend `RegionIdentity`/the region-info
+surface. *Test: local OpenSim (owner account for the estate-manager flag).*
+
+**40. `AvatarAnimation` physical-event list (extends #21, Tier C).**
+`avatar_animations` (`session.rs` ~9389) reads `animation_list` and
+`animation_source_list` but never the `PhysicalAvatarEventList` block (physics /
+ragdoll events the reference viewer processes), which is decoded into the struct
+and dropped. Surface it on `Event::AvatarAnimation`. *Test: local OpenSim.*
+
+**41. Asset-transfer success event + declared size (extends #19, Tier C).** The
+`TransferInfo` handler (`session.rs` ~5311) emits an event only on the *failure*
+path; a successful transfer produces nothing, so `Size` (the total asset byte
+size, useful for progress / preallocation) and `Params` are lost. Add a
+transfer-started/success event carrying `Size`. *Test: local OpenSim.*
+
+**42. Group-reply pagination totals (extends #7, Tier A).**
+`GroupRoleDataReply` (`session.rs` ~5519) drops the `RoleCount` header and
+`GroupRoleMembersReply` (~5526) drops `TotalPairs`. These replies are
+multi-packet, and `GroupMembersReply` already surfaces its `member_count`, so a
+client can tell when the member set is complete but *not* the role or
+role-member sets. Surface both totals. *Test: local OpenSim (Groups V2).*
+
+**43. `MoneyBalanceReply` transaction id (extends #11, Tier B).**
+`money_balance` (`session.rs` ~9326) drops `MoneyData.TransactionID`, so a
+balance reply (and its `MoneyTransaction` description) can't be correlated back
+to the pay/buy that triggered it. Add it to the `MoneyBalance` value.
+*Test: money module or SL grid.*
+
+### Medium
+
+**44. Inventory push fidelity (extends #30, Tier A).**
+`UpdateCreateInventoryItem` (`session.rs` ~5059) uses `.first()` on the
+repeatable `InventoryData` block, so if the simulator batches more than one
+created item into one message all but the first are dropped (from both the event
+and the cache); and `bulk_update_item` (~9883) drops the per-item `CallbackID`,
+breaking create-callback correlation when a result arrives as a
+`BulkUpdateInventory` rather than an `UpdateCreateInventoryItem`. Iterate all
+entries and carry the bulk callback id. *Test: local OpenSim.*
+
+**45. `ChatterBoxInvitation` session type & bucket (extends #28, Tier A).**
+`chatterbox_invitation_from_llsd` (`session.rs` ~10319) reads only
+`id`/`from_id`/`from_name`/`message` from `message_params`, dropping `type` (the
+session kind — group vs. ad-hoc conference vs. P2P) and `binary_bucket` (which
+for a group IM carries the group/session name used to label the session), plus
+`from_group`/`region_id`/`position`/`timestamp`. Surface enough to classify and
+name the session. *Test: SL grid (stock OpenSim emits no CAPS
+`ChatterBoxInvitation`).*
+
+**46. Terse-update trailing `TextureEntry` (extends #16/#33, Tier C).**
+`terse_update` (`session.rs` ~10776) stops after `angular_velocity` and never
+consumes the optional trailing `TextureEntry` the simulator appends when the
+update is flagged `Textures` (OpenSim `CreateImprovedTerseBlock`: 2-byte total
+len, 2-byte inner len, 2 zero bytes, then the `TextureEntry`). A texture/colour
+change delivered via a terse update is silently dropped, leaving a stale cached
+`texture_entry`. Decode the trailing block and plumb it through
+`apply_terse_update` (`session.rs` ~4706, which currently copies only `state`
+and `motion`). *Test: SL grid (the texture-flagged terse path).*
+
+**47. `ParcelAccessListReply` per-entry flags (extends #13, Tier B).** Each
+`List` entry (`session.rs` ~4858) has `ID`, `Time`, **and `Flags`**, but only id
+and time are mapped into `ParcelAccessEntry` — the per-entry flags (access vs.
+ban / whitelist sub-type) are lost. Add the flags. *Test: local OpenSim.*
+
+**48. Login-response extra fields (extends #5, Tier A).**
+`handle_login_response` (`session.rs` ~4389) plus the requested options
+(`sl-wire/src/login.rs` ~76) and parser (~354) capture only
+`inventory-root`/`inventory-skeleton`/`buddy-list`. Request and parse the
+broadly-useful extras: `home`, `look_at`, `agent_access`/`agent_access_max`
+(account maturity rating), `max-agent-groups` (needed before group joins), and
+the Library inventory roots
+(`inventory-lib-root`/`inventory-lib-owner`/`inventory-skel-lib`). `gestures`,
+`global-textures`, `login-flags`, and the category lists are lower-value but in
+the same response. *Test: local OpenSim.*
+
+**49. `TeleportFinish` (CAPS) maturity & flags (extends #10, Tier A).**
+`teleport_finish_from_llsd` (`session.rs` ~10046) reads `SimIP`/`SimPort`/
+`SeedCapability` from `Info[0]` but drops `SimAccess` (destination region
+maturity — PG/Mature/Adult) and `TeleportFlags` (how/why the teleport happened —
+lure, landmark, login). Surface both. *Test: SL grid (the CAPS teleport path).*
+
+### Low
+
+**50. Minor dropped-field batch.** Small, individually-low-value drops, grouped:
+`ScriptTeleportRequest.Options.Flags` (`session.rs` ~5486, decoded then
+dropped); `TeleportFailed.AlertInfo` (~the failed handler — the localizable
+message key + params, only the plain `Reason` string is surfaced);
+`MapBlockReply` per-block `WaterHeight`; `TimeDilation` (U16 in the `RegionData`
+of every object-update message — dropped everywhere; affects motion
+dead-reckoning between terse updates); the avatar collision-plane `LLVector4`
+read-and-discarded in `full_object_motion_inner` (`session.rs` ~10745) and
+`terse_update` (~10783 — foot/standing-plane normal, niche for IK/grounding);
+the deprecated `JointType`/`JointPivot`/`JointAxisOrAnchor` trio dropped by
+`object_from_full_update` (~10827 — legacy, usually zero, but a true
+parse-then-discard); and convenience accessors for the packed `name_value`
+string and the `bump_shiny`/`media_flags` bytes (no loss — every bit is retained
+— but the caller must tokenise/mask them by hand, as the viewer's
+`getBumpmap()`/`getShiny()`/`getFullbright()` do). *Test: local OpenSim.*
+
+### Interpretation trap (not loss — but a correctness footgun)
+
+**51. Attachment-point `state` un-swizzle helper (extends #16, Tier C).** The
+object `state` byte is passed through verbatim (no data loss), but for an
+*attachment* OpenSim/SL send a **swizzled** attachment-point value
+(`((st & 0xf0) >> 4) + ((st & 0x0f) << 4)`, OpenSim `LLClientView.cs`
+~6841/7454) in that same byte. A consumer reading `Object::state` as the
+attachment point gets the wrong value unless it un-swizzles. Add a documented
+accessor (e.g. `Object::attachment_point()`) that returns the un-swizzled point
+for attachments, and a doc note on the raw field.
+*Test: local OpenSim (rez/attach an object).*
 
 ### Out of scope (not LLUDP/CAPS protocol)
 
