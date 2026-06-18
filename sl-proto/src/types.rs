@@ -1485,6 +1485,25 @@ pub struct ObjectProperties {
     pub sale_price: i32,
     /// The object category code.
     pub category: u32,
+    /// The task-inventory serial; bumps whenever the object's contents change,
+    /// so a client can detect task-inventory mutations without re-fetching.
+    pub inventory_serial: i16,
+    /// The inventory item this object was rezzed from (nil if not applicable),
+    /// used to correlate an in-world object back to its inventory item — needed
+    /// for attachments and "find in inventory".
+    pub item_id: Uuid,
+    /// The inventory folder the source item lives in (nil if not applicable).
+    pub folder_id: Uuid,
+    /// The task (object) this item came from, when it was rezzed from another
+    /// object's contents (nil if not applicable).
+    pub from_task_id: Uuid,
+    /// The aggregate permission rollup across the linkset's contents — the
+    /// build-floater "next owner can…" summary.
+    pub aggregate_perms: u8,
+    /// The aggregate permission rollup for textures across the linkset.
+    pub aggregate_perm_textures: u8,
+    /// The owner-facing aggregate permission rollup for textures.
+    pub aggregate_perm_textures_owner: u8,
     /// The object's name.
     pub name: String,
     /// The object's description.
@@ -1493,6 +1512,9 @@ pub struct ObjectProperties {
     pub touch_name: String,
     /// The custom sit-action label, empty if none.
     pub sit_name: String,
+    /// The linkset's concatenated texture-asset ids (the wire carries them as a
+    /// run of 16-byte UUIDs); empty if the sim sent none.
+    pub texture_ids: Vec<Uuid>,
 }
 
 // ---------------------------------------------------------------------------

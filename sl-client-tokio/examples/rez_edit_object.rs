@@ -174,6 +174,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "object properties: name={:?} desc={:?} sale_type={} price={}",
                     props.name, props.description, props.sale_type, props.sale_price
                 );
+                info!(
+                    "  recovered: item_id={} folder_id={} from_task_id={} inv_serial={} \
+                     aggregate_perms={:#x}/{:#x}/{:#x} texture_ids={:?}",
+                    props.item_id,
+                    props.folder_id,
+                    props.from_task_id,
+                    props.inventory_serial,
+                    props.aggregate_perms,
+                    props.aggregate_perm_textures,
+                    props.aggregate_perm_textures_owner,
+                    props.texture_ids
+                );
             }
             Event::ObjectRemoved { local_id, .. } => {
                 if Some(local_id) == target {
