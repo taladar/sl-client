@@ -55,6 +55,23 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 25 ✅ | PBR materials / GLTF | 8 | Modern materials in a renderer | **Recent SL grid; OpenSim varies** |
 | 26 ✅ | Voice chat **(signalling)** | 13 | Voice-enabled client | **SL Vivox/WebRTC or FreeSWITCH** |
 | 27 ✅ | Experiences | 5 | Experience-permission client | **SL grid only** |
+| 28 | Complete the IM surface | 8 | Offer-handler / IM bot (full) | Local OpenSim (2 accts) |
+| 29 | Profile & pick/classified editing | 5 | Profile editor | Local OpenSim (profiles) |
+| 30 | Inventory mutation & AIS3 | 8 | Inventory manager, product bot | Local OpenSim |
+| 31 | Group management edits | 5 | Group admin bot | Local OpenSim (Groups V2) |
+| 32 | Camera & interest control | 3 | Look-aware roaming bot | Local OpenSim |
+| 33 | World-stream decode & LOD fetch | 5 | *(faithfulness for 16/19)* | Local OpenSim |
+| 34 | Experience key-value store | 3 | Experience datastore client | **SL grid only** |
+
+**Items #28–#34 are not yet built.** They are the **deferred follow-ups** that
+items #1–#27 knowingly left for later (the "Deferred:" / "follow-up" /
+"waits on #…" / "unit-tested only" notes in those entries), now promoted to
+first-class roadmap items so the gap analysis stays complete. Each is grouped
+under and extends an earlier item; their full prose is in **"Planned — deferred
+follow-ups"** below the done items. They carry no ✅ and the prose is
+forward-looking. Out-of-scope large items (J2C/glTF/mesh decode, rendering, the
+voice audio transport) are *not* among them — see the closing "Out of scope"
+note.
 
 ## Tier A — self-sufficient interactive clients (text & bot viewers)
 
@@ -997,8 +1014,115 @@ as with #19/#23/#25/#26's asset-bytes and signalling): experience *event/asset*
 contents beyond the metadata records, and the experience key-value store an
 experience-keyed script uses server-side.*
 
-##### Out of scope (not LLUDP/CAPS protocol)
+## Planned — deferred follow-ups of #1–#27
+
+Everything above is done. The items below are the protocol surface that #1–#27
+explicitly **deferred** — recorded in their entries as "Deferred:", "follow-up",
+"remain roadmap #…", "waits on", or "unit-tested only". They are collected here
+rather than interleaved among the done tiers because each is forward-looking
+(unbuilt) and extends a *specific* earlier item; the "value compounds as you go
+down" ordering of #1–#27 does not apply to them. Out-of-scope large items
+(J2C/glTF/mesh *decode*, rendering, the voice audio transport, experience
+asset-byte contents) are deliberately **excluded** — see the closing note.
+
+**28. Complete the IM surface — `ImprovedInstantMessage` offer/session flows,
+`RetrieveInstantMessages`, `ReadOfflineMsgs` CAPS · 8 pts. (extends #2, Tier
+A.)** Item #2 implemented 1:1 IM send/receive and surfaced every inbound
+`ImDialog` sub-type, but several reply/send flows were deferred; this finishes
+them. Will add: **offer reply flows** — accept/decline a **teleport** offer/lure
+(the `TeleportLureRequest` / lure-accept handshake) and accept/decline an
+**inventory** offer received over IM (`IM_INVENTORY_OFFERED`, replying with the
+accepted/declined dialog so the sim files the offered item into the target
+folder or drops it); **give inventory** — an outgoing inventory-offer helper
+(`IM_INVENTORY_OFFERED` send with the binary-bucket asset/folder reference, the
+counterpart to #5's inventory and #30's mutation); **conference / ad-hoc
+multi-party sessions** — start/invite/leave a non-group conference
+(`IM_SESSION_CONFERENCE_START` and the ad-hoc session dialogs), the sibling of
+item #7's group sessions over the same IM multiplexing; and **offline-IM
+history** — the legacy `RetrieveInstantMessages` UDP trigger plus the modern SL
+`ReadOfflineMsgs` CAPS path. New `Command`/`SlCommand` variants + `Event`s
+through both runtimes. *Test: local OpenSim — two accounts for the
+offer/conference round-trips; the grid's offline-IM module plus an
+offline-then-relogin test for history.*
+
+**29. Profile & pick/classified editing — `AvatarPropertiesUpdate`,
+pick/classified create-update-delete, `PickInfoRequest`/`ClassifiedInfoRequest`
+detail · 5 pts. (extends #4, Tier A.)** Item #4 delivered the read side
+(`request_avatar_properties`/`picks`/`notes`); the write side and the per-item
+detail fetches were the deferred half. Will add: editing one's own profile
+(`AvatarPropertiesUpdate`), create/update/delete of picks and of classifieds,
+and the pick/classified **detail** fetches (`PickInfoRequest`/`PickInfoReply`,
+`ClassifiedInfoRequest`/`ClassifiedInfoReply`) — the picks/notes lists item #4
+returns carry only summaries. New `Session` setters + detail events through both
+runtimes. *Test: local OpenSim with the profile module enabled (`[UserProfiles]
+ProfileServiceURL`).*
+
+**30. Inventory mutation & AIS3 — `CreateInventoryFolder`/`Item`,
+`MoveInventory*`, `CopyInventoryItem`, `RemoveInventoryItem`,
+`UpdateInventoryItem`, `BulkUpdateInventory`, `InventoryAPIv3` · 8 pts.
+(extends #5, Tier A.)** Item #5 delivered the fetch tree over both UDP and CAPS
+but deferred all mutation. Will add: create/move/copy/delete/update of folders
+and items, watching the sim's `BulkUpdateInventory`/`UpdateInventoryItem` pushes
+to keep the cached tree live, and the modern **AIS3** (`InventoryAPIv3`) REST
+capability semantics (which also covers #19's deferred "AIS3 inventory-asset
+semantics"). Turns #5's read-only manager into a true inventory manager /
+product-update bot, and provides the file-into-folder step behind #28's
+inventory-offer accept. *Test: local OpenSim.*
+
+**31. Group management edits — group-notice creation, `GroupRoleUpdate`,
+`GroupRoleChanges`, `EjectGroupMemberRequest` · 5 pts. (extends #7, Tier A.)**
+Item #7 implemented membership, roster/role/profile reads, group IM sessions,
+and the join/leave/invite/contribution/accept-notices writes, but deferred the
+admin edits. Will add: group-**notice creation** (with an inventory attachment
+in the binary bucket), role create/delete (`GroupRoleUpdate`), member-role
+assignment edits (`GroupRoleChanges`), and ejecting members
+(`EjectGroupMemberRequest`) — completing the roster-admin surface for an
+owner/officer bot. *Test: local OpenSim with the Groups V2 module.*
+
+**32. Camera & interest control — real `AgentUpdate` camera fields · 3 pts.
+(extends #3; was blocked on #16, Tier C.)** Item #3 noted the camera "stays at
+region centre — true camera control waits on position tracking from the
+object/scene graph (#16)." With #16 done, this populates the `AgentUpdate`
+camera position, the at/left/up axes and the draw distance from a real,
+caller-set viewpoint (a `set_camera`-style surface, persisted and re-sent on
+keep-alive like #3's controls), so the simulator's interest list and the
+per-category bandwidth (#15) follow where the agent actually looks rather than
+the region origin. *Test: local OpenSim.*
+
+**33. World-stream decode & LOD-fetch completeness — `ObjectUpdateCompressed`
+trailing fields, HTTP `Range` LOD · 5 pts. (extends #16 & #19, Tier C.)** Two
+faithfulness gaps the rendering tier left raw. **Full `ObjectUpdateCompressed`
+decode:** Item #16 decodes the compressed update's reliable fixed prefix
+(text/media-url) but leaves the trailing length-prefix-less fields raw — this
+adds the particle-system block, name-values, the shape (path/profile params),
+the packed texture-entry (via #20's `decode_texture_entry`), and the
+compressed-path extra-params (via the `extra_params` decoder #25 added for full
+updates), so a compressed-heavy SL region yields the same decoded `Object` as a
+full update. **HTTP range/LOD fetch:** Item #19 fetches textures/meshes/assets
+over CAPS but truncates the J2C codestream client-side for a discard level; this
+replaces that with real HTTP `Range` requests against
+`GetTexture`/`GetMesh2`/`GetAsset` so only the needed byte prefix is
+transferred. *Test: local OpenSim — stock OpenSim sends full (not compressed)
+updates, so the compressed decode is unit-tested there; range fetch is
+live-checkable against the texture caps.*
+
+**34. Experience key-value store — `ExperienceKeyValue` datastore CAPS · 3 pts.
+(extends #27, Tier D.)** Item #27 implemented the experience metadata and
+permission CAPS but deferred the experience's server-side **key-value store** as
+out of scope; reconsidered, it is a small CAPS protocol API (not a large
+external-crate item), so it is promoted here. Will add the `ExperienceKeyValue`
+datastore verbs — read / write / delete / list keys for an experience, with the
+quota the viewer's experience cache tracks — the store an experience-keyed
+script reads and writes server-side. *Test: SL grid (or an OpenSim grid with an
+experience module); the caps are absent on stock OpenSim, as with #27.*
+
+### Out of scope (not LLUDP/CAPS protocol)
 
 Rendering/physics engines, J2C/mesh *display* (vs. decode), the in-viewer UI,
 and the Marketplace (web, not protocol) are deliberately excluded — this roadmap
-covers protocol features only.
+covers protocol features only. The same scope as #19/#23/#25/#26/#27 holds for
+the follow-ups above: J2C/JPEG-2000 pixel decode, the glTF 2.0 document decode,
+the mesh model-import (LOD/physics/cost) pipeline, the voice audio media
+transport (SIP/RTP/WebRTC), and an experience's event/asset *byte contents*
+remain out — those are large items an existing crate would own, not protocol
+wiring.
