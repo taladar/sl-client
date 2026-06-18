@@ -673,3 +673,366 @@ where
             value: value.clone(),
         })
 }
+
+// ---------------------------------------------------------------------------
+// Server (login-endpoint) direction — the inverse of the client request
+// builder and response parser above. `parse_login_request` reads what a viewer
+// sent, `build_login_response` writes what a grid returns, and `LoginServer`
+// maps a parsed request plus account/sim facts to the response to send.
+// ---------------------------------------------------------------------------
+
+/// A parsed XML-RPC `login_to_simulator` request, as a login server sees it.
+///
+/// The server-side counterpart to [`LoginRequest`]: the same fields, but the
+/// password is the already-hashed `passwd` token the client sent (the server
+/// never sees the plaintext) and the three boolean acknowledgement flags
+/// (`agree_to_tos`/`read_critical`/`extended_errors`) are surfaced so the
+/// endpoint can enforce them. Produced by [`parse_login_request`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedLoginRequest {
+    /// The avatar's first name (`first`).
+    pub first_name: String,
+    /// The avatar's last name (`last`).
+    pub last_name: String,
+    /// The hashed password as sent in `passwd` (`$1$<md5>`; see
+    /// [`password_hash`]). Compared against the stored hash, never reversed.
+    pub password_hash: String,
+    /// The start location (`start`): `"last"`, `"home"`, or `"uri:Region&x&y&z"`.
+    pub start: String,
+    /// The viewer channel name (`channel`).
+    pub channel: String,
+    /// The viewer version string (`version`).
+    pub version: String,
+    /// The platform string (`platform`).
+    pub platform: String,
+    /// The hashed MAC address (`mac`).
+    pub mac: String,
+    /// The machine/installation id (`id0`).
+    pub id0: String,
+    /// The multi-factor one-time code (`token`), empty when not answering a
+    /// challenge.
+    pub token: String,
+    /// A remembered `mfa_hash` echoed back to skip the challenge, empty when none.
+    pub mfa_hash: String,
+    /// Whether the request accepted the terms of service (`agree_to_tos`).
+    pub agree_to_tos: bool,
+    /// Whether the request acknowledged critical messages (`read_critical`).
+    pub read_critical: bool,
+    /// Whether the client asked for structured error reasons (`extended_errors`).
+    pub extended_errors: bool,
+    /// The requested response option flags (`options`, e.g. `inventory-root`).
+    pub options: Vec<String>,
+}
+
+/// Parses an XML-RPC `login_to_simulator` request body into its fields.
+///
+/// The inverse of [`build_login_request`]: it reads the request struct a viewer
+/// POSTs to the login endpoint. Missing scalar members default to empty strings
+/// (the booleans to `false`), so a partial request still parses.
+///
+/// # Errors
+///
+/// Returns a [`LoginParseError`] if the body is not well-formed XML or does not
+/// contain the request struct.
+pub fn parse_login_request(xml: &str) -> Result<ParsedLoginRequest, LoginParseError> {
+    let document = roxmltree::Document::parse(xml)?;
+    let request_struct = document
+        .descendants()
+        .find(|n| n.has_tag_name("param"))
+        .and_then(|param| param.descendants().find(|n| n.has_tag_name("struct")))
+        .ok_or(LoginParseError::NoStruct)?;
+    let members = collect_members(request_struct);
+    let options = member_value_node(request_struct, "options")
+        .map(array_strings)
+        .unwrap_or_default();
+    Ok(ParsedLoginRequest {
+        first_name: member_string(&members, "first"),
+        last_name: member_string(&members, "last"),
+        password_hash: member_string(&members, "passwd"),
+        start: member_string(&members, "start"),
+        channel: member_string(&members, "channel"),
+        version: member_string(&members, "version"),
+        platform: member_string(&members, "platform"),
+        mac: member_string(&members, "mac"),
+        id0: member_string(&members, "id0"),
+        token: member_string(&members, "token"),
+        mfa_hash: member_string(&members, "mfa_hash"),
+        agree_to_tos: parse_bool_member(&members, "agree_to_tos"),
+        read_critical: parse_bool_member(&members, "read_critical"),
+        extended_errors: parse_bool_member(&members, "extended_errors"),
+        options,
+    })
+}
+
+/// Returns the named scalar member, or the empty string if absent.
+fn member_string(members: &HashMap<String, String>, name: &str) -> String {
+    members.get(name).cloned().unwrap_or_default()
+}
+
+/// Reads a boolean struct member, accepting the XML-RPC `1`/`0` and the textual
+/// `true`/`false` forms; an absent or unrecognised member reads as `false`.
+fn parse_bool_member(members: &HashMap<String, String>, name: &str) -> bool {
+    matches!(members.get(name).map(String::as_str), Some("1" | "true"))
+}
+
+/// Iterates the string values inside an array `<value>` (`value → array → data
+/// → value → string`), used for the request `options` list.
+fn array_strings(value_node: roxmltree::Node<'_, '_>) -> Vec<String> {
+    value_node
+        .children()
+        .find(|n| n.has_tag_name("array"))
+        .and_then(|array| array.children().find(|n| n.has_tag_name("data")))
+        .into_iter()
+        .flat_map(|data| data.children().filter(|n| n.has_tag_name("value")))
+        .map(scalar_text)
+        .collect()
+}
+
+/// Builds the XML-RPC `login_to_simulator` response body for a [`LoginResponse`].
+///
+/// The inverse of [`parse_login_response`]: it emits the `<methodResponse>`
+/// struct a grid returns — `login` plus the success payload (ids, sim placement,
+/// seed cap, and any inventory/buddy/home/access/library fields that are
+/// present), or the `reason`/`message` of a failure, or an `mfa_challenge`.
+/// Optional fields are emitted only when set, so the result re-parses to an
+/// equal [`LoginResponse`].
+#[must_use]
+pub fn build_login_response(response: &LoginResponse) -> String {
+    let mut out = String::new();
+    out.push_str("<?xml version=\"1.0\"?>\n<methodResponse>\n<params><param><value><struct>\n");
+    match response {
+        LoginResponse::Success(success) => push_success_members(&mut out, success),
+        LoginResponse::MfaChallenge(challenge) => {
+            push_string_member(&mut out, "login", "false");
+            push_string_member(&mut out, "reason", "mfa_challenge");
+            push_string_member(&mut out, "message", &challenge.message);
+            if let Some(mfa_hash) = &challenge.mfa_hash {
+                push_string_member(&mut out, "mfa_hash", mfa_hash);
+            }
+        }
+        LoginResponse::Failure(failure) => {
+            push_string_member(&mut out, "login", "false");
+            push_string_member(&mut out, "reason", &failure.reason);
+            push_string_member(&mut out, "message", &failure.message);
+        }
+    }
+    out.push_str("</struct></value></param></params>\n</methodResponse>\n");
+    out
+}
+
+/// Appends the members of a successful login, in the order
+/// [`parse_login_response`] reads them.
+fn push_success_members(out: &mut String, success: &LoginSuccess) {
+    push_string_member(out, "login", "true");
+    push_string_member(out, "agent_id", &success.agent_id.to_string());
+    push_string_member(out, "session_id", &success.session_id.to_string());
+    push_string_member(
+        out,
+        "secure_session_id",
+        &success.secure_session_id.to_string(),
+    );
+    push_int_member(out, "circuit_code", i64::from(success.circuit_code));
+    push_string_member(out, "sim_ip", &success.sim_ip.to_string());
+    push_int_member(out, "sim_port", i64::from(success.sim_port));
+    push_string_member(out, "seed_capability", &success.seed_capability);
+    push_opt_string_member(out, "message", success.message.as_deref());
+    push_opt_string_member(out, "mfa_hash", success.mfa_hash.as_deref());
+    if let Some(root) = success.inventory_root {
+        push_id_array_member(out, "inventory-root", "folder_id", root);
+    }
+    push_skeleton_member(out, "inventory-skeleton", &success.inventory_skeleton);
+    push_buddy_list_member(out, &success.buddy_list);
+    if let Some(home) = &success.home {
+        push_string_member(out, "home", &home_to_string(home));
+    }
+    if let Some(look_at) = success.look_at {
+        push_string_member(out, "look_at", &vector3_to_string(look_at));
+    }
+    push_opt_string_member(out, "agent_access", success.agent_access.as_deref());
+    push_opt_string_member(out, "agent_access_max", success.agent_access_max.as_deref());
+    if let Some(groups) = success.max_agent_groups {
+        push_int_member(out, "max-agent-groups", i64::from(groups));
+    }
+    if let Some(root) = success.library_root {
+        push_id_array_member(out, "inventory-lib-root", "folder_id", root);
+    }
+    if let Some(owner) = success.library_owner {
+        push_id_array_member(out, "inventory-lib-owner", "agent_id", owner);
+    }
+    push_skeleton_member(out, "inventory-skel-lib", &success.library_skeleton);
+}
+
+/// Appends an `<i4>` struct member.
+fn push_int_member(out: &mut String, name: &str, value: i64) {
+    out.push_str("<member><name>");
+    out.push_str(name);
+    out.push_str("</name><value><i4>");
+    out.push_str(&value.to_string());
+    out.push_str("</i4></value></member>\n");
+}
+
+/// Appends a `<string>` struct member only when the value is present.
+fn push_opt_string_member(out: &mut String, name: &str, value: Option<&str>) {
+    if let Some(value) = value {
+        push_string_member(out, name, value);
+    }
+}
+
+/// Appends an array member holding a single struct with one id field, the form
+/// [`parse_array_struct_uuid`] reads (e.g. `inventory-root` → `folder_id`,
+/// `inventory-lib-owner` → `agent_id`).
+fn push_id_array_member(out: &mut String, member: &str, field: &str, id: Uuid) {
+    out.push_str("<member><name>");
+    out.push_str(member);
+    out.push_str("</name><value><array><data>\n<value><struct>");
+    push_string_member(out, field, &id.to_string());
+    out.push_str("</struct></value>\n</data></array></value></member>\n");
+}
+
+/// Appends an inventory folder skeleton member (an array of folder structs), the
+/// form [`parse_skeleton`] reads. Nothing is emitted for an empty skeleton, so
+/// it re-parses as "not provided".
+fn push_skeleton_member(out: &mut String, member: &str, folders: &[SkeletonFolder]) {
+    if folders.is_empty() {
+        return;
+    }
+    out.push_str("<member><name>");
+    out.push_str(member);
+    out.push_str("</name><value><array><data>\n");
+    for folder in folders {
+        out.push_str("<value><struct>");
+        push_string_member(out, "folder_id", &folder.folder_id.to_string());
+        push_string_member(out, "parent_id", &folder.parent_id.to_string());
+        push_string_member(out, "name", &folder.name);
+        push_int_member(out, "type_default", i64::from(folder.type_default));
+        push_int_member(out, "version", i64::from(folder.version));
+        out.push_str("</struct></value>\n");
+    }
+    out.push_str("</data></array></value></member>\n");
+}
+
+/// Appends the `buddy-list` member (an array of friend structs), the form
+/// [`parse_buddy_list`] reads. Nothing is emitted for an empty list.
+fn push_buddy_list_member(out: &mut String, buddies: &[BuddyListEntry]) {
+    if buddies.is_empty() {
+        return;
+    }
+    out.push_str("<member><name>buddy-list</name><value><array><data>\n");
+    for buddy in buddies {
+        out.push_str("<value><struct>");
+        push_string_member(out, "buddy_id", &buddy.buddy_id.to_string());
+        push_int_member(out, "buddy_rights_given", i64::from(buddy.rights_granted));
+        push_int_member(out, "buddy_rights_has", i64::from(buddy.rights_has));
+        out.push_str("</struct></value>\n");
+    }
+    out.push_str("</data></array></value></member>\n");
+}
+
+/// Formats a [`HomeLocation`] as the quasi-LLSD `home` string [`parse_home`]
+/// reads: `{'region_handle':[rX,rY], 'position':[rX,rY,rZ], 'look_at':[rX,rY,rZ]}`
+/// with the `r` real-number markers.
+fn home_to_string(home: &HomeLocation) -> String {
+    let (rx, ry) = home.region_handle;
+    let [px, py, pz] = home.position;
+    let [lx, ly, lz] = home.look_at;
+    format!(
+        "{{'region_handle':[r{rx},r{ry}], 'position':[r{px},r{py},r{pz}], 'look_at':[r{lx},r{ly},r{lz}]}}"
+    )
+}
+
+/// Formats a three-component vector as the quasi-LLSD `[rX,rY,rZ]` string
+/// [`parse_vector3`] reads (used for the top-level `look_at` field).
+fn vector3_to_string(vector: [f32; 3]) -> String {
+    let [x, y, z] = vector;
+    format!("[r{x},r{y},r{z}]")
+}
+
+/// A grid's server-side multi-factor policy for an account, used by
+/// [`LoginServer::respond`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MfaPolicy {
+    /// The one-time token the request's `token` must equal to authenticate.
+    pub expected_token: String,
+    /// The `mfa_hash` that, when echoed in the request's `mfa_hash`, skips the
+    /// challenge ("remember this device") — and that a fresh challenge hands out.
+    pub mfa_hash: String,
+    /// The human-readable challenge message returned when MFA is required.
+    pub challenge_message: String,
+}
+
+impl MfaPolicy {
+    /// Whether `request` satisfies this policy: it carries the matching one-time
+    /// token, or echoes the remembered [`mfa_hash`](Self::mfa_hash).
+    #[must_use]
+    pub fn is_satisfied_by(&self, request: &ParsedLoginRequest) -> bool {
+        (!request.token.is_empty() && request.token == self.expected_token)
+            || (!request.mfa_hash.is_empty() && request.mfa_hash == self.mfa_hash)
+    }
+}
+
+/// The stored credentials a [`LoginServer`] checks a login request against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Credential {
+    /// The stored password hash (`$1$<md5>`; see [`password_hash`]), compared to
+    /// the request's `passwd` field.
+    pub password_hash: String,
+    /// The multi-factor policy, if this account/grid requires one.
+    pub mfa: Option<MfaPolicy>,
+}
+
+impl Credential {
+    /// Whether the request's hashed password matches the stored hash.
+    #[must_use]
+    pub fn password_matches(&self, request: &ParsedLoginRequest) -> bool {
+        self.password_hash == request.password_hash
+    }
+}
+
+/// The server side of the XML-RPC `login_to_simulator` endpoint: the inverse of
+/// the viewer's [`build_login_request`]/[`parse_login_response`] pair.
+///
+/// [`LoginServer::respond`] maps a parsed [`ParsedLoginRequest`] plus the
+/// supplied account/simulator facts to the [`LoginResponse`] to return — a
+/// success, a multi-factor challenge, or a failure. Sans-I/O: the caller looks
+/// the account up, mints the session (the [`LoginSuccess`] it hands in), and
+/// performs the HTTP transport; [`LoginServer`] enforces the password/MFA checks
+/// and selects the response variant, which [`build_login_response`] then
+/// serializes.
+#[derive(Debug, Clone, Copy)]
+pub struct LoginServer;
+
+impl LoginServer {
+    /// The failure reason code returned for a bad name/password, matching
+    /// OpenSim/Second Life's `"key"`.
+    pub const BAD_CREDENTIALS_REASON: &'static str = "key";
+
+    /// Authenticates `request` against `credential` and selects the response to
+    /// send: [`LoginResponse::Success`] wrapping the supplied `success` facts
+    /// when the password matches and any MFA policy is satisfied;
+    /// [`LoginResponse::MfaChallenge`] (with the policy's remembered hash and
+    /// message) when MFA is required but unmet; or [`LoginResponse::Failure`]
+    /// (reason [`LoginServer::BAD_CREDENTIALS_REASON`]) on a password mismatch.
+    #[must_use]
+    pub fn respond(
+        request: &ParsedLoginRequest,
+        credential: &Credential,
+        success: Box<LoginSuccess>,
+    ) -> LoginResponse {
+        if !credential.password_matches(request) {
+            return LoginResponse::Failure(LoginFailure {
+                reason: Self::BAD_CREDENTIALS_REASON.to_owned(),
+                message: "Could not authenticate your avatar. Check your user name and password."
+                    .to_owned(),
+            });
+        }
+        if let Some(mfa) = &credential.mfa
+            && !mfa.is_satisfied_by(request)
+        {
+            return LoginResponse::MfaChallenge(MfaChallenge {
+                mfa_hash: Some(mfa.mfa_hash.clone()),
+                message: mfa.challenge_message.clone(),
+            });
+        }
+        LoginResponse::Success(success)
+    }
+}
