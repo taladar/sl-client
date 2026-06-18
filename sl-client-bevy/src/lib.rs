@@ -14,21 +14,28 @@ use reqwest::blocking::Client as ReqwestBlockingClient;
 use std::collections::HashMap;
 
 use sl_proto::{
-    AssetUploadResponse, CAP_FETCH_INVENTORY, CAP_GET_ASSET, CAP_GET_MESH, CAP_GET_MESH2,
-    CAP_GET_TEXTURE, CAP_GROUP_MEMBER_DATA, CAP_MODIFY_MATERIAL_PARAMS,
+    AssetUploadResponse, CAP_AGENT_EXPERIENCES, CAP_EXPERIENCE_PREFERENCES, CAP_FETCH_INVENTORY,
+    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET,
+    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH,
+    CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
+    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_MODIFY_MATERIAL_PARAMS,
     CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
-    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_RENDER_MATERIALS,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING,
-    Event as SessionEvent, Llsd, LoginResponse, REQUESTED_CAPABILITIES, Session,
-    build_event_queue_request, build_fetch_inventory_request, build_group_member_data_request,
-    build_modify_material_params_request, build_new_file_agent_inventory_request,
-    build_object_media_get_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_parcel_voice_info_request,
-    build_provision_voice_account_request, build_render_materials_request, build_seed_request,
-    build_update_avatar_appearance_request, build_update_item_asset_request,
-    build_upload_baked_texture_request, build_voice_signaling_request, j2c,
-    parse_asset_upload_response, parse_event_queue_response, parse_llsd_xml, parse_login_response,
-    parse_render_materials_response, parse_seed_response,
+    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_REGION_EXPERIENCES,
+    CAP_RENDER_MATERIALS, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
+    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Event as SessionEvent, Llsd, LoginResponse,
+    REQUESTED_CAPABILITIES, Session, build_event_queue_request, build_fetch_inventory_request,
+    build_group_member_data_request, build_modify_material_params_request,
+    build_new_file_agent_inventory_request, build_object_media_get_request,
+    build_object_media_navigate_request, build_object_media_update_request,
+    build_parcel_voice_info_request, build_provision_voice_account_request,
+    build_region_experiences_request, build_render_materials_request, build_seed_request,
+    build_set_experience_permission_request, build_update_avatar_appearance_request,
+    build_update_experience_request, build_update_item_asset_request,
+    build_upload_baked_texture_request, build_voice_signaling_request, experience_id_query,
+    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
+    j2c, parse_asset_upload_response, parse_event_queue_response, parse_experience_ids,
+    parse_experience_status, parse_llsd_xml, parse_login_response, parse_render_materials_response,
+    parse_seed_response,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -38,11 +45,12 @@ pub use sl_proto::{
     ActiveGroup, AnyMessage, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,
     ChatAudible, ChatMessage, ChatSourceType, ChatType, ClickAction, ControlFlags,
     CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData, EstateAccessDelta,
-    EstateAccessKind, EstateInfo, ExtendedMesh, FlexibleData, Friend, FriendRights,
-    GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
-    GroupRoleMember, GroupTitle, IceCandidate, ImDialog, InstantMessage, InventoryFolder,
-    InventoryItem, InventoryType, LegacyMaterial, LightData, LightImage, LindenAmount,
-    LoadUrlRequest, LoginParams, LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
+    EstateAccessKind, EstateInfo, ExperienceInfo, ExperiencePermission, ExperienceProperties,
+    ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights, GltfMaterialOverride,
+    GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole, GroupRoleMember,
+    GroupTitle, IceCandidate, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
+    InventoryType, LegacyMaterial, LightData, LightImage, LindenAmount, LoadUrlRequest,
+    LoginParams, LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
     MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
     MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction,
     MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectExtraParams,
@@ -946,6 +954,83 @@ pub enum SlCommand {
         candidates: Vec<IceCandidate>,
         /// Whether this marks the end of ICE gathering.
         completed: bool,
+    },
+    /// Fetch experience metadata over the `GetExperienceInfo` capability, batching
+    /// every id into one request. The reply arrives as
+    /// [`SlSessionEvent::ExperienceInfo`].
+    RequestExperienceInfo {
+        /// The experiences whose metadata to fetch.
+        experience_ids: Vec<Uuid>,
+    },
+    /// Search experiences by name over the `FindExperienceByName` capability. The
+    /// reply (one page) arrives as [`SlSessionEvent::ExperienceSearchResults`].
+    FindExperiences {
+        /// The search text.
+        query: String,
+        /// The zero-based result page.
+        page: i32,
+    },
+    /// Fetch the agent's per-experience preferences over the `GetExperiences`
+    /// capability. The reply arrives as [`SlSessionEvent::ExperiencePermissions`].
+    RequestExperiencePermissions,
+    /// Set (or forget) the agent's preference for one experience over the
+    /// `ExperiencePreferences` capability (`Allow`/`Block` via PUT, `Forget` via
+    /// DELETE). The updated lists arrive as [`SlSessionEvent::ExperiencePermissions`].
+    SetExperiencePermission {
+        /// The experience to set the preference for.
+        experience_id: Uuid,
+        /// The preference to apply.
+        permission: ExperiencePermission,
+    },
+    /// Fetch the experiences the agent owns over the `AgentExperiences`
+    /// capability. The reply arrives as [`SlSessionEvent::OwnedExperiences`].
+    RequestOwnedExperiences,
+    /// Fetch the experiences the agent administers over the `GetAdminExperiences`
+    /// capability. The reply arrives as [`SlSessionEvent::AdminExperiences`].
+    RequestAdminExperiences,
+    /// Fetch the experiences the agent created over the `GetCreatorExperiences`
+    /// capability. The reply arrives as [`SlSessionEvent::CreatorExperiences`].
+    RequestCreatorExperiences,
+    /// Fetch the experiences a group owns over the `GroupExperiences` capability.
+    /// The reply arrives as [`SlSessionEvent::GroupExperiences`].
+    RequestGroupExperiences {
+        /// The group to query.
+        group_id: Uuid,
+    },
+    /// Test whether the agent administers an experience over the
+    /// `IsExperienceAdmin` capability. The reply arrives as
+    /// [`SlSessionEvent::ExperienceAdminStatus`].
+    RequestExperienceAdmin {
+        /// The experience to test.
+        experience_id: Uuid,
+    },
+    /// Test whether the agent contributes to an experience over the
+    /// `IsExperienceContributor` capability. The reply arrives as
+    /// [`SlSessionEvent::ExperienceContributorStatus`].
+    RequestExperienceContributor {
+        /// The experience to test.
+        experience_id: Uuid,
+    },
+    /// Edit an experience's metadata over the `UpdateExperience` capability. The
+    /// updated experience arrives as [`SlSessionEvent::ExperienceUpdated`].
+    UpdateExperience {
+        /// The editable experience metadata to write.
+        update: ExperienceUpdate,
+    },
+    /// Read the region's experience allow/block/trust lists over the
+    /// `RegionExperiences` capability. The reply arrives as
+    /// [`SlSessionEvent::RegionExperiences`].
+    RequestRegionExperiences,
+    /// Replace the region's experience allow/block/trust lists over the
+    /// `RegionExperiences` capability (estate-gated). The updated lists arrive as
+    /// [`SlSessionEvent::RegionExperiences`].
+    SetRegionExperiences {
+        /// The experiences the region allows.
+        allowed: Vec<Uuid>,
+        /// The experiences the region blocks.
+        blocked: Vec<Uuid>,
+        /// The experiences the region trusts.
+        trusted: Vec<Uuid>,
     },
     /// Begin a clean logout.
     Logout,
@@ -1990,6 +2075,162 @@ fn advance_running(
                     });
                 }
             }
+            SlCommand::RequestExperienceInfo { experience_ids } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(base) = caps.map.get(CAP_GET_EXPERIENCE_INFO).cloned()
+                {
+                    let url = format!("{base}{}", experience_info_query(experience_ids));
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_get_caps_llsd(&url, CAP_GET_EXPERIENCE_INFO, &events_tx);
+                    });
+                }
+            }
+            SlCommand::FindExperiences { query, page } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(base) = caps.map.get(CAP_FIND_EXPERIENCE_BY_NAME).cloned()
+                {
+                    let url = format!("{base}{}", find_experience_query(query, *page));
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_get_caps_llsd(&url, CAP_FIND_EXPERIENCE_BY_NAME, &events_tx);
+                    });
+                }
+            }
+            SlCommand::RequestExperiencePermissions => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_GET_EXPERIENCES).cloned()
+                {
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_get_caps_llsd(&url, CAP_GET_EXPERIENCES, &events_tx);
+                    });
+                }
+            }
+            SlCommand::SetExperiencePermission {
+                experience_id,
+                permission,
+            } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(base) = caps.map.get(CAP_EXPERIENCE_PREFERENCES).cloned()
+                {
+                    let events_tx = caps.events_tx.clone();
+                    if permission.is_forget() {
+                        let url = format!("{base}{}", forget_experience_query(*experience_id));
+                        std::thread::spawn(move || {
+                            run_delete_caps_llsd(&url, CAP_EXPERIENCE_PREFERENCES, &events_tx);
+                        });
+                    } else {
+                        let body =
+                            build_set_experience_permission_request(*experience_id, *permission);
+                        std::thread::spawn(move || {
+                            run_put_caps_llsd(&base, body, CAP_EXPERIENCE_PREFERENCES, &events_tx);
+                        });
+                    }
+                }
+            }
+            SlCommand::RequestOwnedExperiences => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_AGENT_EXPERIENCES).cloned()
+                {
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_get_caps_llsd(&url, CAP_AGENT_EXPERIENCES, &events_tx);
+                    });
+                }
+            }
+            SlCommand::RequestAdminExperiences => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_GET_ADMIN_EXPERIENCES).cloned()
+                {
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_get_caps_llsd(&url, CAP_GET_ADMIN_EXPERIENCES, &events_tx);
+                    });
+                }
+            }
+            SlCommand::RequestCreatorExperiences => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_GET_CREATOR_EXPERIENCES).cloned()
+                {
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_get_caps_llsd(&url, CAP_GET_CREATOR_EXPERIENCES, &events_tx);
+                    });
+                }
+            }
+            SlCommand::RequestGroupExperiences { group_id } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(base) = caps.map.get(CAP_GROUP_EXPERIENCES).cloned()
+                {
+                    let url = format!("{base}{}", group_experiences_query(*group_id));
+                    let group_id = *group_id;
+                    let asset_tx = caps.asset_tx.clone();
+                    std::thread::spawn(move || {
+                        run_group_experiences(&url, group_id, &asset_tx);
+                    });
+                }
+            }
+            SlCommand::RequestExperienceAdmin { experience_id } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(base) = caps.map.get(CAP_IS_EXPERIENCE_ADMIN).cloned()
+                {
+                    let url = format!("{base}{}", experience_id_query(*experience_id));
+                    let experience_id = *experience_id;
+                    let asset_tx = caps.asset_tx.clone();
+                    std::thread::spawn(move || {
+                        run_experience_status(&url, experience_id, true, &asset_tx);
+                    });
+                }
+            }
+            SlCommand::RequestExperienceContributor { experience_id } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(base) = caps.map.get(CAP_IS_EXPERIENCE_CONTRIBUTOR).cloned()
+                {
+                    let url = format!("{base}{}", experience_id_query(*experience_id));
+                    let experience_id = *experience_id;
+                    let asset_tx = caps.asset_tx.clone();
+                    std::thread::spawn(move || {
+                        run_experience_status(&url, experience_id, false, &asset_tx);
+                    });
+                }
+            }
+            SlCommand::UpdateExperience { update } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_UPDATE_EXPERIENCE).cloned()
+                {
+                    let body = build_update_experience_request(update);
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_voice_cap(&url, body, CAP_UPDATE_EXPERIENCE, &events_tx);
+                    });
+                }
+            }
+            SlCommand::RequestRegionExperiences => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_REGION_EXPERIENCES).cloned()
+                {
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_get_caps_llsd(&url, CAP_REGION_EXPERIENCES, &events_tx);
+                    });
+                }
+            }
+            SlCommand::SetRegionExperiences {
+                allowed,
+                blocked,
+                trusted,
+            } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_REGION_EXPERIENCES).cloned()
+                {
+                    let body = build_region_experiences_request(allowed, blocked, trusted);
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_voice_cap(&url, body, CAP_REGION_EXPERIENCES, &events_tx);
+                    });
+                }
+            }
             SlCommand::Logout => session.initiate_logout(now),
         }
     }
@@ -2388,6 +2629,124 @@ fn run_voice_signaling(cap_url: &str, body: String) {
         .body(body)
         .send()
         .ok();
+}
+
+/// GETs `url` and parses the LLSD-XML reply, returning `None` on any
+/// transport/parse failure. Shared by the experience capability fetches.
+fn blocking_get_llsd(url: &str) -> Option<Llsd> {
+    let http = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+        .ok()?;
+    let response = http
+        .get(url)
+        .header("Accept", "application/llsd+xml")
+        .send()
+        .ok()?;
+    let text = response.text().ok()?;
+    parse_llsd_xml(&text).ok()
+}
+
+/// GETs an experience capability URL and forwards its LLSD reply to `caps_tx`
+/// tagged `cap`, for the session to decode in
+/// [`Session::handle_caps_event`](sl_proto::Session::handle_caps_event).
+fn run_get_caps_llsd(url: &str, cap: &'static str, caps_tx: &Sender<(String, Llsd)>) {
+    if let Some(llsd) = blocking_get_llsd(url) {
+        caps_tx.send((cap.to_owned(), llsd)).ok();
+    }
+}
+
+/// PUTs `body` to an experience capability URL (the `Allow`/`Block` preference
+/// set) and forwards the LLSD reply to `caps_tx` tagged `cap`.
+fn run_put_caps_llsd(
+    cap_url: &str,
+    body: String,
+    cap: &'static str,
+    caps_tx: &Sender<(String, Llsd)>,
+) {
+    let Ok(http) = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    else {
+        return;
+    };
+    let Ok(response) = http
+        .put(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+    else {
+        return;
+    };
+    if let Ok(text) = response.text()
+        && let Ok(llsd) = parse_llsd_xml(&text)
+    {
+        caps_tx.send((cap.to_owned(), llsd)).ok();
+    }
+}
+
+/// Sends an HTTP DELETE to an experience capability URL (the `Forget`
+/// preference) and forwards the LLSD reply to `caps_tx` tagged `cap`.
+fn run_delete_caps_llsd(cap_url: &str, cap: &'static str, caps_tx: &Sender<(String, Llsd)>) {
+    let Ok(http) = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    else {
+        return;
+    };
+    let Ok(response) = http
+        .delete(cap_url)
+        .header("Accept", "application/llsd+xml")
+        .send()
+    else {
+        return;
+    };
+    if let Ok(text) = response.text()
+        && let Ok(llsd) = parse_llsd_xml(&text)
+    {
+        caps_tx.send((cap.to_owned(), llsd)).ok();
+    }
+}
+
+/// GETs the `GroupExperiences` capability and forwards an
+/// [`SlSessionEvent::GroupExperiences`] over `asset_tx`, echoing the queried
+/// `group_id` (the cap reply does not carry it).
+fn run_group_experiences(url: &str, group_id: Uuid, asset_tx: &Sender<SessionEvent>) {
+    if let Some(llsd) = blocking_get_llsd(url) {
+        asset_tx
+            .send(SessionEvent::GroupExperiences {
+                group_id,
+                experience_ids: parse_experience_ids(&llsd),
+            })
+            .ok();
+    }
+}
+
+/// GETs an `IsExperienceAdmin` (`admin` true) or `IsExperienceContributor`
+/// (`admin` false) capability and forwards the corresponding status event over
+/// `asset_tx`, echoing the queried `experience_id`.
+fn run_experience_status(
+    url: &str,
+    experience_id: Uuid,
+    admin: bool,
+    asset_tx: &Sender<SessionEvent>,
+) {
+    let Some(llsd) = blocking_get_llsd(url) else {
+        return;
+    };
+    let status = parse_experience_status(&llsd);
+    let event = if admin {
+        SessionEvent::ExperienceAdminStatus {
+            experience_id,
+            is_admin: status,
+        }
+    } else {
+        SessionEvent::ExperienceContributorStatus {
+            experience_id,
+            is_contributor: status,
+        }
+    };
+    asset_tx.send(event).ok();
 }
 
 /// Spawns the modern `NewFileAgentInventory` two-step CAPS upload on a background

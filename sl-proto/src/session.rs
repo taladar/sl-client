@@ -163,8 +163,9 @@ use sl_wire::messages::{
 use sl_wire::{
     AnyMessage, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd, MessageId, ObjectMediaResponse,
     PacketFlags, ParcelVoiceInfo, Reader, SkeletonFolder, VoiceAccountInfo, WireError, Writer,
-    build_login_request, encode_datagram, parse_datagram, parse_gltf_material_override,
-    zero_decode,
+    build_login_request, encode_datagram, parse_datagram, parse_experience_ids,
+    parse_experience_infos, parse_experience_permissions, parse_gltf_material_override,
+    parse_region_experiences, zero_decode,
 };
 use uuid::Uuid;
 
@@ -367,6 +368,74 @@ pub const CAP_PARCEL_VOICE_INFO: &str = "ParcelVoiceInfoRequest";
 /// only (Vivox does not use it).
 pub const CAP_VOICE_SIGNALING: &str = "VoiceSignalingRequest";
 
+/// The HTTP capability for batch experience-metadata lookup (`GetExperienceInfo`):
+/// a GET of `…/id/?page_size=N&public_id=<id>&…` returning `{ experience_keys,
+/// error_ids }`. Driven by the runtimes' `RequestExperienceInfo` command; the
+/// reply is decoded by [`Session::handle_caps_event`] into [`Event::ExperienceInfo`].
+/// Experiences are a Second Life feature (stock OpenSim ships no module).
+pub const CAP_GET_EXPERIENCE_INFO: &str = "GetExperienceInfo";
+
+/// The HTTP capability for searching experiences by name (`FindExperienceByName`):
+/// a GET of `…?page=N&page_size=M&query=<text>` returning `{ experience_keys }`.
+/// Driven by `FindExperiences`; decoded into [`Event::ExperienceSearchResults`].
+pub const CAP_FIND_EXPERIENCE_BY_NAME: &str = "FindExperienceByName";
+
+/// The HTTP capability for the agent's admitted/blocked experiences
+/// (`GetExperiences`): a GET returning `{ experiences, blocked }`. Driven by
+/// `RequestExperiencePermissions`; decoded into [`Event::ExperiencePermissions`].
+pub const CAP_GET_EXPERIENCES: &str = "GetExperiences";
+
+/// The HTTP capability for the experiences the agent owns (`AgentExperiences`): a
+/// GET returning `{ experience_ids }`. Driven by `RequestOwnedExperiences`;
+/// decoded into [`Event::OwnedExperiences`].
+pub const CAP_AGENT_EXPERIENCES: &str = "AgentExperiences";
+
+/// The HTTP capability for the experiences the agent administers
+/// (`GetAdminExperiences`): a GET returning `{ experience_ids }`. Driven by
+/// `RequestAdminExperiences`; decoded into [`Event::AdminExperiences`].
+pub const CAP_GET_ADMIN_EXPERIENCES: &str = "GetAdminExperiences";
+
+/// The HTTP capability for the experiences the agent created
+/// (`GetCreatorExperiences`): a GET returning `{ experience_ids }`. Driven by
+/// `RequestCreatorExperiences`; decoded into [`Event::CreatorExperiences`].
+pub const CAP_GET_CREATOR_EXPERIENCES: &str = "GetCreatorExperiences";
+
+/// The HTTP capability for the experiences a group owns (`GroupExperiences`): a
+/// GET of `…?<group_id>` returning `{ experience_ids }`. Driven by
+/// `RequestGroupExperiences`; the runtime tags the reply with the queried group
+/// to build [`Event::GroupExperiences`].
+pub const CAP_GROUP_EXPERIENCES: &str = "GroupExperiences";
+
+/// The HTTP capability for the agent's per-experience preferences
+/// (`ExperiencePreferences`): an `Allow`/`Block` PUT of `{ "<id>": { permission }
+/// }`, or a `Forget` DELETE of `…?<id>`; both reply `{ experiences, blocked }`.
+/// Driven by `SetExperiencePermission`; decoded into [`Event::ExperiencePermissions`].
+pub const CAP_EXPERIENCE_PREFERENCES: &str = "ExperiencePreferences";
+
+/// The HTTP capability testing whether the agent is an admin of an experience
+/// (`IsExperienceAdmin`): a GET of `…?experience_id=<id>` returning `{ status }`.
+/// Driven by `RequestExperienceAdmin`; the runtime tags the reply with the queried
+/// experience to build [`Event::ExperienceAdminStatus`].
+pub const CAP_IS_EXPERIENCE_ADMIN: &str = "IsExperienceAdmin";
+
+/// The HTTP capability testing whether the agent contributes to an experience
+/// (`IsExperienceContributor`): a GET of `…?experience_id=<id>` returning `{
+/// status }`. Driven by `RequestExperienceContributor`; the runtime tags the
+/// reply with the queried experience to build [`Event::ExperienceContributorStatus`].
+pub const CAP_IS_EXPERIENCE_CONTRIBUTOR: &str = "IsExperienceContributor";
+
+/// The HTTP capability for editing an experience's metadata (`UpdateExperience`):
+/// a POST of the editable fields returning the updated experience. Driven by
+/// `UpdateExperience`; decoded into [`Event::ExperienceUpdated`].
+pub const CAP_UPDATE_EXPERIENCE: &str = "UpdateExperience";
+
+/// The HTTP capability for the region's experience allow/block/trust lists
+/// (`RegionExperiences`): a GET to read, or a POST of `{ allowed, blocked,
+/// trusted }` to update (estate-gated); both reply with the three lists. Driven by
+/// `RequestRegionExperiences` / `SetRegionExperiences`; decoded into
+/// [`Event::RegionExperiences`].
+pub const CAP_REGION_EXPERIENCES: &str = "RegionExperiences";
+
 /// The capability names the client requests from the region seed. A driver POSTs
 /// these to the seed URL to obtain the capability map, then uses `EventQueueGet`
 /// for the event-queue long-poll, [`CAP_FETCH_INVENTORY`] for inventory fetches,
@@ -398,6 +467,18 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_PROVISION_VOICE_ACCOUNT,
     CAP_PARCEL_VOICE_INFO,
     CAP_VOICE_SIGNALING,
+    CAP_GET_EXPERIENCE_INFO,
+    CAP_FIND_EXPERIENCE_BY_NAME,
+    CAP_GET_EXPERIENCES,
+    CAP_AGENT_EXPERIENCES,
+    CAP_GET_ADMIN_EXPERIENCES,
+    CAP_GET_CREATOR_EXPERIENCES,
+    CAP_GROUP_EXPERIENCES,
+    CAP_EXPERIENCE_PREFERENCES,
+    CAP_IS_EXPERIENCE_ADMIN,
+    CAP_IS_EXPERIENCE_CONTRIBUTOR,
+    CAP_UPDATE_EXPERIENCE,
+    CAP_REGION_EXPERIENCES,
 ];
 
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
@@ -3194,6 +3275,61 @@ impl Session {
                 if let Some(info) = ParcelVoiceInfo::from_llsd(body) {
                     self.events.push_back(Event::ParcelVoiceInfo(info));
                 }
+            }
+            // The reply to a `GetExperienceInfo` GET: the requested experiences'
+            // metadata (with unresolved ids folded in as `missing` placeholders).
+            CAP_GET_EXPERIENCE_INFO => {
+                self.events
+                    .push_back(Event::ExperienceInfo(parse_experience_infos(body)));
+            }
+            // The reply to a `FindExperienceByName` GET: one page of search hits.
+            CAP_FIND_EXPERIENCE_BY_NAME => {
+                self.events
+                    .push_back(Event::ExperienceSearchResults(parse_experience_infos(body)));
+            }
+            // The reply to a `GetExperiences` GET or an `ExperiencePreferences`
+            // PUT/DELETE: the agent's allowed/blocked experiences.
+            CAP_GET_EXPERIENCES | CAP_EXPERIENCE_PREFERENCES => {
+                let (allowed, blocked) = parse_experience_permissions(body);
+                self.events
+                    .push_back(Event::ExperiencePermissions { allowed, blocked });
+            }
+            // The reply to an `AgentExperiences` GET: experiences the agent owns.
+            CAP_AGENT_EXPERIENCES => {
+                self.events
+                    .push_back(Event::OwnedExperiences(parse_experience_ids(body)));
+            }
+            // The reply to a `GetAdminExperiences` GET: experiences the agent
+            // administers.
+            CAP_GET_ADMIN_EXPERIENCES => {
+                self.events
+                    .push_back(Event::AdminExperiences(parse_experience_ids(body)));
+            }
+            // The reply to a `GetCreatorExperiences` GET: experiences the agent
+            // created.
+            CAP_GET_CREATOR_EXPERIENCES => {
+                self.events
+                    .push_back(Event::CreatorExperiences(parse_experience_ids(body)));
+            }
+            // The reply to an `UpdateExperience` POST: the experience's metadata
+            // after the edit.
+            CAP_UPDATE_EXPERIENCE => {
+                self.events.push_back(Event::ExperienceUpdated(
+                    parse_experience_infos(body)
+                        .into_iter()
+                        .next()
+                        .unwrap_or_default(),
+                ));
+            }
+            // The reply to a `RegionExperiences` GET or POST: the region's
+            // allow/block/trust lists.
+            CAP_REGION_EXPERIENCES => {
+                let (allowed, blocked, trusted) = parse_region_experiences(body);
+                self.events.push_back(Event::RegionExperiences {
+                    allowed,
+                    blocked,
+                    trusted,
+                });
             }
             _ => {}
         }

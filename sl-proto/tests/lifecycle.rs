@@ -6330,4 +6330,102 @@ mod test {
         );
         Ok(())
     }
+
+    /// A `GetExperienceInfo` reply surfaces the requested experiences' metadata,
+    /// with an unresolved id folded in as a `missing` placeholder.
+    #[test]
+    fn get_experience_info_surfaces_records() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let xml = "<llsd><map><key>experience_keys</key><array><map>\
+            <key>public_id</key><uuid>11111111-1111-1111-1111-111111111111</uuid>\
+            <key>name</key><string>Treasure Hunt</string>\
+            <key>properties</key><integer>16</integer>\
+            <key>maturity</key><integer>13</integer>\
+            </map></array>\
+            <key>error_ids</key><array>\
+            <uuid>22222222-2222-2222-2222-222222222222</uuid></array></map></llsd>";
+        let body = sl_proto::parse_llsd_xml(xml)?;
+        session.handle_caps_event("GetExperienceInfo", &body, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::ExperienceInfo(_)))
+            .ok_or("expected an ExperienceInfo event")?;
+        let Event::ExperienceInfo(infos) = event else {
+            return Err("expected ExperienceInfo".into());
+        };
+        let [first, second] = infos.as_slice() else {
+            return Err("expected two experience records".into());
+        };
+        assert_eq!(first.name, "Treasure Hunt");
+        assert!(first.properties.is_grid());
+        assert!(!first.missing);
+        assert!(second.missing);
+        assert!(second.properties.is_invalid());
+        Ok(())
+    }
+
+    /// A `GetExperiences` reply surfaces the agent's allowed/blocked experiences.
+    #[test]
+    fn get_experiences_surfaces_permissions() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let xml = "<llsd><map>\
+            <key>experiences</key><array>\
+            <uuid>11111111-1111-1111-1111-111111111111</uuid></array>\
+            <key>blocked</key><array>\
+            <uuid>22222222-2222-2222-2222-222222222222</uuid></array></map></llsd>";
+        let body = sl_proto::parse_llsd_xml(xml)?;
+        session.handle_caps_event("GetExperiences", &body, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::ExperiencePermissions { .. }))
+            .ok_or("expected an ExperiencePermissions event")?;
+        let Event::ExperiencePermissions { allowed, blocked } = event else {
+            return Err("expected ExperiencePermissions".into());
+        };
+        assert_eq!(allowed.len(), 1);
+        assert_eq!(blocked.len(), 1);
+        Ok(())
+    }
+
+    /// A `RegionExperiences` reply surfaces the region's allow/block/trust lists.
+    #[test]
+    fn region_experiences_surfaces_lists() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let xml = "<llsd><map>\
+            <key>allowed</key><array>\
+            <uuid>11111111-1111-1111-1111-111111111111</uuid></array>\
+            <key>blocked</key><array></array>\
+            <key>trusted</key><array>\
+            <uuid>33333333-3333-3333-3333-333333333333</uuid></array></map></llsd>";
+        let body = sl_proto::parse_llsd_xml(xml)?;
+        session.handle_caps_event("RegionExperiences", &body, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::RegionExperiences { .. }))
+            .ok_or("expected a RegionExperiences event")?;
+        let Event::RegionExperiences {
+            allowed,
+            blocked,
+            trusted,
+        } = event
+        else {
+            return Err("expected RegionExperiences".into());
+        };
+        assert_eq!(allowed.len(), 1);
+        assert!(blocked.is_empty());
+        assert_eq!(trusted.len(), 1);
+        Ok(())
+    }
 }

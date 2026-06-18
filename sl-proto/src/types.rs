@@ -5,7 +5,8 @@ use std::net::SocketAddr;
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::{
-    LoginRequest, MediaEntry, ParcelFlags, ParcelVoiceInfo, RenderMaterialEntry, VoiceAccountInfo,
+    ExperienceInfo, LoginRequest, MediaEntry, ParcelFlags, ParcelVoiceInfo, RenderMaterialEntry,
+    VoiceAccountInfo,
 };
 use uuid::Uuid;
 
@@ -668,6 +669,75 @@ pub enum Event {
     /// `RequestParcelVoiceInfo` command): the current parcel's voice channel
     /// (its `channel_uri`, absent when the parcel has no voice).
     ParcelVoiceInfo(ParcelVoiceInfo),
+    /// The reply to a `GetExperienceInfo` capability GET (the runtime
+    /// `RequestExperienceInfo` command): the metadata for the requested
+    /// experiences, with any ids the grid could not resolve folded in as
+    /// [`missing`](ExperienceInfo::missing) placeholders.
+    ExperienceInfo(Vec<ExperienceInfo>),
+    /// The reply to a `FindExperienceByName` capability GET (the runtime
+    /// `FindExperiences` command): one page of experiences matching the query.
+    ExperienceSearchResults(Vec<ExperienceInfo>),
+    /// The reply to a `GetExperiences` capability GET or an `ExperiencePreferences`
+    /// PUT/DELETE (the runtime `RequestExperiencePermissions` /
+    /// `SetExperiencePermission` commands): the agent's per-experience preferences
+    /// — the experiences it has `allowed` and those it has `blocked`.
+    ExperiencePermissions {
+        /// The experiences the agent admits.
+        allowed: Vec<Uuid>,
+        /// The experiences the agent blocks.
+        blocked: Vec<Uuid>,
+    },
+    /// The reply to an `AgentExperiences` capability GET (the runtime
+    /// `RequestOwnedExperiences` command): the experiences the agent owns.
+    OwnedExperiences(Vec<Uuid>),
+    /// The reply to a `GetAdminExperiences` capability GET (the runtime
+    /// `RequestAdminExperiences` command): the experiences the agent administers.
+    AdminExperiences(Vec<Uuid>),
+    /// The reply to a `GetCreatorExperiences` capability GET (the runtime
+    /// `RequestCreatorExperiences` command): the experiences the agent created.
+    CreatorExperiences(Vec<Uuid>),
+    /// The reply to a `GroupExperiences` capability GET (the runtime
+    /// `RequestGroupExperiences` command): the experiences the queried
+    /// [`group_id`](Self::GroupExperiences::group_id) owns.
+    GroupExperiences {
+        /// The group the experiences belong to (the queried id, echoed by the
+        /// runtime since the cap reply does not carry it).
+        group_id: Uuid,
+        /// The experiences the group owns.
+        experience_ids: Vec<Uuid>,
+    },
+    /// The reply to an `IsExperienceAdmin` capability GET (the runtime
+    /// `RequestExperienceAdmin` command): whether the agent administers the
+    /// queried experience.
+    ExperienceAdminStatus {
+        /// The queried experience (echoed by the runtime).
+        experience_id: Uuid,
+        /// Whether the agent is an admin of it.
+        is_admin: bool,
+    },
+    /// The reply to an `IsExperienceContributor` capability GET (the runtime
+    /// `RequestExperienceContributor` command): whether the agent contributes to
+    /// the queried experience.
+    ExperienceContributorStatus {
+        /// The queried experience (echoed by the runtime).
+        experience_id: Uuid,
+        /// Whether the agent is a contributor to it.
+        is_contributor: bool,
+    },
+    /// The reply to an `UpdateExperience` capability POST (the runtime
+    /// `UpdateExperience` command): the experience's metadata after the edit.
+    ExperienceUpdated(ExperienceInfo),
+    /// The reply to a `RegionExperiences` capability GET or POST (the runtime
+    /// `RequestRegionExperiences` / `SetRegionExperiences` commands): the region's
+    /// experience allow / block / trust lists.
+    RegionExperiences {
+        /// The experiences the region allows.
+        allowed: Vec<Uuid>,
+        /// The experiences the region blocks.
+        blocked: Vec<Uuid>,
+        /// The experiences the region trusts (privileged, key-grid scope).
+        trusted: Vec<Uuid>,
+    },
     /// A decoded terrain (or wind/cloud/water) patch arrived in a `LayerData`
     /// message and was added to or refreshed in the terrain cache. For a
     /// [`Land`](TerrainLayerType::Land) patch the [`values`](TerrainPatch::values)

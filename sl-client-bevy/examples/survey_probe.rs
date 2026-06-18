@@ -203,7 +203,18 @@ fn on_events(
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportLocal
             | SlSessionEvent::VoiceAccountProvisioned(_)
-            | SlSessionEvent::ParcelVoiceInfo(_) => {}
+            | SlSessionEvent::ParcelVoiceInfo(_)
+            | SlSessionEvent::ExperienceInfo(_)
+            | SlSessionEvent::ExperienceSearchResults(_)
+            | SlSessionEvent::ExperiencePermissions { .. }
+            | SlSessionEvent::OwnedExperiences(_)
+            | SlSessionEvent::AdminExperiences(_)
+            | SlSessionEvent::CreatorExperiences(_)
+            | SlSessionEvent::GroupExperiences { .. }
+            | SlSessionEvent::ExperienceAdminStatus { .. }
+            | SlSessionEvent::ExperienceContributorStatus { .. }
+            | SlSessionEvent::ExperienceUpdated(_)
+            | SlSessionEvent::RegionExperiences { .. } => {}
             SlSessionEvent::TeleportFailed { reason } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged { region_handle, sim } => {
                 info!("region changed: handle={region_handle} sim={sim}");

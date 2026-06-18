@@ -413,7 +413,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::AssetUploadFailed { .. }
             | Event::VoiceAccountProvisioned(_)
             | Event::ParcelVoiceInfo(_)
-            | Event::RegionChanged { .. } => {}
+            | Event::RegionChanged { .. }
+            | Event::ExperienceInfo(_)
+            | Event::ExperienceSearchResults(_)
+            | Event::ExperiencePermissions { .. }
+            | Event::OwnedExperiences(_)
+            | Event::AdminExperiences(_)
+            | Event::CreatorExperiences(_)
+            | Event::GroupExperiences { .. }
+            | Event::ExperienceAdminStatus { .. }
+            | Event::ExperienceContributorStatus { .. }
+            | Event::ExperienceUpdated(_)
+            | Event::RegionExperiences { .. } => {}
         }
     }
 

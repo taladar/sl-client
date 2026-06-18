@@ -249,7 +249,18 @@ fn on_events(
             | SlSessionEvent::TeleportFailed { .. }
             | SlSessionEvent::VoiceAccountProvisioned(_)
             | SlSessionEvent::ParcelVoiceInfo(_)
-            | SlSessionEvent::RegionChanged { .. } => {}
+            | SlSessionEvent::RegionChanged { .. }
+            | SlSessionEvent::ExperienceInfo(_)
+            | SlSessionEvent::ExperienceSearchResults(_)
+            | SlSessionEvent::ExperiencePermissions { .. }
+            | SlSessionEvent::OwnedExperiences(_)
+            | SlSessionEvent::AdminExperiences(_)
+            | SlSessionEvent::CreatorExperiences(_)
+            | SlSessionEvent::GroupExperiences { .. }
+            | SlSessionEvent::ExperienceAdminStatus { .. }
+            | SlSessionEvent::ExperienceContributorStatus { .. }
+            | SlSessionEvent::ExperienceUpdated(_)
+            | SlSessionEvent::RegionExperiences { .. } => {}
         }
     }
 }

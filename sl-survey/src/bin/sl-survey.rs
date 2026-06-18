@@ -652,7 +652,18 @@ impl Survey {
             | Event::MaterialParamsResult { .. }
             | Event::VoiceAccountProvisioned(_)
             | Event::ParcelVoiceInfo(_)
-            | Event::CircuitEstablished { .. } => {}
+            | Event::CircuitEstablished { .. }
+            | Event::ExperienceInfo(_)
+            | Event::ExperienceSearchResults(_)
+            | Event::ExperiencePermissions { .. }
+            | Event::OwnedExperiences(_)
+            | Event::AdminExperiences(_)
+            | Event::CreatorExperiences(_)
+            | Event::GroupExperiences { .. }
+            | Event::ExperienceAdminStatus { .. }
+            | Event::ExperienceContributorStatus { .. }
+            | Event::ExperienceUpdated(_)
+            | Event::RegionExperiences { .. } => {}
         }
         Ok(false)
     }

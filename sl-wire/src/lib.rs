@@ -3,6 +3,7 @@
 mod control_flags;
 mod endian;
 mod error;
+mod experience;
 mod field;
 mod header;
 mod llsd;
@@ -18,6 +19,15 @@ mod zerocode;
 
 pub use control_flags::ControlFlags;
 pub use error::WireError;
+pub use experience::{
+    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate,
+    PROPERTY_DISABLED, PROPERTY_GRID, PROPERTY_INVALID, PROPERTY_PRIVATE, PROPERTY_PRIVILEGED,
+    PROPERTY_SUSPENDED, SEARCH_PAGE_SIZE, build_region_experiences_request,
+    build_set_experience_permission_request, build_update_experience_request, experience_id_query,
+    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
+    parse_experience_ids, parse_experience_infos, parse_experience_permissions,
+    parse_experience_status, parse_region_experiences,
+};
 pub use field::{Reader, Writer};
 pub use header::{PacketFlags, ParsedDatagram, encode_datagram, parse_datagram};
 pub use llsd::{

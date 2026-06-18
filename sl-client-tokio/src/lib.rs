@@ -12,20 +12,28 @@ use tokio::sync::mpsc;
 use std::collections::HashMap;
 
 use sl_proto::{
-    CAP_FETCH_INVENTORY, CAP_GET_ASSET, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE,
-    CAP_GROUP_MEMBER_DATA, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
-    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO,
-    CAP_PROVISION_VOICE_ACCOUNT, CAP_RENDER_MATERIALS, CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_AGENT_EXPERIENCES, CAP_EXPERIENCE_PREFERENCES, CAP_FETCH_INVENTORY,
+    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET,
+    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH,
+    CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
+    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_MODIFY_MATERIAL_PARAMS,
+    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
+    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_REGION_EXPERIENCES,
+    CAP_RENDER_MATERIALS, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
     CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Llsd, REQUESTED_CAPABILITIES, Session,
     build_event_queue_request, build_fetch_inventory_request, build_group_member_data_request,
     build_modify_material_params_request, build_new_file_agent_inventory_request,
     build_object_media_get_request, build_object_media_navigate_request,
     build_object_media_update_request, build_parcel_voice_info_request,
-    build_provision_voice_account_request, build_render_materials_request, build_seed_request,
-    build_update_avatar_appearance_request, build_update_item_asset_request,
-    build_upload_baked_texture_request, build_voice_signaling_request, j2c,
-    parse_asset_upload_response, parse_event_queue_response, parse_llsd_xml, parse_login_response,
-    parse_render_materials_response, parse_seed_response,
+    build_provision_voice_account_request, build_region_experiences_request,
+    build_render_materials_request, build_seed_request, build_set_experience_permission_request,
+    build_update_avatar_appearance_request, build_update_experience_request,
+    build_update_item_asset_request, build_upload_baked_texture_request,
+    build_voice_signaling_request, experience_id_query, experience_info_query,
+    find_experience_query, forget_experience_query, group_experiences_query, j2c,
+    parse_asset_upload_response, parse_event_queue_response, parse_experience_ids,
+    parse_experience_status, parse_llsd_xml, parse_login_response, parse_render_materials_response,
+    parse_seed_response,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
@@ -34,9 +42,10 @@ pub use sl_proto::{
     ActiveGroup, AnyMessage, Asset, AssetType, AvatarGroupMembership, AvatarInterests, AvatarPick,
     AvatarProperties, ChatAudible, ChatMessage, ChatSourceType, ChatType, ClickAction,
     ControlFlags, CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData,
-    EstateAccessDelta, EstateAccessKind, EstateInfo, Event, ExtendedMesh, FlexibleData, Friend,
-    FriendRights, GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice, GroupProfile,
-    GroupRole, GroupRoleMember, GroupTitle, IceCandidate, ImDialog, ImageCodec, InstantMessage,
+    EstateAccessDelta, EstateAccessKind, EstateInfo, Event, ExperienceInfo, ExperiencePermission,
+    ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights,
+    GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
+    GroupRoleMember, GroupTitle, IceCandidate, ImDialog, ImageCodec, InstantMessage,
     InventoryFolder, InventoryItem, InventoryType, LegacyMaterial, LightData, LightImage,
     LindenAmount, LoadUrlRequest, LoginParams, LoginRequest, LoginResponse, MEDIA_PERM_ALL,
     MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
@@ -935,6 +944,82 @@ pub enum Command {
         /// Whether this marks the end of ICE gathering.
         completed: bool,
     },
+    /// Fetch experience metadata over the `GetExperienceInfo` capability, batching
+    /// every id into one request. The reply arrives as [`Event::ExperienceInfo`].
+    RequestExperienceInfo {
+        /// The experiences whose metadata to fetch.
+        experience_ids: Vec<Uuid>,
+    },
+    /// Search experiences by name over the `FindExperienceByName` capability. The
+    /// reply (one page) arrives as [`Event::ExperienceSearchResults`].
+    FindExperiences {
+        /// The search text.
+        query: String,
+        /// The zero-based result page.
+        page: i32,
+    },
+    /// Fetch the agent's per-experience preferences over the `GetExperiences`
+    /// capability. The reply arrives as [`Event::ExperiencePermissions`].
+    RequestExperiencePermissions,
+    /// Set (or forget) the agent's preference for one experience over the
+    /// `ExperiencePreferences` capability (`Allow`/`Block` via PUT, `Forget` via
+    /// DELETE). The updated lists arrive as [`Event::ExperiencePermissions`].
+    SetExperiencePermission {
+        /// The experience to set the preference for.
+        experience_id: Uuid,
+        /// The preference to apply.
+        permission: ExperiencePermission,
+    },
+    /// Fetch the experiences the agent owns over the `AgentExperiences`
+    /// capability. The reply arrives as [`Event::OwnedExperiences`].
+    RequestOwnedExperiences,
+    /// Fetch the experiences the agent administers over the `GetAdminExperiences`
+    /// capability. The reply arrives as [`Event::AdminExperiences`].
+    RequestAdminExperiences,
+    /// Fetch the experiences the agent created over the `GetCreatorExperiences`
+    /// capability. The reply arrives as [`Event::CreatorExperiences`].
+    RequestCreatorExperiences,
+    /// Fetch the experiences a group owns over the `GroupExperiences` capability.
+    /// The reply arrives as [`Event::GroupExperiences`].
+    RequestGroupExperiences {
+        /// The group to query.
+        group_id: Uuid,
+    },
+    /// Test whether the agent administers an experience over the
+    /// `IsExperienceAdmin` capability. The reply arrives as
+    /// [`Event::ExperienceAdminStatus`].
+    RequestExperienceAdmin {
+        /// The experience to test.
+        experience_id: Uuid,
+    },
+    /// Test whether the agent contributes to an experience over the
+    /// `IsExperienceContributor` capability. The reply arrives as
+    /// [`Event::ExperienceContributorStatus`].
+    RequestExperienceContributor {
+        /// The experience to test.
+        experience_id: Uuid,
+    },
+    /// Edit an experience's metadata over the `UpdateExperience` capability. The
+    /// updated experience arrives as [`Event::ExperienceUpdated`].
+    UpdateExperience {
+        /// The editable experience metadata to write.
+        update: ExperienceUpdate,
+    },
+    /// Read the region's experience allow/block/trust lists over the
+    /// `RegionExperiences` capability. The reply arrives as
+    /// [`Event::RegionExperiences`].
+    RequestRegionExperiences,
+    /// Replace the region's experience allow/block/trust lists over the
+    /// `RegionExperiences` capability (estate-gated). The updated lists arrive as
+    /// [`Event::RegionExperiences`].
+    SetRegionExperiences {
+        /// The experiences the region allows.
+        allowed: Vec<Uuid>,
+        /// The experiences the region blocks.
+        blocked: Vec<Uuid>,
+        /// The experiences the region trusts.
+        trusted: Vec<Uuid>,
+    },
     /// Begin a clean logout.
     Logout,
 }
@@ -1540,6 +1625,84 @@ impl Client {
                                 tokio::spawn(post_voice_signaling(url, body, http.clone()));
                             }
                         }
+                        Some(Command::RequestExperienceInfo { experience_ids }) => {
+                            if let Some(base) = caps.get(CAP_GET_EXPERIENCE_INFO).cloned() {
+                                let url = format!("{base}{}", experience_info_query(&experience_ids));
+                                tokio::spawn(get_caps_llsd(url, CAP_GET_EXPERIENCE_INFO, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::FindExperiences { query, page }) => {
+                            if let Some(base) = caps.get(CAP_FIND_EXPERIENCE_BY_NAME).cloned() {
+                                let url = format!("{base}{}", find_experience_query(&query, page));
+                                tokio::spawn(get_caps_llsd(url, CAP_FIND_EXPERIENCE_BY_NAME, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::RequestExperiencePermissions) => {
+                            if let Some(url) = caps.get(CAP_GET_EXPERIENCES).cloned() {
+                                tokio::spawn(get_caps_llsd(url, CAP_GET_EXPERIENCES, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::SetExperiencePermission { experience_id, permission }) => {
+                            if let Some(base) = caps.get(CAP_EXPERIENCE_PREFERENCES).cloned() {
+                                if permission.is_forget() {
+                                    let url = format!("{base}{}", forget_experience_query(experience_id));
+                                    tokio::spawn(delete_caps_llsd(url, CAP_EXPERIENCE_PREFERENCES, http.clone(), caps_tx.clone()));
+                                } else {
+                                    let body = build_set_experience_permission_request(experience_id, permission);
+                                    tokio::spawn(put_caps_llsd(base, body, CAP_EXPERIENCE_PREFERENCES, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                        }
+                        Some(Command::RequestOwnedExperiences) => {
+                            if let Some(url) = caps.get(CAP_AGENT_EXPERIENCES).cloned() {
+                                tokio::spawn(get_caps_llsd(url, CAP_AGENT_EXPERIENCES, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::RequestAdminExperiences) => {
+                            if let Some(url) = caps.get(CAP_GET_ADMIN_EXPERIENCES).cloned() {
+                                tokio::spawn(get_caps_llsd(url, CAP_GET_ADMIN_EXPERIENCES, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::RequestCreatorExperiences) => {
+                            if let Some(url) = caps.get(CAP_GET_CREATOR_EXPERIENCES).cloned() {
+                                tokio::spawn(get_caps_llsd(url, CAP_GET_CREATOR_EXPERIENCES, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::RequestGroupExperiences { group_id }) => {
+                            if let Some(base) = caps.get(CAP_GROUP_EXPERIENCES).cloned() {
+                                let url = format!("{base}{}", group_experiences_query(group_id));
+                                tokio::spawn(fetch_group_experiences(url, group_id, http.clone(), events.clone()));
+                            }
+                        }
+                        Some(Command::RequestExperienceAdmin { experience_id }) => {
+                            if let Some(base) = caps.get(CAP_IS_EXPERIENCE_ADMIN).cloned() {
+                                let url = format!("{base}{}", experience_id_query(experience_id));
+                                tokio::spawn(fetch_experience_admin(url, experience_id, http.clone(), events.clone()));
+                            }
+                        }
+                        Some(Command::RequestExperienceContributor { experience_id }) => {
+                            if let Some(base) = caps.get(CAP_IS_EXPERIENCE_CONTRIBUTOR).cloned() {
+                                let url = format!("{base}{}", experience_id_query(experience_id));
+                                tokio::spawn(fetch_experience_contributor(url, experience_id, http.clone(), events.clone()));
+                            }
+                        }
+                        Some(Command::UpdateExperience { update }) => {
+                            if let Some(url) = caps.get(CAP_UPDATE_EXPERIENCE).cloned() {
+                                let body = build_update_experience_request(&update);
+                                tokio::spawn(post_voice_cap(url, body, CAP_UPDATE_EXPERIENCE, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::RequestRegionExperiences) => {
+                            if let Some(url) = caps.get(CAP_REGION_EXPERIENCES).cloned() {
+                                tokio::spawn(get_caps_llsd(url, CAP_REGION_EXPERIENCES, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::SetRegionExperiences { allowed, blocked, trusted }) => {
+                            if let Some(url) = caps.get(CAP_REGION_EXPERIENCES).cloned() {
+                                let body = build_region_experiences_request(&allowed, &blocked, &trusted);
+                                tokio::spawn(post_voice_cap(url, body, CAP_REGION_EXPERIENCES, http.clone(), caps_tx.clone()));
+                            }
+                        }
                         Some(Command::Logout) | None => {
                             self.session.initiate_logout(Instant::now());
                         }
@@ -1791,6 +1954,142 @@ async fn post_voice_signaling(cap_url: String, body: String, http: ReqwestClient
         .send()
         .await
         .ok();
+}
+
+/// GETs `url` and parses the LLSD-XML reply, returning `None` on any
+/// transport/parse failure. Shared by the experience capability fetches.
+async fn get_llsd(url: &str, http: &ReqwestClient) -> Option<Llsd> {
+    let response = http
+        .get(url)
+        .header("Accept", "application/llsd+xml")
+        .send()
+        .await
+        .ok()?;
+    let text = response.text().await.ok()?;
+    parse_llsd_xml(&text).ok()
+}
+
+/// GETs an experience capability URL and forwards its LLSD reply to `caps_tx`
+/// tagged `cap`, for the session to decode in
+/// [`Session::handle_caps_event`](sl_proto::Session::handle_caps_event) into the
+/// matching experience event.
+async fn get_caps_llsd(
+    url: String,
+    cap: &'static str,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    if let Some(llsd) = get_llsd(&url, &http).await {
+        caps_tx.send((cap.to_owned(), llsd)).await.ok();
+    }
+}
+
+/// PUTs `body` to an experience capability URL (the `Allow`/`Block` preference
+/// set) and forwards the LLSD reply to `caps_tx` tagged `cap`.
+async fn put_caps_llsd(
+    cap_url: String,
+    body: String,
+    cap: &'static str,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let Ok(response) = http
+        .put(&cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+    else {
+        return;
+    };
+    let Ok(text) = response.text().await else {
+        return;
+    };
+    if let Ok(llsd) = parse_llsd_xml(&text) {
+        caps_tx.send((cap.to_owned(), llsd)).await.ok();
+    }
+}
+
+/// Sends an HTTP DELETE to an experience capability URL (the `Forget`
+/// preference) and forwards the LLSD reply to `caps_tx` tagged `cap`.
+async fn delete_caps_llsd(
+    cap_url: String,
+    cap: &'static str,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let Ok(response) = http
+        .delete(&cap_url)
+        .header("Accept", "application/llsd+xml")
+        .send()
+        .await
+    else {
+        return;
+    };
+    let Ok(text) = response.text().await else {
+        return;
+    };
+    if let Ok(llsd) = parse_llsd_xml(&text) {
+        caps_tx.send((cap.to_owned(), llsd)).await.ok();
+    }
+}
+
+/// GETs the `GroupExperiences` capability and forwards an [`Event::GroupExperiences`]
+/// over `events`, echoing the queried `group_id` (the cap reply does not carry it).
+async fn fetch_group_experiences(
+    url: String,
+    group_id: Uuid,
+    http: ReqwestClient,
+    events: mpsc::Sender<Event>,
+) {
+    if let Some(llsd) = get_llsd(&url, &http).await {
+        events
+            .send(Event::GroupExperiences {
+                group_id,
+                experience_ids: parse_experience_ids(&llsd),
+            })
+            .await
+            .ok();
+    }
+}
+
+/// GETs the `IsExperienceAdmin` capability and forwards an
+/// [`Event::ExperienceAdminStatus`] over `events`, echoing the queried experience.
+async fn fetch_experience_admin(
+    url: String,
+    experience_id: Uuid,
+    http: ReqwestClient,
+    events: mpsc::Sender<Event>,
+) {
+    if let Some(llsd) = get_llsd(&url, &http).await {
+        events
+            .send(Event::ExperienceAdminStatus {
+                experience_id,
+                is_admin: parse_experience_status(&llsd),
+            })
+            .await
+            .ok();
+    }
+}
+
+/// GETs the `IsExperienceContributor` capability and forwards an
+/// [`Event::ExperienceContributorStatus`] over `events`, echoing the queried
+/// experience.
+async fn fetch_experience_contributor(
+    url: String,
+    experience_id: Uuid,
+    http: ReqwestClient,
+    events: mpsc::Sender<Event>,
+) {
+    if let Some(llsd) = get_llsd(&url, &http).await {
+        events
+            .send(Event::ExperienceContributorStatus {
+                experience_id,
+                is_contributor: parse_experience_status(&llsd),
+            })
+            .await
+            .ok();
+    }
 }
 
 /// POSTs the `UpdateAvatarAppearance` capability for `cof_version` (the modern
