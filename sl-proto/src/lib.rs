@@ -46,10 +46,10 @@ pub use types::{
     PrimShape, PrimShapeParams, ProductType, ProfileUpdate, ReflectionProbe, RegionChatSettings,
     RegionCombatSettings, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability,
     RenderMaterialRef, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, SculptData, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch,
-    Texture, TextureAnimation, TextureEntry, TextureFace, Throttle, TransferStatus, Transmit,
-    Wearable, WearableType, avatar_texture, grid_to_handle, group_powers, handle_to_global,
-    handle_to_grid, particle_pattern, pcode, texture_anim_mode,
+    ScriptTeleportRequest, SculptData, SoundFlags, SoundPreload, TeleportFlags, TerrainLayerType,
+    TerrainPatch, Texture, TextureAnimation, TextureEntry, TextureFace, Throttle, TransferStatus,
+    Transmit, Wearable, WearableType, avatar_texture, grid_to_handle, group_powers,
+    handle_to_global, handle_to_grid, particle_pattern, pcode, texture_anim_mode,
 };
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,

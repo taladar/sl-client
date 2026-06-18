@@ -669,6 +669,7 @@ impl Survey {
             | Event::CachedTextureResponse { .. }
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
+            | Event::TeleportFinished { .. }
             | Event::TeleportLocal
             | Event::ParcelOverlay(_)
             | Event::ParcelMediaCommand { .. }

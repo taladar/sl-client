@@ -210,6 +210,7 @@ fn on_events(
             | SlSessionEvent::EstateAccessList { .. }
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
+            | SlSessionEvent::TeleportFinished { .. }
             | SlSessionEvent::TeleportLocal
             | SlSessionEvent::VoiceAccountProvisioned(_)
             | SlSessionEvent::ParcelVoiceInfo(_)

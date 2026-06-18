@@ -464,6 +464,22 @@ pub enum Event {
         /// The failure reason.
         reason: String,
     },
+    /// A teleport completed at the protocol level (`TeleportFinish`, delivered
+    /// over UDP or the CAPS event queue): the destination region's identity,
+    /// maturity rating, and the flags describing how and why the teleport
+    /// happened arrived. The circuit handover then proceeds; once the
+    /// destination handshake completes an [`Event::RegionChanged`] follows.
+    TeleportFinished {
+        /// The destination region handle.
+        region_handle: u64,
+        /// The destination simulator's UDP address.
+        sim: SocketAddr,
+        /// The destination region's maturity / content rating (`SimAccess`).
+        maturity: Maturity,
+        /// How and why the teleport happened (`TeleportFlags`): lure, landmark,
+        /// login, telehub, home, and so on.
+        flags: TeleportFlags,
+    },
     /// A teleport handover completed: the destination region's handshake
     /// arrived and the circuit is now active there.
     RegionChanged {
@@ -2340,6 +2356,67 @@ impl Maturity {
             Some("A") => Self::Adult,
             _ => Self::Unknown,
         }
+    }
+}
+
+/// The flags describing how and why a teleport happened, carried by
+/// `TeleportFinish` (and `TeleportProgress`) as the `TeleportFlags` U32
+/// bitfield. Mirrors the reference viewer's `TELEPORT_FLAGS_*`
+/// (`indra/llmessage/llteleportflags.h`). Surfaced by
+/// [`Event::TeleportFinished`].
+///
+/// Note: OpenSim collapses the flags it sends on `TeleportFinish` to
+/// [`VIA_LOCATION`](Self::VIA_LOCATION) (plus [`IS_FLYING`](Self::IS_FLYING)),
+/// so the full set of `VIA_*` reasons is only observable on the Second Life
+/// grid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TeleportFlags(pub u32);
+
+impl TeleportFlags {
+    /// Set the agent's home to the teleport target (`SET_HOME_TO_TARGET`, a
+    /// newbie leaving the prelude).
+    pub const SET_HOME_TO_TARGET: u32 = 1 << 0;
+    /// Set the agent's last location to the target (`SET_LAST_TO_TARGET`).
+    pub const SET_LAST_TO_TARGET: u32 = 1 << 1;
+    /// Teleport via a lure / teleport offer (`VIA_LURE`).
+    pub const VIA_LURE: u32 = 1 << 2;
+    /// Teleport via a landmark (`VIA_LANDMARK`).
+    pub const VIA_LANDMARK: u32 = 1 << 3;
+    /// Teleport via an explicit location (`VIA_LOCATION`).
+    pub const VIA_LOCATION: u32 = 1 << 4;
+    /// Teleport to the agent's home (`VIA_HOME`).
+    pub const VIA_HOME: u32 = 1 << 5;
+    /// Teleport via a telehub (`VIA_TELEHUB`).
+    pub const VIA_TELEHUB: u32 = 1 << 6;
+    /// Teleport as part of logging in (`VIA_LOGIN`).
+    pub const VIA_LOGIN: u32 = 1 << 7;
+    /// Teleport via a godlike lure (`VIA_GODLIKE_LURE`).
+    pub const VIA_GODLIKE_LURE: u32 = 1 << 8;
+    /// The teleport was performed with god powers (`GODLIKE`).
+    pub const GODLIKE: u32 = 1 << 9;
+    /// An emergency ("911") teleport (`FLAGS_911`).
+    pub const NINE_ONE_ONE: u32 = 1 << 10;
+    /// Cancelling the teleport is disabled (`DISABLE_CANCEL`, used by
+    /// `llTeleportAgentHome`).
+    pub const DISABLE_CANCEL: u32 = 1 << 11;
+    /// Teleport via a region id (`VIA_REGION_ID`).
+    pub const VIA_REGION_ID: u32 = 1 << 12;
+    /// The agent was flying when the teleport started (`IS_FLYING`).
+    pub const IS_FLYING: u32 = 1 << 13;
+    /// Show the reset-home UI on arrival (`SHOW_RESET_HOME`).
+    pub const SHOW_RESET_HOME: u32 = 1 << 14;
+    /// Force a redirect to some location (`FORCE_REDIRECT`, used when kicking
+    /// someone from land).
+    pub const FORCE_REDIRECT: u32 = 1 << 15;
+    /// Teleport via global coordinates (`VIA_GLOBAL_COORDS`).
+    pub const VIA_GLOBAL_COORDS: u32 = 1 << 16;
+    /// The teleport stays within the same region (`WITHIN_REGION`).
+    pub const WITHIN_REGION: u32 = 1 << 17;
+
+    /// Whether all of the bits in `mask` are set.
+    #[must_use]
+    pub const fn contains(self, mask: u32) -> bool {
+        self.0 & mask == mask
     }
 }
 

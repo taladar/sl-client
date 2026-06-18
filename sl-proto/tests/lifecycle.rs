@@ -19,8 +19,8 @@ mod test {
         ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelMediaCommand,
         ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField,
         PickUpdate, PrimShape, ProductType, ProfileUpdate, RegionInfoUpdate, Reliability, SaleType,
-        ScriptPermissions, Session, SoundFlags, TerrainLayerType, Throttle, TransferStatus,
-        Transmit, WearableType, avatar_texture, group_powers, pcode,
+        ScriptPermissions, Session, SoundFlags, TeleportFlags, TerrainLayerType, Throttle,
+        TransferStatus, Transmit, WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -90,11 +90,11 @@ mod test {
         ScriptDialog, ScriptDialogButtonsBlock, ScriptDialogDataBlock, ScriptDialogOwnerDataBlock,
         ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock, SendXferPacket,
         SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock, SoundTrigger,
-        SoundTriggerSoundDataBlock, TeleportFailed, TeleportFailedInfoBlock, TransferInfo,
-        TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
-        UpdateCreateInventoryItem, UpdateCreateInventoryItemAgentDataBlock,
-        UpdateCreateInventoryItemInventoryDataBlock, UseCachedMuteList,
-        UseCachedMuteListAgentDataBlock,
+        SoundTriggerSoundDataBlock, TeleportFailed, TeleportFailedInfoBlock, TeleportFinish,
+        TeleportFinishInfoBlock, TransferInfo, TransferInfoTransferInfoBlock, TransferPacket,
+        TransferPacketTransferDataBlock, UpdateCreateInventoryItem,
+        UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
+        UseCachedMuteList, UseCachedMuteListAgentDataBlock,
     };
     use sl_wire::{
         AnyMessage, HomeLocation, LoginFailure, LoginRequest, LoginResponse, LoginSuccess,
@@ -959,6 +959,62 @@ mod test {
             throttle.throttle.throttles,
             throttle_payload(&Throttle::preset_300())
         );
+        Ok(())
+    }
+
+    #[test]
+    fn teleport_finish_surfaces_maturity_and_flags() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Begin a teleport so the session is awaiting a `TeleportFinish`.
+        let handle = 0x0003_E900_0003_E800;
+        session.teleport_to(handle, vec3(128.0, 128.0, 30.0), vec3(1.0, 0.0, 0.0), now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // The simulator confirms the teleport, naming the destination's maturity
+        // (Mature) and the flags describing why it happened (a lure, flying).
+        let finish = AnyMessage::TeleportFinish(TeleportFinish {
+            info: TeleportFinishInfoBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                location_id: 4,
+                sim_ip: [127, 0, 0, 1],
+                // IPPORT is big-endian on the wire; the swap mirrors the decoder.
+                sim_port: 9100u16.swap_bytes(),
+                region_handle: handle,
+                seed_capability: b"http://x/seedTP\0".to_vec(),
+                sim_access: sl_wire::sim_access::MATURE,
+                teleport_flags: TeleportFlags::VIA_LURE | TeleportFlags::IS_FLYING,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&finish, 10, true)?, now)?;
+
+        let finished = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::TeleportFinished {
+                    region_handle,
+                    sim,
+                    maturity,
+                    flags,
+                } => Some((region_handle, sim, maturity, flags)),
+                _ => None,
+            })
+            .ok_or("expected a TeleportFinished event")?;
+
+        let (region_handle, sim, maturity, flags) = finished;
+        assert_eq!(region_handle, handle);
+        assert_eq!(
+            sim,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9100)
+        );
+        assert_eq!(maturity, Maturity::Mature);
+        assert!(flags.contains(TeleportFlags::VIA_LURE));
+        assert!(flags.contains(TeleportFlags::IS_FLYING));
+        assert!(!flags.contains(TeleportFlags::VIA_LANDMARK));
         Ok(())
     }
 
@@ -6250,10 +6306,13 @@ mod test {
     fn caps_teleport_finish_xml() -> &'static str {
         // SimIP fwAAAQ== is base64 of [127, 0, 0, 1]; SimPort is a plain integer
         // (host order, no byte swap).
+        // SimAccess 21 is Mature; TeleportFlags 12 is VIA_LURE (4) | VIA_LANDMARK (8).
         "<llsd><map><key>Info</key><array><map>\
             <key>SimIP</key><binary>fwAAAQ==</binary>\
             <key>SimPort</key><integer>9001</integer>\
             <key>SeedCapability</key><string>http://127.0.0.1:9001/seed</string>\
+            <key>SimAccess</key><integer>21</integer>\
+            <key>TeleportFlags</key><integer>12</integer>\
             </map></array></map></llsd>"
     }
 
@@ -6276,6 +6335,26 @@ mod test {
         // OpenSim delivers TeleportFinish over the CAPS event queue.
         let body = sl_proto::parse_llsd_xml(caps_teleport_finish_xml())?;
         session.handle_caps_event("TeleportFinish", &body, now)?;
+
+        // The CAPS path surfaces the destination maturity and teleport flags too.
+        let finished = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::TeleportFinished {
+                    region_handle,
+                    sim,
+                    maturity,
+                    flags,
+                } => Some((region_handle, sim, maturity, flags)),
+                _ => None,
+            })
+            .ok_or("expected a TeleportFinished event from the CAPS path")?;
+        assert_eq!(finished.0, handle);
+        assert_eq!(finished.1, sim_b());
+        assert_eq!(finished.2, Maturity::Mature);
+        assert!(finished.3.contains(TeleportFlags::VIA_LURE));
+        assert!(finished.3.contains(TeleportFlags::VIA_LANDMARK));
+        assert!(!finished.3.contains(TeleportFlags::IS_FLYING));
 
         // The handover bootstraps the destination: UseCircuitCode +
         // CompleteAgentMovement to sim_b.
