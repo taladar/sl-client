@@ -188,27 +188,31 @@ use sl_wire::messages::{
 // Group support (#7): the outgoing group messages and their blocks.
 use sl_wire::messages::{
     ActivateGroup, ActivateGroupAgentDataBlock, CreateGroupRequest,
-    CreateGroupRequestAgentDataBlock, CreateGroupRequestGroupDataBlock, GroupMembersRequest,
-    GroupMembersRequestAgentDataBlock, GroupMembersRequestGroupDataBlock, GroupNoticeRequest,
-    GroupNoticeRequestAgentDataBlock, GroupNoticeRequestDataBlock, GroupNoticesListRequest,
-    GroupNoticesListRequestAgentDataBlock, GroupNoticesListRequestDataBlock, GroupProfileRequest,
-    GroupProfileRequestAgentDataBlock, GroupProfileRequestGroupDataBlock, GroupRoleDataRequest,
-    GroupRoleDataRequestAgentDataBlock, GroupRoleDataRequestGroupDataBlock,
-    GroupRoleMembersRequest, GroupRoleMembersRequestAgentDataBlock,
-    GroupRoleMembersRequestGroupDataBlock, GroupTitlesRequest, GroupTitlesRequestAgentDataBlock,
-    InviteGroupRequest, InviteGroupRequestAgentDataBlock, InviteGroupRequestGroupDataBlock,
-    InviteGroupRequestInviteDataBlock, JoinGroupRequest, JoinGroupRequestAgentDataBlock,
-    JoinGroupRequestGroupDataBlock, LeaveGroupRequest, LeaveGroupRequestAgentDataBlock,
-    LeaveGroupRequestGroupDataBlock, SetGroupAcceptNotices, SetGroupAcceptNoticesAgentDataBlock,
-    SetGroupAcceptNoticesDataBlock, SetGroupAcceptNoticesNewDataBlock, SetGroupContribution,
-    SetGroupContributionAgentDataBlock, SetGroupContributionDataBlock,
+    CreateGroupRequestAgentDataBlock, CreateGroupRequestGroupDataBlock, EjectGroupMemberRequest,
+    EjectGroupMemberRequestAgentDataBlock, EjectGroupMemberRequestEjectDataBlock,
+    EjectGroupMemberRequestGroupDataBlock, GroupMembersRequest, GroupMembersRequestAgentDataBlock,
+    GroupMembersRequestGroupDataBlock, GroupNoticeRequest, GroupNoticeRequestAgentDataBlock,
+    GroupNoticeRequestDataBlock, GroupNoticesListRequest, GroupNoticesListRequestAgentDataBlock,
+    GroupNoticesListRequestDataBlock, GroupProfileRequest, GroupProfileRequestAgentDataBlock,
+    GroupProfileRequestGroupDataBlock, GroupRoleChanges, GroupRoleChangesAgentDataBlock,
+    GroupRoleChangesRoleChangeBlock, GroupRoleDataRequest, GroupRoleDataRequestAgentDataBlock,
+    GroupRoleDataRequestGroupDataBlock, GroupRoleMembersRequest,
+    GroupRoleMembersRequestAgentDataBlock, GroupRoleMembersRequestGroupDataBlock, GroupRoleUpdate,
+    GroupRoleUpdateAgentDataBlock, GroupRoleUpdateRoleDataBlock, GroupTitlesRequest,
+    GroupTitlesRequestAgentDataBlock, InviteGroupRequest, InviteGroupRequestAgentDataBlock,
+    InviteGroupRequestGroupDataBlock, InviteGroupRequestInviteDataBlock, JoinGroupRequest,
+    JoinGroupRequestAgentDataBlock, JoinGroupRequestGroupDataBlock, LeaveGroupRequest,
+    LeaveGroupRequestAgentDataBlock, LeaveGroupRequestGroupDataBlock, SetGroupAcceptNotices,
+    SetGroupAcceptNoticesAgentDataBlock, SetGroupAcceptNoticesDataBlock,
+    SetGroupAcceptNoticesNewDataBlock, SetGroupContribution, SetGroupContributionAgentDataBlock,
+    SetGroupContributionDataBlock,
 };
 use sl_wire::{
     AnyMessage, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd, MessageId, ObjectMediaResponse,
     PacketFlags, ParcelVoiceInfo, Reader, SkeletonFolder, VoiceAccountInfo, WireError, Writer,
-    build_login_request, encode_datagram, parse_datagram, parse_experience_ids,
-    parse_experience_infos, parse_experience_permissions, parse_gltf_material_override,
-    parse_region_experiences, zero_decode,
+    build_group_notice_bucket, build_login_request, encode_datagram, parse_datagram,
+    parse_experience_ids, parse_experience_infos, parse_experience_permissions,
+    parse_gltf_material_override, parse_region_experiences, zero_decode,
 };
 use uuid::Uuid;
 
@@ -219,19 +223,19 @@ use crate::types::{
     AvatarPick, AvatarProperties, ChatAudible, ChatMessage, ChatSourceType, ChatType,
     ClassifiedInfo, ClassifiedUpdate, ClickAction, CreateGroupParams, DeRezDestination,
     DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, Event, Friend,
-    FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
-    GroupRoleMember, GroupTitle, ImDialog, ImageCodec, InstantMessage, InterestsUpdate,
-    InventoryFolder, InventoryItem, InventoryOffer, LoadUrlRequest, LoginHttpRequest, LoginParams,
-    MapItem, MapItemType, MapRegionInfo, Material, Maturity, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, Object,
-    ObjectExtraParams, ObjectFlagSettings, ObjectMotion, ObjectProperties, ObjectTransform,
-    ParcelAccessEntry, ParcelAccessScope, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickInfo, PickUpdate,
-    PlayingAnimation, PrimShape, ProductType, ProfileUpdate, RegionIdentity, RegionInfoUpdate,
-    RegionLimits, Reliability, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture,
-    Throttle, TransferStatus, Transmit, Wearable, WearableType, avatar_texture, grid_to_handle,
-    handle_to_grid,
+    FriendRights, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupProfile,
+    GroupRole, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, GroupTitle, ImDialog,
+    ImageCodec, InstantMessage, InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer,
+    LoadUrlRequest, LoginHttpRequest, LoginParams, MapItem, MapItemType, MapRegionInfo, Material,
+    Maturity, MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
+    NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMotion,
+    ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelInfo,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
+    PermissionField, PickInfo, PickUpdate, PlayingAnimation, PrimShape, ProductType, ProfileUpdate,
+    RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, SaleType, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload,
+    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, Wearable,
+    WearableType, avatar_texture, grid_to_handle, handle_to_grid,
 };
 use crate::{appearance, types::AvatarAppearance, types::AvatarAttachment};
 
@@ -1756,6 +1760,85 @@ impl Circuit {
                 group_id,
                 contribution,
             },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GroupRoleUpdate` reliably, carrying one `RoleData` block per
+    /// role create/update/delete in `roles`.
+    fn send_group_role_update(
+        &mut self,
+        group_id: Uuid,
+        roles: &[GroupRoleEdit],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GroupRoleUpdate(GroupRoleUpdate {
+            agent_data: GroupRoleUpdateAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                group_id,
+            },
+            role_data: roles
+                .iter()
+                .map(|role| GroupRoleUpdateRoleDataBlock {
+                    role_id: role.role_id,
+                    name: with_nul(&role.name),
+                    description: with_nul(&role.description),
+                    title: with_nul(&role.title),
+                    powers: role.powers,
+                    update_type: role.update_type.to_u8(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GroupRoleChanges` reliably, carrying one `RoleChange` block per
+    /// member↔role add/remove in `changes`.
+    fn send_group_role_changes(
+        &mut self,
+        group_id: Uuid,
+        changes: &[GroupRoleMemberChange],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GroupRoleChanges(GroupRoleChanges {
+            agent_data: GroupRoleChangesAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                group_id,
+            },
+            role_change: changes
+                .iter()
+                .map(|change| GroupRoleChangesRoleChangeBlock {
+                    role_id: change.role_id,
+                    member_id: change.member_id,
+                    change: change.change.to_u32(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `EjectGroupMemberRequest` reliably, ejecting each agent in
+    /// `member_ids` from `group_id`.
+    fn send_eject_group_members(
+        &mut self,
+        group_id: Uuid,
+        member_ids: &[Uuid],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::EjectGroupMemberRequest(EjectGroupMemberRequest {
+            agent_data: EjectGroupMemberRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            group_data: EjectGroupMemberRequestGroupDataBlock { group_id },
+            eject_data: member_ids
+                .iter()
+                .map(|ejectee_id| EjectGroupMemberRequestEjectDataBlock {
+                    ejectee_id: *ejectee_id,
+                })
+                .collect(),
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -5509,6 +5592,12 @@ impl Session {
                     group_id: drop.agent_data.group_id,
                 });
             }
+            AnyMessage::EjectGroupMemberReply(reply) => {
+                self.events.push_back(Event::EjectGroupMemberResult {
+                    group_id: reply.group_data.group_id,
+                    success: reply.eject_data.success,
+                });
+            }
             AnyMessage::OnlineNotification(notification) => {
                 let ids = notification
                     .agent_block
@@ -6534,6 +6623,122 @@ impl Session {
         let from_name = self.agent_name();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_session_im(group_id, ImDialog::SessionLeave, "", &from_name, now)?;
+        Ok(())
+    }
+
+    // -- Group management edits (#31) --------------------------------------
+
+    /// Creates, updates, or deletes group roles (`GroupRoleUpdate`), one
+    /// [`GroupRoleEdit`] per role. Each edit's [`update_type`] selects whether
+    /// the role is created, has its data/powers updated, or is deleted; the
+    /// `powers` bitfield is built from the [`group_powers`](crate::group_powers)
+    /// constants. The agent needs the matching role-management powers (e.g.
+    /// [`group_powers::ROLE_CREATE`](crate::group_powers::ROLE_CREATE)). There is
+    /// no direct reply; re-request the roles with
+    /// [`Session::request_group_roles`] to observe the change.
+    ///
+    /// [`update_type`]: GroupRoleEdit::update_type
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn update_group_roles(
+        &mut self,
+        group_id: Uuid,
+        roles: &[GroupRoleEdit],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_role_update(group_id, roles, now)?;
+        Ok(())
+    }
+
+    /// Adds members to or removes members from group roles (`GroupRoleChanges`),
+    /// one [`GroupRoleMemberChange`] per assignment. The agent needs the
+    /// matching powers (e.g.
+    /// [`group_powers::ROLE_ASSIGN_MEMBER`](crate::group_powers::ROLE_ASSIGN_MEMBER)).
+    /// There is no direct reply; re-request the role members with
+    /// [`Session::request_group_role_members`] to observe the change.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn change_group_role_members(
+        &mut self,
+        group_id: Uuid,
+        changes: &[GroupRoleMemberChange],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_role_changes(group_id, changes, now)?;
+        Ok(())
+    }
+
+    /// Ejects each agent in `member_ids` from `group_id`
+    /// (`EjectGroupMemberRequest`). The agent needs
+    /// [`group_powers::MEMBER_EJECT`](crate::group_powers::MEMBER_EJECT). The
+    /// result arrives as [`Event::EjectGroupMemberResult`]. An agent cannot eject
+    /// itself (use [`Session::leave_group`] instead).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn eject_group_members(
+        &mut self,
+        group_id: Uuid,
+        member_ids: &[Uuid],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_eject_group_members(group_id, member_ids, now)?;
+        Ok(())
+    }
+
+    /// Posts a group notice (`ImprovedInstantMessage`, `IM_GROUP_NOTICE`). The
+    /// `subject` and `message` are joined with a `|` on the wire, as the viewer
+    /// sends. An optional [`GroupNoticeAttachment`] attaches an inventory item
+    /// (which must be copy+transfer); it is packed into the binary bucket as the
+    /// viewer's `<? LLSD/XML ?>` `{ item_id, owner_id }` stream, with the empty
+    /// bucket sent when there is no attachment. The agent needs
+    /// [`group_powers::NOTICES_SEND`](crate::group_powers::NOTICES_SEND). The
+    /// grid relays the notice to every member who accepts notices.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn send_group_notice(
+        &mut self,
+        group_id: Uuid,
+        subject: &str,
+        message: &str,
+        attachment: Option<GroupNoticeAttachment>,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        // The viewer joins subject and message with a single '|'.
+        let subject_and_message = format!("{subject}|{message}");
+        // An attachment is the LLSD bucket; otherwise the one-byte empty bucket.
+        let binary_bucket = attachment.map_or_else(
+            || vec![0_u8],
+            |attachment| build_group_notice_bucket(attachment.item_id, attachment.owner_id),
+        );
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_im(
+            &OutgoingIm {
+                to_agent_id: group_id,
+                from_group: false,
+                dialog: ImDialog::GroupNotice,
+                id: Uuid::nil(),
+                message: &subject_and_message,
+                from_name: &from_name,
+                binary_bucket,
+            },
+            now,
+        )?;
         Ok(())
     }
 

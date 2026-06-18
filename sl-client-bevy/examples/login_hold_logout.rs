@@ -216,6 +216,7 @@ fn on_events(
             | SlSessionEvent::JoinGroupResult { .. }
             | SlSessionEvent::LeaveGroupResult { .. }
             | SlSessionEvent::DroppedFromGroup { .. }
+            | SlSessionEvent::EjectGroupMemberResult { .. }
             | SlSessionEvent::AvatarInterests(_)
             | SlSessionEvent::AvatarGroups { .. }
             | SlSessionEvent::AvatarNotes { .. }

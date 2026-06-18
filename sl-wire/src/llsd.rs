@@ -302,6 +302,24 @@ pub fn build_group_member_data_request(group_id: Uuid) -> String {
     format!("<llsd><map><key>group_id</key><uuid>{group_id}</uuid></map></llsd>")
 }
 
+/// Builds the binary bucket for a group notice (`IM_GROUP_NOTICE`) that carries
+/// an inventory attachment. The bucket is the viewer's serialized LLSD stream:
+/// the 15-byte `<? LLSD/XML ?>\n` header followed by an LLSD-XML map of the
+/// attached `item_id` and `owner_id`. OpenSim's group module strips exactly the
+/// 15-byte header before parsing the map, so the header must be present
+/// verbatim. A notice without an attachment instead sends the one-byte empty
+/// bucket (`[0]`).
+#[must_use]
+pub fn build_group_notice_bucket(item_id: Uuid, owner_id: Uuid) -> Vec<u8> {
+    let body = format!(
+        "<? LLSD/XML ?>\n<llsd><map>\
+         <key>item_id</key><uuid>{item_id}</uuid>\
+         <key>owner_id</key><uuid>{owner_id}</uuid>\
+         </map></llsd>"
+    );
+    body.into_bytes()
+}
+
 /// Builds the LLSD-XML body for an `UpdateAvatarAppearance` capability request
 /// (the modern Second Life server-side bake): a map carrying the Current Outfit
 /// Folder version the grid should bake. The grid replies with `{ success,

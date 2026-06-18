@@ -58,12 +58,12 @@ epic. **Test** says whether the local `opensim.service` is enough.
 | 28 ✅ | Complete the IM surface | 8 | Offer-handler / IM bot (full) | Local OpenSim (2 accts) |
 | 29 ✅ | Profile & pick/classified editing | 5 | Profile editor | Local OpenSim (profiles) |
 | 30 ✅ | Inventory mutation & AIS3 | 8 | Inventory manager, product bot | Local OpenSim |
-| 31 | Group management edits | 5 | Group admin bot | Local OpenSim (Groups V2) |
+| 31 ✅ | Group management edits | 5 | Group admin bot | Local OpenSim (Groups V2) |
 | 32 | Camera & interest control | 3 | Look-aware roaming bot | Local OpenSim |
 | 33 | World-stream decode & LOD fetch | 5 | *(faithfulness for 16/19)* | Local OpenSim |
 | 34 | Experience key-value store | 3 | Experience datastore client | **SL grid only** |
 
-**Items #31–#34 are not yet built** (#28, #29 and #30 are now done). They are
+**Items #32–#34 are not yet built** (#28–#31 are now done). They are
 the **deferred follow-ups** that items #1–#27 knowingly left for later (the
 "Deferred:" / "follow-up" / "waits on #…" / "unit-tested only" notes in those
 entries), now promoted to first-class roadmap items so the gap analysis stays
@@ -1180,15 +1180,45 @@ unit-tested only (as with #20/#26/#27's SL-only caps); the UDP mutation, cache,
 and `CreateInventoryCategory` paths are the OpenSim-testable ones.
 *Test: local OpenSim.*
 
-**31. Group management edits — group-notice creation, `GroupRoleUpdate`,
-`GroupRoleChanges`, `EjectGroupMemberRequest` · 5 pts. (extends #7, Tier A.)**
-Item #7 implemented membership, roster/role/profile reads, group IM sessions,
-and the join/leave/invite/contribution/accept-notices writes, but deferred the
-admin edits. Will add: group-**notice creation** (with an inventory attachment
-in the binary bucket), role create/delete (`GroupRoleUpdate`), member-role
-assignment edits (`GroupRoleChanges`), and ejecting members
-(`EjectGroupMemberRequest`) — completing the roster-admin surface for an
-owner/officer bot. *Test: local OpenSim with the Groups V2 module.*
+**31. Group management edits (done) ✅ — group-notice creation,
+`GroupRoleUpdate`, `GroupRoleChanges`, `EjectGroupMemberRequest` · 5 pts.
+(extends #7, Tier A.)** Item #7 implemented membership, roster/role/profile
+reads, group IM sessions, and the join/leave/invite/contribution/accept-notices
+writes, but deferred the admin edits. This completes the roster-admin surface
+for an owner/officer bot. Implemented: **role create/update/delete** —
+`Session::update_group_roles` (`GroupRoleUpdate`, one `RoleData` block per edit)
+taking a `Vec<GroupRoleEdit>` (`role_id`, name/description/title, a `powers`
+u64, and a `GroupRoleUpdateType` selecting
+`Create`/`UpdateData`/`UpdatePowers`/`UpdateAll`/`Delete`, the wire bytes
+matching the viewer's `LLRoleChangeType` and OpenSim's
+`OpenMetaverse.GroupRoleUpdate`); **member-role assignment** —
+`change_group_role_members` (`GroupRoleChanges`, `Vec<GroupRoleMemberChange>`
+with a `GroupRoleChange` `Add`=0/`Remove`=1); **ejecting members** —
+`eject_group_members` (`EjectGroupMemberRequest`), with the
+`EjectGroupMemberReply` surfaced as `Event::EjectGroupMemberResult`; and
+**group-notice creation** — `send_group_notice` (`ImprovedInstantMessage`,
+`IM_GROUP_NOTICE`, subject and body joined with `|`, `from_group` false) taking
+an optional `GroupNoticeAttachment` (`item_id`, `owner_id`), packed into the
+binary bucket as the viewer's serialized LLSD stream — the 15-byte
+`<? LLSD/XML ?>\n` header (which OpenSim's group module strips verbatim) plus an
+LLSD-XML `{ item_id, owner_id }` map, with the one-byte empty bucket sent when
+there is no attachment (new sl-wire `build_group_notice_bucket`). New value
+types `GroupRoleEdit`, `GroupRoleUpdateType`, `GroupRoleMemberChange`,
+`GroupRoleChange`, `GroupNoticeAttachment`, and a `group_powers` constants
+module (the `GP_*` power bits). All wired as `Command`/`SlCommand`
+(`UpdateGroupRoles`, `ChangeGroupRoleMembers`, `EjectGroupMembers`,
+`SendGroupNotice`) through both runtimes. Covered by one sl-wire test (the
+notice bucket's LLSD header) and five `lifecycle.rs` tests (the three send
+encodings, the eject reply → event, and the notice IM with/without attachment).
+*Live-verified against the local OpenSim (Groups V2) via the new `group_admin`
+tokio example: created a group, posted a notice (relayed back to the agent as a
+member — `"sl-client #31|group management edits work"`), then ran a full role
+create → list → update → delete cycle (the new role appeared with powers
+`0x4000_0000_0002` = `MEMBER_INVITE | NOTICES_SEND`, its `UpdateAll` changed the
+title to "Senior Tester" and powers to `NOTICES_SEND`, and the delete dropped it
+from the 4-role list back to 3). The role-member assignment and eject paths need
+a second group member (`SL_MEMBER`), so they are unit-tested only. Test: local
+OpenSim with the Groups V2 module (MariaDB backend).*
 
 **32. Camera & interest control — real `AgentUpdate` camera fields · 3 pts.
 (extends #3; was blocked on #16, Tier C.)** Item #3 noted the camera "stays at
