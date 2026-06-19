@@ -117,6 +117,7 @@ impl Plugin for SlClientPlugin {
         app.add_event::<SlEvent>()
             .add_event::<SlDiagnostic>()
             .add_event::<SlCapabilities>()
+            .add_event::<SlIdentity>()
             .add_event::<SlMfaChallenge>()
             .add_event::<SlCommand>()
             .insert_resource(SlConfig {
@@ -146,6 +147,24 @@ pub struct SlDiagnostic(pub Diagnostic);
 /// symbolizing `$cap:Name` placeholders in a REPL or diagnostic consumer.
 #[derive(Event, Debug, Clone)]
 pub struct SlCapabilities(pub HashMap<String, String>);
+
+/// The session's login-derived identity facts, emitted as a Bevy event once the
+/// circuit comes up. These (agent id, session id, circuit code, and the seed
+/// capability URL) are not carried in the [`SlEvent`] stream, so a REPL or
+/// diagnostic consumer reads them here to seed `$self`/`$session`/`$circuit`/
+/// `$cap:Seed` placeholders. Mirrors the tokio client's `agent_id`/`session_id`/
+/// `circuit_code`/`seed_capability` accessors for runtime parity.
+#[derive(Event, Debug, Clone)]
+pub struct SlIdentity {
+    /// The logged-in avatar's agent id.
+    pub agent_id: Option<Uuid>,
+    /// The session id assigned by the grid.
+    pub session_id: Option<Uuid>,
+    /// The circuit code assigned by the grid.
+    pub circuit_code: Option<u32>,
+    /// The seed capability URL, if the login response carried one.
+    pub seed_capability: Option<String>,
+}
 
 /// Emitted when the grid requires a multi-factor one-time code. To answer it,
 /// re-add the plugin with login parameters prepared via
@@ -273,6 +292,7 @@ fn drive(
     mut events: EventWriter<SlEvent>,
     mut diagnostics: EventWriter<SlDiagnostic>,
     mut capabilities: EventWriter<SlCapabilities>,
+    mut identity: EventWriter<SlIdentity>,
     mut mfa: EventWriter<SlMfaChallenge>,
     mut commands: EventReader<SlCommand>,
 ) {
@@ -280,7 +300,7 @@ fn drive(
     let inner = std::mem::replace(&mut state.inner, SlInner::Done);
     state.inner = match inner {
         SlInner::LoggingIn { session, rx } => {
-            advance_login(session, rx, now, &mut events, &mut mfa)
+            advance_login(session, rx, now, &mut events, &mut identity, &mut mfa)
         }
         SlInner::Running {
             session,
@@ -309,6 +329,7 @@ fn advance_login(
     rx: Receiver<Result<String, String>>,
     now: Instant,
     events: &mut EventWriter<SlEvent>,
+    identity: &mut EventWriter<SlIdentity>,
     mfa: &mut EventWriter<SlMfaChallenge>,
 ) -> SlInner {
     match rx.try_recv() {
@@ -323,6 +344,12 @@ fn advance_login(
                 }
                 match bind_socket() {
                     Ok(socket) => {
+                        identity.write(SlIdentity {
+                            agent_id: session.agent_id(),
+                            session_id: session.session_id(),
+                            circuit_code: session.circuit_code(),
+                            seed_capability: session.seed_capability().map(str::to_owned),
+                        });
                         let caps = start_caps(&session);
                         SlInner::Running {
                             session,
