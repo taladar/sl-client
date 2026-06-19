@@ -32,6 +32,9 @@ const SEEN_CAPACITY: usize = 4096;
 const MAX_ACKS_PER_PACKET: usize = 255;
 /// How long to wait for a `TeleportFinish` before declaring the teleport failed.
 const TELEPORT_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long to wait for an `AvatarSitResponse` before giving up on a sit
+/// request and surfacing a [`Diagnostic::ExpectedReplyMissing`](crate::Diagnostic::ExpectedReplyMissing).
+const SIT_TIMEOUT: Duration = Duration::from_secs(15);
 /// The default draw distance (metres) advertised in keep-alive `AgentUpdate`s,
 /// large enough that the simulator enables the neighbouring regions.
 const DEFAULT_DRAW_DISTANCE: f32 = 256.0;
@@ -364,6 +367,12 @@ struct UnackedPacket {
     sent_at: Instant,
     /// How many times the packet has been sent so far.
     attempts: u32,
+    /// The message name, used to label a [`Diagnostic::ExpectedReplyMissing`]
+    /// when the packet exhausts its retransmission budget (`None` for an
+    /// unrecognised id).
+    ///
+    /// [`Diagnostic::ExpectedReplyMissing`]: crate::Diagnostic::ExpectedReplyMissing
+    name: Option<&'static str>,
 }
 
 /// A bounded set of recently seen inbound reliable sequence numbers, used to
@@ -405,6 +414,9 @@ struct Timers {
     logout: Option<Instant>,
     /// When to give up waiting for a `TeleportFinish`, once teleporting.
     teleport: Option<Instant>,
+    /// When to give up waiting for an `AvatarSitResponse`, once a sit was
+    /// requested.
+    sit: Option<Instant>,
 }
 
 /// An in-flight legacy UDP texture download (`RequestImage` →

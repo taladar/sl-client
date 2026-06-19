@@ -24,8 +24,9 @@ use super::{
     CAP_LIBRARY_API_V3, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, Circuit, DEFAULT_DRAW_DISTANCE,
-    HandoverPending, IDENTITY_ROTATION, LOGOUT_TIMEOUT, MAX_INLINE_ASSET, Session, SessionState,
-    TELEPORT_FLAGS_VIA_LURE, TELEPORT_TIMEOUT, TextureDownload, deadline, merge_deadline,
+    HandoverPending, IDENTITY_ROTATION, LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, Session,
+    SessionState, TELEPORT_FLAGS_VIA_LURE, TELEPORT_TIMEOUT, TextureDownload, deadline,
+    merge_deadline,
 };
 use crate::error::Error;
 use crate::terrain;
@@ -1340,6 +1341,7 @@ impl Session {
                 if self.sit_requested {
                     self.sit_requested = false;
                     if let Some(circuit) = self.circuit.as_mut() {
+                        circuit.timers.sit = None;
                         circuit.send_agent_sit(now)?;
                     }
                     let transform = &response.sit_transform;
@@ -2091,6 +2093,11 @@ impl Session {
             .and_then(|c| c.timers.logout)
             .is_some_and(|d| now >= d)
         {
+            tracing::warn!("logout timed out waiting for LogoutReply");
+            self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+                request: "Logout".to_owned(),
+                sequence: None,
+            });
             self.state = SessionState::Closed;
             self.events.push_back(Event::LoggedOut);
             return Ok(());
@@ -2118,10 +2125,40 @@ impl Session {
         let exhausted = self
             .circuit
             .as_mut()
-            .is_some_and(|c| c.process_resends(now));
-        if exhausted {
+            .map_or_else(Vec::new, |c| c.process_resends(now));
+        if !exhausted.is_empty() {
+            for (sequence, name) in exhausted {
+                tracing::warn!(
+                    sequence,
+                    message = name.unwrap_or("?"),
+                    "reliable packet exhausted its retransmission budget"
+                );
+                self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+                    request: name.map_or_else(|| "reliable packet".to_owned(), str::to_owned),
+                    sequence: Some(sequence),
+                });
+            }
             self.close(DisconnectReason::HandshakeFailed);
             return Ok(());
+        }
+
+        // A sit request whose `AvatarSitResponse` never arrived: surface the
+        // missing reply (the session keeps running — sit is best-effort).
+        if self
+            .circuit
+            .as_ref()
+            .and_then(|c| c.timers.sit)
+            .is_some_and(|d| now >= d)
+        {
+            self.sit_requested = false;
+            if let Some(circuit) = self.circuit.as_mut() {
+                circuit.timers.sit = None;
+            }
+            tracing::warn!("sit timed out waiting for AvatarSitResponse");
+            self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+                request: "Sit".to_owned(),
+                sequence: None,
+            });
         }
 
         if self
@@ -2158,12 +2195,15 @@ impl Session {
         let head = self.head_rotation.clone();
         let camera = self.camera.clone();
         let mut dead = Vec::new();
+        let mut child_exhausted = Vec::new();
         for (addr, child) in &mut self.children {
             if now >= child.timers.inactivity {
                 dead.push(*addr);
                 continue;
             }
-            child.process_resends(now);
+            // A child circuit never fails the session, but a reliable packet
+            // exhausting its budget there is still worth surfacing.
+            child_exhausted.extend(child.process_resends(now));
             if child.timers.ack_flush.is_some_and(|d| now >= d) {
                 child.flush_acks(now)?;
             }
@@ -2171,6 +2211,17 @@ impl Session {
                 child.send_agent_update(controls, body.clone(), head.clone(), &camera, now)?;
                 child.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
             }
+        }
+        for (sequence, name) in child_exhausted {
+            tracing::warn!(
+                sequence,
+                message = name.unwrap_or("?"),
+                "reliable packet on a child circuit exhausted its retransmission budget"
+            );
+            self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+                request: name.map_or_else(|| "reliable packet".to_owned(), str::to_owned),
+                sequence: Some(sequence),
+            });
         }
         for addr in dead {
             self.children.remove(&addr);
@@ -2477,6 +2528,7 @@ impl Session {
     pub fn sit_on(&mut self, target: Uuid, offset: Vector, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_agent_request_sit(target, offset, now)?;
+        circuit.timers.sit = Some(deadline(now, SIT_TIMEOUT));
         self.sit_requested = true;
         Ok(())
     }
@@ -5588,6 +5640,7 @@ impl Session {
         merge_deadline(&mut earliest, circuit.timers.agent_update);
         merge_deadline(&mut earliest, circuit.timers.logout);
         merge_deadline(&mut earliest, circuit.timers.teleport);
+        merge_deadline(&mut earliest, circuit.timers.sit);
         merge_deadline(&mut earliest, circuit.next_resend_deadline());
         for child in self.children.values() {
             merge_deadline(&mut earliest, Some(child.timers.inactivity));
