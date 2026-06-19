@@ -1926,12 +1926,12 @@ in-memory loopback against the existing client `Session`.
 | 55 | `ExtraParams` encoder (all subtypes) | 3 | `decode_extra_params` | Unit round-trip |
 | 56 | `ParticleSystem` + `TextureAnim` encoders | 3 | `decode_particle_system` / `decode_texture_anim` | Unit round-trip |
 | 57 | Object-motion encoders (full / terse / compressed) | 5 | `full_object_motion` / `terse_update` / `compressed_object` | Unit round-trip |
-| 58 | Terrain `LayerData` compressor | 8 | `decode_layer` | Unit (heightmap round-trip) |
+| 58 ✅ | Terrain `LayerData` compressor | 8 | `decode_layer` | Unit (heightmap round-trip) |
 | 59 ✅ | CAPS event serializers + `EventQueueGet` response | 5 | the `*_from_llsd` parsers / `build_event_queue_request` | Unit round-trip |
 | 60 ✅ | `SimSession` skeleton (sans-I/O simulator session) | 8 | client `Session` | Loopback vs. `Session` |
 | 61 ✅ | AIS3 inventory service pairing | 5 | the AIS3 URL/body builders | Unit round-trip |
-| 62 | Experiences service pairing | 3 | `parse_experience_*` | Unit round-trip |
-| 63 | Voice service pairing | 3 | `*::from_llsd` / voice request builders | Unit round-trip |
+| 62 ✅ | Experiences service pairing | 3 | `parse_experience_*` | Unit round-trip |
+| 63 ✅ | Voice service pairing | 3 | `*::from_llsd` / voice request builders | Unit round-trip |
 | 64 | Materials service pairing | 3 | `parse_render_materials_response` / `parse_gltf_material_override` | Unit round-trip |
 | 65 | Map service pairing (`MapBlockReply` / `MapItemReply`) | 2 | the map request encoders | Unit round-trip |
 
@@ -2241,13 +2241,31 @@ rest to `experience_keys` via a new `ExperienceInfo::to_llsd`),
 re-exported from `sl-wire` and `sl-proto`, same private-intra-doc-link gotcha
 as #54–#61. *Test: 10 unit round-trips in `experience.rs` (URL/body builders →
 parsers, response builders re-parsed via `parse_llsd_xml`); stock OpenSim ships
-no experience module so this is unit-tested only.* **Next = #63/F12.**
+no experience module so this is unit-tested only.*
 
-**63. Voice service pairing (extends #26, Tier D).** `sl-wire/src/voice.rs` has
-the request builders + `VoiceAccountInfo`/`ParcelVoiceInfo::from_llsd`. Add
-`parse_provision_voice_account_request`, `parse_voice_signaling_request`,
-and the account/parcel-info response builders. (The voice *audio* transport
-stays out of scope — this is only the signalling-endpoint pairing.)
+**63. Voice service pairing (extends #26, Tier D). ✅ Done.**
+`sl-wire/src/voice.rs` had the request builders +
+`VoiceAccountInfo`/`ParcelVoiceInfo::from_llsd`; this added the server-side
+inverse. **Request parsers** (inverse of the body builders, via #52's
+`parse_llsd_xml`, lenient field-by-field defaults):
+`parse_provision_voice_account_request` → `VoiceProvisionRequest` (the populated
+fields select Vivox / WebRTC / logout, mirroring the builder; the nested `jsep`
+offer SDP is read regardless of the always-`"offer"` type), and
+`parse_voice_signaling_request` → `(viewer_session, Vec<IceCandidate>,
+completed)` (the WebRTC ICE trickle — the `candidates` array *or* the
+end-of-gathering `candidate.completed` flag, never both). **Response builders**
+(server output, built on #52's `Llsd::to_llsd_xml`, inverse of the `from_llsd`
+decoders): `VoiceAccountInfo::to_llsd` +
+`build_provision_voice_account_response`
+(only populated fields emitted — Vivox SIP keys, or the WebRTC session id +
+nested JSEP `answer`) and `ParcelVoiceInfo::to_llsd` +
+`build_parcel_voice_info_response` (the no-voice case emits an empty
+`channel_uri`, the grid's drop-out-of-spatial-voice form). All re-exported from
+`sl-wire` AND `sl-proto`. The voice *audio* transport stays out of scope — this
+is only the signalling-endpoint pairing. *Test: 4 new unit round-trips in
+`voice.rs` (provision request both backends + logout, signaling request both
+forms, provision reply Vivox + WebRTC, parcel-voice reply incl. no-voice),
+alongside the 5 existing client-side tests.* **Next = #64/F13.**
 
 **64. Materials service pairing (extends #25, Tier C).**
 `sl-wire/src/material.rs` is partially bidirectional. Add the gaps:

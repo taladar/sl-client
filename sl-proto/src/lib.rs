@@ -95,7 +95,8 @@ pub use sl_wire::{
     build_group_member_data_request, build_login_request, build_modify_material_params_request,
     build_new_file_agent_inventory_request, build_object_media_get_request,
     build_object_media_navigate_request, build_object_media_update_request,
-    build_parcel_voice_info_request, build_provision_voice_account_request,
+    build_parcel_voice_info_request, build_parcel_voice_info_response,
+    build_provision_voice_account_request, build_provision_voice_account_response,
     build_region_experiences_request, build_region_experiences_response,
     build_render_materials_request, build_seed_request, build_set_experience_permission_request,
     build_update_avatar_appearance_request, build_update_experience_request,
@@ -110,9 +111,10 @@ pub use sl_wire::{
     parse_experience_info_query, parse_experience_infos, parse_experience_permissions,
     parse_experience_status, parse_find_experience_query, parse_forget_experience_query,
     parse_gltf_material_override, parse_group_experiences_query, parse_llsd_xml,
-    parse_login_response, parse_region_experiences, parse_region_experiences_request,
-    parse_render_materials_response, parse_seed_response, parse_set_experience_permission_request,
-    parse_update_experience_request, sim_access,
+    parse_login_response, parse_provision_voice_account_request, parse_region_experiences,
+    parse_region_experiences_request, parse_render_materials_response, parse_seed_response,
+    parse_set_experience_permission_request, parse_update_experience_request,
+    parse_voice_signaling_request, sim_access,
 };
 // Re-export the vector and rotation types used by the teleport and movement APIs.
 pub use sl_types::lsl::{Rotation, Vector};
