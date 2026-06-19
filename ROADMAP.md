@@ -1929,7 +1929,7 @@ in-memory loopback against the existing client `Session`.
 | 58 | Terrain `LayerData` compressor | 8 | `decode_layer` | Unit (heightmap round-trip) |
 | 59 ✅ | CAPS event serializers + `EventQueueGet` response | 5 | the `*_from_llsd` parsers / `build_event_queue_request` | Unit round-trip |
 | 60 ✅ | `SimSession` skeleton (sans-I/O simulator session) | 8 | client `Session` | Loopback vs. `Session` |
-| 61 | AIS3 inventory service pairing | 5 | the AIS3 URL/body builders | Unit round-trip |
+| 61 ✅ | AIS3 inventory service pairing | 5 | the AIS3 URL/body builders | Unit round-trip |
 | 62 | Experiences service pairing | 3 | `parse_experience_*` | Unit round-trip |
 | 63 | Voice service pairing | 3 | `*::from_llsd` / voice request builders | Unit round-trip |
 | 64 | Materials service pairing | 3 | `parse_render_materials_response` / `parse_gltf_material_override` | Unit round-trip |
@@ -2193,13 +2193,31 @@ throttle, ping both directions, clean logout, reliable-ack flush, inactivity
 timeout, CAPS EventQueue round-trip, and `ClientMessage` fall-through). Same
 doc-link gotcha as #54–#59 (the public `SimSession` docs avoid intra-doc links
 to the private `SimState`/the module `self`, else `cargo doc
--D private_intra_doc_links` fails). **Next = #61/F10.**
+-D private_intra_doc_links` fails). **Next = #61/F10 (done — see #61).**
 
 ### Grid / CAPS service roles
 
-**61. AIS3 inventory service pairing (extends #30, Tier A).**
-`sl-wire/src/inventory.rs` has the AIS3 URL + request-body builders. Add the
-`parse_ais_*` request-body parsers and the AIS3 response builders.
+**61. AIS3 inventory service pairing (extends #30, Tier A). ✅ Done.**
+`sl-wire/src/inventory.rs` had the AIS3 URL + request-body builders. Added the
+inverse server-side surface: URL-suffix parsers
+(`parse_ais_create_category_url`,
+`parse_ais_category_url`, `parse_ais_category_children_url`,
+`parse_ais_category_children_fetch_url`, `parse_ais_item_url` — distinguishing
+the `/children` sub-path and re-clamping `depth`), request-body parsers
+(`parse_ais_create_category_body` → `AisCategoryCreate`,
+`parse_ais_rename_category_body`, `parse_ais_move_body`,
+`parse_ais_update_item_body` → `AisItemUpdate`,
+`parse_create_inventory_category_request` → `CreateInventoryCategoryRequest`),
+and the response builders (`build_ais_update_response` over a new `AisUpdate`
+change-set struct mirroring `AISUpdate::parseMeta`'s `_`-prefixed wire keys —
+`_created_categories`/`_created_items`/`_updated_categories`/
+`_updated_category_versions`/`_categories_removed`/`_category_items_removed`/
+`_removed_items`/`_broken_links_removed`, omitting empty change-sets; and
+`build_create_inventory_category_response`). Built on #52's `Llsd::to_llsd_xml`
+and `parse_llsd_xml`, re-exported through `sl-proto`, same
+private-intra-doc-link
+gotcha as #54–#60. *Test: unit round-trip (URL/body builders → parsers, and
+response builders re-parsed via `parse_llsd_xml`).* **Next = #62/F11.**
 
 **62. Experiences service pairing (extends #27, Tier D).**
 `sl-wire/src/experience.rs` has query builders + the `parse_experience_*`

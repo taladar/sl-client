@@ -32,10 +32,16 @@ pub use experience::{
 pub use field::{Reader, Writer};
 pub use header::{PacketFlags, ParsedDatagram, encode_datagram, parse_datagram};
 pub use inventory::{
-    AIS_MAX_FOLDER_DEPTH, ais_category_children_fetch_url, ais_category_children_url,
+    AIS_MAX_FOLDER_DEPTH, AisCategoryCreate, AisItemUpdate, AisUpdate,
+    CreateInventoryCategoryRequest, ais_category_children_fetch_url, ais_category_children_url,
     ais_category_url, ais_create_category_url, ais_item_url, build_ais_create_category_body,
     build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request,
+    build_ais_update_response, build_create_inventory_category_request,
+    build_create_inventory_category_response, parse_ais_category_children_fetch_url,
+    parse_ais_category_children_url, parse_ais_category_url, parse_ais_create_category_body,
+    parse_ais_create_category_url, parse_ais_item_url, parse_ais_move_body,
+    parse_ais_rename_category_body, parse_ais_update_item_body,
+    parse_create_inventory_category_request,
 };
 pub use llsd::{
     AssetUploadResponse, EventQueueEvent, EventQueueResponse, Llsd, MEDIA_PERM_ALL,
