@@ -175,6 +175,7 @@ impl Circuit {
                 agent_update: None,
                 logout: None,
                 teleport: None,
+                sit: None,
             },
         }
     }
@@ -195,6 +196,7 @@ impl Circuit {
             agent_update: None,
             logout: None,
             teleport: None,
+            sit: None,
         };
     }
 
@@ -231,6 +233,7 @@ impl Circuit {
                     datagram: datagram.clone(),
                     sent_at: now,
                     attempts: 1,
+                    name: sl_wire::message_name(message.id()),
                 },
             );
         }
@@ -3130,16 +3133,19 @@ impl Circuit {
 
     /// Retransmits unacknowledged reliable packets whose timeout has elapsed.
     ///
-    /// Returns `true` if any packet has exhausted its retransmission budget.
-    pub(crate) fn process_resends(&mut self, now: Instant) -> bool {
-        let mut exhausted = false;
+    /// Returns the `(sequence, message name)` of every packet that has now
+    /// exhausted its retransmission budget; such packets are dropped from the
+    /// unacked set (so they are reported only once and stop driving the resend
+    /// deadline). An empty result means nothing exhausted this tick.
+    pub(crate) fn process_resends(&mut self, now: Instant) -> Vec<(u32, Option<&'static str>)> {
+        let mut exhausted = Vec::new();
         let mut to_send = Vec::new();
-        for packet in self.unacked.values_mut() {
+        for (sequence, packet) in &mut self.unacked {
             if now < deadline(packet.sent_at, RESEND_TIMEOUT) {
                 continue;
             }
             if packet.attempts >= MAX_RESEND_ATTEMPTS {
-                exhausted = true;
+                exhausted.push((*sequence, packet.name));
                 continue;
             }
             let mut datagram = packet.datagram.clone();
@@ -3151,6 +3157,9 @@ impl Circuit {
             to_send.push(datagram);
         }
         self.out.extend(to_send);
+        for (sequence, _) in &exhausted {
+            self.unacked.remove(sequence);
+        }
         exhausted
     }
 

@@ -358,6 +358,63 @@ mod test {
     }
 
     #[test]
+    fn exhausted_resend_reports_expected_reply_missing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = new_session();
+        session.set_diagnostics(true);
+        session.handle_login_response(success(), now)?;
+        let _initial = drain(&mut session)?; // UseCircuitCode + CompleteAgentMovement
+
+        // Nothing is ever acked: drive the resend clock until the reliable
+        // handshake packets exhaust their retransmission budget and the session
+        // gives up on the circuit.
+        for _ in 0..16 {
+            if session.is_closed() {
+                break;
+            }
+            let next = session.poll_timeout().ok_or("a timeout is scheduled")?;
+            session.handle_timeout(next);
+        }
+        assert!(
+            session.is_closed(),
+            "the session should give up after exhausting its resends"
+        );
+
+        let diagnostics = drain_diagnostics(&mut session);
+        assert!(
+            diagnostics.iter().any(|d| matches!(
+                d,
+                Diagnostic::ExpectedReplyMissing { request, sequence: Some(_) }
+                    if request == "UseCircuitCode"
+            )),
+            "expected an ExpectedReplyMissing for UseCircuitCode, got {diagnostics:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn exhausted_resend_is_silent_without_diagnostics() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = new_session();
+        session.handle_login_response(success(), now)?;
+        let _initial = drain(&mut session)?;
+
+        for _ in 0..16 {
+            if session.is_closed() {
+                break;
+            }
+            let next = session.poll_timeout().ok_or("a timeout is scheduled")?;
+            session.handle_timeout(next);
+        }
+        assert!(session.is_closed());
+        assert!(
+            drain_diagnostics(&mut session).is_empty(),
+            "diagnostics must stay off the normal path when not enabled"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn flushes_owed_acknowledgements() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
@@ -415,6 +472,36 @@ mod test {
             drain_events(&mut session).last(),
             Some(Event::LoggedOut)
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn logout_timeout_reports_expected_reply_missing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        session.set_diagnostics(true);
+        drain(&mut session)?;
+
+        session.initiate_logout(now);
+        drain(&mut session)?;
+
+        // No LogoutReply ever arrives; the logout timer fires and the session
+        // closes anyway, surfacing the missing reply.
+        session.handle_timeout(after(now, 6_000)?);
+        assert!(session.is_closed());
+        assert!(matches!(
+            drain_events(&mut session).last(),
+            Some(Event::LoggedOut)
+        ));
+
+        let diagnostics = drain_diagnostics(&mut session);
+        assert!(
+            diagnostics.iter().any(|d| matches!(
+                d,
+                Diagnostic::ExpectedReplyMissing { request, sequence: None } if request == "Logout"
+            )),
+            "expected an ExpectedReplyMissing for Logout, got {diagnostics:?}"
+        );
         Ok(())
     }
 
@@ -1132,6 +1219,42 @@ mod test {
                 .iter()
                 .any(|e| matches!(e, Event::SitResult { .. })),
             "no SitResult should be emitted"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sit_timeout_reports_expected_reply_missing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        session.set_diagnostics(true);
+        drain(&mut session)?;
+
+        session.sit_on(uuid::Uuid::from_u128(0x5117), vec3(0.0, 0.0, 0.0), now)?;
+        drain(&mut session)?;
+
+        // No AvatarSitResponse arrives; the sit timer fires. Sit is best-effort,
+        // so the session stays up and no SitResult is produced — only a
+        // diagnostic.
+        session.handle_timeout(after(now, 16_000)?);
+        assert!(
+            !session.is_closed(),
+            "a sit timeout must not close the session"
+        );
+        assert!(
+            !drain_events(&mut session)
+                .iter()
+                .any(|e| matches!(e, Event::SitResult { .. })),
+            "no SitResult should be emitted on a sit timeout"
+        );
+
+        let diagnostics = drain_diagnostics(&mut session);
+        assert!(
+            diagnostics.iter().any(|d| matches!(
+                d,
+                Diagnostic::ExpectedReplyMissing { request, sequence: None } if request == "Sit"
+            )),
+            "expected an ExpectedReplyMissing for Sit, got {diagnostics:?}"
         );
         Ok(())
     }
