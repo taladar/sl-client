@@ -1,6 +1,12 @@
 .*~
 .*.swp
 .env
+# sl-repl credentials hold a real password — never commit them. The
+# checked-in template is sl-repl/testdata/credentials.example.toml.
+credentials.toml
+# default log files the REPL binaries write into the working dir
+sl-repl-tokio.log
+sl-repl-bevy.log
 tarpaulin-report.html
 tarpaulin-report.json
 /target
