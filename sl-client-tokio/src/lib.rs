@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+use std::collections::HashMap;
 use std::io::Error as IoError;
 use std::time::{Duration, Instant};
 
@@ -137,6 +138,11 @@ pub struct Client {
     socket: UdpSocket,
     /// A reusable receive buffer.
     recv_buf: Vec<u8>,
+    /// An optional channel over which [`Client::run`] reports the region's
+    /// capability map (name → URL) each time it is fetched (at startup and on
+    /// every region change), for a driver that wants to resolve/symbolize
+    /// `$cap:Name` placeholders.
+    caps_reporter: Option<mpsc::Sender<HashMap<String, String>>>,
 }
 
 impl Client {
@@ -178,6 +184,7 @@ impl Client {
             session,
             socket,
             recv_buf: vec![0u8; RECV_BUFFER_SIZE],
+            caps_reporter: None,
         })
     }
 
@@ -189,6 +196,30 @@ impl Client {
         self.session.agent_id()
     }
 
+    /// The session id, available once logged in. Useful for symbolizing the
+    /// session in a REPL/diagnostic log before [`Client::run`] consumes the
+    /// client.
+    #[must_use]
+    pub const fn session_id(&self) -> Option<Uuid> {
+        self.session.session_id()
+    }
+
+    /// The circuit code, available once logged in. Useful for symbolizing the
+    /// circuit in a REPL/diagnostic log before [`Client::run`] consumes the
+    /// client.
+    #[must_use]
+    pub const fn circuit_code(&self) -> Option<u32> {
+        self.session.circuit_code()
+    }
+
+    /// The region's seed capability URL, available once logged in. A REPL driver
+    /// can seed its placeholder context with it before [`Client::run`] consumes
+    /// the client.
+    #[must_use]
+    pub fn seed_capability(&self) -> Option<&str> {
+        self.session.seed_capability()
+    }
+
     /// Enables or disables protocol diagnostics for the session. Off by default;
     /// while enabled, the session records [`Diagnostic`]s for anomalies it would
     /// otherwise silently drop (decode failures, unhandled messages, unknown
@@ -196,6 +227,16 @@ impl Client {
     /// over its `diagnostics` channel. Call before [`Client::run`].
     pub fn set_diagnostics(&mut self, enabled: bool) {
         self.session.set_diagnostics(enabled);
+    }
+
+    /// Sets the channel over which [`Client::run`] reports the region's
+    /// capability map (name → URL). The map is sent once after the seed
+    /// capability is fetched at startup and again after every region change.
+    /// Call before [`Client::run`]; a slow or dropped receiver never blocks the
+    /// session (the send is best-effort). Useful for resolving/symbolizing
+    /// `$cap:Name` placeholders in a REPL or diagnostic driver.
+    pub fn set_caps_reporter(&mut self, reporter: mpsc::Sender<HashMap<String, String>>) {
+        self.caps_reporter = Some(reporter);
     }
 
     /// Runs the session until it is disconnected or logged out, forwarding
@@ -220,6 +261,9 @@ impl Client {
             .build()?;
         let (caps_tx, mut caps_rx) = mpsc::channel::<(String, Llsd)>(64);
         let mut caps = fetch_capabilities(self.session.seed_capability(), &http).await;
+        if let Some(reporter) = &self.caps_reporter {
+            reporter.send(caps.clone()).await.ok();
+        }
         let mut caps_task = spawn_event_queue(&caps, &http, &caps_tx);
 
         loop {
@@ -256,6 +300,9 @@ impl Client {
                 if region_changed {
                     abort_task(&mut caps_task);
                     caps = fetch_capabilities(self.session.seed_capability(), &http).await;
+                    if let Some(reporter) = &self.caps_reporter {
+                        reporter.send(caps.clone()).await.ok();
+                    }
                     caps_task = spawn_event_queue(&caps, &http, &caps_tx);
                 }
                 if terminal {

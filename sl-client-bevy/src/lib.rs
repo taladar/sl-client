@@ -116,6 +116,7 @@ impl Plugin for SlClientPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<SlEvent>()
             .add_event::<SlDiagnostic>()
+            .add_event::<SlCapabilities>()
             .add_event::<SlMfaChallenge>()
             .add_event::<SlCommand>()
             .insert_resource(SlConfig {
@@ -138,6 +139,13 @@ pub struct SlEvent(pub SessionEvent);
 /// separate from [`SlEvent`].
 #[derive(Event, Debug, Clone)]
 pub struct SlDiagnostic(pub Diagnostic);
+
+/// The region's capability map (cap name → URL), emitted as a Bevy event each
+/// time the driver discovers it: once after the seed capability is fetched at
+/// startup and again after every region change. Useful for resolving or
+/// symbolizing `$cap:Name` placeholders in a REPL or diagnostic consumer.
+#[derive(Event, Debug, Clone)]
+pub struct SlCapabilities(pub HashMap<String, String>);
 
 /// Emitted when the grid requires a multi-factor one-time code. To answer it,
 /// re-add the plugin with login parameters prepared via
@@ -264,6 +272,7 @@ fn drive(
     mut state: ResMut<SlState>,
     mut events: EventWriter<SlEvent>,
     mut diagnostics: EventWriter<SlDiagnostic>,
+    mut capabilities: EventWriter<SlCapabilities>,
     mut mfa: EventWriter<SlMfaChallenge>,
     mut commands: EventReader<SlCommand>,
 ) {
@@ -286,6 +295,7 @@ fn drive(
             now,
             &mut events,
             &mut diagnostics,
+            &mut capabilities,
             &mut commands,
         ),
         SlInner::Done => SlInner::Done,
@@ -376,6 +386,7 @@ fn advance_running(
     now: Instant,
     events: &mut EventWriter<SlEvent>,
     diagnostics: &mut EventWriter<SlDiagnostic>,
+    capabilities: &mut EventWriter<SlCapabilities>,
     commands: &mut EventReader<SlCommand>,
 ) -> SlInner {
     // Drain all available inbound datagrams.
@@ -395,6 +406,7 @@ fn advance_running(
     // payloads (event-queue events plus inventory responses).
     if let Some(caps) = caps.as_mut() {
         while let Ok(map) = caps.map_rx.try_recv() {
+            capabilities.write(SlCapabilities(map.clone()));
             caps.map = map;
         }
         while let Ok((message, body)) = caps.events_rx.try_recv() {

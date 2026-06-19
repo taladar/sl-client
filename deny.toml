@@ -112,6 +112,11 @@ exceptions = [
   # Each entry is the crate and version constraint, and its specific allow
   # list
   # { allow = ["Zlib"], crate = "adler32" },
+  # `error-code` and `clipboard-win` (Windows-only transitive dependencies of
+  # rustyline's clipboard support, via sl-repl-tokio) are BSL-1.0, a permissive
+  # Boost license; allow it only for those crates rather than project-wide.
+  { allow = ["BSL-1.0"], crate = "error-code" },
+  { allow = ["BSL-1.0"], crate = "clipboard-win" },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,

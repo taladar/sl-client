@@ -4014,6 +4014,28 @@ impl Session {
         self.circuit.as_ref().map(|circuit| circuit.agent_id)
     }
 
+    /// The session id, once login has established the circuit. The companion to
+    /// [`Session::agent_id`] for a driver that wants to symbolize the session in
+    /// its logs.
+    #[must_use]
+    pub const fn session_id(&self) -> Option<Uuid> {
+        match self.circuit.as_ref() {
+            Some(circuit) => Some(circuit.session_id),
+            None => None,
+        }
+    }
+
+    /// The circuit code, once login has established the circuit. The companion to
+    /// [`Session::agent_id`] for a driver that wants to symbolize the circuit in
+    /// its logs.
+    #[must_use]
+    pub const fn circuit_code(&self) -> Option<u32> {
+        match self.circuit.as_ref() {
+            Some(circuit) => Some(circuit.code),
+            None => None,
+        }
+    }
+
     /// The agent's inventory root ("My Inventory") folder id, from the login
     /// response, or `None` if the grid did not provide it. Use it as the starting
     /// point for [`Session::request_folder_contents`].
