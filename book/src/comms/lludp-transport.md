@@ -19,7 +19,7 @@ Every LLUDP datagram looks like this:
 │ 1 B  │      4 B          │ len 1 B │  (len bytes)  │ (maybe zero-  │(opt.) │
 │      │                   │         │               │   coded)      │       │
 └──────┴───────────────────┴─────────┴───────────────┴───────────────┴───────┘
-        └──────────── 6-byte prelude ─────────────┘
+└────────── 6-byte prelude ──────────┘
 ```
 
 - **Flags** — one byte of control bits (below).
