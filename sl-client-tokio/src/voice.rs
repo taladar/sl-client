@@ -4,6 +4,8 @@ use reqwest::Client as ReqwestClient;
 use sl_proto::{Llsd, parse_llsd_xml};
 use tokio::sync::mpsc;
 
+use crate::caps::report_caps_failure;
+
 /// POSTs a voice-signalling capability (`ProvisionVoiceAccountRequest` or
 /// `ParcelVoiceInfoRequest`) carrying the prepared `body`, forwarding the LLSD
 /// reply back over `caps_tx` tagged with `cap` so the session decodes it into
@@ -24,13 +26,18 @@ pub(crate) async fn post_voice_cap(
         .send()
         .await
     else {
+        report_caps_failure(&caps_tx, cap).await;
         return;
     };
     let Ok(text) = response.text().await else {
+        report_caps_failure(&caps_tx, cap).await;
         return;
     };
-    if let Ok(llsd) = parse_llsd_xml(&text) {
-        caps_tx.send((cap.to_owned(), llsd)).await.ok();
+    match parse_llsd_xml(&text) {
+        Ok(llsd) => {
+            caps_tx.send((cap.to_owned(), llsd)).await.ok();
+        }
+        Err(_error) => report_caps_failure(&caps_tx, cap).await,
     }
 }
 

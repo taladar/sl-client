@@ -1,6 +1,7 @@
 //! Blocking LLSD/byte HTTP capability helpers (GET/PUT/PATCH/DELETE).
 
 use crate::EVENT_QUEUE_TIMEOUT;
+use crate::caps::report_caps_failure;
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use reqwest::blocking::Client as ReqwestBlockingClient;
@@ -26,8 +27,11 @@ pub(crate) fn blocking_get_llsd(url: &str) -> Option<Llsd> {
 /// tagged `cap`, for the session to decode in
 /// [`Session::handle_caps_event`](sl_proto::Session::handle_caps_event).
 pub(crate) fn run_get_caps_llsd(url: &str, cap: &'static str, caps_tx: &Sender<(String, Llsd)>) {
-    if let Some(llsd) = blocking_get_llsd(url) {
-        caps_tx.send((cap.to_owned(), llsd)).ok();
+    match blocking_get_llsd(url) {
+        Some(llsd) => {
+            caps_tx.send((cap.to_owned(), llsd)).ok();
+        }
+        None => report_caps_failure(caps_tx, cap),
     }
 }
 
@@ -43,6 +47,7 @@ pub(crate) fn run_put_caps_llsd(
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
+        report_caps_failure(caps_tx, cap);
         return;
     };
     let Ok(response) = http
@@ -51,12 +56,18 @@ pub(crate) fn run_put_caps_llsd(
         .body(body)
         .send()
     else {
+        report_caps_failure(caps_tx, cap);
         return;
     };
-    if let Ok(text) = response.text()
-        && let Ok(llsd) = parse_llsd_xml(&text)
-    {
-        caps_tx.send((cap.to_owned(), llsd)).ok();
+    let Ok(text) = response.text() else {
+        report_caps_failure(caps_tx, cap);
+        return;
+    };
+    match parse_llsd_xml(&text) {
+        Ok(llsd) => {
+            caps_tx.send((cap.to_owned(), llsd)).ok();
+        }
+        Err(_error) => report_caps_failure(caps_tx, cap),
     }
 }
 
@@ -72,6 +83,7 @@ pub(crate) fn run_patch_caps_llsd(
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
+        report_caps_failure(caps_tx, cap);
         return;
     };
     let Ok(response) = http
@@ -80,12 +92,18 @@ pub(crate) fn run_patch_caps_llsd(
         .body(body)
         .send()
     else {
+        report_caps_failure(caps_tx, cap);
         return;
     };
-    if let Ok(text) = response.text()
-        && let Ok(llsd) = parse_llsd_xml(&text)
-    {
-        caps_tx.send((cap.to_owned(), llsd)).ok();
+    let Ok(text) = response.text() else {
+        report_caps_failure(caps_tx, cap);
+        return;
+    };
+    match parse_llsd_xml(&text) {
+        Ok(llsd) => {
+            caps_tx.send((cap.to_owned(), llsd)).ok();
+        }
+        Err(_error) => report_caps_failure(caps_tx, cap),
     }
 }
 
@@ -100,6 +118,7 @@ pub(crate) fn run_delete_caps_llsd(
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
+        report_caps_failure(caps_tx, cap);
         return;
     };
     let Ok(response) = http
@@ -107,12 +126,18 @@ pub(crate) fn run_delete_caps_llsd(
         .header("Accept", "application/llsd+xml")
         .send()
     else {
+        report_caps_failure(caps_tx, cap);
         return;
     };
-    if let Ok(text) = response.text()
-        && let Ok(llsd) = parse_llsd_xml(&text)
-    {
-        caps_tx.send((cap.to_owned(), llsd)).ok();
+    let Ok(text) = response.text() else {
+        report_caps_failure(caps_tx, cap);
+        return;
+    };
+    match parse_llsd_xml(&text) {
+        Ok(llsd) => {
+            caps_tx.send((cap.to_owned(), llsd)).ok();
+        }
+        Err(_error) => report_caps_failure(caps_tx, cap),
     }
 }
 

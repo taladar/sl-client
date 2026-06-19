@@ -51,7 +51,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("starting Bevy session");
     let _exit = App::new()
         .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_millis(10))))
-        .add_plugins(SlClientPlugin { params })
+        .add_plugins(SlClientPlugin {
+            params,
+            diagnostics: false,
+        })
         .insert_resource(HoldState {
             hold: Duration::from_secs(hold_secs),
             logout_at: None,

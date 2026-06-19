@@ -77,7 +77,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
     let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-    let run = tokio::spawn(client.run(event_tx, command_rx));
+    let (diag_tx, _diag_rx) = mpsc::channel(16);
+    let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
 
     let mut land = LandStats::default();
     let mut other_layers = 0u32;

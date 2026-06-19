@@ -39,8 +39,8 @@ pub use sl_proto::{
     ActiveGroup, AnyMessage, Asset, AssetType, AvatarClassified, AvatarGroupMembership,
     AvatarInterests, AvatarPick, AvatarProperties, Camera, ChatAudible, ChatMessage,
     ChatSourceType, ChatType, ClassifiedInfo, ClassifiedUpdate, ClickAction, Command, ControlFlags,
-    CreateGroupParams, DeRezDestination, DisconnectReason, EconomyData, EstateAccessDelta,
-    EstateAccessKind, EstateInfo, Event, ExperienceInfo, ExperiencePermission,
+    CreateGroupParams, DeRezDestination, Diagnostic, DisconnectReason, EconomyData,
+    EstateAccessDelta, EstateAccessKind, EstateInfo, Event, ExperienceInfo, ExperiencePermission,
     ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights,
     GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
     GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleMember,
@@ -79,7 +79,9 @@ mod media;
 mod upload;
 mod voice;
 use crate::appearance::request_server_appearance_update;
-use crate::caps::{abort_task, fetch_capabilities, make_sleep, spawn_event_queue};
+use crate::caps::{
+    CAPS_FAILURE_PREFIX, abort_task, fetch_capabilities, make_sleep, spawn_event_queue,
+};
 use crate::experiences::{
     fetch_experience_admin, fetch_experience_contributor, fetch_group_experiences,
 };
@@ -187,8 +189,18 @@ impl Client {
         self.session.agent_id()
     }
 
+    /// Enables or disables protocol diagnostics for the session. Off by default;
+    /// while enabled, the session records [`Diagnostic`]s for anomalies it would
+    /// otherwise silently drop (decode failures, unhandled messages, unknown
+    /// CAPS events, missing expected replies), and [`Client::run`] forwards them
+    /// over its `diagnostics` channel. Call before [`Client::run`].
+    pub fn set_diagnostics(&mut self, enabled: bool) {
+        self.session.set_diagnostics(enabled);
+    }
+
     /// Runs the session until it is disconnected or logged out, forwarding
-    /// events to `events` and applying commands from `commands`.
+    /// events to `events`, diagnostics to `diagnostics` (only when enabled via
+    /// [`Client::set_diagnostics`]), and applying commands from `commands`.
     ///
     /// # Errors
     ///
@@ -196,6 +208,7 @@ impl Client {
     pub async fn run(
         mut self,
         events: mpsc::Sender<Event>,
+        diagnostics: mpsc::Sender<Diagnostic>,
         mut commands: mpsc::Receiver<Command>,
     ) -> Result<(), Error> {
         // The region's capability map is fetched once from the seed and cached
@@ -214,6 +227,10 @@ impl Client {
                 self.socket
                     .send_to(&transmit.payload, transmit.destination)
                     .await?;
+            }
+
+            while let Some(diagnostic) = self.session.poll_diagnostic() {
+                diagnostics.send(diagnostic).await.ok();
             }
 
             while let Some(event) = self.session.poll_event() {
@@ -263,7 +280,26 @@ impl Client {
                 }
                 caps_event = caps_rx.recv() => {
                     if let Some((message, body)) = caps_event {
-                        self.session.handle_caps_event(&message, &body, Instant::now())?;
+                        // A CAPS helper reports a failed request by sending the
+                        // failure sentinel rather than a decoded reply; surface
+                        // it as a diagnostic instead of feeding the session.
+                        if let Some(cap) = message.strip_prefix(CAPS_FAILURE_PREFIX) {
+                            tracing::warn!(
+                                capability = cap,
+                                "CAPS request failed; no reply surfaced"
+                            );
+                            if self.session.diagnostics_enabled() {
+                                diagnostics
+                                    .send(Diagnostic::ExpectedReplyMissing {
+                                        request: cap.to_owned(),
+                                        sequence: None,
+                                    })
+                                    .await
+                                    .ok();
+                            }
+                        } else {
+                            self.session.handle_caps_event(&message, &body, Instant::now())?;
+                        }
                     }
                 }
                 command = commands.recv() => {

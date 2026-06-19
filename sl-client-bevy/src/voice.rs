@@ -1,6 +1,7 @@
 //! Voice capability provisioning and signaling.
 
 use crate::EVENT_QUEUE_TIMEOUT;
+use crate::caps::report_caps_failure;
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use reqwest::blocking::Client as ReqwestBlockingClient;
@@ -22,6 +23,7 @@ pub(crate) fn run_voice_cap(
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
+        report_caps_failure(caps_tx, cap);
         return;
     };
     let Ok(response) = http
@@ -30,13 +32,18 @@ pub(crate) fn run_voice_cap(
         .body(body)
         .send()
     else {
+        report_caps_failure(caps_tx, cap);
         return;
     };
     let Ok(text) = response.text() else {
+        report_caps_failure(caps_tx, cap);
         return;
     };
-    if let Ok(llsd) = parse_llsd_xml(&text) {
-        caps_tx.send((cap.to_owned(), llsd)).ok();
+    match parse_llsd_xml(&text) {
+        Ok(llsd) => {
+            caps_tx.send((cap.to_owned(), llsd)).ok();
+        }
+        Err(_error) => report_caps_failure(caps_tx, cap),
     }
 }
 
