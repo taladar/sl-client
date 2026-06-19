@@ -1,7 +1,7 @@
 //! The sans-I/O session state machine: login, circuit establishment,
 //! keep-alive, and clean logout, driven entirely by passed-in time.
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
@@ -9642,7 +9642,7 @@ const fn economy_data(data: &sl_wire::messages::EconomyData) -> EconomyData {
 /// block carries the bulk of the fields; the three trailing single blocks add
 /// the age-verification, access-override and environment-override settings. The
 /// `SeeAVs`/`AnyAVSounds`/`GroupAVSounds` booleans are only sent over the CAPS
-/// LLSD form, so they are `None` here (see [`parcel_info_from_llsd`]).
+/// LLSD form, so they are `None` here (see `parcel_info_from_llsd`).
 fn parcel_info(msg: &ParcelProperties) -> ParcelInfo {
     let data = &msg.parcel_data;
     ParcelInfo {
@@ -10298,6 +10298,7 @@ fn estate_access_from_params(params: &[EstateOwnerMessageParamListBlock]) -> Opt
 /// A decoded CAPS `TeleportFinish` event: the destination simulator address and
 /// seed capability plus the destination region's maturity (`SimAccess`) and the
 /// teleport flags (how/why the teleport happened).
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct CapsTeleportFinish {
     /// The destination simulator's UDP address.
     dest: SocketAddr,
@@ -11105,6 +11106,629 @@ fn inventory_item_from_llsd(item: &Llsd) -> InventoryItem {
 }
 
 // ---------------------------------------------------------------------------
+// CAPS event serializers (#59 / Tier F): the server direction of the CAPS
+// event-queue and HTTP-capability bodies. Each `*_to_llsd` below is the
+// element-by-element inverse of the matching `*_from_llsd` parser above — a
+// simulator / grid-service uses them to *produce* the LLSD bodies the client
+// decodes, so an `Llsd` round-trips back to an equal decoded value. The
+// top-level encoders are exported `pub` (terrain-style: encoders without a
+// runtime consumer yet, reused by the `SimSession` skeleton, #60); the leaf
+// folder/item/record helpers stay `pub(crate)`. The batch wrapper
+// `build_event_queue_response` lives in `sl-wire` beside its parser.
+// ---------------------------------------------------------------------------
+
+/// Builds an LLSD map from `(key, value)` pairs, owning the keys. Keeps the
+/// serializers readable versus hand-building a [`HashMap`].
+fn llsd_map(entries: Vec<(&str, Llsd)>) -> Llsd {
+    Llsd::Map(
+        entries
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect(),
+    )
+}
+
+/// Masks a value to its low byte (the `& 0xff` always fits a `u8`).
+fn low_byte(value: u32) -> u8 {
+    u8::try_from(value & 0xff).unwrap_or(0)
+}
+
+/// Masks a 64-bit value to its low byte.
+fn low_byte64(value: u64) -> u8 {
+    u8::try_from(value & 0xff).unwrap_or(0)
+}
+
+/// The four big-endian bytes of a `u32` (the `big_endian_bytes` lint forbids
+/// `to_be_bytes`, so the bytes are extracted by hand, mirroring `llsd_u32`).
+fn u32_be_bytes(value: u32) -> [u8; 4] {
+    [
+        low_byte(value >> 24),
+        low_byte(value >> 16),
+        low_byte(value >> 8),
+        low_byte(value),
+    ]
+}
+
+/// The eight big-endian bytes of a `u64` (mirrors `llsd_u64`).
+fn u64_be_bytes(value: u64) -> [u8; 8] {
+    [
+        low_byte64(value >> 56),
+        low_byte64(value >> 48),
+        low_byte64(value >> 40),
+        low_byte64(value >> 32),
+        low_byte64(value >> 24),
+        low_byte64(value >> 16),
+        low_byte64(value >> 8),
+        low_byte64(value),
+    ]
+}
+
+/// Encodes a `u32` the way `llsd_u32` reads one: a plain integer when it fits in
+/// an `i32`, else the 4-byte big-endian binary OpenSim uses for `uint` fields.
+fn u32_to_llsd(value: u32) -> Llsd {
+    i32::try_from(value).map_or_else(
+        |_ignored| Llsd::Binary(u32_be_bytes(value).to_vec()),
+        Llsd::Integer,
+    )
+}
+
+/// Encodes a `u64` the way `llsd_u64` reads one: a plain integer when it fits in
+/// an `i32`, else the 8-byte big-endian binary OpenSim uses for `U64` fields.
+fn u64_to_llsd(value: u64) -> Llsd {
+    i32::try_from(value).map_or_else(
+        |_ignored| Llsd::Binary(u64_be_bytes(value).to_vec()),
+        Llsd::Integer,
+    )
+}
+
+/// Encodes a `(x, y, z)` vector as an LLSD `[x, y, z]` real array (the inverse
+/// of [`vec3_from_llsd`] / [`llsd_position`]).
+fn vec3_to_llsd(vector: (f32, f32, f32)) -> Llsd {
+    let (x, y, z) = vector;
+    Llsd::Array(vec![
+        Llsd::Real(f64::from(x)),
+        Llsd::Real(f64::from(y)),
+        Llsd::Real(f64::from(z)),
+    ])
+}
+
+/// The four IPv4 octets of a socket address (the only address family the wire
+/// uses); an IPv6 address degrades to zeroes.
+const fn ipv4_octets(addr: SocketAddr) -> [u8; 4] {
+    match addr.ip() {
+        IpAddr::V4(v4) => v4.octets(),
+        IpAddr::V6(_) => [0, 0, 0, 0],
+    }
+}
+
+/// Serializes a CAPS `TeleportFinish` event body from the destination address,
+/// seed capability, maturity (`SimAccess`) and teleport flags (the
+/// element-by-element inverse of the `teleport_finish_from_llsd` parser, whose
+/// decoded `CapsTeleportFinish` is a private type).
+#[must_use]
+pub fn teleport_finish_to_llsd(
+    dest: SocketAddr,
+    seed: &str,
+    sim_access: u8,
+    teleport_flags: u32,
+) -> Llsd {
+    let info = llsd_map(vec![
+        ("SimIP", Llsd::Binary(ipv4_octets(dest).to_vec())),
+        ("SimPort", Llsd::Integer(i32::from(dest.port()))),
+        ("SeedCapability", Llsd::String(seed.to_owned())),
+        ("SimAccess", Llsd::Integer(i32::from(sim_access))),
+        ("TeleportFlags", u32_to_llsd(teleport_flags)),
+    ]);
+    llsd_map(vec![("Info", Llsd::Array(vec![info]))])
+}
+
+/// Serializes a neighbour's region handle and address as a CAPS
+/// `EnableSimulator` event body (inverse of `enable_simulator_from_caps_llsd`).
+#[must_use]
+pub fn enable_simulator_to_caps_llsd(handle: u64, sim: SocketAddr) -> Llsd {
+    let info = llsd_map(vec![
+        ("Handle", u64_to_llsd(handle)),
+        ("IP", Llsd::Binary(ipv4_octets(sim).to_vec())),
+        ("Port", Llsd::Integer(i32::from(sim.port()))),
+    ]);
+    llsd_map(vec![("SimulatorInfo", Llsd::Array(vec![info]))])
+}
+
+/// Serializes the destination region handle, address and seed capability as a
+/// CAPS `CrossedRegion` event body (inverse of `crossed_region_from_caps_llsd`).
+#[must_use]
+pub fn crossed_region_to_caps_llsd(handle: u64, dest: SocketAddr, seed: &str) -> Llsd {
+    let region = llsd_map(vec![
+        ("RegionHandle", u64_to_llsd(handle)),
+        ("SimIP", Llsd::Binary(ipv4_octets(dest).to_vec())),
+        ("SimPort", Llsd::Integer(i32::from(dest.port()))),
+        ("SeedCapability", Llsd::String(seed.to_owned())),
+    ]);
+    llsd_map(vec![("RegionData", Llsd::Array(vec![region]))])
+}
+
+/// Serializes a child region's address and seed capability as a CAPS
+/// `EstablishAgentCommunication` event body (inverse of
+/// `establish_agent_communication_from_llsd`).
+#[must_use]
+pub fn establish_agent_communication_to_llsd(sim: SocketAddr, seed: &str) -> Llsd {
+    llsd_map(vec![
+        ("sim-ip-and-port", Llsd::String(sim.to_string())),
+        ("seed-capability", Llsd::String(seed.to_owned())),
+    ])
+}
+
+/// Serializes an [`Event::ServerAppearanceUpdate`] as an `UpdateAvatarAppearance`
+/// capability reply body (inverse of `server_appearance_update_from_llsd`).
+#[must_use]
+pub fn server_appearance_update_to_llsd(event: &Event) -> Llsd {
+    let Event::ServerAppearanceUpdate {
+        success,
+        error,
+        expected_cof_version,
+    } = event
+    else {
+        return Llsd::Undef;
+    };
+    let mut entries = vec![("success", Llsd::Boolean(*success))];
+    if let Some(error) = error {
+        entries.push(("error", Llsd::String(error.clone())));
+    }
+    if let Some(expected) = *expected_cof_version {
+        entries.push(("expected", Llsd::Integer(expected)));
+    }
+    llsd_map(entries)
+}
+
+/// Serializes a [`ParcelInfo`] as a CAPS `ParcelProperties` event body (inverse
+/// of `parcel_info_from_llsd`). The three trailing single-blocks the parser
+/// reads are emitted as one-element arrays, and the CAPS-only `SeeAVs` /
+/// `AnyAVSounds` / `GroupAVSounds` booleans only when present.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one entry per ParcelProperties field — a flat inverse of the parser"
+)]
+#[must_use]
+pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Llsd {
+    let mut data = vec![
+        ("SequenceID", Llsd::Integer(info.sequence_id)),
+        ("RequestResult", Llsd::Integer(info.request_result.to_i32())),
+        ("SnapSelection", Llsd::Boolean(info.snap_selection)),
+        ("SelfCount", Llsd::Integer(info.self_count)),
+        ("OtherCount", Llsd::Integer(info.other_count)),
+        ("PublicCount", Llsd::Integer(info.public_count)),
+        ("LocalID", Llsd::Integer(info.local_id)),
+        ("OwnerID", Llsd::Uuid(info.owner_id)),
+        ("IsGroupOwned", Llsd::Boolean(info.is_group_owned)),
+        ("GroupID", Llsd::Uuid(info.group_id)),
+        ("AuctionID", u32_to_llsd(info.auction_id)),
+        ("ClaimDate", Llsd::Integer(info.claim_date)),
+        ("ClaimPrice", Llsd::Integer(info.claim_price)),
+        ("RentPrice", Llsd::Integer(info.rent_price)),
+        ("AABBMin", vec3_to_llsd(info.aabb_min)),
+        ("AABBMax", vec3_to_llsd(info.aabb_max)),
+        ("Area", Llsd::Integer(info.area)),
+        ("Bitmap", Llsd::Binary(info.bitmap.clone())),
+        ("Status", Llsd::Integer(info.status.to_i32())),
+        ("Category", Llsd::Integer(i32::from(info.category.to_u8()))),
+        ("MaxPrims", Llsd::Integer(info.max_prims)),
+        ("SimWideMaxPrims", Llsd::Integer(info.sim_wide_max_prims)),
+        (
+            "SimWideTotalPrims",
+            Llsd::Integer(info.sim_wide_total_prims),
+        ),
+        ("TotalPrims", Llsd::Integer(info.total_prims)),
+        ("OwnerPrims", Llsd::Integer(info.owner_prims)),
+        ("GroupPrims", Llsd::Integer(info.group_prims)),
+        ("OtherPrims", Llsd::Integer(info.other_prims)),
+        ("SelectedPrims", Llsd::Integer(info.selected_prims)),
+        (
+            "ParcelPrimBonus",
+            Llsd::Real(f64::from(info.parcel_prim_bonus)),
+        ),
+        ("OtherCleanTime", Llsd::Integer(info.other_clean_time)),
+        ("ParcelFlags", u32_to_llsd(info.raw_parcel_flags)),
+        ("SalePrice", Llsd::Integer(info.sale_price)),
+        ("Name", Llsd::String(info.name.clone())),
+        ("Desc", Llsd::String(info.description.clone())),
+        ("MusicURL", Llsd::String(info.music_url.clone())),
+        ("MediaURL", Llsd::String(info.media_url.clone())),
+        ("MediaID", Llsd::Uuid(info.media_id)),
+        ("MediaAutoScale", Llsd::Boolean(info.media_auto_scale)),
+        ("AuthBuyerID", Llsd::Uuid(info.auth_buyer_id)),
+        ("SnapshotID", Llsd::Uuid(info.snapshot_id)),
+        ("PassPrice", Llsd::Integer(info.pass_price)),
+        ("PassHours", Llsd::Real(f64::from(info.pass_hours))),
+        ("UserLocation", vec3_to_llsd(info.user_location)),
+        ("UserLookAt", vec3_to_llsd(info.user_look_at)),
+        (
+            "LandingType",
+            Llsd::Integer(i32::from(info.landing_type.to_u8())),
+        ),
+        (
+            "RegionPushOverride",
+            Llsd::Boolean(info.region_push_override),
+        ),
+        (
+            "RegionDenyAnonymous",
+            Llsd::Boolean(info.region_deny_anonymous),
+        ),
+        (
+            "RegionDenyIdentified",
+            Llsd::Boolean(info.region_deny_identified),
+        ),
+        (
+            "RegionDenyTransacted",
+            Llsd::Boolean(info.region_deny_transacted),
+        ),
+    ];
+    if let Some(see_avs) = info.see_avs {
+        data.push(("SeeAVs", Llsd::Boolean(see_avs)));
+    }
+    if let Some(any_av_sounds) = info.any_av_sounds {
+        data.push(("AnyAVSounds", Llsd::Boolean(any_av_sounds)));
+    }
+    if let Some(group_av_sounds) = info.group_av_sounds {
+        data.push(("GroupAVSounds", Llsd::Boolean(group_av_sounds)));
+    }
+    let age_verification = llsd_map(vec![(
+        "RegionDenyAgeUnverified",
+        Llsd::Boolean(info.region_deny_age_unverified),
+    )]);
+    let region_allow_access = llsd_map(vec![(
+        "RegionAllowAccessOverride",
+        Llsd::Boolean(info.region_allow_access_override),
+    )]);
+    let parcel_environment = llsd_map(vec![
+        (
+            "ParcelEnvironmentVersion",
+            Llsd::Integer(info.parcel_environment_version),
+        ),
+        (
+            "RegionAllowEnvironmentOverride",
+            Llsd::Boolean(info.region_allow_environment_override),
+        ),
+    ]);
+    llsd_map(vec![
+        ("ParcelData", Llsd::Array(vec![llsd_map(data)])),
+        ("AgeVerificationBlock", Llsd::Array(vec![age_verification])),
+        (
+            "RegionAllowAccessBlock",
+            Llsd::Array(vec![region_allow_access]),
+        ),
+        (
+            "ParcelEnvironmentBlock",
+            Llsd::Array(vec![parcel_environment]),
+        ),
+    ])
+}
+
+/// Serializes offline IMs as a `ReadOfflineMsgs` capability reply body — an
+/// array of per-message records (inverse of `offline_messages_from_llsd`).
+#[must_use]
+pub fn offline_messages_to_llsd(messages: &[InstantMessage]) -> Llsd {
+    Llsd::Array(messages.iter().map(offline_message_to_record).collect())
+}
+
+/// Serializes one [`InstantMessage`] as an offline-IM record (inverse of
+/// [`offline_message_from_record`]). The `offline` flag is implicit (the parser
+/// always marks these messages offline), so it is not emitted.
+pub(crate) fn offline_message_to_record(im: &InstantMessage) -> Llsd {
+    llsd_map(vec![
+        ("from_agent_id", Llsd::Uuid(im.from_agent_id)),
+        ("from_agent_name", Llsd::String(im.from_agent_name.clone())),
+        ("to_agent_id", Llsd::Uuid(im.to_agent_id)),
+        ("dialog", Llsd::Integer(i32::from(im.dialog.to_u8()))),
+        ("from_group", Llsd::Boolean(im.from_group)),
+        ("region_id", Llsd::Uuid(im.region_id)),
+        ("position", vec3_to_llsd(im.position)),
+        ("timestamp", u32_to_llsd(im.timestamp)),
+        ("transaction-id", Llsd::Uuid(im.id)),
+        ("parent_estate_id", u32_to_llsd(im.parent_estate_id)),
+        ("message", Llsd::String(im.message.clone())),
+        ("binary_bucket", Llsd::Binary(im.binary_bucket.clone())),
+    ])
+}
+
+/// Serializes an [`Event::ConferenceInvited`] as a `ChatterBoxInvitation` event
+/// body (inverse of `chatterbox_invitation_from_llsd`). `session_name` sits at
+/// the top level and the bucket nests under `message_params.data`, matching the
+/// shape the parser reads.
+#[must_use]
+pub fn chatterbox_invitation_to_llsd(event: &Event) -> Llsd {
+    let Event::ConferenceInvited {
+        session_id,
+        from_agent_id,
+        from_name,
+        dialog,
+        from_group,
+        session_name,
+        message,
+        region_id,
+        position,
+        parent_estate_id,
+        timestamp,
+        binary_bucket,
+    } = event
+    else {
+        return Llsd::Undef;
+    };
+    let params = llsd_map(vec![
+        ("id", Llsd::Uuid(*session_id)),
+        ("from_id", Llsd::Uuid(*from_agent_id)),
+        ("from_name", Llsd::String(from_name.clone())),
+        ("type", Llsd::Integer(i32::from(dialog.to_u8()))),
+        ("from_group", Llsd::Boolean(*from_group)),
+        ("message", Llsd::String(message.clone())),
+        ("region_id", Llsd::Uuid(*region_id)),
+        ("position", vec3_to_llsd(*position)),
+        ("parent_estate_id", u32_to_llsd(*parent_estate_id)),
+        ("timestamp", u32_to_llsd(*timestamp)),
+        (
+            "data",
+            llsd_map(vec![("binary_bucket", Llsd::Binary(binary_bucket.clone()))]),
+        ),
+    ]);
+    llsd_map(vec![
+        ("session_name", Llsd::String(session_name.clone())),
+        ("instantmessage", llsd_map(vec![("message_params", params)])),
+    ])
+}
+
+/// Serializes an [`Event::GroupMemberships`] as the CAPS event-queue
+/// `AgentGroupDataUpdate` body (inverse of `group_memberships_from_caps_llsd`).
+#[must_use]
+pub fn group_memberships_to_caps_llsd(event: &Event) -> Llsd {
+    let Event::GroupMemberships(memberships) = event else {
+        return Llsd::Undef;
+    };
+    let groups = memberships
+        .iter()
+        .map(|membership| {
+            llsd_map(vec![
+                ("GroupID", Llsd::Uuid(membership.group_id)),
+                ("GroupPowers", u64_to_llsd(membership.group_powers)),
+                ("AcceptNotices", Llsd::Boolean(membership.accept_notices)),
+                ("GroupInsigniaID", Llsd::Uuid(membership.group_insignia_id)),
+                ("Contribution", Llsd::Integer(membership.contribution)),
+                ("GroupName", Llsd::String(membership.group_name.clone())),
+            ])
+        })
+        .collect();
+    llsd_map(vec![("GroupData", Llsd::Array(groups))])
+}
+
+/// Serializes an [`Event::GroupMembers`] as a `GroupMemberData` capability
+/// response body (inverse of `group_members_from_caps_llsd`). Each member's
+/// title is emitted inline by index into the `titles` array, and `request_id` /
+/// `member_count` are dropped (the parser sets them itself: nil and the roster
+/// length).
+#[must_use]
+pub fn group_members_to_caps_llsd(event: &Event) -> Llsd {
+    let Event::GroupMembers {
+        group_id, members, ..
+    } = event
+    else {
+        return Llsd::Undef;
+    };
+    let mut titles = Vec::with_capacity(members.len());
+    let mut roster = HashMap::with_capacity(members.len());
+    for (index, member) in members.iter().enumerate() {
+        let title_index = i32::try_from(index).unwrap_or(0);
+        titles.push(Llsd::String(member.title.clone()));
+        let mut entries = vec![
+            ("donated_square_meters", Llsd::Integer(member.contribution)),
+            ("last_login", Llsd::String(member.online_status.clone())),
+            ("powers", u64_to_llsd(member.agent_powers)),
+            ("title", Llsd::Integer(title_index)),
+        ];
+        if member.is_owner {
+            entries.push(("owner", Llsd::Boolean(true)));
+        }
+        roster.insert(member.agent_id.to_string(), llsd_map(entries));
+    }
+    llsd_map(vec![
+        ("group_id", Llsd::Uuid(*group_id)),
+        ("members", Llsd::Map(roster)),
+        ("titles", Llsd::Array(titles)),
+        (
+            "defaults",
+            llsd_map(vec![("default_powers", Llsd::Integer(0))]),
+        ),
+    ])
+}
+
+/// Serializes `InventoryDescendents` events as a `FetchInventoryDescendents2`
+/// capability response body (inverse of `inventory_descendents_from_llsd`):
+/// one `folders` entry per event, each carrying its `categories` and `items`.
+#[must_use]
+pub fn inventory_descendents_to_llsd(events: &[Event]) -> Llsd {
+    let folders = events
+        .iter()
+        .filter_map(|event| {
+            let Event::InventoryDescendents {
+                folder_id,
+                version,
+                descendents,
+                folders,
+                items,
+            } = event
+            else {
+                return None;
+            };
+            Some(llsd_map(vec![
+                ("folder_id", Llsd::Uuid(*folder_id)),
+                ("version", Llsd::Integer(*version)),
+                ("descendents", Llsd::Integer(*descendents)),
+                (
+                    "categories",
+                    Llsd::Array(folders.iter().map(inventory_folder_to_llsd).collect()),
+                ),
+                (
+                    "items",
+                    Llsd::Array(items.iter().map(inventory_item_to_llsd).collect()),
+                ),
+            ]))
+        })
+        .collect();
+    llsd_map(vec![("folders", Llsd::Array(folders))])
+}
+
+/// Serializes a `BulkUpdateInventory` CAPS event-queue body (inverse of
+/// `bulk_update_inventory_from_llsd`).
+#[must_use]
+pub fn bulk_update_inventory_to_llsd(
+    transaction_id: Uuid,
+    folders: &[InventoryFolder],
+    items: &[InventoryItem],
+) -> Llsd {
+    let agent = llsd_map(vec![("TransactionID", Llsd::Uuid(transaction_id))]);
+    let folder_data = folders
+        .iter()
+        .map(|folder| {
+            llsd_map(vec![
+                ("FolderID", Llsd::Uuid(folder.folder_id)),
+                ("ParentID", Llsd::Uuid(folder.parent_id)),
+                ("Name", Llsd::String(folder.name.clone())),
+                ("Type", Llsd::Integer(i32::from(folder.folder_type))),
+            ])
+        })
+        .collect();
+    let item_data = items.iter().map(bulk_update_item_to_llsd).collect();
+    llsd_map(vec![
+        ("AgentData", Llsd::Array(vec![agent])),
+        ("FolderData", Llsd::Array(folder_data)),
+        ("ItemData", Llsd::Array(item_data)),
+    ])
+}
+
+/// Serializes an [`InventoryItem`] as a flat `BulkUpdateInventory` `ItemData`
+/// entry (inverse of [`bulk_update_item_from_llsd`]). `last_owner_id` has no
+/// place in this wire form (the parser leaves it nil), so it is not emitted.
+pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Llsd {
+    llsd_map(vec![
+        ("ItemID", Llsd::Uuid(item.item_id)),
+        ("FolderID", Llsd::Uuid(item.folder_id)),
+        ("Name", Llsd::String(item.name.clone())),
+        ("Description", Llsd::String(item.description.clone())),
+        ("AssetID", Llsd::Uuid(item.asset_id)),
+        ("Type", Llsd::Integer(i32::from(item.item_type))),
+        ("InvType", Llsd::Integer(i32::from(item.inv_type))),
+        ("Flags", Llsd::Integer(item.flags.cast_signed())),
+        ("SaleType", Llsd::Integer(i32::from(item.sale_type))),
+        ("SalePrice", Llsd::Integer(item.sale_price)),
+        ("CreationDate", Llsd::Integer(item.creation_date)),
+        ("OwnerID", Llsd::Uuid(item.owner_id)),
+        ("CreatorID", Llsd::Uuid(item.creator_id)),
+        ("GroupID", Llsd::Uuid(item.group_id)),
+        ("GroupOwned", Llsd::Boolean(item.group_owned)),
+        ("BaseMask", Llsd::Integer(item.base_mask.cast_signed())),
+        ("OwnerMask", Llsd::Integer(item.owner_mask.cast_signed())),
+        ("GroupMask", Llsd::Integer(item.group_mask.cast_signed())),
+        (
+            "EveryoneMask",
+            Llsd::Integer(item.everyone_mask.cast_signed()),
+        ),
+        (
+            "NextOwnerMask",
+            Llsd::Integer(item.next_owner_mask.cast_signed()),
+        ),
+    ])
+}
+
+/// Serializes folders and items as an AIS3 (`InventoryAPIv3`) response body
+/// (inverse of `ais_inventory_update_from_llsd`): the affected objects nest
+/// under `_embedded` as uuid-keyed maps.
+#[must_use]
+pub fn ais_inventory_update_to_llsd(folders: &[InventoryFolder], items: &[InventoryItem]) -> Llsd {
+    let categories = folders
+        .iter()
+        .map(|folder| {
+            (
+                folder.folder_id.to_string(),
+                inventory_folder_to_llsd(folder),
+            )
+        })
+        .collect();
+    let item_map = items
+        .iter()
+        .map(|item| (item.item_id.to_string(), inventory_item_to_llsd(item)))
+        .collect();
+    llsd_map(vec![(
+        "_embedded",
+        llsd_map(vec![
+            ("categories", Llsd::Map(categories)),
+            ("items", Llsd::Map(item_map)),
+        ]),
+    )])
+}
+
+/// Serializes an [`InventoryFolder`] as a `CreateInventoryCategory` reply body
+/// (inverse of `created_category_from_llsd`; `version` is fixed at 1 by the
+/// parser, so it is not emitted).
+#[must_use]
+pub fn created_category_to_llsd(folder: &InventoryFolder) -> Llsd {
+    llsd_map(vec![
+        ("folder_id", Llsd::Uuid(folder.folder_id)),
+        ("parent_id", Llsd::Uuid(folder.parent_id)),
+        ("name", Llsd::String(folder.name.clone())),
+        ("type", Llsd::Integer(i32::from(folder.folder_type))),
+    ])
+}
+
+/// Serializes an [`InventoryFolder`] as an AIS-shaped `categories` entry (inverse
+/// of [`inventory_folder_from_llsd`]).
+pub(crate) fn inventory_folder_to_llsd(folder: &InventoryFolder) -> Llsd {
+    llsd_map(vec![
+        ("category_id", Llsd::Uuid(folder.folder_id)),
+        ("parent_id", Llsd::Uuid(folder.parent_id)),
+        ("name", Llsd::String(folder.name.clone())),
+        ("type_default", Llsd::Integer(i32::from(folder.folder_type))),
+        ("version", Llsd::Integer(folder.version)),
+    ])
+}
+
+/// Serializes an [`InventoryItem`] as an AIS-shaped `items` entry with the nested
+/// `permissions` and `sale_info` maps (inverse of [`inventory_item_from_llsd`]).
+pub(crate) fn inventory_item_to_llsd(item: &InventoryItem) -> Llsd {
+    let permissions = llsd_map(vec![
+        ("base_mask", Llsd::Integer(item.base_mask.cast_signed())),
+        ("owner_mask", Llsd::Integer(item.owner_mask.cast_signed())),
+        ("group_mask", Llsd::Integer(item.group_mask.cast_signed())),
+        (
+            "everyone_mask",
+            Llsd::Integer(item.everyone_mask.cast_signed()),
+        ),
+        (
+            "next_owner_mask",
+            Llsd::Integer(item.next_owner_mask.cast_signed()),
+        ),
+        ("owner_id", Llsd::Uuid(item.owner_id)),
+        ("last_owner_id", Llsd::Uuid(item.last_owner_id)),
+        ("creator_id", Llsd::Uuid(item.creator_id)),
+        ("group_id", Llsd::Uuid(item.group_id)),
+        ("is_owner_group", Llsd::Boolean(item.group_owned)),
+    ]);
+    let sale_info = llsd_map(vec![
+        ("sale_type", Llsd::Integer(i32::from(item.sale_type))),
+        ("sale_price", Llsd::Integer(item.sale_price)),
+    ]);
+    llsd_map(vec![
+        ("item_id", Llsd::Uuid(item.item_id)),
+        ("parent_id", Llsd::Uuid(item.folder_id)),
+        ("name", Llsd::String(item.name.clone())),
+        ("desc", Llsd::String(item.description.clone())),
+        ("asset_id", Llsd::Uuid(item.asset_id)),
+        ("type", Llsd::Integer(i32::from(item.item_type))),
+        ("inv_type", Llsd::Integer(i32::from(item.inv_type))),
+        ("flags", Llsd::Integer(item.flags.cast_signed())),
+        ("created_at", Llsd::Integer(item.creation_date)),
+        ("permissions", permissions),
+        ("sale_info", sale_info),
+    ])
+}
+
+// ---------------------------------------------------------------------------
 // Object / scene graph (#16): assembling decoded objects from full-update
 // blocks. The packed `ObjectData`/`Data` blob (de)coders live in
 // [`crate::object_update`].
@@ -11244,4 +11868,370 @@ fn concatenated_uuids(bytes: &[u8]) -> Vec<Uuid> {
         .chunks_exact(16)
         .filter_map(|chunk| Uuid::from_slice(chunk).ok())
         .collect()
+}
+
+#[cfg(test)]
+mod caps_serializer_tests {
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    use pretty_assertions::assert_eq;
+    use uuid::Uuid;
+
+    use super::{
+        CapsTeleportFinish, ais_inventory_update_from_llsd, ais_inventory_update_to_llsd,
+        bulk_update_inventory_from_llsd, bulk_update_inventory_to_llsd,
+        chatterbox_invitation_from_llsd, chatterbox_invitation_to_llsd, created_category_from_llsd,
+        created_category_to_llsd, crossed_region_from_caps_llsd, crossed_region_to_caps_llsd,
+        enable_simulator_from_caps_llsd, enable_simulator_to_caps_llsd,
+        establish_agent_communication_from_llsd, establish_agent_communication_to_llsd,
+        group_members_from_caps_llsd, group_members_to_caps_llsd, group_memberships_from_caps_llsd,
+        group_memberships_to_caps_llsd, inventory_descendents_from_llsd,
+        inventory_descendents_to_llsd, offline_messages_from_llsd, offline_messages_to_llsd,
+        parcel_info_from_llsd, parcel_info_to_llsd, server_appearance_update_from_llsd,
+        server_appearance_update_to_llsd, teleport_finish_from_llsd, teleport_finish_to_llsd,
+    };
+    use crate::types::{
+        Event, GroupMember, GroupMembership, ImDialog, InstantMessage, InventoryFolder,
+        InventoryItem, LandingType, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus,
+    };
+
+    /// A V4 socket address for the given octets and port.
+    fn addr(a: u8, b: u8, c: u8, d: u8, port: u16) -> SocketAddr {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(a, b, c, d)), port)
+    }
+
+    #[test]
+    fn teleport_finish_round_trips() {
+        let dest = addr(192, 168, 7, 9, 13_001);
+        let llsd = teleport_finish_to_llsd(dest, "https://seed/tp", 21, 0x8000_00ff);
+        assert_eq!(
+            teleport_finish_from_llsd(&llsd),
+            Some(CapsTeleportFinish {
+                dest,
+                seed: "https://seed/tp".to_owned(),
+                sim_access: 21,
+                teleport_flags: 0x8000_00ff,
+            })
+        );
+    }
+
+    #[test]
+    fn enable_simulator_round_trips() {
+        let sim = addr(10, 0, 0, 5, 9000);
+        let handle = 0x0003_e800_0003_e800;
+        let llsd = enable_simulator_to_caps_llsd(handle, sim);
+        assert_eq!(enable_simulator_from_caps_llsd(&llsd), Some((handle, sim)));
+    }
+
+    #[test]
+    fn crossed_region_round_trips() {
+        let dest = addr(10, 0, 0, 6, 9001);
+        let handle = 0x0003_ec00_0003_e800;
+        let llsd = crossed_region_to_caps_llsd(handle, dest, "https://seed/x");
+        assert_eq!(
+            crossed_region_from_caps_llsd(&llsd),
+            Some((handle, dest, "https://seed/x".to_owned()))
+        );
+    }
+
+    #[test]
+    fn establish_agent_communication_round_trips() {
+        let sim = addr(10, 0, 0, 7, 9002);
+        let llsd = establish_agent_communication_to_llsd(sim, "https://seed/eac");
+        assert_eq!(
+            establish_agent_communication_from_llsd(&llsd),
+            Some((sim, "https://seed/eac".to_owned()))
+        );
+    }
+
+    #[test]
+    fn server_appearance_update_round_trips() {
+        let with_error = Event::ServerAppearanceUpdate {
+            success: false,
+            error: Some("stale COF".to_owned()),
+            expected_cof_version: Some(7),
+        };
+        assert_eq!(
+            server_appearance_update_from_llsd(&server_appearance_update_to_llsd(&with_error)),
+            with_error
+        );
+        let ok = Event::ServerAppearanceUpdate {
+            success: true,
+            error: None,
+            expected_cof_version: None,
+        };
+        assert_eq!(
+            server_appearance_update_from_llsd(&server_appearance_update_to_llsd(&ok)),
+            ok
+        );
+    }
+
+    #[test]
+    fn parcel_info_round_trips() {
+        let info = ParcelInfo {
+            sequence_id: 7,
+            request_result: ParcelRequestResult::Multiple,
+            snap_selection: true,
+            self_count: 1,
+            other_count: 2,
+            public_count: 3,
+            local_id: 42,
+            owner_id: Uuid::from_u128(0x11),
+            is_group_owned: false,
+            group_id: Uuid::from_u128(0x22),
+            auction_id: 0xdead_beef,
+            claim_date: 1_700_000_000,
+            claim_price: 100,
+            rent_price: 5,
+            aabb_min: (1.0, 2.0, 3.0),
+            aabb_max: (4.0, 5.0, 6.0),
+            area: 1024,
+            bitmap: vec![1, 2, 3, 4],
+            status: ParcelStatus::Abandoned,
+            category: ParcelCategory::Commercial,
+            max_prims: 500,
+            sim_wide_max_prims: 1000,
+            sim_wide_total_prims: 800,
+            total_prims: 50,
+            owner_prims: 30,
+            group_prims: 10,
+            other_prims: 10,
+            selected_prims: 2,
+            parcel_prim_bonus: 1.5,
+            other_clean_time: 60,
+            raw_parcel_flags: 0x8000_0001,
+            sale_price: 999,
+            name: "Test Parcel".to_owned(),
+            description: "A description".to_owned(),
+            music_url: "http://music".to_owned(),
+            media_url: "http://media".to_owned(),
+            media_id: Uuid::from_u128(0x33),
+            media_auto_scale: true,
+            auth_buyer_id: Uuid::from_u128(0x44),
+            snapshot_id: Uuid::from_u128(0x55),
+            pass_price: 25,
+            pass_hours: 2.0,
+            user_location: (10.0, 20.0, 30.0),
+            user_look_at: (0.0, 1.0, 0.0),
+            landing_type: LandingType::LandingPoint,
+            region_push_override: true,
+            region_deny_anonymous: false,
+            region_deny_identified: true,
+            region_deny_transacted: false,
+            region_deny_age_unverified: true,
+            region_allow_access_override: true,
+            parcel_environment_version: 3,
+            region_allow_environment_override: false,
+            see_avs: Some(true),
+            any_av_sounds: Some(false),
+            group_av_sounds: Some(true),
+        };
+        assert_eq!(
+            parcel_info_from_llsd(&parcel_info_to_llsd(&info)),
+            Some(info)
+        );
+    }
+
+    #[test]
+    fn offline_messages_round_trip() {
+        let messages = vec![InstantMessage {
+            from_agent_id: Uuid::from_u128(0xa1),
+            from_agent_name: "Sender Resident".to_owned(),
+            to_agent_id: Uuid::from_u128(0xa2),
+            dialog: ImDialog::FromTask,
+            from_group: false,
+            region_id: Uuid::from_u128(0xa3),
+            position: (128.0, 64.0, 32.0),
+            offline: true,
+            timestamp: 1_700_000_500,
+            id: Uuid::from_u128(0xa4),
+            parent_estate_id: 1,
+            message: "stored while offline".to_owned(),
+            binary_bucket: vec![9, 8, 7],
+        }];
+        assert_eq!(
+            offline_messages_from_llsd(&offline_messages_to_llsd(&messages)),
+            messages
+        );
+    }
+
+    #[test]
+    fn chatterbox_invitation_round_trips() {
+        let event = Event::ConferenceInvited {
+            session_id: Uuid::from_u128(0xb1),
+            from_agent_id: Uuid::from_u128(0xb2),
+            from_name: "Inviter Resident".to_owned(),
+            dialog: ImDialog::SessionGroupStart,
+            from_group: true,
+            session_name: "The Group".to_owned(),
+            message: "join us".to_owned(),
+            region_id: Uuid::from_u128(0xb3),
+            position: (12.0, 34.0, 56.0),
+            parent_estate_id: 2,
+            timestamp: 1_700_001_000,
+            binary_bucket: vec![1, 2, 3, 4, 5],
+        };
+        assert_eq!(
+            chatterbox_invitation_from_llsd(&chatterbox_invitation_to_llsd(&event)),
+            Some(event)
+        );
+    }
+
+    #[test]
+    fn group_memberships_round_trip() {
+        let event = Event::GroupMemberships(vec![GroupMembership {
+            group_id: Uuid::from_u128(0xc1),
+            group_powers: 0x0000_0001_0000_00ff,
+            accept_notices: true,
+            group_insignia_id: Uuid::from_u128(0xc2),
+            contribution: 128,
+            group_name: "Test Group".to_owned(),
+        }]);
+        assert_eq!(
+            group_memberships_from_caps_llsd(&group_memberships_to_caps_llsd(&event)),
+            Some(event)
+        );
+    }
+
+    #[test]
+    fn group_members_round_trip() {
+        // Members already sorted by agent id, request id nil, count == roster
+        // length — the shape the parser reconstructs.
+        let event = Event::GroupMembers {
+            group_id: Uuid::from_u128(0xd0),
+            request_id: Uuid::nil(),
+            member_count: 2,
+            members: vec![
+                GroupMember {
+                    agent_id: Uuid::from_u128(0xd1),
+                    contribution: 10,
+                    online_status: "Online".to_owned(),
+                    agent_powers: 0x0000_0002_0000_0000,
+                    title: "Owner".to_owned(),
+                    is_owner: true,
+                },
+                GroupMember {
+                    agent_id: Uuid::from_u128(0xd2),
+                    contribution: 0,
+                    online_status: "Offline".to_owned(),
+                    agent_powers: 7,
+                    title: "Member".to_owned(),
+                    is_owner: false,
+                },
+            ],
+        };
+        assert_eq!(
+            group_members_from_caps_llsd(&group_members_to_caps_llsd(&event)),
+            Some(event)
+        );
+    }
+
+    /// A fully-populated inventory item in the AIS/CAPS shape (nested
+    /// permissions + sale info), used by the descendents and AIS round-trips.
+    fn sample_item(seed: u128) -> InventoryItem {
+        InventoryItem {
+            item_id: Uuid::from_u128(seed),
+            folder_id: Uuid::from_u128(seed.wrapping_add(0x100)),
+            name: "An Item".to_owned(),
+            description: "desc".to_owned(),
+            asset_id: Uuid::from_u128(seed.wrapping_add(0x200)),
+            item_type: 6,
+            inv_type: 6,
+            flags: 0x8000_0001,
+            sale_type: 2,
+            sale_price: 50,
+            creation_date: 1_700_002_000,
+            owner_id: Uuid::from_u128(seed.wrapping_add(0x300)),
+            last_owner_id: Uuid::from_u128(seed.wrapping_add(0x400)),
+            creator_id: Uuid::from_u128(seed.wrapping_add(0x500)),
+            group_id: Uuid::from_u128(seed.wrapping_add(0x600)),
+            group_owned: true,
+            base_mask: 0x7fff_ffff,
+            owner_mask: 0x0008_0000,
+            group_mask: 0,
+            everyone_mask: 0x0002_0000,
+            next_owner_mask: 0x0008_2000,
+        }
+    }
+
+    #[test]
+    fn inventory_descendents_round_trip() {
+        let events = vec![Event::InventoryDescendents {
+            folder_id: Uuid::from_u128(0xe0),
+            version: 4,
+            descendents: 2,
+            folders: vec![InventoryFolder {
+                folder_id: Uuid::from_u128(0xe1),
+                parent_id: Uuid::from_u128(0xe0),
+                name: "Sub".to_owned(),
+                folder_type: -1,
+                version: 3,
+            }],
+            items: vec![sample_item(0xe2)],
+        }];
+        assert_eq!(
+            inventory_descendents_from_llsd(&inventory_descendents_to_llsd(&events)),
+            events
+        );
+    }
+
+    #[test]
+    fn bulk_update_inventory_round_trip() {
+        let transaction_id = Uuid::from_u128(0xf0);
+        // The bulk wire form carries no folder version (parser defaults 0) and no
+        // last-owner id (parser defaults nil).
+        let folders = vec![InventoryFolder {
+            folder_id: Uuid::from_u128(0xf1),
+            parent_id: Uuid::from_u128(0xf2),
+            name: "Folder".to_owned(),
+            folder_type: -1,
+            version: 0,
+        }];
+        let mut item = sample_item(0xf3);
+        item.last_owner_id = Uuid::nil();
+        let items = vec![item];
+        assert_eq!(
+            bulk_update_inventory_from_llsd(&bulk_update_inventory_to_llsd(
+                transaction_id,
+                &folders,
+                &items
+            )),
+            Some((transaction_id, folders, items))
+        );
+    }
+
+    #[test]
+    fn ais_inventory_update_round_trip() {
+        let folders = vec![InventoryFolder {
+            folder_id: Uuid::from_u128(0x1a1),
+            parent_id: Uuid::from_u128(0x1a2),
+            name: "AIS Folder".to_owned(),
+            folder_type: 8,
+            version: 5,
+        }];
+        let items = vec![sample_item(0x1b1)];
+        let (mut got_folders, mut got_items) =
+            ais_inventory_update_from_llsd(&ais_inventory_update_to_llsd(&folders, &items));
+        // The `_embedded` maps are uuid-keyed and unordered; sort for comparison.
+        got_folders.sort_by_key(|folder| folder.folder_id);
+        got_items.sort_by_key(|item| item.item_id);
+        assert_eq!(got_folders, folders);
+        assert_eq!(got_items, items);
+    }
+
+    #[test]
+    fn created_category_round_trips() {
+        // The synchronous reply fixes version at 1.
+        let folder = InventoryFolder {
+            folder_id: Uuid::from_u128(0x2a1),
+            parent_id: Uuid::from_u128(0x2a2),
+            name: "New Category".to_owned(),
+            folder_type: -1,
+            version: 1,
+        };
+        assert_eq!(
+            created_category_from_llsd(&created_category_to_llsd(&folder)),
+            Some(folder)
+        );
+    }
 }

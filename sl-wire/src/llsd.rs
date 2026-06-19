@@ -942,3 +942,28 @@ pub fn parse_event_queue_response(xml: &str) -> Result<EventQueueResponse, roxml
     }
     Ok(EventQueueResponse { id, events })
 }
+
+/// Builds an `EventQueueGet` response body: a `{ id, events: [{ message, body
+/// }…] }` batch. The inverse of [`parse_event_queue_response`] (and the server
+/// counterpart of the client's [`build_event_queue_request`]) — a simulator's
+/// CAPS event queue serializes the events it has buffered for the next long-poll
+/// reply, tagging the batch with the `id` the client echoes back as its next
+/// `ack`. Built on [`Llsd::to_llsd_xml`], so it round-trips: re-parsing the
+/// output yields an equal [`EventQueueResponse`].
+#[must_use]
+pub fn build_event_queue_response(id: i32, events: &[EventQueueEvent]) -> String {
+    let event_array = events
+        .iter()
+        .map(|event| {
+            Llsd::Map(HashMap::from([
+                ("message".to_owned(), Llsd::String(event.message.clone())),
+                ("body".to_owned(), event.body.clone()),
+            ]))
+        })
+        .collect();
+    Llsd::Map(HashMap::from([
+        ("id".to_owned(), Llsd::Integer(id)),
+        ("events".to_owned(), Llsd::Array(event_array)),
+    ]))
+    .to_llsd_xml()
+}
