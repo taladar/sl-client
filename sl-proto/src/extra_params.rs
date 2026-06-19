@@ -11,7 +11,7 @@
 //! viewer's `llprimitive.cpp`.
 
 use sl_types::lsl::Vector;
-use sl_wire::Reader;
+use sl_wire::{Reader, Writer};
 
 use crate::types::{
     ExtendedMesh, FlexibleData, LightData, LightImage, ObjectExtraParams, ReflectionProbe,
@@ -109,6 +109,167 @@ pub(crate) fn extra_params_len(blob: &[u8]) -> usize {
     blob.len().saturating_sub(reader.remaining())
 }
 
+/// Encodes an [`ObjectExtraParams`] into the raw `ExtraParams` blob — the exact
+/// inverse of `decode_extra_params`. Emits the container framing (a `u8`
+/// count of present parameters, then for each a little-endian `u16` type code, a
+/// little-endian `u32` payload size, and that many payload bytes) with one
+/// parameter per set field, in ascending type-code order — the order the
+/// reference viewer's parameter list (keyed by `type >> 4`) iterates in
+/// `LLViewerObject`. Each subtype payload is a faithful port of the matching
+/// `LLNetworkData::pack` in `indra/llprimitive/llprimitive.cpp`.
+///
+/// A field that is `None` (or, for render materials, an empty list) is simply
+/// omitted, so an [`ObjectExtraParams::default`] round-trips to a lone zero
+/// count byte. The `PARAMS_MESH` alias is not re-emitted: sculpt/mesh data is
+/// always written under the canonical `PARAMS_SCULPT` code (the decoder accepts
+/// both).
+#[must_use]
+pub fn encode_extra_params(params: &ObjectExtraParams) -> Vec<u8> {
+    // Collect each present parameter as a (type code, payload) pair, in
+    // ascending type-code order.
+    let mut entries: Vec<(u16, Vec<u8>)> = Vec::new();
+    if let Some(flexible) = &params.flexible {
+        entries.push((PARAMS_FLEXIBLE, encode_flexible(flexible)));
+    }
+    if let Some(light) = &params.light {
+        entries.push((PARAMS_LIGHT, encode_light(light)));
+    }
+    if let Some(sculpt) = &params.sculpt {
+        entries.push((PARAMS_SCULPT, encode_sculpt(sculpt)));
+    }
+    if let Some(light_image) = &params.light_image {
+        entries.push((PARAMS_LIGHT_IMAGE, encode_light_image(light_image)));
+    }
+    if let Some(extended_mesh) = &params.extended_mesh {
+        entries.push((PARAMS_EXTENDED_MESH, encode_extended_mesh(extended_mesh)));
+    }
+    if !params.render_material.is_empty() {
+        entries.push((
+            PARAMS_RENDER_MATERIAL,
+            encode_render_material(&params.render_material),
+        ));
+    }
+    if let Some(reflection_probe) = &params.reflection_probe {
+        entries.push((
+            PARAMS_REFLECTION_PROBE,
+            encode_reflection_probe(reflection_probe),
+        ));
+    }
+
+    let mut writer = Writer::new();
+    // The container count is a single byte; an object can carry at most one of
+    // each of the seven subtypes, so it never overflows.
+    writer.put_u8(u8::try_from(entries.len()).unwrap_or(u8::MAX));
+    for (param_type, payload) in entries {
+        writer.put_u16(param_type);
+        writer.put_u32(u32::try_from(payload.len()).unwrap_or(u32::MAX));
+        writer.bytes(&payload);
+    }
+    writer.into_bytes()
+}
+
+/// Truncates a non-negative `f32` toward zero into a `u8`, the inverse of the
+/// flexi decoder's `byte / 10.0` de-quantization. `as` saturates out-of-range
+/// values, matching the viewer's in-range `(U8)` cast for the small values
+/// (≤ 25.5) these fields hold.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "values pre-bounded to 0..=255; truncate-toward-zero matches LL's (U8) cast"
+)]
+const fn trunc_to_u8(value: f32) -> u8 {
+    value as u8
+}
+
+/// Encodes `LLFlexibleObjectData`: four packed bytes (tension, drag, gravity,
+/// wind) and the trailing user-force vector — the inverse of [`decode_flexible`]
+/// and a port of `LLFlexibleObjectData::pack`. The two simulate-LOD ("softness")
+/// bits are stashed back in the high bits of the tension and drag bytes, and the
+/// `* 10.01` factor (then truncate) matches the viewer so a value just under an
+/// integer tenth still rounds up.
+fn encode_flexible(data: &FlexibleData) -> Vec<u8> {
+    let mut writer = Writer::new();
+    let bit1 = (data.softness & 2).wrapping_shl(6);
+    let bit2 = (data.softness & 1).wrapping_shl(7);
+    writer.put_u8(trunc_to_u8(data.tension * 10.01).wrapping_add(bit1));
+    writer.put_u8(trunc_to_u8(data.air_friction * 10.01).wrapping_add(bit2));
+    writer.put_u8(trunc_to_u8((data.gravity + 10.0) * 10.01));
+    writer.put_u8(trunc_to_u8(data.wind_sensitivity * 10.01));
+    writer.put_vector3(&data.user_force);
+    writer.into_bytes()
+}
+
+/// Encodes `LLLightParams`: an RGBA colour then radius, cutoff, falloff — the
+/// inverse of [`decode_light`].
+fn encode_light(data: &LightData) -> Vec<u8> {
+    let mut writer = Writer::new();
+    writer.bytes(&data.color);
+    writer.put_f32(data.radius);
+    writer.put_f32(data.cutoff);
+    writer.put_f32(data.falloff);
+    writer.into_bytes()
+}
+
+/// Encodes `LLSculptParams`: a sculpt/mesh asset id and a type byte — the
+/// inverse of [`decode_sculpt`].
+fn encode_sculpt(data: &SculptData) -> Vec<u8> {
+    let mut writer = Writer::new();
+    writer.put_uuid(data.texture);
+    writer.put_u8(data.sculpt_type);
+    writer.into_bytes()
+}
+
+/// Encodes `LLLightImageParams`: a projected texture id and its parameters — the
+/// inverse of [`decode_light_image`].
+fn encode_light_image(data: &LightImage) -> Vec<u8> {
+    let mut writer = Writer::new();
+    writer.put_uuid(data.texture);
+    writer.put_vector3(&data.params);
+    writer.into_bytes()
+}
+
+/// Encodes `LLExtendedMeshParams`: a single flags word — the inverse of
+/// [`decode_extended_mesh`].
+fn encode_extended_mesh(data: &ExtendedMesh) -> Vec<u8> {
+    let mut writer = Writer::new();
+    writer.put_u32(data.flags);
+    writer.into_bytes()
+}
+
+/// Encodes `LLRenderMaterialParams`: a count then that many `(face, material id)`
+/// entries — the inverse of [`decode_render_material`]. The viewer caps the
+/// block at 14 entries (the wire count is a single byte and each entry is 17
+/// bytes); any beyond that are dropped so the written count matches the entries.
+fn encode_render_material(entries: &[RenderMaterialRef]) -> Vec<u8> {
+    /// The reference viewer's per-block entry cap (`llmin(size, 14)`).
+    const MAX_ENTRIES: usize = 14;
+    let mut writer = Writer::new();
+    let written = entries.len().min(MAX_ENTRIES);
+    writer.put_u8(u8::try_from(written).unwrap_or(u8::MAX));
+    for entry in entries.iter().take(written) {
+        writer.put_u8(entry.face);
+        writer.put_uuid(entry.material_id);
+    }
+    writer.into_bytes()
+}
+
+/// Encodes `LLReflectionProbeParams`: ambiance, clip distance, and a flags byte
+/// — the inverse of [`decode_reflection_probe`]. The three decoded booleans are
+/// recombined into the flags byte (box `0x01`, dynamic `0x02`, mirror `0x04`);
+/// any other bits the wire byte may have carried are not preserved, since the
+/// decoded form keeps only these three.
+fn encode_reflection_probe(data: &ReflectionProbe) -> Vec<u8> {
+    let mut writer = Writer::new();
+    writer.put_f32(data.ambiance);
+    writer.put_f32(data.clip_distance);
+    let flags = u8::from(data.is_box)
+        | (u8::from(data.is_dynamic).wrapping_shl(1))
+        | (u8::from(data.is_mirror).wrapping_shl(2));
+    writer.put_u8(flags);
+    writer.into_bytes()
+}
+
 /// Decodes `LLFlexibleObjectData`: four packed bytes (tension, drag, gravity,
 /// wind) and an optional trailing user-force vector.
 fn decode_flexible(reader: &mut Reader<'_>) -> Option<FlexibleData> {
@@ -204,6 +365,120 @@ fn decode_reflection_probe(reader: &mut Reader<'_>) -> Option<ReflectionProbe> {
         is_dynamic: flags & 0x02 != 0,
         is_mirror: flags & 0x04 != 0,
     })
+}
+
+#[cfg(test)]
+mod encode_tests {
+    use pretty_assertions::assert_eq;
+    use sl_types::lsl::Vector;
+    use uuid::Uuid;
+
+    use super::{decode_extra_params, encode_extra_params};
+    use crate::types::{
+        ExtendedMesh, FlexibleData, LightData, LightImage, ObjectExtraParams, ReflectionProbe,
+        RenderMaterialRef, SculptData,
+    };
+
+    /// A fully-populated [`ObjectExtraParams`] whose floating-point fields are in
+    /// the decoder's canonical forms (`byte / 10` for the flexi fields,
+    /// exactly-representable values elsewhere), so a decode of its encoding is
+    /// bit-identical to it.
+    fn sample() -> ObjectExtraParams {
+        ObjectExtraParams {
+            flexible: Some(FlexibleData {
+                softness: 3,
+                // Each chosen so `decode`'s `byte / 10` reproduces it exactly:
+                // 12 → 1.2, 7 → 0.7, 65 → 6.5 (gravity offset by −10), 24 → 2.4.
+                tension: 12.0 / 10.0,
+                air_friction: 7.0 / 10.0,
+                gravity: 65.0 / 10.0 - 10.0,
+                wind_sensitivity: 24.0 / 10.0,
+                user_force: Vector {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 3.0,
+                },
+            }),
+            light: Some(LightData {
+                color: [10, 20, 30, 255],
+                radius: 10.0,
+                cutoff: 0.0,
+                falloff: 1.0,
+            }),
+            sculpt: Some(SculptData {
+                texture: Uuid::from_u128(0x1111_2222_3333_4444_5555_6666_7777_8888),
+                sculpt_type: 5,
+            }),
+            light_image: Some(LightImage {
+                texture: Uuid::from_u128(0x9999_aaaa_bbbb_cccc_dddd_eeee_ffff_0000),
+                params: Vector {
+                    x: 0.5,
+                    y: 0.25,
+                    z: 0.75,
+                },
+            }),
+            extended_mesh: Some(ExtendedMesh { flags: 0x0000_0001 }),
+            render_material: vec![
+                RenderMaterialRef {
+                    face: 0,
+                    material_id: Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10),
+                },
+                RenderMaterialRef {
+                    face: 3,
+                    material_id: Uuid::from_u128(0x1112_1314_1516_1718_191a_1b1c_1d1e_1f20),
+                },
+            ],
+            reflection_probe: Some(ReflectionProbe {
+                ambiance: 0.5,
+                clip_distance: 2.0,
+                is_box: true,
+                is_dynamic: false,
+                is_mirror: true,
+            }),
+        }
+    }
+
+    #[test]
+    fn default_encodes_to_a_lone_zero_count_byte() {
+        let blob = encode_extra_params(&ObjectExtraParams::default());
+        assert_eq!(blob, vec![0]);
+        // …and that lone byte decodes back to the default (no parameters).
+        assert_eq!(decode_extra_params(&blob), ObjectExtraParams::default());
+    }
+
+    #[test]
+    fn encode_then_decode_round_trips_every_subtype() {
+        let original = sample();
+        let blob = encode_extra_params(&original);
+        // Seven parameters, so the count byte is 7.
+        assert_eq!(blob.first().copied(), Some(7));
+        let decoded = decode_extra_params(&blob);
+        assert_eq!(decoded, original);
+        // The encoder is deterministic and the exact inverse of the decoder, so
+        // re-encoding the decoded form reproduces the identical blob.
+        assert_eq!(encode_extra_params(&decoded), blob);
+    }
+
+    #[test]
+    fn render_material_caps_at_fourteen_entries() {
+        let params = ObjectExtraParams {
+            render_material: (0..20_u8)
+                .map(|face| RenderMaterialRef {
+                    face,
+                    material_id: Uuid::from_u128(u128::from(face) + 1),
+                })
+                .collect(),
+            ..ObjectExtraParams::default()
+        };
+        let blob = encode_extra_params(&params);
+        let decoded = decode_extra_params(&blob);
+        // The block tops out at the viewer's 14-entry cap; the rest are dropped.
+        assert_eq!(decoded.render_material.len(), 14);
+        assert_eq!(
+            Some(decoded.render_material.as_slice()),
+            params.render_material.get(..14)
+        );
+    }
 }
 
 #[cfg(test)]
