@@ -61,6 +61,30 @@ and flushes acknowledgements for reliable packets it has received. Conversely,
 if *no* traffic arrives from the region within an inactivity budget, the client
 treats the session as timed out.
 
+## Diagnostics
+
+A session also produces, on an opt-in side channel, a stream of **diagnostics**:
+reports of things that would otherwise be dropped silently. These are
+*deliberately separate from events* — an [`Event`](../content/index.md) is
+something that happened in the world and that an application acts on; a
+diagnostic is something that went wrong on the wire and that a developer wants
+to see. A match on `Event` must never have to consider a diagnostic.
+
+The kinds of diagnostic are:
+
+- a message that failed to decode (with the raw bytes and the byte offset where
+  decoding gave up),
+- a message that arrived with no handler,
+- an unknown or undecodable [event-queue](caps.md) event,
+- a reliable packet that exhausted its retransmissions without a reply (a
+  handshake packet, a logout, or a sit), so its expected reply never came.
+
+Diagnostics are **off by default** — capturing raw bytes is not free, so it is
+enabled explicitly when you are debugging. When on, they queue inside the
+session and are drained alongside events. The
+[REPL test client](../tools/sl-repl.md) turns them on and renders decode
+failures as marked hexdumps.
+
 ## Client and server views
 
 The same lifecycle exists from the region's side. This workspace models both:
@@ -85,3 +109,12 @@ real grid.
 > - `Session` is a pure state machine: it is fed bytes and the current `Instant`
 >   and emits [`Event`](../content/index.md)s; the actual socket work is done by
 >   the driver crates (`sl-client-tokio`, `sl-client-bevy`).
+> - The diagnostic type is `Diagnostic` in `sl-proto/src/types/diagnostic.rs`
+>   (`DecodeFailed`, `UnhandledMessage`, `UnknownCapsEvent`, `CapsDecodeFailed`,
+>   `ExpectedReplyMissing`) — a separate enum from `Event`. `Session` gates it
+>   with `set_diagnostics(bool)` (default off), queues into a `VecDeque`, and
+>   hands them out via `poll_diagnostic()`.
+> - The drivers surface diagnostics for parity: `sl-client-tokio`'s
+>   `Client::run` takes a `diagnostics: mpsc::Sender<Diagnostic>` and is enabled
+>   with `Client::set_diagnostics`; `sl-client-bevy` registers an `SlDiagnostic`
+>   event and enables it via `SlClientPlugin::diagnostics`.

@@ -53,7 +53,10 @@ and incrementing per packet. Reliability is opt-in per packet:
   its sequence number. If it is not acknowledged within the resend timeout
   (**1500 ms** in this implementation), it is resent with the `RESENT` flag set,
   up to a maximum number of attempts (**6**). Exhausting the attempts during the
-  handshake is fatal to the session.
+  handshake is fatal to the session; in every case the exhausted packet is
+  reported as an `ExpectedReplyMissing` [diagnostic](sessions.md#diagnostics)
+  labelled with the message name, so a reply that never came is visible rather
+  than silent.
 - The receiver acknowledges a reliable packet in one of two ways: by appending
   its sequence number to some other outgoing datagram (the `ACK` flag), or — for
   batches — by sending an explicit `PacketAck` message. Appended acks are the
@@ -108,7 +111,10 @@ When a value comes out wrong by byte-swap, this is almost always the cause.
 >   prelude and appended-ack layout precisely.
 > - Zero-coding is `sl-wire/src/zerocode.rs`.
 > - Endianness helpers are `sl-wire/src/endian.rs`; field-level reading/writing
->   is `sl-wire/src/field.rs` (`Reader`, `Writer`).
+>   is `sl-wire/src/field.rs` (`Reader`, `Writer`). `Reader::position()` reports
+>   how far decoding got, which is what a `DecodeFailed`
+>   [diagnostic](sessions.md#diagnostics) records as the failure offset when a
+>   datagram cannot be parsed.
 > - The reliability bookkeeping (the unacked table, seen-window, ack queue)
 >   lives per-circuit in `sl-proto/src/session/circuit.rs`; the `RESEND_TIMEOUT`
 >   (1500 ms) and `MAX_RESEND_ATTEMPTS` (6) constants are in

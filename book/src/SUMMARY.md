@@ -30,6 +30,10 @@
 - [Experiences](content/experiences.md)
 - [Materials](content/materials.md)
 
+## Tools
+
+- [The REPL test client](tools/sl-repl.md)
+
 ## Appendix
 
 - [Glossary](appendix/glossary.md)

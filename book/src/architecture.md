@@ -73,6 +73,11 @@ different runtimes.
   walks the map, and collects region/parcel metadata. A good worked example of
   the stack in use.
 
+- **`sl-repl`** / **`sl-repl-tokio`** / **`sl-repl-bevy`** — an interactive REPL
+  test client: a sans-I/O shared library (`sl-repl`) plus a binary per runtime
+  that drives a live session from a console, a script, or a recorded transcript.
+  See [The REPL test client](tools/sl-repl.md).
+
 ## The command/event flow
 
 The sans-I/O contract is the same in both drivers:
