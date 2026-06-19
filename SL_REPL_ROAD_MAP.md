@@ -18,7 +18,7 @@ Scope reminders:
 
 ## Phase A — core diagnostics (sl-wire / sl-proto), no REPL yet
 
-- [ ] **A1. sl-wire enablers.** Generate
+- [x] **A1. sl-wire enablers.** Generate
   `message_name(MessageId) -> Option<&'static str>` in `build.rs`; add a
   `Reader::position()` accessor; make `WireError: Clone`. No behaviour change.
   (Foundation for A2.)

@@ -33,6 +33,15 @@ impl<'a> Reader<'a> {
         self.buf.len().saturating_sub(self.pos)
     }
 
+    /// Returns the current read offset into the backing buffer.
+    ///
+    /// After a failed read this is the offset at which decoding stopped, which
+    /// callers can surface as a `failed_offset` for diagnostics.
+    #[must_use]
+    pub const fn position(&self) -> usize {
+        self.pos
+    }
+
     /// Returns `true` if no bytes remain to be read.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
