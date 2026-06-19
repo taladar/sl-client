@@ -670,14 +670,222 @@ fn len_as_i32(len: usize) -> i32 {
     i32::try_from(len).unwrap_or(0)
 }
 
+// ---------------------------------------------------------------------------
+// Server-side inverses (Tier F): the encoders/parsers the *grid* uses
+// ---------------------------------------------------------------------------
+
+/// Builds a GLTF material-override `GenericStreamingMessage` payload — the
+/// inverse of `parse_gltf_material_override`.
+///
+/// Emits the notation-LLSD map
+/// `{ 'id': <local id>, 'te': [faces…], 'od': [overrides…] }` the simulator
+/// pushes to viewers (the message's method id is
+/// [`GLTF_MATERIAL_OVERRIDE_METHOD`]). The per-face override documents are
+/// written verbatim from [`GltfMaterialOverride::overrides`] (they are raw
+/// notation-LLSD bytes the caller supplies — this layer does not build GLTF
+/// material documents), positionally correlated with the face list.
+#[must_use]
+pub fn build_gltf_material_override(material_override: &GltfMaterialOverride) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.push(b'{');
+    out.extend_from_slice(b"'id':i");
+    out.extend_from_slice(material_override.local_id.to_string().as_bytes());
+    out.extend_from_slice(b",'te':[");
+    for (index, face) in material_override.faces.iter().enumerate() {
+        if index != 0 {
+            out.push(b',');
+        }
+        out.push(b'i');
+        out.extend_from_slice(face.to_string().as_bytes());
+    }
+    out.extend_from_slice(b"],'od':[");
+    for (index, document) in material_override.overrides.iter().enumerate() {
+        if index != 0 {
+            out.push(b',');
+        }
+        out.extend_from_slice(document);
+    }
+    out.extend_from_slice(b"]}");
+    out
+}
+
+/// Parses a `ModifyMaterialParams` capability request body — the inverse of
+/// [`build_modify_material_params_request`].
+///
+/// Reads the `<llsd><array>` of per-face assignments back into
+/// [`MaterialOverrideUpdate`]s. Each entry must carry an `object_id`; `side`
+/// defaults to `-1` (all faces) if absent, and the optional `gltf_json` /
+/// `asset_id` fields are surfaced only when present. Malformed entries (no
+/// `object_id`) are skipped.
+///
+/// # Errors
+///
+/// Returns the [`roxmltree`] error if `xml` is not well-formed.
+pub fn parse_modify_material_params_request(
+    xml: &str,
+) -> Result<Vec<MaterialOverrideUpdate>, roxmltree::Error> {
+    let root = parse_llsd_xml(xml)?;
+    let Some(array) = root.as_array() else {
+        return Ok(Vec::new());
+    };
+    Ok(array.iter().filter_map(modify_material_update).collect())
+}
+
+/// Decodes one `ModifyMaterialParams` array entry into a
+/// [`MaterialOverrideUpdate`], or `None` if it lacks an `object_id`.
+fn modify_material_update(item: &Llsd) -> Option<MaterialOverrideUpdate> {
+    let object_id = item.get("object_id").and_then(Llsd::as_uuid)?;
+    let side = item.get("side").and_then(Llsd::as_i32).unwrap_or(-1);
+    let gltf_json = item
+        .get("gltf_json")
+        .and_then(Llsd::as_str)
+        .map(str::to_owned);
+    let asset_id = item.get("asset_id").and_then(Llsd::as_uuid);
+    Some(MaterialOverrideUpdate {
+        object_id,
+        side,
+        gltf_json,
+        asset_id,
+    })
+}
+
+/// Builds a `RenderMaterials` capability response — the inverse of
+/// [`parse_render_materials_response`].
+///
+/// Emits the `{ "Zipped": <binary> }` LLSD-XML map whose binary is the
+/// zlib-compressed binary-LLSD array of `{ "ID": <binary>, "Material": <map> }`
+/// entries the OpenSim `MaterialsModule` returns, re-applying the fixed-point
+/// scaling the parser undoes.
+#[must_use]
+pub fn build_render_materials_response(entries: &[RenderMaterialEntry]) -> String {
+    let array = Llsd::Array(entries.iter().map(render_material_entry_to_llsd).collect());
+    let mut binary = Vec::new();
+    write_binary_value(&array, &mut binary);
+    let zipped = miniz_oxide::deflate::compress_to_vec_zlib(&binary, 6);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&zipped);
+    format!("<llsd><map><key>Zipped</key><binary>{encoded}</binary></map></llsd>")
+}
+
+/// Encodes one `{ "ID", "Material" }` entry of a `RenderMaterials` response.
+fn render_material_entry_to_llsd(entry: &RenderMaterialEntry) -> Llsd {
+    let mut map = HashMap::new();
+    map.insert(
+        "ID".to_owned(),
+        Llsd::Binary(entry.material_id.as_bytes().to_vec()),
+    );
+    map.insert(
+        "Material".to_owned(),
+        legacy_material_to_llsd(&entry.material),
+    );
+    Llsd::Map(map)
+}
+
+/// Encodes a [`LegacyMaterial`] as its `RenderMaterials` LLSD map, re-applying
+/// the fixed-point scaling on the texture transforms (the inverse of
+/// `legacy_material_from_llsd`).
+fn legacy_material_to_llsd(material: &LegacyMaterial) -> Llsd {
+    let mut map = HashMap::new();
+    map.insert("NormMap".to_owned(), Llsd::Uuid(material.normal_map));
+    map.insert(
+        "NormOffsetX".to_owned(),
+        fixed_llsd(material.normal_offset.0),
+    );
+    map.insert(
+        "NormOffsetY".to_owned(),
+        fixed_llsd(material.normal_offset.1),
+    );
+    map.insert(
+        "NormRepeatX".to_owned(),
+        fixed_llsd(material.normal_repeat.0),
+    );
+    map.insert(
+        "NormRepeatY".to_owned(),
+        fixed_llsd(material.normal_repeat.1),
+    );
+    map.insert(
+        "NormRotation".to_owned(),
+        fixed_llsd(material.normal_rotation),
+    );
+    map.insert("SpecMap".to_owned(), Llsd::Uuid(material.specular_map));
+    map.insert(
+        "SpecOffsetX".to_owned(),
+        fixed_llsd(material.specular_offset.0),
+    );
+    map.insert(
+        "SpecOffsetY".to_owned(),
+        fixed_llsd(material.specular_offset.1),
+    );
+    map.insert(
+        "SpecRepeatX".to_owned(),
+        fixed_llsd(material.specular_repeat.0),
+    );
+    map.insert(
+        "SpecRepeatY".to_owned(),
+        fixed_llsd(material.specular_repeat.1),
+    );
+    map.insert(
+        "SpecRotation".to_owned(),
+        fixed_llsd(material.specular_rotation),
+    );
+    map.insert(
+        "SpecColor".to_owned(),
+        color_to_llsd(material.specular_color),
+    );
+    map.insert(
+        "SpecExp".to_owned(),
+        Llsd::Integer(i32::from(material.specular_exponent)),
+    );
+    map.insert(
+        "EnvIntensity".to_owned(),
+        Llsd::Integer(i32::from(material.environment_intensity)),
+    );
+    map.insert(
+        "DiffuseAlphaMode".to_owned(),
+        Llsd::Integer(i32::from(material.diffuse_alpha_mode)),
+    );
+    map.insert(
+        "AlphaMaskCutoff".to_owned(),
+        Llsd::Integer(i32::from(material.alpha_mask_cutoff)),
+    );
+    Llsd::Map(map)
+}
+
+/// Encodes a texture transform as the fixed-point integer the wire carries:
+/// `round(value * 10000)` (the inverse of `scaled`).
+fn fixed_llsd(value: f32) -> Llsd {
+    Llsd::Integer(fixed_from_f32(value))
+}
+
+/// Re-applies the material fixed-point scale, clamping to the `i32` range.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    reason = "the scaled material transform is a small value that fits an i32"
+)]
+fn fixed_from_f32(value: f32) -> i32 {
+    (value * MATERIAL_FIXED_SCALE).round() as i32
+}
+
+/// Encodes a four-element RGBA colour as the integer array the wire carries.
+fn color_to_llsd(color: [u8; 4]) -> Llsd {
+    Llsd::Array(
+        color
+            .iter()
+            .map(|&byte| Llsd::Integer(i32::from(byte)))
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use base64::Engine as _;
     use pretty_assertions::assert_eq;
 
     use super::{
-        GltfMaterialOverride, Llsd, MaterialOverrideUpdate, build_modify_material_params_request,
-        build_render_materials_request, parse_gltf_material_override,
+        GltfMaterialOverride, LegacyMaterial, Llsd, MaterialOverrideUpdate, RenderMaterialEntry,
+        build_gltf_material_override, build_modify_material_params_request,
+        build_render_materials_request, build_render_materials_response,
+        parse_gltf_material_override, parse_modify_material_params_request,
         parse_render_materials_response, read_binary_value, write_binary_value,
     };
     use crate::field::Reader;
@@ -778,5 +986,75 @@ mod tests {
         assert!(body.contains("<key>side</key><integer>-1</integer>"));
         assert!(body.contains("<key>gltf_json</key><string>{&quot;a&quot;:1}</string>"));
         assert!(body.contains(&format!("<key>asset_id</key><uuid>{asset_id}</uuid>")));
+    }
+
+    /// The GLTF override builder produces a payload the parser reads back equal
+    /// (the server-side inverse of `parse_gltf_material_override`).
+    #[test]
+    fn gltf_override_round_trip() -> Result<(), String> {
+        let original = GltfMaterialOverride {
+            local_id: 42,
+            faces: vec![0, 3],
+            overrides: vec![b"{'bc':[r1,r1,r1,r1]}".to_vec(), b"{'mf':r0.5}".to_vec()],
+        };
+        let payload = build_gltf_material_override(&original);
+        let decoded = parse_gltf_material_override(&payload).ok_or("decode failed")?;
+        assert_eq!(decoded, original);
+        Ok(())
+    }
+
+    /// A `ModifyMaterialParams` body built by the client parses back to the same
+    /// updates on the server side.
+    #[test]
+    fn modify_material_params_round_trip() -> Result<(), String> {
+        let updates = vec![
+            MaterialOverrideUpdate {
+                object_id: Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10),
+                side: -1,
+                gltf_json: Some("{\"a\":1}".to_owned()),
+                asset_id: Some(Uuid::from_u128(0x1111_2222_3333_4444_5555_6666_7777_8888)),
+            },
+            MaterialOverrideUpdate {
+                object_id: Uuid::from_u128(0x00ab_cdef_0011_2233_4455_6677_8899_aabb),
+                side: 2,
+                gltf_json: None,
+                asset_id: None,
+            },
+        ];
+        let body = build_modify_material_params_request(&updates);
+        let parsed =
+            parse_modify_material_params_request(&body).map_err(|error| format!("{error:?}"))?;
+        assert_eq!(parsed, updates);
+        Ok(())
+    }
+
+    /// A `RenderMaterials` response built from entries parses back to the same
+    /// entries (the server-side inverse of `parse_render_materials_response`).
+    #[test]
+    fn render_materials_response_round_trip() -> Result<(), String> {
+        let entry = RenderMaterialEntry {
+            material_id: Uuid::from_u128(0x00ab_cdef_0011_2233_4455_6677_8899_aabb),
+            material: LegacyMaterial {
+                normal_map: Uuid::from_u128(0x1234),
+                normal_offset: (0.5, -0.25),
+                normal_repeat: (2.0, 4.0),
+                normal_rotation: 1.5,
+                specular_map: Uuid::from_u128(0x5678),
+                specular_offset: (0.1, 0.2),
+                specular_repeat: (1.0, 1.0),
+                specular_rotation: 0.0,
+                specular_color: [10, 20, 30, 255],
+                specular_exponent: 51,
+                environment_intensity: 7,
+                diffuse_alpha_mode: 1,
+                alpha_mask_cutoff: 128,
+            },
+        };
+        let response = build_render_materials_response(std::slice::from_ref(&entry));
+        let entries = parse_render_materials_response(&response);
+        assert_eq!(entries.len(), 1);
+        let decoded = entries.first().ok_or("no entry")?;
+        assert_eq!(decoded, &entry);
+        Ok(())
     }
 }
