@@ -127,6 +127,27 @@ impl Throttle {
         self.resend + self.land + self.wind + self.cloud + self.task + self.texture + self.asset
     }
 
+    /// Rebuilds a throttle from the seven wire **bits per second** rates (in
+    /// wire order: resend, land, wind, cloud, task, texture, asset), the exact
+    /// inverse of [`Throttle::bits_per_second`]. Used by the simulator side to
+    /// recover the client's requested per-category split from an inbound
+    /// `AgentThrottle`.
+    #[must_use]
+    pub fn from_bits_per_second(rates: [f32; 7]) -> Self {
+        // 1 kilobit = 1024 bits, matching the reference viewer's conversion.
+        const KILOBIT: f32 = 1024.0;
+        let [resend, land, wind, cloud, task, texture, asset] = rates;
+        Self {
+            resend: resend / KILOBIT,
+            land: land / KILOBIT,
+            wind: wind / KILOBIT,
+            cloud: cloud / KILOBIT,
+            task: task / KILOBIT,
+            texture: texture / KILOBIT,
+            asset: asset / KILOBIT,
+        }
+    }
+
     /// The seven category rates in wire order (resend, land, wind, cloud, task,
     /// texture, asset), converted to **bits per second** as the `AgentThrottle`
     /// wire encoding expects (the simulator divides by 8 to get bytes/second).

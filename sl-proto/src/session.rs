@@ -9749,8 +9749,9 @@ fn compute_im_session_id(agent_id: Uuid, other: Uuid) -> Uuid {
 
 /// Builds an [`InstantMessage`] from an `ImprovedInstantMessage`'s agent-data and
 /// message blocks. The `FromAgentName` and `Message` strings carry trailing NUL
-/// padding, which is removed.
-fn instant_message(
+/// padding, which is removed. Shared with the simulator-side [`SimSession`](crate::SimSession),
+/// which decodes the same client message.
+pub(crate) fn instant_message(
     agent_data: &ImprovedInstantMessageAgentDataBlock,
     block: &ImprovedInstantMessageMessageBlockBlock,
 ) -> InstantMessage {
