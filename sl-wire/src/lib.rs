@@ -68,8 +68,9 @@ pub use login::{
 };
 pub use material::{
     GLTF_MATERIAL_OVERRIDE_METHOD, GltfMaterialOverride, LegacyMaterial, MaterialOverrideUpdate,
-    RenderMaterialEntry, build_modify_material_params_request, build_render_materials_request,
-    parse_gltf_material_override, parse_render_materials_response,
+    RenderMaterialEntry, build_gltf_material_override, build_modify_material_params_request,
+    build_render_materials_request, build_render_materials_response, parse_gltf_material_override,
+    parse_modify_material_params_request, parse_render_materials_response,
 };
 pub use message::{Message, MessageId};
 pub use messages::AnyMessage;
