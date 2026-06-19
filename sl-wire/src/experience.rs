@@ -28,9 +28,11 @@
 //! - `RegionExperiences` — GET, or POST `{ allowed, blocked, trusted }` to update;
 //!   both reply `{ allowed, blocked, trusted }`.
 
+use std::collections::HashMap;
+
 use uuid::Uuid;
 
-use crate::llsd::{Llsd, push_escaped};
+use crate::llsd::{Llsd, parse_llsd_xml, push_escaped};
 
 /// Experience [`properties`](ExperienceInfo::properties) bit: the experience id is
 /// invalid (a placeholder for an `error_ids` entry the grid could not resolve).
@@ -131,6 +133,19 @@ impl ExperiencePermission {
     pub const fn is_forget(self) -> bool {
         matches!(self, Self::Forget)
     }
+
+    /// Decodes the wire string (`"Allow"` / `"Block"` / `"Forget"`) back into a
+    /// preference — the inverse of [`as_str`](Self::as_str). Any other text yields
+    /// `None`.
+    #[must_use]
+    pub fn from_wire(text: &str) -> Option<Self> {
+        match text {
+            "Allow" => Some(Self::Allow),
+            "Block" => Some(Self::Block),
+            "Forget" => Some(Self::Forget),
+            _ => None,
+        }
+    }
 }
 
 /// A single experience's metadata record, as carried in a cap reply's
@@ -195,6 +210,38 @@ impl ExperienceInfo {
                 .and_then(Llsd::as_bool)
                 .unwrap_or(false),
         }
+    }
+
+    /// Encodes this record as one `experience_keys` map element — the inverse of
+    /// [`from_llsd`](Self::from_llsd). A `missing` record carries the
+    /// `DoesNotExist` marker so it decodes back as a placeholder; the server-side
+    /// [`build_experience_infos_response`] instead routes missing ids to the
+    /// reply's `error_ids` array (which decodes to the same placeholder).
+    #[must_use]
+    pub fn to_llsd(&self) -> Llsd {
+        let mut map: HashMap<String, Llsd> = HashMap::from([
+            ("public_id".to_owned(), Llsd::Uuid(self.public_id)),
+            ("name".to_owned(), Llsd::String(self.name.clone())),
+            ("agent_id".to_owned(), Llsd::Uuid(self.agent_id)),
+            ("group_id".to_owned(), Llsd::Uuid(self.group_id)),
+            (
+                "description".to_owned(),
+                Llsd::String(self.description.clone()),
+            ),
+            ("properties".to_owned(), Llsd::Integer(self.properties.0)),
+            ("quota".to_owned(), Llsd::Integer(self.quota)),
+            ("expiration".to_owned(), Llsd::Real(self.expiration)),
+            ("maturity".to_owned(), Llsd::Integer(self.maturity)),
+            ("slurl".to_owned(), Llsd::String(self.slurl.clone())),
+            (
+                "extended_metadata".to_owned(),
+                Llsd::String(self.extended_metadata.clone()),
+            ),
+        ]);
+        if self.missing {
+            let _previous = map.insert("DoesNotExist".to_owned(), Llsd::Boolean(true));
+        }
+        Llsd::Map(map)
     }
 }
 
@@ -448,6 +495,285 @@ pub fn parse_experience_status(body: &Llsd) -> bool {
     body.get("status").and_then(Llsd::as_bool).unwrap_or(false)
 }
 
+// ---------------------------------------------------------------------------
+// Server side — the inverse of the request builders / response parsers above.
+//
+// A grid's experience service parses the URL/body a viewer sends (the request
+// parsers) and serializes the replies the viewer's response parsers above
+// decode (the response builders). Each is the exact inverse of its client-side
+// counterpart, so a request round-trips builder → parser and a reply round-trips
+// builder → parser.
+// ---------------------------------------------------------------------------
+
+/// Returns the query string of a `{cap}{suffix}` URL — everything after the
+/// first `?` — or `None` when the suffix carries no query.
+fn url_query(suffix: &str) -> Option<&str> {
+    suffix.split_once('?').map(|(_path, query)| query)
+}
+
+/// Returns the value of query parameter `name` within a `key=value&…` query
+/// string, if present.
+fn query_param<'query>(query: &'query str, name: &str) -> Option<&'query str> {
+    query
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find_map(|(key, value)| (key == name).then_some(value))
+}
+
+/// Maps an ASCII hex digit (`0-9`, `a-f`, `A-F`) to its nibble value, or `None`.
+const fn from_hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte.wrapping_sub(b'0')),
+        b'a'..=b'f' => Some(byte.wrapping_sub(b'a').wrapping_add(10)),
+        b'A'..=b'F' => Some(byte.wrapping_sub(b'A').wrapping_add(10)),
+        _ => None,
+    }
+}
+
+/// Decodes a percent-encoded URL query value — the inverse of [`percent_encode`].
+/// A `%XX` pair becomes its byte; a malformed `%` (not followed by two hex
+/// digits) is kept verbatim. The resulting bytes are interpreted as UTF-8
+/// (lossily, since the encoder only ever emits valid UTF-8).
+fn percent_decode(text: &str) -> String {
+    let mut bytes = Vec::with_capacity(text.len());
+    let mut iter = text.bytes();
+    while let Some(byte) = iter.next() {
+        if byte == b'%' {
+            let high = iter.next();
+            let low = iter.next();
+            match (high.and_then(from_hex_digit), low.and_then(from_hex_digit)) {
+                (Some(high), Some(low)) => bytes.push(high.wrapping_shl(4) | low),
+                _ => {
+                    bytes.push(b'%');
+                    if let Some(high) = high {
+                        bytes.push(high);
+                    }
+                    if let Some(low) = low {
+                        bytes.push(low);
+                    }
+                }
+            }
+        } else {
+            bytes.push(byte);
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// Parses the [`experience_info_query`] URL suffix back into the requested ids
+/// (every `public_id` query parameter). Unparsable ids are skipped; an absent
+/// query yields an empty list.
+#[must_use]
+pub fn parse_experience_info_query(suffix: &str) -> Vec<Uuid> {
+    let Some(query) = url_query(suffix) else {
+        return Vec::new();
+    };
+    query
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .filter(|(key, _value)| *key == "public_id")
+        .filter_map(|(_key, value)| Uuid::parse_str(value).ok())
+        .collect()
+}
+
+/// Parses the [`find_experience_query`] URL suffix back into its
+/// `(search text, page)` pair (the text percent-decoded), or `None` if it does
+/// not match.
+#[must_use]
+pub fn parse_find_experience_query(suffix: &str) -> Option<(String, i32)> {
+    let query = url_query(suffix)?;
+    let page = query_param(query, "page")?.parse::<i32>().ok()?;
+    let text = query_param(query, "query")?;
+    Some((percent_decode(text), page))
+}
+
+/// Parses the bare-UUID query form (`?<id>`) shared by
+/// [`group_experiences_query`] and [`forget_experience_query`].
+fn parse_bare_uuid_query(suffix: &str) -> Option<Uuid> {
+    Uuid::parse_str(url_query(suffix)?).ok()
+}
+
+/// Parses the [`group_experiences_query`] URL suffix back into its group id
+/// (`?<group_id>`), or `None` if it does not match.
+#[must_use]
+pub fn parse_group_experiences_query(suffix: &str) -> Option<Uuid> {
+    parse_bare_uuid_query(suffix)
+}
+
+/// Parses the [`forget_experience_query`] URL suffix back into its experience id
+/// (the `Forget` DELETE target, `?<experience_id>`), or `None` if it does not
+/// match.
+#[must_use]
+pub fn parse_forget_experience_query(suffix: &str) -> Option<Uuid> {
+    parse_bare_uuid_query(suffix)
+}
+
+/// Parses the [`experience_id_query`] URL suffix back into its experience id
+/// (`?experience_id=<id>`), or `None` if it does not match.
+#[must_use]
+pub fn parse_experience_id_query(suffix: &str) -> Option<Uuid> {
+    let query = url_query(suffix)?;
+    Uuid::parse_str(query_param(query, "experience_id")?).ok()
+}
+
+/// Parses an `ExperiencePreferences` PUT body
+/// (`{ "<id>": { "permission": "Allow"|"Block" } }`) back into its
+/// `(experience id, permission)` pair — the inverse of
+/// [`build_set_experience_permission_request`]. Returns `Ok(None)` when the body
+/// is well-formed XML but not a single id→permission entry.
+///
+/// # Errors
+///
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+pub fn parse_set_experience_permission_request(
+    xml: &str,
+) -> Result<Option<(Uuid, ExperiencePermission)>, roxmltree::Error> {
+    let root = parse_llsd_xml(xml)?;
+    let Some(map) = root.as_map() else {
+        return Ok(None);
+    };
+    let Some((key, value)) = map.iter().next() else {
+        return Ok(None);
+    };
+    let Ok(id) = Uuid::parse_str(key) else {
+        return Ok(None);
+    };
+    let permission = value
+        .get("permission")
+        .and_then(Llsd::as_str)
+        .and_then(ExperiencePermission::from_wire);
+    Ok(permission.map(|permission| (id, permission)))
+}
+
+/// Parses an `UpdateExperience` POST body back into an [`ExperienceUpdate`] — the
+/// inverse of [`build_update_experience_request`]. Missing fields take their
+/// defaults, mirroring the lenient decoding elsewhere in this module.
+///
+/// # Errors
+///
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+pub fn parse_update_experience_request(xml: &str) -> Result<ExperienceUpdate, roxmltree::Error> {
+    let root = parse_llsd_xml(xml)?;
+    let string = |key: &str| {
+        root.get(key)
+            .and_then(Llsd::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    Ok(ExperienceUpdate {
+        public_id: root
+            .get("public_id")
+            .and_then(llsd_uuid)
+            .unwrap_or_default(),
+        name: string("name"),
+        description: string("description"),
+        maturity: root.get("maturity").and_then(Llsd::as_i32).unwrap_or(0),
+        properties: root.get("properties").and_then(Llsd::as_i32).unwrap_or(0),
+        slurl: string("slurl"),
+        extended_metadata: string("extended_metadata"),
+    })
+}
+
+/// Parses a `RegionExperiences` POST body back into its
+/// `(allowed, blocked, trusted)` id lists — the inverse of
+/// [`build_region_experiences_request`]. (The body and reply share a shape, so
+/// this delegates to [`parse_region_experiences`].)
+///
+/// # Errors
+///
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+#[expect(
+    clippy::type_complexity,
+    reason = "mirrors parse_region_experiences' (allowed, blocked, trusted) tuple, wrapped in Result for the XML parse error"
+)]
+pub fn parse_region_experiences_request(
+    xml: &str,
+) -> Result<(Vec<Uuid>, Vec<Uuid>, Vec<Uuid>), roxmltree::Error> {
+    Ok(parse_region_experiences(&parse_llsd_xml(xml)?))
+}
+
+/// Builds an array-of-UUIDs LLSD value.
+fn uuid_array_llsd(ids: &[Uuid]) -> Llsd {
+    Llsd::Array(ids.iter().copied().map(Llsd::Uuid).collect())
+}
+
+/// Builds a `GetExperienceInfo` / `FindExperienceByName` reply
+/// (`{ experience_keys, error_ids }`) from a list of records — the inverse of
+/// [`parse_experience_infos`]. Records flagged [`missing`](ExperienceInfo::missing)
+/// are emitted as bare ids in `error_ids` (the grid's "could not resolve" form),
+/// the rest as full `experience_keys` maps; `error_ids` is omitted when empty.
+/// Built on [`Llsd::to_llsd_xml`], so it round-trips through [`parse_llsd_xml`].
+#[must_use]
+pub fn build_experience_infos_response(infos: &[ExperienceInfo]) -> String {
+    let mut keys = Vec::new();
+    let mut errors = Vec::new();
+    for info in infos {
+        if info.missing {
+            errors.push(Llsd::Uuid(info.public_id));
+        } else {
+            keys.push(info.to_llsd());
+        }
+    }
+    let mut map: HashMap<String, Llsd> = HashMap::new();
+    let _previous = map.insert("experience_keys".to_owned(), Llsd::Array(keys));
+    if !errors.is_empty() {
+        let _previous = map.insert("error_ids".to_owned(), Llsd::Array(errors));
+    }
+    Llsd::Map(map).to_llsd_xml()
+}
+
+/// Builds an `AgentExperiences` / `GetAdminExperiences` / `GetCreatorExperiences`
+/// / `GroupExperiences` reply (`{ experience_ids }`) — the inverse of
+/// [`parse_experience_ids`].
+#[must_use]
+pub fn build_experience_ids_response(ids: &[Uuid]) -> String {
+    Llsd::Map(HashMap::from([(
+        "experience_ids".to_owned(),
+        uuid_array_llsd(ids),
+    )]))
+    .to_llsd_xml()
+}
+
+/// Builds a `GetExperiences` / `ExperiencePreferences` reply
+/// (`{ experiences, blocked }`) — the inverse of
+/// [`parse_experience_permissions`].
+#[must_use]
+pub fn build_experience_permissions_response(allowed: &[Uuid], blocked: &[Uuid]) -> String {
+    Llsd::Map(HashMap::from([
+        ("experiences".to_owned(), uuid_array_llsd(allowed)),
+        ("blocked".to_owned(), uuid_array_llsd(blocked)),
+    ]))
+    .to_llsd_xml()
+}
+
+/// Builds a `RegionExperiences` reply (`{ allowed, blocked, trusted }`) — the
+/// inverse of [`parse_region_experiences`]. (The reply shares its shape with the
+/// POST body that [`build_region_experiences_request`] writes.)
+#[must_use]
+pub fn build_region_experiences_response(
+    allowed: &[Uuid],
+    blocked: &[Uuid],
+    trusted: &[Uuid],
+) -> String {
+    Llsd::Map(HashMap::from([
+        ("allowed".to_owned(), uuid_array_llsd(allowed)),
+        ("blocked".to_owned(), uuid_array_llsd(blocked)),
+        ("trusted".to_owned(), uuid_array_llsd(trusted)),
+    ]))
+    .to_llsd_xml()
+}
+
+/// Builds an `IsExperienceAdmin` / `IsExperienceContributor` reply
+/// (`{ status }`) — the inverse of [`parse_experience_status`].
+#[must_use]
+pub fn build_experience_status_response(status: bool) -> String {
+    Llsd::Map(HashMap::from([(
+        "status".to_owned(),
+        Llsd::Boolean(status),
+    )]))
+    .to_llsd_xml()
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -455,12 +781,24 @@ mod tests {
 
     use super::{
         ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate,
-        PROPERTY_GRID, build_region_experiences_request, build_set_experience_permission_request,
-        build_update_experience_request, experience_info_query, find_experience_query,
-        parse_experience_ids, parse_experience_infos, parse_experience_permissions,
-        parse_experience_status, parse_region_experiences,
+        PROPERTY_GRID, PROPERTY_INVALID, build_experience_ids_response,
+        build_experience_infos_response, build_experience_permissions_response,
+        build_experience_status_response, build_region_experiences_request,
+        build_region_experiences_response, build_set_experience_permission_request,
+        build_update_experience_request, experience_id_query, experience_info_query,
+        find_experience_query, forget_experience_query, group_experiences_query,
+        parse_experience_id_query, parse_experience_ids, parse_experience_info_query,
+        parse_experience_infos, parse_experience_permissions, parse_experience_status,
+        parse_find_experience_query, parse_forget_experience_query, parse_group_experiences_query,
+        parse_region_experiences, parse_region_experiences_request,
+        parse_set_experience_permission_request, parse_update_experience_request,
     };
     use crate::llsd::parse_llsd_xml;
+
+    /// Parses a UUID in a test, surfacing a `String` error for the `?` operator.
+    fn uuid(text: &str) -> Result<Uuid, String> {
+        Uuid::parse_str(text).map_err(|error| error.to_string())
+    }
 
     /// `GetExperienceInfo` batches every id as a `public_id` query parameter under
     /// the `id/` path, and its `experience_keys` decode into full records while
@@ -623,6 +961,11 @@ mod tests {
             .map_err(|error| format!("{error:?}"))?;
         assert!(parse_experience_status(&reply));
 
+        assert_eq!(
+            build_experience_status_response(true),
+            "<llsd><map><key>status</key><boolean>true</boolean></map></llsd>"
+        );
+
         let props = ExperienceProperties(PROPERTY_GRID);
         assert!(props.is_grid());
         assert!(!props.is_private());
@@ -630,6 +973,169 @@ mod tests {
             ExperienceInfo::default().properties,
             ExperienceProperties(0)
         );
+        Ok(())
+    }
+
+    /// The `GetExperienceInfo` URL suffix round-trips through its parser, batching
+    /// every requested id back out of the `public_id` query parameters.
+    #[test]
+    fn experience_info_query_round_trip() -> Result<(), String> {
+        let ids = [
+            uuid("11111111-1111-1111-1111-111111111111")?,
+            uuid("22222222-2222-2222-2222-222222222222")?,
+        ];
+        let suffix = experience_info_query(&ids);
+        assert_eq!(parse_experience_info_query(&suffix), ids);
+        Ok(())
+    }
+
+    /// The search query round-trips, recovering the percent-decoded text and page.
+    #[test]
+    fn find_experience_query_round_trip() {
+        let suffix = find_experience_query("a b&c", 2);
+        assert_eq!(
+            parse_find_experience_query(&suffix),
+            Some(("a b&c".to_owned(), 2))
+        );
+    }
+
+    /// The bare-UUID query forms (group, forget) and the `experience_id=` form
+    /// each round-trip through their parsers.
+    #[test]
+    fn uuid_query_round_trips() -> Result<(), String> {
+        let id = uuid("11111111-1111-1111-1111-111111111111")?;
+        assert_eq!(
+            parse_group_experiences_query(&group_experiences_query(id)),
+            Some(id)
+        );
+        assert_eq!(
+            parse_forget_experience_query(&forget_experience_query(id)),
+            Some(id)
+        );
+        assert_eq!(
+            parse_experience_id_query(&experience_id_query(id)),
+            Some(id)
+        );
+        Ok(())
+    }
+
+    /// The `ExperiencePreferences` PUT body round-trips builder → parser, and the
+    /// `{ experiences, blocked }` reply round-trips builder → parser.
+    #[test]
+    fn permission_request_and_reply_round_trip() -> Result<(), String> {
+        let id = uuid("11111111-1111-1111-1111-111111111111")?;
+        let body = build_set_experience_permission_request(id, ExperiencePermission::Block);
+        let parsed =
+            parse_set_experience_permission_request(&body).map_err(|error| format!("{error:?}"))?;
+        assert_eq!(parsed, Some((id, ExperiencePermission::Block)));
+
+        let allowed = [id];
+        let blocked = [uuid("22222222-2222-2222-2222-222222222222")?];
+        let reply = build_experience_permissions_response(&allowed, &blocked);
+        let parsed = parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?;
+        let (allowed_out, blocked_out) = parse_experience_permissions(&parsed);
+        assert_eq!(allowed_out, allowed);
+        assert_eq!(blocked_out, blocked);
+        Ok(())
+    }
+
+    /// The `UpdateExperience` POST body round-trips builder → parser.
+    #[test]
+    fn update_experience_request_round_trip() -> Result<(), String> {
+        let update = ExperienceUpdate {
+            public_id: uuid("11111111-1111-1111-1111-111111111111")?,
+            name: "Renamed".to_owned(),
+            description: "desc & more".to_owned(),
+            maturity: 13,
+            properties: PROPERTY_GRID,
+            slurl: "http://maps/y".to_owned(),
+            extended_metadata: "<x/>".to_owned(),
+        };
+        let body = build_update_experience_request(&update);
+        let parsed =
+            parse_update_experience_request(&body).map_err(|error| format!("{error:?}"))?;
+        assert_eq!(parsed, update);
+        Ok(())
+    }
+
+    /// The `RegionExperiences` POST body and reply each round-trip through their
+    /// request parser / response builder.
+    #[test]
+    fn region_experiences_service_round_trip() -> Result<(), String> {
+        let allowed = [uuid("11111111-1111-1111-1111-111111111111")?];
+        let trusted = [uuid("22222222-2222-2222-2222-222222222222")?];
+        let request = build_region_experiences_request(&allowed, &[], &trusted);
+        let (allowed_out, blocked_out, trusted_out) =
+            parse_region_experiences_request(&request).map_err(|error| format!("{error:?}"))?;
+        assert_eq!(allowed_out, allowed);
+        assert!(blocked_out.is_empty());
+        assert_eq!(trusted_out, trusted);
+
+        let reply = build_region_experiences_response(&allowed, &[], &trusted);
+        let (allowed_out, blocked_out, trusted_out) = parse_region_experiences(
+            &parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?,
+        );
+        assert_eq!(allowed_out, allowed);
+        assert!(blocked_out.is_empty());
+        assert_eq!(trusted_out, trusted);
+        Ok(())
+    }
+
+    /// The `experience_ids` reply round-trips builder → parser.
+    #[test]
+    fn experience_ids_response_round_trip() -> Result<(), String> {
+        let ids = [
+            uuid("11111111-1111-1111-1111-111111111111")?,
+            uuid("22222222-2222-2222-2222-222222222222")?,
+        ];
+        let reply = build_experience_ids_response(&ids);
+        let parsed =
+            parse_experience_ids(&parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?);
+        assert_eq!(parsed, ids);
+        Ok(())
+    }
+
+    /// The `GetExperienceInfo` reply round-trips a full record through
+    /// `experience_keys` and a missing id through `error_ids`.
+    #[test]
+    fn experience_infos_response_round_trip() -> Result<(), String> {
+        let real = ExperienceInfo {
+            public_id: uuid("11111111-1111-1111-1111-111111111111")?,
+            name: "My Experience".to_owned(),
+            agent_id: uuid("22222222-2222-2222-2222-222222222222")?,
+            description: "fun & games".to_owned(),
+            properties: ExperienceProperties(PROPERTY_GRID),
+            maturity: 13,
+            slurl: "http://maps/x".to_owned(),
+            ..ExperienceInfo::default()
+        };
+        let missing = ExperienceInfo {
+            public_id: uuid("33333333-3333-3333-3333-333333333333")?,
+            properties: ExperienceProperties(PROPERTY_INVALID),
+            missing: true,
+            ..ExperienceInfo::default()
+        };
+        let reply = build_experience_infos_response(&[real.clone(), missing.clone()]);
+        let infos =
+            parse_experience_infos(&parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?);
+        let [first, second] = infos.as_slice() else {
+            return Err(format!("expected 2 infos, got {}", infos.len()));
+        };
+        assert_eq!(*first, real);
+        assert_eq!(*second, missing);
+        Ok(())
+    }
+
+    /// A status reply round-trips builder → parser for both truth values.
+    #[test]
+    fn status_response_round_trip() -> Result<(), String> {
+        for value in [true, false] {
+            let reply = build_experience_status_response(value);
+            let parsed = parse_experience_status(
+                &parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?,
+            );
+            assert_eq!(parsed, value);
+        }
         Ok(())
     }
 }
