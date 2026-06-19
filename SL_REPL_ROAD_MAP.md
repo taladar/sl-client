@@ -176,18 +176,23 @@ Scope reminders:
 
 ## Phase E — docs & live verification
 
-- [ ] **E1. Update the mdbook (`book/`).** Add a new page (e.g.
-  `book/src/tools/sl-repl.md`, linked from `book/src/SUMMARY.md`) documenting
-  the three new crates, how to run them, the command grammar/placeholders,
-  credential TOML + MFA timing, and the always-on logging/recording. Update the
-  protocol
-  pages for the new diagnostics surface: `comms/lludp-transport.md` and
-  `comms/messages.md` (decode-failure/`UnhandledMessage` diagnostics,
-  `message_name`, `Reader::position`), `comms/caps.md`
-  (unknown/`CapsDecodeFailed` events), and `comms/sessions.md` (the `Diagnostic`
-  type vs `Event`, `poll_diagnostic`, `set_diagnostics`, changed `Client::run`
-  signature, `SlDiagnostic`). Touch `content/login.md` for the TOML/MFA flow.
-  Keep diagrams consistent.
+- [x] **E1. Update the mdbook (`book/`).** Added a new **Tools** section to
+  `book/src/SUMMARY.md` with `book/src/tools/sl-repl.md`, documenting the three
+  new crates, how to run them, the command grammar/placeholders/meta commands,
+  smoke mode, the wire-diagnostics surface, always-on logging/recording, and the
+  credential TOML + window-aligned MFA timing (`In this codebase` note maps it
+  all to modules). Updated the protocol pages for the diagnostics surface:
+  `comms/sessions.md` gained a **Diagnostics** section (the `Diagnostic` type vs
+  `Event`, the five variants, `set_diagnostics`/`poll_diagnostic`, the changed
+  `Client::run` signature, `SlDiagnostic`); `comms/lludp-transport.md`
+  (`Reader::position` → `DecodeFailed` offset, `ExpectedReplyMissing` on resend
+  exhaustion); `comms/messages.md` (a *When decoding goes wrong* section +
+  generated `message_name`); `comms/caps.md`
+  (`UnknownCapsEvent`/`CapsDecodeFailed`, the `report_caps_failure` sentinel →
+  `ExpectedReplyMissing`); `content/login.md` (TOML credentials + the
+  wall-clock-aligned MFA wait). Also listed the REPL crates in
+  `architecture.md`. `mdbook build` clean, `rumdl`/`typos` clean, all links
+  resolve.
 - [ ] **E2. Local OpenSim verification (both runtimes).** smoke + interactive +
   record/replay (with placeholders, re-login) + diagnostics check
   (`UnhandledMessage`/`UnknownCapsEvent` appear; forced bad input →

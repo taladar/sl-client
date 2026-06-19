@@ -94,6 +94,14 @@ so many chapters in the next part end with "…delivered via the event queue." A
 notable example: rich parcel data (`ParcelProperties`) arrives here rather than
 over UDP.
 
+Because the grid can deliver an event the client does not recognise, or a body
+that does not parse the way the client expects, the event-queue path also
+produces [diagnostics](sessions.md#diagnostics): an event whose `message` name
+the client has no handler for is an `UnknownCapsEvent`, and one whose body fails
+to decode (or whose `from_llsd` returns nothing) is a `CapsDecodeFailed`. As
+with the other diagnostics these are off by default and surface only when
+enabled.
+
 ---
 
 > **In this codebase**
@@ -112,4 +120,11 @@ over UDP.
 >   over an mpsc channel. The Bevy driver mirrors this in
 >   `sl-client-bevy/src/caps.rs`.
 > - HTTP plumbing shared by the CAPS features is in
->   `sl-client-tokio/src/http.rs` (and `fetch.rs` / `upload.rs`).
+>   `sl-client-tokio/src/http.rs` (and `fetch.rs` / `upload.rs`). A failed CAPS
+>   request is reported (rather than swallowed into an `Option`) when
+>   diagnostics are on, via the `caps::report_caps_failure` sentinel that the
+>   run loop turns into an `ExpectedReplyMissing`
+>   [diagnostic](sessions.md#diagnostics).
+> - The unknown-event and decode-failure [diagnostics](sessions.md#diagnostics)
+>   (`UnknownCapsEvent`, `CapsDecodeFailed`) are emitted from the event-queue
+>   handling in `sl-proto/src/session.rs` (`handle_caps_event`).

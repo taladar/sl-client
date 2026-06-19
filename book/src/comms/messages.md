@@ -101,6 +101,17 @@ Because the structs are generated from the canonical template, the wire format
 stays in lock-step with Linden Lab's definition — adding support for a new
 message is often just a matter of the template already containing it.
 
+## When decoding goes wrong
+
+Two things can happen on the receive path that are worth surfacing rather than
+swallowing. A message body may **fail to decode** — truncated, corrupt, or a
+template mismatch — and a message may decode fine but have **no handler** in the
+session. Both are reported as [diagnostics](sessions.md#diagnostics)
+(`DecodeFailed` with the byte offset where decoding stopped, and
+`UnhandledMessage`) when diagnostics are enabled. To label them readably, the
+build step also generates `message_name(MessageId) -> Option<&'static str>`, so
+a numeric id can be turned back into its template name in logs and dumps.
+
 ---
 
 > **In this codebase**
@@ -116,3 +127,6 @@ message is often just a matter of the template already containing it.
 >   in `sl-wire/src/message.rs`. `MessageId::encode` / `decode` handle the
 >   frequency prefix.
 > - Generated messages are reachable under `sl_wire::messages`.
+> - `message_name(MessageId) -> Option<&'static str>` is generated alongside
+>   them by `sl-wire/build.rs`; it backs the message-name labels in the
+>   `DecodeFailed` / `UnhandledMessage` [diagnostics](sessions.md#diagnostics).

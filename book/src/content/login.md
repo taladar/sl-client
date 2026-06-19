@@ -52,6 +52,13 @@ Second Life can also answer with an **MFA challenge** instead of success or
 outright failure: the client must collect a one-time token from the user and
 re-submit the login with it. This is a distinct third outcome, not a failure.
 
+TOTP tokens are valid only within a wall-clock-aligned 30-second window, so a
+token generated near the end of a window can expire mid-flight. The
+[REPL test client](../tools/sl-repl.md) handles this by reading credentials from
+a TOML file (with an optional `mfa_command` per avatar) and, when too little of
+the current window remains, waiting out its tail before generating the token so
+the re-submitted login survives the round-trip.
+
 ## Why XML-RPC, and only here
 
 Login predates CAPS, which is why it uses XML-RPC rather than
