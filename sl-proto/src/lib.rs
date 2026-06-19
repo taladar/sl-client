@@ -36,6 +36,7 @@ pub use session::{
     CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPLOAD_BAKED_TEXTURE,
     CAP_VOICE_SIGNALING, RECV_BUFFER_SIZE, REQUESTED_CAPABILITIES, Session,
 };
+pub use terrain::encode_layer;
 pub use types::{
     ActiveGroup, AlertInfo, Asset, AssetType, AvatarAppearance, AvatarAttachment, AvatarClassified,
     AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, Camera, ChatAudible,
