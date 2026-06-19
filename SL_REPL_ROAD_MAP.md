@@ -86,7 +86,7 @@ Scope reminders:
   `set_object_media`, `send_voice_signaling`) accept a single element via
   keyword fields; multi-element forms are deferred. 39 unit tests; clippy-clean
   under the restriction lints.
-- [ ] **C2. Context + placeholders.** `context.rs`: `ReplContext` +
+- [x] **C2. Context + placeholders.** `context.rs`: `ReplContext` +
   `SessionContext` (`apply_event`), forward resolution
   (`$self/$session/$circuit/$region/$parcel/$lastobj/$cap:Name/$var` → literal
   at **dispatch time**), reverse **symbolizer**, and `info!` **binding lines**

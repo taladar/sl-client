@@ -26,7 +26,7 @@ pub mod parse;
 pub mod registry;
 
 pub use args::Args;
-pub use context::{NoContext, ReplContext};
+pub use context::{NoContext, ReplContext, SessionContext};
 pub use error::ReplError;
 pub use meta::MetaCommand;
 pub use parse::{PendingCommand, ReplAction, parse_line};
