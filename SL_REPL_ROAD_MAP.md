@@ -113,7 +113,7 @@ Scope reminders:
   (`smoke_battery(self)` read-only requests). `record.rs` (`ScriptRecorder`:
   replayable `.repl` of interactive lines, `sleep` deltas, placeholders
   preserved verbatim, parse-fails as `# ERROR` comments, flush per line).
-- [ ] **C5. Auth + secrets.** `auth.rs`: TOML credentials (multi-avatar,
+- [x] **C5. Auth + secrets.** `auth.rs`: TOML credentials (multi-avatar,
   optional `mfa_command`, `mfa_window_guard_secs`), `Secret` redacting newtype,
   and `acquire_mfa_token` with the **wall-clock-aligned 30s-window wait**
   (`remaining = 30-(unix%30)`; if `< guard` sleep to next boundary, then run
