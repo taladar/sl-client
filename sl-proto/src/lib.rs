@@ -5,6 +5,7 @@ mod command;
 mod error;
 mod extra_params;
 pub mod j2c;
+mod object_update;
 mod particles;
 mod session;
 mod terrain;
@@ -14,6 +15,10 @@ pub use appearance::{MAX_FACES, decode_texture_entry, encode_texture_entry};
 pub use command::Command;
 pub use error::Error;
 pub use extra_params::encode_extra_params;
+pub use object_update::{
+    TerseUpdate, encode_compressed_object, encode_object_motion, encode_terse_object_data,
+    encode_terse_texture_entry,
+};
 pub use particles::{
     decode_particle_system, decode_texture_anim, encode_particle_system, encode_texture_anim,
 };
