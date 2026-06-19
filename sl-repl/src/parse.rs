@@ -6,19 +6,47 @@
 //! `$placeholder` tokens left unresolved until the registry builds it against a
 //! [`ReplContext`](crate::context::ReplContext) at dispatch time.
 
+use std::sync::LazyLock;
+
+use sl_proto::Command;
+
 use crate::args::Args;
+use crate::context::ReplContext;
 use crate::error::ReplError;
 use crate::meta::MetaCommand;
+use crate::registry::Registry;
+
+/// The shared default [`Registry`], built once, that [`PendingCommand::resolve`]
+/// dispatches through. A binary that already holds a [`Registry`] should call
+/// [`Registry::build`] directly instead.
+static DEFAULT_REGISTRY: LazyLock<Registry> = LazyLock::new(Registry::new);
 
 /// A grid command named on a REPL line, with its arguments parsed but not yet
 /// resolved or type-checked. The [registry](crate::registry) turns this into a
-/// [`Command`](sl_proto::Command) at dispatch.
+/// [`Command`] at dispatch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingCommand {
     /// The command name (the line's first token).
     pub name: String,
     /// The parsed positional and keyword arguments.
     pub args: Args,
+}
+
+impl PendingCommand {
+    /// Resolve and build this pending command into a [`Command`], resolving its
+    /// `$placeholder` arguments against `ctx` at dispatch time.
+    ///
+    /// This is a convenience over the shared default [`Registry`]; a binary that
+    /// keeps its own [`Registry`] should call [`Registry::build`] directly.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReplError::UnknownCommand`] if the name is not registered, or
+    /// whatever the command's build function returns when an argument is
+    /// missing, malformed, or an unresolvable placeholder.
+    pub fn resolve(&self, ctx: &dyn ReplContext) -> Result<Command, ReplError> {
+        DEFAULT_REGISTRY.build(self, ctx)
+    }
 }
 
 /// The outcome of parsing one REPL line.
@@ -73,8 +101,10 @@ mod tests {
     use std::time::Duration;
 
     use pretty_assertions::assert_eq;
+    use sl_proto::{Command, Uuid};
 
     use super::{PendingCommand, ReplAction, parse_line};
+    use crate::context::{NoContext, SessionContext};
     use crate::error::ReplError;
     use crate::meta::MetaCommand;
 
@@ -155,6 +185,39 @@ mod tests {
         assert_eq!(
             parse_line(r#"chat "oops"#),
             Err(ReplError::UnterminatedQuote)
+        );
+    }
+
+    #[test]
+    fn resolve_builds_command_from_stub_context() {
+        let built = command("chat hello").map(|pending| pending.resolve(&NoContext));
+        assert!(
+            matches!(built, Some(Ok(Command::Chat { .. }))),
+            "a literal command builds against the stub context"
+        );
+    }
+
+    #[test]
+    fn resolve_expands_session_placeholders() {
+        let mut ctx = SessionContext::new();
+        ctx.set_identity(
+            Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap_or_else(|_| Uuid::nil()),
+            Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap_or_else(|_| Uuid::nil()),
+            7,
+        );
+        let built = command("im $self hi").map(|pending| pending.resolve(&ctx));
+        assert!(
+            matches!(built, Some(Ok(Command::InstantMessage { .. }))),
+            "$self resolves through the session context at dispatch time"
+        );
+    }
+
+    #[test]
+    fn resolve_unresolvable_placeholder_errors() {
+        let built = command("im $self hi").map(|pending| pending.resolve(&NoContext));
+        assert!(
+            matches!(built, Some(Err(ReplError::Unresolved(ref name))) if name == "$self"),
+            "an unresolvable placeholder fails to build"
         );
     }
 }
