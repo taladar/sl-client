@@ -8,7 +8,7 @@
 //! `LLPartSysData::unpackBlock` (`llpartdata.cpp`).
 
 use sl_types::lsl::Vector;
-use sl_wire::Reader;
+use sl_wire::{Reader, Writer};
 
 use crate::types::{ParticleSystem, TextureAnimation};
 
@@ -249,16 +249,190 @@ fn pow2(exp: u32) -> f32 {
     value
 }
 
+/// Encodes a [`TextureAnimation`] into its raw 16-byte `TextureAnim` blob — the
+/// inverse of [`decode_texture_anim`] and a port of the reference viewer's
+/// `LLTextureAnim::packTAMessage` (`lltextureanim.cpp`): the four header bytes
+/// (mode, face, grid x, grid y) followed by the three little-endian `F32`s
+/// (start, length, rate). The grid dimensions are written verbatim — the
+/// decoder, not the encoder, applies the non-`SMOOTH` floor-to-1, so a value
+/// re-read after encoding matches the viewer.
+#[must_use]
+pub fn encode_texture_anim(anim: &TextureAnimation) -> Vec<u8> {
+    let mut writer = Writer::new();
+    writer.put_u8(anim.mode);
+    writer.put_i8(anim.face);
+    writer.put_u8(anim.size_x);
+    writer.put_u8(anim.size_y);
+    writer.put_f32(anim.start);
+    writer.put_f32(anim.length);
+    writer.put_f32(anim.rate);
+    writer.into_bytes()
+}
+
+/// Encodes a [`ParticleSystem`] into its raw `PSBlock` blob — the inverse of
+/// [`decode_particle_system`].
+///
+/// Chooses the wire form the way the decoder distinguishes them: a system that
+/// carries no trailing glow or blend-func data (neither `LL_PART_DATA_GLOW`
+/// nor `LL_PART_DATA_BLEND` set in `part_flags`) is emitted as the legacy
+/// fixed 86-byte form — the 68-byte source block immediately followed by the
+/// 18-byte legacy particle block, with no size prefixes; otherwise the modern
+/// form is emitted, prefixing the source and particle sub-blocks with their
+/// `S32` sizes and appending the glow / blend-func bytes gated by those flags
+/// (mirroring `LLPartSysData::isLegacyCompatible` and the server's pack). All
+/// fixed-point fields are re-quantized with the exact inverse of the decoder's
+/// `unpackFixed` (`LLDataPacker::packFixed`): clamp to range, scale by
+/// `2^frac_bits`, and truncate toward zero.
+#[must_use]
+pub fn encode_particle_system(system: &ParticleSystem) -> Vec<u8> {
+    let mut writer = Writer::new();
+    let has_glow = system.part_flags & LL_PART_DATA_GLOW != 0;
+    let has_blend = system.part_flags & LL_PART_DATA_BLEND != 0;
+    if !has_glow && !has_blend {
+        // Legacy 86-byte form: the two sub-blocks back to back, no size prefixes.
+        encode_system(&mut writer, system);
+        encode_legacy_part(&mut writer, system);
+        return writer.into_bytes();
+    }
+    // Modern form: each sub-block prefixed with its S32 size.
+    writer.put_u32(u32::try_from(PS_SYS_DATA_BLOCK_SIZE).unwrap_or(u32::MAX));
+    encode_system(&mut writer, system);
+    // The particle block's declared size covers the legacy fields plus whichever
+    // of the optional glow / blend fields the flags request.
+    let mut part_size = PS_LEGACY_PART_DATA_BLOCK_SIZE;
+    if has_glow {
+        part_size = part_size.saturating_add(2);
+    }
+    if has_blend {
+        part_size = part_size.saturating_add(2);
+    }
+    writer.put_u32(u32::try_from(part_size).unwrap_or(u32::MAX));
+    encode_legacy_part(&mut writer, system);
+    if has_glow {
+        writer.put_u8(trunc_to_u8(system.part_start_glow * 255.0));
+        writer.put_u8(trunc_to_u8(system.part_end_glow * 255.0));
+    }
+    if has_blend {
+        writer.put_u8(system.part_blend_func_source);
+        writer.put_u8(system.part_blend_func_dest);
+    }
+    writer.into_bytes()
+}
+
+/// Encodes the 68-byte particle source block (the inverse of [`decode_system`],
+/// a port of `LLPartSysData::packSystem`). The unsigned scalar fields are 8.8
+/// (`max_age`/`start_age`/the burst fields) or 3.5 (`inner_angle`/`outer_angle`)
+/// fixed-point; the angular-velocity and acceleration vectors are signed 8.7
+/// fixed-point.
+fn encode_system(writer: &mut Writer, system: &ParticleSystem) {
+    writer.put_u32(system.crc);
+    writer.put_u32(system.flags);
+    writer.put_u8(system.pattern);
+    pack_fixed_u16(writer, system.max_age, 8, 8);
+    pack_fixed_u16(writer, system.start_age, 8, 8);
+    pack_fixed_u8(writer, system.inner_angle, 3, 5);
+    pack_fixed_u8(writer, system.outer_angle, 3, 5);
+    pack_fixed_u16(writer, system.burst_rate, 8, 8);
+    pack_fixed_u16(writer, system.burst_radius, 8, 8);
+    pack_fixed_u16(writer, system.burst_speed_min, 8, 8);
+    pack_fixed_u16(writer, system.burst_speed_max, 8, 8);
+    writer.put_u8(system.burst_part_count);
+    pack_fixed_vector_signed(writer, &system.angular_velocity, 8, 7);
+    pack_fixed_vector_signed(writer, &system.acceleration, 8, 7);
+    writer.put_uuid(system.texture_id);
+    writer.put_uuid(system.target_id);
+}
+
+/// Encodes the 18-byte legacy particle-template block (the inverse of
+/// [`decode_legacy_part`], a port of `LLPartData::packLegacy`): the flags, the
+/// 8.8 fixed-point max age, the two RGBA colours verbatim, and the four 3.5
+/// fixed-point start/end scale components.
+fn encode_legacy_part(writer: &mut Writer, system: &ParticleSystem) {
+    writer.put_u32(system.part_flags);
+    pack_fixed_u16(writer, system.part_max_age, 8, 8);
+    writer.bytes(&system.part_start_color);
+    writer.bytes(&system.part_end_color);
+    pack_fixed_u8(writer, system.part_start_scale[0], 3, 5);
+    pack_fixed_u8(writer, system.part_start_scale[1], 3, 5);
+    pack_fixed_u8(writer, system.part_end_scale[0], 3, 5);
+    pack_fixed_u8(writer, system.part_end_scale[1], 3, 5);
+}
+
+/// Writes an unsigned fixed-point value as a `u16` (the inverse of
+/// [`unpack_fixed_u16`], the viewer's `packFixed(false, int_bits, frac_bits)`
+/// with `int_bits + frac_bits == 16`): clamp to `0..=2^int_bits`, scale by
+/// `2^frac_bits`, and truncate toward zero.
+fn pack_fixed_u16(writer: &mut Writer, value: f32, int_bits: u32, frac_bits: u32) {
+    let max_val = pow2(int_bits);
+    let clamped = value.clamp(0.0, max_val);
+    writer.put_u16(trunc_to_u16(clamped * pow2(frac_bits)));
+}
+
+/// Writes an unsigned fixed-point value as a `u8` (the inverse of
+/// [`unpack_fixed_u8`], `packFixed(false, int_bits, frac_bits)` with
+/// `int_bits + frac_bits == 8`).
+fn pack_fixed_u8(writer: &mut Writer, value: f32, int_bits: u32, frac_bits: u32) {
+    let max_val = pow2(int_bits);
+    let clamped = value.clamp(0.0, max_val);
+    writer.put_u8(trunc_to_u8(clamped * pow2(frac_bits)));
+}
+
+/// Writes three signed fixed-point components as `u16`s (the inverse of
+/// [`unpack_fixed_vector_signed`], `packFixed(true, int_bits, frac_bits)`): clamp
+/// each component to `±2^int_bits`, bias by `+2^int_bits` to make it unsigned,
+/// scale by `2^frac_bits`, and truncate toward zero.
+fn pack_fixed_vector_signed(writer: &mut Writer, value: &Vector, int_bits: u32, frac_bits: u32) {
+    let max_val = pow2(int_bits);
+    let scale = pow2(frac_bits);
+    let mut write = |component: f32| {
+        let clamped = component.clamp(-max_val, max_val);
+        writer.put_u16(trunc_to_u16((clamped + max_val) * scale));
+    };
+    write(value.x);
+    write(value.y);
+    write(value.z);
+}
+
+/// Truncates a non-negative `f32` toward zero into a `u8`, the inverse of the
+/// fixed-point decoders' `raw / 2^frac_bits` de-quantization. The `as` cast
+/// saturates rather than wraps, which only differs from the viewer's `(U8)` cast
+/// at the exact clamp boundary (a value the inputs are pre-clamped to reach only
+/// from the maximum, where the difference is a single quantum).
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "value pre-clamped to 0..=255; truncate-toward-zero matches LL's (U8) cast"
+)]
+const fn trunc_to_u8(value: f32) -> u8 {
+    value as u8
+}
+
+/// Truncates a non-negative `f32` toward zero into a `u16`, the inverse of the
+/// 16-bit fixed-point de-quantization. As with [`trunc_to_u8`], the saturating
+/// `as` cast only differs from the viewer's wrapping `(U16)` at the clamp
+/// boundary.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "value pre-clamped to 0..=65535; truncate-toward-zero matches LL's (U16) cast"
+)]
+const fn trunc_to_u16(value: f32) -> u16 {
+    value as u16
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+    use sl_types::lsl::Vector;
     use uuid::Uuid;
 
     use super::{
         LL_PART_DATA_BLEND, LL_PART_DATA_GLOW, PS_LEGACY_DATA_BLOCK_SIZE, PS_SYS_DATA_BLOCK_SIZE,
-        decode_particle_system, decode_texture_anim,
+        decode_particle_system, decode_texture_anim, encode_particle_system, encode_texture_anim,
     };
-    use crate::types::{particle_pattern, texture_anim_mode};
+    use crate::types::{ParticleSystem, TextureAnimation, particle_pattern, texture_anim_mode};
 
     type TestError = Box<dyn core::error::Error>;
 
@@ -444,5 +618,146 @@ mod tests {
         push_le(&mut blob, 999, 4);
         blob.extend_from_slice(&[0_u8; 20]);
         assert!(decode_particle_system(&blob).is_none());
+    }
+
+    /// Builds a [`ParticleSystem`] whose every fixed-point field holds a value
+    /// that is exactly representable on the wire grid (8.8, 3.5 and signed 8.7),
+    /// so an `encode` → `decode` round trip is bit-for-bit lossless. `part_flags`
+    /// chooses the wire form: with the glow / blend bits set the glow / blend
+    /// values below are carried, otherwise they hold their canonical defaults.
+    fn exact_system(part_flags: u32) -> ParticleSystem {
+        let glow = part_flags & LL_PART_DATA_GLOW != 0;
+        let blend = part_flags & LL_PART_DATA_BLEND != 0;
+        ParticleSystem {
+            crc: 0xABCD,
+            flags: 0x02,
+            pattern: particle_pattern::ANGLE_CONE,
+            max_age: 1.0,
+            start_age: 0.5,
+            inner_angle: 1.0,
+            outer_angle: 2.0,
+            burst_rate: 0.5,
+            burst_radius: 2.0,
+            burst_speed_min: 1.0,
+            burst_speed_max: 4.0,
+            burst_part_count: 10,
+            angular_velocity: Vector {
+                x: 1.5,
+                y: -2.0,
+                z: 0.0,
+            },
+            acceleration: Vector {
+                x: 0.0,
+                y: -0.5,
+                z: 3.0,
+            },
+            texture_id: Uuid::from_u128(0x1234),
+            target_id: Uuid::from_u128(0x5678),
+            part_flags,
+            part_max_age: 10.0,
+            part_start_color: [255, 0, 0, 255],
+            part_end_color: [0, 0, 255, 128],
+            part_start_scale: [1.0, 2.0],
+            part_end_scale: [3.0, 0.5],
+            // Glow bytes 200 / 128 re-quantize losslessly (see the quantization
+            // check); when the flag is clear the decoder yields the 0.0 default.
+            part_start_glow: if glow { 200.0 / 255.0 } else { 0.0 },
+            part_end_glow: if glow { 128.0 / 255.0 } else { 0.0 },
+            part_blend_func_source: if blend { 3 } else { 7 },
+            part_blend_func_dest: if blend { 5 } else { 9 },
+        }
+    }
+
+    #[test]
+    fn texture_anim_encode_is_the_inverse_of_decode() -> Result<(), TestError> {
+        // decode → encode reproduces the original 16-byte block exactly.
+        let mut blob = vec![
+            texture_anim_mode::ON | texture_anim_mode::SMOOTH,
+            0xFF, // face = -1
+            4,
+            2,
+        ];
+        push_f32(&mut blob, 1.0);
+        push_f32(&mut blob, 8.0);
+        push_f32(&mut blob, 12.0);
+        let anim = decode_texture_anim(&blob).ok_or("a 16-byte block decodes")?;
+        assert_eq!(encode_texture_anim(&anim), blob);
+
+        // encode → decode preserves a hand-built animation value.
+        let original = TextureAnimation {
+            mode: texture_anim_mode::ON | texture_anim_mode::ROTATE,
+            face: 3,
+            size_x: 7,
+            size_y: 1,
+            start: -1.5,
+            length: 2.25,
+            rate: 0.5,
+        };
+        let encoded = encode_texture_anim(&original);
+        assert_eq!(encoded.len(), 16);
+        let decoded = decode_texture_anim(&encoded).ok_or("re-decodes")?;
+        assert_eq!(decoded, original);
+        Ok(())
+    }
+
+    #[test]
+    fn particle_system_legacy_round_trips() -> Result<(), TestError> {
+        // No glow / blend flags → the legacy fixed 86-byte form, no size prefixes.
+        let system = exact_system(0x01);
+        let blob = encode_particle_system(&system);
+        assert_eq!(blob.len(), PS_LEGACY_DATA_BLOCK_SIZE);
+        let decoded = decode_particle_system(&blob).ok_or("legacy form re-decodes")?;
+        assert_eq!(decoded, system);
+        Ok(())
+    }
+
+    #[test]
+    fn particle_system_modern_round_trips_with_glow_and_blend() -> Result<(), TestError> {
+        let part_flags = 0x01 | LL_PART_DATA_GLOW | LL_PART_DATA_BLEND;
+        let system = exact_system(part_flags);
+        let blob = encode_particle_system(&system);
+        // Modern form: 8 bytes of S32 size prefixes + glow (2) + blend (2) over the
+        // 86-byte legacy payload.
+        assert_eq!(blob.len(), PS_LEGACY_DATA_BLOCK_SIZE + 8 + 4);
+        let decoded = decode_particle_system(&blob).ok_or("modern form re-decodes")?;
+        assert_eq!(decoded, system);
+
+        // Only the glow flag → glow is carried but blend is not (and the form is
+        // still modern because a trailing field is present).
+        let glow_only = exact_system(0x01 | LL_PART_DATA_GLOW);
+        let blob = encode_particle_system(&glow_only);
+        assert_eq!(blob.len(), PS_LEGACY_DATA_BLOCK_SIZE + 8 + 2);
+        assert_eq!(
+            decode_particle_system(&blob).ok_or("glow-only re-decodes")?,
+            glow_only
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn particle_system_decode_encode_is_idempotent_over_a_hand_built_blob() -> Result<(), TestError>
+    {
+        // The hand-built modern blob from the decode test re-encodes byte-for-byte
+        // (every field in the builders is exactly representable on the wire grid).
+        let image = Uuid::from_u128(0x9);
+        let target = Uuid::nil();
+        let part_flags = 0x01 | LL_PART_DATA_GLOW | LL_PART_DATA_BLEND;
+        let mut blob = Vec::new();
+        push_le(
+            &mut blob,
+            u32::try_from(PS_SYS_DATA_BLOCK_SIZE).unwrap_or(0),
+            4,
+        );
+        blob.extend_from_slice(&build_system_block(0x1, 0x0, image, target));
+        push_le(&mut blob, 22, 4);
+        blob.extend_from_slice(&build_legacy_part_block(part_flags));
+        blob.push(255);
+        blob.push(128);
+        blob.push(3);
+        blob.push(5);
+
+        let decoded = decode_particle_system(&blob).ok_or("hand-built blob decodes")?;
+        assert_eq!(encode_particle_system(&decoded), blob);
+        Ok(())
     }
 }
