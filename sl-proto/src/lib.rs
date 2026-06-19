@@ -8,6 +8,7 @@ pub mod j2c;
 mod object_update;
 mod particles;
 mod session;
+mod sim_session;
 mod terrain;
 mod types;
 
@@ -41,6 +42,7 @@ pub use session::{
     group_memberships_to_caps_llsd, inventory_descendents_to_llsd, offline_messages_to_llsd,
     parcel_info_to_llsd, server_appearance_update_to_llsd, teleport_finish_to_llsd,
 };
+pub use sim_session::{AgentUpdateInfo, ServerEvent, SimSession};
 pub use terrain::encode_layer;
 pub use types::{
     ActiveGroup, AlertInfo, Asset, AssetType, AvatarAppearance, AvatarAttachment, AvatarClassified,
