@@ -604,7 +604,7 @@ mod tests {
     use std::net::SocketAddr;
 
     use pretty_assertions::assert_eq;
-    use sl_proto::{Command, Diagnostic, Event, Uuid};
+    use sl_proto::{Command, Diagnostic, Event, MessageId, Uuid, WireError};
 
     use super::{format_command, format_diagnostic, format_event, hexdump};
     use crate::context::{NoContext, SessionContext};
@@ -713,6 +713,44 @@ mod tests {
                 sequence: None,
             }),
             "ExpectedReplyMissing request=Sit sequence=-"
+        );
+    }
+
+    #[test]
+    fn decode_failed_renders_header_and_marked_hexdump() {
+        // These are exactly the fields a live `Session` captures for an unknown
+        // High(0) id with a two-byte body (see `sl-proto`'s
+        // `unknown_message_id_surfaces_decode_failed_with_offset` lifecycle
+        // test): decoding stops after the one-byte id prefix, so the failing
+        // offset is 1 and the captured bytes are the id byte plus the body.
+        let rendered = format_diagnostic(&Diagnostic::DecodeFailed {
+            id: MessageId::High(0),
+            name: None,
+            error: WireError::UnknownMessage {
+                id: MessageId::High(0),
+            },
+            raw: vec![0x00, 0xAA, 0xBB],
+            failed_offset: 1,
+        });
+        assert!(
+            rendered.contains("DecodeFailed id=High(0)"),
+            "the header names the undecodable id: {rendered}"
+        );
+        assert!(
+            rendered.contains("name=?"),
+            "an id owned by no template renders as `?`: {rendered}"
+        );
+        assert!(
+            rendered.contains("failed_offset=1"),
+            "the header carries the failing offset: {rendered}"
+        );
+        assert!(
+            rendered.contains("[aa]"),
+            "the byte at the failing offset is bracketed in the hexdump: {rendered}"
+        );
+        assert!(
+            rendered.contains(" bb "),
+            "the trailing byte stays unmarked: {rendered}"
         );
     }
 

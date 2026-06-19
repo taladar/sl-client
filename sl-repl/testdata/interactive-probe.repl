@@ -1,0 +1,27 @@
+# sl-repl interactive probe script.
+#
+# Replay against a logged-in session with:
+#   sl-repl-tokio --credentials credentials.toml --script interactive-probe.repl
+#   sl-repl-bevy  --credentials credentials.toml --script interactive-probe.repl
+#
+# `sleep` directives pace the replay in seconds; lines run verbatim, so the
+# `$self` placeholder is preserved here and resolved to the avatar's id at
+# dispatch time. The session logs out when the script ends.
+
+# Wait for login + the region handshake to settle.
+sleep 12
+
+# Read-only requests (these are also what `--smoke` fires automatically).
+request_region_info
+request_money_balance
+request_economy_data
+request_parcel_properties 0 0 256 256
+request_wearables
+request_avatar_properties $self
+
+# A chat round-trips back as a `chat_received` event; the IM to self echoes as
+# `instant_message_received`. Both exercise the `$self` placeholder.
+sleep 2
+chat "sl-repl interactive probe"
+im $self "self note via $self placeholder"
+sleep 3
