@@ -228,16 +228,15 @@ use crate::types::{
     InventoryFolder, InventoryItem, InventoryOffer, LandingType, LoadUrlRequest, LoginAccount,
     LoginHttpRequest, LoginParams, MapItem, MapItemType, MapRegionInfo, Material, Maturity,
     MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMotion,
-    ObjectProperties, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-    ParcelCategory, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo,
-    ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, PickInfo,
-    PickUpdate, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
-    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionInfoUpdate, RegionLimits,
-    Reliability, SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, SoundFlags, SoundPreload, TeleportFlags, TerrainLayerType, TerrainPatch,
-    Texture, Throttle, TransferStatus, Transmit, Wearable, WearableType, avatar_texture,
-    grid_to_handle, handle_to_grid,
+    NeighborInfo, NewInventoryItem, Object, ObjectFlagSettings, ObjectProperties, ObjectTransform,
+    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelInfo,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
+    ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, PickInfo, PickUpdate,
+    PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate, RegionChatSettings,
+    RegionCombatSettings, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, SaleType,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SoundFlags,
+    SoundPreload, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus,
+    Transmit, Wearable, WearableType, avatar_texture, grid_to_handle, handle_to_grid,
 };
 use crate::{appearance, types::AvatarAppearance, types::AvatarAttachment};
 
@@ -268,7 +267,7 @@ const DEFAULT_DRAW_DISTANCE: f32 = 256.0;
 /// terrain layer; `LAYER_FLAG` in the reference viewer).
 const MAP_LAYER_FLAG: u32 = 2;
 /// The identity (no-op) rotation: the default body/head facing.
-const IDENTITY_ROTATION: Rotation = Rotation {
+pub(crate) const IDENTITY_ROTATION: Rotation = Rotation {
     x: 0.0,
     y: 0.0,
     z: 0.0,
@@ -4617,9 +4616,11 @@ impl Session {
                 let region_handle = update.region_data.region_handle;
                 self.note_time_dilation(from, region_handle, update.region_data.time_dilation);
                 for block in &update.object_data {
-                    if let Some(object) =
-                        compressed_object(&block.data, region_handle, block.update_flags)
-                    {
+                    if let Some(object) = crate::object_update::compressed_object(
+                        &block.data,
+                        region_handle,
+                        block.update_flags,
+                    ) {
                         self.upsert_object(from, object);
                     }
                 }
@@ -4656,11 +4657,12 @@ impl Session {
                 // unknown ones (which lack identity here), fetch the full update.
                 let mut misses = Vec::new();
                 for block in &update.object_data {
-                    let Some(terse) = terse_update(&block.data) else {
+                    let Some(terse) = crate::object_update::terse_update(&block.data) else {
                         continue;
                     };
                     let local_id = terse.local_id;
-                    let texture_entry = terse_texture_entry(&block.texture_entry);
+                    let texture_entry =
+                        crate::object_update::terse_texture_entry(&block.texture_entry);
                     if !self.apply_terse_update(from, terse, texture_entry) {
                         misses.push(local_id);
                     }
@@ -4789,7 +4791,7 @@ impl Session {
     fn apply_terse_update(
         &mut self,
         from: SocketAddr,
-        update: TerseUpdate,
+        update: crate::object_update::TerseUpdate,
         texture_entry: Option<Vec<u8>>,
     ) -> bool {
         let Some(object) = self
@@ -11103,68 +11105,17 @@ fn inventory_item_from_llsd(item: &Llsd) -> InventoryItem {
 }
 
 // ---------------------------------------------------------------------------
-// Object / scene graph (#16): decoders for the packed `ObjectData`/`Data` blobs.
+// Object / scene graph (#16): assembling decoded objects from full-update
+// blocks. The packed `ObjectData`/`Data` blob (de)coders live in
+// [`crate::object_update`].
 // ---------------------------------------------------------------------------
 
-/// The `CompressedFlags` bitfield carried in an `ObjectUpdateCompressed` blob,
-/// gating which optional fields follow (mirrors LL's `CompressedFlags`).
-const COMPRESSED_SCRATCHPAD: u32 = 0x01;
-/// The object carries a tree species byte.
-const COMPRESSED_TREE: u32 = 0x02;
-/// The object has floating text (`llSetText`).
-const COMPRESSED_HAS_TEXT: u32 = 0x04;
-/// The object has a legacy (≤ 86-byte) particle system block.
-const COMPRESSED_HAS_PARTICLES_LEGACY: u32 = 0x08;
-/// The object has an attached sound (id, gain, flags, radius follow).
-const COMPRESSED_HAS_SOUND: u32 = 0x10;
-/// The object is linked to a parent (a `ParentID` follows).
-const COMPRESSED_HAS_PARENT: u32 = 0x20;
-/// The object has a texture-animation block (after the texture entry).
-const COMPRESSED_TEXTURE_ANIM: u32 = 0x40;
-/// The object has a non-zero angular velocity (a vector follows).
-const COMPRESSED_HAS_ANGULAR_VELOCITY: u32 = 0x80;
-/// The object has a name-value pairs string.
-const COMPRESSED_HAS_NAME_VALUES: u32 = 0x100;
-/// The object has a media URL.
-const COMPRESSED_MEDIA_URL: u32 = 0x200;
-/// The object has a "new" (> 86-byte) particle system block, appended last.
-const COMPRESSED_HAS_PARTICLES_NEW: u32 = 0x400;
-
-/// The fixed byte size of a legacy particle-system block
-/// (`PS_LEGACY_DATA_BLOCK_SIZE`: a 68-byte system block plus an 18-byte
-/// particle-data block). The block carries no length prefix, so it can only be
-/// skipped by its known size.
-const COMPRESSED_LEGACY_PARTICLE_SIZE: usize = 86;
-
 /// A zero [`Vector`], used as the fall-back for absent/short motion fields.
-const ZERO_VECTOR: Vector = Vector {
+pub(crate) const ZERO_VECTOR: Vector = Vector {
     x: 0.0,
     y: 0.0,
     z: 0.0,
 };
-
-/// Dequantizes a 16-bit fixed-point value spanning `[lower, upper]` back to an
-/// `f32`, matching LL's `U16_to_F32` (including its snap-to-zero of values
-/// within one quantum of zero).
-fn u16_to_f32(value: u16, lower: f32, upper: f32) -> f32 {
-    let range = upper - lower;
-    let result = f32::from(value) / f32::from(u16::MAX) * range + lower;
-    let max_error = range / f32::from(u16::MAX);
-    if result.abs() < max_error {
-        0.0
-    } else {
-        result
-    }
-}
-
-/// Reads three consecutive 16-bit-quantized floats (each spanning
-/// `[-range, range]`) as a [`Vector`].
-fn read_quantized_vector(reader: &mut Reader<'_>, range: f32) -> Result<Vector, WireError> {
-    let x = u16_to_f32(reader.u16()?, -range, range);
-    let y = u16_to_f32(reader.u16()?, -range, range);
-    let z = u16_to_f32(reader.u16()?, -range, range);
-    Ok(Vector { x, y, z })
-}
 
 /// Packs a unit quaternion into the three-float form a `MultipleObjectUpdate`
 /// `Data` blob carries (LL's `LLQuaternion::packToVector3`): normalize, then if
@@ -11186,138 +11137,6 @@ fn pack_quaternion_to_vec3(rotation: &Rotation) -> [f32; 3] {
     [x, y, z]
 }
 
-/// A zero/identity [`ObjectMotion`], used when a motion blob is malformed.
-const fn zero_motion() -> ObjectMotion {
-    ObjectMotion {
-        position: ZERO_VECTOR,
-        velocity: ZERO_VECTOR,
-        acceleration: ZERO_VECTOR,
-        rotation: IDENTITY_ROTATION,
-        angular_velocity: ZERO_VECTOR,
-        collision_plane: None,
-    }
-}
-
-/// Decodes the full-precision `ObjectData` blob of an `ObjectUpdate` into an
-/// [`ObjectMotion`]. Avatar variants (length 76/140) carry a 16-byte collision
-/// plane prefix, which is skipped. Returns a zero motion on a short/garbled
-/// blob rather than erroring (best-effort, no panic).
-fn full_object_motion(blob: &[u8]) -> ObjectMotion {
-    full_object_motion_inner(blob).unwrap_or_else(|_ignored| zero_motion())
-}
-
-/// The fallible inner of [`full_object_motion`].
-fn full_object_motion_inner(blob: &[u8]) -> Result<ObjectMotion, WireError> {
-    let mut reader = Reader::new(blob);
-    // Avatar variants carry a collision-plane (LLVector4) prefix; ordinary
-    // objects do not.
-    let collision_plane = if matches!(blob.len(), 76 | 140) {
-        Some(reader.vector4()?)
-    } else {
-        None
-    };
-    let position = reader.vector3()?;
-    let velocity = reader.vector3()?;
-    let acceleration = reader.vector3()?;
-    // Rotation is a packed quaternion (three floats, w reconstructed).
-    let rotation = reader.quaternion()?;
-    let angular_velocity = reader.vector3()?;
-    Ok(ObjectMotion {
-        position,
-        velocity,
-        acceleration,
-        rotation,
-        angular_velocity,
-        collision_plane,
-    })
-}
-
-/// A decoded `ImprovedTerseObjectUpdate` entry: the object's local id, its state
-/// byte, and its new motion.
-struct TerseUpdate {
-    /// The object's region-local id.
-    local_id: u32,
-    /// The object/attachment state byte.
-    state: u8,
-    /// The object's new kinematic state (position full precision; velocity,
-    /// acceleration, rotation, and angular velocity 16-bit quantized).
-    motion: ObjectMotion,
-}
-
-/// Decodes the `Data` blob of an `ImprovedTerseObjectUpdate` entry. Returns
-/// `None` on a short/garbled blob.
-fn terse_update(blob: &[u8]) -> Option<TerseUpdate> {
-    let mut reader = Reader::new(blob);
-    let local_id = reader.u32().ok()?;
-    let state = reader.u8().ok()?;
-    let has_collision_plane = reader.u8().ok()? != 0;
-    // Avatar updates carry a collision plane (LLVector4); other objects do not.
-    let collision_plane = if has_collision_plane {
-        Some(reader.vector4().ok()?)
-    } else {
-        None
-    };
-    let position = reader.vector3().ok()?;
-    let velocity = read_quantized_vector(&mut reader, 128.0).ok()?;
-    let acceleration = read_quantized_vector(&mut reader, 64.0).ok()?;
-    // Rotation: four explicit 16-bit components (x, y, z, w) — not packed.
-    let rot_x = u16_to_f32(reader.u16().ok()?, -1.0, 1.0);
-    let rot_y = u16_to_f32(reader.u16().ok()?, -1.0, 1.0);
-    let rot_z = u16_to_f32(reader.u16().ok()?, -1.0, 1.0);
-    let rot_s = u16_to_f32(reader.u16().ok()?, -1.0, 1.0);
-    let rotation = Rotation {
-        x: rot_x,
-        y: rot_y,
-        z: rot_z,
-        s: rot_s,
-    };
-    let angular_velocity = read_quantized_vector(&mut reader, 64.0).ok()?;
-    Some(TerseUpdate {
-        local_id,
-        state,
-        motion: ObjectMotion {
-            position,
-            velocity,
-            acceleration,
-            rotation,
-            angular_velocity,
-            collision_plane,
-        },
-    })
-}
-
-/// Extracts the raw `TextureEntry` blob from the trailing `TextureEntry` field
-/// of an `ImprovedTerseObjectUpdate` block, or `None` when the simulator sent no
-/// texture change (the common case — the field is empty unless the update is
-/// flagged `Textures`).
-///
-/// Unlike a full `ObjectUpdate`, whose `TextureEntry` field is the bare blob, the
-/// terse field is wrapped: a 2-byte inner length, two zero bytes, then the
-/// `TextureEntry` (OpenSim `CreateImprovedTerseBlock`; the codec has already
-/// stripped the outer 2-byte field length). Skip the four-byte wrapper to recover
-/// the blob, which decodes with
-/// [`decode_texture_entry`](crate::decode_texture_entry).
-fn terse_texture_entry(field: &[u8]) -> Option<Vec<u8>> {
-    let blob = field.get(4..)?;
-    if blob.is_empty() {
-        return None;
-    }
-    Some(blob.to_vec())
-}
-
-/// Reads a NUL-terminated UTF-8 string from `reader` (consuming the terminator).
-fn read_nul_string(reader: &mut Reader<'_>) -> Option<String> {
-    let mut bytes = Vec::new();
-    loop {
-        let byte = reader.u8().ok()?;
-        if byte == 0 {
-            break;
-        }
-        bytes.push(byte);
-    }
-    Some(String::from_utf8_lossy(&bytes).into_owned())
-}
-
 /// Builds an [`Object`] from a full `ObjectUpdate` object-data block.
 fn object_from_full_update(block: &ObjectUpdateObjectDataBlock, region_handle: u64) -> Object {
     Object {
@@ -11332,7 +11151,7 @@ fn object_from_full_update(block: &ObjectUpdateObjectDataBlock, region_handle: u
         click_action: block.click_action,
         update_flags: block.update_flags,
         scale: block.scale.clone(),
-        motion: full_object_motion(&block.object_data),
+        motion: crate::object_update::full_object_motion(&block.object_data),
         owner_id: block.owner_id,
         sound: block.sound,
         gain: block.gain,
@@ -11360,7 +11179,8 @@ fn object_from_full_update(block: &ObjectUpdateObjectDataBlock, region_handle: u
 
 /// Reads the path/profile [`PrimShapeParams`] from a full `ObjectUpdate` block's
 /// individual shape fields. (The compressed update packs the same values as a
-/// single 23-byte blob — see [`read_compressed_shape`].)
+/// single 23-byte blob — see `read_compressed_shape` in
+/// [`crate::object_update`].)
 const fn shape_from_full_block(block: &ObjectUpdateObjectDataBlock) -> PrimShapeParams {
     PrimShapeParams {
         path_curve: block.path_curve,
@@ -11382,216 +11202,6 @@ const fn shape_from_full_block(block: &ObjectUpdateObjectDataBlock) -> PrimShape
         profile_end: block.profile_end,
         profile_hollow: block.profile_hollow,
     }
-}
-
-/// Reads the compressed update's 23-byte path+profile shape blob — the path
-/// block (`LLPathParams`, 16 bytes) then the profile block (`LLProfileParams`, 7
-/// bytes), in the simulator's pack order — into a [`PrimShapeParams`]. The wire
-/// values are the same raw quantized integers a full update sends as individual
-/// fields (see [`shape_from_full_block`]).
-fn read_compressed_shape(reader: &mut Reader<'_>) -> Option<PrimShapeParams> {
-    let path_curve = reader.u8().ok()?;
-    let path_begin = reader.u16().ok()?;
-    let path_end = reader.u16().ok()?;
-    let path_scale_x = reader.u8().ok()?;
-    let path_scale_y = reader.u8().ok()?;
-    let path_shear_x = reader.u8().ok()?;
-    let path_shear_y = reader.u8().ok()?;
-    let path_twist = reader.i8().ok()?;
-    let path_twist_begin = reader.i8().ok()?;
-    let path_radius_offset = reader.i8().ok()?;
-    let path_taper_x = reader.i8().ok()?;
-    let path_taper_y = reader.i8().ok()?;
-    let path_revolutions = reader.u8().ok()?;
-    let path_skew = reader.i8().ok()?;
-    let profile_curve = reader.u8().ok()?;
-    let profile_begin = reader.u16().ok()?;
-    let profile_end = reader.u16().ok()?;
-    let profile_hollow = reader.u16().ok()?;
-    Some(PrimShapeParams {
-        path_curve,
-        profile_curve,
-        path_begin,
-        path_end,
-        path_scale_x,
-        path_scale_y,
-        path_shear_x,
-        path_shear_y,
-        path_twist,
-        path_twist_begin,
-        path_radius_offset,
-        path_taper_x,
-        path_taper_y,
-        path_revolutions,
-        path_skew,
-        profile_begin,
-        profile_end,
-        profile_hollow,
-    })
-}
-
-/// Decodes the packed `Data` blob of an `ObjectUpdateCompressed` entry into an
-/// [`Object`]. The reliable fixed prefix (identity, scale, position, rotation,
-/// flags, owner, optional angular velocity / parent / tree, floating text, and
-/// media URL) is decoded first; then, best-effort, the trailing length-prefix-
-/// less fields the simulator packs in order — legacy particle system,
-/// `ExtraParams`, attached sound, name-values, the path/profile shape, the
-/// packed texture entry, texture animation, and the "new" particle system —
-/// mirroring the reference viewer's `LLViewerObject`/`LLVOVolume`
-/// `processUpdateMessage` and OpenSim's `CreateCompressedUpdateBlock`. With the
-/// trailing decode the sound, name-values, texture entry, and extra-params are
-/// populated, so a compressed update yields the same decoded [`Object`] as a
-/// full `ObjectUpdate`. Returns `None` only when the fixed prefix is too short;
-/// a malformed tail simply leaves the later fields at their defaults.
-fn compressed_object(blob: &[u8], region_handle: u64, update_flags: u32) -> Option<Object> {
-    let mut reader = Reader::new(blob);
-    let full_id = reader.uuid().ok()?;
-    let local_id = reader.u32().ok()?;
-    let pcode = reader.u8().ok()?;
-    let state = reader.u8().ok()?;
-    let crc = reader.u32().ok()?;
-    let material = reader.u8().ok()?;
-    let click_action = reader.u8().ok()?;
-    let scale = reader.vector3().ok()?;
-    let position = reader.vector3().ok()?;
-    // Rotation is a packed quaternion (three floats, w reconstructed).
-    let rotation = reader.quaternion().ok()?;
-    let cflags = reader.u32().ok()?;
-    let owner_id = reader.uuid().ok()?;
-    let angular_velocity = if cflags & COMPRESSED_HAS_ANGULAR_VELOCITY != 0 {
-        reader.vector3().ok()?
-    } else {
-        ZERO_VECTOR
-    };
-    let parent_id = if cflags & COMPRESSED_HAS_PARENT != 0 {
-        reader.u32().ok()?
-    } else {
-        0
-    };
-    // The generic `Data` field: a tree's genome byte (carried inline under the
-    // tree flag) or a scratchpad blob. Captured so the compressed object exposes
-    // the same `data` a full update carries in its `Data` field.
-    let data = if cflags & COMPRESSED_TREE != 0 {
-        vec![reader.u8().ok()?]
-    } else if cflags & COMPRESSED_SCRATCHPAD != 0 {
-        let size = reader.u32().ok()?;
-        reader.take(usize::try_from(size).ok()?).ok()?.to_vec()
-    } else {
-        Vec::new()
-    };
-    let (text, text_color) = if cflags & COMPRESSED_HAS_TEXT != 0 {
-        let text = read_nul_string(&mut reader)?;
-        let color = reader.take_array::<4>().ok()?;
-        (text, color)
-    } else {
-        (String::new(), [0; 4])
-    };
-    let media_url = if cflags & COMPRESSED_MEDIA_URL != 0 {
-        read_nul_string(&mut reader)?
-    } else {
-        String::new()
-    };
-    let mut object = Object {
-        region_handle,
-        local_id,
-        full_id,
-        parent_id,
-        pcode,
-        state,
-        crc,
-        material,
-        click_action,
-        update_flags,
-        scale,
-        motion: ObjectMotion {
-            position,
-            velocity: ZERO_VECTOR,
-            acceleration: ZERO_VECTOR,
-            rotation,
-            angular_velocity,
-            // Compressed updates carry no collision plane (avatars use the full
-            // or terse path).
-            collision_plane: None,
-        },
-        owner_id,
-        sound: Uuid::nil(),
-        gain: 0.0,
-        sound_flags: 0,
-        sound_radius: 0.0,
-        text,
-        text_color,
-        name_value: String::new(),
-        media_url,
-        texture_entry: Vec::new(),
-        texture_anim: Vec::new(),
-        texture_animation: None,
-        shape: PrimShapeParams::default(),
-        particle_system: Vec::new(),
-        particles: None,
-        data,
-        extra: ObjectExtraParams::default(),
-        extra_params: Vec::new(),
-        properties: None,
-        // The deprecated joint fields are not carried by compressed updates.
-        joint_type: 0,
-        joint_pivot: ZERO_VECTOR,
-        joint_axis_or_anchor: ZERO_VECTOR,
-    };
-    // Best-effort decode of the trailing fields: a short/garbled tail leaves the
-    // remaining fields at their defaults rather than discarding the whole object.
-    let _ignored = compressed_object_trailing(&mut reader, cflags, &mut object);
-    Some(object)
-}
-
-/// Decodes the trailing, length-prefix-less fields of an `ObjectUpdateCompressed`
-/// blob — packed by the simulator in this fixed order after the media URL — into
-/// `object`. Best-effort: the first field that runs short short-circuits the
-/// walk (every later field's position depends on the earlier ones being fully
-/// read), leaving `object`'s already-decoded fields in place.
-fn compressed_object_trailing(
-    reader: &mut Reader<'_>,
-    cflags: u32,
-    object: &mut Object,
-) -> Option<()> {
-    // Legacy particle system: a fixed-size block with no length prefix.
-    if cflags & COMPRESSED_HAS_PARTICLES_LEGACY != 0 {
-        object.particle_system = reader.take(COMPRESSED_LEGACY_PARTICLE_SIZE).ok()?.to_vec();
-        object.particles = crate::particles::decode_particle_system(&object.particle_system);
-    }
-    // ExtraParams container (always present, if only as a zero count byte).
-    let extra_len = crate::extra_params::extra_params_len(reader.peek_rest());
-    let extra_params = reader.take(extra_len).ok()?;
-    object.extra = crate::extra_params::decode_extra_params(extra_params);
-    object.extra_params = extra_params.to_vec();
-    // Attached sound: id, gain, flags, cutoff radius.
-    if cflags & COMPRESSED_HAS_SOUND != 0 {
-        object.sound = reader.uuid().ok()?;
-        object.gain = reader.f32().ok()?;
-        object.sound_flags = reader.u8().ok()?;
-        object.sound_radius = reader.f32().ok()?;
-    }
-    // Name-value pairs string.
-    if cflags & COMPRESSED_HAS_NAME_VALUES != 0 {
-        object.name_value = read_nul_string(reader)?;
-    }
-    // Path+profile shape parameters: a fixed-size block with no length prefix.
-    object.shape = read_compressed_shape(reader)?;
-    // Packed texture entry: a little-endian u32 byte length then that many bytes.
-    let te_len = usize::try_from(reader.u32().ok()?).ok()?;
-    object.texture_entry = reader.take(te_len).ok()?.to_vec();
-    // Texture animation: a little-endian u32 byte length then that many bytes.
-    if cflags & COMPRESSED_TEXTURE_ANIM != 0 {
-        let anim_len = usize::try_from(reader.u32().ok()?).ok()?;
-        object.texture_anim = reader.take(anim_len).ok()?.to_vec();
-        object.texture_animation = crate::particles::decode_texture_anim(&object.texture_anim);
-    }
-    // The "new" (> 86-byte) particle system, when present, is the final field —
-    // it carries its own internal size, so the rest of the blob is its payload.
-    if cflags & COMPRESSED_HAS_PARTICLES_NEW != 0 {
-        object.particle_system = reader.take_rest().to_vec();
-        object.particles = crate::particles::decode_particle_system(&object.particle_system);
-    }
-    Some(())
 }
 
 /// Builds an [`ObjectProperties`] from an `ObjectProperties` object-data block.
