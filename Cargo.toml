@@ -5,6 +5,7 @@ members = [
     "sl-msg-template",
     "sl-proto",
     "sl-repl",
+    "sl-repl-bevy",
     "sl-repl-tokio",
     "sl-survey",
     "sl-wire",

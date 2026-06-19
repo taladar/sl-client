@@ -1806,6 +1806,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-repl-bevy"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "clap",
+ "clap_complete",
+ "clap_mangen",
+ "crossbeam-channel",
+ "pretty_assertions",
+ "rustyline",
+ "sl-client-bevy",
+ "sl-proto",
+ "sl-repl",
+ "thiserror",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "sl-repl-tokio"
 version = "0.1.0"
 dependencies = [
