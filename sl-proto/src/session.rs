@@ -25,12 +25,13 @@ use sl_wire::messages::{
     GrantUserRightsAgentDataBlock, GrantUserRightsRightsBlock, ImprovedInstantMessage,
     ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
     ImprovedInstantMessageMessageBlockBlock, InventoryDescendentsFolderDataBlock,
-    InventoryDescendentsItemDataBlock, LogoutRequest, LogoutRequestAgentDataBlock,
-    MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapBlockRequest, MapBlockRequestAgentDataBlock,
-    MapBlockRequestPositionDataBlock, MapItemRequest, MapItemRequestAgentDataBlock,
-    MapItemRequestRequestDataBlock, MapNameRequest, MapNameRequestAgentDataBlock,
-    MapNameRequestNameDataBlock, PacketAck, PacketAckPacketsBlock, ParcelProperties,
-    ParcelPropertiesRequest, ParcelPropertiesRequestAgentDataBlock,
+    InventoryDescendentsItemDataBlock, LogoutRequest, LogoutRequestAgentDataBlock, MapBlockReply,
+    MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapBlockRequest,
+    MapBlockRequestAgentDataBlock, MapBlockRequestPositionDataBlock, MapItemReply,
+    MapItemReplyAgentDataBlock, MapItemReplyDataBlock, MapItemReplyRequestDataBlock,
+    MapItemRequest, MapItemRequestAgentDataBlock, MapItemRequestRequestDataBlock, MapNameRequest,
+    MapNameRequestAgentDataBlock, MapNameRequestNameDataBlock, PacketAck, PacketAckPacketsBlock,
+    ParcelProperties, ParcelPropertiesRequest, ParcelPropertiesRequestAgentDataBlock,
     ParcelPropertiesRequestParcelDataBlock, RegionHandshakeReply,
     RegionHandshakeReplyAgentDataBlock, RegionHandshakeReplyRegionInfoBlock, RequestRegionInfo,
     RequestRegionInfoAgentDataBlock, TeleportLocationRequest,
@@ -10225,6 +10226,98 @@ fn map_item(data: &sl_wire::messages::MapItemReplyDataBlock) -> MapItem {
         extra: data.extra,
         extra2: data.extra2,
         name: trimmed_string(&data.name),
+    }
+}
+
+/// Encodes a [`MapRegionInfo`] into a `MapBlockReply` `Data` block — the
+/// simulator-side inverse of [`map_region_info`]. The grid coordinates are
+/// truncated to the `u16` the wire carries (region indices are small), and the
+/// name is NUL-terminated as a map server sends it. The region size is *not*
+/// carried here; it travels in the parallel `Size` block (see
+/// [`build_map_block_reply`]).
+fn map_region_info_to_data_block(info: &MapRegionInfo) -> MapBlockReplyDataBlock {
+    MapBlockReplyDataBlock {
+        x: u16::try_from(info.grid_x).unwrap_or(u16::MAX),
+        y: u16::try_from(info.grid_y).unwrap_or(u16::MAX),
+        name: with_nul(&info.name),
+        access: info.maturity.to_sim_access(),
+        region_flags: info.region_flags,
+        water_height: info.water_height,
+        agents: info.agents,
+        map_image_id: info.map_image_id,
+    }
+}
+
+/// Builds a `MapBlockReply` reporting `regions`, the simulator-side inverse of
+/// the client's `MapBlockRequest`/`MapNameRequest` (decoded into
+/// [`Event::MapBlock`] entries). `agent_id` and `flags` fill the agent block (the
+/// client ignores them); `flags` is the request's map-layer flag echoed back.
+///
+/// Variable-sized regions are reported by a parallel `Size` block: it is emitted
+/// for every entry — mirroring OpenSim's `SendMapBlock` — whenever any region is
+/// not the standard 256 m, and omitted entirely when every region is 256 m (the
+/// size the client assumes for a missing block). The `data` array is capped at
+/// the 255 entries the wire count byte allows; longer runs must be split across
+/// several replies by the caller.
+#[must_use]
+pub fn build_map_block_reply(
+    agent_id: Uuid,
+    flags: u32,
+    regions: &[MapRegionInfo],
+) -> MapBlockReply {
+    let needs_size = regions
+        .iter()
+        .any(|region| region.size_x != 256 || region.size_y != 256);
+    let size = if needs_size {
+        regions
+            .iter()
+            .map(|region| MapBlockReplySizeBlock {
+                size_x: u16::try_from(region.size_x).unwrap_or(u16::MAX),
+                size_y: u16::try_from(region.size_y).unwrap_or(u16::MAX),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    MapBlockReply {
+        agent_data: MapBlockReplyAgentDataBlock { agent_id, flags },
+        data: regions.iter().map(map_region_info_to_data_block).collect(),
+        size,
+    }
+}
+
+/// Encodes a [`MapItem`] into a `MapItemReply` `Data` block — the simulator-side
+/// inverse of [`map_item`]. Coordinates stay global metres; the name is
+/// NUL-terminated as a map server sends it.
+fn map_item_to_data_block(item: &MapItem) -> MapItemReplyDataBlock {
+    MapItemReplyDataBlock {
+        x: item.global_x,
+        y: item.global_y,
+        id: item.id,
+        extra: item.extra,
+        extra2: item.extra2,
+        name: with_nul(&item.name),
+    }
+}
+
+/// Builds a `MapItemReply` of the given [`MapItemType`] reporting `items`, the
+/// simulator-side inverse of the client's `MapItemRequest` (decoded into an
+/// [`Event::MapItems`]). `agent_id` and `flags` fill the agent block (the client
+/// ignores them). The `data` array is capped at the 255 entries the wire count
+/// byte allows; longer runs must be split across several replies by the caller.
+#[must_use]
+pub fn build_map_item_reply(
+    agent_id: Uuid,
+    flags: u32,
+    item_type: MapItemType,
+    items: &[MapItem],
+) -> MapItemReply {
+    MapItemReply {
+        agent_data: MapItemReplyAgentDataBlock { agent_id, flags },
+        request_data: MapItemReplyRequestDataBlock {
+            item_type: item_type.to_u32(),
+        },
+        data: items.iter().map(map_item_to_data_block).collect(),
     }
 }
 

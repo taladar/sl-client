@@ -37,8 +37,11 @@ use sl_wire::{
 use uuid::Uuid;
 
 use crate::error::Error;
-use crate::session::instant_message;
-use crate::types::{Camera, ChatType, InstantMessage, Reliability, Throttle, Transmit};
+use crate::session::{build_map_block_reply, build_map_item_reply, instant_message};
+use crate::types::{
+    Camera, ChatType, InstantMessage, MapItem, MapItemType, MapRegionInfo, Reliability, Throttle,
+    Transmit,
+};
 
 /// How long to batch owed acknowledgements before flushing them as a `PacketAck`
 /// (matches the client [`Session`](crate::Session)).
@@ -420,6 +423,57 @@ impl SimSession {
             },
         });
         self.send(&message, Reliability::Unreliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `MapBlockReply` reporting `regions` to the client (the inverse of
+    /// the client's `MapBlockRequest`/`MapNameRequest`). `flags` is the request's
+    /// map-layer flag, echoed in the agent block. The reply is sent reliably, as
+    /// a map server sends it. See [`build_map_block_reply`] for how
+    /// variable-sized regions are reported; the batch is capped at 255 regions.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode (e.g. more than 255 regions).
+    pub fn send_map_block_reply(
+        &mut self,
+        flags: u32,
+        regions: &[MapRegionInfo],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let agent_id = self.agent_id.unwrap_or_else(Uuid::nil);
+        let message = AnyMessage::MapBlockReply(build_map_block_reply(agent_id, flags, regions));
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `MapItemReply` of the given [`MapItemType`] reporting `items` to
+    /// the client (the inverse of the client's `MapItemRequest`). `flags` is the
+    /// request's map-layer flag, echoed in the agent block. The reply is sent
+    /// reliably; the batch is capped at 255 items.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode (e.g. more than 255 items).
+    pub fn send_map_item_reply(
+        &mut self,
+        flags: u32,
+        item_type: MapItemType,
+        items: &[MapItem],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let agent_id = self.agent_id.unwrap_or_else(Uuid::nil);
+        let message =
+            AnyMessage::MapItemReply(build_map_item_reply(agent_id, flags, item_type, items));
+        self.send(&message, Reliability::Reliable, now)?;
         Ok(())
     }
 

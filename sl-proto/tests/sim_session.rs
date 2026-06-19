@@ -10,8 +10,9 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        ChatType, Event, ImDialog, LoginParams, ServerEvent, Session, SimSession, Throttle,
-        Transmit, enable_simulator_to_caps_llsd, parse_event_queue_response,
+        ChatType, Event, ImDialog, LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity,
+        ServerEvent, Session, SimSession, Throttle, Transmit, enable_simulator_to_caps_llsd,
+        grid_to_handle, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -484,6 +485,96 @@ mod test {
             )),
             "expected a ClientMessage(MapBlockRequest), got {events:?}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn simulator_map_block_reply_reaches_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        // A standard 256 m region and a variable-sized 512×512 region: the latter
+        // forces the parallel Size block to be emitted for both entries.
+        let regions = vec![
+            MapRegionInfo {
+                name: "Standard".to_owned(),
+                grid_x: 1000,
+                grid_y: 1000,
+                region_handle: grid_to_handle(1000, 1000),
+                maturity: Maturity::Mature,
+                region_flags: 0x0000_0345,
+                size_x: 256,
+                size_y: 256,
+                agents: 3,
+                water_height: 20,
+                map_image_id: uuid::Uuid::from_u128(0xABCD),
+            },
+            MapRegionInfo {
+                name: "Variable".to_owned(),
+                grid_x: 1100,
+                grid_y: 1200,
+                region_handle: grid_to_handle(1100, 1200),
+                maturity: Maturity::Adult,
+                region_flags: 0x0000_0007,
+                size_x: 512,
+                size_y: 512,
+                agents: 0,
+                water_height: 25,
+                map_image_id: uuid::Uuid::from_u128(0x1234),
+            },
+        ];
+        sim.send_map_block_reply(2, &regions, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let decoded: Vec<MapRegionInfo> = drain_client(&mut client)
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::MapBlock(region) => Some(*region),
+                _ => None,
+            })
+            .collect();
+        // The full MapRegionInfo round-trips, including the variable region size.
+        assert_eq!(decoded, regions);
+        Ok(())
+    }
+
+    #[test]
+    fn simulator_map_item_reply_reaches_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let items = vec![
+            MapItem {
+                global_x: 256_000,
+                global_y: 256_128,
+                id: uuid::Uuid::nil(),
+                extra: 4,
+                extra2: 0,
+                name: "dots".to_owned(),
+            },
+            MapItem {
+                global_x: 257_000,
+                global_y: 256_200,
+                id: uuid::Uuid::from_u128(0x55AA),
+                extra: 1024,
+                extra2: 250,
+                name: "Parcel For Sale".to_owned(),
+            },
+        ];
+        sim.send_map_item_reply(2, MapItemType::AgentLocations, &items, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let reply = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::MapItems { item_type, items } => Some((item_type, items)),
+                _ => None,
+            })
+            .ok_or("expected a MapItems client event")?;
+        assert_eq!(reply.0, MapItemType::AgentLocations);
+        assert_eq!(reply.1, items);
         Ok(())
     }
 }

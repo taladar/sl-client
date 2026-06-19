@@ -1933,7 +1933,7 @@ in-memory loopback against the existing client `Session`.
 | 62 ✅ | Experiences service pairing | 3 | `parse_experience_*` | Unit round-trip |
 | 63 ✅ | Voice service pairing | 3 | `*::from_llsd` / voice request builders | Unit round-trip |
 | 64 ✅ | Materials service pairing | 3 | `parse_render_materials_response` / `parse_gltf_material_override` | Unit round-trip |
-| 65 | Map service pairing (`MapBlockReply` / `MapItemReply`) | 2 | the map request encoders | Unit round-trip |
+| 65 ✅ | Map service pairing (`MapBlockReply` / `MapItemReply`) | 2 | the map request encoders | Loopback vs. `Session` |
 
 Ordered foundation-first; each is one commit with reverse-direction round-trip
 tests. "Inverse of" names the existing function/path the new code mirrors
@@ -2291,9 +2291,30 @@ module's existing header-less binary-LLSD writer. All three re-exported from
 build→parse, `ModifyMaterialParams` build→parse, `RenderMaterials`
 response build→parse), alongside the 4 existing client-side tests.*
 
-**65. Map service pairing (extends #12, Tier B).** Encoders for the
-`MapBlockReply` / `MapItemReply` payloads the map server returns, mirroring the
-existing client request encoders.
+**65. Map service pairing (extends #12, Tier B). ✅ Done.** Server-side encoders
+for the `MapBlockReply` / `MapItemReply` payloads the map server returns, the
+exact inverse of the client decoders (`map_region_info` / `map_item`) and a
+mirror of the client request encoders (`send_map_block_request` /
+`send_map_name_request` / `send_map_item_request`). Two free builders in
+`session.rs`, re-exported from `sl-proto`: **`build_map_block_reply`** — turns a
+`&[MapRegionInfo]` into a `MapBlockReply` (grid coords truncated to the wire
+`u16`, name NUL-terminated, maturity → `SimAccess` byte via `to_sim_access`),
+emitting the parallel `Size` block for every entry whenever any region is not
+the standard 256 m (mirroring OpenSim's `SendMapBlock` `needSizes` logic) and
+omitting it when all are 256 m (the size the client assumes for a missing
+block); and **`build_map_item_reply`** — turns a `&[MapItem]` plus a
+`MapItemType` into a `MapItemReply` (global-metre coords, `extra`/`extra2`
+verbatim, name NUL-terminated). Both surfaced on `SimSession` as
+**`send_map_block_reply`** / **`send_map_item_reply`** (reliable, agent block
+filled from the session's agent id + the request's echoed map-layer flag); the
+255-entry wire count byte caps a single reply (longer runs split by the caller).
+Same public-doc intra-doc-link gotcha as #54–#64 (the `pub` builders reference
+the client events, not the private decoders). *Test: 2 new loopback round-trips
+in `sim_session.rs` (`SimSession` → client `Session`) — a standard + a variable
+512 m region through `MapBlockReply` (full `MapRegionInfo` round-trip including
+the size block), and a `MapItemReply` of `AgentLocations` items — alongside the
+12 existing `SimSession` tests.* **Tier F (#52–#65) complete — the
+bidirectional protocol surface is now whole.**
 
 ## Out of scope (not LLUDP/CAPS protocol)
 
