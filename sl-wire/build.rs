@@ -55,7 +55,34 @@ fn generate(template: &Template) -> String {
     }
 
     push_any_message(&mut out, template);
+    push_message_name(&mut out, template);
     out
+}
+
+/// Emits the standalone `message_name` lookup, mapping a [`MessageId`] to the
+/// template name of the message that bears it, if any.
+///
+/// Unlike `AnyMessage::name`, this does not require a decoded message — it lets
+/// diagnostics name a message whose body failed to decode, or that is otherwise
+/// unhandled. Duplicate ids are emitted once (first wins), matching the
+/// de-duplication used by `AnyMessage::decode`.
+fn push_message_name(out: &mut String, template: &Template) {
+    out.push_str("/// Returns the template name of the message with the given id, if known.\n");
+    out.push_str(
+        "pub fn message_name(id: MessageId) -> Option<&'static str> {\n        match id {\n",
+    );
+    let mut seen = BTreeSet::new();
+    for message in &template.messages {
+        let pattern = message_id_pattern(message);
+        if seen.insert(pattern.clone()) {
+            emit(
+                out,
+                format_args!("            {pattern} => Some({0}::NAME),\n", message.name),
+            );
+        }
+    }
+    out.push_str("            _ => None,\n");
+    out.push_str("        }\n}\n");
 }
 
 /// Emits the block structs, the message struct, and the `Message` impl.

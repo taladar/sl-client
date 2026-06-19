@@ -73,7 +73,7 @@ pub use material::{
     parse_modify_material_params_request, parse_render_materials_response,
 };
 pub use message::{Message, MessageId};
-pub use messages::AnyMessage;
+pub use messages::{AnyMessage, message_name};
 pub use parcel_flags::{ParcelFlags, RegionFlags, sim_access};
 pub use voice::{
     IceCandidate, ParcelVoiceInfo, VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC,
@@ -103,12 +103,12 @@ mod test {
     use pretty_assertions::assert_eq;
 
     use super::{
-        MediaEntry, ObjectMediaResponse, PacketFlags, Reader, WireError, Writer,
+        MediaEntry, MessageId, ObjectMediaResponse, PacketFlags, Reader, WireError, Writer,
         build_group_notice_bucket, build_new_file_agent_inventory_request,
         build_object_media_get_request, build_object_media_navigate_request,
         build_object_media_update_request, build_update_item_asset_request, combine_uuids,
-        encode_datagram, parse_asset_upload_response, parse_datagram, parse_llsd_xml, zero_decode,
-        zero_encode,
+        encode_datagram, message_name, parse_asset_upload_response, parse_datagram, parse_llsd_xml,
+        zero_decode, zero_encode,
     };
 
     #[test]
@@ -167,6 +167,37 @@ mod test {
     fn reader_underflow_is_an_error() {
         let mut r = Reader::new(&[0x01, 0x02]);
         assert!(matches!(r.u32(), Err(WireError::UnexpectedEof { .. })));
+    }
+
+    #[test]
+    fn reader_position_tracks_consumed_bytes_and_stops_on_failure() -> Result<(), WireError> {
+        let mut r = Reader::new(&[0x01, 0x02, 0x03, 0x04]);
+        assert_eq!(r.position(), 0);
+        let _consumed = r.u16()?;
+        assert_eq!(r.position(), 2);
+        // A failed read leaves the position at the point decoding stopped, which
+        // is what diagnostics surface as a `failed_offset`.
+        assert!(matches!(r.u32(), Err(WireError::UnexpectedEof { .. })));
+        assert_eq!(r.position(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn message_name_resolves_known_ids_across_frequencies() {
+        // One id per frequency form, from the message template.
+        assert_eq!(message_name(MessageId::High(1)), Some("StartPingCheck"));
+        assert_eq!(message_name(MessageId::Low(1)), Some("TestMessage"));
+        assert_eq!(
+            message_name(MessageId::Fixed(0xFFFF_FFFB)),
+            Some("PacketAck")
+        );
+    }
+
+    #[test]
+    fn message_name_is_none_for_unknown_ids() {
+        // No message uses high id 0 (the 0x00 byte never introduces a message).
+        assert_eq!(message_name(MessageId::High(0)), None);
+        assert_eq!(message_name(MessageId::Low(0xFFFF)), None);
     }
 
     #[test]
