@@ -16,8 +16,10 @@ categories = ["network-programming", "command-line-utilities"]
 exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
 [dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
 sl-proto = { version = "0.1.0", path = "../sl-proto" }
 thiserror = { version = "2.0.18" }
+toml = { version = "1.1.2" }
 tracing = { version = "0.1.44" }
 uuid = { version = "1.18.1" }
 

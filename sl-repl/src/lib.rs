@@ -8,6 +8,9 @@
 //!
 //! The pieces:
 //!
+//! - [`auth`] — TOML credentials, the redacting [`Secret`] newtype, and
+//!   wall-clock-aligned MFA-token acquisition ([`Credentials`],
+//!   [`acquire_mfa_token`]).
 //! - [`parse`] — the line classifier ([`parse_line`]).
 //! - [`args`] — the tokenizer and typed argument accessors ([`Args`]).
 //! - [`meta`] — REPL control lines ([`MetaCommand`]).
@@ -21,6 +24,7 @@
 //!   transcript of an interactive session.
 
 pub mod args;
+pub mod auth;
 pub mod context;
 pub mod error;
 pub mod format;
@@ -31,6 +35,7 @@ pub mod registry;
 pub mod smoke;
 
 pub use args::Args;
+pub use auth::{AuthError, Avatar, Credentials, Secret, acquire_mfa_token};
 pub use context::{NoContext, ReplContext, SessionContext};
 pub use error::ReplError;
 pub use format::{format_command, format_diagnostic, format_event, hexdump};
