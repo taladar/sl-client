@@ -22,7 +22,7 @@ Scope reminders:
   `message_name(MessageId) -> Option<&'static str>` in `build.rs`; add a
   `Reader::position()` accessor; make `WireError: Clone`. No behaviour change.
   (Foundation for A2.)
-- [ ] **A2. `Diagnostic` type + decode/CAPS surfacing.** New
+- [x] **A2. `Diagnostic` type + decode/CAPS surfacing.** New
   `sl-proto/src/types/diagnostic.rs` enum
   (`DecodeFailed{id,name,error,raw,failed_offset}`, `UnhandledMessage`,
   `UnknownCapsEvent`, `CapsDecodeFailed`, `ExpectedReplyMissing`) — **separate

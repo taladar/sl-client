@@ -10,11 +10,11 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         AssetType, Camera, ChatAudible, ChatSourceType, ChatType, ClassifiedUpdate, ClickAction,
-        ControlFlags, CreateGroupParams, DeRezDestination, DisconnectReason, EstateAccessDelta,
-        EstateAccessKind, Event, FriendRights, GroupNoticeAttachment, GroupRoleChange,
-        GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImageCodec,
-        InterestsUpdate, InventoryItem, LandingType, LindenAmount, LoginAccount, LoginParams,
-        MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType,
+        ControlFlags, CreateGroupParams, DeRezDestination, Diagnostic, DisconnectReason,
+        EstateAccessDelta, EstateAccessKind, Event, FriendRights, GroupNoticeAttachment,
+        GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog,
+        ImageCodec, InterestsUpdate, InventoryItem, LandingType, LindenAmount, LoginAccount,
+        LoginParams, MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType,
         NewInventoryItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
         ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelMediaCommand,
         ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField,
@@ -99,9 +99,9 @@ mod test {
         UseCachedMuteListAgentDataBlock,
     };
     use sl_wire::{
-        AnyMessage, HomeLocation, LoginFailure, LoginRequest, LoginResponse, LoginSuccess,
-        MessageId, PacketFlags, Reader, SkeletonFolder, Writer, encode_datagram, parse_datagram,
-        parse_llsd_xml,
+        AnyMessage, HomeLocation, Llsd, LoginFailure, LoginRequest, LoginResponse, LoginSuccess,
+        MessageId, PacketFlags, Reader, SkeletonFolder, WireError, Writer, encode_datagram,
+        parse_datagram, parse_llsd_xml,
     };
 
     /// A boxed test error.
@@ -181,6 +181,15 @@ mod test {
         let mut out = Vec::new();
         while let Some(event) = session.poll_event() {
             out.push(event);
+        }
+        out
+    }
+
+    /// Drains all queued diagnostics.
+    fn drain_diagnostics(session: &mut Session) -> Vec<Diagnostic> {
+        let mut out = Vec::new();
+        while let Some(diagnostic) = session.poll_diagnostic() {
+            out.push(diagnostic);
         }
         out
     }
@@ -9038,6 +9047,130 @@ mod test {
                 .ok_or("item should be cached")?
                 .name,
             "Copied Item"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_message_id_surfaces_decode_failed_with_offset() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        session.set_diagnostics(true);
+
+        // High id 0 maps to no template message, so `AnyMessage::decode` rejects
+        // it after consuming only the single id byte.
+        let datagram = server_datagram(MessageId::High(0), &[0xAA, 0xBB], 2, false);
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let diagnostics = drain_diagnostics(&mut session);
+        let Some(Diagnostic::DecodeFailed {
+            id,
+            name,
+            error,
+            raw,
+            failed_offset,
+        }) = diagnostics.first()
+        else {
+            return Err(format!("expected a DecodeFailed, got {diagnostics:?}").into());
+        };
+        assert_eq!(*id, MessageId::High(0));
+        // No template message owns this id.
+        assert_eq!(*name, None);
+        assert_eq!(
+            *error,
+            WireError::UnknownMessage {
+                id: MessageId::High(0)
+            }
+        );
+        // Decoding stopped right after the one-byte id prefix.
+        assert_eq!(*failed_offset, 1);
+        // The (post zero-decode) body was captured for a hexdump: id byte + body.
+        assert_eq!(raw.as_slice(), &[0x00, 0xAA, 0xBB]);
+        Ok(())
+    }
+
+    #[test]
+    fn truncated_known_message_surfaces_named_decode_failed() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        session.set_diagnostics(true);
+
+        // RegionHandshake (Low 148) with a one-byte body: the id decodes, but the
+        // body runs out before its fields, so decoding fails partway through.
+        let datagram = server_datagram(MessageId::Low(148), &[0x00], 2, false);
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let diagnostics = drain_diagnostics(&mut session);
+        let Some(Diagnostic::DecodeFailed {
+            id,
+            name,
+            error,
+            failed_offset,
+            ..
+        }) = diagnostics.first()
+        else {
+            return Err(format!("expected a DecodeFailed, got {diagnostics:?}").into());
+        };
+        assert_eq!(*id, MessageId::Low(148));
+        assert_eq!(*name, Some("RegionHandshake"));
+        assert!(matches!(error, WireError::UnexpectedEof { .. }));
+        // Past the 4-byte Low-id prefix, into the body.
+        assert!(
+            *failed_offset >= 4,
+            "offset {failed_offset} past the id prefix"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn diagnostics_off_by_default_emits_nothing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Collection is off until explicitly enabled.
+        assert!(!session.diagnostics_enabled());
+
+        // The same undecodable datagram that produces a DecodeFailed when
+        // diagnostics are on must produce nothing while they are off.
+        let datagram = server_datagram(MessageId::High(0), &[0xAA, 0xBB], 2, false);
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        assert!(drain_diagnostics(&mut session).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_caps_event_surfaces_diagnostic() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        session.set_diagnostics(true);
+
+        // An event name the session does not handle.
+        session.handle_caps_event("TotallyUnknownEvent", &Llsd::Undef, now)?;
+        assert_eq!(
+            drain_diagnostics(&mut session),
+            vec![Diagnostic::UnknownCapsEvent {
+                message: "TotallyUnknownEvent".to_owned(),
+            }]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn malformed_caps_body_surfaces_decode_failed() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        session.set_diagnostics(true);
+
+        // A handled event whose body is the wrong shape: `from_llsd` returns None.
+        session.handle_caps_event("ParcelProperties", &Llsd::Undef, now)?;
+        assert_eq!(
+            drain_diagnostics(&mut session),
+            vec![Diagnostic::CapsDecodeFailed {
+                message: "ParcelProperties".to_owned(),
+            }]
         );
         Ok(())
     }
