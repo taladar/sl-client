@@ -16,6 +16,9 @@
 //! - [`format`](mod@format) — symbolized renderers for events, commands, and
 //!   diagnostics ([`format_event`], [`format_command`], [`format_diagnostic`],
 //!   [`hexdump`]).
+//! - [`smoke`] — the read-only [`smoke_battery`] fired by `--smoke` mode.
+//! - [`record`] — the [`ScriptRecorder`] that writes a replayable `.repl`
+//!   transcript of an interactive session.
 
 pub mod args;
 pub mod context;
@@ -23,7 +26,9 @@ pub mod error;
 pub mod format;
 pub mod meta;
 pub mod parse;
+pub mod record;
 pub mod registry;
+pub mod smoke;
 
 pub use args::Args;
 pub use context::{NoContext, ReplContext, SessionContext};
@@ -31,4 +36,6 @@ pub use error::ReplError;
 pub use format::{format_command, format_diagnostic, format_event, hexdump};
 pub use meta::MetaCommand;
 pub use parse::{PendingCommand, ReplAction, parse_line};
+pub use record::ScriptRecorder;
 pub use registry::{CommandSpec, Registry};
+pub use smoke::smoke_battery;

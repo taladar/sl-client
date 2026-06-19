@@ -109,7 +109,7 @@ Scope reminders:
   renderers match every variant via `event_name`/`command_name` (no `_` arm —
   191 commands + 113 events), so a new variant fails to compile until named. 6
   unit tests; clippy-clean under the restriction lints.
-- [ ] **C4. Smoke battery + script recorder.** `smoke.rs`
+- [x] **C4. Smoke battery + script recorder.** `smoke.rs`
   (`smoke_battery(self)` read-only requests). `record.rs` (`ScriptRecorder`:
   replayable `.repl` of interactive lines, `sleep` deltas, placeholders
   preserved verbatim, parse-fails as `# ERROR` comments, flush per line).
