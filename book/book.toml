@@ -1,0 +1,19 @@
+[book]
+title = "The Second Life / OpenSim Protocol"
+description = "A high-level tour of the Second Life / OpenSim (LLUDP + CAPS) protocol, cross-referenced to the sl-client crates that implement it."
+authors = ["Matthias Hörmann"]
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/taladar/sl-client"
+edit-url-template = "https://github.com/taladar/sl-client/edit/master/book/{path}"
+default-theme = "navy"
+preferred-dark-theme = "navy"
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.search]
+enable = true
