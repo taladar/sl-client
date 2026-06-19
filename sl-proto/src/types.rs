@@ -2972,6 +2972,18 @@ impl ParcelRequestResult {
         }
     }
 
+    /// The `RequestResult` wire value for this classification (inverse of
+    /// [`from_i32`](Self::from_i32)).
+    #[must_use]
+    pub const fn to_i32(self) -> i32 {
+        match self {
+            Self::NoData => -1,
+            Self::Single => 0,
+            Self::Multiple => 1,
+            Self::Unknown(other) => other,
+        }
+    }
+
     /// Whether the reply carries real parcel data (anything but
     /// [`NoData`](Self::NoData)).
     #[must_use]
@@ -3010,6 +3022,19 @@ impl ParcelStatus {
             other => Self::Unknown(other),
         }
     }
+
+    /// The `Status` wire value for this classification (inverse of
+    /// [`from_i32`](Self::from_i32)).
+    #[must_use]
+    pub const fn to_i32(self) -> i32 {
+        match self {
+            Self::Leased => 0,
+            Self::LeasePending => 1,
+            Self::Abandoned => 2,
+            Self::None => -1,
+            Self::Unknown(other) => other,
+        }
+    }
 }
 
 /// How an avatar arrives on a parcel, the `LandingType` field of
@@ -3036,6 +3061,18 @@ impl LandingType {
             1 => Self::LandingPoint,
             2 => Self::Anywhere,
             other => Self::Unknown(other),
+        }
+    }
+
+    /// The `LandingType` wire value for this classification (inverse of
+    /// [`from_u8`](Self::from_u8)).
+    #[must_use]
+    pub const fn to_u8(self) -> u8 {
+        match self {
+            Self::Blocked => 0,
+            Self::LandingPoint => 1,
+            Self::Anywhere => 2,
+            Self::Unknown(other) => other,
         }
     }
 }

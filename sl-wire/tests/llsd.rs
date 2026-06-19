@@ -4,11 +4,33 @@
 mod test {
     use pretty_assertions::assert_eq;
     use sl_wire::{
-        Llsd, build_event_queue_request, build_seed_request, parse_event_queue_response,
-        parse_llsd_xml, parse_seed_response,
+        EventQueueEvent, Llsd, build_event_queue_request, build_event_queue_response,
+        build_seed_request, parse_event_queue_response, parse_llsd_xml, parse_seed_response,
     };
 
     type TestError = Box<dyn std::error::Error>;
+
+    #[test]
+    fn event_queue_response_round_trips() -> Result<(), TestError> {
+        let events = vec![
+            EventQueueEvent {
+                message: "EnableSimulator".to_owned(),
+                body: Llsd::Map(std::collections::HashMap::from([(
+                    "Handle".to_owned(),
+                    Llsd::Integer(7),
+                )])),
+            },
+            EventQueueEvent {
+                message: "TeleportFinish".to_owned(),
+                body: Llsd::Array(vec![Llsd::String("x".to_owned())]),
+            },
+        ];
+        let xml = build_event_queue_response(42, &events);
+        let parsed = parse_event_queue_response(&xml)?;
+        assert_eq!(parsed.id, 42);
+        assert_eq!(parsed.events, events);
+        Ok(())
+    }
 
     #[test]
     fn parses_scalar_llsd_types() -> Result<(), TestError> {

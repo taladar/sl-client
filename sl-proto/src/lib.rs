@@ -35,6 +35,11 @@ pub use session::{
     CAP_UPDATE_MATERIAL_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
     CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPLOAD_BAKED_TEXTURE,
     CAP_VOICE_SIGNALING, RECV_BUFFER_SIZE, REQUESTED_CAPABILITIES, Session,
+    ais_inventory_update_to_llsd, bulk_update_inventory_to_llsd, chatterbox_invitation_to_llsd,
+    created_category_to_llsd, crossed_region_to_caps_llsd, enable_simulator_to_caps_llsd,
+    establish_agent_communication_to_llsd, group_members_to_caps_llsd,
+    group_memberships_to_caps_llsd, inventory_descendents_to_llsd, offline_messages_to_llsd,
+    parcel_info_to_llsd, server_appearance_update_to_llsd, teleport_finish_to_llsd,
 };
 pub use terrain::encode_layer;
 pub use types::{
@@ -80,7 +85,7 @@ pub use sl_wire::{
     VoiceProvisionRequest, WireError, ais_category_children_fetch_url, ais_category_children_url,
     ais_category_url, ais_create_category_url, ais_item_url, build_ais_create_category_body,
     build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request, build_event_queue_request,
+    build_create_inventory_category_request, build_event_queue_request, build_event_queue_response,
     build_fetch_inventory_request, build_group_member_data_request, build_login_request,
     build_modify_material_params_request, build_new_file_agent_inventory_request,
     build_object_media_get_request, build_object_media_navigate_request,
