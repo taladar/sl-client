@@ -933,8 +933,9 @@ async fn survey_command(parameters: SurveyParameters) -> Result<(), Error> {
         tracing::info!("logging in for survey");
         let client = Client::connect(params).await?;
         let (event_tx, event_rx) = mpsc::channel::<Event>(256);
+        let (diag_tx, _diag_rx) = mpsc::channel(16);
         let (command_tx, command_rx) = mpsc::channel::<Command>(64);
-        let run = tokio::spawn(client.run(event_tx, command_rx));
+        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
 
         let outcome = survey.run_session(event_rx, command_tx).await?;
         run.await??;

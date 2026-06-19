@@ -13,6 +13,25 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+/// The reserved `(message, body)` key a CAPS helper sends over the events
+/// channel when its request failed before producing a reply. The driver
+/// recognises the `\0caps-failure\0` prefix, logs it, and — when diagnostics are
+/// enabled — surfaces a [`Diagnostic::ExpectedReplyMissing`](sl_proto::Diagnostic::ExpectedReplyMissing)
+/// instead of passing it to
+/// [`Session::handle_caps_event`](sl_proto::Session::handle_caps_event). The NUL
+/// prefix cannot collide with a real capability / event-queue name.
+pub(crate) const CAPS_FAILURE_PREFIX: &str = "\0caps-failure\0";
+
+/// Reports that a CAPS request for `cap` failed before producing a reply,
+/// sending the failure sentinel over `caps_tx`. Helpers call this in place of
+/// silently swallowing a transport / parse error; the driver turns it into a
+/// diagnostic.
+pub(crate) fn report_caps_failure(caps_tx: &Sender<(String, Llsd)>, cap: &str) {
+    caps_tx
+        .send((format!("{CAPS_FAILURE_PREFIX}{cap}"), Llsd::Undef))
+        .ok();
+}
+
 /// Starts the CAPS subsystem for the session's current seed capability: a
 /// background thread that fetches the capability map (reported over `map_rx`)
 /// then long-polls `EventQueueGet`. Returns `None` if no seed is known yet.

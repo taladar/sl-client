@@ -71,7 +71,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
     let (command_tx, command_rx) = mpsc::channel::<Command>(8);
-    let run = tokio::spawn(client.run(event_tx, command_rx));
+    let (diag_tx, _diag_rx) = mpsc::channel(16);
+    let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
 
     // The destination folder for the CAPS upload, learned from the inventory
     // skeleton (the root "My Inventory" folder, whose parent is nil).

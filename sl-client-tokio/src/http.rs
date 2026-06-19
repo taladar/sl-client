@@ -4,6 +4,8 @@ use reqwest::Client as ReqwestClient;
 use sl_proto::{Llsd, parse_llsd_xml};
 use tokio::sync::mpsc;
 
+use crate::caps::report_caps_failure;
+
 /// GETs `url` and parses the LLSD-XML reply, returning `None` on any
 /// transport/parse failure. Shared by the experience capability fetches.
 pub(crate) async fn get_llsd(url: &str, http: &ReqwestClient) -> Option<Llsd> {
@@ -27,8 +29,11 @@ pub(crate) async fn get_caps_llsd(
     http: ReqwestClient,
     caps_tx: mpsc::Sender<(String, Llsd)>,
 ) {
-    if let Some(llsd) = get_llsd(&url, &http).await {
-        caps_tx.send((cap.to_owned(), llsd)).await.ok();
+    match get_llsd(&url, &http).await {
+        Some(llsd) => {
+            caps_tx.send((cap.to_owned(), llsd)).await.ok();
+        }
+        None => report_caps_failure(&caps_tx, cap).await,
     }
 }
 
@@ -48,13 +53,18 @@ pub(crate) async fn put_caps_llsd(
         .send()
         .await
     else {
+        report_caps_failure(&caps_tx, cap).await;
         return;
     };
     let Ok(text) = response.text().await else {
+        report_caps_failure(&caps_tx, cap).await;
         return;
     };
-    if let Ok(llsd) = parse_llsd_xml(&text) {
-        caps_tx.send((cap.to_owned(), llsd)).await.ok();
+    match parse_llsd_xml(&text) {
+        Ok(llsd) => {
+            caps_tx.send((cap.to_owned(), llsd)).await.ok();
+        }
+        Err(_error) => report_caps_failure(&caps_tx, cap).await,
     }
 }
 
@@ -74,13 +84,18 @@ pub(crate) async fn patch_caps_llsd(
         .send()
         .await
     else {
+        report_caps_failure(&caps_tx, cap).await;
         return;
     };
     let Ok(text) = response.text().await else {
+        report_caps_failure(&caps_tx, cap).await;
         return;
     };
-    if let Ok(llsd) = parse_llsd_xml(&text) {
-        caps_tx.send((cap.to_owned(), llsd)).await.ok();
+    match parse_llsd_xml(&text) {
+        Ok(llsd) => {
+            caps_tx.send((cap.to_owned(), llsd)).await.ok();
+        }
+        Err(_error) => report_caps_failure(&caps_tx, cap).await,
     }
 }
 
@@ -98,12 +113,17 @@ pub(crate) async fn delete_caps_llsd(
         .send()
         .await
     else {
+        report_caps_failure(&caps_tx, cap).await;
         return;
     };
     let Ok(text) = response.text().await else {
+        report_caps_failure(&caps_tx, cap).await;
         return;
     };
-    if let Ok(llsd) = parse_llsd_xml(&text) {
-        caps_tx.send((cap.to_owned(), llsd)).await.ok();
+    match parse_llsd_xml(&text) {
+        Ok(llsd) => {
+            caps_tx.send((cap.to_owned(), llsd)).await.ok();
+        }
+        Err(_error) => report_caps_failure(&caps_tx, cap).await,
     }
 }

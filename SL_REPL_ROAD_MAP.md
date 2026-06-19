@@ -48,15 +48,21 @@ Scope reminders:
 
 ## Phase B — runtime wiring (keep tokio & bevy at parity)
 
-- [ ] **B1. sl-client-tokio diagnostics stream.** Add
-  `diagnostics_tx: mpsc::Sender<Diagnostic>` to `Client::run`; drain
-  `poll_diagnostic`. Plumb the `diagnostics` flag through `LoginParams`/the
-  `Client` option. Make CAPS http helpers log failures + feed
-  `ExpectedReplyMissing` instead of swallowing into `Option`. Update callers:
-  `sl-survey` and the tokio/bevy examples.
-- [ ] **B2. sl-client-bevy diagnostics stream.** Register
-  `SlDiagnostic(pub Diagnostic)` next to `SlEvent`; write it from the running
-  system. Same flag plumbing + CAPS-failure surfacing. (Mirrors B1; parity.)
+- [x] **B1. sl-client-tokio diagnostics stream.** Added
+  `diagnostics: mpsc::Sender<Diagnostic>` to `Client::run` and a per-iteration
+  `poll_diagnostic` drain. The flag is a `Client::set_diagnostics` option (kept
+  off the protocol-input `LoginParams`). The generic CAPS http helpers
+  (`get`/`put`/`patch`/`delete_caps_llsd`, `post_voice_cap`) now report a failed
+  request over the events channel with a reserved `\0caps-failure\0` sentinel
+  (`caps::report_caps_failure`); the run loop logs it (`tracing::warn!`) and,
+  when diagnostics are enabled, surfaces `ExpectedReplyMissing` instead of
+  swallowing into `Option`. Callers updated: `sl-survey` and the tokio examples
+  add a drained diagnostics channel.
+- [x] **B2. sl-client-bevy diagnostics stream.** Registered
+  `SlDiagnostic(pub Diagnostic)` next to `SlEvent`, written from the running
+  system (drains `poll_diagnostic` plus the CAPS-failure sentinel). Same flag
+  via `SlClientPlugin::diagnostics` → `set_diagnostics`, and the mirrored
+  CAPS-failure surfacing in the blocking helpers. (Mirrors B1; parity.)
 
 ## Phase C — shared library `sl-repl`
 

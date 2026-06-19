@@ -43,10 +43,10 @@ pub use sl_proto::{
     ActiveGroup, AnyMessage, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick,
     AvatarProperties, Camera, ChatAudible, ChatMessage, ChatSourceType, ChatType, ClassifiedInfo,
     ClassifiedUpdate, ClickAction, Command, ControlFlags, CreateGroupParams, DeRezDestination,
-    DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, ExperienceInfo,
-    ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData,
-    Friend, FriendRights, GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice,
-    GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit,
+    Diagnostic, DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo,
+    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh,
+    FlexibleData, Friend, FriendRights, GltfMaterialOverride, GroupMember, GroupMembership,
+    GroupNotice, GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit,
     GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation,
     IceCandidate, ImDialog, InstantMessage, InterestsUpdate, InventoryFolder, InventoryItem,
     InventoryOffer, InventoryType, LandingType, LegacyMaterial, LightData, LightImage,
@@ -82,7 +82,7 @@ mod materials;
 mod media;
 mod upload;
 mod voice;
-use crate::caps::{post_neighbour_seed, start_caps};
+use crate::caps::{CAPS_FAILURE_PREFIX, post_neighbour_seed, start_caps};
 use crate::experiences::{run_experience_status, run_group_experiences};
 use crate::fetch::{emit_disconnect, run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
 use crate::http::{
@@ -106,15 +106,21 @@ const EVENT_QUEUE_TIMEOUT: Duration = Duration::from_secs(60);
 pub struct SlClientPlugin {
     /// The login parameters used to start the session.
     pub params: LoginParams,
+    /// Whether to collect protocol diagnostics. Off by default; while enabled,
+    /// the session records [`Diagnostic`]s for anomalies it would otherwise
+    /// silently drop, surfaced as [`SlDiagnostic`] events.
+    pub diagnostics: bool,
 }
 
 impl Plugin for SlClientPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<SlEvent>()
+            .add_event::<SlDiagnostic>()
             .add_event::<SlMfaChallenge>()
             .add_event::<SlCommand>()
             .insert_resource(SlConfig {
                 params: self.params.clone(),
+                diagnostics: self.diagnostics,
             })
             .add_systems(Startup, start_login)
             .add_systems(Update, drive);
@@ -124,6 +130,14 @@ impl Plugin for SlClientPlugin {
 /// A high-level session event, emitted as a Bevy event.
 #[derive(Event, Debug, Clone)]
 pub struct SlEvent(pub SessionEvent);
+
+/// A protocol diagnostic, emitted as a Bevy event. Surfaces anomalies the
+/// session would otherwise silently drop (decode failures, unhandled messages,
+/// unknown CAPS events, missing expected replies). Only produced when
+/// diagnostics are enabled via [`SlClientPlugin::diagnostics`]; kept strictly
+/// separate from [`SlEvent`].
+#[derive(Event, Debug, Clone)]
+pub struct SlDiagnostic(pub Diagnostic);
 
 /// Emitted when the grid requires a multi-factor one-time code. To answer it,
 /// re-add the plugin with login parameters prepared via
@@ -142,6 +156,8 @@ pub struct SlCommand(pub Command);
 struct SlConfig {
     /// The login parameters.
     params: LoginParams,
+    /// Whether to collect protocol diagnostics.
+    diagnostics: bool,
 }
 
 /// The driver's runtime state resource.
@@ -208,7 +224,8 @@ impl Drop for Caps {
 
 /// Startup system: builds the session and spawns the blocking login thread.
 fn start_login(mut commands: Commands, config: Res<SlConfig>) {
-    let session = Session::new(config.params.clone());
+    let mut session = Session::new(config.params.clone());
+    session.set_diagnostics(config.diagnostics);
     let inner = match session.login_http_request() {
         Some(request) => {
             let (tx, rx) = unbounded();
@@ -246,6 +263,7 @@ fn perform_login(url: &str, user_agent: &str, body: String) -> Result<String, St
 fn drive(
     mut state: ResMut<SlState>,
     mut events: EventWriter<SlEvent>,
+    mut diagnostics: EventWriter<SlDiagnostic>,
     mut mfa: EventWriter<SlMfaChallenge>,
     mut commands: EventReader<SlCommand>,
 ) {
@@ -267,6 +285,7 @@ fn drive(
             caps,
             now,
             &mut events,
+            &mut diagnostics,
             &mut commands,
         ),
         SlInner::Done => SlInner::Done,
@@ -343,7 +362,12 @@ fn bind_socket() -> Result<UdpSocket, ()> {
 }
 
 /// Handles the running phase: receive UDP and CAPS events, apply commands, time
-/// out, transmit, and surface events.
+/// out, transmit, and surface events and diagnostics.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the ECS driver fans the session's output to several Bevy writers \
+              (events, diagnostics) alongside its state"
+)]
 fn advance_running(
     mut session: Box<Session>,
     socket: UdpSocket,
@@ -351,6 +375,7 @@ fn advance_running(
     mut caps: Option<Caps>,
     now: Instant,
     events: &mut EventWriter<SlEvent>,
+    diagnostics: &mut EventWriter<SlDiagnostic>,
     commands: &mut EventReader<SlCommand>,
 ) -> SlInner {
     // Drain all available inbound datagrams.
@@ -373,7 +398,20 @@ fn advance_running(
             caps.map = map;
         }
         while let Ok((message, body)) = caps.events_rx.try_recv() {
-            session.handle_caps_event(&message, &body, now).ok();
+            // A CAPS helper reports a failed request by sending the failure
+            // sentinel rather than a decoded reply; surface it as a diagnostic
+            // instead of feeding the session.
+            if let Some(cap) = message.strip_prefix(CAPS_FAILURE_PREFIX) {
+                tracing::warn!(capability = cap, "CAPS request failed; no reply surfaced");
+                if session.diagnostics_enabled() {
+                    diagnostics.write(SlDiagnostic(Diagnostic::ExpectedReplyMissing {
+                        request: cap.to_owned(),
+                        sequence: None,
+                    }));
+                }
+            } else {
+                session.handle_caps_event(&message, &body, now).ok();
+            }
         }
         // Binary asset fetches return fully-formed session events; surface them.
         while let Ok(event) = caps.asset_rx.try_recv() {
@@ -1753,6 +1791,13 @@ fn advance_running(
     // Flush outgoing datagrams.
     while let Some(transmit) = session.poll_transmit() {
         socket.send_to(&transmit.payload, transmit.destination).ok();
+    }
+
+    // Surface protocol diagnostics the session collected this frame (decode
+    // failures, unhandled messages, unknown CAPS events, missing replies). Only
+    // populated while diagnostics are enabled.
+    while let Some(diagnostic) = session.poll_diagnostic() {
+        diagnostics.write(SlDiagnostic(diagnostic));
     }
 
     // Surface events. A region change brings a new seed capability, so restart

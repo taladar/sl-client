@@ -10,6 +10,26 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
+/// The reserved `(message, body)` key a CAPS helper sends over the events
+/// channel when its request failed before producing a reply. The run loop
+/// recognises the `\0caps-failure\0` prefix, logs it, and — when diagnostics are
+/// enabled — surfaces a [`Diagnostic::ExpectedReplyMissing`](sl_proto::Diagnostic::ExpectedReplyMissing)
+/// instead of passing it to
+/// [`Session::handle_caps_event`](sl_proto::Session::handle_caps_event). The NUL
+/// prefix cannot collide with a real capability / event-queue name.
+pub(crate) const CAPS_FAILURE_PREFIX: &str = "\0caps-failure\0";
+
+/// Reports that a CAPS request for `cap` failed before producing a reply,
+/// sending the failure sentinel over `caps_tx`. Helpers call this in place of
+/// silently swallowing a transport / parse error; the run loop turns it into a
+/// diagnostic.
+pub(crate) async fn report_caps_failure(caps_tx: &mpsc::Sender<(String, Llsd)>, cap: &str) {
+    caps_tx
+        .send((format!("{CAPS_FAILURE_PREFIX}{cap}"), Llsd::Undef))
+        .await
+        .ok();
+}
+
 /// Aborts a running task handle, if present.
 pub(crate) fn abort_task(task: &mut Option<tokio::task::JoinHandle<()>>) {
     if let Some(handle) = task.take() {

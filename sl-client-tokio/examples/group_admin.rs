@@ -74,7 +74,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
     let (command_tx, command_rx) = mpsc::channel::<Command>(16);
-    let run = tokio::spawn(client.run(event_tx, command_rx));
+    let (diag_tx, _diag_rx) = mpsc::channel(16);
+    let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
 
     // A tiny state machine across the role CRUD cycle. We learn the group id from
     // CreateGroupResult and the server-assigned role id from GroupRoleData.
