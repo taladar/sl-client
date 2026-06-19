@@ -13,14 +13,14 @@
 //! - [`meta`] — REPL control lines ([`MetaCommand`]).
 //! - [`registry`] — one build entry per `Command` variant ([`Registry`]).
 //! - [`context`] — the [`ReplContext`] placeholder-resolution interface.
-//!
-//! Placeholder resolution, the reverse symbolizer, and formatting arrive in
-//! later phases; the build entries are written against [`ReplContext`] so they
-//! need no change when the session-aware context lands.
+//! - [`format`](mod@format) — symbolized renderers for events, commands, and
+//!   diagnostics ([`format_event`], [`format_command`], [`format_diagnostic`],
+//!   [`hexdump`]).
 
 pub mod args;
 pub mod context;
 pub mod error;
+pub mod format;
 pub mod meta;
 pub mod parse;
 pub mod registry;
@@ -28,6 +28,7 @@ pub mod registry;
 pub use args::Args;
 pub use context::{NoContext, ReplContext, SessionContext};
 pub use error::ReplError;
+pub use format::{format_command, format_diagnostic, format_event, hexdump};
 pub use meta::MetaCommand;
 pub use parse::{PendingCommand, ReplAction, parse_line};
 pub use registry::{CommandSpec, Registry};
