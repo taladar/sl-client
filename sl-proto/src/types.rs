@@ -8,6 +8,7 @@ mod appearance;
 mod asset;
 mod avatar_profile;
 mod chat;
+mod diagnostic;
 mod economy;
 mod editing;
 mod event;
@@ -34,6 +35,7 @@ pub use avatar_profile::{
 pub use chat::{
     ChatAudible, ChatMessage, ChatSourceType, ChatType, ImDialog, InstantMessage, InventoryOffer,
 };
+pub use diagnostic::Diagnostic;
 pub use economy::{EconomyData, MoneyBalance, MoneyTransaction, MoneyTransactionType};
 pub use editing::{
     ClickAction, DeRezDestination, Material, Maturity, ObjectFlagSettings, ObjectTransform,

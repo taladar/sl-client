@@ -31,26 +31,26 @@ use crate::error::Error;
 use crate::terrain;
 use crate::types::{
     AlertInfo, Asset, AssetType, AvatarClassified, AvatarPick, Camera, ChatType, ClassifiedUpdate,
-    ClickAction, CreateGroupParams, DeRezDestination, DisconnectReason, EstateAccessDelta, Event,
-    FriendRights, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange,
-    ImDialog, ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer,
-    LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType, Material, Maturity,
-    MoneyTransactionType, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, Object,
-    ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
-    PermissionField, PickUpdate, PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability, SaleType,
-    ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload, TeleportFlags,
-    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, Wearable,
-    WearableType, handle_to_grid,
+    ClickAction, CreateGroupParams, DeRezDestination, Diagnostic, DisconnectReason,
+    EstateAccessDelta, Event, FriendRights, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMember,
+    GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem,
+    InventoryOffer, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType,
+    Material, Maturity, MoneyTransactionType, MuteFlags, MuteType, NeighborInfo, NewInventoryItem,
+    Object, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo,
+    ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProfileUpdate,
+    RegionInfoUpdate, Reliability, SaleType, ScriptPermissions, ScriptTeleportRequest, SoundFlags,
+    SoundPreload, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus,
+    Transmit, Wearable, WearableType, handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::{
     AnyMessage, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd, MessageId, ObjectMediaResponse,
     PacketFlags, ParcelVoiceInfo, Reader, VoiceAccountInfo, build_group_notice_bucket,
-    build_login_request, parse_datagram, parse_experience_ids, parse_experience_infos,
-    parse_experience_permissions, parse_gltf_material_override, parse_region_experiences,
-    zero_decode,
+    build_login_request, message_name, parse_datagram, parse_experience_ids,
+    parse_experience_infos, parse_experience_permissions, parse_gltf_material_override,
+    parse_region_experiences, zero_decode,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -96,7 +96,53 @@ impl Session {
             inventory_items: BTreeMap::new(),
             next_inventory_callback: 1,
             events: VecDeque::new(),
+            diagnostics_enabled: false,
+            diagnostics: VecDeque::new(),
         }
+    }
+
+    /// Enables or disables protocol-diagnostic collection.
+    ///
+    /// Off by default. While enabled, the session records a [`Diagnostic`] (and
+    /// emits `tracing` records) at the points where it would otherwise silently
+    /// drop inbound data: undecodable datagrams, unhandled messages, and unknown
+    /// or malformed CAPS events. Disabling clears any already-queued
+    /// diagnostics. Drain them with [`Session::poll_diagnostic`].
+    pub fn set_diagnostics(&mut self, enabled: bool) {
+        self.diagnostics_enabled = enabled;
+        if !enabled {
+            self.diagnostics.clear();
+        }
+    }
+
+    /// Whether protocol-diagnostic collection is currently enabled.
+    #[must_use]
+    pub const fn diagnostics_enabled(&self) -> bool {
+        self.diagnostics_enabled
+    }
+
+    /// The next pending [`Diagnostic`], if any. Always `None` unless diagnostics
+    /// were enabled with [`Session::set_diagnostics`].
+    pub fn poll_diagnostic(&mut self) -> Option<Diagnostic> {
+        self.diagnostics.pop_front()
+    }
+
+    /// Queues `diagnostic` for the driver when diagnostics are enabled; a no-op
+    /// otherwise (so the silent-drop sites stay free on the normal path).
+    fn push_diagnostic(&mut self, diagnostic: Diagnostic) {
+        if self.diagnostics_enabled {
+            self.diagnostics.push_back(diagnostic);
+        }
+    }
+
+    /// Records that a recognised CAPS event named `message` arrived but its LLSD
+    /// body failed to parse into the expected shape. Logs a warning and queues a
+    /// [`Diagnostic::CapsDecodeFailed`].
+    fn caps_decode_failed(&mut self, message: &str) {
+        tracing::warn!(event = message, "CAPS event body failed to parse");
+        self.push_diagnostic(Diagnostic::CapsDecodeFailed {
+            message: message.to_owned(),
+        });
     }
 
     /// Sets the draw distance (metres) advertised in keep-alive `AgentUpdate`s.
@@ -134,11 +180,14 @@ impl Session {
         body: &Llsd,
         now: Instant,
     ) -> Result<(), Error> {
+        tracing::trace!(event = message, "inbound CAPS event");
         match message {
             "ParcelProperties" => {
                 if let Some(parcel) = parcel_info_from_llsd(body) {
                     self.events
                         .push_back(Event::ParcelProperties(Box::new(parcel)));
+                } else {
+                    self.caps_decode_failed(message);
                 }
             }
             "TeleportFinish" => {
@@ -153,6 +202,8 @@ impl Session {
                         });
                     }
                     self.begin_handover(finish.dest, region_handle, Some(finish.seed), now)?;
+                } else {
+                    self.caps_decode_failed(message);
                 }
             }
             // A neighbouring region is announced over the CAPS event queue (the
@@ -171,6 +222,8 @@ impl Session {
                             grid_x,
                             grid_y,
                         }));
+                } else {
+                    self.caps_decode_failed(message);
                 }
             }
             // A neighbouring region's child-agent seed capability, sent after we
@@ -187,6 +240,8 @@ impl Session {
                         sim,
                         seed_capability: seed,
                     });
+                } else {
+                    self.caps_decode_failed(message);
                 }
             }
             // The agent has physically crossed a region border; OpenSim signals
@@ -195,6 +250,8 @@ impl Session {
             "CrossedRegion" if matches!(self.state, SessionState::Active) => {
                 if let Some((handle, dest, seed)) = crossed_region_from_caps_llsd(body) {
                     self.promote_child_to_root(dest, handle, Some(seed), now)?;
+                } else {
+                    self.caps_decode_failed(message);
                 }
             }
             CAP_FETCH_INVENTORY => {
@@ -219,6 +276,8 @@ impl Session {
                         items,
                         item_callbacks: Vec::new(),
                     });
+                } else {
+                    self.caps_decode_failed(message);
                 }
             }
             // The reply to an AIS3 (`InventoryAPIv3`/`LibraryAPIv3`) REST
@@ -247,6 +306,8 @@ impl Session {
                         items: Vec::new(),
                         item_callbacks: Vec::new(),
                     });
+                } else {
+                    self.caps_decode_failed(message);
                 }
             }
             // The modern (CAPS event-queue) delivery of group memberships; the
@@ -254,6 +315,8 @@ impl Session {
             "AgentGroupDataUpdate" => {
                 if let Some(event) = group_memberships_from_caps_llsd(body) {
                     self.events.push_back(event);
+                } else {
+                    self.caps_decode_failed(message);
                 }
             }
             // The response to a `GroupMemberData` capability POST (the modern
@@ -261,6 +324,8 @@ impl Session {
             CAP_GROUP_MEMBER_DATA => {
                 if let Some(event) = group_members_from_caps_llsd(body) {
                     self.events.push_back(event);
+                } else {
+                    self.caps_decode_failed(message);
                 }
             }
             // The reply to an `UpdateAvatarAppearance` POST (server-side baking).
@@ -282,6 +347,8 @@ impl Session {
                         version: response.version,
                         faces: response.faces,
                     });
+                } else {
+                    self.caps_decode_failed(message);
                 }
             }
             // The reply to a `ModifyMaterialParams` POST (setting a GLTF material
@@ -310,6 +377,8 @@ impl Session {
             CAP_PARCEL_VOICE_INFO => {
                 if let Some(info) = ParcelVoiceInfo::from_llsd(body) {
                     self.events.push_back(Event::ParcelVoiceInfo(info));
+                } else {
+                    self.caps_decode_failed(message);
                 }
             }
             // The reply to a `GetExperienceInfo` GET: the requested experiences'
@@ -384,9 +453,16 @@ impl Session {
             "ChatterBoxInvitation" => {
                 if let Some(event) = chatterbox_invitation_from_llsd(body) {
                     self.events.push_back(event);
+                } else {
+                    self.caps_decode_failed(message);
                 }
             }
-            _ => {}
+            _ => {
+                tracing::trace!(event = message, "unhandled CAPS event");
+                self.push_diagnostic(Diagnostic::UnknownCapsEvent {
+                    message: message.to_owned(),
+                });
+            }
         }
         Ok(())
     }
@@ -722,10 +798,30 @@ impl Session {
 
         let mut reader = Reader::new(body);
         let id = MessageId::decode(&mut reader)?;
-        // Unrecognized messages are ignored rather than failing the datagram.
-        let Ok(message) = AnyMessage::decode(id, &mut reader) else {
-            return Ok(());
+        // Unrecognized messages (and bodies that fail to decode) are dropped
+        // rather than failing the datagram, but surfaced as a diagnostic.
+        let message = match AnyMessage::decode(id, &mut reader) {
+            Ok(message) => message,
+            Err(error) => {
+                let name = message_name(id);
+                tracing::warn!(?id, name, %error, "dropping undecodable inbound message");
+                self.push_diagnostic(Diagnostic::DecodeFailed {
+                    id,
+                    name,
+                    error,
+                    // Capture the (post zero-decode) body only when diagnostics
+                    // are on, so the normal path pays nothing.
+                    raw: if self.diagnostics_enabled {
+                        body.to_vec()
+                    } else {
+                        Vec::new()
+                    },
+                    failed_offset: reader.position(),
+                });
+                return Ok(());
+            }
         };
+        tracing::trace!(?id, name = message.name(), %from, "inbound message");
         if is_root {
             self.dispatch(from, &message, now)
         } else {
@@ -772,7 +868,13 @@ impl Session {
                 self.child_seeds.remove(&from);
                 self.forget_sim_objects(from);
             }
-            _ => {}
+            _ => {
+                self.push_diagnostic(Diagnostic::UnhandledMessage {
+                    id: message.id(),
+                    name: message.name(),
+                    child: true,
+                });
+            }
         }
         Ok(())
     }
@@ -1949,7 +2051,13 @@ impl Session {
                 self.state = SessionState::Closed;
                 self.events.push_back(Event::LoggedOut);
             }
-            _ => {}
+            _ => {
+                self.push_diagnostic(Diagnostic::UnhandledMessage {
+                    id: message.id(),
+                    name: message.name(),
+                    child: false,
+                });
+            }
         }
         Ok(())
     }

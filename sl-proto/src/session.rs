@@ -2,7 +2,7 @@
 //! keep-alive, and clean logout, driven entirely by passed-in time.
 
 use crate::types::{
-    AssetType, Camera, Event, ImageCodec, InventoryFolder, InventoryItem, LoginAccount,
+    AssetType, Camera, Diagnostic, Event, ImageCodec, InventoryFolder, InventoryItem, LoginAccount,
     LoginParams, Object, TerrainPatch, Throttle,
 };
 use sl_types::lsl::Rotation;
@@ -709,6 +709,13 @@ pub struct Session {
     next_inventory_callback: u32,
     /// Pending high-level events for the driver.
     events: VecDeque<Event>,
+    /// Whether protocol diagnostics are collected. Off by default so the
+    /// silent-drop sites cost nothing (no raw-byte capture, no queueing) on the
+    /// normal path. Toggled by [`Session::set_diagnostics`].
+    diagnostics_enabled: bool,
+    /// Pending [`Diagnostic`]s for the driver, populated only while
+    /// `diagnostics_enabled`. Drained by [`Session::poll_diagnostic`].
+    diagnostics: VecDeque<Diagnostic>,
 }
 
 mod circuit;
