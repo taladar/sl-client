@@ -10,10 +10,10 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        AvatarName, ChatType, Event, GroupName, ImDialog, LoginParams, MapItem, MapItemType,
-        MapRegionInfo, Maturity, ProductType, RegionIdentity, ServerEvent, Session, SimSession,
-        Throttle, Transmit, enable_simulator_to_caps_llsd, grid_to_handle,
-        parse_event_queue_response,
+        AttachmentPoint, AvatarName, ChatType, Event, GroupName, ImDialog, LoginParams, MapItem,
+        MapItemType, MapRegionInfo, Maturity, ProductType, RegionIdentity, RezAttachment,
+        ServerEvent, Session, SimSession, Throttle, Transmit, enable_simulator_to_caps_llsd,
+        grid_to_handle, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -215,6 +215,128 @@ mod test {
             })
             .ok_or("expected a Chat server event")?;
         assert_eq!(chat, ("hello sim".to_owned(), 7, ChatType::Shout));
+        Ok(())
+    }
+
+    #[test]
+    fn client_attach_object_reaches_simulator() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        client.attach_object(
+            55,
+            AttachmentPoint::RightHand,
+            true,
+            &sl_types::lsl::Rotation {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                s: 1.0,
+            },
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+        let attach = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::AttachObject {
+                    local_id,
+                    attachment_point,
+                    add,
+                    ..
+                } => Some((*local_id, *attachment_point, *add)),
+                _ => None,
+            })
+            .ok_or("expected an AttachObject server event")?;
+        assert_eq!(attach, (55, AttachmentPoint::RightHand, true));
+        Ok(())
+    }
+
+    #[test]
+    fn client_detach_objects_reaches_simulator() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        client.detach_objects(&[3, 4], now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+        let ids = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::DetachObjects(ids) => Some(ids.clone()),
+                _ => None,
+            })
+            .ok_or("expected a DetachObjects server event")?;
+        assert_eq!(ids, vec![3, 4]);
+        Ok(())
+    }
+
+    #[test]
+    fn client_remove_attachment_reaches_simulator() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let item = uuid::Uuid::from_u128(0x5151);
+        client.remove_attachment(AttachmentPoint::Skull, item, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+        let removed = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RemoveAttachment {
+                    attachment_point,
+                    item_id,
+                } => Some((*attachment_point, *item_id)),
+                _ => None,
+            })
+            .ok_or("expected a RemoveAttachment server event")?;
+        assert_eq!(removed, (AttachmentPoint::Skull, item));
+        Ok(())
+    }
+
+    #[test]
+    fn client_rez_attachments_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let compound = uuid::Uuid::from_u128(0x9001);
+        let attachments = vec![RezAttachment {
+            item_id: uuid::Uuid::from_u128(0x9002),
+            owner_id: uuid::Uuid::from_u128(0x9000),
+            attachment_point: AttachmentPoint::LeftHand,
+            add: true,
+            name: String::new(),
+            description: String::new(),
+        }];
+        client.rez_attachments(compound, false, &attachments, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+        let rez = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RezAttachments {
+                    compound_id,
+                    first_detach_all,
+                    attachments,
+                } => Some((*compound_id, *first_detach_all, attachments.clone())),
+                _ => None,
+            })
+            .ok_or("expected a RezAttachments server event")?;
+        assert_eq!(rez.0, compound);
+        assert!(!rez.1);
+        let first = rez.2.first().ok_or("first attachment")?;
+        assert_eq!(first.attachment_point, AttachmentPoint::LeftHand);
+        assert!(first.add);
+        assert_eq!(first.item_id, uuid::Uuid::from_u128(0x9002));
         Ok(())
     }
 

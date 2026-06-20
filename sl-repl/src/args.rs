@@ -193,7 +193,7 @@ fn parse_hex(field: &str, value: &str) -> Result<Vec<u8>, ReplError> {
 }
 
 /// Parse a boolean from `true`/`false`/`1`/`0`/`yes`/`no` (case-insensitive).
-fn parse_bool(field: &str, value: &str) -> Result<bool, ReplError> {
+pub(crate) fn parse_bool(field: &str, value: &str) -> Result<bool, ReplError> {
     match value.to_ascii_lowercase().as_str() {
         "true" | "1" | "yes" | "on" => Ok(true),
         "false" | "0" | "no" | "off" => Ok(false),

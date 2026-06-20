@@ -25,8 +25,8 @@ mod session;
 mod terrain;
 
 pub use appearance::{
-    AvatarAppearance, AvatarAttachment, PlayingAnimation, SoundFlags, SoundPreload, TextureEntry,
-    TextureFace, Wearable, WearableType, avatar_texture,
+    AttachmentPoint, AvatarAppearance, AvatarAttachment, PlayingAnimation, RezAttachment,
+    SoundFlags, SoundPreload, TextureEntry, TextureFace, Wearable, WearableType, avatar_texture,
 };
 pub use asset::{Asset, AssetType, ImageCodec, InventoryType, Texture, TransferStatus};
 pub use avatar_profile::{

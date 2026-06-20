@@ -8,11 +8,11 @@ use super::{
     MAX_RESEND_ATTEMPTS, RESEND_TIMEOUT, SeenWindow, Timers, UnackedPacket, deadline,
 };
 use crate::types::{
-    AssetType, Camera, ChatType, ClassifiedUpdate, ClickAction, CreateGroupParams,
+    AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction, CreateGroupParams,
     DeRezDestination, GroupRoleEdit, GroupRoleMemberChange, ImDialog, InterestsUpdate,
     InventoryItem, Material, NewInventoryItem, ObjectFlagSettings, ObjectTransform,
     ParcelAccessEntry, ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProfileUpdate,
-    Reliability, SaleType, Throttle, Wearable,
+    Reliability, RezAttachment, SaleType, Throttle, Wearable,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
@@ -80,23 +80,26 @@ use sl_wire::messages::{
     MoveInventoryItemAgentDataBlock, MoveInventoryItemInventoryDataBlock, MultipleObjectUpdate,
     MultipleObjectUpdateAgentDataBlock, MultipleObjectUpdateObjectDataBlock, MuteListRequest,
     MuteListRequestAgentDataBlock, MuteListRequestMuteDataBlock, ObjectAdd,
-    ObjectAddAgentDataBlock, ObjectAddObjectDataBlock, ObjectCategory,
-    ObjectCategoryAgentDataBlock, ObjectCategoryObjectDataBlock, ObjectClickAction,
-    ObjectClickActionAgentDataBlock, ObjectClickActionObjectDataBlock, ObjectDeGrab,
-    ObjectDeGrabAgentDataBlock, ObjectDeGrabObjectDataBlock, ObjectDelete,
-    ObjectDeleteAgentDataBlock, ObjectDeleteObjectDataBlock, ObjectDelink,
-    ObjectDelinkAgentDataBlock, ObjectDelinkObjectDataBlock, ObjectDescription,
-    ObjectDescriptionAgentDataBlock, ObjectDescriptionObjectDataBlock, ObjectDeselect,
-    ObjectDeselectAgentDataBlock, ObjectDeselectObjectDataBlock, ObjectDuplicate,
-    ObjectDuplicateAgentDataBlock, ObjectDuplicateObjectDataBlock, ObjectDuplicateSharedDataBlock,
-    ObjectFlagUpdate, ObjectFlagUpdateAgentDataBlock, ObjectGrab, ObjectGrabAgentDataBlock,
-    ObjectGrabObjectDataBlock, ObjectGrabUpdate, ObjectGrabUpdateAgentDataBlock,
-    ObjectGrabUpdateObjectDataBlock, ObjectGroup, ObjectGroupAgentDataBlock,
-    ObjectGroupObjectDataBlock, ObjectIncludeInSearch, ObjectIncludeInSearchAgentDataBlock,
-    ObjectIncludeInSearchObjectDataBlock, ObjectLink, ObjectLinkAgentDataBlock,
-    ObjectLinkObjectDataBlock, ObjectMaterial, ObjectMaterialAgentDataBlock,
-    ObjectMaterialObjectDataBlock, ObjectName, ObjectNameAgentDataBlock, ObjectNameObjectDataBlock,
-    ObjectPermissions, ObjectPermissionsAgentDataBlock, ObjectPermissionsHeaderDataBlock,
+    ObjectAddAgentDataBlock, ObjectAddObjectDataBlock, ObjectAttach, ObjectAttachAgentDataBlock,
+    ObjectAttachObjectDataBlock, ObjectCategory, ObjectCategoryAgentDataBlock,
+    ObjectCategoryObjectDataBlock, ObjectClickAction, ObjectClickActionAgentDataBlock,
+    ObjectClickActionObjectDataBlock, ObjectDeGrab, ObjectDeGrabAgentDataBlock,
+    ObjectDeGrabObjectDataBlock, ObjectDelete, ObjectDeleteAgentDataBlock,
+    ObjectDeleteObjectDataBlock, ObjectDelink, ObjectDelinkAgentDataBlock,
+    ObjectDelinkObjectDataBlock, ObjectDescription, ObjectDescriptionAgentDataBlock,
+    ObjectDescriptionObjectDataBlock, ObjectDeselect, ObjectDeselectAgentDataBlock,
+    ObjectDeselectObjectDataBlock, ObjectDetach, ObjectDetachAgentDataBlock,
+    ObjectDetachObjectDataBlock, ObjectDrop, ObjectDropAgentDataBlock, ObjectDropObjectDataBlock,
+    ObjectDuplicate, ObjectDuplicateAgentDataBlock, ObjectDuplicateObjectDataBlock,
+    ObjectDuplicateSharedDataBlock, ObjectFlagUpdate, ObjectFlagUpdateAgentDataBlock, ObjectGrab,
+    ObjectGrabAgentDataBlock, ObjectGrabObjectDataBlock, ObjectGrabUpdate,
+    ObjectGrabUpdateAgentDataBlock, ObjectGrabUpdateObjectDataBlock, ObjectGroup,
+    ObjectGroupAgentDataBlock, ObjectGroupObjectDataBlock, ObjectIncludeInSearch,
+    ObjectIncludeInSearchAgentDataBlock, ObjectIncludeInSearchObjectDataBlock, ObjectLink,
+    ObjectLinkAgentDataBlock, ObjectLinkObjectDataBlock, ObjectMaterial,
+    ObjectMaterialAgentDataBlock, ObjectMaterialObjectDataBlock, ObjectName,
+    ObjectNameAgentDataBlock, ObjectNameObjectDataBlock, ObjectPermissions,
+    ObjectPermissionsAgentDataBlock, ObjectPermissionsHeaderDataBlock,
     ObjectPermissionsObjectDataBlock, ObjectSaleInfo, ObjectSaleInfoAgentDataBlock,
     ObjectSaleInfoObjectDataBlock, ObjectSelect, ObjectSelectAgentDataBlock,
     ObjectSelectObjectDataBlock, PacketAck, PacketAckPacketsBlock, ParcelAccessListRequest,
@@ -118,6 +121,7 @@ use sl_wire::messages::{
     PickInfoUpdateAgentDataBlock, PickInfoUpdateDataBlock, PurgeInventoryDescendents,
     PurgeInventoryDescendentsAgentDataBlock, PurgeInventoryDescendentsInventoryDataBlock,
     RegionHandshakeReply, RegionHandshakeReplyAgentDataBlock, RegionHandshakeReplyRegionInfoBlock,
+    RemoveAttachment, RemoveAttachmentAgentDataBlock, RemoveAttachmentAttachmentBlockBlock,
     RemoveInventoryFolder, RemoveInventoryFolderAgentDataBlock,
     RemoveInventoryFolderFolderDataBlock, RemoveInventoryItem, RemoveInventoryItemAgentDataBlock,
     RemoveInventoryItemInventoryDataBlock, RemoveInventoryObjects,
@@ -127,18 +131,22 @@ use sl_wire::messages::{
     RequestImageRequestImageBlock, RequestMultipleObjects, RequestMultipleObjectsAgentDataBlock,
     RequestMultipleObjectsObjectDataBlock, RequestRegionInfo, RequestRegionInfoAgentDataBlock,
     RequestXfer, RequestXferXferIDBlock, RetrieveInstantMessages,
-    RetrieveInstantMessagesAgentDataBlock, ScriptAnswerYes, ScriptAnswerYesAgentDataBlock,
-    ScriptAnswerYesDataBlock, ScriptDialogReply, ScriptDialogReplyAgentDataBlock,
-    ScriptDialogReplyDataBlock, SendXferPacket, SendXferPacketDataPacketBlock,
-    SendXferPacketXferIDBlock, SetGroupAcceptNotices, SetGroupAcceptNoticesAgentDataBlock,
-    SetGroupAcceptNoticesDataBlock, SetGroupAcceptNoticesNewDataBlock, SetGroupContribution,
-    SetGroupContributionAgentDataBlock, SetGroupContributionDataBlock, StartLure,
-    StartLureAgentDataBlock, StartLureInfoBlock, StartLureTargetDataBlock, TeleportLocationRequest,
-    TeleportLocationRequestAgentDataBlock, TeleportLocationRequestInfoBlock, TeleportLureRequest,
-    TeleportLureRequestInfoBlock, TerminateFriendship, TerminateFriendshipAgentDataBlock,
-    TerminateFriendshipExBlockBlock, TransferRequest, TransferRequestTransferInfoBlock,
-    UUIDGroupNameRequest, UUIDGroupNameRequestUUIDNameBlockBlock, UUIDNameRequest,
-    UUIDNameRequestUUIDNameBlockBlock, UpdateInventoryFolder, UpdateInventoryFolderAgentDataBlock,
+    RetrieveInstantMessagesAgentDataBlock, RezMultipleAttachmentsFromInv,
+    RezMultipleAttachmentsFromInvAgentDataBlock, RezMultipleAttachmentsFromInvHeaderDataBlock,
+    RezMultipleAttachmentsFromInvObjectDataBlock, RezSingleAttachmentFromInv,
+    RezSingleAttachmentFromInvAgentDataBlock, RezSingleAttachmentFromInvObjectDataBlock,
+    ScriptAnswerYes, ScriptAnswerYesAgentDataBlock, ScriptAnswerYesDataBlock, ScriptDialogReply,
+    ScriptDialogReplyAgentDataBlock, ScriptDialogReplyDataBlock, SendXferPacket,
+    SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock, SetGroupAcceptNotices,
+    SetGroupAcceptNoticesAgentDataBlock, SetGroupAcceptNoticesDataBlock,
+    SetGroupAcceptNoticesNewDataBlock, SetGroupContribution, SetGroupContributionAgentDataBlock,
+    SetGroupContributionDataBlock, StartLure, StartLureAgentDataBlock, StartLureInfoBlock,
+    StartLureTargetDataBlock, TeleportLocationRequest, TeleportLocationRequestAgentDataBlock,
+    TeleportLocationRequestInfoBlock, TeleportLureRequest, TeleportLureRequestInfoBlock,
+    TerminateFriendship, TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock,
+    TransferRequest, TransferRequestTransferInfoBlock, UUIDGroupNameRequest,
+    UUIDGroupNameRequestUUIDNameBlockBlock, UUIDNameRequest, UUIDNameRequestUUIDNameBlockBlock,
+    UpdateInventoryFolder, UpdateInventoryFolderAgentDataBlock,
     UpdateInventoryFolderFolderDataBlock, UpdateInventoryItem, UpdateInventoryItemAgentDataBlock,
     UpdateInventoryItemInventoryDataBlock, UpdateMuteListEntry, UpdateMuteListEntryAgentDataBlock,
     UpdateMuteListEntryMuteDataBlock, UseCircuitCode, UseCircuitCodeCircuitCodeBlock,
@@ -1590,6 +1598,166 @@ impl Circuit {
                 .map(|wearable| AgentIsNowWearingWearableDataBlock {
                     item_id: wearable.item_id,
                     wearable_type: wearable.wearable_type.to_code(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectAttach` reliably, attaching the in-world object
+    /// `local_id` to `attachment_point` at `rotation` (the `add` flag adds the
+    /// attachment rather than replacing what is on the point).
+    pub(crate) fn send_object_attach(
+        &mut self,
+        local_id: u32,
+        attachment_point: AttachmentPoint,
+        add: bool,
+        rotation: &Rotation,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectAttach(ObjectAttach {
+            agent_data: ObjectAttachAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                attachment_point: attachment_point.with_add(add),
+            },
+            object_data: vec![ObjectAttachObjectDataBlock {
+                object_local_id: local_id,
+                rotation: rotation.clone(),
+            }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectDetach` reliably, detaching the attachments `local_ids`
+    /// back to inventory.
+    pub(crate) fn send_object_detach(
+        &mut self,
+        local_ids: &[u32],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectDetach(ObjectDetach {
+            agent_data: ObjectDetachAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: local_ids
+                .iter()
+                .map(|&object_local_id| ObjectDetachObjectDataBlock { object_local_id })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectDrop` reliably, dropping the attachments `local_ids` from
+    /// the avatar onto the ground.
+    pub(crate) fn send_object_drop(
+        &mut self,
+        local_ids: &[u32],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectDrop(ObjectDrop {
+            agent_data: ObjectDropAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: local_ids
+                .iter()
+                .map(|&object_local_id| ObjectDropObjectDataBlock { object_local_id })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RemoveAttachment` reliably, taking off the worn item `item_id`
+    /// (worn on `attachment_point`).
+    pub(crate) fn send_remove_attachment(
+        &mut self,
+        attachment_point: AttachmentPoint,
+        item_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RemoveAttachment(RemoveAttachment {
+            agent_data: RemoveAttachmentAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            attachment_block: RemoveAttachmentAttachmentBlockBlock {
+                attachment_point: attachment_point.to_code(),
+                item_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RezSingleAttachmentFromInv` reliably, wearing the inventory item
+    /// described by `rez` as an attachment. The permission/flags fields are left
+    /// zero — the simulator no longer reads them (the viewer's
+    /// `pack_permissions_slam` is documented cruft).
+    pub(crate) fn send_rez_single_attachment(
+        &mut self,
+        rez: &RezAttachment,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RezSingleAttachmentFromInv(RezSingleAttachmentFromInv {
+            agent_data: RezSingleAttachmentFromInvAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: RezSingleAttachmentFromInvObjectDataBlock {
+                item_id: rez.item_id,
+                owner_id: rez.owner_id,
+                attachment_pt: rez.attachment_point.with_add(rez.add),
+                item_flags: 0,
+                group_mask: 0,
+                everyone_mask: 0,
+                next_owner_mask: 0,
+                name: with_nul(&rez.name),
+                description: with_nul(&rez.description),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RezMultipleAttachmentsFromInv` reliably, wearing several
+    /// inventory items as attachments in one compound message. `compound_id`
+    /// correlates the message's parts; `first_detach_all` detaches everything
+    /// worn first. The permission/flags fields are left zero (see
+    /// [`send_rez_single_attachment`](Self::send_rez_single_attachment)).
+    pub(crate) fn send_rez_multiple_attachments(
+        &mut self,
+        compound_id: Uuid,
+        first_detach_all: bool,
+        attachments: &[RezAttachment],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let total_objects =
+            u8::try_from(attachments.len()).map_err(|_e| WireError::VariableTooLong {
+                len: attachments.len(),
+                max: 255,
+            })?;
+        let message = AnyMessage::RezMultipleAttachmentsFromInv(RezMultipleAttachmentsFromInv {
+            agent_data: RezMultipleAttachmentsFromInvAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            header_data: RezMultipleAttachmentsFromInvHeaderDataBlock {
+                compound_msg_id: compound_id,
+                total_objects,
+                first_detach_all,
+            },
+            object_data: attachments
+                .iter()
+                .map(|rez| RezMultipleAttachmentsFromInvObjectDataBlock {
+                    item_id: rez.item_id,
+                    owner_id: rez.owner_id,
+                    attachment_pt: rez.attachment_point.with_add(rez.add),
+                    item_flags: 0,
+                    group_mask: 0,
+                    everyone_mask: 0,
+                    next_owner_mask: 0,
+                    name: with_nul(&rez.name),
+                    description: with_nul(&rez.description),
                 })
                 .collect(),
         });

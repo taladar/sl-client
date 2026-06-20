@@ -5,15 +5,15 @@
 //! copies.
 
 use crate::{
-    AnyMessage, AssetType, Camera, ChatType, ClassifiedUpdate, ClickAction, ControlFlags,
-    CreateGroupParams, DeRezDestination, EstateAccessDelta, ExperiencePermission, ExperienceUpdate,
-    FriendRights, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMemberChange, IceCandidate,
-    InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LindenAmount, MapItemType,
-    Material, MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MuteFlags, MuteType,
-    NewInventoryItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
-    ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProfileUpdate,
-    RegionInfoUpdate, Reliability, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
-    VoiceProvisionRequest, Wearable,
+    AnyMessage, AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction,
+    ControlFlags, CreateGroupParams, DeRezDestination, EstateAccessDelta, ExperiencePermission,
+    ExperienceUpdate, FriendRights, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMemberChange,
+    IceCandidate, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LindenAmount,
+    MapItemType, Material, MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MuteFlags,
+    MuteType, NewInventoryItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessScope, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PrimShape,
+    ProfileUpdate, RegionInfoUpdate, Reliability, RezAttachment, Rotation, SaleType,
+    ScriptPermissions, Throttle, Uuid, Vector, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -991,6 +991,61 @@ pub enum Command {
     /// Stop one of the agent's own animations (`AgentAnimation`); convenience for
     /// a single-element [`Command::SetAnimations`].
     StopAnimation(Uuid),
+    /// Attach an in-world object (selected by its region-local id) to the avatar
+    /// (`ObjectAttach`). The object is worn at `attachment_point`; when `add` is
+    /// `true` it is added alongside anything already on that point rather than
+    /// replacing it ([`AttachmentPoint::Default`] lets the simulator pick the
+    /// object's saved/scripted slot). To wear an item straight from inventory
+    /// instead, use [`Command::RezAttachment`].
+    AttachObject {
+        /// The in-world object's region-local id.
+        local_id: u32,
+        /// The point to attach the object to.
+        attachment_point: AttachmentPoint,
+        /// Add the attachment (`true`) rather than replace what is on the point.
+        add: bool,
+        /// The rotation to wear the object at, relative to the attachment point.
+        rotation: Rotation,
+    },
+    /// Detach attachments back to inventory by their region-local ids
+    /// (`ObjectDetach`), marking each item as no longer "(worn)".
+    DetachObjects {
+        /// The attachments' region-local ids.
+        local_ids: Vec<u32>,
+    },
+    /// Drop attachments from the avatar onto the ground by their region-local ids
+    /// (`ObjectDrop`): they become ordinary in-world objects at the avatar's
+    /// location rather than returning to inventory.
+    DropAttachments {
+        /// The attachments' region-local ids.
+        local_ids: Vec<u32>,
+    },
+    /// Remove (take off) an attachment by its inventory item id
+    /// (`RemoveAttachment`). Unlike [`Command::DetachObjects`] this names the
+    /// inventory item rather than the rezzed object's region-local id.
+    RemoveAttachment {
+        /// The attachment point the item is worn on (the simulator resolves the
+        /// item by id; [`AttachmentPoint::Default`] is accepted).
+        attachment_point: AttachmentPoint,
+        /// The worn item's inventory item id.
+        item_id: Uuid,
+    },
+    /// Wear an inventory item as an attachment (`RezSingleAttachmentFromInv`):
+    /// rez it directly onto the avatar from inventory. To attach an object that
+    /// is already rezzed in-world, use [`Command::AttachObject`].
+    RezAttachment(RezAttachment),
+    /// Wear several inventory items as attachments in one compound message
+    /// (`RezMultipleAttachmentsFromInv`).
+    RezAttachments {
+        /// A fresh, caller-chosen id correlating the compound message's parts
+        /// (the viewer generates a new UUID per request).
+        compound_id: Uuid,
+        /// Detach everything currently worn before wearing these (`true`), e.g.
+        /// when replacing the whole outfit.
+        first_detach_all: bool,
+        /// The items to wear.
+        attachments: Vec<RezAttachment>,
+    },
     /// Upload a new asset over the legacy UDP path (`AssetUploadRequest`): stores
     /// the asset bytes (small assets inline, larger ones over `Xfer`) without
     /// creating an inventory item. Completion arrives as
