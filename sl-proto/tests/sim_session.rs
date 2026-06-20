@@ -10,10 +10,12 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        AttachmentPoint, AvatarName, ChatType, CoarseLocation, Event, GroupName, ImDialog,
-        LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity, PointAtType, ProductType,
-        RegionIdentity, RezAttachment, ServerEvent, Session, SimSession, Throttle, Transmit,
-        ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
+        AttachmentPoint, AvatarName, AvatarPickerResult, ChatType, CoarseLocation,
+        DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
+        DirPeopleResult, DirPlaceResult, Event, GroupName, ImDialog, LandSearchType, LoginParams,
+        MapItem, MapItemType, MapRegionInfo, Maturity, ParcelCategory, PlacesResult, PointAtType,
+        ProductType, RegionIdentity, RezAttachment, ServerEvent, Session, SimSession, Throttle,
+        Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
         grid_to_handle, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
@@ -482,6 +484,316 @@ mod test {
             .ok_or("expected a FindAgentReply client event")?;
         assert_eq!(reply_prey, prey);
         assert_eq!(locations, vec![(300_000.0, 301_000.0)]);
+        Ok(())
+    }
+
+    #[test]
+    fn client_directory_queries_round_trip() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let qid = uuid::Uuid::from_u128(0xE01);
+        let txn = uuid::Uuid::from_u128(0xE02);
+        client.dir_find_query(
+            qid,
+            "alice",
+            DirFindFlags::PEOPLE.union(DirFindFlags::ONLINE),
+            0,
+            now,
+        )?;
+        client.dir_places_query(
+            qid,
+            "sandbox",
+            DirFindFlags::INC_PG,
+            ParcelCategory::Commercial,
+            "Region",
+            10,
+            now,
+        )?;
+        client.dir_land_query(
+            qid,
+            DirFindFlags::FOR_SALE.union(DirFindFlags::LIMIT_BY_PRICE),
+            LandSearchType::MAINLAND,
+            5000,
+            512,
+            0,
+            now,
+        )?;
+        client.dir_classified_query(qid, "shoes", DirFindFlags::INC_MATURE, 3, 0, now)?;
+        client.avatar_picker_request(qid, "bob", now)?;
+        client.places_query(
+            qid,
+            txn,
+            "",
+            DirFindFlags::NONE,
+            ParcelCategory::None,
+            "",
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+        let find = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::DirFindQuery {
+                    query_text, flags, ..
+                } => Some((query_text.clone(), *flags)),
+                _ => None,
+            })
+            .ok_or("expected a DirFindQuery server event")?;
+        assert_eq!(find.0, "alice");
+        assert!(find.1.contains(DirFindFlags::PEOPLE));
+        assert!(find.1.contains(DirFindFlags::ONLINE));
+
+        let places = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::DirPlacesQuery {
+                    category, sim_name, ..
+                } => Some((*category, sim_name.clone())),
+                _ => None,
+            })
+            .ok_or("expected a DirPlacesQuery server event")?;
+        assert_eq!(places.0, ParcelCategory::Commercial);
+        assert_eq!(places.1, "Region");
+
+        let land = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::DirLandQuery {
+                    search_type,
+                    price,
+                    area,
+                    ..
+                } => Some((*search_type, *price, *area)),
+                _ => None,
+            })
+            .ok_or("expected a DirLandQuery server event")?;
+        assert_eq!(land, (LandSearchType::MAINLAND, 5000, 512));
+
+        let classified = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::DirClassifiedQuery {
+                    query_text,
+                    category,
+                    ..
+                } => Some((query_text.clone(), *category)),
+                _ => None,
+            })
+            .ok_or("expected a DirClassifiedQuery server event")?;
+        assert_eq!(classified, ("shoes".to_owned(), 3));
+
+        let picker = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::AvatarPickerRequest { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .ok_or("expected an AvatarPickerRequest server event")?;
+        assert_eq!(picker, "bob");
+
+        let holdings = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::PlacesQuery { transaction_id, .. } => Some(*transaction_id),
+                _ => None,
+            })
+            .ok_or("expected a PlacesQuery server event")?;
+        assert_eq!(holdings, txn);
+        Ok(())
+    }
+
+    #[test]
+    fn server_directory_replies_reach_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let qid = uuid::Uuid::from_u128(0xF01);
+        let txn = uuid::Uuid::from_u128(0xF02);
+        sim.send_dir_people_reply(
+            qid,
+            &[DirPeopleResult {
+                agent_id: uuid::Uuid::from_u128(0xF10),
+                first_name: "Alice".to_owned(),
+                last_name: "Resident".to_owned(),
+                group: String::new(),
+                online: true,
+                reputation: 0,
+            }],
+            now,
+        )?;
+        sim.send_dir_groups_reply(
+            qid,
+            &[DirGroupResult {
+                group_id: uuid::Uuid::from_u128(0xF11),
+                group_name: "Builders".to_owned(),
+                members: 42,
+                search_order: 1.5,
+            }],
+            now,
+        )?;
+        sim.send_dir_events_reply(
+            qid,
+            &[DirEventResult {
+                owner_id: uuid::Uuid::from_u128(0xF12),
+                name: "Party".to_owned(),
+                event_id: 7,
+                date: "2026-06-20".to_owned(),
+                unix_time: 1_750_000_000,
+                event_flags: 0,
+            }],
+            0,
+            now,
+        )?;
+        sim.send_dir_classified_reply(
+            qid,
+            &[DirClassifiedResult {
+                classified_id: uuid::Uuid::from_u128(0xF13),
+                name: "Shoes".to_owned(),
+                classified_flags: 0,
+                creation_date: 1,
+                expiration_date: 2,
+                price_for_listing: 50,
+            }],
+            0,
+            now,
+        )?;
+        sim.send_dir_places_reply(
+            qid,
+            &[DirPlaceResult {
+                parcel_id: uuid::Uuid::from_u128(0xF14),
+                name: "Sandbox".to_owned(),
+                for_sale: false,
+                auction: false,
+                dwell: 12.0,
+            }],
+            0,
+            now,
+        )?;
+        sim.send_dir_land_reply(
+            qid,
+            &[DirLandResult {
+                parcel_id: uuid::Uuid::from_u128(0xF15),
+                name: "For Sale".to_owned(),
+                auction: false,
+                for_sale: true,
+                sale_price: 1000,
+                actual_area: 1024,
+            }],
+            now,
+        )?;
+        sim.send_avatar_picker_reply(
+            qid,
+            &[AvatarPickerResult {
+                avatar_id: uuid::Uuid::from_u128(0xF16),
+                first_name: "Bob".to_owned(),
+                last_name: "Resident".to_owned(),
+            }],
+            now,
+        )?;
+        sim.send_places_reply(
+            qid,
+            txn,
+            &[PlacesResult {
+                owner_id: uuid::Uuid::from_u128(0xF17),
+                name: "Holding".to_owned(),
+                description: "mine".to_owned(),
+                actual_area: 512,
+                billable_area: 512,
+                flags: 0,
+                global_position: (1000.0, 2000.0, 30.0),
+                sim_name: "Region".to_owned(),
+                snapshot_id: uuid::Uuid::nil(),
+                dwell: 3.0,
+                price: 0,
+            }],
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_client(&mut client);
+        let people = events
+            .iter()
+            .find_map(|e| match e {
+                Event::DirPeopleReply { results, .. } => Some(results.clone()),
+                _ => None,
+            })
+            .ok_or("expected a DirPeopleReply client event")?;
+        assert_eq!(people.first().ok_or("person")?.first_name, "Alice");
+
+        let groups = events
+            .iter()
+            .find_map(|e| match e {
+                Event::DirGroupsReply { results, .. } => Some(results.clone()),
+                _ => None,
+            })
+            .ok_or("expected a DirGroupsReply client event")?;
+        assert_eq!(groups.first().ok_or("group")?.members, 42);
+
+        let dir_events = events
+            .iter()
+            .find_map(|e| match e {
+                Event::DirEventsReply { results, .. } => Some(results.clone()),
+                _ => None,
+            })
+            .ok_or("expected a DirEventsReply client event")?;
+        assert_eq!(dir_events.first().ok_or("event")?.event_id, 7);
+
+        let classifieds = events
+            .iter()
+            .find_map(|e| match e {
+                Event::DirClassifiedReply { results, .. } => Some(results.clone()),
+                _ => None,
+            })
+            .ok_or("expected a DirClassifiedReply client event")?;
+        assert_eq!(classifieds.first().ok_or("classified")?.name, "Shoes");
+
+        let places = events
+            .iter()
+            .find_map(|e| match e {
+                Event::DirPlacesReply { results, .. } => Some(results.clone()),
+                _ => None,
+            })
+            .ok_or("expected a DirPlacesReply client event")?;
+        assert_eq!(places.first().ok_or("place")?.name, "Sandbox");
+
+        let land = events
+            .iter()
+            .find_map(|e| match e {
+                Event::DirLandReply { results, .. } => Some(results.clone()),
+                _ => None,
+            })
+            .ok_or("expected a DirLandReply client event")?;
+        assert_eq!(land.first().ok_or("land")?.sale_price, 1000);
+
+        let picker = events
+            .iter()
+            .find_map(|e| match e {
+                Event::AvatarPickerReply { results, .. } => Some(results.clone()),
+                _ => None,
+            })
+            .ok_or("expected an AvatarPickerReply client event")?;
+        assert_eq!(picker.first().ok_or("picker")?.first_name, "Bob");
+
+        let (reply_txn, holdings) = events
+            .iter()
+            .find_map(|e| match e {
+                Event::PlacesReply {
+                    transaction_id,
+                    results,
+                    ..
+                } => Some((*transaction_id, results.clone())),
+                _ => None,
+            })
+            .ok_or("expected a PlacesReply client event")?;
+        assert_eq!(reply_txn, txn);
+        let holding = holdings.first().ok_or("holding")?;
+        assert_eq!(holding.global_position, (1000.0, 2000.0, 30.0));
+        assert_eq!(holding.sim_name, "Region");
         Ok(())
     }
 

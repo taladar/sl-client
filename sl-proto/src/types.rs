@@ -9,6 +9,7 @@ mod asset;
 mod avatar_profile;
 mod chat;
 mod diagnostic;
+pub(crate) mod directory;
 mod economy;
 mod editing;
 mod environment;
@@ -39,6 +40,10 @@ pub use chat::{
     ChatAudible, ChatMessage, ChatSourceType, ChatType, ImDialog, InstantMessage, InventoryOffer,
 };
 pub use diagnostic::Diagnostic;
+pub use directory::{
+    AvatarPickerResult, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
+    DirLandResult, DirPeopleResult, DirPlaceResult, LandSearchType, PlacesResult,
+};
 pub use economy::{EconomyData, MoneyBalance, MoneyTransaction, MoneyTransactionType};
 pub use editing::{
     ClickAction, DeRezDestination, Material, Maturity, ObjectFlagSettings, ObjectTransform,

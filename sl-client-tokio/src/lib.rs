@@ -929,6 +929,24 @@ impl Client {
                         Some(Command::FindAgent { hunter, prey }) => {
                             self.session.find_agent(hunter, prey, Instant::now())?;
                         }
+                        Some(Command::DirFindQuery { query_id, query_text, flags, query_start }) => {
+                            self.session.dir_find_query(query_id, &query_text, flags, query_start, Instant::now())?;
+                        }
+                        Some(Command::DirPlacesQuery { query_id, query_text, flags, category, sim_name, query_start }) => {
+                            self.session.dir_places_query(query_id, &query_text, flags, category, &sim_name, query_start, Instant::now())?;
+                        }
+                        Some(Command::DirLandQuery { query_id, flags, search_type, price, area, query_start }) => {
+                            self.session.dir_land_query(query_id, flags, search_type, price, area, query_start, Instant::now())?;
+                        }
+                        Some(Command::DirClassifiedQuery { query_id, query_text, flags, category, query_start }) => {
+                            self.session.dir_classified_query(query_id, &query_text, flags, category, query_start, Instant::now())?;
+                        }
+                        Some(Command::AvatarPickerRequest { query_id, name }) => {
+                            self.session.avatar_picker_request(query_id, &name, Instant::now())?;
+                        }
+                        Some(Command::PlacesQuery { query_id, transaction_id, query_text, flags, category, sim_name }) => {
+                            self.session.places_query(query_id, transaction_id, &query_text, flags, category, &sim_name, Instant::now())?;
+                        }
                         Some(Command::UploadAssetUdp { asset_type, data, temp_file, store_local }) => {
                             self.session.upload_asset_udp(asset_type, data, temp_file, store_local, Instant::now())?;
                         }

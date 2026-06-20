@@ -26,6 +26,7 @@
 - [Groups](content/groups.md)
 - [Economy & Money](content/economy.md)
 - [Profiles, Picks & Classifieds](content/profiles.md)
+- [Search & Directory](content/search.md)
 - [Appearance](content/appearance.md)
 - [Attachments](content/attachments.md)
 - [Nearby Avatars & Viewer Effects](content/nearby.md)

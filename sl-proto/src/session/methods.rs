@@ -33,19 +33,22 @@ use super::{
 use crate::error::Error;
 use crate::terrain;
 use crate::types::{
-    AlertInfo, Asset, AssetType, AttachmentPoint, AvatarClassified, AvatarPick, Camera, ChatType,
-    ClassifiedUpdate, ClickAction, CoarseLocation, CreateGroupParams, DeRezDestination, Diagnostic,
-    DisconnectReason, EstateAccessDelta, Event, FriendRights, GroupNoticeAttachment, GroupRoleEdit,
-    GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder,
-    InventoryItem, InventoryOffer, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams,
+    AlertInfo, Asset, AssetType, AttachmentPoint, AvatarClassified, AvatarPick, AvatarPickerResult,
+    Camera, ChatType, ClassifiedUpdate, ClickAction, CoarseLocation, CreateGroupParams,
+    DeRezDestination, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags,
+    DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DisconnectReason,
+    EstateAccessDelta, Event, FriendRights, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMember,
+    GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem,
+    InventoryOffer, LandSearchType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams,
     MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType, NeighborInfo,
     NewInventoryItem, Object, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PrimShape,
-    ProfileUpdate, RegionInfoUpdate, Reliability, RezAttachment, SaleType, ScriptPermissions,
-    ScriptTeleportRequest, SoundFlags, SoundPreload, TeleportFlags, TerrainLayerType, TerrainPatch,
-    Texture, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    Wearable, WearableType, global_to_handle, handle_to_grid,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
+    PickUpdate, PlacesResult, PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability,
+    RezAttachment, SaleType, ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload,
+    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType, global_to_handle,
+    handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
@@ -1962,6 +1965,165 @@ impl Session {
                         .location_block
                         .iter()
                         .map(|block| (block.global_x, block.global_y))
+                        .collect(),
+                });
+            }
+            // The people results of a `DirFindQuery` (people search).
+            AnyMessage::DirPeopleReply(reply) => {
+                self.events.push_back(Event::DirPeopleReply {
+                    query_id: reply.query_data.query_id,
+                    results: reply
+                        .query_replies
+                        .iter()
+                        .map(|block| DirPeopleResult {
+                            agent_id: block.agent_id,
+                            first_name: trimmed_string(&block.first_name),
+                            last_name: trimmed_string(&block.last_name),
+                            group: trimmed_string(&block.group),
+                            online: block.online,
+                            reputation: block.reputation,
+                        })
+                        .collect(),
+                });
+            }
+            // The group results of a `DirFindQuery` (group search).
+            AnyMessage::DirGroupsReply(reply) => {
+                self.events.push_back(Event::DirGroupsReply {
+                    query_id: reply.query_data.query_id,
+                    results: reply
+                        .query_replies
+                        .iter()
+                        .map(|block| DirGroupResult {
+                            group_id: block.group_id,
+                            group_name: trimmed_string(&block.group_name),
+                            members: block.members,
+                            search_order: block.search_order,
+                        })
+                        .collect(),
+                });
+            }
+            // The event results of a `DirFindQuery` (event search).
+            AnyMessage::DirEventsReply(reply) => {
+                self.events.push_back(Event::DirEventsReply {
+                    query_id: reply.query_data.query_id,
+                    results: reply
+                        .query_replies
+                        .iter()
+                        .map(|block| DirEventResult {
+                            owner_id: block.owner_id,
+                            name: trimmed_string(&block.name),
+                            event_id: block.event_id,
+                            date: trimmed_string(&block.date),
+                            unix_time: block.unix_time,
+                            event_flags: block.event_flags,
+                        })
+                        .collect(),
+                    status: reply
+                        .status_data
+                        .first()
+                        .map_or(0, |status| status.status),
+                });
+            }
+            // The results of a `DirClassifiedQuery`.
+            AnyMessage::DirClassifiedReply(reply) => {
+                self.events.push_back(Event::DirClassifiedReply {
+                    query_id: reply.query_data.query_id,
+                    results: reply
+                        .query_replies
+                        .iter()
+                        .map(|block| DirClassifiedResult {
+                            classified_id: block.classified_id,
+                            name: trimmed_string(&block.name),
+                            classified_flags: block.classified_flags,
+                            creation_date: block.creation_date,
+                            expiration_date: block.expiration_date,
+                            price_for_listing: block.price_for_listing,
+                        })
+                        .collect(),
+                    status: reply
+                        .status_data
+                        .first()
+                        .map_or(0, |status| status.status),
+                });
+            }
+            // The results of a `DirPlacesQuery`.
+            AnyMessage::DirPlacesReply(reply) => {
+                self.events.push_back(Event::DirPlacesReply {
+                    query_id: reply
+                        .query_data
+                        .first()
+                        .map_or_else(Uuid::nil, |query| query.query_id),
+                    results: reply
+                        .query_replies
+                        .iter()
+                        .map(|block| DirPlaceResult {
+                            parcel_id: block.parcel_id,
+                            name: trimmed_string(&block.name),
+                            for_sale: block.for_sale,
+                            auction: block.auction,
+                            dwell: block.dwell,
+                        })
+                        .collect(),
+                    status: reply
+                        .status_data
+                        .first()
+                        .map_or(0, |status| status.status),
+                });
+            }
+            // The results of a `DirLandQuery`.
+            AnyMessage::DirLandReply(reply) => {
+                self.events.push_back(Event::DirLandReply {
+                    query_id: reply.query_data.query_id,
+                    results: reply
+                        .query_replies
+                        .iter()
+                        .map(|block| DirLandResult {
+                            parcel_id: block.parcel_id,
+                            name: trimmed_string(&block.name),
+                            auction: block.auction,
+                            for_sale: block.for_sale,
+                            sale_price: block.sale_price,
+                            actual_area: block.actual_area,
+                        })
+                        .collect(),
+                });
+            }
+            // The results of an `AvatarPickerRequest` (name autocomplete).
+            AnyMessage::AvatarPickerReply(reply) => {
+                self.events.push_back(Event::AvatarPickerReply {
+                    query_id: reply.agent_data.query_id,
+                    results: reply
+                        .data
+                        .iter()
+                        .map(|block| AvatarPickerResult {
+                            avatar_id: block.avatar_id,
+                            first_name: trimmed_string(&block.first_name),
+                            last_name: trimmed_string(&block.last_name),
+                        })
+                        .collect(),
+                });
+            }
+            // The results of a `PlacesQuery` (land holdings).
+            AnyMessage::PlacesReply(reply) => {
+                self.events.push_back(Event::PlacesReply {
+                    query_id: reply.agent_data.query_id,
+                    transaction_id: reply.transaction_data.transaction_id,
+                    results: reply
+                        .query_data
+                        .iter()
+                        .map(|block| PlacesResult {
+                            owner_id: block.owner_id,
+                            name: trimmed_string(&block.name),
+                            description: trimmed_string(&block.desc),
+                            actual_area: block.actual_area,
+                            billable_area: block.billable_area,
+                            flags: block.flags,
+                            global_position: (block.global_x, block.global_y, block.global_z),
+                            sim_name: trimmed_string(&block.sim_name),
+                            snapshot_id: block.snapshot_id,
+                            dwell: block.dwell,
+                            price: block.price,
+                        })
                         .collect(),
                 });
             }
@@ -4138,6 +4300,162 @@ impl Session {
     pub fn find_agent(&mut self, hunter: Uuid, prey: Uuid, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_find_agent(hunter, prey, now)?;
+        Ok(())
+    }
+
+    /// Runs a directory people / groups / events search via `DirFindQuery`.
+    /// `flags` selects what is searched ([`DirFindFlags::PEOPLE`] /
+    /// [`DirFindFlags::GROUPS`] / [`DirFindFlags::EVENTS`]) and how the results
+    /// are sorted/filtered; `query_start` pages the results. The reply arrives as
+    /// [`Event::DirPeopleReply`] / [`Event::DirGroupsReply`] /
+    /// [`Event::DirEventsReply`], correlated by `query_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn dir_find_query(
+        &mut self,
+        query_id: Uuid,
+        query_text: &str,
+        flags: DirFindFlags,
+        query_start: i32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_dir_find_query(query_id, query_text, flags, query_start, now)?;
+        Ok(())
+    }
+
+    /// Searches the places directory via `DirPlacesQuery`. The reply arrives as
+    /// [`Event::DirPlacesReply`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    #[expect(clippy::too_many_arguments, reason = "mirrors the wire query block")]
+    pub fn dir_places_query(
+        &mut self,
+        query_id: Uuid,
+        query_text: &str,
+        flags: DirFindFlags,
+        category: ParcelCategory,
+        sim_name: &str,
+        query_start: i32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_dir_places_query(
+            query_id,
+            query_text,
+            flags,
+            category,
+            sim_name,
+            query_start,
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Searches the land-for-sale directory via `DirLandQuery`. The reply arrives
+    /// as [`Event::DirLandReply`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    #[expect(clippy::too_many_arguments, reason = "mirrors the wire query block")]
+    pub fn dir_land_query(
+        &mut self,
+        query_id: Uuid,
+        flags: DirFindFlags,
+        search_type: LandSearchType,
+        price: i32,
+        area: i32,
+        query_start: i32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_dir_land_query(query_id, flags, search_type, price, area, query_start, now)?;
+        Ok(())
+    }
+
+    /// Searches the classifieds directory via `DirClassifiedQuery`. The reply
+    /// arrives as [`Event::DirClassifiedReply`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn dir_classified_query(
+        &mut self,
+        query_id: Uuid,
+        query_text: &str,
+        flags: DirFindFlags,
+        category: u32,
+        query_start: i32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_dir_classified_query(
+            query_id,
+            query_text,
+            flags,
+            category,
+            query_start,
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Autocompletes avatar names via `AvatarPickerRequest`. The reply arrives as
+    /// [`Event::AvatarPickerReply`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn avatar_picker_request(
+        &mut self,
+        query_id: Uuid,
+        name: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_avatar_picker_request(query_id, name, now)?;
+        Ok(())
+    }
+
+    /// Looks up an agent's or group's land holdings via `PlacesQuery` (the
+    /// land-holdings panels, distinct from the directory search). The reply
+    /// arrives as [`Event::PlacesReply`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    #[expect(clippy::too_many_arguments, reason = "mirrors the wire query block")]
+    pub fn places_query(
+        &mut self,
+        query_id: Uuid,
+        transaction_id: Uuid,
+        query_text: &str,
+        flags: DirFindFlags,
+        category: ParcelCategory,
+        sim_name: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_places_query(
+            query_id,
+            transaction_id,
+            query_text,
+            flags,
+            category,
+            sim_name,
+            now,
+        )?;
         Ok(())
     }
 

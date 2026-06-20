@@ -485,6 +485,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::AvatarNames(_)
             | Event::GroupNames(_)
             | Event::DisplayNames(_)
+            | Event::DirPeopleReply { .. }
+            | Event::DirGroupsReply { .. }
+            | Event::DirEventsReply { .. }
+            | Event::DirClassifiedReply { .. }
+            | Event::DirPlacesReply { .. }
+            | Event::DirLandReply { .. }
+            | Event::AvatarPickerReply { .. }
+            | Event::PlacesReply { .. }
             | Event::Environment(_)
             | Event::MoneyBalance(_)
             | Event::EconomyData(_)

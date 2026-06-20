@@ -245,6 +245,14 @@ fn on_events(
             | SlSessionEvent::AvatarNames(_)
             | SlSessionEvent::GroupNames(_)
             | SlSessionEvent::DisplayNames(_)
+            | SlSessionEvent::DirPeopleReply { .. }
+            | SlSessionEvent::DirGroupsReply { .. }
+            | SlSessionEvent::DirEventsReply { .. }
+            | SlSessionEvent::DirClassifiedReply { .. }
+            | SlSessionEvent::DirPlacesReply { .. }
+            | SlSessionEvent::DirLandReply { .. }
+            | SlSessionEvent::AvatarPickerReply { .. }
+            | SlSessionEvent::PlacesReply { .. }
             | SlSessionEvent::Environment(_)
             | SlSessionEvent::MoneyBalance(_)
             | SlSessionEvent::EconomyData(_)
