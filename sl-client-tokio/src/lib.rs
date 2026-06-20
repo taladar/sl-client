@@ -19,19 +19,20 @@ use sl_proto::{
     CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
     CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_RENDER_MATERIALS, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
-    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Llsd, RECV_BUFFER_SIZE, Session,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Llsd, RECV_BUFFER_SIZE,
+    Session, ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
     ais_create_category_url, ais_item_url, build_ais_create_category_body, build_ais_move_body,
     build_ais_rename_category_body, build_ais_update_item_body,
     build_create_inventory_category_request, build_modify_material_params_request,
     build_new_file_agent_inventory_request, build_object_media_navigate_request,
     build_object_media_update_request, build_parcel_voice_info_request,
     build_provision_voice_account_request, build_region_experiences_request,
-    build_set_experience_permission_request, build_update_experience_request,
-    build_update_item_asset_request, build_upload_baked_texture_request,
-    build_voice_signaling_request, display_names_query, experience_id_query, experience_info_query,
-    find_experience_query, forget_experience_query, group_experiences_query, parse_login_response,
+    build_remote_parcel_request, build_set_experience_permission_request,
+    build_update_experience_request, build_update_item_asset_request,
+    build_upload_baked_texture_request, build_voice_signaling_request, display_names_query,
+    experience_id_query, experience_info_query, find_experience_query, forget_experience_query,
+    group_experiences_query, parse_login_response,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
@@ -817,6 +818,24 @@ impl Client {
                         Some(Command::ReleaseParcel { local_id }) => {
                             self.session.release_parcel(local_id, Instant::now())?;
                         }
+                        Some(Command::JoinParcels { west, south, east, north }) => {
+                            self.session.join_parcels(west, south, east, north, Instant::now())?;
+                        }
+                        Some(Command::DivideParcel { west, south, east, north }) => {
+                            self.session.divide_parcel(west, south, east, north, Instant::now())?;
+                        }
+                        Some(Command::RequestParcelObjectOwners { local_id }) => {
+                            self.session.request_parcel_object_owners(local_id, Instant::now())?;
+                        }
+                        Some(Command::BuyParcelPass { local_id }) => {
+                            self.session.buy_parcel_pass(local_id, Instant::now())?;
+                        }
+                        Some(Command::DisableParcelObjects { local_id, return_type, owner_ids, task_ids }) => {
+                            self.session.disable_parcel_objects(local_id, return_type, &owner_ids, &task_ids, Instant::now())?;
+                        }
+                        Some(Command::RequestParcelInfo { parcel_id }) => {
+                            self.session.request_parcel_info(parcel_id, Instant::now())?;
+                        }
                         Some(Command::RequestEstateInfo) => {
                             self.session.request_estate_info(Instant::now())?;
                         }
@@ -1101,6 +1120,16 @@ impl Client {
                             if let Some(base) = caps.get(CAP_GET_DISPLAY_NAMES).cloned() {
                                 let url = format!("{base}{}", display_names_query(&agent_ids));
                                 tokio::spawn(get_caps_llsd(url, CAP_GET_DISPLAY_NAMES, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::RequestRemoteParcelId { location, region_id, region_handle }) => {
+                            if let Some(url) = caps.get(CAP_REMOTE_PARCEL_REQUEST).cloned() {
+                                let body = build_remote_parcel_request(
+                                    [f64::from(location.x), f64::from(location.y), f64::from(location.z)],
+                                    region_id,
+                                    region_handle,
+                                );
+                                tokio::spawn(post_voice_cap(url, body, CAP_REMOTE_PARCEL_REQUEST, http.clone(), caps_tx.clone()));
                             }
                         }
                         Some(Command::RequestExperienceInfo { experience_ids }) => {

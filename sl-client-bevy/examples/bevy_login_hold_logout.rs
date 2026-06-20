@@ -256,6 +256,9 @@ fn on_events(
             | SlSessionEvent::EventInfoReply { .. }
             | SlSessionEvent::ObjectPropertiesFamily { .. }
             | SlSessionEvent::PayPriceReply { .. }
+            | SlSessionEvent::ParcelObjectOwners { .. }
+            | SlSessionEvent::ParcelDetails(_)
+            | SlSessionEvent::RemoteParcelId(_)
             | SlSessionEvent::Environment(_)
             | SlSessionEvent::MoneyBalance(_)
             | SlSessionEvent::EconomyData(_)

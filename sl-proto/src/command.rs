@@ -629,6 +629,81 @@ pub enum Command {
         /// The parcel's region-local id.
         local_id: i32,
     },
+    /// Join all owned, leased parcels within a metre rectangle into one parcel
+    /// (`ParcelJoin`). Requires land rights over every parcel in the rectangle.
+    JoinParcels {
+        /// The western edge of the rectangle (metres, region-local).
+        west: f32,
+        /// The southern edge (metres).
+        south: f32,
+        /// The eastern edge (metres).
+        east: f32,
+        /// The northern edge (metres).
+        north: f32,
+    },
+    /// Subdivide a parcel: chop the metre rectangle (which must be a subsection of
+    /// exactly one parcel) out into a new parcel (`ParcelDivide`). Requires land
+    /// rights over the parcel.
+    DivideParcel {
+        /// The western edge of the rectangle (metres, region-local).
+        west: f32,
+        /// The southern edge (metres).
+        south: f32,
+        /// The eastern edge (metres).
+        east: f32,
+        /// The northern edge (metres).
+        north: f32,
+    },
+    /// Request the per-owner object tallies for a parcel
+    /// (`ParcelObjectOwnersRequest`); the reply arrives as
+    /// [`Event::ParcelObjectOwners`](crate::Event::ParcelObjectOwners).
+    RequestParcelObjectOwners {
+        /// The parcel's region-local id.
+        local_id: i32,
+    },
+    /// Buy a temporary access pass to a parcel (`ParcelBuyPass`) at its configured
+    /// pass price.
+    BuyParcelPass {
+        /// The parcel's region-local id.
+        local_id: i32,
+    },
+    /// Disable (stop) scripted objects on a parcel (`ParcelDisableObjects`).
+    /// `return_type` selects which objects (combine [`ParcelReturnType`]
+    /// constants); `owner_ids`/`task_ids` optionally scope it (use
+    /// [`ParcelReturnType::LIST`] with `task_ids` for specific objects). Requires
+    /// parcel ownership / land rights.
+    DisableParcelObjects {
+        /// The parcel's region-local id.
+        local_id: i32,
+        /// Which objects to disable.
+        return_type: ParcelReturnType,
+        /// Optional owner-id scope.
+        owner_ids: Vec<Uuid>,
+        /// Optional explicit object/task-id scope.
+        task_ids: Vec<Uuid>,
+    },
+    /// Request a parcel's basic listing by its grid-wide parcel id
+    /// (`ParcelInfoRequest`); the reply arrives as
+    /// [`Event::ParcelDetails`](crate::Event::ParcelDetails). Resolve the parcel
+    /// id from a region location first with [`RequestRemoteParcelId`](Self::RequestRemoteParcelId).
+    RequestParcelInfo {
+        /// The parcel's grid-wide id.
+        parcel_id: Uuid,
+    },
+    /// Resolve a region location to a grid-wide parcel id via the
+    /// `RemoteParcelRequest` capability; the reply arrives as
+    /// [`Event::RemoteParcelId`](crate::Event::RemoteParcelId), whose id then
+    /// feeds [`RequestParcelInfo`](Self::RequestParcelInfo). Pass either a
+    /// non-nil `region_id` or a non-zero `region_handle` (the viewer sends the id
+    /// when it knows the region, the handle otherwise).
+    RequestRemoteParcelId {
+        /// The region-relative position whose parcel to resolve.
+        location: Vector,
+        /// The region's grid-wide id (nil to send `region_handle` instead).
+        region_id: Uuid,
+        /// The 256 m region handle (used when `region_id` is nil).
+        region_handle: u64,
+    },
     /// Request the region's estate config + access lists (`getinfo`); replies
     /// arrive as [`Event::EstateInfo`](crate::Event::EstateInfo) and [`Event::EstateAccessList`](crate::Event::EstateAccessList).
     RequestEstateInfo,

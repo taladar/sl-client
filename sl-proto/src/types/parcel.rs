@@ -666,3 +666,84 @@ impl Default for ParcelUpdate {
         }
     }
 }
+
+/// One owner's object tally on a parcel, from a `ParcelObjectOwnersReply` block
+/// (the per-owner rows the "Returnable objects" land panel shows). Requested via
+/// [`Command::RequestParcelObjectOwners`](crate::Command::RequestParcelObjectOwners)
+/// and surfaced as [`Event::ParcelObjectOwners`](crate::Event::ParcelObjectOwners).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ParcelObjectOwner {
+    /// The owner's agent id (or group id when [`is_group_owned`](Self::is_group_owned)).
+    pub owner_id: Uuid,
+    /// Whether the objects are group-owned (so `owner_id` is a group id).
+    pub is_group_owned: bool,
+    /// How many of this owner's objects sit on the parcel.
+    pub count: i32,
+    /// Whether the owner is currently online (the grid only fills this for the
+    /// estate owner / managers, otherwise `false`).
+    pub online_status: bool,
+}
+
+/// Basic parcel information from a `ParcelInfoReply` — the condensed listing the
+/// places/search panels show for a parcel id (distinct from the full geometry
+/// and flags of [`ParcelInfo`], which a `ParcelProperties` carries). Requested by
+/// parcel id via [`Command::RequestParcelInfo`](crate::Command::RequestParcelInfo)
+/// (the id comes from a `RemoteParcelRequest` capability lookup,
+/// [`Command::RequestRemoteParcelId`](crate::Command::RequestRemoteParcelId)) and
+/// surfaced as [`Event::ParcelDetails`](crate::Event::ParcelDetails).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParcelDetails {
+    /// The parcel's grid-wide id (the `parcel_id` the lookup resolves).
+    pub parcel_id: Uuid,
+    /// The parcel owner's agent (or group) id.
+    pub owner_id: Uuid,
+    /// The parcel name.
+    pub name: String,
+    /// The parcel description.
+    pub description: String,
+    /// The actual area in m².
+    pub actual_area: i32,
+    /// The billable area in m².
+    pub billable_area: i32,
+    /// The packed parcel flags byte (a condensed subset of the full
+    /// [`ParcelFlags`](sl_wire::ParcelFlags)).
+    pub flags: u8,
+    /// The parcel anchor's global X coordinate, in metres.
+    pub global_x: f32,
+    /// The parcel anchor's global Y coordinate, in metres.
+    pub global_y: f32,
+    /// The parcel anchor's global Z coordinate, in metres.
+    pub global_z: f32,
+    /// The containing region's name.
+    pub sim_name: String,
+    /// The parcel snapshot texture id.
+    pub snapshot_id: Uuid,
+    /// The parcel's dwell (traffic) value.
+    pub dwell: f32,
+    /// The sale price in L$ (when for sale).
+    pub sale_price: i32,
+    /// The auction id (non-zero when the parcel is up for auction).
+    pub auction_id: i32,
+}
+
+impl Default for ParcelDetails {
+    fn default() -> Self {
+        Self {
+            parcel_id: Uuid::nil(),
+            owner_id: Uuid::nil(),
+            name: String::new(),
+            description: String::new(),
+            actual_area: 0,
+            billable_area: 0,
+            flags: 0,
+            global_x: 0.0,
+            global_y: 0.0,
+            global_z: 0.0,
+            sim_name: String::new(),
+            snapshot_id: Uuid::nil(),
+            dwell: 0.0,
+            sale_price: 0,
+            auction_id: 0,
+        }
+    }
+}

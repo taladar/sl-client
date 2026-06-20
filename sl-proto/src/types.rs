@@ -77,8 +77,8 @@ pub use object::{
 };
 pub use parcel::{
     LandingType, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
-    ParcelReturnType, ParcelStatus, ParcelUpdate,
+    ParcelDetails, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner,
+    ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
 };
 pub use region::{RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits};
 pub use script::{

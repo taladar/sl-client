@@ -25,10 +25,10 @@ use super::{
     CAP_GET_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LIBRARY_API_V3,
     CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, Circuit, DEFAULT_DRAW_DISTANCE,
-    HandoverPending, IDENTITY_ROTATION, LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, Session,
-    SessionState, TELEPORT_FLAGS_VIA_LURE, TELEPORT_TIMEOUT, TextureDownload, deadline,
-    merge_deadline,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, Circuit,
+    DEFAULT_DRAW_DISTANCE, HandoverPending, IDENTITY_ROTATION, LOGOUT_TIMEOUT, MAX_INLINE_ASSET,
+    SIT_TIMEOUT, Session, SessionState, TELEPORT_FLAGS_VIA_LURE, TELEPORT_TIMEOUT, TextureDownload,
+    deadline, merge_deadline,
 };
 use crate::error::Error;
 use crate::terrain;
@@ -43,12 +43,13 @@ use crate::types::{
     LoginParams, MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType,
     NeighborInfo, NewInventoryItem, NotecardRez, Object, ObjectBuyItem, ObjectFlagSettings,
     ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PlacesResult,
-    PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType,
-    ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload, TeleportFlags,
-    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, Wearable, WearableType, global_to_handle, handle_to_grid,
+    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
+    PickUpdate, PlacesResult, PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem,
+    RezAttachment, SaleType, ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload,
+    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType, global_to_handle,
+    handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
@@ -57,7 +58,7 @@ use sl_wire::{
     PacketFlags, ParcelVoiceInfo, Reader, VoiceAccountInfo, build_group_notice_bucket,
     build_login_request, message_name, parse_datagram, parse_display_names, parse_experience_ids,
     parse_experience_infos, parse_experience_permissions, parse_gltf_material_override,
-    parse_region_experiences, zero_decode,
+    parse_region_experiences, parse_remote_parcel_reply, zero_decode,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -406,6 +407,15 @@ impl Session {
             CAP_GET_DISPLAY_NAMES => {
                 self.events
                     .push_back(Event::DisplayNames(parse_display_names(body)));
+            }
+            // The reply to a `RemoteParcelRequest` POST: the grid-wide parcel id
+            // covering the requested region location (feeds a `ParcelInfoRequest`).
+            CAP_REMOTE_PARCEL_REQUEST => {
+                if let Some(parcel_id) = parse_remote_parcel_reply(body) {
+                    self.events.push_back(Event::RemoteParcelId(parcel_id));
+                } else {
+                    self.caps_decode_failed(message);
+                }
             }
             // The reply to a `GetExperienceInfo` GET: the requested experiences'
             // metadata (with unresolved ids folded in as `missing` placeholders).
@@ -1288,6 +1298,40 @@ impl Session {
                         })
                         .collect(),
                 });
+            }
+            AnyMessage::ParcelObjectOwnersReply(reply) => {
+                self.events.push_back(Event::ParcelObjectOwners {
+                    owners: reply
+                        .data
+                        .iter()
+                        .map(|owner| ParcelObjectOwner {
+                            owner_id: owner.owner_id,
+                            is_group_owned: owner.is_group_owned,
+                            count: owner.count,
+                            online_status: owner.online_status,
+                        })
+                        .collect(),
+                });
+            }
+            AnyMessage::ParcelInfoReply(reply) => {
+                let data = &reply.data;
+                self.events.push_back(Event::ParcelDetails(ParcelDetails {
+                    parcel_id: data.parcel_id,
+                    owner_id: data.owner_id,
+                    name: trimmed_string(&data.name),
+                    description: trimmed_string(&data.desc),
+                    actual_area: data.actual_area,
+                    billable_area: data.billable_area,
+                    flags: data.flags,
+                    global_x: data.global_x,
+                    global_y: data.global_y,
+                    global_z: data.global_z,
+                    sim_name: trimmed_string(&data.sim_name),
+                    snapshot_id: data.snapshot_id,
+                    dwell: data.dwell,
+                    sale_price: data.sale_price,
+                    auction_id: data.auction_id,
+                }));
             }
             AnyMessage::EstateOwnerMessage(message) => {
                 match trimmed_string(&message.method_data.method).as_str() {
@@ -5646,6 +5690,115 @@ impl Session {
     pub fn release_parcel(&mut self, local_id: i32, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_parcel_release(local_id, now)?;
+        Ok(())
+    }
+
+    /// Joins all owned, leased parcels within the metre rectangle into one parcel
+    /// via `ParcelJoin`. Requires land rights over every parcel in the rectangle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn join_parcels(
+        &mut self,
+        west: f32,
+        south: f32,
+        east: f32,
+        north: f32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_join(west, south, east, north, now)?;
+        Ok(())
+    }
+
+    /// Subdivides a parcel via `ParcelDivide`: the metre rectangle (a subsection
+    /// of exactly one parcel) becomes a new parcel. Requires land rights over the
+    /// parcel.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn divide_parcel(
+        &mut self,
+        west: f32,
+        south: f32,
+        east: f32,
+        north: f32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_divide(west, south, east, north, now)?;
+        Ok(())
+    }
+
+    /// Requests the per-owner object tallies for a parcel via
+    /// `ParcelObjectOwnersRequest`. The reply arrives as
+    /// [`Event::ParcelObjectOwners`]. Requires parcel ownership / land rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_parcel_object_owners(
+        &mut self,
+        local_id: i32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_object_owners_request(local_id, now)?;
+        Ok(())
+    }
+
+    /// Buys a temporary access pass to a parcel via `ParcelBuyPass` at its
+    /// configured pass price.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn buy_parcel_pass(&mut self, local_id: i32, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_buy_pass(local_id, now)?;
+        Ok(())
+    }
+
+    /// Disables (stops) scripted objects on a parcel via `ParcelDisableObjects`.
+    /// `return_type` selects which objects; pass [`ParcelReturnType::LIST`] with
+    /// `task_ids` to disable specific objects. Requires parcel ownership / land
+    /// rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn disable_parcel_objects(
+        &mut self,
+        local_id: i32,
+        return_type: ParcelReturnType,
+        owner_ids: &[Uuid],
+        task_ids: &[Uuid],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_disable_objects(local_id, return_type.0, owner_ids, task_ids, now)?;
+        Ok(())
+    }
+
+    /// Requests a parcel's basic listing by its grid-wide parcel id via
+    /// `ParcelInfoRequest`. The reply arrives as [`Event::ParcelDetails`]. Resolve
+    /// the parcel id from a region location first with the runtimes'
+    /// `RequestRemoteParcelId` command (the `RemoteParcelRequest` capability).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_parcel_info(&mut self, parcel_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_parcel_info_request(parcel_id, now)?;
         Ok(())
     }
 

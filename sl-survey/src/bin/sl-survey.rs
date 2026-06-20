@@ -713,6 +713,9 @@ impl Survey {
             | Event::EventInfoReply { .. }
             | Event::ObjectPropertiesFamily { .. }
             | Event::PayPriceReply { .. }
+            | Event::ParcelObjectOwners { .. }
+            | Event::ParcelDetails(_)
+            | Event::RemoteParcelId(_)
             | Event::Environment(_) => {}
         }
         Ok(false)

@@ -71,6 +71,33 @@ A client requests it (`Command::RequestParcelProperties`) and receives
 `Event::ParcelProperties` from the event-queue side. Overlay info (the colored
 parcel grid) and dwell come back separately.
 
+### Parcel management
+
+Beyond reading a parcel, a client with land rights can **manage** it over UDP:
+
+- **edit** its settings (`Command::UpdateParcel`), **buy** / **deed** /
+  **reclaim** / **release** it, and edit its **access** and **ban** lists,
+- **join** several owned, leased parcels inside a metre rectangle into one
+  (`Command::JoinParcels`) or **divide** a rectangle out of a parcel into a new
+  one (`Command::DivideParcel`),
+- list **who owns objects** on the parcel
+  (`Command::RequestParcelObjectOwners` → `Event::ParcelObjectOwners`, one row
+  per owner with a count and online flag),
+  and **return** or **disable** those objects
+  (`Command::ReturnParcelObjects` / `Command::DisableParcelObjects`, scoped by
+  owner/group/other or an explicit id list),
+- and **buy a temporary access pass** to a restricted parcel
+  (`Command::BuyParcelPass`).
+
+The places/search panels identify a parcel by a grid-wide **parcel id** rather
+than a region-local id. A client resolves that id from a region location through
+the `RemoteParcelRequest` capability (`Command::RequestRemoteParcelId` →
+`Event::RemoteParcelId`), then fetches the parcel's basic listing — name,
+description, area, owner, sale price, dwell, global position —
+over UDP (`Command::RequestParcelInfo` → `Event::ParcelDetails`). This is
+distinct from the rich `ParcelProperties` above: it is the condensed, by-id form
+the search results show.
+
 ## Avatars in the region
 
 Other avatars are simply objects with the **avatar** pcode, so they arrive
@@ -102,6 +129,16 @@ top:
 > - Terrain is `sl-proto/src/terrain.rs` (`TerrainPatch`, `encode_layer`),
 >   surfaced as `Event::TerrainPatch`.
 > - Parcels are `sl-proto/src/types/parcel.rs` (`ParcelInfo`, `ParcelStatus`,
->   `ParcelCategory`, `LandingType`); request via
+>   `ParcelCategory`, `LandingType`, plus the by-id `ParcelDetails` and
+>   per-owner `ParcelObjectOwner`); request via
 >   `Command::RequestParcelProperties`, receive `Event::ParcelProperties` /
 >   `ParcelOverlay` / `ParcelDwell`.
+> - Parcel management (`JoinParcels`, `DivideParcel`,
+>   `RequestParcelObjectOwners`, `BuyParcelPass`, `DisableParcelObjects`,
+>   `RequestParcelInfo`) maps to the UDP encoders in
+>   `sl-proto/src/session/circuit.rs`; the simulator side decodes each into a
+>   `ServerEvent` and answers `RequestParcelObjectOwners` / `RequestParcelInfo`
+>   with `SimSession::send_parcel_object_owners_reply` /
+>   `send_parcel_info_reply`.
+> - `RequestRemoteParcelId` posts the `RemoteParcelRequest` capability
+>   (`sl-wire/src/remote_parcel.rs`), decoded into `Event::RemoteParcelId`.

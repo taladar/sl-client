@@ -87,9 +87,11 @@ mod test {
         ObjectUpdateRegionDataBlock, OfflineNotification, OfflineNotificationAgentBlockBlock,
         OnlineNotification, OnlineNotificationAgentBlockBlock, ParcelAccessListReply,
         ParcelAccessListReplyDataBlock, ParcelAccessListReplyListBlock, ParcelDwellReply,
-        ParcelDwellReplyAgentDataBlock, ParcelDwellReplyDataBlock, ParcelMediaCommandMessage,
+        ParcelDwellReplyAgentDataBlock, ParcelDwellReplyDataBlock, ParcelInfoReply,
+        ParcelInfoReplyAgentDataBlock, ParcelInfoReplyDataBlock, ParcelMediaCommandMessage,
         ParcelMediaCommandMessageCommandBlockBlock, ParcelMediaUpdate,
-        ParcelMediaUpdateDataBlockBlock, ParcelMediaUpdateDataBlockExtendedBlock, ParcelProperties,
+        ParcelMediaUpdateDataBlockBlock, ParcelMediaUpdateDataBlockExtendedBlock,
+        ParcelObjectOwnersReply, ParcelObjectOwnersReplyDataBlock, ParcelProperties,
         ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
         ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
         PayPriceReply, PayPriceReplyButtonDataBlock, PayPriceReplyObjectDataBlock, PickInfoReply,
@@ -7096,6 +7098,195 @@ mod test {
             ParcelAccessFlags::BAN.union(ParcelAccessFlags::BLOCK_EXPERIENCE)
         );
         assert!(second.flags.contains(ParcelAccessFlags::BLOCK_EXPERIENCE));
+        Ok(())
+    }
+
+    #[test]
+    fn parcel_g7_commands_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.join_parcels(16.0, 32.0, 48.0, 64.0, now)?;
+        session.divide_parcel(1.0, 2.0, 3.0, 4.0, now)?;
+        session.request_parcel_object_owners(7, now)?;
+        session.buy_parcel_pass(7, now)?;
+        session.disable_parcel_objects(
+            7,
+            ParcelReturnType::OTHER,
+            &[uuid::Uuid::from_u128(0x99)],
+            &[uuid::Uuid::from_u128(0xAB)],
+            now,
+        )?;
+        session.request_parcel_info(uuid::Uuid::from_u128(0x00C0_FFEE), now)?;
+        let sent = drain(&mut session)?;
+
+        let join = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ParcelJoin(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a ParcelJoin")?;
+        assert_eq!(join.parcel_data.west.to_bits(), 16.0_f32.to_bits());
+        assert_eq!(join.parcel_data.north.to_bits(), 64.0_f32.to_bits());
+
+        let divide = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ParcelDivide(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a ParcelDivide")?;
+        assert_eq!(divide.parcel_data.east.to_bits(), 3.0_f32.to_bits());
+
+        let owners = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ParcelObjectOwnersRequest(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a ParcelObjectOwnersRequest")?;
+        assert_eq!(owners.parcel_data.local_id, 7);
+
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::ParcelBuyPass(_))),
+            "expected a ParcelBuyPass"
+        );
+
+        let disable = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ParcelDisableObjects(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a ParcelDisableObjects")?;
+        assert_eq!(disable.parcel_data.return_type, ParcelReturnType::OTHER.0);
+        assert_eq!(disable.owner_i_ds.len(), 1);
+        assert_eq!(disable.task_i_ds.len(), 1);
+
+        let info = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ParcelInfoRequest(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected a ParcelInfoRequest")?;
+        assert_eq!(info.data.parcel_id, uuid::Uuid::from_u128(0x00C0_FFEE));
+        Ok(())
+    }
+
+    #[test]
+    fn parcel_object_owners_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let reply = AnyMessage::ParcelObjectOwnersReply(ParcelObjectOwnersReply {
+            data: vec![
+                ParcelObjectOwnersReplyDataBlock {
+                    owner_id: uuid::Uuid::from_u128(0x21),
+                    is_group_owned: false,
+                    count: 12,
+                    online_status: true,
+                },
+                ParcelObjectOwnersReplyDataBlock {
+                    owner_id: uuid::Uuid::from_u128(0x22),
+                    is_group_owned: true,
+                    count: 3,
+                    online_status: false,
+                },
+            ],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&reply, 9, true)?, now)?;
+
+        let owners = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ParcelObjectOwners { owners } => Some(owners),
+                _ => None,
+            })
+            .ok_or("expected a ParcelObjectOwners event")?;
+        assert_eq!(owners.len(), 2);
+        let first = owners.first().ok_or("expected a first owner")?;
+        assert_eq!(first.owner_id, uuid::Uuid::from_u128(0x21));
+        assert_eq!(first.count, 12);
+        assert!(first.online_status);
+        let second = owners.get(1).ok_or("expected a second owner")?;
+        assert!(second.is_group_owned);
+        Ok(())
+    }
+
+    #[test]
+    fn parcel_info_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let reply = AnyMessage::ParcelInfoReply(ParcelInfoReply {
+            agent_data: ParcelInfoReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+            data: ParcelInfoReplyDataBlock {
+                parcel_id: uuid::Uuid::from_u128(0x00C0_FFEE),
+                owner_id: uuid::Uuid::from_u128(0x55),
+                name: with_nul_bytes("Sunny Plaza"),
+                desc: with_nul_bytes("A nice spot"),
+                actual_area: 512,
+                billable_area: 480,
+                flags: 0x4,
+                global_x: 256_000.0,
+                global_y: 257_024.0,
+                global_z: 23.5,
+                sim_name: with_nul_bytes("Default Region"),
+                snapshot_id: uuid::Uuid::from_u128(0x77),
+                dwell: 88.0,
+                sale_price: 1000,
+                auction_id: 0,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&reply, 9, true)?, now)?;
+
+        let details = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ParcelDetails(details) => Some(details),
+                _ => None,
+            })
+            .ok_or("expected a ParcelDetails event")?;
+        assert_eq!(details.parcel_id, uuid::Uuid::from_u128(0x00C0_FFEE));
+        assert_eq!(details.name, "Sunny Plaza");
+        assert_eq!(details.sim_name, "Default Region");
+        assert_eq!(details.actual_area, 512);
+        assert_eq!(details.sale_price, 1000);
+        assert_eq!(details.global_z.to_bits(), 23.5_f32.to_bits());
+        Ok(())
+    }
+
+    #[test]
+    fn remote_parcel_request_surfaces_parcel_id() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let body = parse_llsd_xml(concat!(
+            "<llsd><map><key>parcel_id</key>",
+            "<uuid>00000000-0000-0000-0000-000000c0ffee</uuid></map></llsd>",
+        ))?;
+        session.handle_caps_event(sl_proto::CAP_REMOTE_PARCEL_REQUEST, &body, now)?;
+
+        let parcel_id = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::RemoteParcelId(parcel_id) => Some(parcel_id),
+                _ => None,
+            })
+            .ok_or("expected a RemoteParcelId event")?;
+        assert_eq!(parcel_id, uuid::Uuid::from_u128(0x00C0_FFEE));
         Ok(())
     }
 
