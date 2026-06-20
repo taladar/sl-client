@@ -9061,6 +9061,45 @@ mod test {
         Ok(())
     }
 
+    /// A `GetDisplayNames` reply surfaces the requested agents' display names,
+    /// with an unresolved id folded in as a `missing` placeholder.
+    #[test]
+    fn get_display_names_surfaces_records() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let xml = "<llsd><map><key>agents</key><array><map>\
+            <key>id</key><uuid>11111111-1111-1111-1111-111111111111</uuid>\
+            <key>username</key><string>james.linden</string>\
+            <key>display_name</key><string>James the Great</string>\
+            <key>legacy_first_name</key><string>James</string>\
+            <key>legacy_last_name</key><string>Linden</string>\
+            <key>is_display_name_default</key><boolean>false</boolean>\
+            </map></array>\
+            <key>bad_ids</key><array>\
+            <uuid>22222222-2222-2222-2222-222222222222</uuid></array></map></llsd>";
+        let body = sl_proto::parse_llsd_xml(xml)?;
+        session.handle_caps_event(sl_proto::CAP_GET_DISPLAY_NAMES, &body, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::DisplayNames(_)))
+            .ok_or("expected a DisplayNames event")?;
+        let Event::DisplayNames(names) = event else {
+            return Err("expected DisplayNames".into());
+        };
+        let [first, second] = names.as_slice() else {
+            return Err("expected two display-name records".into());
+        };
+        assert_eq!(first.username, "james.linden");
+        assert_eq!(first.display_name, "James the Great");
+        assert_eq!(first.legacy_name(), "James Linden");
+        assert!(!first.missing);
+        assert!(second.missing);
+        Ok(())
+    }
+
     /// A `GetExperiences` reply surfaces the agent's allowed/blocked experiences.
     #[test]
     fn get_experiences_surfaces_permissions() -> Result<(), TestError> {

@@ -237,6 +237,7 @@ fn on_events(
             | SlSessionEvent::ConferenceInvited { .. }
             | SlSessionEvent::AvatarNames(_)
             | SlSessionEvent::GroupNames(_)
+            | SlSessionEvent::DisplayNames(_)
             | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged { region_handle, sim } => {

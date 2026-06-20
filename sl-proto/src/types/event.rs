@@ -17,6 +17,7 @@ use super::{
 };
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
+use sl_wire::DisplayName;
 use sl_wire::ExperienceInfo;
 use sl_wire::MediaEntry;
 use sl_wire::ParcelVoiceInfo;
@@ -50,6 +51,12 @@ pub enum Event {
     /// Group names resolved from a `UUIDGroupNameReply` (a reply to
     /// [`Session::request_group_names`](crate::Session::request_group_names)).
     GroupNames(Vec<GroupName>),
+    /// Display names resolved from a `GetDisplayNames` capability GET (the reply
+    /// to [`Command::RequestDisplayNames`](crate::Command::RequestDisplayNames)):
+    /// the mutable display name plus username/SLID and legacy first/last for each
+    /// requested id. Ids the grid could not resolve come back as
+    /// [`missing`](sl_wire::DisplayName::missing) placeholders.
+    DisplayNames(Vec<DisplayName>),
     /// The extended-environment (EEP) sky/water/day-cycle settings for the region
     /// or a parcel, parsed from the `ExtEnvironment` capability (the reply to
     /// [`Command::RequestEnvironment`](crate::Command::RequestEnvironment)).

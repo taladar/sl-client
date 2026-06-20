@@ -289,6 +289,14 @@ pub const CAP_CREATE_INVENTORY_CATEGORY: &str = "CreateInventoryCategory";
 /// water, and day-cycle settings as LLSD. Decoded into [`Event::Environment`].
 pub const CAP_EXT_ENVIRONMENT: &str = "ExtEnvironment";
 
+/// The HTTP capability for batch **display-name** resolution (`GetDisplayNames`):
+/// a GET of `…?ids=<id>&ids=<id>&…` returning `{ agents, bad_ids }`. Driven by the
+/// runtimes' `RequestDisplayNames` command; the reply is decoded by
+/// [`Session::handle_caps_event`] into [`Event::DisplayNames`]. Complements the
+/// always-present UDP legacy-name lookup ([`Session::request_avatar_names`]);
+/// stock OpenSim serves it only when its user-management component is present.
+pub const CAP_GET_DISPLAY_NAMES: &str = "GetDisplayNames";
+
 /// The viewer's `TELEPORT_FLAGS_VIA_LURE` (`1 << 2`), sent in a
 /// `TeleportLureRequest` when accepting a teleport lure (#28).
 const TELEPORT_FLAGS_VIA_LURE: u32 = 4;
@@ -341,6 +349,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_LIBRARY_API_V3,
     CAP_CREATE_INVENTORY_CATEGORY,
     CAP_EXT_ENVIRONMENT,
+    CAP_GET_DISPLAY_NAMES,
 ];
 
 /// The maximum UDP datagram size an I/O driver should be prepared to receive.

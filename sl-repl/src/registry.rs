@@ -1930,6 +1930,15 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "request_display_names",
+            usage: "<agent_id> [agent_id...]",
+            build: |args, ctx| {
+                Ok(Command::RequestDisplayNames(
+                    args.req_uuid_list(ctx, "agent_id", 0)?,
+                ))
+            },
+        },
+        CommandSpec {
             name: "request_environment",
             usage: "[parcel_id]",
             build: |args, ctx| {
