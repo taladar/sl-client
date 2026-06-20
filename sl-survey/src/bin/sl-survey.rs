@@ -701,6 +701,7 @@ impl Survey {
             | Event::ConferenceInvited { .. }
             | Event::AvatarNames(_)
             | Event::GroupNames(_)
+            | Event::DisplayNames(_)
             | Event::Environment(_) => {}
         }
         Ok(false)

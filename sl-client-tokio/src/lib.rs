@@ -13,9 +13,9 @@ use tokio::sync::mpsc;
 use sl_proto::{
     CAP_AGENT_EXPERIENCES, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
     CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_EXPERIENCE_INFO,
-    CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES,
-    CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
+    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
+    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE,
+    CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
     CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
     CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
@@ -30,7 +30,7 @@ use sl_proto::{
     build_provision_voice_account_request, build_region_experiences_request,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_upload_baked_texture_request,
-    build_voice_signaling_request, experience_id_query, experience_info_query,
+    build_voice_signaling_request, display_names_query, experience_id_query, experience_info_query,
     find_experience_query, forget_experience_query, group_experiences_query, parse_login_response,
 };
 
@@ -1030,6 +1030,12 @@ impl Client {
                             if let Some(url) = caps.get(CAP_VOICE_SIGNALING).cloned() {
                                 let body = build_voice_signaling_request(&viewer_session, &candidates, completed);
                                 tokio::spawn(post_voice_signaling(url, body, http.clone()));
+                            }
+                        }
+                        Some(Command::RequestDisplayNames(agent_ids)) => {
+                            if let Some(base) = caps.get(CAP_GET_DISPLAY_NAMES).cloned() {
+                                let url = format!("{base}{}", display_names_query(&agent_ids));
+                                tokio::spawn(get_caps_llsd(url, CAP_GET_DISPLAY_NAMES, http.clone(), caps_tx.clone()));
                             }
                         }
                         Some(Command::RequestExperienceInfo { experience_ids }) => {

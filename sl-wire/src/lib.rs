@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 mod control_flags;
+mod display_name;
 mod endian;
 mod error;
 mod experience;
@@ -19,6 +20,10 @@ mod voice;
 mod zerocode;
 
 pub use control_flags::ControlFlags;
+pub use display_name::{
+    DisplayName, build_display_names_response, display_names_query, parse_display_names,
+    parse_display_names_query,
+};
 pub use error::WireError;
 pub use experience::{
     ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate,

@@ -244,6 +244,7 @@ fn on_events(
             | SlSessionEvent::RegionLimits(_)
             | SlSessionEvent::AvatarNames(_)
             | SlSessionEvent::GroupNames(_)
+            | SlSessionEvent::DisplayNames(_)
             | SlSessionEvent::Environment(_)
             | SlSessionEvent::MoneyBalance(_)
             | SlSessionEvent::EconomyData(_)

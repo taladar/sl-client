@@ -16,9 +16,9 @@ use std::collections::HashMap;
 use sl_proto::{
     CAP_AGENT_EXPERIENCES, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
     CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_EXPERIENCE_INFO,
-    CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES,
-    CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
+    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
+    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE,
+    CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
     CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
     CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_RENDER_MATERIALS,
@@ -32,9 +32,9 @@ use sl_proto::{
     build_parcel_voice_info_request, build_provision_voice_account_request,
     build_region_experiences_request, build_set_experience_permission_request,
     build_update_experience_request, build_update_item_asset_request,
-    build_upload_baked_texture_request, build_voice_signaling_request, experience_id_query,
-    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
-    parse_login_response,
+    build_upload_baked_texture_request, build_voice_signaling_request, display_names_query,
+    experience_id_query, experience_info_query, find_experience_query, forget_experience_query,
+    group_experiences_query, parse_login_response,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -1621,6 +1621,17 @@ fn advance_running(
                         build_voice_signaling_request(viewer_session, candidates, *completed);
                     std::thread::spawn(move || {
                         run_voice_signaling(&url, body);
+                    });
+                }
+            }
+            Command::RequestDisplayNames(agent_ids) => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(base) = caps.map.get(CAP_GET_DISPLAY_NAMES).cloned()
+                {
+                    let url = format!("{base}{}", display_names_query(agent_ids));
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_get_caps_llsd(&url, CAP_GET_DISPLAY_NAMES, &events_tx);
                     });
                 }
             }

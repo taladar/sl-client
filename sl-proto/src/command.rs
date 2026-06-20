@@ -521,6 +521,16 @@ pub enum Command {
     /// as [`Event::GroupNames`](crate::Event::GroupNames). See
     /// [`RequestAvatarNames`](Self::RequestAvatarNames).
     RequestGroupNames(Vec<Uuid>),
+    /// Resolve agent ids to their **display names** over the `GetDisplayNames`
+    /// capability, batching every id into one request; the reply arrives as
+    /// [`Event::DisplayNames`](crate::Event::DisplayNames). This complements the
+    /// always-present legacy-name lookup
+    /// ([`RequestAvatarNames`](Self::RequestAvatarNames)) with the mutable,
+    /// user-chosen display name, username/SLID, and the legacy first/last names in
+    /// one record. The cap is Second-Life-centric (stock OpenSim serves it only
+    /// with its user-management component present), so the command is a no-op when
+    /// the region seed omits the capability.
+    RequestDisplayNames(Vec<Uuid>),
     /// Request the extended-environment (EEP) settings via the `ExtEnvironment`
     /// capability; the reply arrives as
     /// [`Event::Environment`](crate::Event::Environment). `parcel_id` selects a

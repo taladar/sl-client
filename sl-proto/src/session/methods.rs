@@ -21,13 +21,14 @@ use super::{
     AGENT_UPDATE_INTERVAL, AssetTransfer, AssetUpload, CAP_AGENT_EXPERIENCES,
     CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT,
     CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
-    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES,
-    CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LIBRARY_API_V3, CAP_MODIFY_MATERIAL_PARAMS,
-    CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, Circuit,
-    DEFAULT_DRAW_DISTANCE, HandoverPending, IDENTITY_ROTATION, LOGOUT_TIMEOUT, MAX_INLINE_ASSET,
-    SIT_TIMEOUT, Session, SessionState, TELEPORT_FLAGS_VIA_LURE, TELEPORT_TIMEOUT, TextureDownload,
-    deadline, merge_deadline,
+    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
+    CAP_GET_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LIBRARY_API_V3,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, Circuit, DEFAULT_DRAW_DISTANCE,
+    HandoverPending, IDENTITY_ROTATION, LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, Session,
+    SessionState, TELEPORT_FLAGS_VIA_LURE, TELEPORT_TIMEOUT, TextureDownload, deadline,
+    merge_deadline,
 };
 use crate::error::Error;
 use crate::terrain;
@@ -51,7 +52,7 @@ use sl_types::money::LindenAmount;
 use sl_wire::{
     AnyMessage, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd, MessageId, ObjectMediaResponse,
     PacketFlags, ParcelVoiceInfo, Reader, VoiceAccountInfo, build_group_notice_bucket,
-    build_login_request, message_name, parse_datagram, parse_experience_ids,
+    build_login_request, message_name, parse_datagram, parse_display_names, parse_experience_ids,
     parse_experience_infos, parse_experience_permissions, parse_gltf_material_override,
     parse_region_experiences, zero_decode,
 };
@@ -396,6 +397,12 @@ impl Session {
                 } else {
                     self.caps_decode_failed(message);
                 }
+            }
+            // The reply to a `GetDisplayNames` GET: the requested agents' display
+            // names (with unresolved ids folded in as `missing` placeholders).
+            CAP_GET_DISPLAY_NAMES => {
+                self.events
+                    .push_back(Event::DisplayNames(parse_display_names(body)));
             }
             // The reply to a `GetExperienceInfo` GET: the requested experiences'
             // metadata (with unresolved ids folded in as `missing` placeholders).

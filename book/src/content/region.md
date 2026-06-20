@@ -88,9 +88,27 @@ need and decide what to do with the answers.
   `UUIDGroupNameRequest`; the reply is `Event::GroupNames(Vec<GroupName>)`.
 
 Large id lists are split across several requests automatically, and a single
-request may be answered by several batched replies. (Second Life's mutable
-*display names* are a different, CAPS-based lookup and are intentionally not
-conflated with these immutable legacy names.)
+request may be answered by several batched replies.
+
+### Display names
+
+The legacy `First Last` resolved above is an avatar's **immutable** identity.
+Second Life layers a **mutable, user-chosen *display name*** over it, resolved
+by a separate HTTP [capability](../comms/caps.md) (`GetDisplayNames`) rather
+than UDP — so the two are intentionally not conflated.
+
+- `Command::RequestDisplayNames(ids)` batches every agent id into one
+  `GetDisplayNames` `GET`; the reply is `Event::DisplayNames(Vec<DisplayName>)`.
+  Each `DisplayName` carries the mutable `display_name`, the `username`/SLID
+  (e.g. `"james.linden"`), the legacy `legacy_first_name` / `legacy_last_name`
+  (with the same `legacy_name()` helper as `AvatarName`), an
+  `is_display_name_default` flag (the agent has not set a custom name), and the
+  `display_name_expires` / `display_name_next_update` timestamps. Ids the grid
+  could not resolve come back as `missing` placeholders.
+
+The capability is Second-Life-centric: stock OpenSim serves `GetDisplayNames`
+only when its user-management component is present, and the command is a no-op
+when the region seed omits the capability.
 
 ## Environment (EEP)
 
@@ -133,14 +151,16 @@ parsed; every other documented sky/water parameter is.
 >
 > - Region types are in `sl-proto/src/types/region.rs` (`RegionIdentity`,
 >   `RegionLimits`, `RegionChatSettings`, `RegionCombatSettings`); estate types
->   (`EstateInfo`, `EstateAccessKind`) in `sl-proto/src/types/map.rs`; name
->   types (`AvatarName`, `GroupName`) in `sl-proto/src/types/name.rs`;
->   environment types (`EnvironmentSettings`, `DayCycle`, `DayCycleFrame`,
->   `SkySettings`, `WaterSettings`) in `sl-proto/src/types/environment.rs`.
+>   (`EstateInfo`, `EstateAccessKind`) in `sl-proto/src/types/map.rs`; legacy
+>   name types (`AvatarName`, `GroupName`) in `sl-proto/src/types/name.rs`; the
+>   CAPS `DisplayName` in `sl-wire/src/display_name.rs`; environment types
+>   (`EnvironmentSettings`, `DayCycle`, `DayCycleFrame`, `SkySettings`,
+>   `WaterSettings`) in `sl-proto/src/types/environment.rs`.
 > - Commands `RequestRegionInfo`, `RequestEstateInfo`, `RequestAvatarNames`,
->   `RequestGroupNames`, `RequestEnvironment` are in `sl-proto/src/command.rs`;
->   the matching events (`RegionInfoHandshake`, `RegionLimits`, `EstateInfo`,
->   `EstateAccessList`, `AvatarNames`, `GroupNames`, `Environment`) are in
+>   `RequestGroupNames`, `RequestDisplayNames`, `RequestEnvironment` are in
+>   `sl-proto/src/command.rs`; the matching events (`RegionInfoHandshake`,
+>   `RegionLimits`, `EstateInfo`, `EstateAccessList`, `AvatarNames`,
+>   `GroupNames`, `DisplayNames`, `Environment`) are in
 >   `sl-proto/src/types/event.rs`.
 > - The handshake handle and grid coordinates are seeded from the login
 >   response (`sl-wire/src/login.rs` `region_x` / `region_y`); a region handle
@@ -148,10 +168,13 @@ parsed; every other documented sky/water parameter is.
 >   `grid_to_handle` / `global_to_handle`).
 > - In the [REPL](../tools/sl-repl.md): `request_region_info`,
 >   `request_estate_info`, `request_avatar_names <id…>`,
->   `request_group_names <id…>`, and `request_environment [parcel_id]`.
+>   `request_group_names <id…>`, `request_display_names <id…>`, and
+>   `request_environment [parcel_id]`.
 > - The **server** side mirrors the decoders:
 >   `SimSession::send_region_handshake` builds the greeting from a
 >   `RegionIdentity`; `send_avatar_names` / `send_group_names` answer the
 >   `UUIDNameRequest` the simulator surfaces as
->   `ServerEvent::AvatarNamesRequested` / `GroupNamesRequested`; and
+>   `ServerEvent::AvatarNamesRequested` / `GroupNamesRequested`;
+>   `build_display_names_response` (with `parse_display_names_query`) builds the
+>   `GetDisplayNames` reply body a grid's people service returns; and
 >   `environment_to_llsd` builds the `ExtEnvironment` reply body.
