@@ -716,6 +716,8 @@ impl Survey {
             | Event::ParcelObjectOwners { .. }
             | Event::ParcelDetails(_)
             | Event::RemoteParcelId(_)
+            | Event::EstateCovenant(_)
+            | Event::TelehubInfo(_)
             | Event::Environment(_) => {}
         }
         Ok(false)

@@ -62,8 +62,8 @@ pub use inventory::{
     handle_to_global, handle_to_grid,
 };
 pub use map::{
-    EstateAccessDelta, EstateAccessKind, EstateInfo, MapItem, MapItemType, MapRegionInfo,
-    NeighborInfo, RegionInfoUpdate,
+    EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, MapItem, MapItemType,
+    MapRegionInfo, NeighborInfo, RegionInfoUpdate, TelehubInfo,
 };
 pub use name::{AvatarName, GroupName};
 pub use nearby::{

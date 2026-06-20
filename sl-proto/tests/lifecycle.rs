@@ -54,11 +54,12 @@ mod test {
         DirPeopleReplyQueryDataBlock, DirPeopleReplyQueryRepliesBlock, DisableSimulator,
         EconomyData, EconomyDataInfoBlock, EjectGroupMemberReply,
         EjectGroupMemberReplyAgentDataBlock, EjectGroupMemberReplyEjectDataBlock,
-        EjectGroupMemberReplyGroupDataBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
-        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock, EventInfoReply,
-        EventInfoReplyAgentDataBlock, EventInfoReplyEventDataBlock, FindAgent,
-        FindAgentAgentBlockBlock, FindAgentLocationBlockBlock, GenericMessage,
-        GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GenericStreamingMessage,
+        EjectGroupMemberReplyGroupDataBlock, EstateCovenantReply, EstateCovenantReplyDataBlock,
+        EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
+        EstateOwnerMessageParamListBlock, EventInfoReply, EventInfoReplyAgentDataBlock,
+        EventInfoReplyEventDataBlock, FindAgent, FindAgentAgentBlockBlock,
+        FindAgentLocationBlockBlock, GenericMessage, GenericMessageAgentDataBlock,
+        GenericMessageMethodDataBlock, GenericStreamingMessage,
         GenericStreamingMessageDataBlockBlock, GenericStreamingMessageMethodDataBlock,
         GroupMembersReply, GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
         GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
@@ -105,12 +106,14 @@ mod test {
         ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock,
         ScriptTeleportRequest, ScriptTeleportRequestDataBlock, ScriptTeleportRequestOptionsBlock,
         SendXferPacket, SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock, SoundTrigger,
-        SoundTriggerSoundDataBlock, TeleportFailed, TeleportFailedAlertInfoBlock,
-        TeleportFailedInfoBlock, TeleportFinish, TeleportFinishInfoBlock, TransferInfo,
-        TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
-        UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock, UpdateCreateInventoryItem,
-        UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
-        UseCachedMuteList, UseCachedMuteListAgentDataBlock, ViewerEffect as ViewerEffectMessage,
+        SoundTriggerSoundDataBlock, TelehubInfo as TelehubInfoMessage,
+        TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock, TeleportFailed,
+        TeleportFailedAlertInfoBlock, TeleportFailedInfoBlock, TeleportFinish,
+        TeleportFinishInfoBlock, TransferInfo, TransferInfoTransferInfoBlock, TransferPacket,
+        TransferPacketTransferDataBlock, UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock,
+        UpdateCreateInventoryItem, UpdateCreateInventoryItemAgentDataBlock,
+        UpdateCreateInventoryItemInventoryDataBlock, UseCachedMuteList,
+        UseCachedMuteListAgentDataBlock, ViewerEffect as ViewerEffectMessage,
         ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
     };
     use sl_wire::{
@@ -7503,6 +7506,142 @@ mod test {
         assert_eq!(estate_id, 101);
         assert_eq!(kind, EstateAccessKind::BannedAgents);
         assert_eq!(members, banned.to_vec());
+        Ok(())
+    }
+
+    #[test]
+    fn estate_g8_commands_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.request_estate_covenant(now)?;
+        session.request_telehub_info(now)?;
+        session.connect_telehub(42, now)?;
+        session.disconnect_telehub(now)?;
+        session.add_telehub_spawn_point(43, now)?;
+        session.remove_telehub_spawn_point(2, now)?;
+        let sent = drain(&mut session)?;
+
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::EstateCovenantRequest(_))),
+            "expected an EstateCovenantRequest"
+        );
+
+        let telehub: Vec<_> = sent
+            .iter()
+            .filter_map(|m| match m {
+                AnyMessage::EstateOwnerMessage(message)
+                    if trimmed(&message.method_data.method) == "telehub" =>
+                {
+                    Some(message)
+                }
+                _ => None,
+            })
+            .collect();
+        // info ui, connect, delete, spawnpoint add, spawnpoint remove.
+        assert_eq!(telehub.len(), 5);
+        let at = |index: usize| telehub.get(index).ok_or("missing telehub command");
+        let command =
+            |index: usize| -> Result<String, TestError> { Ok(param_at(&at(index)?.param_list, 0)) };
+        assert_eq!(command(0)?, "info ui");
+        assert_eq!(command(1)?, "connect");
+        assert_eq!(param_at(&at(1)?.param_list, 1), "42");
+        assert_eq!(command(2)?, "delete");
+        assert_eq!(command(3)?, "spawnpoint add");
+        assert_eq!(param_at(&at(3)?.param_list, 1), "43");
+        assert_eq!(command(4)?, "spawnpoint remove");
+        assert_eq!(param_at(&at(4)?.param_list, 1), "2");
+        Ok(())
+    }
+
+    #[test]
+    fn estate_covenant_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let reply = AnyMessage::EstateCovenantReply(EstateCovenantReply {
+            data: EstateCovenantReplyDataBlock {
+                covenant_id: uuid::Uuid::from_u128(0xC0FE),
+                covenant_timestamp: 1_700_000_000,
+                estate_name: with_nul_bytes("My Estate"),
+                estate_owner_id: uuid::Uuid::from_u128(0x42),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&reply, 9, true)?, now)?;
+
+        let covenant = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::EstateCovenant(covenant) => Some(covenant),
+                _ => None,
+            })
+            .ok_or("expected an EstateCovenant event")?;
+        assert_eq!(covenant.covenant_id, uuid::Uuid::from_u128(0xC0FE));
+        assert_eq!(covenant.covenant_timestamp, 1_700_000_000);
+        assert_eq!(covenant.estate_name, "My Estate");
+        assert_eq!(covenant.estate_owner_id, uuid::Uuid::from_u128(0x42));
+        Ok(())
+    }
+
+    #[test]
+    fn telehub_info_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let info = AnyMessage::TelehubInfo(TelehubInfoMessage {
+            telehub_block: TelehubInfoTelehubBlockBlock {
+                object_id: uuid::Uuid::from_u128(0x7E1E),
+                object_name: with_nul_bytes("Welcome Hub"),
+                telehub_pos: Vector {
+                    x: 128.0,
+                    y: 129.0,
+                    z: 25.0,
+                },
+                telehub_rot: Rotation {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    s: 1.0,
+                },
+            },
+            spawn_point_block: vec![
+                TelehubInfoSpawnPointBlockBlock {
+                    spawn_point_pos: Vector {
+                        x: 1.0,
+                        y: 2.0,
+                        z: 3.0,
+                    },
+                },
+                TelehubInfoSpawnPointBlockBlock {
+                    spawn_point_pos: Vector {
+                        x: -4.0,
+                        y: -5.0,
+                        z: -6.0,
+                    },
+                },
+            ],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&info, 9, true)?, now)?;
+
+        let telehub = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::TelehubInfo(telehub) => Some(telehub),
+                _ => None,
+            })
+            .ok_or("expected a TelehubInfo event")?;
+        assert_eq!(telehub.object_id, uuid::Uuid::from_u128(0x7E1E));
+        assert_eq!(telehub.object_name, "Welcome Hub");
+        assert_eq!(telehub.position.x.to_bits(), 128.0_f32.to_bits());
+        assert_eq!(telehub.spawn_points.len(), 2);
+        let second = telehub.spawn_points.get(1).ok_or("expected 2 spawns")?;
+        assert_eq!(second.x.to_bits(), (-4.0_f32).to_bits());
         Ok(())
     }
 

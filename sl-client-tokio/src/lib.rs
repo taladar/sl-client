@@ -860,6 +860,24 @@ impl Client {
                         Some(Command::SetRegionInfo(update)) => {
                             self.session.set_region_info(&update, Instant::now())?;
                         }
+                        Some(Command::RequestEstateCovenant) => {
+                            self.session.request_estate_covenant(Instant::now())?;
+                        }
+                        Some(Command::RequestTelehubInfo) => {
+                            self.session.request_telehub_info(Instant::now())?;
+                        }
+                        Some(Command::ConnectTelehub { object_local_id }) => {
+                            self.session.connect_telehub(object_local_id, Instant::now())?;
+                        }
+                        Some(Command::DisconnectTelehub) => {
+                            self.session.disconnect_telehub(Instant::now())?;
+                        }
+                        Some(Command::AddTelehubSpawnPoint { object_local_id }) => {
+                            self.session.add_telehub_spawn_point(object_local_id, Instant::now())?;
+                        }
+                        Some(Command::RemoveTelehubSpawnPoint { spawn_index }) => {
+                            self.session.remove_telehub_spawn_point(spawn_index, Instant::now())?;
+                        }
                         Some(Command::GodKickUser { target, reason }) => {
                             self.session.god_kick_user(target, &reason, Instant::now())?;
                         }

@@ -73,6 +73,39 @@ The access lists are **ids, not names** — including the estate *managers* list
 To turn those UUIDs (or the region owner, or any other id the protocol hands
 you) into something readable, use name resolution.
 
+### Estate covenant
+
+Every estate may publish a **covenant** — a notecard of terms that a buyer
+agrees to before purchasing land in it. `Command::RequestEstateCovenant` asks
+for the summary; the reply is `Event::EstateCovenant(EstateCovenant)`, carrying
+the estate **name** and **owner** id, the covenant's last-changed **timestamp**,
+and the covenant notecard's **`covenant_id`**. The covenant text itself is an
+asset — fetch it separately with that id when it is non-nil (a nil id means the
+estate has no covenant).
+
+### Telehub
+
+A region can route every incoming teleport to a **telehub** — an object with one
+or more **spawn points** arrivals are scattered across.
+`Command::RequestTelehubInfo` asks for the current layout; the reply is
+`Event::TelehubInfo(TelehubInfo)`, with the telehub object's **id** (nil when
+the region has none), **name**, **position** and **rotation**, and the list of
+**spawn points** (each relative to the telehub).
+
+The telehub is managed by the estate owner (or a god) with four more commands,
+each of which is answered by a fresh `Event::TelehubInfo`:
+
+- `Command::ConnectTelehub { object_local_id }` makes an in-region object the
+  telehub;
+- `Command::DisconnectTelehub` removes the telehub;
+- `Command::AddTelehubSpawnPoint { object_local_id }` adds a spawn point at an
+  object's position;
+- `Command::RemoveTelehubSpawnPoint { spawn_index }` removes a spawn point by
+  its zero-based index.
+
+These all travel as `EstateOwnerMessage` `telehub` sub-commands under the hood;
+the simulator rejects them unless the agent has estate-owner or god rights.
+
 ## Resolving ids to names
 
 The protocol is full of bare UUIDs; names are a separate, on-demand lookup. The
@@ -151,15 +184,19 @@ parsed; every other documented sky/water parameter is.
 >
 > - Region types are in `sl-proto/src/types/region.rs` (`RegionIdentity`,
 >   `RegionLimits`, `RegionChatSettings`, `RegionCombatSettings`); estate types
->   (`EstateInfo`, `EstateAccessKind`) in `sl-proto/src/types/map.rs`; legacy
+>   (`EstateInfo`, `EstateAccessKind`, `EstateCovenant`, `TelehubInfo`) in
+>   `sl-proto/src/types/map.rs`; legacy
 >   name types (`AvatarName`, `GroupName`) in `sl-proto/src/types/name.rs`; the
 >   CAPS `DisplayName` in `sl-wire/src/display_name.rs`; environment types
 >   (`EnvironmentSettings`, `DayCycle`, `DayCycleFrame`, `SkySettings`,
 >   `WaterSettings`) in `sl-proto/src/types/environment.rs`.
-> - Commands `RequestRegionInfo`, `RequestEstateInfo`, `RequestAvatarNames`,
+> - Commands `RequestRegionInfo`, `RequestEstateInfo`, `RequestEstateCovenant`,
+>   `RequestTelehubInfo`, `ConnectTelehub`, `DisconnectTelehub`,
+>   `AddTelehubSpawnPoint`, `RemoveTelehubSpawnPoint`, `RequestAvatarNames`,
 >   `RequestGroupNames`, `RequestDisplayNames`, `RequestEnvironment` are in
 >   `sl-proto/src/command.rs`; the matching events (`RegionInfoHandshake`,
->   `RegionLimits`, `EstateInfo`, `EstateAccessList`, `AvatarNames`,
+>   `RegionLimits`, `EstateInfo`, `EstateAccessList`, `EstateCovenant`,
+>   `TelehubInfo`, `AvatarNames`,
 >   `GroupNames`, `DisplayNames`, `Environment`) are in
 >   `sl-proto/src/types/event.rs`.
 > - The handshake handle and grid coordinates are seeded from the login
@@ -167,7 +204,10 @@ parsed; every other documented sky/water parameter is.
 >   splits into grid coordinates with `handle_to_grid` (and back with
 >   `grid_to_handle` / `global_to_handle`).
 > - In the [REPL](../tools/sl-repl.md): `request_region_info`,
->   `request_estate_info`, `request_avatar_names <id…>`,
+>   `request_estate_info`, `request_estate_covenant`, `request_telehub_info`,
+>   `connect_telehub <object_local_id>`, `disconnect_telehub`,
+>   `add_telehub_spawn_point <object_local_id>`,
+>   `remove_telehub_spawn_point <spawn_index>`, `request_avatar_names <id…>`,
 >   `request_group_names <id…>`, `request_display_names <id…>`, and
 >   `request_environment [parcel_id]`.
 > - The **server** side mirrors the decoders:
@@ -176,5 +216,10 @@ parsed; every other documented sky/water parameter is.
 >   `UUIDNameRequest` the simulator surfaces as
 >   `ServerEvent::AvatarNamesRequested` / `GroupNamesRequested`;
 >   `build_display_names_response` (with `parse_display_names_query`) builds the
->   `GetDisplayNames` reply body a grid's people service returns; and
->   `environment_to_llsd` builds the `ExtEnvironment` reply body.
+>   `GetDisplayNames` reply body a grid's people service returns;
+>   `send_estate_covenant_reply` answers the `EstateCovenantRequest` surfaced as
+>   `ServerEvent::RequestEstateCovenant`; `send_telehub_info` answers the
+>   telehub `info ui`/management commands (`ServerEvent::RequestTelehubInfo`,
+>   `ConnectTelehub`, `DisconnectTelehub`, `AddTelehubSpawnPoint`,
+>   `RemoveTelehubSpawnPoint`); and `environment_to_llsd` builds the
+>   `ExtEnvironment` reply body.

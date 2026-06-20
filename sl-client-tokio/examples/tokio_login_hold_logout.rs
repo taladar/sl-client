@@ -540,7 +540,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::ExperienceAdminStatus { .. }
             | Event::ExperienceContributorStatus { .. }
             | Event::ExperienceUpdated(_)
-            | Event::RegionExperiences { .. } => {}
+            | Event::RegionExperiences { .. }
+            | Event::EstateCovenant(_)
+            | Event::TelehubInfo(_) => {}
         }
     }
 

@@ -39,6 +39,7 @@ use sl_wire::messages::{
     DirPeopleReply, DirPeopleReplyAgentDataBlock, DirPeopleReplyQueryDataBlock,
     DirPeopleReplyQueryRepliesBlock, DirPlacesReply, DirPlacesReplyAgentDataBlock,
     DirPlacesReplyQueryDataBlock, DirPlacesReplyQueryRepliesBlock, DirPlacesReplyStatusDataBlock,
+    EstateCovenantReply, EstateCovenantReplyDataBlock, EstateOwnerMessageParamListBlock,
     EventInfoReply, EventInfoReplyAgentDataBlock, EventInfoReplyEventDataBlock, FindAgent,
     FindAgentAgentBlockBlock, FindAgentLocationBlockBlock, LogoutReply, LogoutReplyAgentDataBlock,
     PacketAck, PlacesReply, PlacesReplyAgentDataBlock, PlacesReplyQueryDataBlock,
@@ -51,7 +52,8 @@ use sl_wire::messages::{
     ObjectPropertiesFamilyObjectDataBlock as ObjectPropertiesFamilyObjectDataBlockMessage,
     ParcelInfoReply, ParcelInfoReplyAgentDataBlock, ParcelInfoReplyDataBlock,
     ParcelObjectOwnersReply, ParcelObjectOwnersReplyDataBlock, PayPriceReply,
-    PayPriceReplyButtonDataBlock, PayPriceReplyObjectDataBlock,
+    PayPriceReplyButtonDataBlock, PayPriceReplyObjectDataBlock, TelehubInfo as TelehubInfoMessage,
+    TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock,
 };
 use sl_wire::{
     AnyMessage, ControlFlags, EventQueueEvent, Llsd, MessageId, PacketFlags, Reader, WireError,
@@ -67,10 +69,11 @@ use crate::types::directory::category_from_wire;
 use crate::types::{
     AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatType, CoarseLocation,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, EventInfo, GroupName, InstantMessage, LandSearchType, MapItem,
-    MapItemType, MapRegionInfo, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory,
-    ParcelDetails, ParcelObjectOwner, PlacesResult, RegionIdentity, Reliability, RestoreItem,
-    RezAttachment, SaleType, Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    DirPeopleResult, DirPlaceResult, EstateCovenant, EventInfo, GroupName, InstantMessage,
+    LandSearchType, MapItem, MapItemType, MapRegionInfo, NotecardRez, ObjectBuyItem,
+    ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult,
+    RegionIdentity, Reliability, RestoreItem, RezAttachment, SaleType, TelehubInfo, Throttle,
+    Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 
 /// How long to batch owed acknowledgements before flushing them as a `PacketAck`
@@ -544,6 +547,34 @@ pub enum ServerEvent {
     RequestParcelInfo {
         /// The parcel's grid-wide id.
         parcel_id: Uuid,
+    },
+    /// The client asked for the estate covenant (`EstateCovenantRequest`); the
+    /// simulator answers with [`SimSession::send_estate_covenant_reply`].
+    RequestEstateCovenant,
+    /// The client requested the region's telehub configuration
+    /// (`EstateOwnerMessage`/`telehub` `info ui`); the simulator answers with
+    /// [`SimSession::send_telehub_info`].
+    RequestTelehubInfo,
+    /// The client asked to make an object the region's telehub
+    /// (`EstateOwnerMessage`/`telehub` `connect`).
+    ConnectTelehub {
+        /// The local id of the object to make the telehub.
+        object_local_id: u32,
+    },
+    /// The client asked to remove the region's telehub (`EstateOwnerMessage`/
+    /// `telehub` `delete`).
+    DisconnectTelehub,
+    /// The client asked to add a telehub spawn point at an object's position
+    /// (`EstateOwnerMessage`/`telehub` `spawnpoint add`).
+    AddTelehubSpawnPoint {
+        /// The local id of the object marking the spawn point.
+        object_local_id: u32,
+    },
+    /// The client asked to remove a telehub spawn point by index
+    /// (`EstateOwnerMessage`/`telehub` `spawnpoint remove`).
+    RemoveTelehubSpawnPoint {
+        /// The zero-based index of the spawn point to remove.
+        spawn_index: u32,
     },
     /// The client requested a clean logout (`LogoutRequest`); the simulator has
     /// replied with a `LogoutReply` and closed the session.
@@ -1507,6 +1538,66 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends an `EstateCovenantReply`: the estate covenant summary, in response
+    /// to a client's `EstateCovenantRequest` (surfaced as
+    /// [`ServerEvent::RequestEstateCovenant`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_estate_covenant_reply(
+        &mut self,
+        covenant: &EstateCovenant,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::EstateCovenantReply(EstateCovenantReply {
+            data: EstateCovenantReplyDataBlock {
+                covenant_id: covenant.covenant_id,
+                covenant_timestamp: covenant.covenant_timestamp,
+                estate_name: with_nul(&covenant.estate_name),
+                estate_owner_id: covenant.estate_owner_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `TelehubInfo`: the region's telehub configuration, in response to
+    /// a client's `telehub` `info ui` request (surfaced as
+    /// [`ServerEvent::RequestTelehubInfo`]) or after a telehub-management command.
+    /// A nil [`TelehubInfo::object_id`] means the region has no telehub.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_telehub_info(&mut self, info: &TelehubInfo, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::TelehubInfo(TelehubInfoMessage {
+            telehub_block: TelehubInfoTelehubBlockBlock {
+                object_id: info.object_id,
+                object_name: with_nul(&info.object_name),
+                telehub_pos: info.position.clone(),
+                telehub_rot: info.rotation.clone(),
+            },
+            spawn_point_block: info
+                .spawn_points
+                .iter()
+                .map(|spawn| TelehubInfoSpawnPointBlockBlock {
+                    spawn_point_pos: spawn.clone(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
     /// Sends a `StartPingCheck` to the client; the client answers with a
     /// `CompletePingCheck`. Returns the ping id sent (so a caller can match the
     /// reply), or `None` if the circuit is not open.
@@ -2121,6 +2212,16 @@ impl SimSession {
                     parcel_id: request.data.parcel_id,
                 });
             }
+            AnyMessage::EstateCovenantRequest(_) => {
+                self.events.push_back(ServerEvent::RequestEstateCovenant);
+            }
+            AnyMessage::EstateOwnerMessage(message)
+                if trimmed_string(&message.method_data.method) == "telehub" =>
+            {
+                if let Some(event) = telehub_server_event(&message.param_list) {
+                    self.events.push_back(event);
+                }
+            }
             AnyMessage::LogoutRequest(_) => {
                 self.send_logout_reply(now)?;
                 self.close(ServerEvent::LoggedOut);
@@ -2264,6 +2365,36 @@ fn from_index(index: Option<usize>) -> i16 {
         Some(value) => i16::try_from(value).unwrap_or(-1),
         None => -1,
     }
+}
+
+/// Maps a `telehub` `EstateOwnerMessage`'s parameter list to a [`ServerEvent`].
+/// The first block holds the sub-command; the second (when present) holds the
+/// object/spawn id as a decimal `u32` (the layout `LLClientView` parses).
+/// Returns `None` for an unknown sub-command.
+fn telehub_server_event(params: &[EstateOwnerMessageParamListBlock]) -> Option<ServerEvent> {
+    let command = trimmed_string(&params.first()?.parameter);
+    let param1 = || {
+        params
+            .get(1)
+            .map(|block| trimmed_string(&block.parameter))
+            .and_then(|text| text.trim().parse::<u32>().ok())
+            .unwrap_or(0)
+    };
+    let event = match command.trim() {
+        "info ui" => ServerEvent::RequestTelehubInfo,
+        "connect" => ServerEvent::ConnectTelehub {
+            object_local_id: param1(),
+        },
+        "delete" => ServerEvent::DisconnectTelehub,
+        "spawnpoint add" => ServerEvent::AddTelehubSpawnPoint {
+            object_local_id: param1(),
+        },
+        "spawnpoint remove" => ServerEvent::RemoveTelehubSpawnPoint {
+            spawn_index: param1(),
+        },
+        _ => return None,
+    };
+    Some(event)
 }
 
 /// Decodes the seven little-endian `f32` bits-per-second rates an `AgentThrottle`

@@ -325,7 +325,9 @@ fn on_events(
             | SlSessionEvent::RegionExperiences { .. }
             | SlSessionEvent::ConferenceSessionMessage { .. }
             | SlSessionEvent::ConferenceSessionParticipant { .. }
-            | SlSessionEvent::ConferenceInvited { .. } => {}
+            | SlSessionEvent::ConferenceInvited { .. }
+            | SlSessionEvent::EstateCovenant(_)
+            | SlSessionEvent::TelehubInfo(_) => {}
         }
     }
 }
