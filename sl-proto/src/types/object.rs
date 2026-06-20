@@ -687,6 +687,49 @@ pub struct ObjectProperties {
     pub texture_ids: Vec<Uuid>,
 }
 
+/// An object's condensed broadcast properties (`ObjectPropertiesFamily`),
+/// delivered after a
+/// [`Session::request_object_properties_family`](crate::Session::request_object_properties_family).
+/// Unlike the full [`ObjectProperties`] (which needs the object selected), the
+/// family reply carries just the owner/permissions/sale summary a viewer shows
+/// on hover or in the pay/report dialogs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectPropertiesFamily {
+    /// The request flags echoed back from the request (e.g. `OBJECT_PAY_REQUEST`
+    /// `0x04`), letting a viewer route the reply to the dialog that asked.
+    pub request_flags: u32,
+    /// The object's persistent global id.
+    pub object_id: Uuid,
+    /// The current owner's id.
+    pub owner_id: Uuid,
+    /// The group the object is set to.
+    pub group_id: Uuid,
+    /// The base permissions mask.
+    pub base_mask: u32,
+    /// The owner permissions mask.
+    pub owner_mask: u32,
+    /// The group permissions mask.
+    pub group_mask: u32,
+    /// The everyone permissions mask.
+    pub everyone_mask: u32,
+    /// The next-owner permissions mask.
+    pub next_owner_mask: u32,
+    /// The ownership cost, in L$.
+    pub ownership_cost: i32,
+    /// The sale type (`SALE_TYPE_*`).
+    pub sale_type: u8,
+    /// The sale price, in L$.
+    pub sale_price: i32,
+    /// The object category code.
+    pub category: u32,
+    /// The previous owner's id.
+    pub last_owner_id: Uuid,
+    /// The object's name.
+    pub name: String,
+    /// The object's description.
+    pub description: String,
+}
+
 // ---------------------------------------------------------------------------
 // Terrain heightmaps (#18): the patched-DCT-compressed `LayerData` layers.
 // ---------------------------------------------------------------------------

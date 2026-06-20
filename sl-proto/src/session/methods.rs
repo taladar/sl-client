@@ -41,14 +41,14 @@ use crate::types::{
     GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder,
     InventoryItem, InventoryOffer, LandSearchType, LoadUrlRequest, LoginAccount, LoginHttpRequest,
     LoginParams, MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType,
-    NeighborInfo, NewInventoryItem, Object, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
-    PickUpdate, PlacesResult, PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability,
-    RezAttachment, SaleType, ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload,
-    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType, global_to_handle,
-    handle_to_grid,
+    NeighborInfo, NewInventoryItem, NotecardRez, Object, ObjectBuyItem, ObjectFlagSettings,
+    ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PlacesResult,
+    PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType,
+    ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload, TeleportFlags,
+    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect,
+    ViewerEffectData, ViewerEffectType, Wearable, WearableType, global_to_handle, handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
@@ -2146,6 +2146,43 @@ impl Session {
                         sim_name: trimmed_string(&data.sim_name),
                         global_position: (global_x, global_y, global_z),
                         flags: data.event_flags,
+                    },
+                });
+            }
+            // An object's pay-button layout, in reply to a `RequestPayPrice`.
+            AnyMessage::PayPriceReply(reply) => {
+                self.events.push_back(Event::PayPriceReply {
+                    object_id: reply.object_data.object_id,
+                    default_pay_price: reply.object_data.default_pay_price,
+                    pay_buttons: reply
+                        .button_data
+                        .iter()
+                        .map(|button| button.pay_button)
+                        .collect(),
+                });
+            }
+            // An object's condensed broadcast properties, in reply to a
+            // `RequestObjectPropertiesFamily`.
+            AnyMessage::ObjectPropertiesFamily(reply) => {
+                let data = &reply.object_data;
+                self.events.push_back(Event::ObjectPropertiesFamily {
+                    properties: ObjectPropertiesFamily {
+                        request_flags: data.request_flags,
+                        object_id: data.object_id,
+                        owner_id: data.owner_id,
+                        group_id: data.group_id,
+                        base_mask: data.base_mask,
+                        owner_mask: data.owner_mask,
+                        group_mask: data.group_mask,
+                        everyone_mask: data.everyone_mask,
+                        next_owner_mask: data.next_owner_mask,
+                        ownership_cost: data.ownership_cost,
+                        sale_type: data.sale_type,
+                        sale_price: data.sale_price,
+                        category: data.category,
+                        last_owner_id: data.last_owner_id,
+                        name: trimmed_string(&data.name),
+                        description: trimmed_string(&data.description),
                     },
                 });
             }
@@ -4526,6 +4563,193 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_event_notification_remove_request(event_id, now)?;
+        Ok(())
+    }
+
+    /// Buys one or more in-world objects offered for sale via `ObjectBuy`. The
+    /// sale type and price in each [`ObjectBuyItem`] must match what the object
+    /// advertises (see [`Session::request_object_properties_family`]); a derezed
+    /// purchase is placed in `category_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn buy_object(
+        &mut self,
+        group_id: Uuid,
+        category_id: Uuid,
+        objects: &[ObjectBuyItem],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_buy(group_id, category_id, objects, now)?;
+        Ok(())
+    }
+
+    /// Buys a single item out of an object's contents via `BuyObjectInventory`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn buy_object_inventory(
+        &mut self,
+        object_id: Uuid,
+        item_id: Uuid,
+        folder_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_buy_object_inventory(object_id, item_id, folder_id, now)?;
+        Ok(())
+    }
+
+    /// Requests an object's pay-button layout via `RequestPayPrice`. The reply
+    /// arrives as [`Event::PayPriceReply`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_pay_price(&mut self, object_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_request_pay_price(object_id, now)?;
+        Ok(())
+    }
+
+    /// Requests an object's condensed broadcast properties via
+    /// `RequestObjectPropertiesFamily`. The reply arrives as
+    /// [`Event::ObjectPropertiesFamily`]. Unlike
+    /// [`Session::request_object_properties`] this needs no prior selection.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_object_properties_family(
+        &mut self,
+        request_flags: u32,
+        object_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_request_object_properties_family(request_flags, object_id, now)?;
+        Ok(())
+    }
+
+    /// Begins an interactive spin (rotate) of an object via `ObjectSpinStart`;
+    /// pairs with [`Session::spin_object_update`] / [`Session::spin_object_stop`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn spin_object_start(&mut self, object_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_spin_start(object_id, now)?;
+        Ok(())
+    }
+
+    /// Updates an in-progress object spin with the latest rotation via
+    /// `ObjectSpinUpdate`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn spin_object_update(
+        &mut self,
+        object_id: Uuid,
+        rotation: Rotation,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_spin_update(object_id, rotation, now)?;
+        Ok(())
+    }
+
+    /// Ends an interactive object spin via `ObjectSpinStop`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn spin_object_stop(&mut self, object_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_spin_stop(object_id, now)?;
+        Ok(())
+    }
+
+    /// Duplicates objects, dropping the copies against the surface a ray hits,
+    /// via `ObjectDuplicateOnRay`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    #[expect(
+        clippy::too_many_arguments,
+        clippy::fn_params_excessive_bools,
+        reason = "mirrors the ObjectDuplicateOnRay wire block one-to-one"
+    )]
+    pub fn duplicate_objects_on_ray(
+        &mut self,
+        local_ids: &[u32],
+        group_id: Uuid,
+        ray_start: Vector,
+        ray_end: Vector,
+        bypass_raycast: bool,
+        ray_end_is_intersection: bool,
+        copy_centers: bool,
+        copy_rotates: bool,
+        ray_target_id: Uuid,
+        duplicate_flags: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_duplicate_on_ray(
+            local_ids,
+            group_id,
+            ray_start,
+            ray_end,
+            bypass_raycast,
+            ray_end_is_intersection,
+            copy_centers,
+            copy_rotates,
+            ray_target_id,
+            duplicate_flags,
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Restores an inventory item to the world at its last in-world position via
+    /// `RezRestoreToWorld` (a `UDPDeprecated` message a viewer may still send).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn rez_restore_to_world(&mut self, item: &RestoreItem, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_rez_restore_to_world(item, now)?;
+        Ok(())
+    }
+
+    /// Rezzes an object embedded in a notecard asset via `RezObjectFromNotecard`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn rez_object_from_notecard(
+        &mut self,
+        rez: &NotecardRez,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_rez_object_from_notecard(rez, now)?;
         Ok(())
     }
 

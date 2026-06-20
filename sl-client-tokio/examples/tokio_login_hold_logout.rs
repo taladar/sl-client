@@ -494,6 +494,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::AvatarPickerReply { .. }
             | Event::PlacesReply { .. }
             | Event::EventInfoReply { .. }
+            | Event::ObjectPropertiesFamily { .. }
+            | Event::PayPriceReply { .. }
             | Event::Environment(_)
             | Event::MoneyBalance(_)
             | Event::EconomyData(_)

@@ -21,6 +21,7 @@
 - [Inventory](content/inventory.md)
 - [Chat & Instant Messaging](content/chat.md)
 - [3D World Information](content/world.md)
+- [Object Interaction & Commerce](content/object-commerce.md)
 - [Region & Estate Information](content/region.md)
 - [Sound, Music & Media](content/sound-media.md)
 - [Groups](content/groups.md)

@@ -10,11 +10,11 @@ use crate::{
     ExperiencePermission, ExperienceUpdate, FriendRights, GroupNoticeAttachment, GroupRoleEdit,
     GroupRoleMemberChange, IceCandidate, InterestsUpdate, InventoryItem, InventoryOffer,
     InventoryType, LandSearchType, LindenAmount, MapItemType, Material, MaterialOverrideUpdate,
-    MediaEntry, MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, ObjectFlagSettings,
-    ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelReturnType,
-    ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProfileUpdate, RegionInfoUpdate,
-    Reliability, RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
-    ViewerEffect, VoiceProvisionRequest, Wearable,
+    MediaEntry, MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
+    ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
+    ParcelCategory, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PrimShape,
+    ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, Rotation, SaleType,
+    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -895,6 +895,102 @@ pub enum Command {
     DelinkObjects {
         /// The region-local ids to unlink.
         local_ids: Vec<u32>,
+    },
+    /// Buy one or more in-world objects offered for sale (`ObjectBuy`). The sale
+    /// type and price in each [`ObjectBuyItem`] must match what the object
+    /// advertises (see [`Command::RequestObjectPropertiesFamily`]); the simulator
+    /// rejects a mismatch. A successful purchase (when derezed) places the object
+    /// in `category_id`.
+    BuyObject {
+        /// The active group ([`Uuid::nil`] for none).
+        group_id: Uuid,
+        /// The inventory folder a derezed purchase is placed in.
+        category_id: Uuid,
+        /// The objects to buy (each with its advertised sale type and price).
+        objects: Vec<ObjectBuyItem>,
+    },
+    /// Buy a single item out of an object's contents (`BuyObjectInventory`): on
+    /// success the simulator copies the item into the agent's inventory.
+    BuyObjectInventory {
+        /// The object whose contents holds the item.
+        object_id: Uuid,
+        /// The inventory item to buy.
+        item_id: Uuid,
+        /// The folder the bought item is placed in.
+        folder_id: Uuid,
+    },
+    /// Ask an object for its pay-button layout (`RequestPayPrice`); the simulator
+    /// answers with an [`Event::PayPriceReply`](crate::Event::PayPriceReply)
+    /// listing the default price and the quick-pay button amounts.
+    RequestPayPrice {
+        /// The object to query.
+        object_id: Uuid,
+    },
+    /// Ask for an object's condensed broadcast properties
+    /// (`RequestObjectPropertiesFamily`); the simulator answers with an
+    /// [`Event::ObjectPropertiesFamily`](crate::Event::ObjectPropertiesFamily).
+    /// Unlike [`Command::RequestObjectProperties`] this needs no prior selection.
+    RequestObjectPropertiesFamily {
+        /// The request flags (e.g. `OBJECT_PAY_REQUEST` `0x04`), echoed back in
+        /// the reply; `0` for a plain hover/info query.
+        request_flags: u32,
+        /// The object to query.
+        object_id: Uuid,
+    },
+    /// Begin an interactive spin (rotate) of an object (`ObjectSpinStart`); pairs
+    /// with [`Command::SpinObjectUpdate`] and [`Command::SpinObjectStop`].
+    SpinObjectStart {
+        /// The object being spun.
+        object_id: Uuid,
+    },
+    /// Update an in-progress object spin with the latest rotation
+    /// (`ObjectSpinUpdate`).
+    SpinObjectUpdate {
+        /// The object being spun.
+        object_id: Uuid,
+        /// The new rotation.
+        rotation: Rotation,
+    },
+    /// End an interactive object spin (`ObjectSpinStop`).
+    SpinObjectStop {
+        /// The object being spun.
+        object_id: Uuid,
+    },
+    /// Duplicate objects, placing the copies against the surface a ray hits
+    /// (`ObjectDuplicateOnRay`) — the "copy and drop in place" gesture.
+    DuplicateObjectsOnRay {
+        /// The region-local ids to duplicate.
+        local_ids: Vec<u32>,
+        /// The active group the copies are set to ([`Uuid::nil`] for none).
+        group_id: Uuid,
+        /// The ray's start point (region-local).
+        ray_start: Vector,
+        /// The ray's end point (region-local).
+        ray_end: Vector,
+        /// When set, the simulator trusts `ray_end` rather than raycasting.
+        bypass_raycast: bool,
+        /// Whether `ray_end` is the actual intersection point.
+        ray_end_is_intersection: bool,
+        /// Whether to copy each object's centre offset.
+        copy_centers: bool,
+        /// Whether to copy each object's rotation.
+        copy_rotates: bool,
+        /// The object the ray is cast against ([`Uuid::nil`] for the terrain).
+        ray_target_id: Uuid,
+        /// The duplicate flags (see `object_flags.h`).
+        duplicate_flags: u32,
+    },
+    /// Restore an inventory item to the world at its last in-world position
+    /// (`RezRestoreToWorld`). The message is `UDPDeprecated`, but a viewer may
+    /// still send it.
+    RezRestoreToWorld {
+        /// The full inventory item to restore.
+        item: RestoreItem,
+    },
+    /// Rez an object embedded in a notecard asset (`RezObjectFromNotecard`).
+    RezObjectFromNotecard {
+        /// The rez parameters (ray placement, permissions, notecard, items).
+        rez: NotecardRez,
     },
     /// Request a texture over the legacy UDP image path (`RequestImage`); the
     /// reassembled image arrives as [`Event::TextureReceived`](crate::Event::TextureReceived) (or

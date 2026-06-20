@@ -956,6 +956,44 @@ impl Client {
                         Some(Command::EventNotificationRemoveRequest { event_id }) => {
                             self.session.event_notification_remove_request(event_id, Instant::now())?;
                         }
+                        Some(Command::BuyObject { group_id, category_id, objects }) => {
+                            self.session.buy_object(group_id, category_id, &objects, Instant::now())?;
+                        }
+                        Some(Command::BuyObjectInventory { object_id, item_id, folder_id }) => {
+                            self.session.buy_object_inventory(object_id, item_id, folder_id, Instant::now())?;
+                        }
+                        Some(Command::RequestPayPrice { object_id }) => {
+                            self.session.request_pay_price(object_id, Instant::now())?;
+                        }
+                        Some(Command::RequestObjectPropertiesFamily { request_flags, object_id }) => {
+                            self.session.request_object_properties_family(request_flags, object_id, Instant::now())?;
+                        }
+                        Some(Command::SpinObjectStart { object_id }) => {
+                            self.session.spin_object_start(object_id, Instant::now())?;
+                        }
+                        Some(Command::SpinObjectUpdate { object_id, rotation }) => {
+                            self.session.spin_object_update(object_id, rotation, Instant::now())?;
+                        }
+                        Some(Command::SpinObjectStop { object_id }) => {
+                            self.session.spin_object_stop(object_id, Instant::now())?;
+                        }
+                        Some(Command::DuplicateObjectsOnRay {
+                            local_ids, group_id, ray_start, ray_end, bypass_raycast,
+                            ray_end_is_intersection, copy_centers, copy_rotates, ray_target_id,
+                            duplicate_flags,
+                        }) => {
+                            self.session.duplicate_objects_on_ray(
+                                &local_ids, group_id, ray_start, ray_end, bypass_raycast,
+                                ray_end_is_intersection, copy_centers, copy_rotates, ray_target_id,
+                                duplicate_flags, Instant::now(),
+                            )?;
+                        }
+                        Some(Command::RezRestoreToWorld { item }) => {
+                            self.session.rez_restore_to_world(&item, Instant::now())?;
+                        }
+                        Some(Command::RezObjectFromNotecard { rez }) => {
+                            self.session.rez_object_from_notecard(&rez, Instant::now())?;
+                        }
                         Some(Command::UploadAssetUdp { asset_type, data, temp_file, store_local }) => {
                             self.session.upload_asset_udp(asset_type, data, temp_file, store_local, Instant::now())?;
                         }

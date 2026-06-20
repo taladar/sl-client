@@ -11,11 +11,11 @@ use super::{
     Friend, FriendRights, GroupMember, GroupMembership, GroupName, GroupNotice, GroupProfile,
     GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder,
     InventoryItem, LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapRegionInfo, Maturity,
-    MoneyBalance, MuteEntry, NeighborInfo, Object, ObjectProperties, ParcelAccessEntry,
-    ParcelAccessScope, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo,
-    PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, ScriptDialog,
-    ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload, TeleportFlags,
-    TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
+    MoneyBalance, MuteEntry, NeighborInfo, Object, ObjectProperties, ObjectPropertiesFamily,
+    ParcelAccessEntry, ParcelAccessScope, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits,
+    ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload,
+    TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
 };
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
@@ -669,6 +669,27 @@ pub enum Event {
     /// (which selects the object). If the object is in the scene cache its
     /// [`Object::properties`] is updated too.
     ObjectProperties(Box<ObjectProperties>),
+    /// An object's condensed broadcast properties (`ObjectPropertiesFamily`), in
+    /// response to a
+    /// [`Command::RequestObjectPropertiesFamily`](crate::Command::RequestObjectPropertiesFamily).
+    /// Carries just the owner/permissions/sale summary a viewer shows on hover or
+    /// in the pay/report dialogs, without needing the object selected.
+    ObjectPropertiesFamily {
+        /// The object's condensed properties.
+        properties: ObjectPropertiesFamily,
+    },
+    /// An object's pay-button layout (`PayPriceReply`), in response to a
+    /// [`Command::RequestPayPrice`](crate::Command::RequestPayPrice): the default
+    /// pay amount and the quick-pay button amounts the viewer offers (a value of
+    /// `-1`/`-2` is LL's convention for "hide"/"default" buttons).
+    PayPriceReply {
+        /// The object queried.
+        object_id: Uuid,
+        /// The default pay amount, in L$ (`-1` if the object sets none).
+        default_pay_price: i32,
+        /// The quick-pay button amounts, in L$.
+        pay_buttons: Vec<i32>,
+    },
     /// An object's per-face **media-on-a-prim** settings, decoded from an
     /// `ObjectMedia` capability GET reply (the runtime `RequestObjectMedia`
     /// command). Each [`faces`](Event::ObjectMedia::faces) slot is the

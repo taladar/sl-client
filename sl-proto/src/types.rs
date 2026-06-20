@@ -46,8 +46,9 @@ pub use directory::{
 };
 pub use economy::{EconomyData, MoneyBalance, MoneyTransaction, MoneyTransactionType};
 pub use editing::{
-    ClickAction, DeRezDestination, Material, Maturity, ObjectFlagSettings, ObjectTransform,
-    PermissionField, PrimShape, ProductType, SaleType, TeleportFlags,
+    ClickAction, DeRezDestination, Material, Maturity, NotecardRez, ObjectBuyItem,
+    ObjectFlagSettings, ObjectTransform, PermissionField, PrimShape, ProductType, RestoreItem,
+    SaleType, TeleportFlags,
 };
 pub use environment::{DayCycle, DayCycleFrame, EnvironmentSettings, SkySettings, WaterSettings};
 pub use event::Event;
@@ -70,8 +71,9 @@ pub use nearby::{
 };
 pub use object::{
     ExtendedMesh, FlexibleData, LightData, LightImage, NameValue, Object, ObjectExtraParams,
-    ObjectMotion, ObjectProperties, ParticleSystem, PrimShapeParams, ReflectionProbe,
-    RenderMaterialRef, SculptData, TextureAnimation, particle_pattern, pcode, texture_anim_mode,
+    ObjectMotion, ObjectProperties, ObjectPropertiesFamily, ParticleSystem, PrimShapeParams,
+    ReflectionProbe, RenderMaterialRef, SculptData, TextureAnimation, particle_pattern, pcode,
+    texture_anim_mode,
 };
 pub use parcel::{
     LandingType, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
