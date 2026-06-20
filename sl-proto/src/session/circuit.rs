@@ -10,17 +10,18 @@ use super::{
 use crate::types::directory::category_to_wire;
 use crate::types::{
     AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction, CreateGroupParams,
-    DeRezDestination, DirFindFlags, GroupRoleEdit, GroupRoleMemberChange, ImDialog,
-    InterestsUpdate, InventoryItem, LandSearchType, Material, NewInventoryItem, NotecardRez,
-    ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelCategory,
-    ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProfileUpdate, Reliability, RestoreItem,
-    RezAttachment, SaleType, Throttle, ViewerEffect, Wearable,
+    DeRezDestination, DirFindFlags, GestureActivation, GroupRoleEdit, GroupRoleMemberChange,
+    ImDialog, InterestsUpdate, InventoryItem, LandSearchType, Material, NewInventoryItem,
+    NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
+    ParcelCategory, ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProfileUpdate,
+    Reliability, RestoreItem, RezAttachment, SaleType, Throttle, ViewerEffect, Wearable,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
     AcceptFriendship, AcceptFriendshipAgentDataBlock, AcceptFriendshipFolderDataBlock,
-    AcceptFriendshipTransactionBlockBlock, ActivateGroup, ActivateGroupAgentDataBlock,
-    AgentAnimation, AgentAnimationAgentDataBlock, AgentAnimationAnimationListBlock,
+    AcceptFriendshipTransactionBlockBlock, ActivateGestures, ActivateGesturesAgentDataBlock,
+    ActivateGesturesDataBlock, ActivateGroup, ActivateGroupAgentDataBlock, AgentAnimation,
+    AgentAnimationAgentDataBlock, AgentAnimationAnimationListBlock,
     AgentAnimationPhysicalAvatarEventListBlock, AgentCachedTexture,
     AgentCachedTextureAgentDataBlock, AgentCachedTextureWearableDataBlock, AgentIsNowWearing,
     AgentIsNowWearingAgentDataBlock, AgentIsNowWearingWearableDataBlock, AgentRequestSit,
@@ -49,6 +50,7 @@ use sl_wire::messages::{
     CreateInventoryFolderAgentDataBlock, CreateInventoryFolderFolderDataBlock, CreateInventoryItem,
     CreateInventoryItemAgentDataBlock, CreateInventoryItemInventoryBlockBlock, DeRezObject,
     DeRezObjectAgentBlockBlock, DeRezObjectAgentDataBlock, DeRezObjectObjectDataBlock,
+    DeactivateGestures, DeactivateGesturesAgentDataBlock, DeactivateGesturesDataBlock,
     DeclineFriendship, DeclineFriendshipAgentDataBlock, DeclineFriendshipTransactionBlockBlock,
     DirClassifiedQuery, DirClassifiedQueryAgentDataBlock, DirClassifiedQueryQueryDataBlock,
     DirFindQuery, DirFindQueryAgentDataBlock, DirFindQueryQueryDataBlock, DirLandQuery,
@@ -1325,6 +1327,55 @@ impl Circuit {
                 .iter()
                 .map(|ejectee_id| EjectGroupMemberRequestEjectDataBlock {
                     ejectee_id: *ejectee_id,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ActivateGestures` reliably, marking each gesture in `gestures`
+    /// active for this session.
+    pub(crate) fn send_activate_gestures(
+        &mut self,
+        gestures: &[GestureActivation],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ActivateGestures(ActivateGestures {
+            agent_data: ActivateGesturesAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                flags: 0,
+            },
+            data: gestures
+                .iter()
+                .map(|gesture| ActivateGesturesDataBlock {
+                    item_id: gesture.item_id,
+                    asset_id: gesture.asset_id,
+                    gesture_flags: 0,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `DeactivateGestures` reliably, marking each gesture named in
+    /// `item_ids` inactive for this session.
+    pub(crate) fn send_deactivate_gestures(
+        &mut self,
+        item_ids: &[Uuid],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::DeactivateGestures(DeactivateGestures {
+            agent_data: DeactivateGesturesAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                flags: 0,
+            },
+            data: item_ids
+                .iter()
+                .map(|item_id| DeactivateGesturesDataBlock {
+                    item_id: *item_id,
+                    gesture_flags: 0,
                 })
                 .collect(),
         });

@@ -82,12 +82,13 @@ use crate::types::directory::category_from_wire;
 use crate::types::{
     AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatType, CoarseLocation,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, EstateCovenant, EventInfo, GroupAccountDetails,
-    GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
-    GroupVoteHistoryItem, InstantMessage, LandSearchType, MapItem, MapItemType, MapRegionInfo,
-    NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails,
-    ParcelObjectOwner, PlacesResult, RegionIdentity, Reliability, RestoreItem, RezAttachment,
-    SaleType, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    DirPeopleResult, DirPlaceResult, EstateCovenant, EventInfo, GestureActivation,
+    GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem,
+    GroupName, GroupVoteHistoryItem, InstantMessage, LandSearchType, MapItem, MapItemType,
+    MapRegionInfo, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory,
+    ParcelDetails, ParcelObjectOwner, PlacesResult, RegionIdentity, Reliability, RestoreItem,
+    RezAttachment, SaleType, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
+    ViewerEffectType,
 };
 
 /// How long to batch owed acknowledgements before flushing them as a `PacketAck`
@@ -303,6 +304,20 @@ pub enum ServerEvent {
     /// point-at gaze hints, the editing/touch beam, and other transient HUD
     /// effects. A simulator would relay these to other nearby viewers.
     ViewerEffect(Vec<ViewerEffect>),
+    /// The client marked one or more gestures active (`ActivateGestures`); the
+    /// simulator records which gesture assets are live for the session so it can
+    /// preload them.
+    ActivateGestures {
+        /// The gestures to activate (each pairs an inventory item id with its
+        /// gesture asset id).
+        gestures: Vec<GestureActivation>,
+    },
+    /// The client marked one or more gestures inactive (`DeactivateGestures`),
+    /// naming them by inventory item id.
+    DeactivateGestures {
+        /// The inventory item ids of the gestures to deactivate.
+        item_ids: Vec<Uuid>,
+    },
     /// The client asked to track an agent's position (`TrackAgent`); the
     /// simulator would stream the tracked agent's coarse location back via
     /// [`SimSession::send_coarse_location_update`].
@@ -2344,6 +2359,23 @@ impl SimSession {
                     })
                     .collect();
                 self.events.push_back(ServerEvent::ViewerEffect(effects));
+            }
+            AnyMessage::ActivateGestures(activate) => {
+                let gestures = activate
+                    .data
+                    .iter()
+                    .map(|block| GestureActivation {
+                        item_id: block.item_id,
+                        asset_id: block.asset_id,
+                    })
+                    .collect();
+                self.events
+                    .push_back(ServerEvent::ActivateGestures { gestures });
+            }
+            AnyMessage::DeactivateGestures(deactivate) => {
+                let item_ids = deactivate.data.iter().map(|block| block.item_id).collect();
+                self.events
+                    .push_back(ServerEvent::DeactivateGestures { item_ids });
             }
             AnyMessage::TrackAgent(track) => {
                 self.events.push_back(ServerEvent::TrackAgent {

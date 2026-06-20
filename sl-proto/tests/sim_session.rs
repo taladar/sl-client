@@ -12,11 +12,11 @@ mod test {
     use sl_proto::{
         AttachmentPoint, AvatarName, AvatarPickerResult, ChatType, CoarseLocation,
         DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-        DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventInfo, GroupAccountDetails,
-        GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
-        GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVote,
-        GroupVoteHistoryItem, ImDialog, LandSearchType, LoginParams, MapItem, MapItemType,
-        MapRegionInfo, Maturity, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily,
+        DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventInfo, GestureActivation,
+        GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
+        GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
+        GroupVote, GroupVoteHistoryItem, ImDialog, LandSearchType, LoginParams, MapItem,
+        MapItemType, MapRegionInfo, Maturity, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily,
         ParcelCategory, ParcelDetails, ParcelObjectOwner, ParcelReturnType, PlacesResult,
         PointAtType, ProductType, RegionIdentity, RestoreItem, RezAttachment, SaleType,
         ServerEvent, Session, SimSession, TelehubInfo, Throttle, Transmit, ViewerEffect,
@@ -1596,6 +1596,49 @@ mod test {
                         && item.votes.first().is_some_and(|v| v.num_votes == 7)
             )),
             "expected a GroupVoteHistory client event"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn gesture_activation_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let item_a = uuid::Uuid::from_u128(0x6E5_A001);
+        let asset_a = uuid::Uuid::from_u128(0x6E5_A002);
+        let item_b = uuid::Uuid::from_u128(0x6E5_A003);
+
+        // Client -> sim: activating then deactivating gestures each surface a
+        // matching server event carrying the item (and, for activation, asset) ids.
+        client.activate_gestures(
+            &[GestureActivation {
+                item_id: item_a,
+                asset_id: asset_a,
+            }],
+            now,
+        )?;
+        client.deactivate_gestures(&[item_b], now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::ActivateGestures { gestures }
+                    if gestures.first().is_some_and(|g| g.item_id == item_a && g.asset_id == asset_a)
+            )),
+            "expected an ActivateGestures server event"
+        );
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::DeactivateGestures { item_ids }
+                    if item_ids.first() == Some(&item_b)
+            )),
+            "expected a DeactivateGestures server event"
         );
         Ok(())
     }

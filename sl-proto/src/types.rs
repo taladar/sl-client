@@ -61,8 +61,8 @@ pub use group::{
     group_powers,
 };
 pub use inventory::{
-    InventoryFolder, InventoryItem, NewInventoryItem, global_to_handle, grid_to_handle,
-    handle_to_global, handle_to_grid,
+    GestureActivation, InventoryFolder, InventoryItem, NewInventoryItem, global_to_handle,
+    grid_to_handle, handle_to_global, handle_to_grid,
 };
 pub use map::{
     EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, MapItem, MapItemType,

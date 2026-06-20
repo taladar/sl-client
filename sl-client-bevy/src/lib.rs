@@ -934,6 +934,12 @@ fn advance_running(
             } => {
                 session.eject_group_members(*group_id, member_ids, now).ok();
             }
+            Command::ActivateGestures { gestures } => {
+                session.activate_gestures(gestures, now).ok();
+            }
+            Command::DeactivateGestures { item_ids } => {
+                session.deactivate_gestures(item_ids, now).ok();
+            }
             Command::SendGroupNotice {
                 group_id,
                 subject,

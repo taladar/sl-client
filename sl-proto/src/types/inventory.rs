@@ -94,6 +94,20 @@ pub struct NewInventoryItem {
     pub description: String,
 }
 
+/// A gesture to activate via
+/// [`Session::activate_gestures`](crate::Session::activate_gestures)
+/// (`ActivateGestures`), pairing the gesture's inventory item id with the asset
+/// id of its gesture asset. Deactivation
+/// ([`Session::deactivate_gestures`](crate::Session::deactivate_gestures)) only
+/// needs the item id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GestureActivation {
+    /// The gesture's inventory item id.
+    pub item_id: Uuid,
+    /// The gesture asset id backing that item.
+    pub asset_id: Uuid,
+}
+
 /// Splits a region handle into its global south-west corner in metres,
 /// `(global_x, global_y)`.
 #[must_use]

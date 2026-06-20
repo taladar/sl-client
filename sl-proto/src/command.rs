@@ -7,14 +7,15 @@
 use crate::{
     AnyMessage, AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction,
     ControlFlags, CreateGroupParams, DeRezDestination, DirFindFlags, EstateAccessDelta,
-    ExperiencePermission, ExperienceUpdate, FriendRights, GroupNoticeAttachment, GroupRoleEdit,
-    GroupRoleMemberChange, IceCandidate, InterestsUpdate, InventoryItem, InventoryOffer,
-    InventoryType, LandSearchType, LindenAmount, MapItemType, Material, MaterialOverrideUpdate,
-    MediaEntry, MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
-    ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
-    ParcelCategory, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PrimShape,
-    ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, Rotation, SaleType,
-    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
+    ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation, GroupNoticeAttachment,
+    GroupRoleEdit, GroupRoleMemberChange, IceCandidate, InterestsUpdate, InventoryItem,
+    InventoryOffer, InventoryType, LandSearchType, LindenAmount, MapItemType, Material,
+    MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MuteFlags, MuteType,
+    NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform,
+    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelReturnType, ParcelUpdate,
+    PermissionField, PickUpdate, PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability,
+    RestoreItem, RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
+    ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1310,6 +1311,21 @@ pub enum Command {
     /// Stop one of the agent's own animations (`AgentAnimation`); convenience for
     /// a single-element [`Command::SetAnimations`].
     StopAnimation(Uuid),
+    /// Mark one or more gestures active for this session (`ActivateGestures`),
+    /// so the simulator preloads them and they fire on their trigger
+    /// words/keys. The gesture assets themselves are uploaded separately (via
+    /// inventory); this only toggles which are live.
+    ActivateGestures {
+        /// The gestures to activate (each pairs an inventory item id with its
+        /// gesture asset id).
+        gestures: Vec<GestureActivation>,
+    },
+    /// Mark one or more gestures inactive for this session
+    /// (`DeactivateGestures`), naming them by inventory item id.
+    DeactivateGestures {
+        /// The inventory item ids of the gestures to deactivate.
+        item_ids: Vec<Uuid>,
+    },
     /// Attach an in-world object (selected by its region-local id) to the avatar
     /// (`ObjectAttach`). The object is worn at `attachment_point`; when `add` is
     /// `true` it is added alongside anything already on that point rather than

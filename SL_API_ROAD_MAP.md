@@ -342,15 +342,29 @@ replies. OpenSim-testable (Groups V2 + money module).
   sim↔dataserver backend-only `*Backend` messages; `TallyVotes` (Low 365,
   userserver→dataserver `Trusted`) is out of scope. OpenSim-testable (needs
   Groups V2 plus a money module) but NOT live-tested this session (loopback +
-  lifecycle cover both directions). **NEXT = G11** (gesture
-  activate/deactivate).
+  lifecycle cover both directions).
 
 ### G11 — Gestures (active-state)
 
 `ActivateGestures`/`DeactivateGestures` (the gesture asset is already uploadable
 via `UpdateInventoryAsset`; this toggles which are active). OpenSim-testable.
 
-- [ ] G11 gesture activate/deactivate.
+- [x] G11 gesture activate/deactivate. New type `GestureActivation`
+  (`item_id`/`asset_id`) in `sl-proto/src/types/inventory.rs`. Commands
+  `ActivateGestures { gestures: Vec<GestureActivation> }` and
+  `DeactivateGestures { item_ids: Vec<Uuid> }`; circuit encoders
+  (`send_activate_gestures`/`send_deactivate_gestures`, both `flags`/
+  `gesture_flags` fixed at 0 as the viewer always sends) + `Session` methods
+  (`activate_gestures`/`deactivate_gestures`). Both are fire-and-forget (no
+  reply, hence no client `Event`). Server: each surfaces as a matching
+  `ServerEvent::ActivateGestures`/`DeactivateGestures` in the `SimSession`
+  dispatch. Wired through both runtimes + REPL (2 commands `activate_gestures`/
+  `deactivate_gestures` + `format.rs` names). Tests: 2 lifecycle client (each
+  request packs), 1 loopback round-trip (both surface server events), 2 REPL
+  registry. Book: `content/appearance.md` gained a "Gestures" section + "In this
+  codebase" entry. OpenSim-testable but NOT live-tested this session (loopback +
+  lifecycle cover both directions). **NEXT = G12** (agent run/pause/FOV/window +
+  scripted camera & controls).
 
 ### G12 — Agent state & viewport
 

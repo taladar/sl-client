@@ -44,6 +44,17 @@ Animations are assets the avatar plays. The client starts/stops them
 and sees what others are playing through `Event::AvatarAnimation` (see also the
 [avatars](world.md#avatars-in-the-region) section of the world chapter).
 
+## Gestures
+
+A gesture is an inventory asset that chains animations, sounds, chat and waits,
+fired by a trigger word or keybinding. Uploading the gesture asset (over the
+inventory/asset path) only stores it; the simulator also needs to know which
+gestures are *active* for the session so it can preload them and watch for their
+triggers. The client toggles that with `Command::ActivateGestures` (each entry
+pairs the gesture's inventory item id with its asset id) and
+`Command::DeactivateGestures` (by item id). Both are fire-and-forget — there is
+no reply.
+
 ---
 
 > **In this codebase**
@@ -62,3 +73,7 @@ and sees what others are playing through `Event::AvatarAnimation` (see also the
 >   `StopAnimation`, `SetAnimations`; events `AvatarAppearance`,
 >   `AgentWearables`, `ServerAppearanceUpdate`, `CachedTextureResponse`,
 >   `AvatarAnimation`.
+> - Gestures: `Command::ActivateGestures` (with the `GestureActivation`
+>   item-id/asset-id pairs) and `Command::DeactivateGestures`
+>   (`Session::activate_gestures` / `deactivate_gestures`). A simulator sees
+>   them as `ServerEvent::ActivateGestures` / `DeactivateGestures`.
