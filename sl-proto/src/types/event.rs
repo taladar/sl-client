@@ -7,13 +7,13 @@ use super::{
     AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPick, AvatarPickerResult,
     AvatarProperties, ChatMessage, ClassifiedInfo, CoarseLocation, DirClassifiedResult,
     DirEventResult, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
-    DisconnectReason, EconomyData, EnvironmentSettings, EstateAccessKind, EstateInfo, Friend,
-    FriendRights, GroupMember, GroupMembership, GroupName, GroupNotice, GroupProfile, GroupRole,
-    GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapRegionInfo, Maturity, MoneyBalance,
-    MuteEntry, NeighborInfo, Object, ObjectProperties, ParcelAccessEntry, ParcelAccessScope,
-    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, PickInfo,
-    PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, ScriptDialog,
+    DisconnectReason, EconomyData, EnvironmentSettings, EstateAccessKind, EstateInfo, EventInfo,
+    Friend, FriendRights, GroupMember, GroupMembership, GroupName, GroupNotice, GroupProfile,
+    GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder,
+    InventoryItem, LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapRegionInfo, Maturity,
+    MoneyBalance, MuteEntry, NeighborInfo, Object, ObjectProperties, ParcelAccessEntry,
+    ParcelAccessScope, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo,
+    PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, ScriptDialog,
     ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload, TeleportFlags,
     TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
 };
@@ -1048,6 +1048,13 @@ pub enum Event {
         transaction_id: Uuid,
         /// The matched land holdings.
         results: Vec<PlacesResult>,
+    },
+    /// The full detail of an in-world event, in response to a
+    /// [`Command::EventInfoRequest`](crate::Command::EventInfoRequest)
+    /// (`EventInfoReply`).
+    EventInfoReply {
+        /// The event's full listing.
+        info: EventInfo,
     },
     /// A one-shot spatial sound the simulator wants played at a fixed location
     /// (`SoundTrigger` — e.g. a scripted `llTriggerSound`, a collision sound, or

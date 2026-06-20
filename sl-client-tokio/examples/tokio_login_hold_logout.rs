@@ -493,6 +493,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::DirLandReply { .. }
             | Event::AvatarPickerReply { .. }
             | Event::PlacesReply { .. }
+            | Event::EventInfoReply { .. }
             | Event::Environment(_)
             | Event::MoneyBalance(_)
             | Event::EconomyData(_)

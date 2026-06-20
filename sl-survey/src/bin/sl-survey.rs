@@ -710,6 +710,7 @@ impl Survey {
             | Event::DirLandReply { .. }
             | Event::AvatarPickerReply { .. }
             | Event::PlacesReply { .. }
+            | Event::EventInfoReply { .. }
             | Event::Environment(_) => {}
         }
         Ok(false)

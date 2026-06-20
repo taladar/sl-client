@@ -1177,6 +1177,28 @@ pub enum Command {
         /// An optional region-name filter (empty for any region).
         sim_name: String,
     },
+    /// Request the full detail of an in-world event (`EventInfoRequest`), by the
+    /// `event_id` from a [`DirEventResult`](crate::DirEventResult) of an events
+    /// [`DirFindQuery`](Self::DirFindQuery) (or the events directory). The
+    /// simulator answers with an
+    /// [`Event::EventInfoReply`](crate::Event::EventInfoReply).
+    EventInfoRequest {
+        /// The event to look up.
+        event_id: u32,
+    },
+    /// Subscribe to a reminder for an in-world event
+    /// (`EventNotificationAddRequest`): the simulator will notify the agent as
+    /// the event approaches. There is no direct reply.
+    EventNotificationAddRequest {
+        /// The event to be reminded about.
+        event_id: u32,
+    },
+    /// Cancel a previously-added event reminder
+    /// (`EventNotificationRemoveRequest`). There is no direct reply.
+    EventNotificationRemoveRequest {
+        /// The event whose reminder to cancel.
+        event_id: u32,
+    },
     /// Upload a new asset over the legacy UDP path (`AssetUploadRequest`): stores
     /// the asset bytes (small assets inline, larger ones over `Xfer`) without
     /// creating an inventory item. Completion arrives as

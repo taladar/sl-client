@@ -42,7 +42,7 @@ pub use chat::{
 pub use diagnostic::Diagnostic;
 pub use directory::{
     AvatarPickerResult, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
-    DirLandResult, DirPeopleResult, DirPlaceResult, LandSearchType, PlacesResult,
+    DirLandResult, DirPeopleResult, DirPlaceResult, EventInfo, LandSearchType, PlacesResult,
 };
 pub use economy::{EconomyData, MoneyBalance, MoneyTransaction, MoneyTransactionType};
 pub use editing::{

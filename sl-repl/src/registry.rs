@@ -2778,6 +2778,33 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "event_info_request",
+            usage: "<event_id-u32>",
+            build: |args, ctx| {
+                Ok(Command::EventInfoRequest {
+                    event_id: args.req_parse(ctx, "event_id", 0, "u32")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "event_notification_add_request",
+            usage: "<event_id-u32>",
+            build: |args, ctx| {
+                Ok(Command::EventNotificationAddRequest {
+                    event_id: args.req_parse(ctx, "event_id", 0, "u32")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "event_notification_remove_request",
+            usage: "<event_id-u32>",
+            build: |args, ctx| {
+                Ok(Command::EventNotificationRemoveRequest {
+                    event_id: args.req_parse(ctx, "event_id", 0, "u32")?,
+                })
+            },
+        },
+        CommandSpec {
             name: "set_appearance",
             usage: "<serial> <size-vec> texture_entry=<hex> visual_params=<hex> [wearable_cache=id:idx,…]",
             build: |args, ctx| {

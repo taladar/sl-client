@@ -253,6 +253,7 @@ fn on_events(
             | SlSessionEvent::DirLandReply { .. }
             | SlSessionEvent::AvatarPickerReply { .. }
             | SlSessionEvent::PlacesReply { .. }
+            | SlSessionEvent::EventInfoReply { .. }
             | SlSessionEvent::Environment(_)
             | SlSessionEvent::MoneyBalance(_)
             | SlSessionEvent::EconomyData(_)

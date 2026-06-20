@@ -12,11 +12,11 @@ mod test {
     use sl_proto::{
         AttachmentPoint, AvatarName, AvatarPickerResult, ChatType, CoarseLocation,
         DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-        DirPeopleResult, DirPlaceResult, Event, GroupName, ImDialog, LandSearchType, LoginParams,
-        MapItem, MapItemType, MapRegionInfo, Maturity, ParcelCategory, PlacesResult, PointAtType,
-        ProductType, RegionIdentity, RezAttachment, ServerEvent, Session, SimSession, Throttle,
-        Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
-        grid_to_handle, parse_event_queue_response,
+        DirPeopleResult, DirPlaceResult, Event, EventInfo, GroupName, ImDialog, LandSearchType,
+        LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity, ParcelCategory, PlacesResult,
+        PointAtType, ProductType, RegionIdentity, RezAttachment, ServerEvent, Session, SimSession,
+        Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        enable_simulator_to_caps_llsd, grid_to_handle, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -794,6 +794,82 @@ mod test {
         let holding = holdings.first().ok_or("holding")?;
         assert_eq!(holding.global_position, (1000.0, 2000.0, 30.0));
         assert_eq!(holding.sim_name, "Region");
+        Ok(())
+    }
+
+    #[test]
+    fn event_directory_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        // Client -> sim: the three events-directory requests.
+        client.event_info_request(42, now)?;
+        client.event_notification_add_request(42, now)?;
+        client.event_notification_remove_request(7, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let server_events = drain_server(&mut sim);
+        let info_event = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::EventInfoRequest { event_id } => Some(*event_id),
+                _ => None,
+            })
+            .ok_or("expected an EventInfoRequest server event")?;
+        assert_eq!(info_event, 42);
+        let added = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::EventNotificationAddRequest { event_id } => Some(*event_id),
+                _ => None,
+            })
+            .ok_or("expected an EventNotificationAddRequest server event")?;
+        assert_eq!(added, 42);
+        let removed = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::EventNotificationRemoveRequest { event_id } => Some(*event_id),
+                _ => None,
+            })
+            .ok_or("expected an EventNotificationRemoveRequest server event")?;
+        assert_eq!(removed, 7);
+
+        // Sim -> client: the filled-in reply.
+        let creator = uuid::Uuid::from_u128(0xE0E);
+        sim.send_event_info_reply(
+            &EventInfo {
+                event_id: 42,
+                creator,
+                name: "Beach Party".to_owned(),
+                category: "Discussion".to_owned(),
+                description: "Come along".to_owned(),
+                date: "2026-06-20 12:00:00".to_owned(),
+                date_utc: 1_750_000_000,
+                duration: 60,
+                cover: 1,
+                amount: 50,
+                sim_name: "Sandbox".to_owned(),
+                global_position: (256_000.0, 257_000.0, 30.0),
+                flags: 0,
+            },
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let info = drain_client(&mut client)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::EventInfoReply { info } => Some(info),
+                _ => None,
+            })
+            .ok_or("expected an EventInfoReply client event")?;
+        assert_eq!(info.event_id, 42);
+        assert_eq!(info.creator, creator);
+        assert_eq!(info.name, "Beach Party");
+        assert_eq!(info.amount, 50);
+        assert_eq!(info.global_position, (256_000.0, 257_000.0, 30.0));
         Ok(())
     }
 
