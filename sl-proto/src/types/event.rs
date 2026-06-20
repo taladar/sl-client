@@ -4,14 +4,16 @@ use std::net::SocketAddr;
 
 use super::{
     ActiveGroup, AlertInfo, Asset, AssetType, AvatarAppearance, AvatarClassified,
-    AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPick, AvatarProperties, ChatMessage,
-    ClassifiedInfo, CoarseLocation, DisconnectReason, EconomyData, EnvironmentSettings,
-    EstateAccessKind, EstateInfo, Friend, FriendRights, GroupMember, GroupMembership, GroupName,
-    GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
-    InventoryFolder, InventoryItem, LoadUrlRequest, LoginAccount, MapItem, MapItemType,
-    MapRegionInfo, Maturity, MoneyBalance, MuteEntry, NeighborInfo, Object, ObjectProperties,
-    ParcelAccessEntry, ParcelAccessScope, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelOverlayInfo, PickInfo, PlayingAnimation, RegionIdentity, RegionLimits, ScriptDialog,
+    AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPick, AvatarPickerResult,
+    AvatarProperties, ChatMessage, ClassifiedInfo, CoarseLocation, DirClassifiedResult,
+    DirEventResult, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
+    DisconnectReason, EconomyData, EnvironmentSettings, EstateAccessKind, EstateInfo, Friend,
+    FriendRights, GroupMember, GroupMembership, GroupName, GroupNotice, GroupProfile, GroupRole,
+    GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
+    LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapRegionInfo, Maturity, MoneyBalance,
+    MuteEntry, NeighborInfo, Object, ObjectProperties, ParcelAccessEntry, ParcelAccessScope,
+    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, PickInfo,
+    PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, ScriptDialog,
     ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload, TeleportFlags,
     TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
 };
@@ -974,6 +976,78 @@ pub enum Event {
         prey: Uuid,
         /// The found global `(x, y)` positions, in metres.
         locations: Vec<(f64, f64)>,
+    },
+    /// The people results of a [`Command::DirFindQuery`](crate::Command::DirFindQuery)
+    /// run with [`DirFindFlags::PEOPLE`](crate::DirFindFlags::PEOPLE) (`DirPeopleReply`).
+    DirPeopleReply {
+        /// The query this answers (echoed from the request).
+        query_id: Uuid,
+        /// The matched people.
+        results: Vec<DirPeopleResult>,
+    },
+    /// The group results of a [`Command::DirFindQuery`](crate::Command::DirFindQuery)
+    /// run with [`DirFindFlags::GROUPS`](crate::DirFindFlags::GROUPS) (`DirGroupsReply`).
+    DirGroupsReply {
+        /// The query this answers (echoed from the request).
+        query_id: Uuid,
+        /// The matched groups.
+        results: Vec<DirGroupResult>,
+    },
+    /// The event results of a [`Command::DirFindQuery`](crate::Command::DirFindQuery)
+    /// run with [`DirFindFlags::EVENTS`](crate::DirFindFlags::EVENTS) (`DirEventsReply`).
+    DirEventsReply {
+        /// The query this answers (echoed from the request).
+        query_id: Uuid,
+        /// The matched events.
+        results: Vec<DirEventResult>,
+        /// The search-status flags (`STATUS_SEARCH_EVENTS_*`); `0` on success.
+        status: u32,
+    },
+    /// The results of a [`Command::DirClassifiedQuery`](crate::Command::DirClassifiedQuery)
+    /// (`DirClassifiedReply`).
+    DirClassifiedReply {
+        /// The query this answers (echoed from the request).
+        query_id: Uuid,
+        /// The matched classifieds.
+        results: Vec<DirClassifiedResult>,
+        /// The search-status flags (`STATUS_SEARCH_CLASSIFIEDS_*`); `0` on success.
+        status: u32,
+    },
+    /// The results of a [`Command::DirPlacesQuery`](crate::Command::DirPlacesQuery)
+    /// (`DirPlacesReply`).
+    DirPlacesReply {
+        /// The query this answers (echoed from the request).
+        query_id: Uuid,
+        /// The matched places.
+        results: Vec<DirPlaceResult>,
+        /// The search-status flags (`STATUS_SEARCH_PLACES_*`); `0` on success.
+        status: u32,
+    },
+    /// The results of a [`Command::DirLandQuery`](crate::Command::DirLandQuery)
+    /// (`DirLandReply`).
+    DirLandReply {
+        /// The query this answers (echoed from the request).
+        query_id: Uuid,
+        /// The matched land parcels.
+        results: Vec<DirLandResult>,
+    },
+    /// The results of an [`Command::AvatarPickerRequest`](crate::Command::AvatarPickerRequest)
+    /// name autocomplete (`AvatarPickerReply`).
+    AvatarPickerReply {
+        /// The query this answers (echoed from the request).
+        query_id: Uuid,
+        /// The matched names.
+        results: Vec<AvatarPickerResult>,
+    },
+    /// The results of a [`Command::PlacesQuery`](crate::Command::PlacesQuery)
+    /// land-holdings lookup (`PlacesReply`).
+    PlacesReply {
+        /// The query this answers (echoed from the request).
+        query_id: Uuid,
+        /// The correlation id echoed from the request.
+        transaction_id: Uuid,
+        /// The matched land holdings.
+        results: Vec<PlacesResult>,
     },
     /// A one-shot spatial sound the simulator wants played at a fixed location
     /// (`SoundTrigger` — e.g. a scripted `llTriggerSound`, a collision sound, or

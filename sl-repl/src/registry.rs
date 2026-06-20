@@ -19,16 +19,16 @@ use std::collections::BTreeMap;
 
 use sl_proto::{
     AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, Command, ControlFlags,
-    CreateGroupParams, DeRezDestination, EstateAccessDelta, ExperiencePermission, ExperienceUpdate,
-    FriendRights, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
-    InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LindenAmount, LookAtType,
-    MapItemType, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType,
-    MuteFlags, MuteType, NewInventoryItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
-    ParcelUpdate, PermissionField, PickUpdate, PointAtType, PrimShape, ProfileUpdate,
-    RegionInfoUpdate, RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable,
-    WearableType,
+    CreateGroupParams, DeRezDestination, DirFindFlags, EstateAccessDelta, ExperiencePermission,
+    ExperienceUpdate, FriendRights, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit,
+    GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType,
+    LandSearchType, LindenAmount, LookAtType, MapItemType, Material, MaterialOverrideUpdate,
+    Maturity, MediaEntry, MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem,
+    ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+    ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate,
+    PointAtType, PrimShape, ProfileUpdate, RegionInfoUpdate, RezAttachment, Rotation, SaleType,
+    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -2690,6 +2690,90 @@ fn all_specs() -> Vec<CommandSpec> {
                 Ok(Command::FindAgent {
                     hunter: args.req_uuid(ctx, "hunter", 0)?,
                     prey: args.req_uuid(ctx, "prey", 1)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "dir_find_query",
+            usage: "<query_id> <query_text> <flags-u32> [query_start=0]",
+            build: |args, ctx| {
+                Ok(Command::DirFindQuery {
+                    query_id: args.req_uuid(ctx, "query_id", 0)?,
+                    query_text: args.req_str(ctx, "query_text", 1)?,
+                    flags: DirFindFlags::from_bits(args.req_parse(ctx, "flags", 2, "u32")?),
+                    query_start: args.parse_or(ctx, "query_start", 3, "i32", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "dir_places_query",
+            usage: "<query_id> <query_text> <flags-u32> [category=0] [sim_name=] [query_start=0]",
+            build: |args, ctx| {
+                Ok(Command::DirPlacesQuery {
+                    query_id: args.req_uuid(ctx, "query_id", 0)?,
+                    query_text: args.req_str(ctx, "query_text", 1)?,
+                    flags: DirFindFlags::from_bits(args.req_parse(ctx, "flags", 2, "u32")?),
+                    category: ParcelCategory::from_u8(args.parse_or(ctx, "category", 3, "u8", 0)?),
+                    sim_name: args.str_or(ctx, "sim_name", 4, "")?,
+                    query_start: args.parse_or(ctx, "query_start", 5, "i32", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "dir_land_query",
+            usage: "<query_id> <flags-u32> [search_type=4294967295] [price=0] [area=0] \
+                    [query_start=0]",
+            build: |args, ctx| {
+                Ok(Command::DirLandQuery {
+                    query_id: args.req_uuid(ctx, "query_id", 0)?,
+                    flags: DirFindFlags::from_bits(args.req_parse(ctx, "flags", 1, "u32")?),
+                    search_type: LandSearchType::from_bits(args.parse_or(
+                        ctx,
+                        "search_type",
+                        2,
+                        "u32",
+                        LandSearchType::ALL.bits(),
+                    )?),
+                    price: args.parse_or(ctx, "price", 3, "i32", 0)?,
+                    area: args.parse_or(ctx, "area", 4, "i32", 0)?,
+                    query_start: args.parse_or(ctx, "query_start", 5, "i32", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "dir_classified_query",
+            usage: "<query_id> <query_text> <flags-u32> [category=0] [query_start=0]",
+            build: |args, ctx| {
+                Ok(Command::DirClassifiedQuery {
+                    query_id: args.req_uuid(ctx, "query_id", 0)?,
+                    query_text: args.req_str(ctx, "query_text", 1)?,
+                    flags: DirFindFlags::from_bits(args.req_parse(ctx, "flags", 2, "u32")?),
+                    category: args.parse_or(ctx, "category", 3, "u32", 0)?,
+                    query_start: args.parse_or(ctx, "query_start", 4, "i32", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "avatar_picker_request",
+            usage: "<query_id> <name>",
+            build: |args, ctx| {
+                Ok(Command::AvatarPickerRequest {
+                    query_id: args.req_uuid(ctx, "query_id", 0)?,
+                    name: args.req_str(ctx, "name", 1)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "places_query",
+            usage: "<query_id> <transaction_id> [query_text=] [flags=0] [category=0] [sim_name=]",
+            build: |args, ctx| {
+                Ok(Command::PlacesQuery {
+                    query_id: args.req_uuid(ctx, "query_id", 0)?,
+                    transaction_id: args.req_uuid(ctx, "transaction_id", 1)?,
+                    query_text: args.str_or(ctx, "query_text", 2, "")?,
+                    flags: DirFindFlags::from_bits(args.parse_or(ctx, "flags", 3, "u32", 0)?),
+                    category: ParcelCategory::from_u8(args.parse_or(ctx, "category", 4, "u8", 0)?),
+                    sim_name: args.str_or(ctx, "sim_name", 5, "")?,
                 })
             },
         },

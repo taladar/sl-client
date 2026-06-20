@@ -1454,6 +1454,97 @@ fn advance_running(
             Command::FindAgent { hunter, prey } => {
                 session.find_agent(*hunter, *prey, now).ok();
             }
+            Command::DirFindQuery {
+                query_id,
+                query_text,
+                flags,
+                query_start,
+            } => {
+                session
+                    .dir_find_query(*query_id, query_text, *flags, *query_start, now)
+                    .ok();
+            }
+            Command::DirPlacesQuery {
+                query_id,
+                query_text,
+                flags,
+                category,
+                sim_name,
+                query_start,
+            } => {
+                session
+                    .dir_places_query(
+                        *query_id,
+                        query_text,
+                        *flags,
+                        *category,
+                        sim_name,
+                        *query_start,
+                        now,
+                    )
+                    .ok();
+            }
+            Command::DirLandQuery {
+                query_id,
+                flags,
+                search_type,
+                price,
+                area,
+                query_start,
+            } => {
+                session
+                    .dir_land_query(
+                        *query_id,
+                        *flags,
+                        *search_type,
+                        *price,
+                        *area,
+                        *query_start,
+                        now,
+                    )
+                    .ok();
+            }
+            Command::DirClassifiedQuery {
+                query_id,
+                query_text,
+                flags,
+                category,
+                query_start,
+            } => {
+                session
+                    .dir_classified_query(
+                        *query_id,
+                        query_text,
+                        *flags,
+                        *category,
+                        *query_start,
+                        now,
+                    )
+                    .ok();
+            }
+            Command::AvatarPickerRequest { query_id, name } => {
+                session.avatar_picker_request(*query_id, name, now).ok();
+            }
+            Command::PlacesQuery {
+                query_id,
+                transaction_id,
+                query_text,
+                flags,
+                category,
+                sim_name,
+            } => {
+                session
+                    .places_query(
+                        *query_id,
+                        *transaction_id,
+                        query_text,
+                        *flags,
+                        *category,
+                        sim_name,
+                        now,
+                    )
+                    .ok();
+            }
             Command::UploadAssetUdp {
                 asset_type,
                 data,

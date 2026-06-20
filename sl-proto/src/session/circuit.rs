@@ -7,12 +7,14 @@ use super::{
     ACK_FLUSH_DELAY, Circuit, INACTIVITY_TIMEOUT, MAP_LAYER_FLAG, MAX_ACKS_PER_PACKET,
     MAX_RESEND_ATTEMPTS, RESEND_TIMEOUT, SeenWindow, Timers, UnackedPacket, deadline,
 };
+use crate::types::directory::category_to_wire;
 use crate::types::{
     AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction, CreateGroupParams,
-    DeRezDestination, GroupRoleEdit, GroupRoleMemberChange, ImDialog, InterestsUpdate,
-    InventoryItem, Material, NewInventoryItem, ObjectFlagSettings, ObjectTransform,
-    ParcelAccessEntry, ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProfileUpdate,
-    Reliability, RezAttachment, SaleType, Throttle, ViewerEffect, Wearable,
+    DeRezDestination, DirFindFlags, GroupRoleEdit, GroupRoleMemberChange, ImDialog,
+    InterestsUpdate, InventoryItem, LandSearchType, Material, NewInventoryItem, ObjectFlagSettings,
+    ObjectTransform, ParcelAccessEntry, ParcelCategory, ParcelUpdate, PermissionField, PickUpdate,
+    PrimShape, ProfileUpdate, Reliability, RezAttachment, SaleType, Throttle, ViewerEffect,
+    Wearable,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
@@ -30,7 +32,8 @@ use sl_wire::messages::{
     AgentWearablesRequestAgentDataBlock, AssetUploadRequest, AssetUploadRequestAssetBlockBlock,
     AvatarInterestsUpdate, AvatarInterestsUpdateAgentDataBlock,
     AvatarInterestsUpdatePropertiesDataBlock, AvatarNotesUpdate, AvatarNotesUpdateAgentDataBlock,
-    AvatarNotesUpdateDataBlock, AvatarPropertiesRequest, AvatarPropertiesRequestAgentDataBlock,
+    AvatarNotesUpdateDataBlock, AvatarPickerRequest, AvatarPickerRequestAgentDataBlock,
+    AvatarPickerRequestDataBlock, AvatarPropertiesRequest, AvatarPropertiesRequestAgentDataBlock,
     AvatarPropertiesUpdate, AvatarPropertiesUpdateAgentDataBlock,
     AvatarPropertiesUpdatePropertiesDataBlock, ChangeInventoryItemFlags,
     ChangeInventoryItemFlagsAgentDataBlock, ChangeInventoryItemFlagsInventoryDataBlock,
@@ -47,7 +50,11 @@ use sl_wire::messages::{
     CreateInventoryItemAgentDataBlock, CreateInventoryItemInventoryBlockBlock, DeRezObject,
     DeRezObjectAgentBlockBlock, DeRezObjectAgentDataBlock, DeRezObjectObjectDataBlock,
     DeclineFriendship, DeclineFriendshipAgentDataBlock, DeclineFriendshipTransactionBlockBlock,
-    EconomyDataRequest, EjectGroupMemberRequest, EjectGroupMemberRequestAgentDataBlock,
+    DirClassifiedQuery, DirClassifiedQueryAgentDataBlock, DirClassifiedQueryQueryDataBlock,
+    DirFindQuery, DirFindQueryAgentDataBlock, DirFindQueryQueryDataBlock, DirLandQuery,
+    DirLandQueryAgentDataBlock, DirLandQueryQueryDataBlock, DirPlacesQuery,
+    DirPlacesQueryAgentDataBlock, DirPlacesQueryQueryDataBlock, EconomyDataRequest,
+    EjectGroupMemberRequest, EjectGroupMemberRequestAgentDataBlock,
     EjectGroupMemberRequestEjectDataBlock, EjectGroupMemberRequestGroupDataBlock,
     EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
     EstateOwnerMessageParamListBlock, FetchInventoryDescendents,
@@ -119,7 +126,8 @@ use sl_wire::messages::{
     ParcelSelectObjectsAgentDataBlock, ParcelSelectObjectsParcelDataBlock,
     ParcelSelectObjectsReturnIDsBlock, PickDelete, PickDeleteAgentDataBlock, PickDeleteDataBlock,
     PickGodDelete, PickGodDeleteAgentDataBlock, PickGodDeleteDataBlock, PickInfoUpdate,
-    PickInfoUpdateAgentDataBlock, PickInfoUpdateDataBlock, PurgeInventoryDescendents,
+    PickInfoUpdateAgentDataBlock, PickInfoUpdateDataBlock, PlacesQuery, PlacesQueryAgentDataBlock,
+    PlacesQueryQueryDataBlock, PlacesQueryTransactionDataBlock, PurgeInventoryDescendents,
     PurgeInventoryDescendentsAgentDataBlock, PurgeInventoryDescendentsInventoryDataBlock,
     RegionHandshakeReply, RegionHandshakeReplyAgentDataBlock, RegionHandshakeReplyRegionInfoBlock,
     RemoveAttachment, RemoveAttachmentAgentDataBlock, RemoveAttachmentAttachmentBlockBlock,
@@ -1830,6 +1838,164 @@ impl Circuit {
                 space_ip: [0, 0, 0, 0],
             },
             location_block: Vec::new(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `DirFindQuery` reliably: the unified people / groups / events
+    /// directory search (`flags` selecting which, plus sort/filter bits).
+    pub(crate) fn send_dir_find_query(
+        &mut self,
+        query_id: Uuid,
+        query_text: &str,
+        flags: DirFindFlags,
+        query_start: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::DirFindQuery(DirFindQuery {
+            agent_data: DirFindQueryAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            query_data: DirFindQueryQueryDataBlock {
+                query_id,
+                query_text: with_nul(query_text),
+                query_flags: flags.bits(),
+                query_start,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `DirPlacesQuery` reliably: the places-directory search.
+    #[expect(clippy::too_many_arguments, reason = "mirrors the wire query block")]
+    pub(crate) fn send_dir_places_query(
+        &mut self,
+        query_id: Uuid,
+        query_text: &str,
+        flags: DirFindFlags,
+        category: ParcelCategory,
+        sim_name: &str,
+        query_start: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::DirPlacesQuery(DirPlacesQuery {
+            agent_data: DirPlacesQueryAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            query_data: DirPlacesQueryQueryDataBlock {
+                query_id,
+                query_text: with_nul(query_text),
+                query_flags: flags.bits(),
+                category: category_to_wire(category),
+                sim_name: with_nul(sim_name),
+                query_start,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `DirLandQuery` reliably: the land-for-sale directory search.
+    #[expect(clippy::too_many_arguments, reason = "mirrors the wire query block")]
+    pub(crate) fn send_dir_land_query(
+        &mut self,
+        query_id: Uuid,
+        flags: DirFindFlags,
+        search_type: LandSearchType,
+        price: i32,
+        area: i32,
+        query_start: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::DirLandQuery(DirLandQuery {
+            agent_data: DirLandQueryAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            query_data: DirLandQueryQueryDataBlock {
+                query_id,
+                query_flags: flags.bits(),
+                search_type: search_type.bits(),
+                price,
+                area,
+                query_start,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `DirClassifiedQuery` reliably: the classifieds-directory search.
+    pub(crate) fn send_dir_classified_query(
+        &mut self,
+        query_id: Uuid,
+        query_text: &str,
+        flags: DirFindFlags,
+        category: u32,
+        query_start: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::DirClassifiedQuery(DirClassifiedQuery {
+            agent_data: DirClassifiedQueryAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            query_data: DirClassifiedQueryQueryDataBlock {
+                query_id,
+                query_text: with_nul(query_text),
+                query_flags: flags.bits(),
+                category,
+                query_start,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AvatarPickerRequest` reliably: the name-autocomplete lookup.
+    pub(crate) fn send_avatar_picker_request(
+        &mut self,
+        query_id: Uuid,
+        name: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AvatarPickerRequest(AvatarPickerRequest {
+            agent_data: AvatarPickerRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                query_id,
+            },
+            data: AvatarPickerRequestDataBlock {
+                name: with_nul(name),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `PlacesQuery` reliably: the agent/group land-holdings lookup.
+    #[expect(clippy::too_many_arguments, reason = "mirrors the wire query block")]
+    pub(crate) fn send_places_query(
+        &mut self,
+        query_id: Uuid,
+        transaction_id: Uuid,
+        query_text: &str,
+        flags: DirFindFlags,
+        category: ParcelCategory,
+        sim_name: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::PlacesQuery(PlacesQuery {
+            agent_data: PlacesQueryAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                query_id,
+            },
+            transaction_data: PlacesQueryTransactionDataBlock { transaction_id },
+            query_data: PlacesQueryQueryDataBlock {
+                query_text: with_nul(query_text),
+                query_flags: flags.bits(),
+                category: category_to_wire(category),
+                sim_name: with_nul(sim_name),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }

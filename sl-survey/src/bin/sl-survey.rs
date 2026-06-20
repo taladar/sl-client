@@ -702,6 +702,14 @@ impl Survey {
             | Event::AvatarNames(_)
             | Event::GroupNames(_)
             | Event::DisplayNames(_)
+            | Event::DirPeopleReply { .. }
+            | Event::DirGroupsReply { .. }
+            | Event::DirEventsReply { .. }
+            | Event::DirClassifiedReply { .. }
+            | Event::DirPlacesReply { .. }
+            | Event::DirLandReply { .. }
+            | Event::AvatarPickerReply { .. }
+            | Event::PlacesReply { .. }
             | Event::Environment(_) => {}
         }
         Ok(false)

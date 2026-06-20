@@ -11,19 +11,19 @@ mod test {
     use sl_proto::{
         AssetType, AttachmentPoint, Camera, ChatAudible, ChatSourceType, ChatType,
         ClassifiedUpdate, ClickAction, CoarseLocation, ControlFlags, CreateGroupParams, DayCycle,
-        DayCycleFrame, DeRezDestination, Diagnostic, DisconnectReason, EnvironmentSettings,
-        EstateAccessDelta, EstateAccessKind, Event, FriendRights, GroupNoticeAttachment,
-        GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog,
-        ImageCodec, InterestsUpdate, InventoryItem, LandingType, LindenAmount, LoginAccount,
-        LoginParams, LookAtType, MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags,
-        MuteType, NewInventoryItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
-        ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelMediaCommand,
-        ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField,
-        PickUpdate, PointAtType, PrimShape, ProductType, ProfileUpdate, RegionInfoUpdate,
-        Reliability, RezAttachment, SaleType, ScriptPermissions, Session, SkySettings, SoundFlags,
-        TeleportFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
-        group_powers, pcode,
+        DayCycleFrame, DeRezDestination, Diagnostic, DirFindFlags, DisconnectReason,
+        EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, FriendRights,
+        GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
+        GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate, InventoryItem, LandingType,
+        LindenAmount, LoginAccount, LoginParams, LookAtType, MapItemType, Material, Maturity,
+        MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, ObjectFlagSettings,
+        ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+        ParcelFlags, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
+        ParcelUpdate, PermissionField, PickUpdate, PointAtType, PrimShape, ProductType,
+        ProfileUpdate, RegionInfoUpdate, Reliability, RezAttachment, SaleType, ScriptPermissions,
+        Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType, Throttle,
+        TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings,
+        WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -49,13 +49,14 @@ mod test {
         CoarseLocationUpdate, CoarseLocationUpdateAgentDataBlock, CoarseLocationUpdateIndexBlock,
         CoarseLocationUpdateLocationBlock, ConfirmXferPacket, ConfirmXferPacketXferIDBlock,
         CrossedRegion, CrossedRegionAgentDataBlock, CrossedRegionInfoBlock,
-        CrossedRegionRegionDataBlock, DisableSimulator, EconomyData, EconomyDataInfoBlock,
-        EjectGroupMemberReply, EjectGroupMemberReplyAgentDataBlock,
-        EjectGroupMemberReplyEjectDataBlock, EjectGroupMemberReplyGroupDataBlock,
-        EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
-        EstateOwnerMessageParamListBlock, FindAgent, FindAgentAgentBlockBlock,
-        FindAgentLocationBlockBlock, GenericMessage, GenericMessageAgentDataBlock,
-        GenericMessageMethodDataBlock, GenericStreamingMessage,
+        CrossedRegionRegionDataBlock, DirPeopleReply, DirPeopleReplyAgentDataBlock,
+        DirPeopleReplyQueryDataBlock, DirPeopleReplyQueryRepliesBlock, DisableSimulator,
+        EconomyData, EconomyDataInfoBlock, EjectGroupMemberReply,
+        EjectGroupMemberReplyAgentDataBlock, EjectGroupMemberReplyEjectDataBlock,
+        EjectGroupMemberReplyGroupDataBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
+        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock, FindAgent,
+        FindAgentAgentBlockBlock, FindAgentLocationBlockBlock, GenericMessage,
+        GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GenericStreamingMessage,
         GenericStreamingMessageDataBlockBlock, GenericStreamingMessageMethodDataBlock,
         GroupMembersReply, GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
         GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
@@ -3992,6 +3993,78 @@ mod test {
             .ok_or("expected a FindAgentReply event")?;
         assert_eq!(reply_prey, prey);
         assert_eq!(locations, vec![(256_000.0, 257_000.0)]);
+        Ok(())
+    }
+
+    #[test]
+    fn dir_find_query_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let query_id = uuid::Uuid::from_u128(0x30);
+        session.dir_find_query(
+            query_id,
+            "alice",
+            DirFindFlags::PEOPLE.union(DirFindFlags::ONLINE),
+            20,
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let query = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::DirFindQuery(query) => Some(query),
+                _ => None,
+            })
+            .ok_or("expected a DirFindQuery")?;
+        assert_eq!(query.query_data.query_id, query_id);
+        assert_eq!(query.query_data.query_text, b"alice\0");
+        assert_eq!(
+            query.query_data.query_flags,
+            DirFindFlags::PEOPLE.union(DirFindFlags::ONLINE).bits()
+        );
+        assert_eq!(query.query_data.query_start, 20);
+        Ok(())
+    }
+
+    #[test]
+    fn dir_people_reply_surfaces_results() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let query_id = uuid::Uuid::from_u128(0x31);
+        let agent = uuid::Uuid::from_u128(0x32);
+        let message = AnyMessage::DirPeopleReply(DirPeopleReply {
+            agent_data: DirPeopleReplyAgentDataBlock {
+                agent_id: uuid::Uuid::nil(),
+            },
+            query_data: DirPeopleReplyQueryDataBlock { query_id },
+            query_replies: vec![DirPeopleReplyQueryRepliesBlock {
+                agent_id: agent,
+                first_name: b"Alice\0".to_vec(),
+                last_name: b"Resident\0".to_vec(),
+                group: Vec::new(),
+                online: true,
+                reputation: 0,
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let (reply_query, results) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::DirPeopleReply { query_id, results } => Some((query_id, results)),
+                _ => None,
+            })
+            .ok_or("expected a DirPeopleReply event")?;
+        assert_eq!(reply_query, query_id);
+        let person = results.first().ok_or("first person")?;
+        assert_eq!(person.agent_id, agent);
+        assert_eq!(person.first_name, "Alice");
+        assert_eq!(person.last_name, "Resident");
+        assert!(person.online);
         Ok(())
     }
 

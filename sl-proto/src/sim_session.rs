@@ -26,13 +26,25 @@ use std::time::{Duration, Instant};
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
     AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
-    AgentMovementCompleteSimDataBlock, ChatFromSimulator, ChatFromSimulatorChatDataBlock,
+    AgentMovementCompleteSimDataBlock, AvatarPickerReply, AvatarPickerReplyAgentDataBlock,
+    AvatarPickerReplyDataBlock, ChatFromSimulator, ChatFromSimulatorChatDataBlock,
     CoarseLocationUpdate, CoarseLocationUpdateAgentDataBlock, CoarseLocationUpdateIndexBlock,
-    CoarseLocationUpdateLocationBlock, CompletePingCheck, CompletePingCheckPingIDBlock, FindAgent,
-    FindAgentAgentBlockBlock, FindAgentLocationBlockBlock, LogoutReply, LogoutReplyAgentDataBlock,
-    PacketAck, StartPingCheck, StartPingCheckPingIDBlock, UUIDGroupNameReply,
-    UUIDGroupNameReplyUUIDNameBlockBlock, UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock,
-    ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
+    CoarseLocationUpdateLocationBlock, CompletePingCheck, CompletePingCheckPingIDBlock,
+    DirClassifiedReply, DirClassifiedReplyAgentDataBlock, DirClassifiedReplyQueryDataBlock,
+    DirClassifiedReplyQueryRepliesBlock, DirClassifiedReplyStatusDataBlock, DirEventsReply,
+    DirEventsReplyAgentDataBlock, DirEventsReplyQueryDataBlock, DirEventsReplyQueryRepliesBlock,
+    DirEventsReplyStatusDataBlock, DirGroupsReply, DirGroupsReplyAgentDataBlock,
+    DirGroupsReplyQueryDataBlock, DirGroupsReplyQueryRepliesBlock, DirLandReply,
+    DirLandReplyAgentDataBlock, DirLandReplyQueryDataBlock, DirLandReplyQueryRepliesBlock,
+    DirPeopleReply, DirPeopleReplyAgentDataBlock, DirPeopleReplyQueryDataBlock,
+    DirPeopleReplyQueryRepliesBlock, DirPlacesReply, DirPlacesReplyAgentDataBlock,
+    DirPlacesReplyQueryDataBlock, DirPlacesReplyQueryRepliesBlock, DirPlacesReplyStatusDataBlock,
+    FindAgent, FindAgentAgentBlockBlock, FindAgentLocationBlockBlock, LogoutReply,
+    LogoutReplyAgentDataBlock, PacketAck, PlacesReply, PlacesReplyAgentDataBlock,
+    PlacesReplyQueryDataBlock, PlacesReplyTransactionDataBlock, StartPingCheck,
+    StartPingCheckPingIDBlock, UUIDGroupNameReply, UUIDGroupNameReplyUUIDNameBlockBlock,
+    UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock, ViewerEffect as ViewerEffectMessage,
+    ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
 };
 use sl_wire::{
     AnyMessage, ControlFlags, EventQueueEvent, Llsd, MessageId, PacketFlags, Reader, WireError,
@@ -44,10 +56,13 @@ use crate::error::Error;
 use crate::session::{
     build_map_block_reply, build_map_item_reply, instant_message, region_handshake_message,
 };
+use crate::types::directory::category_from_wire;
 use crate::types::{
-    AttachmentPoint, AvatarName, Camera, ChatType, CoarseLocation, GroupName, InstantMessage,
-    MapItem, MapItemType, MapRegionInfo, RegionIdentity, Reliability, RezAttachment, Throttle,
-    Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatType, CoarseLocation,
+    DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
+    DirPeopleResult, DirPlaceResult, GroupName, InstantMessage, LandSearchType, MapItem,
+    MapItemType, MapRegionInfo, ParcelCategory, PlacesResult, RegionIdentity, Reliability,
+    RezAttachment, Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 
 /// How long to batch owed acknowledgements before flushing them as a `PacketAck`
@@ -277,6 +292,89 @@ pub enum ServerEvent {
         hunter: Uuid,
         /// The agent to locate (the "prey").
         prey: Uuid,
+    },
+    /// The client ran a directory people / groups / events search
+    /// (`DirFindQuery`); the simulator answers with the matching `send_dir_*`
+    /// reply, correlated by `query_id`.
+    DirFindQuery {
+        /// The client-chosen id to echo back in the reply.
+        query_id: Uuid,
+        /// The search text.
+        query_text: String,
+        /// What to search and how to sort/filter.
+        flags: DirFindFlags,
+        /// The 0-based index of the first result the client wants.
+        query_start: i32,
+    },
+    /// The client searched the places directory (`DirPlacesQuery`); the simulator
+    /// answers with [`SimSession::send_dir_places_reply`].
+    DirPlacesQuery {
+        /// The client-chosen id to echo back in the reply.
+        query_id: Uuid,
+        /// The search text.
+        query_text: String,
+        /// Result inclusion/sort flags.
+        flags: DirFindFlags,
+        /// The parcel category to filter by.
+        category: ParcelCategory,
+        /// An optional region-name filter (empty for any region).
+        sim_name: String,
+        /// The 0-based index of the first result the client wants.
+        query_start: i32,
+    },
+    /// The client searched the land-for-sale directory (`DirLandQuery`); the
+    /// simulator answers with [`SimSession::send_dir_land_reply`].
+    DirLandQuery {
+        /// The client-chosen id to echo back in the reply.
+        query_id: Uuid,
+        /// Result inclusion/sort and limit flags.
+        flags: DirFindFlags,
+        /// Which sale types to include.
+        search_type: LandSearchType,
+        /// The price limit.
+        price: i32,
+        /// The area limit.
+        area: i32,
+        /// The 0-based index of the first result the client wants.
+        query_start: i32,
+    },
+    /// The client searched the classifieds directory (`DirClassifiedQuery`); the
+    /// simulator answers with [`SimSession::send_dir_classified_reply`].
+    DirClassifiedQuery {
+        /// The client-chosen id to echo back in the reply.
+        query_id: Uuid,
+        /// The search text.
+        query_text: String,
+        /// Result inclusion/sort flags.
+        flags: DirFindFlags,
+        /// The classified category to filter by (`0` for any).
+        category: u32,
+        /// The 0-based index of the first result the client wants.
+        query_start: i32,
+    },
+    /// The client requested avatar-name autocomplete (`AvatarPickerRequest`); the
+    /// simulator answers with [`SimSession::send_avatar_picker_reply`].
+    AvatarPickerRequest {
+        /// The client-chosen id to echo back in the reply.
+        query_id: Uuid,
+        /// The (partial) name to match.
+        name: String,
+    },
+    /// The client looked up land holdings (`PlacesQuery`); the simulator answers
+    /// with [`SimSession::send_places_reply`].
+    PlacesQuery {
+        /// The client-chosen id to echo back in the reply.
+        query_id: Uuid,
+        /// A correlation id to echo back in the reply.
+        transaction_id: Uuid,
+        /// The search text.
+        query_text: String,
+        /// Result flags.
+        flags: DirFindFlags,
+        /// The parcel category to filter by.
+        category: ParcelCategory,
+        /// An optional region-name filter (empty for any region).
+        sim_name: String,
     },
     /// The client requested a clean logout (`LogoutRequest`); the simulator has
     /// replied with a `LogoutReply` and closed the session.
@@ -745,6 +843,317 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends a `DirPeopleReply`: the people results of a client's `DirFindQuery`
+    /// (surfaced as [`ServerEvent::DirFindQuery`]), echoing its `query_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_dir_people_reply(
+        &mut self,
+        query_id: Uuid,
+        results: &[DirPeopleResult],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::DirPeopleReply(DirPeopleReply {
+            agent_data: DirPeopleReplyAgentDataBlock {
+                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+            },
+            query_data: DirPeopleReplyQueryDataBlock { query_id },
+            query_replies: results
+                .iter()
+                .map(|result| DirPeopleReplyQueryRepliesBlock {
+                    agent_id: result.agent_id,
+                    first_name: with_nul(&result.first_name),
+                    last_name: with_nul(&result.last_name),
+                    group: with_nul(&result.group),
+                    online: result.online,
+                    reputation: result.reputation,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `DirGroupsReply`: the group results of a client's `DirFindQuery`
+    /// (surfaced as [`ServerEvent::DirFindQuery`]), echoing its `query_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_dir_groups_reply(
+        &mut self,
+        query_id: Uuid,
+        results: &[DirGroupResult],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::DirGroupsReply(DirGroupsReply {
+            agent_data: DirGroupsReplyAgentDataBlock {
+                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+            },
+            query_data: DirGroupsReplyQueryDataBlock { query_id },
+            query_replies: results
+                .iter()
+                .map(|result| DirGroupsReplyQueryRepliesBlock {
+                    group_id: result.group_id,
+                    group_name: with_nul(&result.group_name),
+                    members: result.members,
+                    search_order: result.search_order,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `DirEventsReply`: the event results of a client's `DirFindQuery`
+    /// (surfaced as [`ServerEvent::DirFindQuery`]), echoing its `query_id`.
+    /// `status` is the `STATUS_SEARCH_EVENTS_*` flags (`0` on success).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_dir_events_reply(
+        &mut self,
+        query_id: Uuid,
+        results: &[DirEventResult],
+        status: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::DirEventsReply(DirEventsReply {
+            agent_data: DirEventsReplyAgentDataBlock {
+                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+            },
+            query_data: DirEventsReplyQueryDataBlock { query_id },
+            query_replies: results
+                .iter()
+                .map(|result| DirEventsReplyQueryRepliesBlock {
+                    owner_id: result.owner_id,
+                    name: with_nul(&result.name),
+                    event_id: result.event_id,
+                    date: with_nul(&result.date),
+                    unix_time: result.unix_time,
+                    event_flags: result.event_flags,
+                })
+                .collect(),
+            status_data: vec![DirEventsReplyStatusDataBlock { status }],
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `DirClassifiedReply`: the results of a client's
+    /// `DirClassifiedQuery` (surfaced as [`ServerEvent::DirClassifiedQuery`]),
+    /// echoing its `query_id`. `status` is the `STATUS_SEARCH_CLASSIFIEDS_*`
+    /// flags (`0` on success).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_dir_classified_reply(
+        &mut self,
+        query_id: Uuid,
+        results: &[DirClassifiedResult],
+        status: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::DirClassifiedReply(DirClassifiedReply {
+            agent_data: DirClassifiedReplyAgentDataBlock {
+                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+            },
+            query_data: DirClassifiedReplyQueryDataBlock { query_id },
+            query_replies: results
+                .iter()
+                .map(|result| DirClassifiedReplyQueryRepliesBlock {
+                    classified_id: result.classified_id,
+                    name: with_nul(&result.name),
+                    classified_flags: result.classified_flags,
+                    creation_date: result.creation_date,
+                    expiration_date: result.expiration_date,
+                    price_for_listing: result.price_for_listing,
+                })
+                .collect(),
+            status_data: vec![DirClassifiedReplyStatusDataBlock { status }],
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `DirPlacesReply`: the results of a client's `DirPlacesQuery`
+    /// (surfaced as [`ServerEvent::DirPlacesQuery`]), echoing its `query_id`.
+    /// `status` is the `STATUS_SEARCH_PLACES_*` flags (`0` on success).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_dir_places_reply(
+        &mut self,
+        query_id: Uuid,
+        results: &[DirPlaceResult],
+        status: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::DirPlacesReply(DirPlacesReply {
+            agent_data: DirPlacesReplyAgentDataBlock {
+                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+            },
+            query_data: vec![DirPlacesReplyQueryDataBlock { query_id }],
+            query_replies: results
+                .iter()
+                .map(|result| DirPlacesReplyQueryRepliesBlock {
+                    parcel_id: result.parcel_id,
+                    name: with_nul(&result.name),
+                    for_sale: result.for_sale,
+                    auction: result.auction,
+                    dwell: result.dwell,
+                })
+                .collect(),
+            status_data: vec![DirPlacesReplyStatusDataBlock { status }],
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `DirLandReply`: the results of a client's `DirLandQuery`
+    /// (surfaced as [`ServerEvent::DirLandQuery`]), echoing its `query_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_dir_land_reply(
+        &mut self,
+        query_id: Uuid,
+        results: &[DirLandResult],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::DirLandReply(DirLandReply {
+            agent_data: DirLandReplyAgentDataBlock {
+                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+            },
+            query_data: DirLandReplyQueryDataBlock { query_id },
+            query_replies: results
+                .iter()
+                .map(|result| DirLandReplyQueryRepliesBlock {
+                    parcel_id: result.parcel_id,
+                    name: with_nul(&result.name),
+                    auction: result.auction,
+                    for_sale: result.for_sale,
+                    sale_price: result.sale_price,
+                    actual_area: result.actual_area,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `AvatarPickerReply`: the results of a client's
+    /// `AvatarPickerRequest` (surfaced as [`ServerEvent::AvatarPickerRequest`]),
+    /// echoing its `query_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_avatar_picker_reply(
+        &mut self,
+        query_id: Uuid,
+        results: &[AvatarPickerResult],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::AvatarPickerReply(AvatarPickerReply {
+            agent_data: AvatarPickerReplyAgentDataBlock {
+                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                query_id,
+            },
+            data: results
+                .iter()
+                .map(|result| AvatarPickerReplyDataBlock {
+                    avatar_id: result.avatar_id,
+                    first_name: with_nul(&result.first_name),
+                    last_name: with_nul(&result.last_name),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `PlacesReply`: the land holdings answering a client's `PlacesQuery`
+    /// (surfaced as [`ServerEvent::PlacesQuery`]), echoing its `query_id` and
+    /// `transaction_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_places_reply(
+        &mut self,
+        query_id: Uuid,
+        transaction_id: Uuid,
+        results: &[PlacesResult],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::PlacesReply(PlacesReply {
+            agent_data: PlacesReplyAgentDataBlock {
+                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                query_id,
+            },
+            transaction_data: PlacesReplyTransactionDataBlock { transaction_id },
+            query_data: results
+                .iter()
+                .map(|result| PlacesReplyQueryDataBlock {
+                    owner_id: result.owner_id,
+                    name: with_nul(&result.name),
+                    desc: with_nul(&result.description),
+                    actual_area: result.actual_area,
+                    billable_area: result.billable_area,
+                    flags: result.flags,
+                    global_x: result.global_position.0,
+                    global_y: result.global_position.1,
+                    global_z: result.global_position.2,
+                    sim_name: with_nul(&result.sim_name),
+                    snapshot_id: result.snapshot_id,
+                    dwell: result.dwell,
+                    price: result.price,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
     /// Sends a `StartPingCheck` to the client; the client answers with a
     /// `CompletePingCheck`. Returns the ping id sent (so a caller can match the
     /// reply), or `None` if the circuit is not open.
@@ -1121,6 +1530,59 @@ impl SimSession {
                 self.events.push_back(ServerEvent::FindAgent {
                     hunter: find.agent_block.hunter,
                     prey: find.agent_block.prey,
+                });
+            }
+            AnyMessage::DirFindQuery(query) => {
+                self.events.push_back(ServerEvent::DirFindQuery {
+                    query_id: query.query_data.query_id,
+                    query_text: trimmed_string(&query.query_data.query_text),
+                    flags: DirFindFlags::from_bits(query.query_data.query_flags),
+                    query_start: query.query_data.query_start,
+                });
+            }
+            AnyMessage::DirPlacesQuery(query) => {
+                self.events.push_back(ServerEvent::DirPlacesQuery {
+                    query_id: query.query_data.query_id,
+                    query_text: trimmed_string(&query.query_data.query_text),
+                    flags: DirFindFlags::from_bits(query.query_data.query_flags),
+                    category: category_from_wire(query.query_data.category),
+                    sim_name: trimmed_string(&query.query_data.sim_name),
+                    query_start: query.query_data.query_start,
+                });
+            }
+            AnyMessage::DirLandQuery(query) => {
+                self.events.push_back(ServerEvent::DirLandQuery {
+                    query_id: query.query_data.query_id,
+                    flags: DirFindFlags::from_bits(query.query_data.query_flags),
+                    search_type: LandSearchType::from_bits(query.query_data.search_type),
+                    price: query.query_data.price,
+                    area: query.query_data.area,
+                    query_start: query.query_data.query_start,
+                });
+            }
+            AnyMessage::DirClassifiedQuery(query) => {
+                self.events.push_back(ServerEvent::DirClassifiedQuery {
+                    query_id: query.query_data.query_id,
+                    query_text: trimmed_string(&query.query_data.query_text),
+                    flags: DirFindFlags::from_bits(query.query_data.query_flags),
+                    category: query.query_data.category,
+                    query_start: query.query_data.query_start,
+                });
+            }
+            AnyMessage::AvatarPickerRequest(request) => {
+                self.events.push_back(ServerEvent::AvatarPickerRequest {
+                    query_id: request.agent_data.query_id,
+                    name: trimmed_string(&request.data.name),
+                });
+            }
+            AnyMessage::PlacesQuery(query) => {
+                self.events.push_back(ServerEvent::PlacesQuery {
+                    query_id: query.agent_data.query_id,
+                    transaction_id: query.transaction_data.transaction_id,
+                    query_text: trimmed_string(&query.query_data.query_text),
+                    flags: DirFindFlags::from_bits(query.query_data.query_flags),
+                    category: category_from_wire(query.query_data.category),
+                    sim_name: trimmed_string(&query.query_data.sim_name),
                 });
             }
             AnyMessage::LogoutRequest(_) => {

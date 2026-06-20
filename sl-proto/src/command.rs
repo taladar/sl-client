@@ -6,14 +6,15 @@
 
 use crate::{
     AnyMessage, AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction,
-    ControlFlags, CreateGroupParams, DeRezDestination, EstateAccessDelta, ExperiencePermission,
-    ExperienceUpdate, FriendRights, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMemberChange,
-    IceCandidate, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LindenAmount,
-    MapItemType, Material, MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MuteFlags,
-    MuteType, NewInventoryItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessScope, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PrimShape,
-    ProfileUpdate, RegionInfoUpdate, Reliability, RezAttachment, Rotation, SaleType,
-    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
+    ControlFlags, CreateGroupParams, DeRezDestination, DirFindFlags, EstateAccessDelta,
+    ExperiencePermission, ExperienceUpdate, FriendRights, GroupNoticeAttachment, GroupRoleEdit,
+    GroupRoleMemberChange, IceCandidate, InterestsUpdate, InventoryItem, InventoryOffer,
+    InventoryType, LandSearchType, LindenAmount, MapItemType, Material, MaterialOverrideUpdate,
+    MediaEntry, MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, ObjectFlagSettings,
+    ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelReturnType,
+    ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProfileUpdate, RegionInfoUpdate,
+    Reliability, RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
+    ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1080,6 +1081,101 @@ pub enum Command {
         hunter: Uuid,
         /// The agent to locate (the "prey").
         prey: Uuid,
+    },
+    /// Run a directory people / groups / events search (`DirFindQuery`): the
+    /// unified *Search* query whose [`DirFindFlags`] select what is searched
+    /// (set [`DirFindFlags::PEOPLE`], [`DirFindFlags::GROUPS`] or
+    /// [`DirFindFlags::EVENTS`]) and how the results are sorted/filtered. The
+    /// simulator answers with a matching
+    /// [`Event::DirPeopleReply`](crate::Event::DirPeopleReply),
+    /// [`Event::DirGroupsReply`](crate::Event::DirGroupsReply) or
+    /// [`Event::DirEventsReply`](crate::Event::DirEventsReply), correlated by
+    /// `query_id`.
+    DirFindQuery {
+        /// A client-chosen id echoed back in the reply.
+        query_id: Uuid,
+        /// The search text.
+        query_text: String,
+        /// What to search and how to sort/filter.
+        flags: DirFindFlags,
+        /// The 0-based index of the first result to return (for paging).
+        query_start: i32,
+    },
+    /// Search the places directory (`DirPlacesQuery`): named parcels, optionally
+    /// filtered by [`ParcelCategory`]. The simulator answers with a
+    /// [`Event::DirPlacesReply`](crate::Event::DirPlacesReply).
+    DirPlacesQuery {
+        /// A client-chosen id echoed back in the reply.
+        query_id: Uuid,
+        /// The search text.
+        query_text: String,
+        /// Result inclusion/sort flags (the maturity-inclusion and sort bits).
+        flags: DirFindFlags,
+        /// The parcel category to filter by ([`ParcelCategory::None`] for any).
+        category: ParcelCategory,
+        /// An optional region-name filter (empty for any region).
+        sim_name: String,
+        /// The 0-based index of the first result to return (for paging).
+        query_start: i32,
+    },
+    /// Search the land-for-sale directory (`DirLandQuery`): parcels for sale or
+    /// auction, filtered by sale type, price and area. The simulator answers
+    /// with a [`Event::DirLandReply`](crate::Event::DirLandReply).
+    DirLandQuery {
+        /// A client-chosen id echoed back in the reply.
+        query_id: Uuid,
+        /// Result inclusion/sort and limit flags (e.g.
+        /// [`DirFindFlags::FOR_SALE`], [`DirFindFlags::LIMIT_BY_PRICE`]).
+        flags: DirFindFlags,
+        /// Which sale types to include.
+        search_type: LandSearchType,
+        /// The price limit, applied when [`DirFindFlags::LIMIT_BY_PRICE`] is set.
+        price: i32,
+        /// The area limit, applied when [`DirFindFlags::LIMIT_BY_AREA`] is set.
+        area: i32,
+        /// The 0-based index of the first result to return (for paging).
+        query_start: i32,
+    },
+    /// Search the classifieds directory (`DirClassifiedQuery`). The simulator
+    /// answers with a [`Event::DirClassifiedReply`](crate::Event::DirClassifiedReply).
+    DirClassifiedQuery {
+        /// A client-chosen id echoed back in the reply.
+        query_id: Uuid,
+        /// The search text.
+        query_text: String,
+        /// Result inclusion/sort flags (the maturity-inclusion and sort bits).
+        flags: DirFindFlags,
+        /// The classified category to filter by (`0` for any).
+        category: u32,
+        /// The 0-based index of the first result to return (for paging).
+        query_start: i32,
+    },
+    /// Autocomplete avatar names (`AvatarPickerRequest`): the name-picker lookup.
+    /// The simulator answers with an
+    /// [`Event::AvatarPickerReply`](crate::Event::AvatarPickerReply).
+    AvatarPickerRequest {
+        /// A client-chosen id echoed back in the reply.
+        query_id: Uuid,
+        /// The (partial) name to match.
+        name: String,
+    },
+    /// Look up an agent's or group's land holdings (`PlacesQuery`): the land /
+    /// group-land panels (distinct from the directory search). The simulator
+    /// answers with a [`Event::PlacesReply`](crate::Event::PlacesReply).
+    PlacesQuery {
+        /// A client-chosen id echoed back in the reply.
+        query_id: Uuid,
+        /// A correlation id echoed back in the reply (the viewer reuses it to
+        /// route the reply to the requesting panel).
+        transaction_id: Uuid,
+        /// The search text (empty for all holdings).
+        query_text: String,
+        /// Result flags (the holdings-selection bits).
+        flags: DirFindFlags,
+        /// The parcel category to filter by.
+        category: ParcelCategory,
+        /// An optional region-name filter (empty for any region).
+        sim_name: String,
     },
     /// Upload a new asset over the legacy UDP path (`AssetUploadRequest`): stores
     /// the asset bytes (small assets inline, larger ones over `Xfer`) without
