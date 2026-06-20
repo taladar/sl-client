@@ -2785,6 +2785,37 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "request_script_running",
+            usage: "<object_id> <item_id>",
+            build: |args, ctx| {
+                Ok(Command::RequestScriptRunning {
+                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    item_id: args.req_uuid(ctx, "item_id", 1)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "set_script_running",
+            usage: "<object_id> <item_id> <running>",
+            build: |args, ctx| {
+                Ok(Command::SetScriptRunning {
+                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    item_id: args.req_uuid(ctx, "item_id", 1)?,
+                    running: args.req_bool(ctx, "running", 2)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "reset_script",
+            usage: "<object_id> <item_id>",
+            build: |args, ctx| {
+                Ok(Command::ResetScript {
+                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    item_id: args.req_uuid(ctx, "item_id", 1)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "request_texture",
             usage: "<texture_id> [discard_level=0] [priority=1.0]",
             build: |args, ctx| {
@@ -4036,6 +4067,46 @@ mod tests {
         assert!(matches!(
             build("remove_telehub_spawn_point 2"),
             Ok(Command::RemoveTelehubSpawnPoint { spawn_index: 2 })
+        ));
+    }
+
+    #[test]
+    fn request_script_running_parses() {
+        assert!(matches!(
+            build(
+                "request_script_running \
+                 11111111-1111-1111-1111-111111111111 \
+                 22222222-2222-2222-2222-222222222222"
+            ),
+            Ok(Command::RequestScriptRunning { object_id, item_id })
+                if object_id == Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111)
+                    && item_id == Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222)
+        ));
+    }
+
+    #[test]
+    fn set_script_running_parses_running_flag() {
+        assert!(matches!(
+            build(
+                "set_script_running \
+                 11111111-1111-1111-1111-111111111111 \
+                 22222222-2222-2222-2222-222222222222 true"
+            ),
+            Ok(Command::SetScriptRunning { running: true, .. })
+        ));
+    }
+
+    #[test]
+    fn reset_script_parses() {
+        assert!(matches!(
+            build(
+                "reset_script \
+                 11111111-1111-1111-1111-111111111111 \
+                 22222222-2222-2222-2222-222222222222"
+            ),
+            Ok(Command::ResetScript { object_id, item_id })
+                if object_id == Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111)
+                    && item_id == Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222)
         ));
     }
 }

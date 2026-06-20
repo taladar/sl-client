@@ -1688,6 +1688,23 @@ fn advance_running(
             Command::RezObjectFromNotecard { rez } => {
                 session.rez_object_from_notecard(rez, now).ok();
             }
+            Command::RequestScriptRunning { object_id, item_id } => {
+                session
+                    .request_script_running(*object_id, *item_id, now)
+                    .ok();
+            }
+            Command::SetScriptRunning {
+                object_id,
+                item_id,
+                running,
+            } => {
+                session
+                    .set_script_running(*object_id, *item_id, *running, now)
+                    .ok();
+            }
+            Command::ResetScript { object_id, item_id } => {
+                session.reset_script(*object_id, *item_id, now).ok();
+            }
             Command::UploadAssetUdp {
                 asset_type,
                 data,

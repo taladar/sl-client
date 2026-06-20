@@ -713,6 +713,16 @@ pub enum Event {
         /// The quick-pay button amounts, in L$.
         pay_buttons: Vec<i32>,
     },
+    /// A task script's run state (`ScriptRunningReply`), in response to a
+    /// [`Command::RequestScriptRunning`](crate::Command::RequestScriptRunning).
+    ScriptRunning {
+        /// The object (task) holding the script.
+        object_id: Uuid,
+        /// The script inventory item inside that task.
+        item_id: Uuid,
+        /// Whether the script is currently running.
+        running: bool,
+    },
     /// An object's per-face **media-on-a-prim** settings, decoded from an
     /// `ObjectMedia` capability GET reply (the runtime `RequestObjectMedia`
     /// command). Each [`faces`](Event::ObjectMedia::faces) slot is the

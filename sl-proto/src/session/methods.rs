@@ -2253,6 +2253,14 @@ impl Session {
                     },
                 });
             }
+            AnyMessage::ScriptRunningReply(reply) => {
+                let script = &reply.script;
+                self.events.push_back(Event::ScriptRunning {
+                    object_id: script.object_id,
+                    item_id: script.item_id,
+                    running: script.running,
+                });
+            }
             AnyMessage::GenericMessage(generic)
                 // The sim NUL-terminates the method name on the wire.
                 if trimmed_string(&generic.method_data.method) == "emptymutelist" =>
@@ -4817,6 +4825,61 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_rez_object_from_notecard(rez, now)?;
+        Ok(())
+    }
+
+    /// Asks whether the script `item_id` inside the task `object_id` is running
+    /// via `GetScriptRunning`. The reply arrives as [`Event::ScriptRunning`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_script_running(
+        &mut self,
+        object_id: Uuid,
+        item_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_get_script_running(object_id, item_id, now)?;
+        Ok(())
+    }
+
+    /// Starts or stops the script `item_id` inside the task `object_id` via
+    /// `SetScriptRunning` (`running` selects run vs. stop).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_script_running(
+        &mut self,
+        object_id: Uuid,
+        item_id: Uuid,
+        running: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_set_script_running(object_id, item_id, running, now)?;
+        Ok(())
+    }
+
+    /// Resets the script `item_id` inside the task `object_id` to its initial
+    /// state via `ScriptReset`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn reset_script(
+        &mut self,
+        object_id: Uuid,
+        item_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_script_reset(object_id, item_id, now)?;
         Ok(())
     }
 

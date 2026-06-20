@@ -52,7 +52,8 @@ use sl_wire::messages::{
     ObjectPropertiesFamilyObjectDataBlock as ObjectPropertiesFamilyObjectDataBlockMessage,
     ParcelInfoReply, ParcelInfoReplyAgentDataBlock, ParcelInfoReplyDataBlock,
     ParcelObjectOwnersReply, ParcelObjectOwnersReplyDataBlock, PayPriceReply,
-    PayPriceReplyButtonDataBlock, PayPriceReplyObjectDataBlock, TelehubInfo as TelehubInfoMessage,
+    PayPriceReplyButtonDataBlock, PayPriceReplyObjectDataBlock, ScriptRunningReply,
+    ScriptRunningReplyScriptBlock, TelehubInfo as TelehubInfoMessage,
     TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock,
 };
 use sl_wire::{
@@ -547,6 +548,30 @@ pub enum ServerEvent {
     RequestParcelInfo {
         /// The parcel's grid-wide id.
         parcel_id: Uuid,
+    },
+    /// The client asked whether a task's script is running (`GetScriptRunning`);
+    /// the simulator answers with [`SimSession::send_script_running_reply`].
+    RequestScriptRunning {
+        /// The object (task) holding the script.
+        object_id: Uuid,
+        /// The script inventory item inside that task.
+        item_id: Uuid,
+    },
+    /// The client asked to start or stop a task's script (`SetScriptRunning`).
+    SetScriptRunning {
+        /// The object (task) holding the script.
+        object_id: Uuid,
+        /// The script inventory item inside that task.
+        item_id: Uuid,
+        /// `true` to run the script, `false` to stop it.
+        running: bool,
+    },
+    /// The client asked to reset a task's script (`ScriptReset`).
+    ResetScript {
+        /// The object (task) holding the script.
+        object_id: Uuid,
+        /// The script inventory item inside that task.
+        item_id: Uuid,
     },
     /// The client asked for the estate covenant (`EstateCovenantRequest`); the
     /// simulator answers with [`SimSession::send_estate_covenant_reply`].
@@ -1424,6 +1449,35 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends a `ScriptRunningReply`: a task script's run state, in response to a
+    /// client's `GetScriptRunning` (surfaced as
+    /// [`ServerEvent::RequestScriptRunning`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_script_running_reply(
+        &mut self,
+        object_id: Uuid,
+        item_id: Uuid,
+        running: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ScriptRunningReply(ScriptRunningReply {
+            script: ScriptRunningReplyScriptBlock {
+                object_id,
+                item_id,
+                running,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
     /// Sends an `ObjectPropertiesFamily`: an object's condensed broadcast
     /// properties, in response to a client's `RequestObjectPropertiesFamily`
     /// (surfaced as [`ServerEvent::RequestObjectPropertiesFamily`]).
@@ -2210,6 +2264,25 @@ impl SimSession {
             AnyMessage::ParcelInfoRequest(request) => {
                 self.events.push_back(ServerEvent::RequestParcelInfo {
                     parcel_id: request.data.parcel_id,
+                });
+            }
+            AnyMessage::GetScriptRunning(request) => {
+                self.events.push_back(ServerEvent::RequestScriptRunning {
+                    object_id: request.script.object_id,
+                    item_id: request.script.item_id,
+                });
+            }
+            AnyMessage::SetScriptRunning(request) => {
+                self.events.push_back(ServerEvent::SetScriptRunning {
+                    object_id: request.script.object_id,
+                    item_id: request.script.item_id,
+                    running: request.script.running,
+                });
+            }
+            AnyMessage::ScriptReset(request) => {
+                self.events.push_back(ServerEvent::ResetScript {
+                    object_id: request.script.object_id,
+                    item_id: request.script.item_id,
                 });
             }
             AnyMessage::EstateCovenantRequest(_) => {

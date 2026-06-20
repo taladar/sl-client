@@ -103,17 +103,17 @@ mod test {
         RegionInfoCombatSettingsBlock, RegionInfoRegionInfo2Block, RegionInfoRegionInfo3Block,
         RegionInfoRegionInfo5Block, RegionInfoRegionInfoBlock, RequestXfer, RequestXferXferIDBlock,
         ScriptDialog, ScriptDialogButtonsBlock, ScriptDialogDataBlock, ScriptDialogOwnerDataBlock,
-        ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock,
-        ScriptTeleportRequest, ScriptTeleportRequestDataBlock, ScriptTeleportRequestOptionsBlock,
-        SendXferPacket, SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock, SoundTrigger,
-        SoundTriggerSoundDataBlock, TelehubInfo as TelehubInfoMessage,
-        TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock, TeleportFailed,
-        TeleportFailedAlertInfoBlock, TeleportFailedInfoBlock, TeleportFinish,
-        TeleportFinishInfoBlock, TransferInfo, TransferInfoTransferInfoBlock, TransferPacket,
-        TransferPacketTransferDataBlock, UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock,
-        UpdateCreateInventoryItem, UpdateCreateInventoryItemAgentDataBlock,
-        UpdateCreateInventoryItemInventoryDataBlock, UseCachedMuteList,
-        UseCachedMuteListAgentDataBlock, ViewerEffect as ViewerEffectMessage,
+        ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock, ScriptRunningReply,
+        ScriptRunningReplyScriptBlock, ScriptTeleportRequest, ScriptTeleportRequestDataBlock,
+        ScriptTeleportRequestOptionsBlock, SendXferPacket, SendXferPacketDataPacketBlock,
+        SendXferPacketXferIDBlock, SoundTrigger, SoundTriggerSoundDataBlock,
+        TelehubInfo as TelehubInfoMessage, TelehubInfoSpawnPointBlockBlock,
+        TelehubInfoTelehubBlockBlock, TeleportFailed, TeleportFailedAlertInfoBlock,
+        TeleportFailedInfoBlock, TeleportFinish, TeleportFinishInfoBlock, TransferInfo,
+        TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
+        UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock, UpdateCreateInventoryItem,
+        UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
+        UseCachedMuteList, UseCachedMuteListAgentDataBlock, ViewerEffect as ViewerEffectMessage,
         ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
     };
     use sl_wire::{
@@ -4388,6 +4388,85 @@ mod test {
         );
         assert!(rez.rez_data.ray_end_is_intersection);
         assert_eq!(rez.inventory_data.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn script_g9_commands_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let object_id = uuid::Uuid::from_u128(0x0B1E);
+        let item_id = uuid::Uuid::from_u128(0x17E3);
+        session.request_script_running(object_id, item_id, now)?;
+        session.set_script_running(object_id, item_id, true, now)?;
+        session.reset_script(object_id, item_id, now)?;
+        let sent = drain(&mut session)?;
+
+        let get = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::GetScriptRunning(get) => Some(get),
+                _ => None,
+            })
+            .ok_or("expected a GetScriptRunning")?;
+        assert_eq!(get.script.object_id, object_id);
+        assert_eq!(get.script.item_id, item_id);
+
+        let set = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::SetScriptRunning(set) => Some(set),
+                _ => None,
+            })
+            .ok_or("expected a SetScriptRunning")?;
+        assert_eq!(set.script.object_id, object_id);
+        assert_eq!(set.script.item_id, item_id);
+        assert!(set.script.running);
+
+        let reset = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ScriptReset(reset) => Some(reset),
+                _ => None,
+            })
+            .ok_or("expected a ScriptReset")?;
+        assert_eq!(reset.script.object_id, object_id);
+        assert_eq!(reset.script.item_id, item_id);
+        Ok(())
+    }
+
+    #[test]
+    fn script_running_reply_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let reply = AnyMessage::ScriptRunningReply(ScriptRunningReply {
+            script: ScriptRunningReplyScriptBlock {
+                object_id: uuid::Uuid::from_u128(0x0B1E),
+                item_id: uuid::Uuid::from_u128(0x17E3),
+                running: true,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&reply, 9, true)?, now)?;
+
+        let running = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ScriptRunning {
+                    object_id,
+                    item_id,
+                    running,
+                } => Some((object_id, item_id, running)),
+                _ => None,
+            })
+            .ok_or("expected a ScriptRunning event")?;
+        assert_eq!(running.0, uuid::Uuid::from_u128(0x0B1E));
+        assert_eq!(running.1, uuid::Uuid::from_u128(0x17E3));
+        assert!(running.2);
         Ok(())
     }
 

@@ -249,6 +249,7 @@ fn on_events(
             | SlSessionEvent::EventInfoReply { .. }
             | SlSessionEvent::ObjectPropertiesFamily { .. }
             | SlSessionEvent::PayPriceReply { .. }
+            | SlSessionEvent::ScriptRunning { .. }
             | SlSessionEvent::ParcelObjectOwners { .. }
             | SlSessionEvent::ParcelDetails(_)
             | SlSessionEvent::RemoteParcelId(_)

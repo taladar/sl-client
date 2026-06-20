@@ -1097,6 +1097,32 @@ pub enum Command {
         /// The rez parameters (ray placement, permissions, notecard, items).
         rez: NotecardRez,
     },
+    /// Ask whether a task's script is currently running (`GetScriptRunning`);
+    /// the simulator answers with
+    /// [`Event::ScriptRunning`](crate::Event::ScriptRunning).
+    RequestScriptRunning {
+        /// The object (task) holding the script.
+        object_id: Uuid,
+        /// The script inventory item inside that task.
+        item_id: Uuid,
+    },
+    /// Start or stop a task's script (`SetScriptRunning`).
+    SetScriptRunning {
+        /// The object (task) holding the script.
+        object_id: Uuid,
+        /// The script inventory item inside that task.
+        item_id: Uuid,
+        /// `true` to run the script, `false` to stop it.
+        running: bool,
+    },
+    /// Reset a task's script to its initial state (`ScriptReset`), as if it had
+    /// just been (re)compiled.
+    ResetScript {
+        /// The object (task) holding the script.
+        object_id: Uuid,
+        /// The script inventory item inside that task.
+        item_id: Uuid,
+    },
     /// Request a texture over the legacy UDP image path (`RequestImage`); the
     /// reassembled image arrives as [`Event::TextureReceived`](crate::Event::TextureReceived) (or
     /// [`Event::TextureNotFound`](crate::Event::TextureNotFound)).

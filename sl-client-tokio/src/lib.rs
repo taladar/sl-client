@@ -1031,6 +1031,15 @@ impl Client {
                         Some(Command::RezObjectFromNotecard { rez }) => {
                             self.session.rez_object_from_notecard(&rez, Instant::now())?;
                         }
+                        Some(Command::RequestScriptRunning { object_id, item_id }) => {
+                            self.session.request_script_running(object_id, item_id, Instant::now())?;
+                        }
+                        Some(Command::SetScriptRunning { object_id, item_id, running }) => {
+                            self.session.set_script_running(object_id, item_id, running, Instant::now())?;
+                        }
+                        Some(Command::ResetScript { object_id, item_id }) => {
+                            self.session.reset_script(object_id, item_id, Instant::now())?;
+                        }
                         Some(Command::UploadAssetUdp { asset_type, data, temp_file, store_local }) => {
                             self.session.upload_asset_udp(asset_type, data, temp_file, store_local, Instant::now())?;
                         }
