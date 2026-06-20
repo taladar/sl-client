@@ -4,16 +4,16 @@ use std::net::SocketAddr;
 
 use super::{
     ActiveGroup, AlertInfo, Asset, AssetType, AvatarAppearance, AvatarClassified,
-    AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, ChatMessage,
-    ClassifiedInfo, DisconnectReason, EconomyData, EstateAccessKind, EstateInfo, Friend,
-    FriendRights, GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole,
-    GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapRegionInfo, Maturity, MoneyBalance,
-    MuteEntry, NeighborInfo, Object, ObjectProperties, ParcelAccessEntry, ParcelAccessScope,
-    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, PickInfo,
-    PlayingAnimation, RegionIdentity, RegionLimits, ScriptDialog, ScriptPermissionRequest,
-    ScriptTeleportRequest, SoundFlags, SoundPreload, TeleportFlags, TerrainPatch, Texture,
-    TransferStatus, Wearable,
+    AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPick, AvatarProperties, ChatMessage,
+    ClassifiedInfo, DisconnectReason, EconomyData, EnvironmentSettings, EstateAccessKind,
+    EstateInfo, Friend, FriendRights, GroupMember, GroupMembership, GroupName, GroupNotice,
+    GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
+    InventoryFolder, InventoryItem, LoadUrlRequest, LoginAccount, MapItem, MapItemType,
+    MapRegionInfo, Maturity, MoneyBalance, MuteEntry, NeighborInfo, Object, ObjectProperties,
+    ParcelAccessEntry, ParcelAccessScope, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelOverlayInfo, PickInfo, PlayingAnimation, RegionIdentity, RegionLimits, ScriptDialog,
+    ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload, TeleportFlags,
+    TerrainPatch, Texture, TransferStatus, Wearable,
 };
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
@@ -42,6 +42,18 @@ pub enum Event {
     /// The current region's agent and object limits, parsed from a `RegionInfo`
     /// reply to [`Session::request_region_info`](crate::Session::request_region_info).
     RegionLimits(RegionLimits),
+    /// Legacy avatar names resolved from a `UUIDNameReply` (a reply to
+    /// [`Session::request_avatar_names`](crate::Session::request_avatar_names)).
+    /// A single reply may batch several ids, and one request may be answered by
+    /// several replies.
+    AvatarNames(Vec<AvatarName>),
+    /// Group names resolved from a `UUIDGroupNameReply` (a reply to
+    /// [`Session::request_group_names`](crate::Session::request_group_names)).
+    GroupNames(Vec<GroupName>),
+    /// The extended-environment (EEP) sky/water/day-cycle settings for the region
+    /// or a parcel, parsed from the `ExtEnvironment` capability (the reply to
+    /// [`Command::RequestEnvironment`](crate::Command::RequestEnvironment)).
+    Environment(Box<EnvironmentSettings>),
     /// The agent's L$ balance, parsed from a `MoneyBalanceReply` (a reply to
     /// [`Session::request_money_balance`](crate::Session::request_money_balance),
     /// or pushed by the simulator after a transaction changes the balance).

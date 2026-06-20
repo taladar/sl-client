@@ -1689,6 +1689,33 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |_args, _ctx| Ok(Command::RequestRegionInfo),
         },
         CommandSpec {
+            name: "request_avatar_names",
+            usage: "<agent_id> [agent_id...]",
+            build: |args, ctx| {
+                Ok(Command::RequestAvatarNames(
+                    args.req_uuid_list(ctx, "agent_id", 0)?,
+                ))
+            },
+        },
+        CommandSpec {
+            name: "request_group_names",
+            usage: "<group_id> [group_id...]",
+            build: |args, ctx| {
+                Ok(Command::RequestGroupNames(
+                    args.req_uuid_list(ctx, "group_id", 0)?,
+                ))
+            },
+        },
+        CommandSpec {
+            name: "request_environment",
+            usage: "[parcel_id]",
+            build: |args, ctx| {
+                Ok(Command::RequestEnvironment {
+                    parcel_id: args.opt_parse(ctx, "parcel_id", 0, "i32")?,
+                })
+            },
+        },
+        CommandSpec {
             name: "request_parcel_properties",
             usage: "<west> <south> <east> <north> [sequence_id=0]",
             build: |args, ctx| {

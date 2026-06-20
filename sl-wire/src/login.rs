@@ -251,6 +251,16 @@ pub struct LoginSuccess {
     /// The camera look-at direction at the start location, parsed from the
     /// top-level `look_at` response field, if present and well-formed.
     pub look_at: Option<[f32; 3]>,
+    /// The global X metre coordinate of the start region's south-west corner,
+    /// from the top-level `region_x` response field. `None` if the grid did not
+    /// provide it. Together with [`region_y`](Self::region_y) this packs into the
+    /// start region's handle (`(region_x << 32) | region_y`); divide either by
+    /// 256 for the grid coordinate (region index).
+    pub region_x: Option<u32>,
+    /// The global Y metre coordinate of the start region's south-west corner,
+    /// from the top-level `region_y` response field. See
+    /// [`region_x`](Self::region_x).
+    pub region_y: Option<u32>,
     /// The account's current maturity/content rating (`agent_access`), as the
     /// grid's short code: `"PG"`, `"M"` (mature), or `"A"` (adult). `None` if
     /// the grid did not provide it.
@@ -415,6 +425,8 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
         buddy_list: parse_buddy_list(response_struct),
         home: members.get("home").and_then(|h| parse_home(h)),
         look_at: members.get("look_at").and_then(|l| parse_vector3(l)),
+        region_x: members.get("region_x").and_then(|x| x.trim().parse().ok()),
+        region_y: members.get("region_y").and_then(|y| y.trim().parse().ok()),
         agent_access: members.get("agent_access").cloned(),
         agent_access_max: members.get("agent_access_max").cloned(),
         max_agent_groups: members
@@ -847,6 +859,12 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
     }
     if let Some(look_at) = success.look_at {
         push_string_member(out, "look_at", &vector3_to_string(look_at));
+    }
+    if let Some(region_x) = success.region_x {
+        push_int_member(out, "region_x", i64::from(region_x));
+    }
+    if let Some(region_y) = success.region_y {
+        push_int_member(out, "region_y", i64::from(region_y));
     }
     push_opt_string_member(out, "agent_access", success.agent_access.as_deref());
     push_opt_string_member(out, "agent_access_max", success.agent_access_max.as_deref());

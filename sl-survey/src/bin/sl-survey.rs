@@ -695,7 +695,10 @@ impl Survey {
             | Event::RegionExperiences { .. }
             | Event::ConferenceSessionMessage { .. }
             | Event::ConferenceSessionParticipant { .. }
-            | Event::ConferenceInvited { .. } => {}
+            | Event::ConferenceInvited { .. }
+            | Event::AvatarNames(_)
+            | Event::GroupNames(_)
+            | Event::Environment(_) => {}
         }
         Ok(false)
     }

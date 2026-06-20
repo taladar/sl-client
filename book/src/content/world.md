@@ -44,6 +44,10 @@ factor, and whether you are an estate manager there. The client replies with
 `RegionHandshakeReply`, after which the scene/terrain stream begins. Richer,
 updatable region settings (`RegionInfo`) can be requested afterward.
 
+The descriptive and configuration data of a region — its identity, agent
+limits, estate, and sky/water environment — is covered on its own in
+[Region & Estate Information](region.md); this chapter is about the live scene.
+
 ## Terrain
 
 The ground is a heightfield, delivered as compressed **terrain patches** — small

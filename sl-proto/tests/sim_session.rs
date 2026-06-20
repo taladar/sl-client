@@ -10,9 +10,10 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        ChatType, Event, ImDialog, LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity,
-        ServerEvent, Session, SimSession, Throttle, Transmit, enable_simulator_to_caps_llsd,
-        grid_to_handle, parse_event_queue_response,
+        AvatarName, ChatType, Event, GroupName, ImDialog, LoginParams, MapItem, MapItemType,
+        MapRegionInfo, Maturity, ProductType, RegionIdentity, ServerEvent, Session, SimSession,
+        Throttle, Transmit, enable_simulator_to_caps_llsd, grid_to_handle,
+        parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -67,6 +68,8 @@ mod test {
             buddy_list: Vec::new(),
             home: None,
             look_at: None,
+            region_x: None,
+            region_y: None,
             agent_access: None,
             agent_access_max: None,
             max_agent_groups: None,
@@ -575,6 +578,131 @@ mod test {
             .ok_or("expected a MapItems client event")?;
         assert_eq!(reply.0, MapItemType::AgentLocations);
         assert_eq!(reply.1, items);
+        Ok(())
+    }
+
+    #[test]
+    fn send_region_handshake_encodes_the_identity() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (_client, mut sim) = setup(now)?;
+
+        let identity = RegionIdentity {
+            sim_name: "Server Region".to_owned(),
+            region_id: uuid::Uuid::from_u128(0xBEEF),
+            // Grid coordinates / handle are not wire fields of the handshake.
+            region_handle: 0,
+            grid_x: 0,
+            grid_y: 0,
+            region_flags: 0x40,
+            region_flags_extended: 0x1_0000_0040,
+            region_protocols: 0x5,
+            maturity: Maturity::Mature,
+            product: ProductType::Homestead,
+            product_sku: String::new(),
+            product_name: "Homestead".to_owned(),
+            cpu_class_id: 4,
+            cpu_ratio: 8,
+            sim_owner: uuid::Uuid::from_u128(0x0411),
+            is_estate_manager: true,
+            water_height: 20.0,
+            billable_factor: 1.0,
+        };
+        sim.send_region_handshake(&identity, now)?;
+
+        let mut handshake = None;
+        while let Some(transmit) = sim.poll_transmit() {
+            if let AnyMessage::RegionHandshake(decoded) = decode(&transmit)? {
+                handshake = Some(decoded);
+            }
+        }
+        let handshake = handshake.ok_or("a RegionHandshake datagram was sent")?;
+        assert_eq!(
+            handshake.region_info2.region_id,
+            uuid::Uuid::from_u128(0xBEEF)
+        );
+        assert_eq!(handshake.region_info3.cpu_class_id, 4);
+        assert_eq!(handshake.region_info3.cpu_ratio, 8);
+        assert_eq!(handshake.region_info.region_flags, 0x40);
+        assert_eq!(
+            handshake.region_info.sim_access,
+            Maturity::Mature.to_sim_access()
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&handshake.region_info.sim_name).trim_end_matches('\0'),
+            "Server Region"
+        );
+        let info4 = handshake
+            .region_info4
+            .first()
+            .ok_or("a RegionInfo4 block")?;
+        assert_eq!(info4.region_flags_extended, 0x1_0000_0040);
+        assert_eq!(info4.region_protocols, 0x5);
+        Ok(())
+    }
+
+    #[test]
+    fn uuid_name_request_round_trips_through_the_simulator() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let alice = uuid::Uuid::from_u128(0xA11CE);
+        let club = uuid::Uuid::from_u128(0xC1B);
+        client.request_avatar_names(&[alice], now)?;
+        client.request_group_names(&[club], now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        // The simulator surfaces both lookups for the application to answer.
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(
+                |event| matches!(event, ServerEvent::AvatarNamesRequested(ids) if ids == &[alice])
+            ),
+            "expected AvatarNamesRequested, got {server_events:?}"
+        );
+        assert!(
+            server_events.iter().any(
+                |event| matches!(event, ServerEvent::GroupNamesRequested(ids) if ids == &[club])
+            ),
+            "expected GroupNamesRequested, got {server_events:?}"
+        );
+
+        // The simulator answers; the client decodes the names.
+        sim.send_avatar_names(
+            &[AvatarName {
+                id: alice,
+                first_name: "Alice".to_owned(),
+                last_name: "Liddell".to_owned(),
+            }],
+            now,
+        )?;
+        sim.send_group_names(
+            &[GroupName {
+                id: club,
+                name: "The Club".to_owned(),
+            }],
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        let avatar = client_events
+            .iter()
+            .find_map(|event| match event {
+                Event::AvatarNames(names) => names.iter().find(|name| name.id == alice),
+                _ => None,
+            })
+            .ok_or("expected the avatar name on the client")?;
+        assert_eq!(avatar.legacy_name(), "Alice Liddell");
+        let group = client_events
+            .iter()
+            .find_map(|event| match event {
+                Event::GroupNames(names) => names.iter().find(|name| name.id == club),
+                _ => None,
+            })
+            .ok_or("expected the group name on the client")?;
+        assert_eq!(group.name, "The Club");
         Ok(())
     }
 }

@@ -284,6 +284,11 @@ pub const CAP_LIBRARY_API_V3: &str = "LibraryAPIv3";
 /// OpenSim and Second Life. Decoded into [`Event::InventoryBulkUpdate`].
 pub const CAP_CREATE_INVENTORY_CATEGORY: &str = "CreateInventoryCategory";
 
+/// The HTTP capability for the Extended Environment (EEP): an HTTP `GET` of
+/// `?parcelid=<id>` (or `-1` for the region) returns the region/parcel sky,
+/// water, and day-cycle settings as LLSD. Decoded into [`Event::Environment`].
+pub const CAP_EXT_ENVIRONMENT: &str = "ExtEnvironment";
+
 /// The viewer's `TELEPORT_FLAGS_VIA_LURE` (`1 << 2`), sent in a
 /// `TeleportLureRequest` when accepting a teleport lure (#28).
 const TELEPORT_FLAGS_VIA_LURE: u32 = 4;
@@ -335,6 +340,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_INVENTORY_API_V3,
     CAP_LIBRARY_API_V3,
     CAP_CREATE_INVENTORY_CATEGORY,
+    CAP_EXT_ENVIRONMENT,
 ];
 
 /// The maximum UDP datagram size an I/O driver should be prepared to receive.
@@ -734,11 +740,11 @@ mod circuit;
 mod conversions;
 mod methods;
 
-pub(crate) use conversions::{ZERO_VECTOR, instant_message};
+pub(crate) use conversions::{ZERO_VECTOR, instant_message, region_handshake_message};
 pub use conversions::{
     ais_inventory_update_to_llsd, build_map_block_reply, build_map_item_reply,
     bulk_update_inventory_to_llsd, chatterbox_invitation_to_llsd, created_category_to_llsd,
-    crossed_region_to_caps_llsd, enable_simulator_to_caps_llsd,
+    crossed_region_to_caps_llsd, enable_simulator_to_caps_llsd, environment_to_llsd,
     establish_agent_communication_to_llsd, group_members_to_caps_llsd,
     group_memberships_to_caps_llsd, inventory_descendents_to_llsd, offline_messages_to_llsd,
     parcel_info_to_llsd, server_appearance_update_to_llsd, teleport_finish_to_llsd,

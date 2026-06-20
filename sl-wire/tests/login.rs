@@ -459,6 +459,8 @@ mod test {
                 look_at: [1.0, 0.0, 0.0],
             }),
             look_at: Some([0.9994, 0.0316, 0.0]),
+            region_x: Some(256_000),
+            region_y: Some(256_256),
             agent_access: Some("M".to_owned()),
             agent_access_max: Some("A".to_owned()),
             max_agent_groups: Some(42),
@@ -502,6 +504,8 @@ mod test {
         assert_vec3_approx(home.position, [128.5, 127.0, 25.75]);
         assert_vec3_approx(home.look_at, [1.0, 0.0, 0.0]);
         assert_vec3_approx(parsed.look_at.ok_or("look_at")?, [0.9994, 0.0316, 0.0]);
+        assert_eq!(parsed.region_x, Some(256_000));
+        assert_eq!(parsed.region_y, Some(256_256));
         assert_eq!(parsed.agent_access.as_deref(), Some("M"));
         assert_eq!(parsed.agent_access_max.as_deref(), Some("A"));
         assert_eq!(parsed.max_agent_groups, Some(42));

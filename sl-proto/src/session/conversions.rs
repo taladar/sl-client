@@ -4,15 +4,16 @@
 use crate::appearance;
 use crate::types::{
     ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment, AvatarGroupMembership,
-    AvatarInterests, AvatarProperties, ChatAudible, ChatMessage, ChatSourceType, ChatType,
-    ClassifiedInfo, EconomyData, EstateAccessKind, EstateInfo, Event, Friend, FriendRights,
-    GroupMember, GroupMembership, GroupNotice, GroupProfile, GroupRole, GroupTitle, ImDialog,
-    InstantMessage, InventoryFolder, InventoryItem, LandingType, MapItem, MapItemType,
-    MapRegionInfo, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, Object, ObjectProperties, ParcelCategory, ParcelInfo, ParcelRequestResult,
-    ParcelStatus, PickInfo, PlayingAnimation, PrimShapeParams, ProductType, RegionChatSettings,
-    RegionCombatSettings, RegionIdentity, RegionLimits, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, avatar_texture, grid_to_handle, handle_to_grid,
+    AvatarInterests, AvatarName, AvatarProperties, ChatAudible, ChatMessage, ChatSourceType,
+    ChatType, ClassifiedInfo, DayCycle, DayCycleFrame, EconomyData, EnvironmentSettings,
+    EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupMember, GroupMembership,
+    GroupName, GroupNotice, GroupProfile, GroupRole, GroupTitle, ImDialog, InstantMessage,
+    InventoryFolder, InventoryItem, LandingType, MapItem, MapItemType, MapRegionInfo, Maturity,
+    MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object,
+    ObjectProperties, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo,
+    PlayingAnimation, PrimShapeParams, ProductType, RegionChatSettings, RegionCombatSettings,
+    RegionIdentity, RegionLimits, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    SkySettings, WaterSettings, avatar_texture, grid_to_handle, handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
@@ -29,11 +30,11 @@ use sl_wire::messages::{
     InventoryDescendentsItemDataBlock, MapBlockReply, MapBlockReplyAgentDataBlock,
     MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapItemReply, MapItemReplyAgentDataBlock,
     MapItemReplyDataBlock, MapItemReplyRequestDataBlock, ObjectPropertiesObjectDataBlock,
-    ObjectUpdateObjectDataBlock, ParcelProperties, PickInfoReplyDataBlock,
-    UpdateCreateInventoryItemInventoryDataBlock,
+    ObjectUpdateObjectDataBlock, ParcelProperties, PickInfoReplyDataBlock, UUIDGroupNameReply,
+    UUIDNameReply, UpdateCreateInventoryItemInventoryDataBlock,
 };
 use sl_wire::{Llsd, SkeletonFolder};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use uuid::Uuid;
 
@@ -135,8 +136,14 @@ pub(crate) fn parse_mute_line(line: &str) -> Option<MuteEntry> {
 
 /// Builds a [`RegionIdentity`] from a `RegionHandshake`'s region-info blocks. The
 /// 64-bit flags / protocols come from the optional `RegionInfo4` block (absent on
-/// OpenSim and older grids), falling back to the zero-extended 32-bit flags.
-pub(crate) fn region_identity(handshake: &sl_wire::messages::RegionHandshake) -> RegionIdentity {
+/// OpenSim and older grids), falling back to the zero-extended 32-bit flags. The
+/// `RegionHandshake` does not carry the region handle, so `region_handle` is
+/// passed in by the caller (the handle the session has learned for the
+/// simulator); its grid coordinates are derived from it.
+pub(crate) fn region_identity(
+    handshake: &sl_wire::messages::RegionHandshake,
+    region_handle: u64,
+) -> RegionIdentity {
     let info = &handshake.region_info;
     let info3 = &handshake.region_info3;
     let product_sku = trimmed_string(&info3.product_sku);
@@ -147,8 +154,13 @@ pub(crate) fn region_identity(handshake: &sl_wire::messages::RegionHandshake) ->
         |i4| i4.region_flags_extended,
     );
     let region_protocols = info4.map_or(0, |i4| i4.region_protocols);
+    let (grid_x, grid_y) = handle_to_grid(region_handle);
     RegionIdentity {
         sim_name: trimmed_string(&info.sim_name),
+        region_id: handshake.region_info2.region_id,
+        region_handle,
+        grid_x,
+        grid_y,
         region_flags: info.region_flags,
         region_flags_extended,
         region_protocols,
@@ -156,10 +168,246 @@ pub(crate) fn region_identity(handshake: &sl_wire::messages::RegionHandshake) ->
         product: ProductType::classify(&product_sku, &product_name),
         product_sku,
         product_name,
+        cpu_class_id: info3.cpu_class_id,
+        cpu_ratio: info3.cpu_ratio,
         sim_owner: info.sim_owner,
         is_estate_manager: info.is_estate_manager,
         water_height: info.water_height,
         billable_factor: info.billable_factor,
+    }
+}
+
+/// Builds a `RegionHandshake` message from a [`RegionIdentity`] — the server-side
+/// inverse of [`region_identity`]. The grid coordinates / handle are *not* wire
+/// fields of the handshake (the client derives them from the circuit), so they
+/// are not encoded here; the terrain texture/height fields are left at their
+/// defaults.
+pub(crate) fn region_handshake_message(
+    identity: &RegionIdentity,
+) -> sl_wire::messages::RegionHandshake {
+    use sl_wire::messages::{
+        RegionHandshake, RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
+        RegionHandshakeRegionInfo4Block, RegionHandshakeRegionInfoBlock,
+    };
+    let nil = Uuid::nil();
+    RegionHandshake {
+        region_info: RegionHandshakeRegionInfoBlock {
+            region_flags: identity.region_flags,
+            sim_access: identity.maturity.to_sim_access(),
+            sim_name: with_nul(&identity.sim_name),
+            sim_owner: identity.sim_owner,
+            is_estate_manager: identity.is_estate_manager,
+            water_height: identity.water_height,
+            billable_factor: identity.billable_factor,
+            cache_id: nil,
+            terrain_base0: nil,
+            terrain_base1: nil,
+            terrain_base2: nil,
+            terrain_base3: nil,
+            terrain_detail0: nil,
+            terrain_detail1: nil,
+            terrain_detail2: nil,
+            terrain_detail3: nil,
+            terrain_start_height00: 0.0,
+            terrain_start_height01: 0.0,
+            terrain_start_height10: 0.0,
+            terrain_start_height11: 0.0,
+            terrain_height_range00: 0.0,
+            terrain_height_range01: 0.0,
+            terrain_height_range10: 0.0,
+            terrain_height_range11: 0.0,
+        },
+        region_info2: RegionHandshakeRegionInfo2Block {
+            region_id: identity.region_id,
+        },
+        region_info3: RegionHandshakeRegionInfo3Block {
+            cpu_class_id: identity.cpu_class_id,
+            cpu_ratio: identity.cpu_ratio,
+            colo_name: Vec::new(),
+            product_sku: with_nul(&identity.product_sku),
+            product_name: with_nul(&identity.product_name),
+        },
+        region_info4: vec![RegionHandshakeRegionInfo4Block {
+            region_flags_extended: identity.region_flags_extended,
+            region_protocols: identity.region_protocols,
+        }],
+    }
+}
+
+/// Builds [`AvatarName`]s from a `UUIDNameReply`'s variable name block.
+pub(crate) fn avatar_names(reply: &UUIDNameReply) -> Vec<AvatarName> {
+    reply
+        .uuid_name_block
+        .iter()
+        .map(|block| AvatarName {
+            id: block.id,
+            first_name: trimmed_string(&block.first_name),
+            last_name: trimmed_string(&block.last_name),
+        })
+        .collect()
+}
+
+/// Builds [`GroupName`]s from a `UUIDGroupNameReply`'s variable name block.
+pub(crate) fn group_names(reply: &UUIDGroupNameReply) -> Vec<GroupName> {
+    reply
+        .uuid_name_block
+        .iter()
+        .map(|block| GroupName {
+            id: block.id,
+            name: trimmed_string(&block.group_name),
+        })
+        .collect()
+}
+
+/// Parses an `ExtEnvironment` GET reply (the
+/// [`Command::RequestEnvironment`](crate::Command::RequestEnvironment) result)
+/// into [`EnvironmentSettings`]. Returns `None` if the `environment` envelope is
+/// absent (e.g. a failure reply).
+pub(crate) fn environment_from_llsd(body: &Llsd) -> Option<EnvironmentSettings> {
+    let env = body.get("environment")?;
+    let alt = env.get("track_altitudes");
+    let altitude = |index: usize| {
+        alt.and_then(|a| a.index(index))
+            .and_then(Llsd::as_f32)
+            .unwrap_or(0.0)
+    };
+    Some(EnvironmentSettings {
+        parcel_id: i32_member(env, "parcel_id"),
+        region_id: uuid_member(env, "region_id"),
+        day_length: i32_member(env, "day_length"),
+        day_offset: i32_member(env, "day_offset"),
+        flags: u32_member(env, "flags"),
+        env_version: i32_member(env, "env_version"),
+        track_altitudes: [altitude(0), altitude(1), altitude(2)],
+        day_cycle: day_cycle_from_llsd(env.get("day_cycle")),
+    })
+}
+
+/// Parses a day-cycle `OSDMap` into a [`DayCycle`]: its tracks (track 0 water, the
+/// rest sky) and its named sky/water frames. An absent cycle yields an empty one.
+fn day_cycle_from_llsd(value: Option<&Llsd>) -> DayCycle {
+    let name = value
+        .map(|cycle| string_member(cycle, "name"))
+        .unwrap_or_default();
+    let mut sky_frames = BTreeMap::new();
+    let mut water_frames = BTreeMap::new();
+    if let Some(frames) = value
+        .and_then(|cycle| cycle.get("frames"))
+        .and_then(Llsd::as_map)
+    {
+        for (frame_name, frame) in frames {
+            if frame.get("type").and_then(Llsd::as_str) == Some("water") {
+                drop(water_frames.insert(
+                    frame_name.clone(),
+                    water_settings_from_llsd(frame_name, frame),
+                ));
+            } else {
+                drop(sky_frames.insert(
+                    frame_name.clone(),
+                    sky_settings_from_llsd(frame_name, frame),
+                ));
+            }
+        }
+    }
+    let tracks = value
+        .and_then(|cycle| cycle.get("tracks"))
+        .and_then(Llsd::as_array)
+        .map(|array| array.iter().map(track_from_llsd).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let mut iter = tracks.into_iter();
+    let water_track = iter.next().unwrap_or_default();
+    let sky_tracks = iter.collect();
+    DayCycle {
+        name,
+        water_track,
+        sky_tracks,
+        sky_frames,
+        water_frames,
+    }
+}
+
+/// Parses one track (an array of `{key_keyframe, key_name}` maps) into its
+/// [`DayCycleFrame`] keyframes.
+fn track_from_llsd(track: &Llsd) -> Vec<DayCycleFrame> {
+    track
+        .as_array()
+        .map(|frames| {
+            frames
+                .iter()
+                .map(|frame| DayCycleFrame {
+                    keyframe: f32_member(frame, "key_keyframe"),
+                    name: string_member(frame, "key_name"),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Parses a sky frame `OSDMap` into [`SkySettings`]. The legacy haze colours and
+/// scalars come from the frame's `legacy_haze` sub-map.
+fn sky_settings_from_llsd(name: &str, sky: &Llsd) -> SkySettings {
+    let haze = sky.get("legacy_haze");
+    let haze_f32 = |key: &str| haze.map_or(0.0, |block| f32_member(block, key));
+    let haze_color = |key: &str| color3_from_llsd(haze.and_then(|block| block.get(key)));
+    SkySettings {
+        name: name.to_owned(),
+        sun_rotation: rotation_from_llsd(sky.get("sun_rotation")),
+        moon_rotation: rotation_from_llsd(sky.get("moon_rotation")),
+        sunlight_color: vec4_from_llsd(sky.get("sunlight_color")),
+        ambient: haze_color("ambient"),
+        blue_horizon: haze_color("blue_horizon"),
+        blue_density: haze_color("blue_density"),
+        haze_horizon: haze_f32("haze_horizon"),
+        haze_density: haze_f32("haze_density"),
+        density_multiplier: haze_f32("density_multiplier"),
+        distance_multiplier: haze_f32("distance_multiplier"),
+        max_y: f32_member(sky, "max_y"),
+        gamma: f32_member(sky, "gamma"),
+        cloud_color: color3_from_llsd(sky.get("cloud_color")),
+        cloud_pos_density1: color3_from_llsd(sky.get("cloud_pos_density1")),
+        cloud_pos_density2: color3_from_llsd(sky.get("cloud_pos_density2")),
+        cloud_scale: f32_member(sky, "cloud_scale"),
+        cloud_scroll_rate: vec2_from_llsd(sky.get("cloud_scroll_rate")),
+        cloud_shadow: f32_member(sky, "cloud_shadow"),
+        cloud_variance: f32_member(sky, "cloud_variance"),
+        glow: color3_from_llsd(sky.get("glow")),
+        star_brightness: f32_member(sky, "star_brightness"),
+        sun_scale: f32_member(sky, "sun_scale"),
+        moon_scale: f32_member(sky, "moon_scale"),
+        moon_brightness: f32_member(sky, "moon_brightness"),
+        sun_arc_radians: f32_member(sky, "sun_arc_radians"),
+        droplet_radius: f32_member(sky, "droplet_radius"),
+        ice_level: f32_member(sky, "ice_level"),
+        moisture_level: f32_member(sky, "moisture_level"),
+        sky_top_radius: f32_member(sky, "sky_top_radius"),
+        sky_bottom_radius: f32_member(sky, "sky_bottom_radius"),
+        planet_radius: f32_member(sky, "planet_radius"),
+        sun_texture: uuid_member(sky, "sun_id"),
+        moon_texture: uuid_member(sky, "moon_id"),
+        cloud_texture: uuid_member(sky, "cloud_id"),
+        bloom_texture: uuid_member(sky, "bloom_id"),
+        halo_texture: uuid_member(sky, "halo_id"),
+        rainbow_texture: uuid_member(sky, "rainbow_id"),
+    }
+}
+
+/// Parses a water frame `OSDMap` into [`WaterSettings`].
+fn water_settings_from_llsd(name: &str, water: &Llsd) -> WaterSettings {
+    WaterSettings {
+        name: name.to_owned(),
+        blur_multiplier: f32_member(water, "blur_multiplier"),
+        fresnel_offset: f32_member(water, "fresnel_offset"),
+        fresnel_scale: f32_member(water, "fresnel_scale"),
+        normal_scale: color3_from_llsd(water.get("normal_scale")),
+        normal_map: uuid_member(water, "normal_map"),
+        scale_above: f32_member(water, "scale_above"),
+        scale_below: f32_member(water, "scale_below"),
+        transparent_texture: uuid_member(water, "transparent_texture"),
+        underwater_fog_mod: f32_member(water, "underwater_fog_mod"),
+        water_fog_color: color3_from_llsd(water.get("water_fog_color")),
+        water_fog_density: f32_member(water, "water_fog_density"),
+        wave1_direction: vec2_from_llsd(water.get("wave1_direction")),
+        wave2_direction: vec2_from_llsd(water.get("wave2_direction")),
     }
 }
 
@@ -1425,6 +1673,47 @@ pub(crate) fn vec3_from_llsd(value: Option<&Llsd>) -> (f32, f32, f32) {
     (component(0), component(1), component(2))
 }
 
+/// Reads a two-component vector (`[x, y]` reals) from an LLSD array as `[f32; 2]`.
+fn vec2_from_llsd(value: Option<&Llsd>) -> [f32; 2] {
+    let component = |index: usize| {
+        value
+            .and_then(|vector| vector.index(index))
+            .and_then(Llsd::as_f32)
+            .unwrap_or(0.0)
+    };
+    [component(0), component(1)]
+}
+
+/// Reads a three-component colour/vector from an LLSD array as `[f32; 3]`.
+fn color3_from_llsd(value: Option<&Llsd>) -> [f32; 3] {
+    let (x, y, z) = vec3_from_llsd(value);
+    [x, y, z]
+}
+
+/// Reads a four-component vector (`[x, y, z, w]` reals) from an LLSD array as
+/// `[f32; 4]`.
+fn vec4_from_llsd(value: Option<&Llsd>) -> [f32; 4] {
+    let component = |index: usize| {
+        value
+            .and_then(|vector| vector.index(index))
+            .and_then(Llsd::as_f32)
+            .unwrap_or(0.0)
+    };
+    [component(0), component(1), component(2), component(3)]
+}
+
+/// Reads a quaternion (`[x, y, z, w]` reals) from an LLSD array. The trailing
+/// component is the quaternion's scalar part ([`Rotation::s`]).
+fn rotation_from_llsd(value: Option<&Llsd>) -> Rotation {
+    let [x, y, z, s] = vec4_from_llsd(value);
+    Rotation { x, y, z, s }
+}
+
+/// Reads an `f32` from an LLSD map member, defaulting to `0.0`.
+fn f32_member(map: &Llsd, key: &str) -> f32 {
+    map.get(key).and_then(Llsd::as_f32).unwrap_or(0.0)
+}
+
 /// Reads a UUID from an LLSD map member, defaulting to nil.
 pub(crate) fn uuid_member(map: &Llsd, key: &str) -> Uuid {
     map.get(key)
@@ -2092,6 +2381,163 @@ pub fn server_appearance_update_to_llsd(event: &Event) -> Llsd {
         entries.push(("expected", Llsd::Integer(expected)));
     }
     llsd_map(entries)
+}
+
+/// Encodes an `f32` as an LLSD real.
+fn real(value: f32) -> Llsd {
+    Llsd::Real(f64::from(value))
+}
+
+/// Encodes a slice of `f32` components as an LLSD array of reals (used for the
+/// colour / vector / rotation tuples in environment frames).
+fn reals_to_llsd(values: &[f32]) -> Llsd {
+    Llsd::Array(values.iter().copied().map(real).collect())
+}
+
+/// Encodes [`SkySettings`] into a sky-frame `OSDMap` (the inverse of
+/// `sky_settings_from_llsd`). The legacy haze colours/scalars go into a
+/// `legacy_haze` sub-map, as the viewer expects.
+fn sky_settings_to_llsd(sky: &SkySettings) -> Llsd {
+    let legacy_haze = llsd_map(vec![
+        ("ambient", reals_to_llsd(&sky.ambient)),
+        ("blue_horizon", reals_to_llsd(&sky.blue_horizon)),
+        ("blue_density", reals_to_llsd(&sky.blue_density)),
+        ("haze_horizon", real(sky.haze_horizon)),
+        ("haze_density", real(sky.haze_density)),
+        ("density_multiplier", real(sky.density_multiplier)),
+        ("distance_multiplier", real(sky.distance_multiplier)),
+    ]);
+    llsd_map(vec![
+        ("type", Llsd::String("sky".to_owned())),
+        ("name", Llsd::String(sky.name.clone())),
+        (
+            "sun_rotation",
+            reals_to_llsd(&[
+                sky.sun_rotation.x,
+                sky.sun_rotation.y,
+                sky.sun_rotation.z,
+                sky.sun_rotation.s,
+            ]),
+        ),
+        (
+            "moon_rotation",
+            reals_to_llsd(&[
+                sky.moon_rotation.x,
+                sky.moon_rotation.y,
+                sky.moon_rotation.z,
+                sky.moon_rotation.s,
+            ]),
+        ),
+        ("sunlight_color", reals_to_llsd(&sky.sunlight_color)),
+        ("legacy_haze", legacy_haze),
+        ("max_y", real(sky.max_y)),
+        ("gamma", real(sky.gamma)),
+        ("cloud_color", reals_to_llsd(&sky.cloud_color)),
+        ("cloud_pos_density1", reals_to_llsd(&sky.cloud_pos_density1)),
+        ("cloud_pos_density2", reals_to_llsd(&sky.cloud_pos_density2)),
+        ("cloud_scale", real(sky.cloud_scale)),
+        ("cloud_scroll_rate", reals_to_llsd(&sky.cloud_scroll_rate)),
+        ("cloud_shadow", real(sky.cloud_shadow)),
+        ("cloud_variance", real(sky.cloud_variance)),
+        ("glow", reals_to_llsd(&sky.glow)),
+        ("star_brightness", real(sky.star_brightness)),
+        ("sun_scale", real(sky.sun_scale)),
+        ("moon_scale", real(sky.moon_scale)),
+        ("moon_brightness", real(sky.moon_brightness)),
+        ("sun_arc_radians", real(sky.sun_arc_radians)),
+        ("droplet_radius", real(sky.droplet_radius)),
+        ("ice_level", real(sky.ice_level)),
+        ("moisture_level", real(sky.moisture_level)),
+        ("sky_top_radius", real(sky.sky_top_radius)),
+        ("sky_bottom_radius", real(sky.sky_bottom_radius)),
+        ("planet_radius", real(sky.planet_radius)),
+        ("sun_id", Llsd::Uuid(sky.sun_texture)),
+        ("moon_id", Llsd::Uuid(sky.moon_texture)),
+        ("cloud_id", Llsd::Uuid(sky.cloud_texture)),
+        ("bloom_id", Llsd::Uuid(sky.bloom_texture)),
+        ("halo_id", Llsd::Uuid(sky.halo_texture)),
+        ("rainbow_id", Llsd::Uuid(sky.rainbow_texture)),
+    ])
+}
+
+/// Encodes [`WaterSettings`] into a water-frame `OSDMap` (the inverse of
+/// `water_settings_from_llsd`).
+fn water_settings_to_llsd(water: &WaterSettings) -> Llsd {
+    llsd_map(vec![
+        ("type", Llsd::String("water".to_owned())),
+        ("name", Llsd::String(water.name.clone())),
+        ("blur_multiplier", real(water.blur_multiplier)),
+        ("fresnel_offset", real(water.fresnel_offset)),
+        ("fresnel_scale", real(water.fresnel_scale)),
+        ("normal_scale", reals_to_llsd(&water.normal_scale)),
+        ("normal_map", Llsd::Uuid(water.normal_map)),
+        ("scale_above", real(water.scale_above)),
+        ("scale_below", real(water.scale_below)),
+        ("transparent_texture", Llsd::Uuid(water.transparent_texture)),
+        ("underwater_fog_mod", real(water.underwater_fog_mod)),
+        ("water_fog_color", reals_to_llsd(&water.water_fog_color)),
+        ("water_fog_density", real(water.water_fog_density)),
+        ("wave1_direction", reals_to_llsd(&water.wave1_direction)),
+        ("wave2_direction", reals_to_llsd(&water.wave2_direction)),
+    ])
+}
+
+/// Encodes one day-cycle track (its keyframes) as an LLSD array of
+/// `{key_keyframe, key_name}` maps.
+fn track_to_llsd(track: &[DayCycleFrame]) -> Llsd {
+    Llsd::Array(
+        track
+            .iter()
+            .map(|frame| {
+                llsd_map(vec![
+                    ("key_keyframe", real(frame.keyframe)),
+                    ("key_name", Llsd::String(frame.name.clone())),
+                ])
+            })
+            .collect(),
+    )
+}
+
+/// Encodes a [`DayCycle`] into a day-cycle `OSDMap`: its named frames and its
+/// tracks (the water track first, then the sky tracks).
+fn day_cycle_to_llsd(cycle: &DayCycle) -> Llsd {
+    let mut frames: Vec<(&str, Llsd)> = Vec::new();
+    for (name, sky) in &cycle.sky_frames {
+        frames.push((name.as_str(), sky_settings_to_llsd(sky)));
+    }
+    for (name, water) in &cycle.water_frames {
+        frames.push((name.as_str(), water_settings_to_llsd(water)));
+    }
+    let mut tracks = vec![track_to_llsd(&cycle.water_track)];
+    tracks.extend(cycle.sky_tracks.iter().map(|track| track_to_llsd(track)));
+    llsd_map(vec![
+        ("type", Llsd::String("daycycle".to_owned())),
+        ("name", Llsd::String(cycle.name.clone())),
+        ("frames", llsd_map(frames)),
+        ("tracks", Llsd::Array(tracks)),
+    ])
+}
+
+/// Encodes [`EnvironmentSettings`] into the `ExtEnvironment` GET response
+/// envelope (the inverse of `environment_from_llsd`): an `environment` map
+/// wrapped with `parcel_id` and `success`.
+#[must_use]
+pub fn environment_to_llsd(env: &EnvironmentSettings) -> Llsd {
+    let environment = llsd_map(vec![
+        ("parcel_id", Llsd::Integer(env.parcel_id)),
+        ("region_id", Llsd::Uuid(env.region_id)),
+        ("day_length", Llsd::Integer(env.day_length)),
+        ("day_offset", Llsd::Integer(env.day_offset)),
+        ("flags", u32_to_llsd(env.flags)),
+        ("env_version", Llsd::Integer(env.env_version)),
+        ("track_altitudes", reals_to_llsd(&env.track_altitudes)),
+        ("day_cycle", day_cycle_to_llsd(&env.day_cycle)),
+    ]);
+    llsd_map(vec![
+        ("environment", environment),
+        ("parcel_id", Llsd::Integer(env.parcel_id)),
+        ("success", Llsd::Boolean(true)),
+    ])
 }
 
 /// Serializes a [`ParcelInfo`] as a CAPS `ParcelProperties` event body (inverse
