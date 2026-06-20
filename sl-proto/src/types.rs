@@ -11,10 +11,12 @@ mod chat;
 mod diagnostic;
 mod economy;
 mod editing;
+mod environment;
 mod event;
 mod group;
 mod inventory;
 mod map;
+mod name;
 mod object;
 mod parcel;
 mod region;
@@ -41,6 +43,7 @@ pub use editing::{
     ClickAction, DeRezDestination, Material, Maturity, ObjectFlagSettings, ObjectTransform,
     PermissionField, PrimShape, ProductType, SaleType, TeleportFlags,
 };
+pub use environment::{DayCycle, DayCycleFrame, EnvironmentSettings, SkySettings, WaterSettings};
 pub use event::Event;
 pub use group::{
     ActiveGroup, CreateGroupParams, GroupMember, GroupMembership, GroupNotice,
@@ -48,13 +51,14 @@ pub use group::{
     GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, group_powers,
 };
 pub use inventory::{
-    InventoryFolder, InventoryItem, NewInventoryItem, grid_to_handle, handle_to_global,
-    handle_to_grid,
+    InventoryFolder, InventoryItem, NewInventoryItem, global_to_handle, grid_to_handle,
+    handle_to_global, handle_to_grid,
 };
 pub use map::{
     EstateAccessDelta, EstateAccessKind, EstateInfo, MapItem, MapItemType, MapRegionInfo,
     NeighborInfo, RegionInfoUpdate,
 };
+pub use name::{AvatarName, GroupName};
 pub use object::{
     ExtendedMesh, FlexibleData, LightData, LightImage, NameValue, Object, ObjectExtraParams,
     ObjectMotion, ObjectProperties, ParticleSystem, PrimShapeParams, ReflectionProbe,

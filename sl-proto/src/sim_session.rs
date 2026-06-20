@@ -28,7 +28,8 @@ use sl_wire::messages::{
     AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
     AgentMovementCompleteSimDataBlock, ChatFromSimulator, ChatFromSimulatorChatDataBlock,
     CompletePingCheck, CompletePingCheckPingIDBlock, LogoutReply, LogoutReplyAgentDataBlock,
-    PacketAck, StartPingCheck, StartPingCheckPingIDBlock,
+    PacketAck, StartPingCheck, StartPingCheckPingIDBlock, UUIDGroupNameReply,
+    UUIDGroupNameReplyUUIDNameBlockBlock, UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock,
 };
 use sl_wire::{
     AnyMessage, ControlFlags, EventQueueEvent, Llsd, MessageId, PacketFlags, Reader, WireError,
@@ -37,10 +38,12 @@ use sl_wire::{
 use uuid::Uuid;
 
 use crate::error::Error;
-use crate::session::{build_map_block_reply, build_map_item_reply, instant_message};
+use crate::session::{
+    build_map_block_reply, build_map_item_reply, instant_message, region_handshake_message,
+};
 use crate::types::{
-    Camera, ChatType, InstantMessage, MapItem, MapItemType, MapRegionInfo, Reliability, Throttle,
-    Transmit,
+    AvatarName, Camera, ChatType, GroupName, InstantMessage, MapItem, MapItemType, MapRegionInfo,
+    RegionIdentity, Reliability, Throttle, Transmit,
 };
 
 /// How long to batch owed acknowledgements before flushing them as a `PacketAck`
@@ -65,6 +68,11 @@ const MAX_RESEND_ATTEMPTS: u32 = 6;
 
 /// The bound on the recently-seen inbound reliable sequence window.
 const SEEN_CAPACITY: usize = 4096;
+
+/// The maximum number of names packed into a single `UUIDNameReply` /
+/// `UUIDGroupNameReply`. Smaller than the request batch because each entry also
+/// carries the (variable-length) name strings.
+const UUID_NAMES_PER_REPLY: usize = 40;
 
 /// The maximum number of acknowledgements packed into a single `PacketAck`.
 const MAX_ACKS_PER_PACKET: usize = 255;
@@ -203,6 +211,14 @@ pub enum ServerEvent {
     },
     /// The client sent an instant message (`ImprovedInstantMessage`).
     InstantMessage(Box<InstantMessage>),
+    /// The client asked the simulator to resolve agent ids to legacy names
+    /// (`UUIDNameRequest`). The server answers with
+    /// [`SimSession::send_avatar_names`].
+    AvatarNamesRequested(Vec<Uuid>),
+    /// The client asked the simulator to resolve group ids to names
+    /// (`UUIDGroupNameRequest`). The server answers with
+    /// [`SimSession::send_group_names`].
+    GroupNamesRequested(Vec<Uuid>),
     /// The client requested a clean logout (`LogoutRequest`); the simulator has
     /// replied with a `LogoutReply` and closed the session.
     LoggedOut,
@@ -477,6 +493,86 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends a `RegionHandshake` greeting carrying `identity` to the client — the
+    /// server-side inverse of the client's `Event::RegionInfoHandshake`. The
+    /// client replies with `RegionHandshakeReply` (surfaced as
+    /// [`ServerEvent::RegionHandshakeReplied`]). Sent reliably. The grid
+    /// coordinates / handle are not wire fields of the handshake, so they are not
+    /// part of `identity` here; the client derives them from the circuit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_region_handshake(
+        &mut self,
+        identity: &RegionIdentity,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::RegionHandshake(region_handshake_message(identity));
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends `UUIDNameReply` batches resolving agent ids to legacy names — the
+    /// reply to a client's `UUIDNameRequest` (surfaced as
+    /// [`ServerEvent::AvatarNamesRequested`]). Large lists are split across
+    /// several messages. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// a message fails to encode.
+    pub fn send_avatar_names(&mut self, names: &[AvatarName], now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        for batch in names.chunks(UUID_NAMES_PER_REPLY) {
+            let message = AnyMessage::UUIDNameReply(UUIDNameReply {
+                uuid_name_block: batch
+                    .iter()
+                    .map(|name| UUIDNameReplyUUIDNameBlockBlock {
+                        id: name.id,
+                        first_name: with_nul(&name.first_name),
+                        last_name: with_nul(&name.last_name),
+                    })
+                    .collect(),
+            });
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
+    }
+
+    /// Sends `UUIDGroupNameReply` batches resolving group ids to names — the reply
+    /// to a client's `UUIDGroupNameRequest` (surfaced as
+    /// [`ServerEvent::GroupNamesRequested`]). Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// a message fails to encode.
+    pub fn send_group_names(&mut self, names: &[GroupName], now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        for batch in names.chunks(UUID_NAMES_PER_REPLY) {
+            let message = AnyMessage::UUIDGroupNameReply(UUIDGroupNameReply {
+                uuid_name_block: batch
+                    .iter()
+                    .map(|name| UUIDGroupNameReplyUUIDNameBlockBlock {
+                        id: name.id,
+                        group_name: with_nul(&name.name),
+                    })
+                    .collect(),
+            });
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
+    }
+
     /// Sends a `StartPingCheck` to the client; the client answers with a
     /// `CompletePingCheck`. Returns the ping id sent (so a caller can match the
     /// reply), or `None` if the circuit is not open.
@@ -736,6 +832,23 @@ impl SimSession {
                         &im.agent_data,
                         &im.message_block,
                     ))));
+            }
+            AnyMessage::UUIDNameRequest(request) => {
+                let ids = request
+                    .uuid_name_block
+                    .iter()
+                    .map(|block| block.id)
+                    .collect();
+                self.events
+                    .push_back(ServerEvent::AvatarNamesRequested(ids));
+            }
+            AnyMessage::UUIDGroupNameRequest(request) => {
+                let ids = request
+                    .uuid_name_block
+                    .iter()
+                    .map(|block| block.id)
+                    .collect();
+                self.events.push_back(ServerEvent::GroupNamesRequested(ids));
             }
             AnyMessage::LogoutRequest(_) => {
                 self.send_logout_reply(now)?;

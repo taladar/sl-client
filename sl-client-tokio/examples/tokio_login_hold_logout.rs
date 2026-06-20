@@ -465,6 +465,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::AvatarNotes { .. }
             | Event::RegionInfoHandshake(_)
             | Event::RegionLimits(_)
+            | Event::AvatarNames(_)
+            | Event::GroupNames(_)
+            | Event::Environment(_)
             | Event::MoneyBalance(_)
             | Event::EconomyData(_)
             | Event::ParcelProperties(_)

@@ -354,6 +354,34 @@ impl Args {
         }
     }
 
+    /// A required, non-empty list of [`Uuid`]s taken from every *positional*
+    /// token at index `from_pos` and beyond (each resolved through `ctx` and
+    /// parsed as a UUID). Keyword arguments are ignored. Errors if no positional
+    /// token is present at `from_pos` or any token is not a UUID.
+    pub(crate) fn req_uuid_list(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        from_pos: usize,
+    ) -> Result<Vec<Uuid>, ReplError> {
+        let mut ids = Vec::new();
+        for raw in self.positional.iter().skip(from_pos) {
+            let value = resolve(ctx, raw)?;
+            let id = Uuid::parse_str(&value)
+                .ok()
+                .ok_or_else(|| ReplError::InvalidArg {
+                    field: field.to_owned(),
+                    value,
+                    expected: "UUID".to_owned(),
+                })?;
+            ids.push(id);
+        }
+        if ids.is_empty() {
+            return Err(self.missing(field));
+        }
+        Ok(ids)
+    }
+
     /// A required argument parsed via [`FromStr`] into `T`, described as
     /// `expected` on failure.
     pub(crate) fn req_parse<T>(
@@ -386,6 +414,24 @@ impl Args {
         match self.opt_str(ctx, field, pos)? {
             Some(value) => parse_scalar::<T>(field, &value, expected),
             None => Ok(default),
+        }
+    }
+
+    /// An optional argument parsed via [`FromStr`] into `T`, yielding `None` when
+    /// the field is absent.
+    pub(crate) fn opt_parse<T>(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        pos: usize,
+        expected: &str,
+    ) -> Result<Option<T>, ReplError>
+    where
+        T: FromStr,
+    {
+        match self.opt_str(ctx, field, pos)? {
+            Some(value) => parse_scalar::<T>(field, &value, expected).map(Some),
+            None => Ok(None),
         }
     }
 

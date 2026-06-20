@@ -2,31 +2,32 @@
 
 use super::conversions::{
     OutgoingIm, ZERO_VECTOR, active_group, ais_inventory_update_from_llsd, avatar_animations,
-    avatar_appearance, avatar_group, avatar_interests, avatar_properties, bulk_update_folder,
-    bulk_update_inventory_from_llsd, bulk_update_item, chat_message,
+    avatar_appearance, avatar_group, avatar_interests, avatar_names, avatar_properties,
+    bulk_update_folder, bulk_update_inventory_from_llsd, bulk_update_item, chat_message,
     chatterbox_invitation_from_llsd, classified_info, created_category_from_llsd,
     crossed_region_from_caps_llsd, economy_data, enable_simulator_from_caps_llsd,
-    establish_agent_communication_from_llsd, estate_access_from_params, estate_info_from_params,
-    friend, group_member, group_members_from_caps_llsd, group_membership,
-    group_memberships_from_caps_llsd, group_notice, group_profile, group_role, group_title,
-    instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
-    inventory_item_from_create, inventory_offer_bucket, map_item, map_region_info, money_balance,
-    neighbor_info, object_from_full_update, object_properties, offline_messages_from_llsd,
-    pack_uuids, parcel_info, parcel_info_from_llsd, parse_lure_region_handle, parse_mute_list,
-    pick_info, region_identity, region_limits, script_dialog, script_permission_request,
-    server_appearance_update_from_llsd, skeleton_folder, teleport_finish_from_llsd, trimmed_string,
+    environment_from_llsd, establish_agent_communication_from_llsd, estate_access_from_params,
+    estate_info_from_params, friend, group_member, group_members_from_caps_llsd, group_membership,
+    group_memberships_from_caps_llsd, group_names, group_notice, group_profile, group_role,
+    group_title, instant_message, inventory_descendents_from_llsd, inventory_folder,
+    inventory_item, inventory_item_from_create, inventory_offer_bucket, map_item, map_region_info,
+    money_balance, neighbor_info, object_from_full_update, object_properties,
+    offline_messages_from_llsd, pack_uuids, parcel_info, parcel_info_from_llsd,
+    parse_lure_region_handle, parse_mute_list, pick_info, region_identity, region_limits,
+    script_dialog, script_permission_request, server_appearance_update_from_llsd, skeleton_folder,
+    teleport_finish_from_llsd, trimmed_string,
 };
 use super::{
     AGENT_UPDATE_INTERVAL, AssetTransfer, AssetUpload, CAP_AGENT_EXPERIENCES,
-    CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES, CAP_FETCH_INVENTORY,
-    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
-    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3,
-    CAP_LIBRARY_API_V3, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
-    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, Circuit, DEFAULT_DRAW_DISTANCE,
-    HandoverPending, IDENTITY_ROTATION, LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, Session,
-    SessionState, TELEPORT_FLAGS_VIA_LURE, TELEPORT_TIMEOUT, TextureDownload, deadline,
-    merge_deadline,
+    CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT,
+    CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
+    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES,
+    CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LIBRARY_API_V3, CAP_MODIFY_MATERIAL_PARAMS,
+    CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
+    CAP_REGION_EXPERIENCES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, Circuit,
+    DEFAULT_DRAW_DISTANCE, HandoverPending, IDENTITY_ROTATION, LOGOUT_TIMEOUT, MAX_INLINE_ASSET,
+    SIT_TIMEOUT, Session, SessionState, TELEPORT_FLAGS_VIA_LURE, TELEPORT_TIMEOUT, TextureDownload,
+    deadline, merge_deadline,
 };
 use crate::error::Error;
 use crate::terrain;
@@ -42,7 +43,7 @@ use crate::types::{
     ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProfileUpdate,
     RegionInfoUpdate, Reliability, SaleType, ScriptPermissions, ScriptTeleportRequest, SoundFlags,
     SoundPreload, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus,
-    Transmit, Wearable, WearableType, handle_to_grid,
+    Transmit, Wearable, WearableType, global_to_handle, handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
@@ -57,6 +58,11 @@ use std::collections::{BTreeMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Instant;
 use uuid::Uuid;
+
+/// The maximum number of ids packed into a single `UUIDNameRequest` /
+/// `UUIDGroupNameRequest`. Each id is 16 bytes; 80 keeps the datagram (plus its
+/// header and block count) comfortably within a typical UDP MTU.
+const UUID_NAMES_PER_REQUEST: usize = 80;
 
 impl Session {
     /// Creates a new session for the given login parameters.
@@ -187,6 +193,14 @@ impl Session {
                 if let Some(parcel) = parcel_info_from_llsd(body) {
                     self.events
                         .push_back(Event::ParcelProperties(Box::new(parcel)));
+                } else {
+                    self.caps_decode_failed(message);
+                }
+            }
+            CAP_EXT_ENVIRONMENT => {
+                if let Some(environment) = environment_from_llsd(body) {
+                    self.events
+                        .push_back(Event::Environment(Box::new(environment)));
                 } else {
                     self.caps_decode_failed(message);
                 }
@@ -694,6 +708,14 @@ impl Session {
                 self.terrain.clear();
                 self.regions.clear();
                 self.time_dilation.clear();
+                // Seed the root region's handle from the login response's global
+                // `region_x` / `region_y` so it is known before any object update
+                // arrives — in particular for the `RegionHandshake`, which does
+                // not itself carry the handle.
+                if let (Some(region_x), Some(region_y)) = (success.region_x, success.region_y) {
+                    self.regions
+                        .insert(sim_addr, global_to_handle(region_x, region_y));
+                }
                 self.seed_capability = Some(success.seed_capability.clone());
                 self.inventory_root = success.inventory_root;
                 self.secure_session_id = success.secure_session_id;
@@ -1158,9 +1180,11 @@ impl Session {
                     if let Some(circuit) = self.circuit.as_mut() {
                         circuit.send_region_handshake_reply(now)?;
                     }
+                    let region_handle = self.regions.get(&from).copied().unwrap_or(0);
                     self.events
                         .push_back(Event::RegionInfoHandshake(Box::new(region_identity(
                             handshake,
+                            region_handle,
                         ))));
                     self.complete_arrival(now);
                 }
@@ -1174,6 +1198,14 @@ impl Session {
             AnyMessage::RegionInfo(info) => {
                 self.events
                     .push_back(Event::RegionLimits(region_limits(info)));
+            }
+            AnyMessage::UUIDNameReply(reply) => {
+                self.events
+                    .push_back(Event::AvatarNames(avatar_names(reply)));
+            }
+            AnyMessage::UUIDGroupNameReply(reply) => {
+                self.events
+                    .push_back(Event::GroupNames(group_names(reply)));
             }
             AnyMessage::MoneyBalanceReply(reply) => {
                 self.events
@@ -4499,6 +4531,44 @@ impl Session {
     pub fn request_region_info(&mut self, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_request_region_info(now)?;
+        Ok(())
+    }
+
+    /// Resolves agent ids to their legacy names via `UUIDNameRequest`. Replies
+    /// arrive as [`Event::AvatarNames`]; a single request may be answered by
+    /// several replies, and each reply may batch several ids. The session does
+    /// not resolve or cache names itself — this is the primitive a caller uses to
+    /// turn the UUIDs that pervade the protocol (object owners, estate managers,
+    /// inventory creators, …) into legacy names on demand.
+    ///
+    /// `ids` is split into MTU-sized batches automatically; an empty slice sends
+    /// nothing. Duplicate ids are sent as-is (the simulator de-duplicates).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if a request fails to encode.
+    pub fn request_avatar_names(&mut self, ids: &[Uuid], now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        for batch in ids.chunks(UUID_NAMES_PER_REQUEST) {
+            circuit.send_uuid_name_request(batch, now)?;
+        }
+        Ok(())
+    }
+
+    /// Resolves group ids to their names via `UUIDGroupNameRequest`. Replies
+    /// arrive as [`Event::GroupNames`]. See [`Self::request_avatar_names`] for the
+    /// batching and caching semantics.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if a request fails to encode.
+    pub fn request_group_names(&mut self, ids: &[Uuid], now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        for batch in ids.chunks(UUID_NAMES_PER_REQUEST) {
+            circuit.send_uuid_group_name_request(batch, now)?;
+        }
         Ok(())
     }
 

@@ -137,7 +137,8 @@ use sl_wire::messages::{
     TeleportLocationRequestAgentDataBlock, TeleportLocationRequestInfoBlock, TeleportLureRequest,
     TeleportLureRequestInfoBlock, TerminateFriendship, TerminateFriendshipAgentDataBlock,
     TerminateFriendshipExBlockBlock, TransferRequest, TransferRequestTransferInfoBlock,
-    UpdateInventoryFolder, UpdateInventoryFolderAgentDataBlock,
+    UUIDGroupNameRequest, UUIDGroupNameRequestUUIDNameBlockBlock, UUIDNameRequest,
+    UUIDNameRequestUUIDNameBlockBlock, UpdateInventoryFolder, UpdateInventoryFolderAgentDataBlock,
     UpdateInventoryFolderFolderDataBlock, UpdateInventoryItem, UpdateInventoryItemAgentDataBlock,
     UpdateInventoryItemInventoryDataBlock, UpdateMuteListEntry, UpdateMuteListEntryAgentDataBlock,
     UpdateMuteListEntryMuteDataBlock, UseCircuitCode, UseCircuitCodeCircuitCodeBlock,
@@ -453,6 +454,38 @@ impl Circuit {
                 .collect(),
         });
         self.send(&lure, Reliability::Reliable, now)
+    }
+
+    /// Queues a `UUIDNameRequest` reliably for the given agent ids. The caller is
+    /// responsible for keeping `ids` small enough to fit one packet.
+    pub(crate) fn send_uuid_name_request(
+        &mut self,
+        ids: &[Uuid],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let request = AnyMessage::UUIDNameRequest(UUIDNameRequest {
+            uuid_name_block: ids
+                .iter()
+                .map(|&id| UUIDNameRequestUUIDNameBlockBlock { id })
+                .collect(),
+        });
+        self.send(&request, Reliability::Reliable, now)
+    }
+
+    /// Queues a `UUIDGroupNameRequest` reliably for the given group ids. The
+    /// caller is responsible for keeping `ids` small enough to fit one packet.
+    pub(crate) fn send_uuid_group_name_request(
+        &mut self,
+        ids: &[Uuid],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let request = AnyMessage::UUIDGroupNameRequest(UUIDGroupNameRequest {
+            uuid_name_block: ids
+                .iter()
+                .map(|&id| UUIDGroupNameRequestUUIDNameBlockBlock { id })
+                .collect(),
+        });
+        self.send(&request, Reliability::Reliable, now)
     }
 
     /// Queues a `TeleportLureRequest` reliably: accepts a teleport lure,

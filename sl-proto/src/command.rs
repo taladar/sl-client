@@ -511,6 +511,24 @@ pub enum Command {
     },
     /// Request the current region's info (agent/object limits).
     RequestRegionInfo,
+    /// Resolve agent ids to their legacy names (`UUIDNameRequest`); replies
+    /// arrive as [`Event::AvatarNames`](crate::Event::AvatarNames). The session
+    /// does not resolve or cache names on its own — a caller asks for the ids it
+    /// needs (e.g. an estate's manager list) and decides what to do with the
+    /// answers. Large lists are split across several requests automatically.
+    RequestAvatarNames(Vec<Uuid>),
+    /// Resolve group ids to their names (`UUIDGroupNameRequest`); replies arrive
+    /// as [`Event::GroupNames`](crate::Event::GroupNames). See
+    /// [`RequestAvatarNames`](Self::RequestAvatarNames).
+    RequestGroupNames(Vec<Uuid>),
+    /// Request the extended-environment (EEP) settings via the `ExtEnvironment`
+    /// capability; the reply arrives as
+    /// [`Event::Environment`](crate::Event::Environment). `parcel_id` selects a
+    /// parcel's environment, or [`None`] for the whole region.
+    RequestEnvironment {
+        /// The parcel's region-local id, or [`None`] for the region environment.
+        parcel_id: Option<i32>,
+    },
     /// Request `ParcelProperties` for a metre rectangle (region-local).
     RequestParcelProperties {
         /// The western edge (metres).

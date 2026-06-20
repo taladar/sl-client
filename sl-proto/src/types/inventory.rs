@@ -117,6 +117,15 @@ pub fn handle_to_grid(handle: u64) -> (u32, u32) {
     )
 }
 
+/// Builds a region handle from its global south-west corner in metres,
+/// `(global_x, global_y)` — the inverse of [`handle_to_global`]. Unlike
+/// [`grid_to_handle`], the inputs are already in metres (not region indices),
+/// e.g. the `region_x` / `region_y` fields of the login response.
+#[must_use]
+pub fn global_to_handle(global_x: u32, global_y: u32) -> u64 {
+    u64::from(global_x).checked_shl(32).unwrap_or(0) | u64::from(global_y)
+}
+
 /// Builds a region handle from grid coordinates (region indices).
 #[must_use]
 pub fn grid_to_handle(grid_x: u32, grid_y: u32) -> u64 {

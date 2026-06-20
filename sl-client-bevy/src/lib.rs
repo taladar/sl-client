@@ -15,17 +15,18 @@ use std::collections::HashMap;
 
 use sl_proto::{
     CAP_AGENT_EXPERIENCES, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
-    CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET,
-    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH,
-    CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
-    CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
-    CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO,
-    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_RENDER_MATERIALS, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
-    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Event as SessionEvent, Llsd, LoginResponse,
-    RECV_BUFFER_SIZE, Session, ais_category_children_fetch_url, ais_category_children_url,
-    ais_category_url, ais_create_category_url, ais_item_url, build_ais_create_category_body,
-    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
+    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME,
+    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_EXPERIENCE_INFO,
+    CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES,
+    CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
+    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
+    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_RENDER_MATERIALS,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE,
+    CAP_VOICE_SIGNALING, Event as SessionEvent, Llsd, LoginResponse, RECV_BUFFER_SIZE, Session,
+    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    ais_create_category_url, ais_item_url, build_ais_create_category_body, build_ais_move_body,
+    build_ais_rename_category_body, build_ais_update_item_body,
     build_create_inventory_category_request, build_modify_material_params_request,
     build_object_media_navigate_request, build_object_media_update_request,
     build_parcel_voice_info_request, build_provision_voice_account_request,
@@ -993,6 +994,23 @@ fn advance_running(
             }
             Command::RequestRegionInfo => {
                 session.request_region_info(now).ok();
+            }
+            Command::RequestAvatarNames(ids) => {
+                session.request_avatar_names(ids, now).ok();
+            }
+            Command::RequestGroupNames(ids) => {
+                session.request_group_names(ids, now).ok();
+            }
+            Command::RequestEnvironment { parcel_id } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(base) = caps.map.get(CAP_EXT_ENVIRONMENT).cloned()
+                {
+                    let events_tx = caps.events_tx.clone();
+                    let url = format!("{base}?parcelid={}", parcel_id.unwrap_or(-1));
+                    std::thread::spawn(move || {
+                        run_get_caps_llsd(&url, CAP_EXT_ENVIRONMENT, &events_tx);
+                    });
+                }
             }
             Command::RequestMoneyBalance => {
                 session.request_money_balance(now).ok();

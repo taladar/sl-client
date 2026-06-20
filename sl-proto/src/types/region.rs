@@ -10,6 +10,21 @@ use uuid::Uuid;
 pub struct RegionIdentity {
     /// The region (simulator) name.
     pub sim_name: String,
+    /// The region's globally-unique id (`RegionID`, from the `RegionInfo2` block).
+    pub region_id: Uuid,
+    /// The region handle: its global south-west corner packed as
+    /// `(global_x << 32) | global_y`, or `0` when not yet known. The
+    /// `RegionHandshake` message does not itself carry the handle, so this is the
+    /// handle the session has learned for the simulator — seeded from the login
+    /// response's `region_x` / `region_y` for the start region, and otherwise from
+    /// `EnableSimulator` / object updates.
+    pub region_handle: u64,
+    /// The region's grid X coordinate (region index = the handle's global X metres
+    /// divided by 256), derived from [`Self::region_handle`]; `0` when the handle
+    /// is unknown.
+    pub grid_x: u32,
+    /// The region's grid Y coordinate; see [`Self::grid_x`].
+    pub grid_y: u32,
     /// The raw 32-bit `RegionFlags` bitfield (decode with [`sl_wire::RegionFlags`]).
     pub region_flags: u32,
     /// The full 64-bit `RegionFlagsExtended` (from the `RegionInfo4` block); falls
@@ -27,6 +42,12 @@ pub struct RegionIdentity {
     pub product_sku: String,
     /// The raw `ProductName` string (possibly empty, e.g. on OpenSim).
     pub product_name: String,
+    /// The simulator's advertised CPU class (`CPUClassID`, from the `RegionInfo3`
+    /// block); a coarse performance tier. `0` when the grid does not provide it.
+    pub cpu_class_id: i32,
+    /// The simulator's CPU ratio — roughly how many regions share the host CPU
+    /// (`CPURatio`, from the `RegionInfo3` block). `0` when not provided.
+    pub cpu_ratio: i32,
     /// The region/estate owner's id.
     pub sim_owner: Uuid,
     /// Whether *this* agent is an estate manager for the region (gates estate UI).

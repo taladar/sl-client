@@ -10,17 +10,18 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         AssetType, Camera, ChatAudible, ChatSourceType, ChatType, ClassifiedUpdate, ClickAction,
-        ControlFlags, CreateGroupParams, DeRezDestination, Diagnostic, DisconnectReason,
-        EstateAccessDelta, EstateAccessKind, Event, FriendRights, GroupNoticeAttachment,
-        GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog,
-        ImageCodec, InterestsUpdate, InventoryItem, LandingType, LindenAmount, LoginAccount,
-        LoginParams, MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType,
-        NewInventoryItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
-        ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelMediaCommand,
-        ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField,
-        PickUpdate, PrimShape, ProductType, ProfileUpdate, RegionInfoUpdate, Reliability, SaleType,
-        ScriptPermissions, Session, SoundFlags, TeleportFlags, TerrainLayerType, Throttle,
-        TransferStatus, Transmit, WearableType, avatar_texture, group_powers, pcode,
+        ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, Diagnostic,
+        DisconnectReason, EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event,
+        FriendRights, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
+        GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate, InventoryItem, LandingType,
+        LindenAmount, LoginAccount, LoginParams, MapItemType, Material, Maturity,
+        MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, ObjectFlagSettings,
+        ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+        ParcelFlags, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
+        ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProductType, ProfileUpdate,
+        RegionInfoUpdate, Reliability, SaleType, ScriptPermissions, Session, SkySettings,
+        SoundFlags, TeleportFlags, TerrainLayerType, Throttle, TransferStatus, Transmit,
+        WaterSettings, WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -94,9 +95,9 @@ mod test {
         SoundTriggerSoundDataBlock, TeleportFailed, TeleportFailedAlertInfoBlock,
         TeleportFailedInfoBlock, TeleportFinish, TeleportFinishInfoBlock, TransferInfo,
         TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
-        UpdateCreateInventoryItem, UpdateCreateInventoryItemAgentDataBlock,
-        UpdateCreateInventoryItemInventoryDataBlock, UseCachedMuteList,
-        UseCachedMuteListAgentDataBlock,
+        UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock, UpdateCreateInventoryItem,
+        UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
+        UseCachedMuteList, UseCachedMuteListAgentDataBlock,
     };
     use sl_wire::{
         AnyMessage, HomeLocation, Llsd, LoginFailure, LoginRequest, LoginResponse, LoginSuccess,
@@ -150,6 +151,8 @@ mod test {
             buddy_list: Vec::new(),
             home: None,
             look_at: None,
+            region_x: None,
+            region_y: None,
             agent_access: None,
             agent_access_max: None,
             max_agent_groups: None,
@@ -4154,6 +4157,8 @@ mod test {
             buddy_list: Vec::new(),
             home: None,
             look_at: None,
+            region_x: None,
+            region_y: None,
             agent_access: None,
             agent_access_max: None,
             max_agent_groups: None,
@@ -4204,6 +4209,8 @@ mod test {
                 look_at: [1.0, 0.0, 0.0],
             }),
             look_at: Some([0.5, 0.5, 0.0]),
+            region_x: Some(256_000),
+            region_y: Some(256_256),
             agent_access: Some("M".to_owned()),
             agent_access_max: Some("A".to_owned()),
             max_agent_groups: Some(42),
@@ -4641,12 +4648,16 @@ mod test {
         let mut session = awaiting_handshake(now)?;
 
         let owner = uuid::Uuid::from_u128(0x1234);
+        let region_id = uuid::Uuid::from_u128(0xABCD);
         let mut msg = region_handshake_msg(13, 0x40, "TestRegion", "", "");
         if let AnyMessage::RegionHandshake(ref mut handshake) = msg {
             handshake.region_info.sim_owner = owner;
             handshake.region_info.is_estate_manager = true;
             handshake.region_info.water_height = 20.5;
             handshake.region_info.billable_factor = 1.0;
+            handshake.region_info2.region_id = region_id;
+            handshake.region_info3.cpu_class_id = 4;
+            handshake.region_info3.cpu_ratio = 8;
             handshake.region_info4 = vec![RegionHandshakeRegionInfo4Block {
                 region_flags_extended: 0x1_0000_0040,
                 region_protocols: 0x5,
@@ -4667,9 +4678,330 @@ mod test {
         assert!(identity.is_estate_manager);
         assert!((identity.water_height - 20.5).abs() < f32::EPSILON);
         assert!((identity.billable_factor - 1.0).abs() < f32::EPSILON);
+        // RegionInfo2 / RegionInfo3 supply the region id and CPU metrics.
+        assert_eq!(identity.region_id, region_id);
+        assert_eq!(identity.cpu_class_id, 4);
+        assert_eq!(identity.cpu_ratio, 8);
         // RegionInfo4 supplies the full 64-bit flags and the protocols bitfield.
         assert_eq!(identity.region_flags_extended, 0x1_0000_0040);
         assert_eq!(identity.region_protocols, 0x5);
+        Ok(())
+    }
+
+    #[test]
+    fn region_handshake_carries_grid_coordinates_from_login() -> Result<(), TestError> {
+        let now = Instant::now();
+        // Log in with a start region at global (256000, 256512) metres — grid
+        // (1000, 1002). The handshake does not carry the handle, so the session
+        // must surface the one seeded from the login response.
+        let mut session = new_session();
+        let LoginResponse::Success(mut boxed) = success() else {
+            return Err("expected a success fixture".into());
+        };
+        boxed.region_x = Some(256_000);
+        boxed.region_y = Some(256_512);
+        session.handle_login_response(LoginResponse::Success(boxed), now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let handshake =
+            server_message(&region_handshake_msg(13, 0, "TestRegion", "", ""), 1, true)?;
+        session.handle_datagram(sim_addr(), &handshake, now)?;
+
+        let events = drain_events(&mut session);
+        let identity = events
+            .iter()
+            .find_map(|e| match e {
+                Event::RegionInfoHandshake(identity) => Some(identity),
+                _ => None,
+            })
+            .ok_or("expected a RegionInfoHandshake event")?;
+        assert_eq!(
+            identity.region_handle,
+            sl_proto::global_to_handle(256_000, 256_512)
+        );
+        assert_eq!(identity.grid_x, 1000);
+        assert_eq!(identity.grid_y, 1002);
+        Ok(())
+    }
+
+    #[test]
+    fn ext_environment_caps_surfaces_day_cycle() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // An `ExtEnvironment` GET reply: a region environment with one sky frame
+        // and one water frame scheduled by a water track and one sky track.
+        let xml = concat!(
+            "<llsd><map>",
+            "<key>environment</key><map>",
+            "<key>parcel_id</key><integer>-1</integer>",
+            "<key>region_id</key><uuid>00000000-0000-0000-0000-000000000042</uuid>",
+            "<key>day_length</key><integer>14400</integer>",
+            "<key>day_offset</key><integer>0</integer>",
+            "<key>env_version</key><integer>3</integer>",
+            "<key>track_altitudes</key><array><real>1000</real><real>2000</real><real>3000</real></array>",
+            "<key>day_cycle</key><map>",
+            "<key>name</key><string>Test Cycle</string>",
+            "<key>type</key><string>daycycle</string>",
+            "<key>frames</key><map>",
+            "<key>Sunrise</key><map>",
+            "<key>type</key><string>sky</string>",
+            "<key>max_y</key><real>1605</real>",
+            "<key>star_brightness</key><real>0.5</real>",
+            "<key>sun_rotation</key><array><real>0</real><real>0</real><real>0</real><real>1</real></array>",
+            "<key>cloud_id</key><uuid>00000000-0000-0000-0000-0000000000cc</uuid>",
+            "<key>legacy_haze</key><map>",
+            "<key>ambient</key><array><real>0.25</real><real>0.25</real><real>0.25</real></array>",
+            "<key>haze_density</key><real>0.75</real>",
+            "</map></map>",
+            "<key>Default</key><map>",
+            "<key>type</key><string>water</string>",
+            "<key>water_fog_density</key><real>2</real>",
+            "<key>normal_map</key><uuid>00000000-0000-0000-0000-0000000000aa</uuid>",
+            "<key>wave1_direction</key><array><real>1.5</real><real>-0.5</real></array>",
+            "</map></map>",
+            "<key>tracks</key><array>",
+            "<array><map><key>key_keyframe</key><real>0</real><key>key_name</key><string>Default</string></map></array>",
+            "<array><map><key>key_keyframe</key><real>0.25</real><key>key_name</key><string>Sunrise</string></map></array>",
+            "</array></map></map>",
+            "<key>parcel_id</key><integer>-1</integer>",
+            "<key>success</key><boolean>1</boolean>",
+            "</map></llsd>",
+        );
+        let body = parse_llsd_xml(xml)?;
+        session.handle_caps_event(sl_proto::CAP_EXT_ENVIRONMENT, &body, now)?;
+
+        let env = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::Environment(env) => Some(env),
+                _ => None,
+            })
+            .ok_or("expected an Environment event")?;
+        assert_eq!(env.parcel_id, -1);
+        assert_eq!(env.region_id, uuid::Uuid::from_u128(0x42));
+        assert_eq!(env.day_length, 14400);
+        assert_eq!(env.env_version, 3);
+        assert!(
+            env.track_altitudes
+                .iter()
+                .zip([1000.0, 2000.0, 3000.0])
+                .all(|(actual, expected)| (actual - expected).abs() < f32::EPSILON)
+        );
+
+        let cycle = &env.day_cycle;
+        assert_eq!(cycle.name, "Test Cycle");
+        // Track 0 is the water track; the remaining tracks are sky tracks.
+        let water_frame = cycle.water_track.first().ok_or("water keyframe")?;
+        assert_eq!(water_frame.name, "Default");
+        assert!((water_frame.keyframe - 0.0).abs() < f32::EPSILON);
+        let sky_frame = cycle
+            .sky_tracks
+            .first()
+            .and_then(|track| track.first())
+            .ok_or("sky keyframe")?;
+        assert_eq!(sky_frame.name, "Sunrise");
+        assert!((sky_frame.keyframe - 0.25).abs() < f32::EPSILON);
+
+        let sky = cycle.sky_frames.get("Sunrise").ok_or("sky frame")?;
+        assert!((sky.max_y - 1605.0).abs() < f32::EPSILON);
+        assert!((sky.star_brightness - 0.5).abs() < f32::EPSILON);
+        assert!((sky.sun_rotation.s - 1.0).abs() < f32::EPSILON);
+        assert_eq!(sky.cloud_texture, uuid::Uuid::from_u128(0xcc));
+        // Haze colours/scalars come from the `legacy_haze` sub-map.
+        assert!(
+            sky.ambient
+                .iter()
+                .all(|component| (component - 0.25).abs() < f32::EPSILON)
+        );
+        assert!((sky.haze_density - 0.75).abs() < f32::EPSILON);
+
+        let water = cycle.water_frames.get("Default").ok_or("water frame")?;
+        assert!((water.water_fog_density - 2.0).abs() < f32::EPSILON);
+        assert_eq!(water.normal_map, uuid::Uuid::from_u128(0xaa));
+        assert!(
+            water
+                .wave1_direction
+                .iter()
+                .zip([1.5, -0.5])
+                .all(|(actual, expected)| (actual - expected).abs() < f32::EPSILON)
+        );
+        Ok(())
+    }
+
+    /// A fully-populated sky frame with exactly-representable `f32` values, so an
+    /// encode→decode round trip is bit-exact.
+    fn sky_fixture(name: &str) -> SkySettings {
+        SkySettings {
+            name: name.to_owned(),
+            sun_rotation: Rotation {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                s: 1.0,
+            },
+            moon_rotation: Rotation {
+                x: 0.5,
+                y: 0.5,
+                z: 0.5,
+                s: 0.5,
+            },
+            sunlight_color: [0.25, 0.5, 0.75, 1.0],
+            ambient: [0.125, 0.25, 0.5],
+            blue_horizon: [0.25, 0.5, 1.0],
+            blue_density: [0.5, 0.25, 0.125],
+            haze_horizon: 0.75,
+            haze_density: 2.0,
+            density_multiplier: 0.25,
+            distance_multiplier: 4.0,
+            max_y: 1605.0,
+            gamma: 1.0,
+            cloud_color: [0.5, 0.5, 0.5],
+            cloud_pos_density1: [1.0, 0.5, 0.25],
+            cloud_pos_density2: [0.125, 0.25, 0.5],
+            cloud_scale: 0.5,
+            cloud_scroll_rate: [10.0, 10.25],
+            cloud_shadow: 0.25,
+            cloud_variance: 0.0,
+            glow: [5.0, 0.0, -2.5],
+            star_brightness: 0.5,
+            sun_scale: 1.0,
+            moon_scale: 1.0,
+            moon_brightness: 0.5,
+            sun_arc_radians: 0.125,
+            droplet_radius: 800.0,
+            ice_level: 0.0,
+            moisture_level: 0.5,
+            sky_top_radius: 6400.0,
+            sky_bottom_radius: 6360.0,
+            planet_radius: 6360.0,
+            sun_texture: uuid::Uuid::from_u128(0x511),
+            moon_texture: uuid::Uuid::from_u128(0x110),
+            cloud_texture: uuid::Uuid::from_u128(0xc10),
+            bloom_texture: uuid::Uuid::from_u128(0xb1),
+            halo_texture: uuid::Uuid::from_u128(0xa10),
+            rainbow_texture: uuid::Uuid::from_u128(0x4a1),
+        }
+    }
+
+    /// A fully-populated water frame with exactly-representable `f32` values.
+    fn water_fixture(name: &str) -> WaterSettings {
+        WaterSettings {
+            name: name.to_owned(),
+            blur_multiplier: 0.25,
+            fresnel_offset: 0.5,
+            fresnel_scale: 0.75,
+            normal_scale: [2.0, 2.0, 2.0],
+            normal_map: uuid::Uuid::from_u128(0x404),
+            scale_above: 0.125,
+            scale_below: 0.25,
+            transparent_texture: uuid::Uuid::from_u128(0x7a),
+            underwater_fog_mod: 0.25,
+            water_fog_color: [0.0, 0.25, 0.5],
+            water_fog_density: 16.0,
+            wave1_direction: [1.5, -0.5],
+            wave2_direction: [-1.0, 0.25],
+        }
+    }
+
+    #[test]
+    fn environment_round_trips_through_llsd() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let mut sky_frames = std::collections::BTreeMap::new();
+        sky_frames.insert("Sunrise".to_owned(), sky_fixture("Sunrise"));
+        sky_frames.insert("Noon".to_owned(), sky_fixture("Noon"));
+        let mut water_frames = std::collections::BTreeMap::new();
+        water_frames.insert("Default".to_owned(), water_fixture("Default"));
+        let original = EnvironmentSettings {
+            parcel_id: -1,
+            region_id: uuid::Uuid::from_u128(0x42),
+            day_length: 14400,
+            day_offset: 0,
+            flags: 0,
+            env_version: 3,
+            track_altitudes: [1000.0, 2000.0, 3000.0],
+            day_cycle: DayCycle {
+                name: "Test Cycle".to_owned(),
+                water_track: vec![DayCycleFrame {
+                    keyframe: 0.0,
+                    name: "Default".to_owned(),
+                }],
+                sky_tracks: vec![vec![
+                    DayCycleFrame {
+                        keyframe: 0.25,
+                        name: "Sunrise".to_owned(),
+                    },
+                    DayCycleFrame {
+                        keyframe: 0.5,
+                        name: "Noon".to_owned(),
+                    },
+                ]],
+                sky_frames,
+                water_frames,
+            },
+        };
+
+        // Encode with the server-side encoder, decode with the client path.
+        let body = sl_proto::environment_to_llsd(&original);
+        session.handle_caps_event(sl_proto::CAP_EXT_ENVIRONMENT, &body, now)?;
+        let decoded = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::Environment(env) => Some(env),
+                _ => None,
+            })
+            .ok_or("expected an Environment event")?;
+        assert_eq!(*decoded, original);
+        Ok(())
+    }
+
+    #[test]
+    fn uuid_name_reply_surfaces_avatar_names() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let alice = uuid::Uuid::from_u128(0xA11CE);
+        let bob = uuid::Uuid::from_u128(0xB0B);
+        let reply = AnyMessage::UUIDNameReply(UUIDNameReply {
+            uuid_name_block: vec![
+                UUIDNameReplyUUIDNameBlockBlock {
+                    id: alice,
+                    first_name: b"Alice".to_vec(),
+                    last_name: b"Liddell".to_vec(),
+                },
+                UUIDNameReplyUUIDNameBlockBlock {
+                    id: bob,
+                    first_name: b"Bob".to_vec(),
+                    last_name: b"Resident".to_vec(),
+                },
+            ],
+        });
+        let datagram = server_message(&reply, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let events = drain_events(&mut session);
+        let names = events
+            .iter()
+            .find_map(|e| match e {
+                Event::AvatarNames(names) => Some(names),
+                _ => None,
+            })
+            .ok_or("expected an AvatarNames event")?;
+        assert_eq!(names.len(), 2);
+        let alice_name = names.iter().find(|n| n.id == alice).ok_or("alice")?;
+        assert_eq!(alice_name.legacy_name(), "Alice Liddell");
+        // The "Resident" placeholder last name collapses to the first name.
+        let bob_name = names.iter().find(|n| n.id == bob).ok_or("bob")?;
+        assert_eq!(bob_name.legacy_name(), "Bob");
         Ok(())
     }
 

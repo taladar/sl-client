@@ -242,6 +242,9 @@ fn on_events(
             | SlSessionEvent::AvatarNotes { .. }
             | SlSessionEvent::RegionInfoHandshake(_)
             | SlSessionEvent::RegionLimits(_)
+            | SlSessionEvent::AvatarNames(_)
+            | SlSessionEvent::GroupNames(_)
+            | SlSessionEvent::Environment(_)
             | SlSessionEvent::MoneyBalance(_)
             | SlSessionEvent::EconomyData(_)
             | SlSessionEvent::ParcelProperties(_)

@@ -231,7 +231,10 @@ fn on_events(
             | SlSessionEvent::RegionExperiences { .. }
             | SlSessionEvent::ConferenceSessionMessage { .. }
             | SlSessionEvent::ConferenceSessionParticipant { .. }
-            | SlSessionEvent::ConferenceInvited { .. } => {}
+            | SlSessionEvent::ConferenceInvited { .. }
+            | SlSessionEvent::AvatarNames(_)
+            | SlSessionEvent::GroupNames(_)
+            | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged { region_handle, sim } => {
                 info!("region changed: handle={region_handle} sim={sim}");
