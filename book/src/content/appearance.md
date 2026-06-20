@@ -13,7 +13,8 @@ moved from the client to the server over the years.
   universal, …, which can stack). Each wearable references the inventory item
   that defines it.
 - An **attachment** is an object rezzed onto an attachment point on the avatar's
-  body (or HUD).
+  body (or HUD). Attaching, detaching, dropping and wearing-from-inventory have
+  their own [attachments](attachments.md) chapter.
 
 The client tells the region what it is wearing (`Command::SetWearing`) and can
 fetch the current set (`Command::RequestWearables`, → `Event::AgentWearables`).

@@ -394,6 +394,329 @@ pub struct AvatarAttachment {
     pub attachment_point: u8,
 }
 
+/// An avatar attachment point: the body joint or HUD slot an attached object
+/// hangs from (LL's attachment-point enumeration, mirroring the viewer's
+/// `avatar_lad.xml`). Carried by the attachment commands
+/// ([`Command::AttachObject`](crate::Command::AttachObject),
+/// [`Command::RezAttachment`](crate::Command::RezAttachment),
+/// [`Command::RemoveAttachment`](crate::Command::RemoveAttachment)) and the
+/// matching server events.
+///
+/// On the wire the point shares a byte with an "add" flag (`ATTACHMENT_ADD`,
+/// `0x80`): when set, the object is *added* to the point alongside anything
+/// already there rather than *replacing* it. The flag is modelled separately
+/// (the `add` field on the commands), so [`to_code`](Self::to_code) /
+/// [`from_code`](Self::from_code) carry only the point itself (the low 7 bits);
+/// use [`split_code`](Self::split_code) / [`with_add`](Self::with_add) to combine
+/// or separate the two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttachmentPoint {
+    /// The item's default attachment point (`0`); the simulator picks the slot
+    /// the object was last attached to (or its scripted default).
+    Default,
+    /// Chest (`1`).
+    Chest,
+    /// Skull / head (`2`).
+    Skull,
+    /// Left shoulder (`3`).
+    LeftShoulder,
+    /// Right shoulder (`4`).
+    RightShoulder,
+    /// Left hand (`5`).
+    LeftHand,
+    /// Right hand (`6`).
+    RightHand,
+    /// Left foot (`7`).
+    LeftFoot,
+    /// Right foot (`8`).
+    RightFoot,
+    /// Spine / back (`9`).
+    Spine,
+    /// Pelvis (`10`).
+    Pelvis,
+    /// Mouth (`11`).
+    Mouth,
+    /// Chin (`12`).
+    Chin,
+    /// Left ear (`13`).
+    LeftEar,
+    /// Right ear (`14`).
+    RightEar,
+    /// Left eyeball (`15`).
+    LeftEyeball,
+    /// Right eyeball (`16`).
+    RightEyeball,
+    /// Nose (`17`).
+    Nose,
+    /// Right upper arm (`18`).
+    RUpperArm,
+    /// Right forearm (`19`).
+    RForearm,
+    /// Left upper arm (`20`).
+    LUpperArm,
+    /// Left forearm (`21`).
+    LForearm,
+    /// Right hip (`22`).
+    RightHip,
+    /// Right upper leg (`23`).
+    RUpperLeg,
+    /// Right lower leg (`24`).
+    RLowerLeg,
+    /// Left hip (`25`).
+    LeftHip,
+    /// Left upper leg (`26`).
+    LUpperLeg,
+    /// Left lower leg (`27`).
+    LLowerLeg,
+    /// Stomach / belly (`28`).
+    Stomach,
+    /// Left pectoral (`29`).
+    LeftPec,
+    /// Right pectoral (`30`).
+    RightPec,
+    /// HUD centre 2 (`31`).
+    HudCenter2,
+    /// HUD top right (`32`).
+    HudTopRight,
+    /// HUD top (`33`).
+    HudTop,
+    /// HUD top left (`34`).
+    HudTopLeft,
+    /// HUD centre (`35`).
+    HudCenter,
+    /// HUD bottom left (`36`).
+    HudBottomLeft,
+    /// HUD bottom (`37`).
+    HudBottom,
+    /// HUD bottom right (`38`).
+    HudBottomRight,
+    /// Neck (`39`).
+    Neck,
+    /// Avatar centre / root (`40`).
+    AvatarCenter,
+    /// Left ring finger (`41`).
+    LeftRingFinger,
+    /// Right ring finger (`42`).
+    RightRingFinger,
+    /// Tail base (`43`).
+    TailBase,
+    /// Tail tip (`44`).
+    TailTip,
+    /// Left wing (`45`).
+    LeftWing,
+    /// Right wing (`46`).
+    RightWing,
+    /// Jaw (`47`).
+    Jaw,
+    /// Alternate left ear (`48`).
+    AltLeftEar,
+    /// Alternate right ear (`49`).
+    AltRightEar,
+    /// Alternate left eye (`50`).
+    AltLeftEye,
+    /// Alternate right eye (`51`).
+    AltRightEye,
+    /// Tongue (`52`).
+    Tongue,
+    /// Groin (`53`).
+    Groin,
+    /// Left hind foot (`54`).
+    LeftHindFoot,
+    /// Right hind foot (`55`).
+    RightHindFoot,
+    /// An unknown / future attachment point, preserving the raw wire byte (the
+    /// point only, with the `ATTACHMENT_ADD` flag already stripped).
+    Other(u8),
+}
+
+impl AttachmentPoint {
+    /// The `ATTACHMENT_ADD` wire flag (`0x80`): set in the attachment-point byte
+    /// to add an attachment to the point rather than replace what is there.
+    pub const ADD_FLAG: u8 = 0x80;
+
+    /// The attachment-point wire byte for this slot (the point only, without the
+    /// [`ADD_FLAG`](Self::ADD_FLAG); combine with [`with_add`](Self::with_add)).
+    #[must_use]
+    pub const fn to_code(self) -> u8 {
+        match self {
+            Self::Default => 0,
+            Self::Chest => 1,
+            Self::Skull => 2,
+            Self::LeftShoulder => 3,
+            Self::RightShoulder => 4,
+            Self::LeftHand => 5,
+            Self::RightHand => 6,
+            Self::LeftFoot => 7,
+            Self::RightFoot => 8,
+            Self::Spine => 9,
+            Self::Pelvis => 10,
+            Self::Mouth => 11,
+            Self::Chin => 12,
+            Self::LeftEar => 13,
+            Self::RightEar => 14,
+            Self::LeftEyeball => 15,
+            Self::RightEyeball => 16,
+            Self::Nose => 17,
+            Self::RUpperArm => 18,
+            Self::RForearm => 19,
+            Self::LUpperArm => 20,
+            Self::LForearm => 21,
+            Self::RightHip => 22,
+            Self::RUpperLeg => 23,
+            Self::RLowerLeg => 24,
+            Self::LeftHip => 25,
+            Self::LUpperLeg => 26,
+            Self::LLowerLeg => 27,
+            Self::Stomach => 28,
+            Self::LeftPec => 29,
+            Self::RightPec => 30,
+            Self::HudCenter2 => 31,
+            Self::HudTopRight => 32,
+            Self::HudTop => 33,
+            Self::HudTopLeft => 34,
+            Self::HudCenter => 35,
+            Self::HudBottomLeft => 36,
+            Self::HudBottom => 37,
+            Self::HudBottomRight => 38,
+            Self::Neck => 39,
+            Self::AvatarCenter => 40,
+            Self::LeftRingFinger => 41,
+            Self::RightRingFinger => 42,
+            Self::TailBase => 43,
+            Self::TailTip => 44,
+            Self::LeftWing => 45,
+            Self::RightWing => 46,
+            Self::Jaw => 47,
+            Self::AltLeftEar => 48,
+            Self::AltRightEar => 49,
+            Self::AltLeftEye => 50,
+            Self::AltRightEye => 51,
+            Self::Tongue => 52,
+            Self::Groin => 53,
+            Self::LeftHindFoot => 54,
+            Self::RightHindFoot => 55,
+            Self::Other(code) => code,
+        }
+    }
+
+    /// Classifies an attachment-point wire byte (the point only — strip the
+    /// [`ADD_FLAG`](Self::ADD_FLAG) first, e.g. via [`split_code`](Self::split_code));
+    /// codes outside the known range become [`Other`](Self::Other).
+    #[must_use]
+    pub const fn from_code(code: u8) -> Self {
+        match code {
+            0 => Self::Default,
+            1 => Self::Chest,
+            2 => Self::Skull,
+            3 => Self::LeftShoulder,
+            4 => Self::RightShoulder,
+            5 => Self::LeftHand,
+            6 => Self::RightHand,
+            7 => Self::LeftFoot,
+            8 => Self::RightFoot,
+            9 => Self::Spine,
+            10 => Self::Pelvis,
+            11 => Self::Mouth,
+            12 => Self::Chin,
+            13 => Self::LeftEar,
+            14 => Self::RightEar,
+            15 => Self::LeftEyeball,
+            16 => Self::RightEyeball,
+            17 => Self::Nose,
+            18 => Self::RUpperArm,
+            19 => Self::RForearm,
+            20 => Self::LUpperArm,
+            21 => Self::LForearm,
+            22 => Self::RightHip,
+            23 => Self::RUpperLeg,
+            24 => Self::RLowerLeg,
+            25 => Self::LeftHip,
+            26 => Self::LUpperLeg,
+            27 => Self::LLowerLeg,
+            28 => Self::Stomach,
+            29 => Self::LeftPec,
+            30 => Self::RightPec,
+            31 => Self::HudCenter2,
+            32 => Self::HudTopRight,
+            33 => Self::HudTop,
+            34 => Self::HudTopLeft,
+            35 => Self::HudCenter,
+            36 => Self::HudBottomLeft,
+            37 => Self::HudBottom,
+            38 => Self::HudBottomRight,
+            39 => Self::Neck,
+            40 => Self::AvatarCenter,
+            41 => Self::LeftRingFinger,
+            42 => Self::RightRingFinger,
+            43 => Self::TailBase,
+            44 => Self::TailTip,
+            45 => Self::LeftWing,
+            46 => Self::RightWing,
+            47 => Self::Jaw,
+            48 => Self::AltLeftEar,
+            49 => Self::AltRightEar,
+            50 => Self::AltLeftEye,
+            51 => Self::AltRightEye,
+            52 => Self::Tongue,
+            53 => Self::Groin,
+            54 => Self::LeftHindFoot,
+            55 => Self::RightHindFoot,
+            other => Self::Other(other),
+        }
+    }
+
+    /// The full wire byte combining this point with the `add` flag: sets the
+    /// [`ADD_FLAG`](Self::ADD_FLAG) bit when `add` is `true`.
+    #[must_use]
+    pub const fn with_add(self, add: bool) -> u8 {
+        if add {
+            self.to_code() | Self::ADD_FLAG
+        } else {
+            self.to_code()
+        }
+    }
+
+    /// Splits a raw attachment-point wire byte into its point and `add` flag (the
+    /// inverse of [`with_add`](Self::with_add)).
+    #[must_use]
+    pub const fn split_code(byte: u8) -> (Self, bool) {
+        (
+            Self::from_code(byte & !Self::ADD_FLAG),
+            byte & Self::ADD_FLAG != 0,
+        )
+    }
+
+    /// Whether this is one of the HUD slots ([`HudCenter2`](Self::HudCenter2)
+    /// through [`HudBottomRight`](Self::HudBottomRight), codes `31`–`38`), which
+    /// attach to the agent's own screen rather than the avatar's body.
+    #[must_use]
+    pub const fn is_hud(self) -> bool {
+        matches!(self.to_code(), 31..=38)
+    }
+}
+
+/// An inventory item to wear as an attachment, passed to
+/// [`Command::RezAttachment`](crate::Command::RezAttachment) and
+/// [`Command::RezAttachments`](crate::Command::RezAttachments) (the
+/// `RezSingleAttachmentFromInv` / `RezMultipleAttachmentsFromInv` messages).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RezAttachment {
+    /// The inventory item id to wear.
+    pub item_id: Uuid,
+    /// The item's owner id (the agent's own id for an item from its inventory).
+    pub owner_id: Uuid,
+    /// The attachment point to wear it on ([`AttachmentPoint::Default`] lets the
+    /// simulator pick the item's saved/scripted slot).
+    pub attachment_point: AttachmentPoint,
+    /// Whether to *add* the attachment alongside anything already on the point
+    /// (`true`) rather than *replace* it (`false`); the `ATTACHMENT_ADD` flag.
+    pub add: bool,
+    /// The item's name (sent verbatim; the simulator ignores it).
+    pub name: String,
+    /// The item's description (sent verbatim; the simulator ignores it).
+    pub description: String,
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;

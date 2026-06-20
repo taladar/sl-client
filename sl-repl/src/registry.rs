@@ -18,15 +18,16 @@
 use std::collections::BTreeMap;
 
 use sl_proto::{
-    AssetType, Camera, ChatType, ClassifiedUpdate, Command, ControlFlags, CreateGroupParams,
-    DeRezDestination, EstateAccessDelta, ExperiencePermission, ExperienceUpdate, FriendRights,
-    GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange, InterestsUpdate,
-    InventoryItem, InventoryOffer, InventoryType, LindenAmount, MapItemType, Material,
-    MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MuteFlags, MuteType,
-    NewInventoryItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate,
-    PermissionField, PickUpdate, PrimShape, ProfileUpdate, RegionInfoUpdate, SaleType,
-    ScriptPermissions, Throttle, Uuid, Vector, VoiceProvisionRequest, Wearable, WearableType,
+    AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, Command, ControlFlags,
+    CreateGroupParams, DeRezDestination, EstateAccessDelta, ExperiencePermission, ExperienceUpdate,
+    FriendRights, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
+    InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LindenAmount, MapItemType,
+    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MuteFlags,
+    MuteType, NewInventoryItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
+    ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProfileUpdate, RegionInfoUpdate,
+    RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
+    VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -442,6 +443,75 @@ fn parse_wearable_type(field: &str, value: &str) -> Result<WearableType, ReplErr
                 .parse::<u8>()
                 .ok()
                 .ok_or_else(|| invalid(field, value, "wearable type"))?,
+        ),
+    })
+}
+
+/// Parse an [`AttachmentPoint`] from its name (e.g. `chest`, `lefthand`,
+/// `hudtopright`, `default`) or its wire code.
+fn parse_attachment_point(field: &str, value: &str) -> Result<AttachmentPoint, ReplError> {
+    Ok(match norm(value).as_str() {
+        "default" => AttachmentPoint::Default,
+        "chest" => AttachmentPoint::Chest,
+        "skull" | "head" => AttachmentPoint::Skull,
+        "leftshoulder" => AttachmentPoint::LeftShoulder,
+        "rightshoulder" => AttachmentPoint::RightShoulder,
+        "lefthand" => AttachmentPoint::LeftHand,
+        "righthand" => AttachmentPoint::RightHand,
+        "leftfoot" => AttachmentPoint::LeftFoot,
+        "rightfoot" => AttachmentPoint::RightFoot,
+        "spine" | "back" => AttachmentPoint::Spine,
+        "pelvis" => AttachmentPoint::Pelvis,
+        "mouth" => AttachmentPoint::Mouth,
+        "chin" => AttachmentPoint::Chin,
+        "leftear" => AttachmentPoint::LeftEar,
+        "rightear" => AttachmentPoint::RightEar,
+        "lefteyeball" => AttachmentPoint::LeftEyeball,
+        "righteyeball" => AttachmentPoint::RightEyeball,
+        "nose" => AttachmentPoint::Nose,
+        "rupperarm" => AttachmentPoint::RUpperArm,
+        "rforearm" => AttachmentPoint::RForearm,
+        "lupperarm" => AttachmentPoint::LUpperArm,
+        "lforearm" => AttachmentPoint::LForearm,
+        "righthip" => AttachmentPoint::RightHip,
+        "rupperleg" => AttachmentPoint::RUpperLeg,
+        "rlowerleg" => AttachmentPoint::RLowerLeg,
+        "lefthip" => AttachmentPoint::LeftHip,
+        "lupperleg" => AttachmentPoint::LUpperLeg,
+        "llowerleg" => AttachmentPoint::LLowerLeg,
+        "stomach" | "belly" => AttachmentPoint::Stomach,
+        "leftpec" => AttachmentPoint::LeftPec,
+        "rightpec" => AttachmentPoint::RightPec,
+        "hudcenter2" => AttachmentPoint::HudCenter2,
+        "hudtopright" => AttachmentPoint::HudTopRight,
+        "hudtop" => AttachmentPoint::HudTop,
+        "hudtopleft" => AttachmentPoint::HudTopLeft,
+        "hudcenter" => AttachmentPoint::HudCenter,
+        "hudbottomleft" => AttachmentPoint::HudBottomLeft,
+        "hudbottom" => AttachmentPoint::HudBottom,
+        "hudbottomright" => AttachmentPoint::HudBottomRight,
+        "neck" => AttachmentPoint::Neck,
+        "avatarcenter" | "root" => AttachmentPoint::AvatarCenter,
+        "leftringfinger" => AttachmentPoint::LeftRingFinger,
+        "rightringfinger" => AttachmentPoint::RightRingFinger,
+        "tailbase" => AttachmentPoint::TailBase,
+        "tailtip" => AttachmentPoint::TailTip,
+        "leftwing" => AttachmentPoint::LeftWing,
+        "rightwing" => AttachmentPoint::RightWing,
+        "jaw" => AttachmentPoint::Jaw,
+        "altleftear" => AttachmentPoint::AltLeftEar,
+        "altrightear" => AttachmentPoint::AltRightEar,
+        "altlefteye" => AttachmentPoint::AltLeftEye,
+        "altrighteye" => AttachmentPoint::AltRightEye,
+        "tongue" => AttachmentPoint::Tongue,
+        "groin" => AttachmentPoint::Groin,
+        "lefthindfoot" => AttachmentPoint::LeftHindFoot,
+        "righthindfoot" => AttachmentPoint::RightHindFoot,
+        _ => AttachmentPoint::from_code(
+            value
+                .parse::<u8>()
+                .ok()
+                .ok_or_else(|| invalid(field, value, "attachment point"))?,
         ),
     })
 }
@@ -2309,6 +2379,120 @@ fn all_specs() -> Vec<CommandSpec> {
                     });
                 }
                 Ok(Command::SetWearing(wearables))
+            },
+        },
+        CommandSpec {
+            name: "attach_object",
+            usage: "<local_id> <attachment_point> [add=] [rotation=<r>]",
+            build: |args, ctx| {
+                Ok(Command::AttachObject {
+                    local_id: args.req_parse(ctx, "local_id", 0, "u32")?,
+                    attachment_point: enum_arg(
+                        args,
+                        ctx,
+                        "attachment_point",
+                        1,
+                        parse_attachment_point,
+                    )?,
+                    add: args.bool_or(ctx, "add", 2, false)?,
+                    rotation: args.opt_rotation(ctx, "rotation", 3)?.unwrap_or(Rotation {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                        s: 1.0,
+                    }),
+                })
+            },
+        },
+        CommandSpec {
+            name: "detach_objects",
+            usage: "<local_id,…>",
+            build: |args, ctx| {
+                Ok(Command::DetachObjects {
+                    local_ids: args.vec_parse(ctx, "local_ids", 0, "u32")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "drop_attachments",
+            usage: "<local_id,…>",
+            build: |args, ctx| {
+                Ok(Command::DropAttachments {
+                    local_ids: args.vec_parse(ctx, "local_ids", 0, "u32")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "remove_attachment",
+            usage: "<attachment_point> <item_id>",
+            build: |args, ctx| {
+                Ok(Command::RemoveAttachment {
+                    attachment_point: enum_arg(
+                        args,
+                        ctx,
+                        "attachment_point",
+                        0,
+                        parse_attachment_point,
+                    )?,
+                    item_id: args.req_uuid(ctx, "item_id", 1)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "rez_attachment",
+            usage: "<item_id> <attachment_point> [owner_id=] [add=] [name=] [description=]",
+            build: |args, ctx| {
+                Ok(Command::RezAttachment(RezAttachment {
+                    item_id: args.req_uuid(ctx, "item_id", 0)?,
+                    attachment_point: enum_arg(
+                        args,
+                        ctx,
+                        "attachment_point",
+                        1,
+                        parse_attachment_point,
+                    )?,
+                    owner_id: args.uuid_or_nil(ctx, "owner_id", 2)?,
+                    add: args.bool_or(ctx, "add", 3, false)?,
+                    name: args.opt_str(ctx, "name", 4)?.unwrap_or_default(),
+                    description: args.opt_str(ctx, "description", 5)?.unwrap_or_default(),
+                }))
+            },
+        },
+        CommandSpec {
+            name: "rez_attachments",
+            usage: "<compound_id> <item_id:owner_id:attachment_point[:add],…> [first_detach_all=]",
+            build: |args, ctx| {
+                let compound_id = args.uuid_or_nil(ctx, "compound_id", 0)?;
+                let first_detach_all = args.bool_or(ctx, "first_detach_all", 100, false)?;
+                let mut attachments = Vec::new();
+                for record in args.vec_records(ctx, "attachments", 1)? {
+                    let add = match record.get(3) {
+                        Some(value) => args::parse_bool("attachments", value)?,
+                        None => false,
+                    };
+                    attachments.push(RezAttachment {
+                        item_id: args::literal_uuid(
+                            "attachments",
+                            record_field("attachments", &record, 0)?,
+                        )?,
+                        owner_id: args::literal_uuid(
+                            "attachments",
+                            record_field("attachments", &record, 1)?,
+                        )?,
+                        attachment_point: parse_attachment_point(
+                            "attachments",
+                            record_field("attachments", &record, 2)?,
+                        )?,
+                        add,
+                        name: String::new(),
+                        description: String::new(),
+                    });
+                }
+                Ok(Command::RezAttachments {
+                    compound_id,
+                    first_detach_all,
+                    attachments,
+                })
             },
         },
         CommandSpec {

@@ -27,6 +27,7 @@
 - [Economy & Money](content/economy.md)
 - [Profiles, Picks & Classifieds](content/profiles.md)
 - [Appearance](content/appearance.md)
+- [Attachments](content/attachments.md)
 - [Friends & Presence](content/friends.md)
 - [Experiences](content/experiences.md)
 - [Materials](content/materials.md)

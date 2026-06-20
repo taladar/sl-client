@@ -9,19 +9,20 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
-        AssetType, Camera, ChatAudible, ChatSourceType, ChatType, ClassifiedUpdate, ClickAction,
-        ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, Diagnostic,
-        DisconnectReason, EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event,
-        FriendRights, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
-        GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate, InventoryItem, LandingType,
-        LindenAmount, LoginAccount, LoginParams, MapItemType, Material, Maturity,
-        MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, ObjectFlagSettings,
-        ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-        ParcelFlags, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-        ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProductType, ProfileUpdate,
-        RegionInfoUpdate, Reliability, SaleType, ScriptPermissions, Session, SkySettings,
-        SoundFlags, TeleportFlags, TerrainLayerType, Throttle, TransferStatus, Transmit,
-        WaterSettings, WearableType, avatar_texture, group_powers, pcode,
+        AssetType, AttachmentPoint, Camera, ChatAudible, ChatSourceType, ChatType,
+        ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame,
+        DeRezDestination, Diagnostic, DisconnectReason, EnvironmentSettings, EstateAccessDelta,
+        EstateAccessKind, Event, FriendRights, GroupNoticeAttachment, GroupRoleChange,
+        GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImageCodec,
+        InterestsUpdate, InventoryItem, LandingType, LindenAmount, LoginAccount, LoginParams,
+        MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType,
+        NewInventoryItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
+        ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelMediaCommand,
+        ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField,
+        PickUpdate, PrimShape, ProductType, ProfileUpdate, RegionInfoUpdate, Reliability,
+        RezAttachment, SaleType, ScriptPermissions, Session, SkySettings, SoundFlags,
+        TeleportFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, WaterSettings,
+        WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -3601,6 +3602,175 @@ mod test {
         let shirt = wearables.get(1).ok_or("second wearable")?;
         assert_eq!(shirt.wearable_type, WearableType::Shirt);
         assert!(!shirt.wearable_type.is_body_part());
+        Ok(())
+    }
+
+    #[test]
+    fn attach_object_encodes_object_attach() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.attach_object(
+            42,
+            AttachmentPoint::RightHand,
+            true,
+            &Rotation {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                s: 1.0,
+            },
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let attach = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectAttach(attach) => Some(attach),
+                _ => None,
+            })
+            .ok_or("expected an ObjectAttach")?;
+        // The add flag (0x80) is OR'd onto the right-hand point code (6).
+        assert_eq!(attach.agent_data.attachment_point, 0x80 | 6);
+        let object = attach.object_data.first().ok_or("first object")?;
+        assert_eq!(object.object_local_id, 42);
+        Ok(())
+    }
+
+    #[test]
+    fn detach_and_drop_encode_local_ids() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.detach_objects(&[7, 8], now)?;
+        session.drop_attachments(&[9], now)?;
+        let sent = drain(&mut session)?;
+        let detach = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectDetach(detach) => Some(detach),
+                _ => None,
+            })
+            .ok_or("expected an ObjectDetach")?;
+        let detach_ids: Vec<u32> = detach
+            .object_data
+            .iter()
+            .map(|object| object.object_local_id)
+            .collect();
+        assert_eq!(detach_ids, vec![7, 8]);
+        let drop = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectDrop(drop) => Some(drop),
+                _ => None,
+            })
+            .ok_or("expected an ObjectDrop")?;
+        let drop_ids: Vec<u32> = drop
+            .object_data
+            .iter()
+            .map(|object| object.object_local_id)
+            .collect();
+        assert_eq!(drop_ids, vec![9]);
+        Ok(())
+    }
+
+    #[test]
+    fn remove_attachment_encodes_item_and_point() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let item = uuid::Uuid::from_u128(0xAA);
+        session.remove_attachment(AttachmentPoint::Skull, item, now)?;
+        let sent = drain(&mut session)?;
+        let remove = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RemoveAttachment(remove) => Some(remove),
+                _ => None,
+            })
+            .ok_or("expected a RemoveAttachment")?;
+        assert_eq!(remove.attachment_block.attachment_point, 2); // Skull, no add flag
+        assert_eq!(remove.attachment_block.item_id, item);
+        Ok(())
+    }
+
+    #[test]
+    fn rez_attachment_encodes_rez_single() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let item = uuid::Uuid::from_u128(0xB1);
+        let owner = uuid::Uuid::from_u128(0xB2);
+        session.rez_attachment(
+            &RezAttachment {
+                item_id: item,
+                owner_id: owner,
+                attachment_point: AttachmentPoint::Chest,
+                add: false,
+                name: "hat".to_owned(),
+                description: "a hat".to_owned(),
+            },
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let rez = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RezSingleAttachmentFromInv(rez) => Some(rez),
+                _ => None,
+            })
+            .ok_or("expected a RezSingleAttachmentFromInv")?;
+        assert_eq!(rez.object_data.item_id, item);
+        assert_eq!(rez.object_data.owner_id, owner);
+        assert_eq!(rez.object_data.attachment_pt, 1); // Chest, no add flag
+        assert_eq!(rez.object_data.name, b"hat\0");
+        Ok(())
+    }
+
+    #[test]
+    fn rez_attachments_encodes_compound_message() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let compound = uuid::Uuid::from_u128(0xC0);
+        let attachments = vec![
+            RezAttachment {
+                item_id: uuid::Uuid::from_u128(0xD1),
+                owner_id: uuid::Uuid::from_u128(0xD0),
+                attachment_point: AttachmentPoint::LeftHand,
+                add: true,
+                name: String::new(),
+                description: String::new(),
+            },
+            RezAttachment {
+                item_id: uuid::Uuid::from_u128(0xD2),
+                owner_id: uuid::Uuid::from_u128(0xD0),
+                attachment_point: AttachmentPoint::Default,
+                add: false,
+                name: String::new(),
+                description: String::new(),
+            },
+        ];
+        session.rez_attachments(compound, true, &attachments, now)?;
+        let sent = drain(&mut session)?;
+        let rez = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RezMultipleAttachmentsFromInv(rez) => Some(rez),
+                _ => None,
+            })
+            .ok_or("expected a RezMultipleAttachmentsFromInv")?;
+        assert_eq!(rez.header_data.compound_msg_id, compound);
+        assert_eq!(rez.header_data.total_objects, 2);
+        assert!(rez.header_data.first_detach_all);
+        assert_eq!(rez.object_data.len(), 2);
+        let first = rez.object_data.first().ok_or("first object")?;
+        assert_eq!(first.attachment_pt, 0x80 | 5); // LeftHand + add flag
         Ok(())
     }
 

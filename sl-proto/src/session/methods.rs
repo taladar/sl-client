@@ -32,18 +32,19 @@ use super::{
 use crate::error::Error;
 use crate::terrain;
 use crate::types::{
-    AlertInfo, Asset, AssetType, AvatarClassified, AvatarPick, Camera, ChatType, ClassifiedUpdate,
-    ClickAction, CreateGroupParams, DeRezDestination, Diagnostic, DisconnectReason,
-    EstateAccessDelta, Event, FriendRights, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMember,
-    GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem,
-    InventoryOffer, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType,
-    Material, Maturity, MoneyTransactionType, MuteFlags, MuteType, NeighborInfo, NewInventoryItem,
-    Object, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProfileUpdate,
-    RegionInfoUpdate, Reliability, SaleType, ScriptPermissions, ScriptTeleportRequest, SoundFlags,
-    SoundPreload, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus,
-    Transmit, Wearable, WearableType, global_to_handle, handle_to_grid,
+    AlertInfo, Asset, AssetType, AttachmentPoint, AvatarClassified, AvatarPick, Camera, ChatType,
+    ClassifiedUpdate, ClickAction, CreateGroupParams, DeRezDestination, Diagnostic,
+    DisconnectReason, EstateAccessDelta, Event, FriendRights, GroupNoticeAttachment, GroupRoleEdit,
+    GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder,
+    InventoryItem, InventoryOffer, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams,
+    MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType, NeighborInfo,
+    NewInventoryItem, Object, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessFlags, ParcelAccessScope, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PrimShape,
+    ProfileUpdate, RegionInfoUpdate, Reliability, RezAttachment, SaleType, ScriptPermissions,
+    ScriptTeleportRequest, SoundFlags, SoundPreload, TeleportFlags, TerrainLayerType, TerrainPatch,
+    Texture, Throttle, TransferStatus, Transmit, Wearable, WearableType, global_to_handle,
+    handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
@@ -3925,6 +3926,108 @@ impl Session {
     pub fn set_wearing(&mut self, wearables: &[Wearable], now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_agent_is_now_wearing(wearables, now)?;
+        Ok(())
+    }
+
+    /// Attaches the in-world object `local_id` to the avatar via `ObjectAttach`,
+    /// worn at `attachment_point` and rotated by `rotation`. When `add` is `true`
+    /// the object is added to the point alongside anything already there rather
+    /// than replacing it. To wear an item straight from inventory instead, use
+    /// [`Session::rez_attachment`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn attach_object(
+        &mut self,
+        local_id: u32,
+        attachment_point: AttachmentPoint,
+        add: bool,
+        rotation: &Rotation,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_attach(local_id, attachment_point, add, rotation, now)?;
+        Ok(())
+    }
+
+    /// Detaches the attachments `local_ids` back to inventory via `ObjectDetach`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn detach_objects(&mut self, local_ids: &[u32], now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_detach(local_ids, now)?;
+        Ok(())
+    }
+
+    /// Drops the attachments `local_ids` from the avatar onto the ground via
+    /// `ObjectDrop` (they become ordinary in-world objects).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn drop_attachments(&mut self, local_ids: &[u32], now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_object_drop(local_ids, now)?;
+        Ok(())
+    }
+
+    /// Removes (takes off) the worn item `item_id` via `RemoveAttachment`. Unlike
+    /// [`Session::detach_objects`] this names the inventory item, not the rezzed
+    /// object's region-local id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn remove_attachment(
+        &mut self,
+        attachment_point: AttachmentPoint,
+        item_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_remove_attachment(attachment_point, item_id, now)?;
+        Ok(())
+    }
+
+    /// Wears the inventory item described by `rez` as an attachment via
+    /// `RezSingleAttachmentFromInv`. To attach an object already rezzed in-world,
+    /// use [`Session::attach_object`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn rez_attachment(&mut self, rez: &RezAttachment, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_rez_single_attachment(rez, now)?;
+        Ok(())
+    }
+
+    /// Wears several inventory items as attachments in one compound message via
+    /// `RezMultipleAttachmentsFromInv`. `compound_id` is a fresh caller-chosen id
+    /// correlating the message's parts; `first_detach_all` detaches everything
+    /// currently worn first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn rez_attachments(
+        &mut self,
+        compound_id: Uuid,
+        first_detach_all: bool,
+        attachments: &[RezAttachment],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_rez_multiple_attachments(compound_id, first_detach_all, attachments, now)?;
         Ok(())
     }
 

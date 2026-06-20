@@ -902,6 +902,24 @@ impl Client {
                         Some(Command::StopAnimation(anim_id)) => {
                             self.session.stop_animation(anim_id, Instant::now())?;
                         }
+                        Some(Command::AttachObject { local_id, attachment_point, add, rotation }) => {
+                            self.session.attach_object(local_id, attachment_point, add, &rotation, Instant::now())?;
+                        }
+                        Some(Command::DetachObjects { local_ids }) => {
+                            self.session.detach_objects(&local_ids, Instant::now())?;
+                        }
+                        Some(Command::DropAttachments { local_ids }) => {
+                            self.session.drop_attachments(&local_ids, Instant::now())?;
+                        }
+                        Some(Command::RemoveAttachment { attachment_point, item_id }) => {
+                            self.session.remove_attachment(attachment_point, item_id, Instant::now())?;
+                        }
+                        Some(Command::RezAttachment(rez)) => {
+                            self.session.rez_attachment(&rez, Instant::now())?;
+                        }
+                        Some(Command::RezAttachments { compound_id, first_detach_all, attachments }) => {
+                            self.session.rez_attachments(compound_id, first_detach_all, &attachments, Instant::now())?;
+                        }
                         Some(Command::UploadAssetUdp { asset_type, data, temp_file, store_local }) => {
                             self.session.upload_asset_udp(asset_type, data, temp_file, store_local, Instant::now())?;
                         }

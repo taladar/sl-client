@@ -1409,6 +1409,42 @@ fn advance_running(
             Command::StopAnimation(anim_id) => {
                 session.stop_animation(*anim_id, now).ok();
             }
+            Command::AttachObject {
+                local_id,
+                attachment_point,
+                add,
+                rotation,
+            } => {
+                session
+                    .attach_object(*local_id, *attachment_point, *add, rotation, now)
+                    .ok();
+            }
+            Command::DetachObjects { local_ids } => {
+                session.detach_objects(local_ids, now).ok();
+            }
+            Command::DropAttachments { local_ids } => {
+                session.drop_attachments(local_ids, now).ok();
+            }
+            Command::RemoveAttachment {
+                attachment_point,
+                item_id,
+            } => {
+                session
+                    .remove_attachment(*attachment_point, *item_id, now)
+                    .ok();
+            }
+            Command::RezAttachment(rez) => {
+                session.rez_attachment(rez, now).ok();
+            }
+            Command::RezAttachments {
+                compound_id,
+                first_detach_all,
+                attachments,
+            } => {
+                session
+                    .rez_attachments(*compound_id, *first_detach_all, attachments, now)
+                    .ok();
+            }
             Command::UploadAssetUdp {
                 asset_type,
                 data,

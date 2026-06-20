@@ -42,8 +42,8 @@ use crate::session::{
     build_map_block_reply, build_map_item_reply, instant_message, region_handshake_message,
 };
 use crate::types::{
-    AvatarName, Camera, ChatType, GroupName, InstantMessage, MapItem, MapItemType, MapRegionInfo,
-    RegionIdentity, Reliability, Throttle, Transmit,
+    AttachmentPoint, AvatarName, Camera, ChatType, GroupName, InstantMessage, MapItem, MapItemType,
+    MapRegionInfo, RegionIdentity, Reliability, RezAttachment, Throttle, Transmit,
 };
 
 /// How long to batch owed acknowledgements before flushing them as a `PacketAck`
@@ -219,6 +219,42 @@ pub enum ServerEvent {
     /// (`UUIDGroupNameRequest`). The server answers with
     /// [`SimSession::send_group_names`].
     GroupNamesRequested(Vec<Uuid>),
+    /// The client attached an in-world object to its avatar (`ObjectAttach`).
+    AttachObject {
+        /// The attached object's region-local id.
+        local_id: u32,
+        /// The point the object is attached to.
+        attachment_point: AttachmentPoint,
+        /// Whether the object was added to the point (`true`) rather than
+        /// replacing what was there.
+        add: bool,
+        /// The rotation the object is worn at.
+        rotation: Rotation,
+    },
+    /// The client detached attachments back to inventory (`ObjectDetach`).
+    DetachObjects(Vec<u32>),
+    /// The client dropped attachments onto the ground (`ObjectDrop`).
+    DropAttachments(Vec<u32>),
+    /// The client took off a worn item by inventory id (`RemoveAttachment`).
+    RemoveAttachment {
+        /// The point the item was worn on.
+        attachment_point: AttachmentPoint,
+        /// The worn item's inventory item id.
+        item_id: Uuid,
+    },
+    /// The client wore an inventory item as an attachment
+    /// (`RezSingleAttachmentFromInv`).
+    RezAttachment(Box<RezAttachment>),
+    /// The client wore several inventory items as attachments in one compound
+    /// message (`RezMultipleAttachmentsFromInv`).
+    RezAttachments {
+        /// The compound message's correlation id.
+        compound_id: Uuid,
+        /// Whether everything worn was detached first.
+        first_detach_all: bool,
+        /// The items the client wore.
+        attachments: Vec<RezAttachment>,
+    },
     /// The client requested a clean logout (`LogoutRequest`); the simulator has
     /// replied with a `LogoutReply` and closed the session.
     LoggedOut,
@@ -849,6 +885,78 @@ impl SimSession {
                     .map(|block| block.id)
                     .collect();
                 self.events.push_back(ServerEvent::GroupNamesRequested(ids));
+            }
+            AnyMessage::ObjectAttach(attach) => {
+                let (attachment_point, add) =
+                    AttachmentPoint::split_code(attach.agent_data.attachment_point);
+                for object in &attach.object_data {
+                    self.events.push_back(ServerEvent::AttachObject {
+                        local_id: object.object_local_id,
+                        attachment_point,
+                        add,
+                        rotation: object.rotation.clone(),
+                    });
+                }
+            }
+            AnyMessage::ObjectDetach(detach) => {
+                let ids = detach
+                    .object_data
+                    .iter()
+                    .map(|object| object.object_local_id)
+                    .collect();
+                self.events.push_back(ServerEvent::DetachObjects(ids));
+            }
+            AnyMessage::ObjectDrop(drop) => {
+                let ids = drop
+                    .object_data
+                    .iter()
+                    .map(|object| object.object_local_id)
+                    .collect();
+                self.events.push_back(ServerEvent::DropAttachments(ids));
+            }
+            AnyMessage::RemoveAttachment(remove) => {
+                let (attachment_point, _add) =
+                    AttachmentPoint::split_code(remove.attachment_block.attachment_point);
+                self.events.push_back(ServerEvent::RemoveAttachment {
+                    attachment_point,
+                    item_id: remove.attachment_block.item_id,
+                });
+            }
+            AnyMessage::RezSingleAttachmentFromInv(rez) => {
+                let object = &rez.object_data;
+                let (attachment_point, add) = AttachmentPoint::split_code(object.attachment_pt);
+                self.events
+                    .push_back(ServerEvent::RezAttachment(Box::new(RezAttachment {
+                        item_id: object.item_id,
+                        owner_id: object.owner_id,
+                        attachment_point,
+                        add,
+                        name: trimmed_string(&object.name),
+                        description: trimmed_string(&object.description),
+                    })));
+            }
+            AnyMessage::RezMultipleAttachmentsFromInv(rez) => {
+                let attachments = rez
+                    .object_data
+                    .iter()
+                    .map(|object| {
+                        let (attachment_point, add) =
+                            AttachmentPoint::split_code(object.attachment_pt);
+                        RezAttachment {
+                            item_id: object.item_id,
+                            owner_id: object.owner_id,
+                            attachment_point,
+                            add,
+                            name: trimmed_string(&object.name),
+                            description: trimmed_string(&object.description),
+                        }
+                    })
+                    .collect();
+                self.events.push_back(ServerEvent::RezAttachments {
+                    compound_id: rez.header_data.compound_msg_id,
+                    first_detach_all: rez.header_data.first_detach_all,
+                    attachments,
+                });
             }
             AnyMessage::LogoutRequest(_) => {
                 self.send_logout_reply(now)?;
