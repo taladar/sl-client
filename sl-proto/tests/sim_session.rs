@@ -12,13 +12,16 @@ mod test {
     use sl_proto::{
         AttachmentPoint, AvatarName, AvatarPickerResult, ChatType, CoarseLocation,
         DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-        DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventInfo, GroupName, ImDialog,
-        LandSearchType, LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity, NotecardRez,
-        ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner,
-        ParcelReturnType, PlacesResult, PointAtType, ProductType, RegionIdentity, RestoreItem,
-        RezAttachment, SaleType, ServerEvent, Session, SimSession, TelehubInfo, Throttle, Transmit,
-        ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
-        grid_to_handle, parse_event_queue_response,
+        DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventInfo, GroupAccountDetails,
+        GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
+        GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVote,
+        GroupVoteHistoryItem, ImDialog, LandSearchType, LoginParams, MapItem, MapItemType,
+        MapRegionInfo, Maturity, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily,
+        ParcelCategory, ParcelDetails, ParcelObjectOwner, ParcelReturnType, PlacesResult,
+        PointAtType, ProductType, RegionIdentity, RestoreItem, RezAttachment, SaleType,
+        ServerEvent, Session, SimSession, TelehubInfo, Throttle, Transmit, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd, grid_to_handle,
+        parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -1387,6 +1390,213 @@ mod test {
             })
             .ok_or("expected a ScriptRunning client event")?;
         assert_eq!(running, (object_id, item_id, true));
+        Ok(())
+    }
+
+    #[test]
+    fn group_finance_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let group_id = uuid::Uuid::from_u128(0x6A0D);
+        let request_id = uuid::Uuid::from_u128(0xF00D);
+        let transaction_id = uuid::Uuid::from_u128(0x7AC7);
+        let proposal_id = uuid::Uuid::from_u128(0x9A0E);
+
+        // Client -> sim: every G10 request surfaces a matching server event.
+        client.request_group_account_summary(group_id, request_id, 60, 0, now)?;
+        client.request_group_account_details(group_id, request_id, 60, 0, now)?;
+        client.request_group_account_transactions(group_id, request_id, 60, 0, now)?;
+        client.request_group_active_proposals(group_id, transaction_id, now)?;
+        client.request_group_vote_history(group_id, transaction_id, now)?;
+        client.start_group_proposal(group_id, 3, 0.5, 86_400, "Adopt the bylaws?", now)?;
+        client.cast_group_proposal_ballot(proposal_id, group_id, "yes", now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::RequestGroupAccountSummary { group_id: g, request_id: r, .. }
+                    if *g == group_id && *r == request_id
+            )),
+            "expected a RequestGroupAccountSummary server event"
+        );
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::RequestGroupAccountDetails { .. })),
+            "expected a RequestGroupAccountDetails server event"
+        );
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::RequestGroupAccountTransactions { .. })),
+            "expected a RequestGroupAccountTransactions server event"
+        );
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::RequestGroupActiveProposals { transaction_id: t, .. }
+                    if *t == transaction_id
+            )),
+            "expected a RequestGroupActiveProposals server event"
+        );
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::RequestGroupVoteHistory { .. })),
+            "expected a RequestGroupVoteHistory server event"
+        );
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::StartGroupProposal { quorum, duration, .. }
+                    if *quorum == 3 && *duration == 86_400
+            )),
+            "expected a StartGroupProposal server event"
+        );
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::GroupProposalBallot { proposal_id: p, vote_cast, .. }
+                    if *p == proposal_id && vote_cast == "yes"
+            )),
+            "expected a GroupProposalBallot server event"
+        );
+
+        // Sim -> client: every G10 reply surfaces a matching client event.
+        let summary = GroupAccountSummary {
+            group_id,
+            request_id,
+            interval_days: 7,
+            current_interval: 0,
+            start_date: "2026-06-01".to_owned(),
+            balance: 1234,
+            total_credits: 50,
+            total_debits: 20,
+            object_tax_current: 1,
+            light_tax_current: 2,
+            land_tax_current: 3,
+            group_tax_current: 4,
+            parcel_dir_fee_current: 5,
+            object_tax_estimate: 6,
+            light_tax_estimate: 7,
+            land_tax_estimate: 8,
+            group_tax_estimate: 9,
+            parcel_dir_fee_estimate: 10,
+            non_exempt_members: 11,
+            last_tax_date: "2026-05-25".to_owned(),
+            tax_date: "2026-06-08".to_owned(),
+        };
+        sim.send_group_account_summary_reply(&summary, now)?;
+        let details = GroupAccountDetails {
+            group_id,
+            request_id,
+            interval_days: 7,
+            current_interval: 0,
+            start_date: "2026-06-01".to_owned(),
+            entries: vec![GroupAccountDetailsEntry {
+                description: "Object tax".to_owned(),
+                amount: -3,
+            }],
+        };
+        sim.send_group_account_details_reply(&details, now)?;
+        let transactions = GroupAccountTransactions {
+            group_id,
+            request_id,
+            interval_days: 7,
+            current_interval: 0,
+            start_date: "2026-06-01".to_owned(),
+            entries: vec![GroupAccountTransaction {
+                time: "12:00".to_owned(),
+                user: "Resident Tester".to_owned(),
+                transaction_type: 5,
+                item: "Group dues".to_owned(),
+                amount: 10,
+            }],
+        };
+        sim.send_group_account_transactions_reply(&transactions, now)?;
+        let proposal = GroupActiveProposalItem {
+            vote_id: proposal_id,
+            vote_initiator: uuid::Uuid::from_u128(0x1217),
+            terse_date_id: "td".to_owned(),
+            start_date_time: "2026-06-01".to_owned(),
+            end_date_time: "2026-06-08".to_owned(),
+            already_voted: false,
+            vote_cast: String::new(),
+            majority: 0.5,
+            quorum: 3,
+            proposal_text: "Adopt the bylaws?".to_owned(),
+        };
+        sim.send_group_active_proposals_reply(group_id, transaction_id, 1, &[proposal], now)?;
+        let history = GroupVoteHistoryItem {
+            vote_id: proposal_id,
+            terse_date_id: "td".to_owned(),
+            start_date_time: "2026-05-01".to_owned(),
+            end_date_time: "2026-05-08".to_owned(),
+            vote_initiator: uuid::Uuid::from_u128(0x1217),
+            vote_type: "Proposal".to_owned(),
+            vote_result: "Success".to_owned(),
+            majority: 0.5,
+            quorum: 3,
+            proposal_text: "Past proposal".to_owned(),
+            votes: vec![GroupVote {
+                candidate_id: uuid::Uuid::from_u128(0xC0DE),
+                vote_cast: "yes".to_owned(),
+                num_votes: 7,
+            }],
+        };
+        sim.send_group_vote_history_reply(group_id, transaction_id, 1, &history, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        let got_summary = client_events
+            .iter()
+            .find_map(|e| match e {
+                Event::GroupAccountSummary(summary) => Some(summary),
+                _ => None,
+            })
+            .ok_or("expected a GroupAccountSummary client event")?;
+        assert_eq!(got_summary, &summary);
+
+        let got_details = client_events
+            .iter()
+            .find_map(|e| match e {
+                Event::GroupAccountDetails(details) => Some(details),
+                _ => None,
+            })
+            .ok_or("expected a GroupAccountDetails client event")?;
+        assert_eq!(got_details, &details);
+
+        let got_transactions = client_events
+            .iter()
+            .find_map(|e| match e {
+                Event::GroupAccountTransactions(transactions) => Some(transactions),
+                _ => None,
+            })
+            .ok_or("expected a GroupAccountTransactions client event")?;
+        assert_eq!(got_transactions, &transactions);
+
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::GroupActiveProposals { proposals, .. }
+                    if proposals.first().is_some_and(|p| p.proposal_text == "Adopt the bylaws?")
+            )),
+            "expected a GroupActiveProposals client event"
+        );
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::GroupVoteHistory { item, .. }
+                    if item.vote_result == "Success"
+                        && item.votes.first().is_some_and(|v| v.num_votes == 7)
+            )),
+            "expected a GroupVoteHistory client event"
+        );
         Ok(())
     }
 

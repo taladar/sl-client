@@ -53,9 +53,12 @@ pub use editing::{
 pub use environment::{DayCycle, DayCycleFrame, EnvironmentSettings, SkySettings, WaterSettings};
 pub use event::Event;
 pub use group::{
-    ActiveGroup, CreateGroupParams, GroupMember, GroupMembership, GroupNotice,
-    GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit,
-    GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, group_powers,
+    ActiveGroup, CreateGroupParams, GroupAccountDetails, GroupAccountDetailsEntry,
+    GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
+    GroupActiveProposalItem, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
+    GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleMember,
+    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, GroupVote, GroupVoteHistoryItem,
+    group_powers,
 };
 pub use inventory::{
     InventoryFolder, InventoryItem, NewInventoryItem, global_to_handle, grid_to_handle,

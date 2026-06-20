@@ -944,6 +944,97 @@ fn advance_running(
                     .send_group_notice(*group_id, subject, message, *attachment, now)
                     .ok();
             }
+            Command::RequestGroupAccountSummary {
+                group_id,
+                request_id,
+                interval_days,
+                current_interval,
+            } => {
+                session
+                    .request_group_account_summary(
+                        *group_id,
+                        *request_id,
+                        *interval_days,
+                        *current_interval,
+                        now,
+                    )
+                    .ok();
+            }
+            Command::RequestGroupAccountDetails {
+                group_id,
+                request_id,
+                interval_days,
+                current_interval,
+            } => {
+                session
+                    .request_group_account_details(
+                        *group_id,
+                        *request_id,
+                        *interval_days,
+                        *current_interval,
+                        now,
+                    )
+                    .ok();
+            }
+            Command::RequestGroupAccountTransactions {
+                group_id,
+                request_id,
+                interval_days,
+                current_interval,
+            } => {
+                session
+                    .request_group_account_transactions(
+                        *group_id,
+                        *request_id,
+                        *interval_days,
+                        *current_interval,
+                        now,
+                    )
+                    .ok();
+            }
+            Command::RequestGroupActiveProposals {
+                group_id,
+                transaction_id,
+            } => {
+                session
+                    .request_group_active_proposals(*group_id, *transaction_id, now)
+                    .ok();
+            }
+            Command::RequestGroupVoteHistory {
+                group_id,
+                transaction_id,
+            } => {
+                session
+                    .request_group_vote_history(*group_id, *transaction_id, now)
+                    .ok();
+            }
+            Command::StartGroupProposal {
+                group_id,
+                quorum,
+                majority,
+                duration,
+                proposal_text,
+            } => {
+                session
+                    .start_group_proposal(
+                        *group_id,
+                        *quorum,
+                        *majority,
+                        *duration,
+                        proposal_text,
+                        now,
+                    )
+                    .ok();
+            }
+            Command::GroupProposalBallot {
+                proposal_id,
+                group_id,
+                vote_cast,
+            } => {
+                session
+                    .cast_group_proposal_ballot(*proposal_id, *group_id, vote_cast, now)
+                    .ok();
+            }
             Command::ReplyScriptDialog {
                 object_id,
                 chat_channel,

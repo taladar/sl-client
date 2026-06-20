@@ -7,15 +7,17 @@ use super::conversions::{
     chatterbox_invitation_from_llsd, classified_info, created_category_from_llsd,
     crossed_region_from_caps_llsd, economy_data, enable_simulator_from_caps_llsd,
     environment_from_llsd, establish_agent_communication_from_llsd, estate_access_from_params,
-    estate_info_from_params, friend, group_member, group_members_from_caps_llsd, group_membership,
-    group_memberships_from_caps_llsd, group_names, group_notice, group_profile, group_role,
-    group_title, index_into, instant_message, inventory_descendents_from_llsd, inventory_folder,
-    inventory_item, inventory_item_from_create, inventory_offer_bucket, map_item, map_region_info,
-    money_balance, neighbor_info, object_from_full_update, object_properties,
-    offline_messages_from_llsd, pack_uuids, parcel_info, parcel_info_from_llsd,
-    parse_lure_region_handle, parse_mute_list, parse_uuid_string, pick_info, region_identity,
-    region_limits, script_dialog, script_permission_request, server_appearance_update_from_llsd,
-    skeleton_folder, teleport_finish_from_llsd, trimmed_string,
+    estate_info_from_params, friend, group_account_details, group_account_summary,
+    group_account_transactions, group_active_proposal_item, group_member,
+    group_members_from_caps_llsd, group_membership, group_memberships_from_caps_llsd, group_names,
+    group_notice, group_profile, group_role, group_title, group_vote_history_item, index_into,
+    instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
+    inventory_item_from_create, inventory_offer_bucket, map_item, map_region_info, money_balance,
+    neighbor_info, object_from_full_update, object_properties, offline_messages_from_llsd,
+    pack_uuids, parcel_info, parcel_info_from_llsd, parse_lure_region_handle, parse_mute_list,
+    parse_uuid_string, pick_info, region_identity, region_limits, script_dialog,
+    script_permission_request, server_appearance_update_from_llsd, skeleton_folder,
+    teleport_finish_from_llsd, trimmed_string,
 };
 use super::{
     AGENT_UPDATE_INTERVAL, AssetTransfer, AssetUpload, CAP_AGENT_EXPERIENCES,
@@ -2365,6 +2367,40 @@ impl Session {
                     notices: reply.data.iter().map(group_notice).collect(),
                 });
             }
+            AnyMessage::GroupAccountSummaryReply(reply) => {
+                self.events
+                    .push_back(Event::GroupAccountSummary(group_account_summary(reply)));
+            }
+            AnyMessage::GroupAccountDetailsReply(reply) => {
+                self.events
+                    .push_back(Event::GroupAccountDetails(group_account_details(reply)));
+            }
+            AnyMessage::GroupAccountTransactionsReply(reply) => {
+                self.events
+                    .push_back(Event::GroupAccountTransactions(group_account_transactions(
+                        reply,
+                    )));
+            }
+            AnyMessage::GroupActiveProposalItemReply(reply) => {
+                self.events.push_back(Event::GroupActiveProposals {
+                    group_id: reply.agent_data.group_id,
+                    transaction_id: reply.transaction_data.transaction_id,
+                    total_num_items: reply.transaction_data.total_num_items,
+                    proposals: reply
+                        .proposal_data
+                        .iter()
+                        .map(group_active_proposal_item)
+                        .collect(),
+                });
+            }
+            AnyMessage::GroupVoteHistoryItemReply(reply) => {
+                self.events.push_back(Event::GroupVoteHistory {
+                    group_id: reply.agent_data.group_id,
+                    transaction_id: reply.transaction_data.transaction_id,
+                    total_num_items: reply.transaction_data.total_num_items,
+                    item: group_vote_history_item(reply),
+                });
+            }
             AnyMessage::CreateGroupReply(reply) => {
                 self.events.push_back(Event::CreateGroupResult {
                     group_id: reply.reply_data.group_id,
@@ -3592,6 +3628,173 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_eject_group_members(group_id, member_ids, now)?;
+        Ok(())
+    }
+
+    /// Requests a group's financial summary (`GroupAccountSummaryRequest`) for
+    /// the accounting interval selected by `interval_days`/`current_interval` (0 =
+    /// current, 1 = previous). The reply arrives as
+    /// [`Event::GroupAccountSummary`]. The `request_id` is echoed back for
+    /// correlation. The agent needs group accountability powers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_group_account_summary(
+        &mut self,
+        group_id: Uuid,
+        request_id: Uuid,
+        interval_days: i32,
+        current_interval: i32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_account_summary_request(
+            group_id,
+            request_id,
+            interval_days,
+            current_interval,
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Requests a group's itemised accounting detail
+    /// (`GroupAccountDetailsRequest`). The reply arrives as
+    /// [`Event::GroupAccountDetails`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_group_account_details(
+        &mut self,
+        group_id: Uuid,
+        request_id: Uuid,
+        interval_days: i32,
+        current_interval: i32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_account_details_request(
+            group_id,
+            request_id,
+            interval_days,
+            current_interval,
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Requests a group's transaction log (`GroupAccountTransactionsRequest`). The
+    /// reply arrives as [`Event::GroupAccountTransactions`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_group_account_transactions(
+        &mut self,
+        group_id: Uuid,
+        request_id: Uuid,
+        interval_days: i32,
+        current_interval: i32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_account_transactions_request(
+            group_id,
+            request_id,
+            interval_days,
+            current_interval,
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Requests a group's active proposals (`GroupActiveProposalsRequest`). The
+    /// reply arrives as [`Event::GroupActiveProposals`]. The `transaction_id` is
+    /// echoed back for correlation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_group_active_proposals(
+        &mut self,
+        group_id: Uuid,
+        transaction_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_active_proposals_request(group_id, transaction_id, now)?;
+        Ok(())
+    }
+
+    /// Requests a group's vote history (`GroupVoteHistoryRequest`). Each finished
+    /// proposal arrives as [`Event::GroupVoteHistory`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_group_vote_history(
+        &mut self,
+        group_id: Uuid,
+        transaction_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_vote_history_request(group_id, transaction_id, now)?;
+        Ok(())
+    }
+
+    /// Starts a new group proposal/vote (`StartGroupProposal`): `quorum` votes are
+    /// required for the result to count, `majority` (0.0–1.0) to pass, voting open
+    /// for `duration` seconds. It then appears in the group's active proposals.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn start_group_proposal(
+        &mut self,
+        group_id: Uuid,
+        quorum: i32,
+        majority: f32,
+        duration: i32,
+        proposal_text: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_start_group_proposal(
+            group_id,
+            quorum,
+            majority,
+            duration,
+            proposal_text,
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Casts a vote on an active group proposal (`GroupProposalBallot`):
+    /// `vote_cast` is the choice (e.g. `"yes"`/`"no"`/`"abstain"`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn cast_group_proposal_ballot(
+        &mut self,
+        proposal_id: Uuid,
+        group_id: Uuid,
+        vote_cast: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_proposal_ballot(proposal_id, group_id, vote_cast, now)?;
         Ok(())
     }
 

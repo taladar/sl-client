@@ -257,6 +257,11 @@ fn on_events(
             | SlSessionEvent::ObjectPropertiesFamily { .. }
             | SlSessionEvent::PayPriceReply { .. }
             | SlSessionEvent::ScriptRunning { .. }
+            | SlSessionEvent::GroupAccountSummary(_)
+            | SlSessionEvent::GroupAccountDetails(_)
+            | SlSessionEvent::GroupAccountTransactions(_)
+            | SlSessionEvent::GroupActiveProposals { .. }
+            | SlSessionEvent::GroupVoteHistory { .. }
             | SlSessionEvent::ParcelObjectOwners { .. }
             | SlSessionEvent::ParcelDetails(_)
             | SlSessionEvent::RemoteParcelId(_)

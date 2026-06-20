@@ -650,6 +650,27 @@ impl Client {
                         Some(Command::SendGroupNotice { group_id, subject, message, attachment }) => {
                             self.session.send_group_notice(group_id, &subject, &message, attachment, Instant::now())?;
                         }
+                        Some(Command::RequestGroupAccountSummary { group_id, request_id, interval_days, current_interval }) => {
+                            self.session.request_group_account_summary(group_id, request_id, interval_days, current_interval, Instant::now())?;
+                        }
+                        Some(Command::RequestGroupAccountDetails { group_id, request_id, interval_days, current_interval }) => {
+                            self.session.request_group_account_details(group_id, request_id, interval_days, current_interval, Instant::now())?;
+                        }
+                        Some(Command::RequestGroupAccountTransactions { group_id, request_id, interval_days, current_interval }) => {
+                            self.session.request_group_account_transactions(group_id, request_id, interval_days, current_interval, Instant::now())?;
+                        }
+                        Some(Command::RequestGroupActiveProposals { group_id, transaction_id }) => {
+                            self.session.request_group_active_proposals(group_id, transaction_id, Instant::now())?;
+                        }
+                        Some(Command::RequestGroupVoteHistory { group_id, transaction_id }) => {
+                            self.session.request_group_vote_history(group_id, transaction_id, Instant::now())?;
+                        }
+                        Some(Command::StartGroupProposal { group_id, quorum, majority, duration, proposal_text }) => {
+                            self.session.start_group_proposal(group_id, quorum, majority, duration, &proposal_text, Instant::now())?;
+                        }
+                        Some(Command::GroupProposalBallot { proposal_id, group_id, vote_cast }) => {
+                            self.session.cast_group_proposal_ballot(proposal_id, group_id, &vote_cast, Instant::now())?;
+                        }
                         Some(Command::ReplyScriptDialog { object_id, chat_channel, button_index, button_label }) => {
                             self.session.reply_script_dialog(object_id, chat_channel, button_index, &button_label, Instant::now())?;
                         }

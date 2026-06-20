@@ -6,14 +6,16 @@ use crate::types::{
     ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment, AvatarGroupMembership,
     AvatarInterests, AvatarName, AvatarProperties, ChatAudible, ChatMessage, ChatSourceType,
     ChatType, ClassifiedInfo, DayCycle, DayCycleFrame, EconomyData, EnvironmentSettings,
-    EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupMember, GroupMembership,
-    GroupName, GroupNotice, GroupProfile, GroupRole, GroupTitle, ImDialog, InstantMessage,
-    InventoryFolder, InventoryItem, LandingType, MapItem, MapItemType, MapRegionInfo, Maturity,
-    MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object,
-    ObjectProperties, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo,
-    PlayingAnimation, PrimShapeParams, ProductType, RegionChatSettings, RegionCombatSettings,
-    RegionIdentity, RegionLimits, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    SkySettings, WaterSettings, avatar_texture, grid_to_handle, handle_to_grid,
+    EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupAccountDetails,
+    GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
+    GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
+    GroupNotice, GroupProfile, GroupRole, GroupTitle, GroupVote, GroupVoteHistoryItem, ImDialog,
+    InstantMessage, InventoryFolder, InventoryItem, LandingType, MapItem, MapItemType,
+    MapRegionInfo, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType,
+    NeighborInfo, Object, ObjectProperties, ParcelCategory, ParcelInfo, ParcelRequestResult,
+    ParcelStatus, PickInfo, PlayingAnimation, PrimShapeParams, ProductType, RegionChatSettings,
+    RegionCombatSettings, RegionIdentity, RegionLimits, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, SkySettings, WaterSettings, avatar_texture, grid_to_handle, handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
@@ -22,16 +24,18 @@ use sl_wire::messages::{
     AvatarGroupsReplyGroupDataBlock, AvatarInterestsReplyPropertiesDataBlock,
     AvatarPropertiesReplyPropertiesDataBlock, BulkUpdateInventoryFolderDataBlock,
     BulkUpdateInventoryItemDataBlock, ChatFromSimulatorChatDataBlock, ClassifiedInfoReplyDataBlock,
-    EnableSimulatorSimulatorInfoBlock, EstateOwnerMessageParamListBlock,
-    GroupMembersReplyMemberDataBlock, GroupNoticesListReplyDataBlock,
-    GroupProfileReplyGroupDataBlock, GroupRoleDataReplyRoleDataBlock,
-    GroupTitlesReplyGroupDataBlock, ImprovedInstantMessageAgentDataBlock,
-    ImprovedInstantMessageMessageBlockBlock, InventoryDescendentsFolderDataBlock,
-    InventoryDescendentsItemDataBlock, MapBlockReply, MapBlockReplyAgentDataBlock,
-    MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapItemReply, MapItemReplyAgentDataBlock,
-    MapItemReplyDataBlock, MapItemReplyRequestDataBlock, ObjectPropertiesObjectDataBlock,
-    ObjectUpdateObjectDataBlock, ParcelProperties, PickInfoReplyDataBlock, UUIDGroupNameReply,
-    UUIDNameReply, UpdateCreateInventoryItemInventoryDataBlock,
+    EnableSimulatorSimulatorInfoBlock, EstateOwnerMessageParamListBlock, GroupAccountDetailsReply,
+    GroupAccountSummaryReply, GroupAccountTransactionsReply,
+    GroupActiveProposalItemReplyProposalDataBlock, GroupMembersReplyMemberDataBlock,
+    GroupNoticesListReplyDataBlock, GroupProfileReplyGroupDataBlock,
+    GroupRoleDataReplyRoleDataBlock, GroupTitlesReplyGroupDataBlock, GroupVoteHistoryItemReply,
+    ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageMessageBlockBlock,
+    InventoryDescendentsFolderDataBlock, InventoryDescendentsItemDataBlock, MapBlockReply,
+    MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapItemReply,
+    MapItemReplyAgentDataBlock, MapItemReplyDataBlock, MapItemReplyRequestDataBlock,
+    ObjectPropertiesObjectDataBlock, ObjectUpdateObjectDataBlock, ParcelProperties,
+    PickInfoReplyDataBlock, UUIDGroupNameReply, UUIDNameReply,
+    UpdateCreateInventoryItemInventoryDataBlock,
 };
 use sl_wire::{Llsd, SkeletonFolder};
 use std::collections::{BTreeMap, HashMap};
@@ -945,6 +949,125 @@ pub(crate) fn group_notice(data: &GroupNoticesListReplyDataBlock) -> GroupNotice
         subject: trimmed_string(&data.subject),
         has_attachment: data.has_attachment,
         asset_type: data.asset_type,
+    }
+}
+
+/// Builds [`GroupAccountSummary`] from a `GroupAccountSummaryReply`.
+pub(crate) fn group_account_summary(reply: &GroupAccountSummaryReply) -> GroupAccountSummary {
+    let money = &reply.money_data;
+    GroupAccountSummary {
+        group_id: reply.agent_data.group_id,
+        request_id: money.request_id,
+        interval_days: money.interval_days,
+        current_interval: money.current_interval,
+        start_date: trimmed_string(&money.start_date),
+        balance: money.balance,
+        total_credits: money.total_credits,
+        total_debits: money.total_debits,
+        object_tax_current: money.object_tax_current,
+        light_tax_current: money.light_tax_current,
+        land_tax_current: money.land_tax_current,
+        group_tax_current: money.group_tax_current,
+        parcel_dir_fee_current: money.parcel_dir_fee_current,
+        object_tax_estimate: money.object_tax_estimate,
+        light_tax_estimate: money.light_tax_estimate,
+        land_tax_estimate: money.land_tax_estimate,
+        group_tax_estimate: money.group_tax_estimate,
+        parcel_dir_fee_estimate: money.parcel_dir_fee_estimate,
+        non_exempt_members: money.non_exempt_members,
+        last_tax_date: trimmed_string(&money.last_tax_date),
+        tax_date: trimmed_string(&money.tax_date),
+    }
+}
+
+/// Builds [`GroupAccountDetails`] from a `GroupAccountDetailsReply`.
+pub(crate) fn group_account_details(reply: &GroupAccountDetailsReply) -> GroupAccountDetails {
+    let money = &reply.money_data;
+    GroupAccountDetails {
+        group_id: reply.agent_data.group_id,
+        request_id: money.request_id,
+        interval_days: money.interval_days,
+        current_interval: money.current_interval,
+        start_date: trimmed_string(&money.start_date),
+        entries: reply
+            .history_data
+            .iter()
+            .map(|entry| GroupAccountDetailsEntry {
+                description: trimmed_string(&entry.description),
+                amount: entry.amount,
+            })
+            .collect(),
+    }
+}
+
+/// Builds [`GroupAccountTransactions`] from a `GroupAccountTransactionsReply`.
+pub(crate) fn group_account_transactions(
+    reply: &GroupAccountTransactionsReply,
+) -> GroupAccountTransactions {
+    let money = &reply.money_data;
+    GroupAccountTransactions {
+        group_id: reply.agent_data.group_id,
+        request_id: money.request_id,
+        interval_days: money.interval_days,
+        current_interval: money.current_interval,
+        start_date: trimmed_string(&money.start_date),
+        entries: reply
+            .history_data
+            .iter()
+            .map(|entry| GroupAccountTransaction {
+                time: trimmed_string(&entry.time),
+                user: trimmed_string(&entry.user),
+                transaction_type: entry.r#type,
+                item: trimmed_string(&entry.item),
+                amount: entry.amount,
+            })
+            .collect(),
+    }
+}
+
+/// Builds [`GroupActiveProposalItem`] from a `GroupActiveProposalItemReply`
+/// proposal entry.
+pub(crate) fn group_active_proposal_item(
+    data: &GroupActiveProposalItemReplyProposalDataBlock,
+) -> GroupActiveProposalItem {
+    GroupActiveProposalItem {
+        vote_id: data.vote_id,
+        vote_initiator: data.vote_initiator,
+        terse_date_id: trimmed_string(&data.terse_date_id),
+        start_date_time: trimmed_string(&data.start_date_time),
+        end_date_time: trimmed_string(&data.end_date_time),
+        already_voted: data.already_voted,
+        vote_cast: trimmed_string(&data.vote_cast),
+        majority: data.majority,
+        quorum: data.quorum,
+        proposal_text: trimmed_string(&data.proposal_text),
+    }
+}
+
+/// Builds [`GroupVoteHistoryItem`] from a `GroupVoteHistoryItemReply` (its single
+/// history item plus the per-candidate tallies).
+pub(crate) fn group_vote_history_item(reply: &GroupVoteHistoryItemReply) -> GroupVoteHistoryItem {
+    let item = &reply.history_item_data;
+    GroupVoteHistoryItem {
+        vote_id: item.vote_id,
+        terse_date_id: trimmed_string(&item.terse_date_id),
+        start_date_time: trimmed_string(&item.start_date_time),
+        end_date_time: trimmed_string(&item.end_date_time),
+        vote_initiator: item.vote_initiator,
+        vote_type: trimmed_string(&item.vote_type),
+        vote_result: trimmed_string(&item.vote_result),
+        majority: item.majority,
+        quorum: item.quorum,
+        proposal_text: trimmed_string(&item.proposal_text),
+        votes: reply
+            .vote_item
+            .iter()
+            .map(|vote| GroupVote {
+                candidate_id: vote.candidate_id,
+                vote_cast: trimmed_string(&vote.vote_cast),
+                num_votes: vote.num_votes,
+            })
+            .collect(),
     }
 }
 
