@@ -10,9 +10,10 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        AttachmentPoint, AvatarName, ChatType, Event, GroupName, ImDialog, LoginParams, MapItem,
-        MapItemType, MapRegionInfo, Maturity, ProductType, RegionIdentity, RezAttachment,
-        ServerEvent, Session, SimSession, Throttle, Transmit, enable_simulator_to_caps_llsd,
+        AttachmentPoint, AvatarName, ChatType, CoarseLocation, Event, GroupName, ImDialog,
+        LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity, PointAtType, ProductType,
+        RegionIdentity, RezAttachment, ServerEvent, Session, SimSession, Throttle, Transmit,
+        ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
         grid_to_handle, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
@@ -337,6 +338,150 @@ mod test {
         assert_eq!(first.attachment_point, AttachmentPoint::LeftHand);
         assert!(first.add);
         assert_eq!(first.item_id, uuid::Uuid::from_u128(0x9002));
+        Ok(())
+    }
+
+    #[test]
+    fn client_viewer_effect_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let source = uuid::Uuid::from_u128(0xA00);
+        let data = ViewerEffectData::PointAt {
+            source,
+            target: uuid::Uuid::from_u128(0xA01),
+            target_position: [1.0, 2.0, 3.0],
+            point_at_type: PointAtType::Grab,
+        };
+        client.send_viewer_effect(
+            &[ViewerEffect {
+                id: uuid::Uuid::from_u128(0xA0F),
+                agent_id: source,
+                effect_type: ViewerEffectType::PointAt,
+                duration: 1.0,
+                color: [1, 2, 3, 4],
+                data: data.clone(),
+            }],
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let effects = drain_server(&mut sim)
+            .into_iter()
+            .find_map(|e| match e {
+                ServerEvent::ViewerEffect(effects) => Some(effects),
+                _ => None,
+            })
+            .ok_or("expected a ViewerEffect server event")?;
+        let effect = effects.first().ok_or("first effect")?;
+        assert_eq!(effect.effect_type, ViewerEffectType::PointAt);
+        assert_eq!(effect.data, data);
+        Ok(())
+    }
+
+    #[test]
+    fn client_track_and_find_agent_round_trip() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let prey = uuid::Uuid::from_u128(0xB01);
+        let hunter = uuid::Uuid::from_u128(0xB00);
+        client.track_agent(prey, now)?;
+        client.find_agent(hunter, prey, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+        let tracked = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::TrackAgent { prey_id } => Some(*prey_id),
+                _ => None,
+            })
+            .ok_or("expected a TrackAgent server event")?;
+        assert_eq!(tracked, prey);
+        let found = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::FindAgent { hunter, prey } => Some((*hunter, *prey)),
+                _ => None,
+            })
+            .ok_or("expected a FindAgent server event")?;
+        assert_eq!(found, (hunter, prey));
+        Ok(())
+    }
+
+    #[test]
+    fn server_coarse_location_update_reaches_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let me = uuid::Uuid::from_u128(0xC00);
+        let other = uuid::Uuid::from_u128(0xC01);
+        sim.send_coarse_location_update(
+            &[
+                CoarseLocation {
+                    agent_id: me,
+                    x: 100,
+                    y: 50,
+                    z: 80, // sent as 80/4 = 20 on the wire, decoded back to 80
+                },
+                CoarseLocation {
+                    agent_id: other,
+                    x: 1,
+                    y: 2,
+                    z: 4,
+                },
+            ],
+            Some(0),
+            Some(1),
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let (locations, you, prey) = drain_client(&mut client)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::CoarseLocationUpdate {
+                    locations,
+                    you,
+                    prey,
+                } => Some((locations, you, prey)),
+                _ => None,
+            })
+            .ok_or("expected a CoarseLocationUpdate client event")?;
+        assert_eq!(you, Some(0));
+        assert_eq!(prey, Some(1));
+        let first = locations.first().ok_or("first location")?;
+        assert_eq!(first.agent_id, me);
+        assert_eq!(first.z, 80);
+        Ok(())
+    }
+
+    #[test]
+    fn server_find_agent_reply_reaches_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let hunter = uuid::Uuid::from_u128(0xD00);
+        let prey = uuid::Uuid::from_u128(0xD01);
+        sim.send_find_agent_reply(hunter, prey, &[(300_000.0, 301_000.0)], now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let (reply_prey, locations) = drain_client(&mut client)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::FindAgentReply {
+                    prey, locations, ..
+                } => Some((prey, locations)),
+                _ => None,
+            })
+            .ok_or("expected a FindAgentReply client event")?;
+        assert_eq!(reply_prey, prey);
+        assert_eq!(locations, vec![(300_000.0, 301_000.0)]);
         Ok(())
     }
 

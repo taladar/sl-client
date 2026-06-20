@@ -276,6 +276,9 @@ fn on_events(
             | SlSessionEvent::AvatarAppearance(_)
             | SlSessionEvent::AgentWearables { .. }
             | SlSessionEvent::AvatarAnimation { .. }
+            | SlSessionEvent::CoarseLocationUpdate { .. }
+            | SlSessionEvent::ViewerEffect(_)
+            | SlSessionEvent::FindAgentReply { .. }
             | SlSessionEvent::SoundTrigger { .. }
             | SlSessionEvent::AttachedSound { .. }
             | SlSessionEvent::AttachedSoundGainChange { .. }

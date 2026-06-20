@@ -28,6 +28,7 @@
 - [Profiles, Picks & Classifieds](content/profiles.md)
 - [Appearance](content/appearance.md)
 - [Attachments](content/attachments.md)
+- [Nearby Avatars & Viewer Effects](content/nearby.md)
 - [Friends & Presence](content/friends.md)
 - [Experiences](content/experiences.md)
 - [Materials](content/materials.md)

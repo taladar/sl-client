@@ -85,7 +85,20 @@ surface attach/detach as `ServerEvent`. OpenSim-testable.
 highlight — new `ViewerEffectType` enum); `TrackAgent` / `FindAgent` +
 `FindAgentReply`. OpenSim-testable.
 
-- [ ] G2 coarse-location, viewer effects, agent tracking.
+- [x] G2 coarse-location, viewer effects, agent tracking. New
+  `sl-proto/src/types/nearby.rs`: `CoarseLocation`; `ViewerEffect` +
+  `ViewerEffectType` (the `LLHUDObject` effect codes) + `ViewerEffectData`
+  (typed `LookAt`/`PointAt` 57-byte + `Spiral`-family 56-byte `TypeData`, with a
+  `Raw` fallback) + `LookAtType`/`PointAtType`. Commands `ViewerEffect`
+  (batched), `TrackAgent`, `FindAgent`; events `CoarseLocationUpdate`,
+  `ViewerEffect`, `FindAgentReply`. Server decodes the inbound client messages
+  into matching `ServerEvent`s and gains `send_coarse_location_update` /
+  `send_viewer_effect` / `send_find_agent_reply` encoders. Both runtimes + REPL
+  (`viewer_effect`/`track_agent`/`find_agent`) + tests (5 client + 5 server) +
+  new book chapter `content/nearby.md`. **Scope note:** there is no separate
+  `FindAgentReply` message — `FindAgent` is reused for both the request and the
+  filled-in reply (modelled as `Command::FindAgent` + `Event::FindAgentReply`),
+  exactly as the viewer/sim use it.
 
 ### G3 — Display names (CAPS, SL-priority)
 

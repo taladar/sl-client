@@ -46,6 +46,13 @@ pub(crate) fn trimmed_string(bytes: &[u8]) -> String {
         .to_owned()
 }
 
+/// Converts a wire array index that uses a negative value to mean "absent"
+/// (e.g. the `You`/`Prey` fields of `CoarseLocationUpdate`) into an
+/// `Option<usize>`: negative values become `None`.
+pub(crate) fn index_into(index: i16) -> Option<usize> {
+    usize::try_from(index).ok()
+}
+
 /// Encodes a string as NUL-terminated UTF-8 bytes, as the viewer sends variable
 /// string fields on the wire.
 pub(crate) fn with_nul(s: &str) -> Vec<u8> {

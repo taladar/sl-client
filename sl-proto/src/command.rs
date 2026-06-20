@@ -13,7 +13,7 @@ use crate::{
     MuteType, NewInventoryItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
     ParcelAccessScope, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PrimShape,
     ProfileUpdate, RegionInfoUpdate, Reliability, RezAttachment, Rotation, SaleType,
-    ScriptPermissions, Throttle, Uuid, Vector, VoiceProvisionRequest, Wearable,
+    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1045,6 +1045,31 @@ pub enum Command {
         first_detach_all: bool,
         /// The items to wear.
         attachments: Vec<RezAttachment>,
+    },
+    /// Send one or more viewer effects (`ViewerEffect`): the look-at / point-at
+    /// gaze hints, the editing/touch beam, and the other transient HUD effects
+    /// other viewers render. The effects are batched into a single message;
+    /// each carries its own id, source agent, type, duration, colour and
+    /// effect-specific payload.
+    ViewerEffect(Vec<ViewerEffect>),
+    /// Track an agent's position on the world map (`TrackAgent`): the simulator
+    /// streams the tracked ("prey") agent's coarse location back via
+    /// `CoarseLocationUpdate` (surfaced as
+    /// [`Event::CoarseLocationUpdate`](crate::Event::CoarseLocationUpdate), whose
+    /// `prey` index then points at the tracked avatar).
+    TrackAgent {
+        /// The agent to track.
+        prey_id: Uuid,
+    },
+    /// Ask the simulator for an agent's global position (`FindAgent`): an
+    /// estate/god lookup. The simulator answers with a `FindAgent` carrying the
+    /// found positions, surfaced as
+    /// [`Event::FindAgentReply`](crate::Event::FindAgentReply).
+    FindAgent {
+        /// The requesting agent (the "hunter"); usually the agent's own id.
+        hunter: Uuid,
+        /// The agent to locate (the "prey").
+        prey: Uuid,
     },
     /// Upload a new asset over the legacy UDP path (`AssetUploadRequest`): stores
     /// the asset bytes (small assets inline, larger ones over `Xfer`) without

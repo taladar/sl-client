@@ -9,7 +9,7 @@ use super::conversions::{
     environment_from_llsd, establish_agent_communication_from_llsd, estate_access_from_params,
     estate_info_from_params, friend, group_member, group_members_from_caps_llsd, group_membership,
     group_memberships_from_caps_llsd, group_names, group_notice, group_profile, group_role,
-    group_title, instant_message, inventory_descendents_from_llsd, inventory_folder,
+    group_title, index_into, instant_message, inventory_descendents_from_llsd, inventory_folder,
     inventory_item, inventory_item_from_create, inventory_offer_bucket, map_item, map_region_info,
     money_balance, neighbor_info, object_from_full_update, object_properties,
     offline_messages_from_llsd, pack_uuids, parcel_info, parcel_info_from_llsd,
@@ -33,7 +33,7 @@ use crate::error::Error;
 use crate::terrain;
 use crate::types::{
     AlertInfo, Asset, AssetType, AttachmentPoint, AvatarClassified, AvatarPick, Camera, ChatType,
-    ClassifiedUpdate, ClickAction, CreateGroupParams, DeRezDestination, Diagnostic,
+    ClassifiedUpdate, ClickAction, CoarseLocation, CreateGroupParams, DeRezDestination, Diagnostic,
     DisconnectReason, EstateAccessDelta, Event, FriendRights, GroupNoticeAttachment, GroupRoleEdit,
     GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder,
     InventoryItem, InventoryOffer, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams,
@@ -43,8 +43,8 @@ use crate::types::{
     ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PrimShape,
     ProfileUpdate, RegionInfoUpdate, Reliability, RezAttachment, SaleType, ScriptPermissions,
     ScriptTeleportRequest, SoundFlags, SoundPreload, TeleportFlags, TerrainLayerType, TerrainPatch,
-    Texture, Throttle, TransferStatus, Transmit, Wearable, WearableType, global_to_handle,
-    handle_to_grid,
+    Texture, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    Wearable, WearableType, global_to_handle, handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
@@ -1901,6 +1901,60 @@ impl Session {
                         .wearable_data
                         .iter()
                         .map(|block| (block.texture_index, block.texture_id))
+                        .collect(),
+                });
+            }
+            // Coarse (minimap) positions of nearby avatars. The location and
+            // agent-data blocks are parallel arrays; `you`/`prey` index into them
+            // (a negative index means "none").
+            AnyMessage::CoarseLocationUpdate(update) => {
+                let locations = update
+                    .agent_data
+                    .iter()
+                    .zip(update.location.iter())
+                    .map(|(agent, location)| CoarseLocation {
+                        agent_id: agent.agent_id,
+                        x: location.x,
+                        y: location.y,
+                        z: u16::from(location.z).saturating_mul(4),
+                    })
+                    .collect();
+                self.events.push_back(Event::CoarseLocationUpdate {
+                    locations,
+                    you: index_into(update.index.you),
+                    prey: index_into(update.index.prey),
+                });
+            }
+            // Transient HUD effects from other avatars (look-at / point-at gaze,
+            // beams, …). Each effect's `TypeData` is decoded into a typed
+            // `ViewerEffectData` (unknown layouts stay raw).
+            AnyMessage::ViewerEffect(effect) => {
+                let effects = effect
+                    .effect
+                    .iter()
+                    .map(|block| {
+                        let effect_type = ViewerEffectType::from_code(block.r#type);
+                        ViewerEffect {
+                            id: block.id,
+                            agent_id: block.agent_id,
+                            effect_type,
+                            duration: block.duration,
+                            color: block.color,
+                            data: ViewerEffectData::from_wire(effect_type, &block.type_data),
+                        }
+                    })
+                    .collect();
+                self.events.push_back(Event::ViewerEffect(effects));
+            }
+            // The reply to a `FindAgent` lookup: the located global positions.
+            AnyMessage::FindAgent(find) => {
+                self.events.push_back(Event::FindAgentReply {
+                    hunter: find.agent_block.hunter,
+                    prey: find.agent_block.prey,
+                    locations: find
+                        .location_block
+                        .iter()
+                        .map(|block| (block.global_x, block.global_y))
                         .collect(),
                 });
             }
@@ -4028,6 +4082,55 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_rez_multiple_attachments(compound_id, first_detach_all, attachments, now)?;
+        Ok(())
+    }
+
+    /// Sends one or more viewer effects via `ViewerEffect` (look-at / point-at
+    /// gaze hints, the editing/touch beam, and other transient HUD effects other
+    /// viewers render). The effects are batched into a single message.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn send_viewer_effect(
+        &mut self,
+        effects: &[ViewerEffect],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_viewer_effect(effects, now)?;
+        Ok(())
+    }
+
+    /// Asks the simulator to track `prey_id`'s position via `TrackAgent`; the
+    /// tracked agent's coarse location is then streamed back in
+    /// `CoarseLocationUpdate` (surfaced as
+    /// [`Event::CoarseLocationUpdate`](crate::Event::CoarseLocationUpdate)).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn track_agent(&mut self, prey_id: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_track_agent(prey_id, now)?;
+        Ok(())
+    }
+
+    /// Asks the simulator for `prey`'s global position via `FindAgent` (an
+    /// estate/god lookup, sent on behalf of `hunter` — usually the agent's own
+    /// id). The simulator answers with a `FindAgent` carrying the found
+    /// positions, surfaced as
+    /// [`Event::FindAgentReply`](crate::Event::FindAgentReply).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn find_agent(&mut self, hunter: Uuid, prey: Uuid, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_find_agent(hunter, prey, now)?;
         Ok(())
     }
 

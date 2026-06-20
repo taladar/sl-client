@@ -10,19 +10,20 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         AssetType, AttachmentPoint, Camera, ChatAudible, ChatSourceType, ChatType,
-        ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame,
-        DeRezDestination, Diagnostic, DisconnectReason, EnvironmentSettings, EstateAccessDelta,
-        EstateAccessKind, Event, FriendRights, GroupNoticeAttachment, GroupRoleChange,
-        GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImageCodec,
-        InterestsUpdate, InventoryItem, LandingType, LindenAmount, LoginAccount, LoginParams,
-        MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType,
-        NewInventoryItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
+        ClassifiedUpdate, ClickAction, CoarseLocation, ControlFlags, CreateGroupParams, DayCycle,
+        DayCycleFrame, DeRezDestination, Diagnostic, DisconnectReason, EnvironmentSettings,
+        EstateAccessDelta, EstateAccessKind, Event, FriendRights, GroupNoticeAttachment,
+        GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog,
+        ImageCodec, InterestsUpdate, InventoryItem, LandingType, LindenAmount, LoginAccount,
+        LoginParams, LookAtType, MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags,
+        MuteType, NewInventoryItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
         ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelMediaCommand,
         ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField,
-        PickUpdate, PrimShape, ProductType, ProfileUpdate, RegionInfoUpdate, Reliability,
-        RezAttachment, SaleType, ScriptPermissions, Session, SkySettings, SoundFlags,
-        TeleportFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, WaterSettings,
-        WearableType, avatar_texture, group_powers, pcode,
+        PickUpdate, PointAtType, PrimShape, ProductType, ProfileUpdate, RegionInfoUpdate,
+        Reliability, RezAttachment, SaleType, ScriptPermissions, Session, SkySettings, SoundFlags,
+        TeleportFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
+        group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -45,13 +46,16 @@ mod test {
         BulkUpdateInventoryItemDataBlock, ChangeUserRights, ChangeUserRightsAgentDataBlock,
         ChangeUserRightsRightsBlock, ChatFromSimulator, ChatFromSimulatorChatDataBlock,
         ClassifiedInfoReply, ClassifiedInfoReplyAgentDataBlock, ClassifiedInfoReplyDataBlock,
-        ConfirmXferPacket, ConfirmXferPacketXferIDBlock, CrossedRegion,
-        CrossedRegionAgentDataBlock, CrossedRegionInfoBlock, CrossedRegionRegionDataBlock,
-        DisableSimulator, EconomyData, EconomyDataInfoBlock, EjectGroupMemberReply,
-        EjectGroupMemberReplyAgentDataBlock, EjectGroupMemberReplyEjectDataBlock,
-        EjectGroupMemberReplyGroupDataBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
-        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock, GenericMessage,
-        GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GenericStreamingMessage,
+        CoarseLocationUpdate, CoarseLocationUpdateAgentDataBlock, CoarseLocationUpdateIndexBlock,
+        CoarseLocationUpdateLocationBlock, ConfirmXferPacket, ConfirmXferPacketXferIDBlock,
+        CrossedRegion, CrossedRegionAgentDataBlock, CrossedRegionInfoBlock,
+        CrossedRegionRegionDataBlock, DisableSimulator, EconomyData, EconomyDataInfoBlock,
+        EjectGroupMemberReply, EjectGroupMemberReplyAgentDataBlock,
+        EjectGroupMemberReplyEjectDataBlock, EjectGroupMemberReplyGroupDataBlock,
+        EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
+        EstateOwnerMessageParamListBlock, FindAgent, FindAgentAgentBlockBlock,
+        FindAgentLocationBlockBlock, GenericMessage, GenericMessageAgentDataBlock,
+        GenericMessageMethodDataBlock, GenericStreamingMessage,
         GenericStreamingMessageDataBlockBlock, GenericStreamingMessageMethodDataBlock,
         GroupMembersReply, GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
         GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
@@ -98,7 +102,8 @@ mod test {
         TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
         UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock, UpdateCreateInventoryItem,
         UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
-        UseCachedMuteList, UseCachedMuteListAgentDataBlock,
+        UseCachedMuteList, UseCachedMuteListAgentDataBlock, ViewerEffect as ViewerEffectMessage,
+        ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
     };
     use sl_wire::{
         AnyMessage, HomeLocation, Llsd, LoginFailure, LoginRequest, LoginResponse, LoginSuccess,
@@ -3771,6 +3776,222 @@ mod test {
         assert_eq!(rez.object_data.len(), 2);
         let first = rez.object_data.first().ok_or("first object")?;
         assert_eq!(first.attachment_pt, 0x80 | 5); // LeftHand + add flag
+        Ok(())
+    }
+
+    #[test]
+    fn viewer_effect_encodes_lookat() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let self_id = uuid::Uuid::from_u128(0xE0);
+        let target = uuid::Uuid::from_u128(0xE1);
+        session.send_viewer_effect(
+            &[ViewerEffect {
+                id: uuid::Uuid::from_u128(0xEF),
+                agent_id: self_id,
+                effect_type: ViewerEffectType::LookAt,
+                duration: 2.0,
+                color: [255, 0, 0, 255],
+                data: ViewerEffectData::LookAt {
+                    source: self_id,
+                    target,
+                    target_position: [1.0, 2.0, 3.0],
+                    look_at_type: LookAtType::Focus,
+                },
+            }],
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let effect = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ViewerEffect(effect) => Some(effect),
+                _ => None,
+            })
+            .ok_or("expected a ViewerEffect")?;
+        let block = effect.effect.first().ok_or("first effect")?;
+        assert_eq!(block.r#type, 14); // LL_HUD_EFFECT_LOOKAT
+        assert_eq!(block.color, [255, 0, 0, 255]);
+        // The 57-byte LookAt TypeData round-trips back to the typed form.
+        assert_eq!(
+            ViewerEffectData::from_wire(ViewerEffectType::LookAt, &block.type_data),
+            ViewerEffectData::LookAt {
+                source: self_id,
+                target,
+                target_position: [1.0, 2.0, 3.0],
+                look_at_type: LookAtType::Focus,
+            },
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn track_and_find_agent_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let prey = uuid::Uuid::from_u128(0xF1);
+        let hunter = uuid::Uuid::from_u128(0xF0);
+        session.track_agent(prey, now)?;
+        session.find_agent(hunter, prey, now)?;
+        let sent = drain(&mut session)?;
+        let track = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::TrackAgent(track) => Some(track),
+                _ => None,
+            })
+            .ok_or("expected a TrackAgent")?;
+        assert_eq!(track.target_data.prey_id, prey);
+        let find = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::FindAgent(find) => Some(find),
+                _ => None,
+            })
+            .ok_or("expected a FindAgent")?;
+        assert_eq!(find.agent_block.hunter, hunter);
+        assert_eq!(find.agent_block.prey, prey);
+        assert!(find.location_block.is_empty()); // request carries no locations
+        Ok(())
+    }
+
+    #[test]
+    fn coarse_location_update_surfaces_nearby_avatars() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let me = uuid::Uuid::from_u128(0x1);
+        let other = uuid::Uuid::from_u128(0x2);
+        let message = AnyMessage::CoarseLocationUpdate(CoarseLocationUpdate {
+            location: vec![
+                CoarseLocationUpdateLocationBlock {
+                    x: 128,
+                    y: 64,
+                    z: 5, // metres / 4 → 20 m
+                },
+                CoarseLocationUpdateLocationBlock { x: 10, y: 20, z: 6 },
+            ],
+            index: CoarseLocationUpdateIndexBlock { you: 0, prey: 1 },
+            agent_data: vec![
+                CoarseLocationUpdateAgentDataBlock { agent_id: me },
+                CoarseLocationUpdateAgentDataBlock { agent_id: other },
+            ],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let (locations, you, prey) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::CoarseLocationUpdate {
+                    locations,
+                    you,
+                    prey,
+                } => Some((locations, you, prey)),
+                _ => None,
+            })
+            .ok_or("expected a CoarseLocationUpdate event")?;
+        assert_eq!(you, Some(0));
+        assert_eq!(prey, Some(1));
+        assert_eq!(
+            locations,
+            vec![
+                CoarseLocation {
+                    agent_id: me,
+                    x: 128,
+                    y: 64,
+                    z: 20,
+                },
+                CoarseLocation {
+                    agent_id: other,
+                    x: 10,
+                    y: 20,
+                    z: 24,
+                },
+            ],
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn viewer_effect_surfaces_received_effect() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let source = uuid::Uuid::from_u128(0x10);
+        let target = uuid::Uuid::from_u128(0x11);
+        let data = ViewerEffectData::PointAt {
+            source,
+            target,
+            target_position: [4.0, 5.0, 6.0],
+            point_at_type: PointAtType::Grab,
+        };
+        let message = AnyMessage::ViewerEffect(ViewerEffectMessage {
+            agent_data: ViewerEffectAgentDataBlock {
+                agent_id: source,
+                session_id: uuid::Uuid::nil(),
+            },
+            effect: vec![ViewerEffectEffectBlock {
+                id: uuid::Uuid::from_u128(0x12),
+                agent_id: source,
+                r#type: 15, // LL_HUD_EFFECT_POINTAT
+                duration: 1.5,
+                color: [0, 255, 0, 255],
+                type_data: data.to_wire(),
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let effects = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ViewerEffect(effects) => Some(effects),
+                _ => None,
+            })
+            .ok_or("expected a ViewerEffect event")?;
+        let effect = effects.first().ok_or("first effect")?;
+        assert_eq!(effect.effect_type, ViewerEffectType::PointAt);
+        assert_eq!(effect.data, data);
+        Ok(())
+    }
+
+    #[test]
+    fn find_agent_reply_surfaces_locations() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let hunter = uuid::Uuid::from_u128(0x20);
+        let prey = uuid::Uuid::from_u128(0x21);
+        let message = AnyMessage::FindAgent(FindAgent {
+            agent_block: FindAgentAgentBlockBlock {
+                hunter,
+                prey,
+                space_ip: [0, 0, 0, 0],
+            },
+            location_block: vec![FindAgentLocationBlockBlock {
+                global_x: 256_000.0,
+                global_y: 257_000.0,
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let (reply_prey, locations) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::FindAgentReply {
+                    prey, locations, ..
+                } => Some((prey, locations)),
+                _ => None,
+            })
+            .ok_or("expected a FindAgentReply event")?;
+        assert_eq!(reply_prey, prey);
+        assert_eq!(locations, vec![(256_000.0, 257_000.0)]);
         Ok(())
     }
 

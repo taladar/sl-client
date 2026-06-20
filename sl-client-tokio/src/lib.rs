@@ -920,6 +920,15 @@ impl Client {
                         Some(Command::RezAttachments { compound_id, first_detach_all, attachments }) => {
                             self.session.rez_attachments(compound_id, first_detach_all, &attachments, Instant::now())?;
                         }
+                        Some(Command::ViewerEffect(effects)) => {
+                            self.session.send_viewer_effect(&effects, Instant::now())?;
+                        }
+                        Some(Command::TrackAgent { prey_id }) => {
+                            self.session.track_agent(prey_id, Instant::now())?;
+                        }
+                        Some(Command::FindAgent { hunter, prey }) => {
+                            self.session.find_agent(hunter, prey, Instant::now())?;
+                        }
                         Some(Command::UploadAssetUdp { asset_type, data, temp_file, store_local }) => {
                             self.session.upload_asset_udp(asset_type, data, temp_file, store_local, Instant::now())?;
                         }
