@@ -1324,6 +1324,73 @@ mod test {
     }
 
     #[test]
+    fn script_running_round_trip() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let object_id = uuid::Uuid::from_u128(0x0B1E);
+        let item_id = uuid::Uuid::from_u128(0x17E3);
+
+        // Client -> sim: the three task-script control messages surface.
+        client.request_script_running(object_id, item_id, now)?;
+        client.set_script_running(object_id, item_id, true, now)?;
+        client.reset_script(object_id, item_id, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let server_events = drain_server(&mut sim);
+        let get = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RequestScriptRunning { object_id, item_id } => {
+                    Some((*object_id, *item_id))
+                }
+                _ => None,
+            })
+            .ok_or("expected a RequestScriptRunning server event")?;
+        assert_eq!(get, (object_id, item_id));
+        let set = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::SetScriptRunning {
+                    object_id,
+                    item_id,
+                    running,
+                } => Some((*object_id, *item_id, *running)),
+                _ => None,
+            })
+            .ok_or("expected a SetScriptRunning server event")?;
+        assert_eq!(set, (object_id, item_id, true));
+        let reset = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::ResetScript { object_id, item_id } => Some((*object_id, *item_id)),
+                _ => None,
+            })
+            .ok_or("expected a ResetScript server event")?;
+        assert_eq!(reset, (object_id, item_id));
+
+        // Sim -> client: the run-state reply.
+        sim.send_script_running_reply(object_id, item_id, true, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let running = drain_client(&mut client)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ScriptRunning {
+                    object_id,
+                    item_id,
+                    running,
+                } => Some((object_id, item_id, running)),
+                _ => None,
+            })
+            .ok_or("expected a ScriptRunning client event")?;
+        assert_eq!(running, (object_id, item_id, true));
+        Ok(())
+    }
+
+    #[test]
     fn simulator_chat_reaches_client() -> Result<(), TestError> {
         let now = Instant::now();
         let (mut client, mut sim) = setup(now)?;

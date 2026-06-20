@@ -187,6 +187,11 @@ use sl_wire::messages::{
     RezObjectFromNotecardNotecardDataBlock, RezObjectFromNotecardRezDataBlock, RezRestoreToWorld,
     RezRestoreToWorldAgentDataBlock, RezRestoreToWorldInventoryDataBlock,
 };
+use sl_wire::messages::{
+    GetScriptRunning, GetScriptRunningScriptBlock, ScriptReset, ScriptResetAgentDataBlock,
+    ScriptResetScriptBlock, SetScriptRunning, SetScriptRunningAgentDataBlock,
+    SetScriptRunningScriptBlock,
+};
 use sl_wire::{AnyMessage, PacketFlags, WireError, Writer, encode_datagram};
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
@@ -3839,6 +3844,61 @@ impl Circuit {
                 session_id: self.session_id,
             },
             object_data: ObjectSpinStopObjectDataBlock { object_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GetScriptRunning` reliably (query whether `item_id` inside the
+    /// task `object_id` is running). This message carries no `AgentData` block.
+    pub(crate) fn send_get_script_running(
+        &mut self,
+        object_id: Uuid,
+        item_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GetScriptRunning(GetScriptRunning {
+            script: GetScriptRunningScriptBlock { object_id, item_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `SetScriptRunning` reliably (start or stop the script `item_id`
+    /// inside the task `object_id`).
+    pub(crate) fn send_set_script_running(
+        &mut self,
+        object_id: Uuid,
+        item_id: Uuid,
+        running: bool,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::SetScriptRunning(SetScriptRunning {
+            agent_data: SetScriptRunningAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            script: SetScriptRunningScriptBlock {
+                object_id,
+                item_id,
+                running,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ScriptReset` reliably (reset the script `item_id` inside the
+    /// task `object_id`).
+    pub(crate) fn send_script_reset(
+        &mut self,
+        object_id: Uuid,
+        item_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ScriptReset(ScriptReset {
+            agent_data: ScriptResetAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            script: ScriptResetScriptBlock { object_id, item_id },
         });
         self.send(&message, Reliability::Reliable, now)
     }
