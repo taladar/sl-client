@@ -53,6 +53,38 @@ The write side covers the full lifecycle, gated by the caller's powers:
 Results come back as `CreateGroupResult`, `JoinGroupResult`, `LeaveGroupResult`,
 `EjectGroupMemberResult`, and `DroppedFromGroup`.
 
+## Finance, proposals & voting
+
+Groups keep an L$ account and can run member votes. Both are query/reply pairs
+like the rest of the read side, gated by the caller's powers (group
+accountability for the finance queries).
+
+The **finance** queries each take an accounting interval — `interval_days` plus
+`current_interval` (0 = the current period, 1 = the previous one) — and a
+client-chosen `request_id` that the reply echoes for correlation:
+
+| Command | Event | What it returns |
+|---|---|---|
+| `RequestGroupAccountSummary` | `GroupAccountSummary` | balances, credits/debits, current and estimated taxes |
+| `RequestGroupAccountDetails` | `GroupAccountDetails` | the itemised tax/fee lines for the interval |
+| `RequestGroupAccountTransactions` | `GroupAccountTransactions` | the dated L$ transaction log |
+
+The **proposal/voting** surface lets a member list active proposals, start a new
+one, cast a ballot, and read the vote history. The list/history requests carry a
+client-chosen `transaction_id` (echoed back for correlation):
+
+| Command | Event | What it does |
+|---|---|---|
+| `RequestGroupActiveProposals` | `GroupActiveProposals` | the open proposals (id, initiator, window, quorum/majority, whether you voted) |
+| `StartGroupProposal` | — | start a vote (`quorum`, `majority` 0.0–1.0, `duration` seconds, text) |
+| `GroupProposalBallot` | — | cast a vote (`"yes"`/`"no"`/`"abstain"`) on a proposal |
+| `RequestGroupVoteHistory` | `GroupVoteHistory` | one finished proposal per reply, with its per-candidate tallies |
+
+`StartGroupProposal` and `GroupProposalBallot` are `UDPDeprecated` on Second
+Life but still serviced; they are wrapped here for completeness. The finance and
+proposal directories are served by OpenSim only with the Groups V2 module (and a
+money module for live balances) present.
+
 ---
 
 > **In this codebase**
@@ -60,9 +92,15 @@ Results come back as `CreateGroupResult`, `JoinGroupResult`, `LeaveGroupResult`,
 > - Types are in `sl-proto/src/types/group.rs`: `GroupProfile`,
 >   `GroupMembership`, `GroupMember`, `GroupRole`, `GroupRoleMember`,
 >   `GroupTitle`, `GroupNotice`, `GroupNoticeAttachment`, `CreateGroupParams`,
->   the role-edit helpers (`GroupRoleEdit`, `GroupRoleMemberChange`), and
->   `ActiveGroup`; group powers live with `group_powers` (re-exported from
->   `sl-proto`).
+>   the role-edit helpers (`GroupRoleEdit`, `GroupRoleMemberChange`),
+>   `ActiveGroup`, and the finance/voting types (`GroupAccountSummary`,
+>   `GroupAccountDetails`/`GroupAccountDetailsEntry`,
+>   `GroupAccountTransactions`/`GroupAccountTransaction`,
+>   `GroupActiveProposalItem`, `GroupVoteHistoryItem`/`GroupVote`); group powers
+>   live with `group_powers` (re-exported from `sl-proto`).
+> - The finance/proposal replies decode in `sl-proto/src/session/methods.rs`
+>   (helpers in `session/conversions.rs`); the server-side encoders are
+>   `SimSession::send_group_account_summary_reply` and its siblings.
 > - Commands and events are the `*Group*` variants in `sl-proto/src/command.rs`
 >   and `sl-proto/src/types/event.rs`; the `GroupMemberData` cap is
 >   `CAP_GROUP_MEMBER_DATA`.

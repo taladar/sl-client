@@ -1849,6 +1849,86 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "request_group_account_summary",
+            usage: "<group_id> <request_id> <interval_days> <current_interval>",
+            build: |args, ctx| {
+                Ok(Command::RequestGroupAccountSummary {
+                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    request_id: args.req_uuid(ctx, "request_id", 1)?,
+                    interval_days: args.req_parse(ctx, "interval_days", 2, "i32")?,
+                    current_interval: args.req_parse(ctx, "current_interval", 3, "i32")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_group_account_details",
+            usage: "<group_id> <request_id> <interval_days> <current_interval>",
+            build: |args, ctx| {
+                Ok(Command::RequestGroupAccountDetails {
+                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    request_id: args.req_uuid(ctx, "request_id", 1)?,
+                    interval_days: args.req_parse(ctx, "interval_days", 2, "i32")?,
+                    current_interval: args.req_parse(ctx, "current_interval", 3, "i32")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_group_account_transactions",
+            usage: "<group_id> <request_id> <interval_days> <current_interval>",
+            build: |args, ctx| {
+                Ok(Command::RequestGroupAccountTransactions {
+                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    request_id: args.req_uuid(ctx, "request_id", 1)?,
+                    interval_days: args.req_parse(ctx, "interval_days", 2, "i32")?,
+                    current_interval: args.req_parse(ctx, "current_interval", 3, "i32")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_group_active_proposals",
+            usage: "<group_id> <transaction_id>",
+            build: |args, ctx| {
+                Ok(Command::RequestGroupActiveProposals {
+                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    transaction_id: args.req_uuid(ctx, "transaction_id", 1)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_group_vote_history",
+            usage: "<group_id> <transaction_id>",
+            build: |args, ctx| {
+                Ok(Command::RequestGroupVoteHistory {
+                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    transaction_id: args.req_uuid(ctx, "transaction_id", 1)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "start_group_proposal",
+            usage: "<group_id> <quorum> <majority> <duration_secs> <proposal_text>",
+            build: |args, ctx| {
+                Ok(Command::StartGroupProposal {
+                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    quorum: args.req_parse(ctx, "quorum", 1, "i32")?,
+                    majority: args.req_parse(ctx, "majority", 2, "f32")?,
+                    duration: args.req_parse(ctx, "duration", 3, "i32")?,
+                    proposal_text: args.req_str(ctx, "proposal_text", 4)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "group_proposal_ballot",
+            usage: "<proposal_id> <group_id> <vote_cast>",
+            build: |args, ctx| {
+                Ok(Command::GroupProposalBallot {
+                    proposal_id: args.req_uuid(ctx, "proposal_id", 0)?,
+                    group_id: args.req_uuid(ctx, "group_id", 1)?,
+                    vote_cast: args.req_str(ctx, "vote_cast", 2)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "reply_script_dialog",
             usage: "<object_id> <chat_channel> <button_index> <button_label>",
             build: |args, ctx| {
@@ -4107,6 +4187,69 @@ mod tests {
             Ok(Command::ResetScript { object_id, item_id })
                 if object_id == Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111)
                     && item_id == Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222)
+        ));
+    }
+
+    #[test]
+    fn request_group_account_summary_parses() {
+        assert!(matches!(
+            build(
+                "request_group_account_summary \
+                 11111111-1111-1111-1111-111111111111 \
+                 22222222-2222-2222-2222-222222222222 60 1"
+            ),
+            Ok(Command::RequestGroupAccountSummary {
+                group_id,
+                interval_days: 60,
+                current_interval: 1,
+                ..
+            }) if group_id == Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111)
+        ));
+    }
+
+    #[test]
+    fn request_group_active_proposals_parses() {
+        assert!(matches!(
+            build(
+                "request_group_active_proposals \
+                 11111111-1111-1111-1111-111111111111 \
+                 22222222-2222-2222-2222-222222222222"
+            ),
+            Ok(Command::RequestGroupActiveProposals { group_id, transaction_id })
+                if group_id == Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111)
+                    && transaction_id == Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222)
+        ));
+    }
+
+    #[test]
+    fn start_group_proposal_parses() {
+        assert!(matches!(
+            build(
+                "start_group_proposal \
+                 11111111-1111-1111-1111-111111111111 \
+                 3 0.5 86400 \"Adopt the bylaws?\""
+            ),
+            Ok(Command::StartGroupProposal {
+                quorum: 3,
+                duration: 86_400,
+                proposal_text,
+                ..
+            }) if proposal_text == "Adopt the bylaws?"
+        ));
+    }
+
+    #[test]
+    fn group_proposal_ballot_parses() {
+        assert!(matches!(
+            build(
+                "group_proposal_ballot \
+                 11111111-1111-1111-1111-111111111111 \
+                 22222222-2222-2222-2222-222222222222 yes"
+            ),
+            Ok(Command::GroupProposalBallot { proposal_id, group_id, vote_cast })
+                if proposal_id == Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111)
+                    && group_id == Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222)
+                    && vote_cast == "yes"
         ));
     }
 }

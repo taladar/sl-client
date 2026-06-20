@@ -48,6 +48,18 @@ use sl_wire::messages::{
     ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
 };
 use sl_wire::messages::{
+    GroupAccountDetailsReply, GroupAccountDetailsReplyAgentDataBlock,
+    GroupAccountDetailsReplyHistoryDataBlock, GroupAccountDetailsReplyMoneyDataBlock,
+    GroupAccountSummaryReply, GroupAccountSummaryReplyAgentDataBlock,
+    GroupAccountSummaryReplyMoneyDataBlock, GroupAccountTransactionsReply,
+    GroupAccountTransactionsReplyAgentDataBlock, GroupAccountTransactionsReplyHistoryDataBlock,
+    GroupAccountTransactionsReplyMoneyDataBlock, GroupActiveProposalItemReply,
+    GroupActiveProposalItemReplyAgentDataBlock, GroupActiveProposalItemReplyProposalDataBlock,
+    GroupActiveProposalItemReplyTransactionDataBlock, GroupVoteHistoryItemReply,
+    GroupVoteHistoryItemReplyAgentDataBlock, GroupVoteHistoryItemReplyHistoryItemDataBlock,
+    GroupVoteHistoryItemReplyTransactionDataBlock, GroupVoteHistoryItemReplyVoteItemBlock,
+};
+use sl_wire::messages::{
     ObjectPropertiesFamily as ObjectPropertiesFamilyMessage,
     ObjectPropertiesFamilyObjectDataBlock as ObjectPropertiesFamilyObjectDataBlockMessage,
     ParcelInfoReply, ParcelInfoReplyAgentDataBlock, ParcelInfoReplyDataBlock,
@@ -70,11 +82,12 @@ use crate::types::directory::category_from_wire;
 use crate::types::{
     AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatType, CoarseLocation,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, EstateCovenant, EventInfo, GroupName, InstantMessage,
-    LandSearchType, MapItem, MapItemType, MapRegionInfo, NotecardRez, ObjectBuyItem,
-    ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult,
-    RegionIdentity, Reliability, RestoreItem, RezAttachment, SaleType, TelehubInfo, Throttle,
-    Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    DirPeopleResult, DirPlaceResult, EstateCovenant, EventInfo, GroupAccountDetails,
+    GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
+    GroupVoteHistoryItem, InstantMessage, LandSearchType, MapItem, MapItemType, MapRegionInfo,
+    NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails,
+    ParcelObjectOwner, PlacesResult, RegionIdentity, Reliability, RestoreItem, RezAttachment,
+    SaleType, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 
 /// How long to batch owed acknowledgements before flushing them as a `PacketAck`
@@ -572,6 +585,86 @@ pub enum ServerEvent {
         object_id: Uuid,
         /// The script inventory item inside that task.
         item_id: Uuid,
+    },
+    /// The client requested a group's financial summary
+    /// (`GroupAccountSummaryRequest`); the simulator answers with
+    /// [`SimSession::send_group_account_summary_reply`].
+    RequestGroupAccountSummary {
+        /// The group to summarise.
+        group_id: Uuid,
+        /// The client-chosen request id to echo back.
+        request_id: Uuid,
+        /// The accounting interval length in days.
+        interval_days: i32,
+        /// Which interval (0 = current, 1 = previous).
+        current_interval: i32,
+    },
+    /// The client requested a group's itemised accounting detail
+    /// (`GroupAccountDetailsRequest`); the simulator answers with
+    /// [`SimSession::send_group_account_details_reply`].
+    RequestGroupAccountDetails {
+        /// The group to detail.
+        group_id: Uuid,
+        /// The client-chosen request id to echo back.
+        request_id: Uuid,
+        /// The accounting interval length in days.
+        interval_days: i32,
+        /// Which interval (0 = current, 1 = previous).
+        current_interval: i32,
+    },
+    /// The client requested a group's transaction log
+    /// (`GroupAccountTransactionsRequest`); the simulator answers with
+    /// [`SimSession::send_group_account_transactions_reply`].
+    RequestGroupAccountTransactions {
+        /// The group whose log to return.
+        group_id: Uuid,
+        /// The client-chosen request id to echo back.
+        request_id: Uuid,
+        /// The accounting interval length in days.
+        interval_days: i32,
+        /// Which interval (0 = current, 1 = previous).
+        current_interval: i32,
+    },
+    /// The client requested a group's active proposals
+    /// (`GroupActiveProposalsRequest`); the simulator answers with
+    /// [`SimSession::send_group_active_proposals_reply`].
+    RequestGroupActiveProposals {
+        /// The group to query.
+        group_id: Uuid,
+        /// The client-chosen transaction id to echo back.
+        transaction_id: Uuid,
+    },
+    /// The client requested a group's vote history (`GroupVoteHistoryRequest`);
+    /// the simulator answers with
+    /// [`SimSession::send_group_vote_history_reply`].
+    RequestGroupVoteHistory {
+        /// The group to query.
+        group_id: Uuid,
+        /// The client-chosen transaction id to echo back.
+        transaction_id: Uuid,
+    },
+    /// The client started a new group proposal (`StartGroupProposal`).
+    StartGroupProposal {
+        /// The group to start the proposal in.
+        group_id: Uuid,
+        /// The minimum number of votes required for the result to count.
+        quorum: i32,
+        /// The fraction of votes needed to pass (0.0–1.0).
+        majority: f32,
+        /// The voting window length in seconds.
+        duration: i32,
+        /// The proposal text.
+        proposal_text: String,
+    },
+    /// The client cast a vote on an active group proposal
+    /// (`GroupProposalBallot`).
+    GroupProposalBallot {
+        /// The proposal's id.
+        proposal_id: Uuid,
+        /// The group the proposal belongs to.
+        group_id: Uuid,
+        /// The vote cast (e.g. `"yes"`/`"no"`).
+        vote_cast: String,
     },
     /// The client asked for the estate covenant (`EstateCovenantRequest`); the
     /// simulator answers with [`SimSession::send_estate_covenant_reply`].
@@ -1478,6 +1571,239 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends a `GroupAccountSummaryReply`: a group's financial summary, in
+    /// response to a client's `GroupAccountSummaryRequest` (surfaced as
+    /// [`ServerEvent::RequestGroupAccountSummary`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_group_account_summary_reply(
+        &mut self,
+        summary: &GroupAccountSummary,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::GroupAccountSummaryReply(GroupAccountSummaryReply {
+            agent_data: GroupAccountSummaryReplyAgentDataBlock {
+                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                group_id: summary.group_id,
+            },
+            money_data: GroupAccountSummaryReplyMoneyDataBlock {
+                request_id: summary.request_id,
+                interval_days: summary.interval_days,
+                current_interval: summary.current_interval,
+                start_date: with_nul(&summary.start_date),
+                balance: summary.balance,
+                total_credits: summary.total_credits,
+                total_debits: summary.total_debits,
+                object_tax_current: summary.object_tax_current,
+                light_tax_current: summary.light_tax_current,
+                land_tax_current: summary.land_tax_current,
+                group_tax_current: summary.group_tax_current,
+                parcel_dir_fee_current: summary.parcel_dir_fee_current,
+                object_tax_estimate: summary.object_tax_estimate,
+                light_tax_estimate: summary.light_tax_estimate,
+                land_tax_estimate: summary.land_tax_estimate,
+                group_tax_estimate: summary.group_tax_estimate,
+                parcel_dir_fee_estimate: summary.parcel_dir_fee_estimate,
+                non_exempt_members: summary.non_exempt_members,
+                last_tax_date: with_nul(&summary.last_tax_date),
+                tax_date: with_nul(&summary.tax_date),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `GroupAccountDetailsReply`: a group's itemised accounting detail,
+    /// in response to a client's `GroupAccountDetailsRequest` (surfaced as
+    /// [`ServerEvent::RequestGroupAccountDetails`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_group_account_details_reply(
+        &mut self,
+        details: &GroupAccountDetails,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::GroupAccountDetailsReply(GroupAccountDetailsReply {
+            agent_data: GroupAccountDetailsReplyAgentDataBlock {
+                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                group_id: details.group_id,
+            },
+            money_data: GroupAccountDetailsReplyMoneyDataBlock {
+                request_id: details.request_id,
+                interval_days: details.interval_days,
+                current_interval: details.current_interval,
+                start_date: with_nul(&details.start_date),
+            },
+            history_data: details
+                .entries
+                .iter()
+                .map(|entry| GroupAccountDetailsReplyHistoryDataBlock {
+                    description: with_nul(&entry.description),
+                    amount: entry.amount,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `GroupAccountTransactionsReply`: a group's transaction log, in
+    /// response to a client's `GroupAccountTransactionsRequest` (surfaced as
+    /// [`ServerEvent::RequestGroupAccountTransactions`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_group_account_transactions_reply(
+        &mut self,
+        transactions: &GroupAccountTransactions,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::GroupAccountTransactionsReply(GroupAccountTransactionsReply {
+            agent_data: GroupAccountTransactionsReplyAgentDataBlock {
+                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                group_id: transactions.group_id,
+            },
+            money_data: GroupAccountTransactionsReplyMoneyDataBlock {
+                request_id: transactions.request_id,
+                interval_days: transactions.interval_days,
+                current_interval: transactions.current_interval,
+                start_date: with_nul(&transactions.start_date),
+            },
+            history_data: transactions
+                .entries
+                .iter()
+                .map(|entry| GroupAccountTransactionsReplyHistoryDataBlock {
+                    time: with_nul(&entry.time),
+                    user: with_nul(&entry.user),
+                    r#type: entry.transaction_type,
+                    item: with_nul(&entry.item),
+                    amount: entry.amount,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `GroupActiveProposalItemReply`: a group's active proposals, in
+    /// response to a client's `GroupActiveProposalsRequest` (surfaced as
+    /// [`ServerEvent::RequestGroupActiveProposals`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_group_active_proposals_reply(
+        &mut self,
+        group_id: Uuid,
+        transaction_id: Uuid,
+        total_num_items: u32,
+        proposals: &[GroupActiveProposalItem],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::GroupActiveProposalItemReply(GroupActiveProposalItemReply {
+            agent_data: GroupActiveProposalItemReplyAgentDataBlock {
+                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                group_id,
+            },
+            transaction_data: GroupActiveProposalItemReplyTransactionDataBlock {
+                transaction_id,
+                total_num_items,
+            },
+            proposal_data: proposals
+                .iter()
+                .map(|item| GroupActiveProposalItemReplyProposalDataBlock {
+                    vote_id: item.vote_id,
+                    vote_initiator: item.vote_initiator,
+                    terse_date_id: with_nul(&item.terse_date_id),
+                    start_date_time: with_nul(&item.start_date_time),
+                    end_date_time: with_nul(&item.end_date_time),
+                    already_voted: item.already_voted,
+                    vote_cast: with_nul(&item.vote_cast),
+                    majority: item.majority,
+                    quorum: item.quorum,
+                    proposal_text: with_nul(&item.proposal_text),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `GroupVoteHistoryItemReply`: one finished proposal from a group's
+    /// vote history, in response to a client's `GroupVoteHistoryRequest` (surfaced
+    /// as [`ServerEvent::RequestGroupVoteHistory`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_group_vote_history_reply(
+        &mut self,
+        group_id: Uuid,
+        transaction_id: Uuid,
+        total_num_items: u32,
+        item: &GroupVoteHistoryItem,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::GroupVoteHistoryItemReply(GroupVoteHistoryItemReply {
+            agent_data: GroupVoteHistoryItemReplyAgentDataBlock {
+                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                group_id,
+            },
+            transaction_data: GroupVoteHistoryItemReplyTransactionDataBlock {
+                transaction_id,
+                total_num_items,
+            },
+            history_item_data: GroupVoteHistoryItemReplyHistoryItemDataBlock {
+                vote_id: item.vote_id,
+                terse_date_id: with_nul(&item.terse_date_id),
+                start_date_time: with_nul(&item.start_date_time),
+                end_date_time: with_nul(&item.end_date_time),
+                vote_initiator: item.vote_initiator,
+                vote_type: with_nul(&item.vote_type),
+                vote_result: with_nul(&item.vote_result),
+                majority: item.majority,
+                quorum: item.quorum,
+                proposal_text: with_nul(&item.proposal_text),
+            },
+            vote_item: item
+                .votes
+                .iter()
+                .map(|vote| GroupVoteHistoryItemReplyVoteItemBlock {
+                    candidate_id: vote.candidate_id,
+                    vote_cast: with_nul(&vote.vote_cast),
+                    num_votes: vote.num_votes,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
     /// Sends an `ObjectPropertiesFamily`: an object's condensed broadcast
     /// properties, in response to a client's `RequestObjectPropertiesFamily`
     /// (surfaced as [`ServerEvent::RequestObjectPropertiesFamily`]).
@@ -2283,6 +2609,62 @@ impl SimSession {
                 self.events.push_back(ServerEvent::ResetScript {
                     object_id: request.script.object_id,
                     item_id: request.script.item_id,
+                });
+            }
+            AnyMessage::GroupAccountSummaryRequest(request) => {
+                self.events
+                    .push_back(ServerEvent::RequestGroupAccountSummary {
+                        group_id: request.agent_data.group_id,
+                        request_id: request.money_data.request_id,
+                        interval_days: request.money_data.interval_days,
+                        current_interval: request.money_data.current_interval,
+                    });
+            }
+            AnyMessage::GroupAccountDetailsRequest(request) => {
+                self.events
+                    .push_back(ServerEvent::RequestGroupAccountDetails {
+                        group_id: request.agent_data.group_id,
+                        request_id: request.money_data.request_id,
+                        interval_days: request.money_data.interval_days,
+                        current_interval: request.money_data.current_interval,
+                    });
+            }
+            AnyMessage::GroupAccountTransactionsRequest(request) => {
+                self.events
+                    .push_back(ServerEvent::RequestGroupAccountTransactions {
+                        group_id: request.agent_data.group_id,
+                        request_id: request.money_data.request_id,
+                        interval_days: request.money_data.interval_days,
+                        current_interval: request.money_data.current_interval,
+                    });
+            }
+            AnyMessage::GroupActiveProposalsRequest(request) => {
+                self.events
+                    .push_back(ServerEvent::RequestGroupActiveProposals {
+                        group_id: request.group_data.group_id,
+                        transaction_id: request.transaction_data.transaction_id,
+                    });
+            }
+            AnyMessage::GroupVoteHistoryRequest(request) => {
+                self.events.push_back(ServerEvent::RequestGroupVoteHistory {
+                    group_id: request.group_data.group_id,
+                    transaction_id: request.transaction_data.transaction_id,
+                });
+            }
+            AnyMessage::StartGroupProposal(request) => {
+                self.events.push_back(ServerEvent::StartGroupProposal {
+                    group_id: request.proposal_data.group_id,
+                    quorum: request.proposal_data.quorum,
+                    majority: request.proposal_data.majority,
+                    duration: request.proposal_data.duration,
+                    proposal_text: trimmed_string(&request.proposal_data.proposal_text),
+                });
+            }
+            AnyMessage::GroupProposalBallot(request) => {
+                self.events.push_back(ServerEvent::GroupProposalBallot {
+                    proposal_id: request.proposal_data.proposal_id,
+                    group_id: request.proposal_data.group_id,
+                    vote_cast: trimmed_string(&request.proposal_data.vote_cast),
                 });
             }
             AnyMessage::EstateCovenantRequest(_) => {

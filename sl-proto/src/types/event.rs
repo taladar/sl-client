@@ -8,13 +8,14 @@ use super::{
     AvatarProperties, ChatMessage, ClassifiedInfo, CoarseLocation, DirClassifiedResult,
     DirEventResult, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
     DisconnectReason, EconomyData, EnvironmentSettings, EstateAccessKind, EstateCovenant,
-    EstateInfo, EventInfo, Friend, FriendRights, GroupMember, GroupMembership, GroupName,
-    GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
-    InventoryFolder, InventoryItem, LoadUrlRequest, LoginAccount, MapItem, MapItemType,
-    MapRegionInfo, Maturity, MoneyBalance, MuteEntry, NeighborInfo, Object, ObjectProperties,
-    ObjectPropertiesFamily, ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, PickInfo,
-    PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, ScriptDialog,
+    EstateInfo, EventInfo, Friend, FriendRights, GroupAccountDetails, GroupAccountSummary,
+    GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
+    GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, GroupVoteHistoryItem,
+    ImDialog, InstantMessage, InventoryFolder, InventoryItem, LoadUrlRequest, LoginAccount,
+    MapItem, MapItemType, MapRegionInfo, Maturity, MoneyBalance, MuteEntry, NeighborInfo, Object,
+    ObjectProperties, ObjectPropertiesFamily, ParcelAccessEntry, ParcelAccessScope, ParcelDetails,
+    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
+    PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, ScriptDialog,
     ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload, TelehubInfo,
     TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
 };
@@ -471,6 +472,41 @@ pub enum Event {
         group_id: Uuid,
         /// The notice headers.
         notices: Vec<GroupNotice>,
+    },
+    /// A group's financial summary (`GroupAccountSummaryReply`), in response to
+    /// [`Command::RequestGroupAccountSummary`](crate::Command::RequestGroupAccountSummary).
+    GroupAccountSummary(GroupAccountSummary),
+    /// A group's itemised accounting detail (`GroupAccountDetailsReply`), in
+    /// response to
+    /// [`Command::RequestGroupAccountDetails`](crate::Command::RequestGroupAccountDetails).
+    GroupAccountDetails(GroupAccountDetails),
+    /// A group's transaction log (`GroupAccountTransactionsReply`), in response to
+    /// [`Command::RequestGroupAccountTransactions`](crate::Command::RequestGroupAccountTransactions).
+    GroupAccountTransactions(GroupAccountTransactions),
+    /// A group's active proposals (`GroupActiveProposalItemReply`), in response to
+    /// [`Command::RequestGroupActiveProposals`](crate::Command::RequestGroupActiveProposals).
+    GroupActiveProposals {
+        /// The group the proposals belong to.
+        group_id: Uuid,
+        /// The request's transaction id, echoed for correlation.
+        transaction_id: Uuid,
+        /// The total number of active proposals in the reply set.
+        total_num_items: u32,
+        /// The proposals in this reply message.
+        proposals: Vec<GroupActiveProposalItem>,
+    },
+    /// One finished proposal from a group's vote history
+    /// (`GroupVoteHistoryItemReply`), in response to
+    /// [`Command::RequestGroupVoteHistory`](crate::Command::RequestGroupVoteHistory).
+    GroupVoteHistory {
+        /// The group the proposal belongs to.
+        group_id: Uuid,
+        /// The request's transaction id, echoed for correlation.
+        transaction_id: Uuid,
+        /// The total number of history items in the reply set.
+        total_num_items: u32,
+        /// The finished proposal and its per-candidate tallies.
+        item: GroupVoteHistoryItem,
     },
     /// A message was received in a group IM session (an `ImprovedInstantMessage`
     /// with `from_group` set and the `IM_SESSION_SEND` dialog). The session id is

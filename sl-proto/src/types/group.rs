@@ -283,6 +283,189 @@ pub struct GroupNoticeAttachment {
     pub owner_id: Uuid,
 }
 
+/// A group's financial summary for an accounting interval, parsed from
+/// `GroupAccountSummaryReply` (the answer to
+/// [`Command::RequestGroupAccountSummary`](crate::Command::RequestGroupAccountSummary)).
+/// All monetary fields are L$. `current_interval` selects this period (0) or the
+/// previous one (1); `interval_days` is the period length.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupAccountSummary {
+    /// The group the summary is for.
+    pub group_id: Uuid,
+    /// The client-chosen request id echoed from the request, for correlation.
+    pub request_id: Uuid,
+    /// The accounting interval length in days.
+    pub interval_days: i32,
+    /// Which interval this is (0 = current, 1 = previous).
+    pub current_interval: i32,
+    /// The interval's start date (grid-formatted string).
+    pub start_date: String,
+    /// The group's current L$ balance.
+    pub balance: i32,
+    /// Total L$ credited over the interval.
+    pub total_credits: i32,
+    /// Total L$ debited over the interval.
+    pub total_debits: i32,
+    /// Current object tax.
+    pub object_tax_current: i32,
+    /// Current light tax.
+    pub light_tax_current: i32,
+    /// Current land tax.
+    pub land_tax_current: i32,
+    /// Current group tax.
+    pub group_tax_current: i32,
+    /// Current parcel-directory listing fee.
+    pub parcel_dir_fee_current: i32,
+    /// Estimated object tax for the next interval.
+    pub object_tax_estimate: i32,
+    /// Estimated light tax for the next interval.
+    pub light_tax_estimate: i32,
+    /// Estimated land tax for the next interval.
+    pub land_tax_estimate: i32,
+    /// Estimated group tax for the next interval.
+    pub group_tax_estimate: i32,
+    /// Estimated parcel-directory listing fee for the next interval.
+    pub parcel_dir_fee_estimate: i32,
+    /// The number of members that count toward tax (non-exempt).
+    pub non_exempt_members: i32,
+    /// The date of the last tax assessment (grid-formatted string).
+    pub last_tax_date: String,
+    /// The date of the next tax assessment (grid-formatted string).
+    pub tax_date: String,
+}
+
+/// One line of a group's accounting detail, from a `GroupAccountDetailsReply`
+/// entry: a single tax/fee charge with its L$ amount.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupAccountDetailsEntry {
+    /// What the charge is for (grid-formatted string).
+    pub description: String,
+    /// The L$ amount of the charge.
+    pub amount: i32,
+}
+
+/// A group's itemised accounting detail for an interval, parsed from
+/// `GroupAccountDetailsReply` (the answer to
+/// [`Command::RequestGroupAccountDetails`](crate::Command::RequestGroupAccountDetails)).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupAccountDetails {
+    /// The group the detail is for.
+    pub group_id: Uuid,
+    /// The client-chosen request id echoed from the request, for correlation.
+    pub request_id: Uuid,
+    /// The accounting interval length in days.
+    pub interval_days: i32,
+    /// Which interval this is (0 = current, 1 = previous).
+    pub current_interval: i32,
+    /// The interval's start date (grid-formatted string).
+    pub start_date: String,
+    /// The detail lines for the interval.
+    pub entries: Vec<GroupAccountDetailsEntry>,
+}
+
+/// One entry in a group's transaction log, from a `GroupAccountTransactionsReply`
+/// entry: a single dated L$ transaction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupAccountTransaction {
+    /// When the transaction happened (grid-formatted string).
+    pub time: String,
+    /// The other party's name (grid-formatted string).
+    pub user: String,
+    /// The transaction type code (matches the `MoneyTransactionType` family).
+    pub transaction_type: i32,
+    /// A description of the item/reason (grid-formatted string).
+    pub item: String,
+    /// The L$ amount (positive credit, negative debit).
+    pub amount: i32,
+}
+
+/// A group's transaction log for an interval, parsed from
+/// `GroupAccountTransactionsReply` (the answer to
+/// [`Command::RequestGroupAccountTransactions`](crate::Command::RequestGroupAccountTransactions)).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupAccountTransactions {
+    /// The group the log is for.
+    pub group_id: Uuid,
+    /// The client-chosen request id echoed from the request, for correlation.
+    pub request_id: Uuid,
+    /// The accounting interval length in days.
+    pub interval_days: i32,
+    /// Which interval this is (0 = current, 1 = previous).
+    pub current_interval: i32,
+    /// The interval's start date (grid-formatted string).
+    pub start_date: String,
+    /// The transactions over the interval.
+    pub entries: Vec<GroupAccountTransaction>,
+}
+
+/// One active group proposal, from a `GroupActiveProposalItemReply` entry. The
+/// agent votes on it via
+/// [`Command::GroupProposalBallot`](crate::Command::GroupProposalBallot).
+#[derive(Debug, Clone, PartialEq)]
+pub struct GroupActiveProposalItem {
+    /// The proposal's id (used as the ballot's `proposal_id`).
+    pub vote_id: Uuid,
+    /// The agent that started the proposal.
+    pub vote_initiator: Uuid,
+    /// A terse date id (grid-internal string).
+    pub terse_date_id: String,
+    /// When voting opened (grid-formatted string).
+    pub start_date_time: String,
+    /// When voting closes (grid-formatted string).
+    pub end_date_time: String,
+    /// Whether the requesting agent has already voted.
+    pub already_voted: bool,
+    /// The vote the requesting agent already cast (empty if none).
+    pub vote_cast: String,
+    /// The fraction of votes needed to pass (0.0–1.0).
+    pub majority: f32,
+    /// The minimum number of votes required for the result to count.
+    pub quorum: i32,
+    /// The proposal's text.
+    pub proposal_text: String,
+}
+
+/// One candidate tally within a finished proposal, from a
+/// `GroupVoteHistoryItemReply` `VoteItem` entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupVote {
+    /// The candidate/option id (or the voter for a yes/no proposal).
+    pub candidate_id: Uuid,
+    /// The vote text cast (e.g. `"yes"`/`"no"`).
+    pub vote_cast: String,
+    /// How many votes this candidate received.
+    pub num_votes: i32,
+}
+
+/// One finished proposal from a group's vote history, parsed from a
+/// `GroupVoteHistoryItemReply` (the answer to
+/// [`Command::RequestGroupVoteHistory`](crate::Command::RequestGroupVoteHistory)).
+#[derive(Debug, Clone, PartialEq)]
+pub struct GroupVoteHistoryItem {
+    /// The proposal's id.
+    pub vote_id: Uuid,
+    /// A terse date id (grid-internal string).
+    pub terse_date_id: String,
+    /// When voting opened (grid-formatted string).
+    pub start_date_time: String,
+    /// When voting closed (grid-formatted string).
+    pub end_date_time: String,
+    /// The agent that started the proposal.
+    pub vote_initiator: Uuid,
+    /// The proposal/vote type (grid-formatted string).
+    pub vote_type: String,
+    /// The outcome (grid-formatted string, e.g. `"Success"`).
+    pub vote_result: String,
+    /// The fraction of votes that was needed to pass (0.0–1.0).
+    pub majority: f32,
+    /// The minimum number of votes that was required.
+    pub quorum: i32,
+    /// The proposal's text.
+    pub proposal_text: String,
+    /// The per-candidate tallies.
+    pub votes: Vec<GroupVote>,
+}
+
 /// Group role power bits (`GP_*` in the viewer's `roles_constants.h`), combined
 /// into the `powers` bitfield of a [`GroupRoleEdit`]. Only the commonly-set
 /// powers are named; any bit may be set directly. Bit 0 is unused (the "none"

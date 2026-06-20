@@ -4,7 +4,7 @@
 //! [meta command](MetaCommand) (a comment, `sleep`, `set`/`unset`/`vars`) or a
 //! [`PendingCommand`] — the named command plus its parsed [`Args`], with
 //! `$placeholder` tokens left unresolved until the registry builds it against a
-//! [`ReplContext`](crate::context::ReplContext) at dispatch time.
+//! [`ReplContext`] at dispatch time.
 
 use std::sync::LazyLock;
 

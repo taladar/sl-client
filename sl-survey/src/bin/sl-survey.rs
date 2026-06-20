@@ -714,6 +714,11 @@ impl Survey {
             | Event::ObjectPropertiesFamily { .. }
             | Event::PayPriceReply { .. }
             | Event::ScriptRunning { .. }
+            | Event::GroupAccountSummary(_)
+            | Event::GroupAccountDetails(_)
+            | Event::GroupAccountTransactions(_)
+            | Event::GroupActiveProposals { .. }
+            | Event::GroupVoteHistory { .. }
             | Event::ParcelObjectOwners { .. }
             | Event::ParcelDetails(_)
             | Event::RemoteParcelId(_)

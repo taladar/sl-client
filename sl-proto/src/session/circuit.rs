@@ -192,6 +192,19 @@ use sl_wire::messages::{
     ScriptResetScriptBlock, SetScriptRunning, SetScriptRunningAgentDataBlock,
     SetScriptRunningScriptBlock,
 };
+use sl_wire::messages::{
+    GroupAccountDetailsRequest, GroupAccountDetailsRequestAgentDataBlock,
+    GroupAccountDetailsRequestMoneyDataBlock, GroupAccountSummaryRequest,
+    GroupAccountSummaryRequestAgentDataBlock, GroupAccountSummaryRequestMoneyDataBlock,
+    GroupAccountTransactionsRequest, GroupAccountTransactionsRequestAgentDataBlock,
+    GroupAccountTransactionsRequestMoneyDataBlock, GroupActiveProposalsRequest,
+    GroupActiveProposalsRequestAgentDataBlock, GroupActiveProposalsRequestGroupDataBlock,
+    GroupActiveProposalsRequestTransactionDataBlock, GroupProposalBallot,
+    GroupProposalBallotAgentDataBlock, GroupProposalBallotProposalDataBlock,
+    GroupVoteHistoryRequest, GroupVoteHistoryRequestAgentDataBlock,
+    GroupVoteHistoryRequestGroupDataBlock, GroupVoteHistoryRequestTransactionDataBlock,
+    StartGroupProposal, StartGroupProposalAgentDataBlock, StartGroupProposalProposalDataBlock,
+};
 use sl_wire::{AnyMessage, PacketFlags, WireError, Writer, encode_datagram};
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
@@ -1314,6 +1327,166 @@ impl Circuit {
                     ejectee_id: *ejectee_id,
                 })
                 .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GroupAccountSummaryRequest` reliably for `group_id` over the
+    /// accounting interval selected by `interval_days`/`current_interval`.
+    pub(crate) fn send_group_account_summary_request(
+        &mut self,
+        group_id: Uuid,
+        request_id: Uuid,
+        interval_days: i32,
+        current_interval: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GroupAccountSummaryRequest(GroupAccountSummaryRequest {
+            agent_data: GroupAccountSummaryRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                group_id,
+            },
+            money_data: GroupAccountSummaryRequestMoneyDataBlock {
+                request_id,
+                interval_days,
+                current_interval,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GroupAccountDetailsRequest` reliably for `group_id`.
+    pub(crate) fn send_group_account_details_request(
+        &mut self,
+        group_id: Uuid,
+        request_id: Uuid,
+        interval_days: i32,
+        current_interval: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GroupAccountDetailsRequest(GroupAccountDetailsRequest {
+            agent_data: GroupAccountDetailsRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                group_id,
+            },
+            money_data: GroupAccountDetailsRequestMoneyDataBlock {
+                request_id,
+                interval_days,
+                current_interval,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GroupAccountTransactionsRequest` reliably for `group_id`.
+    pub(crate) fn send_group_account_transactions_request(
+        &mut self,
+        group_id: Uuid,
+        request_id: Uuid,
+        interval_days: i32,
+        current_interval: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message =
+            AnyMessage::GroupAccountTransactionsRequest(GroupAccountTransactionsRequest {
+                agent_data: GroupAccountTransactionsRequestAgentDataBlock {
+                    agent_id: self.agent_id,
+                    session_id: self.session_id,
+                    group_id,
+                },
+                money_data: GroupAccountTransactionsRequestMoneyDataBlock {
+                    request_id,
+                    interval_days,
+                    current_interval,
+                },
+            });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GroupActiveProposalsRequest` reliably for `group_id`.
+    pub(crate) fn send_group_active_proposals_request(
+        &mut self,
+        group_id: Uuid,
+        transaction_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GroupActiveProposalsRequest(GroupActiveProposalsRequest {
+            agent_data: GroupActiveProposalsRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            group_data: GroupActiveProposalsRequestGroupDataBlock { group_id },
+            transaction_data: GroupActiveProposalsRequestTransactionDataBlock { transaction_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GroupVoteHistoryRequest` reliably for `group_id`.
+    pub(crate) fn send_group_vote_history_request(
+        &mut self,
+        group_id: Uuid,
+        transaction_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GroupVoteHistoryRequest(GroupVoteHistoryRequest {
+            agent_data: GroupVoteHistoryRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            group_data: GroupVoteHistoryRequestGroupDataBlock { group_id },
+            transaction_data: GroupVoteHistoryRequestTransactionDataBlock { transaction_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `StartGroupProposal` reliably (start a new proposal/vote in
+    /// `group_id`).
+    pub(crate) fn send_start_group_proposal(
+        &mut self,
+        group_id: Uuid,
+        quorum: i32,
+        majority: f32,
+        duration: i32,
+        proposal_text: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::StartGroupProposal(StartGroupProposal {
+            agent_data: StartGroupProposalAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            proposal_data: StartGroupProposalProposalDataBlock {
+                group_id,
+                quorum,
+                majority,
+                duration,
+                proposal_text: with_nul(proposal_text),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GroupProposalBallot` reliably (cast `vote_cast` on `proposal_id`
+    /// of `group_id`).
+    pub(crate) fn send_group_proposal_ballot(
+        &mut self,
+        proposal_id: Uuid,
+        group_id: Uuid,
+        vote_cast: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GroupProposalBallot(GroupProposalBallot {
+            agent_data: GroupProposalBallotAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            proposal_data: GroupProposalBallotProposalDataBlock {
+                proposal_id,
+                group_id,
+                vote_cast: with_nul(vote_cast),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }

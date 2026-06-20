@@ -445,6 +445,87 @@ pub enum Command {
         /// The agent ids to eject.
         member_ids: Vec<Uuid>,
     },
+    /// Request a group's financial summary (`GroupAccountSummaryRequest`) for an
+    /// accounting interval. The reply arrives as
+    /// [`Event::GroupAccountSummary`](crate::Event::GroupAccountSummary).
+    RequestGroupAccountSummary {
+        /// The group to query.
+        group_id: Uuid,
+        /// A client-chosen id echoed back in the reply for correlation.
+        request_id: Uuid,
+        /// The interval length in days.
+        interval_days: i32,
+        /// Which interval (0 = current, 1 = previous).
+        current_interval: i32,
+    },
+    /// Request a group's itemised accounting detail (`GroupAccountDetailsRequest`)
+    /// for an interval. The reply arrives as
+    /// [`Event::GroupAccountDetails`](crate::Event::GroupAccountDetails).
+    RequestGroupAccountDetails {
+        /// The group to query.
+        group_id: Uuid,
+        /// A client-chosen id echoed back in the reply for correlation.
+        request_id: Uuid,
+        /// The interval length in days.
+        interval_days: i32,
+        /// Which interval (0 = current, 1 = previous).
+        current_interval: i32,
+    },
+    /// Request a group's transaction log (`GroupAccountTransactionsRequest`) for an
+    /// interval. The reply arrives as
+    /// [`Event::GroupAccountTransactions`](crate::Event::GroupAccountTransactions).
+    RequestGroupAccountTransactions {
+        /// The group to query.
+        group_id: Uuid,
+        /// A client-chosen id echoed back in the reply for correlation.
+        request_id: Uuid,
+        /// The interval length in days.
+        interval_days: i32,
+        /// Which interval (0 = current, 1 = previous).
+        current_interval: i32,
+    },
+    /// Request a group's active proposals (`GroupActiveProposalsRequest`). The
+    /// reply arrives as
+    /// [`Event::GroupActiveProposals`](crate::Event::GroupActiveProposals).
+    RequestGroupActiveProposals {
+        /// The group to query.
+        group_id: Uuid,
+        /// A client-chosen id echoed back in the reply for correlation.
+        transaction_id: Uuid,
+    },
+    /// Request a group's vote history (`GroupVoteHistoryRequest`). Each finished
+    /// proposal arrives as
+    /// [`Event::GroupVoteHistory`](crate::Event::GroupVoteHistory).
+    RequestGroupVoteHistory {
+        /// The group to query.
+        group_id: Uuid,
+        /// A client-chosen id echoed back in the reply for correlation.
+        transaction_id: Uuid,
+    },
+    /// Start a new group proposal/vote (`StartGroupProposal`). It then appears in
+    /// the group's active proposals.
+    StartGroupProposal {
+        /// The group to start the proposal in.
+        group_id: Uuid,
+        /// The minimum number of votes required for the result to count.
+        quorum: i32,
+        /// The fraction of votes needed to pass (0.0–1.0).
+        majority: f32,
+        /// The voting window length in seconds.
+        duration: i32,
+        /// The proposal text.
+        proposal_text: String,
+    },
+    /// Cast a vote on an active group proposal (`GroupProposalBallot`).
+    GroupProposalBallot {
+        /// The proposal's id (the `vote_id` from
+        /// [`Event::GroupActiveProposals`](crate::Event::GroupActiveProposals)).
+        proposal_id: Uuid,
+        /// The group the proposal belongs to.
+        group_id: Uuid,
+        /// The vote to cast (e.g. `"yes"`/`"no"`/`"abstain"`).
+        vote_cast: String,
+    },
     /// Post a group notice (`IM_GROUP_NOTICE`), optionally attaching an inventory
     /// item. The grid relays it to members who accept notices.
     SendGroupNotice {

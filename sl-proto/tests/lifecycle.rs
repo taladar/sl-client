@@ -61,7 +61,11 @@ mod test {
         FindAgentLocationBlockBlock, GenericMessage, GenericMessageAgentDataBlock,
         GenericMessageMethodDataBlock, GenericStreamingMessage,
         GenericStreamingMessageDataBlockBlock, GenericStreamingMessageMethodDataBlock,
-        GroupMembersReply, GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
+        GroupAccountSummaryReply, GroupAccountSummaryReplyAgentDataBlock,
+        GroupAccountSummaryReplyMoneyDataBlock, GroupActiveProposalItemReply,
+        GroupActiveProposalItemReplyAgentDataBlock, GroupActiveProposalItemReplyProposalDataBlock,
+        GroupActiveProposalItemReplyTransactionDataBlock, GroupMembersReply,
+        GroupMembersReplyAgentDataBlock, GroupMembersReplyGroupDataBlock,
         GroupMembersReplyMemberDataBlock, GroupProfileReply, GroupProfileReplyAgentDataBlock,
         GroupProfileReplyGroupDataBlock, GroupRoleDataReply, GroupRoleDataReplyAgentDataBlock,
         GroupRoleDataReplyGroupDataBlock, GroupRoleDataReplyRoleDataBlock, GroupRoleMembersReply,
@@ -4467,6 +4471,188 @@ mod test {
         assert_eq!(running.0, uuid::Uuid::from_u128(0x0B1E));
         assert_eq!(running.1, uuid::Uuid::from_u128(0x17E3));
         assert!(running.2);
+        Ok(())
+    }
+
+    #[test]
+    fn group_finance_g10_commands_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group_id = uuid::Uuid::from_u128(0x6A0D);
+        let request_id = uuid::Uuid::from_u128(0xF00D);
+        let transaction_id = uuid::Uuid::from_u128(0x7AC7);
+        let proposal_id = uuid::Uuid::from_u128(0x9A0E);
+        session.request_group_account_summary(group_id, request_id, 60, 0, now)?;
+        session.request_group_account_details(group_id, request_id, 60, 0, now)?;
+        session.request_group_account_transactions(group_id, request_id, 60, 0, now)?;
+        session.request_group_active_proposals(group_id, transaction_id, now)?;
+        session.request_group_vote_history(group_id, transaction_id, now)?;
+        session.start_group_proposal(group_id, 3, 0.5, 86_400, "Adopt the bylaws?", now)?;
+        session.cast_group_proposal_ballot(proposal_id, group_id, "yes", now)?;
+        let sent = drain(&mut session)?;
+
+        let summary = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::GroupAccountSummaryRequest(req) => Some(req),
+                _ => None,
+            })
+            .ok_or("expected a GroupAccountSummaryRequest")?;
+        assert_eq!(summary.agent_data.group_id, group_id);
+        assert_eq!(summary.money_data.request_id, request_id);
+        assert_eq!(summary.money_data.interval_days, 60);
+
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::GroupAccountDetailsRequest(_))),
+            "expected a GroupAccountDetailsRequest"
+        );
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::GroupAccountTransactionsRequest(_))),
+            "expected a GroupAccountTransactionsRequest"
+        );
+
+        let proposals = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::GroupActiveProposalsRequest(req) => Some(req),
+                _ => None,
+            })
+            .ok_or("expected a GroupActiveProposalsRequest")?;
+        assert_eq!(proposals.group_data.group_id, group_id);
+        assert_eq!(proposals.transaction_data.transaction_id, transaction_id);
+
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::GroupVoteHistoryRequest(_))),
+            "expected a GroupVoteHistoryRequest"
+        );
+
+        let start = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::StartGroupProposal(req) => Some(req),
+                _ => None,
+            })
+            .ok_or("expected a StartGroupProposal")?;
+        assert_eq!(start.proposal_data.group_id, group_id);
+        assert_eq!(start.proposal_data.quorum, 3);
+        assert_eq!(start.proposal_data.duration, 86_400);
+        assert!((start.proposal_data.majority - 0.5).abs() < f32::EPSILON);
+
+        let ballot = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::GroupProposalBallot(req) => Some(req),
+                _ => None,
+            })
+            .ok_or("expected a GroupProposalBallot")?;
+        assert_eq!(ballot.proposal_data.proposal_id, proposal_id);
+        assert_eq!(ballot.proposal_data.group_id, group_id);
+        Ok(())
+    }
+
+    #[test]
+    fn group_finance_replies_surface_events() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let group_id = uuid::Uuid::from_u128(0x6A0D);
+        let request_id = uuid::Uuid::from_u128(0xF00D);
+        let summary = AnyMessage::GroupAccountSummaryReply(GroupAccountSummaryReply {
+            agent_data: GroupAccountSummaryReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(0xA6E),
+                group_id,
+            },
+            money_data: GroupAccountSummaryReplyMoneyDataBlock {
+                request_id,
+                interval_days: 7,
+                current_interval: 0,
+                start_date: b"2026-06-01\0".to_vec(),
+                balance: 1234,
+                total_credits: 50,
+                total_debits: 20,
+                object_tax_current: 1,
+                light_tax_current: 2,
+                land_tax_current: 3,
+                group_tax_current: 4,
+                parcel_dir_fee_current: 5,
+                object_tax_estimate: 6,
+                light_tax_estimate: 7,
+                land_tax_estimate: 8,
+                group_tax_estimate: 9,
+                parcel_dir_fee_estimate: 10,
+                non_exempt_members: 11,
+                last_tax_date: b"2026-05-25\0".to_vec(),
+                tax_date: b"2026-06-08\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&summary, 20, true)?, now)?;
+
+        let got = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::GroupAccountSummary(summary) => Some(summary),
+                _ => None,
+            })
+            .ok_or("expected a GroupAccountSummary event")?;
+        assert_eq!(got.group_id, group_id);
+        assert_eq!(got.request_id, request_id);
+        assert_eq!(got.balance, 1234);
+        assert_eq!(got.start_date, "2026-06-01");
+        assert_eq!(got.non_exempt_members, 11);
+
+        let transaction_id = uuid::Uuid::from_u128(0x7AC7);
+        let vote_id = uuid::Uuid::from_u128(0x9A0E);
+        let proposals = AnyMessage::GroupActiveProposalItemReply(GroupActiveProposalItemReply {
+            agent_data: GroupActiveProposalItemReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(0xA6E),
+                group_id,
+            },
+            transaction_data: GroupActiveProposalItemReplyTransactionDataBlock {
+                transaction_id,
+                total_num_items: 1,
+            },
+            proposal_data: vec![GroupActiveProposalItemReplyProposalDataBlock {
+                vote_id,
+                vote_initiator: uuid::Uuid::from_u128(0x1217),
+                terse_date_id: b"td\0".to_vec(),
+                start_date_time: b"2026-06-01\0".to_vec(),
+                end_date_time: b"2026-06-08\0".to_vec(),
+                already_voted: false,
+                vote_cast: b"\0".to_vec(),
+                majority: 0.5,
+                quorum: 3,
+                proposal_text: b"Adopt the bylaws?\0".to_vec(),
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&proposals, 21, true)?, now)?;
+
+        let active = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::GroupActiveProposals {
+                    group_id,
+                    transaction_id,
+                    total_num_items,
+                    proposals,
+                } => Some((group_id, transaction_id, total_num_items, proposals)),
+                _ => None,
+            })
+            .ok_or("expected a GroupActiveProposals event")?;
+        assert_eq!(active.0, group_id);
+        assert_eq!(active.1, transaction_id);
+        assert_eq!(active.2, 1);
+        let proposal = active.3.first().ok_or("expected one proposal")?;
+        assert_eq!(proposal.vote_id, vote_id);
+        assert_eq!(proposal.quorum, 3);
+        assert_eq!(proposal.proposal_text, "Adopt the bylaws?");
+        assert!((proposal.majority - 0.5).abs() < f32::EPSILON);
         Ok(())
     }
 
