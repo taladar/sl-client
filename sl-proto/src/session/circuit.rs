@@ -56,7 +56,8 @@ use sl_wire::messages::{
     DirPlacesQueryAgentDataBlock, DirPlacesQueryQueryDataBlock, EconomyDataRequest,
     EjectGroupMemberRequest, EjectGroupMemberRequestAgentDataBlock,
     EjectGroupMemberRequestEjectDataBlock, EjectGroupMemberRequestGroupDataBlock,
-    EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
+    EstateCovenantRequest, EstateCovenantRequestAgentDataBlock, EstateOwnerMessage,
+    EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
     EstateOwnerMessageParamListBlock, EventInfoRequest, EventInfoRequestAgentDataBlock,
     EventInfoRequestEventDataBlock, EventNotificationAddRequest,
     EventNotificationAddRequestAgentDataBlock, EventNotificationAddRequestEventDataBlock,
@@ -3041,6 +3042,18 @@ impl Circuit {
                 invoice: Uuid::nil(),
             },
             param_list,
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `EstateCovenantRequest` reliably. The simulator replies with an
+    /// `EstateCovenantReply` carrying the covenant notecard id and estate name.
+    pub(crate) fn send_estate_covenant_request(&mut self, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::EstateCovenantRequest(EstateCovenantRequest {
+            agent_data: EstateCovenantRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }

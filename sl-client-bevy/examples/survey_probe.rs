@@ -252,6 +252,8 @@ fn on_events(
             | SlSessionEvent::ParcelObjectOwners { .. }
             | SlSessionEvent::ParcelDetails(_)
             | SlSessionEvent::RemoteParcelId(_)
+            | SlSessionEvent::EstateCovenant(_)
+            | SlSessionEvent::TelehubInfo(_)
             | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged { region_handle, sim } => {

@@ -12,13 +12,13 @@ mod test {
     use sl_proto::{
         AttachmentPoint, AvatarName, AvatarPickerResult, ChatType, CoarseLocation,
         DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-        DirPeopleResult, DirPlaceResult, Event, EventInfo, GroupName, ImDialog, LandSearchType,
-        LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity, NotecardRez, ObjectBuyItem,
-        ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner, ParcelReturnType,
-        PlacesResult, PointAtType, ProductType, RegionIdentity, RestoreItem, RezAttachment,
-        SaleType, ServerEvent, Session, SimSession, Throttle, Transmit, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd, grid_to_handle,
-        parse_event_queue_response,
+        DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventInfo, GroupName, ImDialog,
+        LandSearchType, LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity, NotecardRez,
+        ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner,
+        ParcelReturnType, PlacesResult, PointAtType, ProductType, RegionIdentity, RestoreItem,
+        RezAttachment, SaleType, ServerEvent, Session, SimSession, TelehubInfo, Throttle, Transmit,
+        ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
+        grid_to_handle, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -1202,6 +1202,124 @@ mod test {
         assert_eq!(details.name, "Sunny Plaza");
         assert_eq!(details.parcel_id, uuid::Uuid::from_u128(0x00C0_FFEE));
         assert_eq!(details.sale_price, 1000);
+        Ok(())
+    }
+
+    #[test]
+    fn estate_covenant_and_telehub_round_trip() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        // Client -> sim: the covenant request and the telehub command surface.
+        client.request_estate_covenant(now)?;
+        client.request_telehub_info(now)?;
+        client.connect_telehub(42, now)?;
+        client.disconnect_telehub(now)?;
+        client.add_telehub_spawn_point(43, now)?;
+        client.remove_telehub_spawn_point(2, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::RequestEstateCovenant)),
+            "expected a RequestEstateCovenant server event"
+        );
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::RequestTelehubInfo)),
+            "expected a RequestTelehubInfo server event"
+        );
+        let connect = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::ConnectTelehub { object_local_id } => Some(*object_local_id),
+                _ => None,
+            })
+            .ok_or("expected a ConnectTelehub server event")?;
+        assert_eq!(connect, 42);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::DisconnectTelehub)),
+            "expected a DisconnectTelehub server event"
+        );
+        let add = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::AddTelehubSpawnPoint { object_local_id } => Some(*object_local_id),
+                _ => None,
+            })
+            .ok_or("expected an AddTelehubSpawnPoint server event")?;
+        assert_eq!(add, 43);
+        let remove = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RemoveTelehubSpawnPoint { spawn_index } => Some(*spawn_index),
+                _ => None,
+            })
+            .ok_or("expected a RemoveTelehubSpawnPoint server event")?;
+        assert_eq!(remove, 2);
+
+        // Sim -> client: the two reply encoders.
+        sim.send_estate_covenant_reply(
+            &EstateCovenant {
+                covenant_id: uuid::Uuid::from_u128(0xC0FE),
+                covenant_timestamp: 1_700_000_000,
+                estate_name: "My Estate".to_owned(),
+                estate_owner_id: uuid::Uuid::from_u128(0x42),
+            },
+            now,
+        )?;
+        sim.send_telehub_info(
+            &TelehubInfo {
+                object_id: uuid::Uuid::from_u128(0x7E1E),
+                object_name: "Welcome Hub".to_owned(),
+                position: sl_types::lsl::Vector {
+                    x: 128.0,
+                    y: 129.0,
+                    z: 25.0,
+                },
+                rotation: sl_types::lsl::Rotation {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    s: 1.0,
+                },
+                spawn_points: vec![sl_types::lsl::Vector {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 3.0,
+                }],
+            },
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        let covenant = client_events
+            .iter()
+            .find_map(|e| match e {
+                Event::EstateCovenant(covenant) => Some(covenant),
+                _ => None,
+            })
+            .ok_or("expected an EstateCovenant client event")?;
+        assert_eq!(covenant.estate_name, "My Estate");
+        assert_eq!(covenant.covenant_id, uuid::Uuid::from_u128(0xC0FE));
+        let telehub = client_events
+            .iter()
+            .find_map(|e| match e {
+                Event::TelehubInfo(telehub) => Some(telehub),
+                _ => None,
+            })
+            .ok_or("expected a TelehubInfo client event")?;
+        assert_eq!(telehub.object_name, "Welcome Hub");
+        assert_eq!(telehub.spawn_points.len(), 1);
+        assert_eq!(telehub.position.z.to_bits(), 25.0_f32.to_bits());
         Ok(())
     }
 

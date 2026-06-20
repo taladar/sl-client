@@ -1320,6 +1320,24 @@ fn advance_running(
             Command::SetRegionInfo(update) => {
                 session.set_region_info(update, now).ok();
             }
+            Command::RequestEstateCovenant => {
+                session.request_estate_covenant(now).ok();
+            }
+            Command::RequestTelehubInfo => {
+                session.request_telehub_info(now).ok();
+            }
+            Command::ConnectTelehub { object_local_id } => {
+                session.connect_telehub(*object_local_id, now).ok();
+            }
+            Command::DisconnectTelehub => {
+                session.disconnect_telehub(now).ok();
+            }
+            Command::AddTelehubSpawnPoint { object_local_id } => {
+                session.add_telehub_spawn_point(*object_local_id, now).ok();
+            }
+            Command::RemoveTelehubSpawnPoint { spawn_index } => {
+                session.remove_telehub_spawn_point(*spawn_index, now).ok();
+            }
             Command::GodKickUser { target, reason } => {
                 session.god_kick_user(*target, reason, now).ok();
             }

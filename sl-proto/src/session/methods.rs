@@ -37,19 +37,19 @@ use crate::types::{
     Camera, ChatType, ClassifiedUpdate, ClickAction, CoarseLocation, CreateGroupParams,
     DeRezDestination, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags,
     DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DisconnectReason,
-    EstateAccessDelta, Event, EventInfo, FriendRights, GroupNoticeAttachment, GroupRoleEdit,
-    GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder,
-    InventoryItem, InventoryOffer, LandSearchType, LoadUrlRequest, LoginAccount, LoginHttpRequest,
-    LoginParams, MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType,
-    NeighborInfo, NewInventoryItem, NotecardRez, Object, ObjectBuyItem, ObjectFlagSettings,
-    ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
-    PickUpdate, PlacesResult, PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem,
-    RezAttachment, SaleType, ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload,
-    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType, global_to_handle,
-    handle_to_grid,
+    EstateAccessDelta, EstateCovenant, Event, EventInfo, FriendRights, GroupNoticeAttachment,
+    GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate,
+    InventoryFolder, InventoryItem, InventoryOffer, LandSearchType, LoadUrlRequest, LoginAccount,
+    LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MoneyTransactionType,
+    MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NotecardRez, Object, ObjectBuyItem,
+    ObjectFlagSettings, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
+    PermissionField, PickUpdate, PlacesResult, PrimShape, ProfileUpdate, RegionInfoUpdate,
+    Reliability, RestoreItem, RezAttachment, SaleType, ScriptPermissions, ScriptTeleportRequest,
+    SoundFlags, SoundPreload, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
+    Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
+    WearableType, global_to_handle, handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
@@ -1347,6 +1347,29 @@ impl Session {
                     }
                     _ => {}
                 }
+            }
+            AnyMessage::EstateCovenantReply(reply) => {
+                let data = &reply.data;
+                self.events.push_back(Event::EstateCovenant(EstateCovenant {
+                    covenant_id: data.covenant_id,
+                    covenant_timestamp: data.covenant_timestamp,
+                    estate_name: trimmed_string(&data.estate_name),
+                    estate_owner_id: data.estate_owner_id,
+                }));
+            }
+            AnyMessage::TelehubInfo(info) => {
+                let block = &info.telehub_block;
+                self.events.push_back(Event::TelehubInfo(TelehubInfo {
+                    object_id: block.object_id,
+                    object_name: trimmed_string(&block.object_name),
+                    position: block.telehub_pos.clone(),
+                    rotation: block.telehub_rot.clone(),
+                    spawn_points: info
+                        .spawn_point_block
+                        .iter()
+                        .map(|spawn| spawn.spawn_point_pos.clone())
+                        .collect(),
+                }));
             }
             AnyMessage::ChatFromSimulator(chat) => {
                 let data = &chat.chat_data;
@@ -5943,6 +5966,102 @@ impl Session {
             yn(update.allow_parcel_changes),
         ];
         circuit.send_estate_owner_message("setregioninfo", &params, now)?;
+        Ok(())
+    }
+
+    /// Requests the estate's covenant summary via `EstateCovenantRequest`. The
+    /// reply arrives as [`Event::EstateCovenant`]; fetch the covenant notecard
+    /// asset separately with its `covenant_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_estate_covenant(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_estate_covenant_request(now)?;
+        Ok(())
+    }
+
+    /// Requests the region's telehub configuration via `EstateOwnerMessage`/
+    /// `telehub` (`info ui`). The reply arrives as [`Event::TelehubInfo`].
+    /// Requires the agent to be the estate owner or a god.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_telehub_info(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_estate_owner_message("telehub", &["info ui".to_owned()], now)?;
+        Ok(())
+    }
+
+    /// Connects the given in-region object as the region's telehub via
+    /// `EstateOwnerMessage`/`telehub` (`connect`). The updated configuration
+    /// arrives as [`Event::TelehubInfo`]. Requires estate-owner or god rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn connect_telehub(&mut self, object_local_id: u32, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let params = ["connect".to_owned(), object_local_id.to_string()];
+        circuit.send_estate_owner_message("telehub", &params, now)?;
+        Ok(())
+    }
+
+    /// Removes the region's telehub via `EstateOwnerMessage`/`telehub`
+    /// (`delete`). The updated configuration arrives as [`Event::TelehubInfo`].
+    /// Requires estate-owner or god rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn disconnect_telehub(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_estate_owner_message("telehub", &["delete".to_owned()], now)?;
+        Ok(())
+    }
+
+    /// Adds a telehub spawn point at the given in-region object's position via
+    /// `EstateOwnerMessage`/`telehub` (`spawnpoint add`). The updated
+    /// configuration arrives as [`Event::TelehubInfo`]. Requires estate-owner or
+    /// god rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn add_telehub_spawn_point(
+        &mut self,
+        object_local_id: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let params = ["spawnpoint add".to_owned(), object_local_id.to_string()];
+        circuit.send_estate_owner_message("telehub", &params, now)?;
+        Ok(())
+    }
+
+    /// Removes a telehub spawn point by index via `EstateOwnerMessage`/`telehub`
+    /// (`spawnpoint remove`). The updated configuration arrives as
+    /// [`Event::TelehubInfo`]. Requires estate-owner or god rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn remove_telehub_spawn_point(
+        &mut self,
+        spawn_index: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let params = ["spawnpoint remove".to_owned(), spawn_index.to_string()];
+        circuit.send_estate_owner_message("telehub", &params, now)?;
         Ok(())
     }
 

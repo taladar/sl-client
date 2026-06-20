@@ -3,6 +3,8 @@
 use std::net::SocketAddr;
 
 use super::Maturity;
+use sl_types::lsl::Rotation;
+use sl_types::lsl::Vector;
 use uuid::Uuid;
 
 /// A change to one of an estate's access lists, applied via
@@ -82,6 +84,42 @@ pub struct EstateInfo {
     pub covenant_timestamp: u32,
     /// The estate's abuse-report email address.
     pub abuse_email: String,
+}
+
+/// An estate's covenant summary, from an `EstateCovenantReply` in response to
+/// [`Session::request_estate_covenant`](crate::Session::request_estate_covenant)
+/// (`EstateCovenantRequest`). The covenant text itself is an asset fetched
+/// separately via the notecard [`covenant_id`](EstateCovenant::covenant_id).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EstateCovenant {
+    /// The covenant notecard's asset id (nil if the estate has no covenant).
+    pub covenant_id: Uuid,
+    /// When the covenant last changed (Unix timestamp).
+    pub covenant_timestamp: u32,
+    /// The estate name.
+    pub estate_name: String,
+    /// The estate owner's id.
+    pub estate_owner_id: Uuid,
+}
+
+/// A region's telehub configuration, from a `TelehubInfo` reply to
+/// [`Session::request_telehub_info`](crate::Session::request_telehub_info)
+/// (and after each telehub-management command). A telehub routes incoming
+/// teleports to one of its spawn points.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TelehubInfo {
+    /// The telehub object's id (nil when the region has no telehub).
+    pub object_id: Uuid,
+    /// The telehub object's name (empty when there is no telehub).
+    pub object_name: String,
+    /// The telehub object's region-local position (a fallback the viewer uses
+    /// when it cannot find the object itself).
+    pub position: Vector,
+    /// The telehub object's rotation.
+    pub rotation: Rotation,
+    /// The spawn points, each relative to the telehub position. Incoming
+    /// teleports are routed to one of these.
+    pub spawn_points: Vec<Vector>,
 }
 
 /// The settings to apply to a region via

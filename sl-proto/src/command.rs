@@ -739,6 +739,36 @@ pub enum Command {
     },
     /// Update the region's settings (`setregioninfo`).
     SetRegionInfo(RegionInfoUpdate),
+    /// Request the estate covenant summary (`EstateCovenantRequest`); the reply
+    /// arrives as [`Event::EstateCovenant`](crate::Event::EstateCovenant).
+    RequestEstateCovenant,
+    /// Request the region's telehub configuration (`EstateOwnerMessage`/`telehub`
+    /// `info ui`); the reply arrives as
+    /// [`Event::TelehubInfo`](crate::Event::TelehubInfo). Needs estate-owner or
+    /// god rights.
+    RequestTelehubInfo,
+    /// Connect the given object as the region's telehub (`EstateOwnerMessage`/
+    /// `telehub` `connect`). Needs estate-owner or god rights.
+    ConnectTelehub {
+        /// The local id of the (in-region) object to make the telehub.
+        object_local_id: u32,
+    },
+    /// Remove the region's telehub (`EstateOwnerMessage`/`telehub` `delete`).
+    /// Needs estate-owner or god rights.
+    DisconnectTelehub,
+    /// Add a telehub spawn point at the given object's position
+    /// (`EstateOwnerMessage`/`telehub` `spawnpoint add`). Needs estate-owner or
+    /// god rights.
+    AddTelehubSpawnPoint {
+        /// The local id of the (in-region) object marking the spawn point.
+        object_local_id: u32,
+    },
+    /// Remove a telehub spawn point by index (`EstateOwnerMessage`/`telehub`
+    /// `spawnpoint remove`). Needs estate-owner or god rights.
+    RemoveTelehubSpawnPoint {
+        /// The zero-based index into the telehub's spawn-point list.
+        spawn_index: u32,
+    },
     /// God-level eject of an agent (`GodKickUser`; needs grid-god rights).
     GodKickUser {
         /// The agent to kick.

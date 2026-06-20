@@ -2226,6 +2226,48 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| Ok(Command::SetRegionInfo(build_region_info_update(args, ctx)?)),
         },
         CommandSpec {
+            name: "request_estate_covenant",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::RequestEstateCovenant),
+        },
+        CommandSpec {
+            name: "request_telehub_info",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::RequestTelehubInfo),
+        },
+        CommandSpec {
+            name: "connect_telehub",
+            usage: "<object_local_id>",
+            build: |args, ctx| {
+                Ok(Command::ConnectTelehub {
+                    object_local_id: args.req_parse(ctx, "object_local_id", 0, "u32")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "disconnect_telehub",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::DisconnectTelehub),
+        },
+        CommandSpec {
+            name: "add_telehub_spawn_point",
+            usage: "<object_local_id>",
+            build: |args, ctx| {
+                Ok(Command::AddTelehubSpawnPoint {
+                    object_local_id: args.req_parse(ctx, "object_local_id", 0, "u32")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "remove_telehub_spawn_point",
+            usage: "<spawn_index>",
+            build: |args, ctx| {
+                Ok(Command::RemoveTelehubSpawnPoint {
+                    spawn_index: args.req_parse(ctx, "spawn_index", 0, "u32")?,
+                })
+            },
+        },
+        CommandSpec {
             name: "god_kick_user",
             usage: "<target> [reason]",
             build: |args, ctx| {
@@ -3960,6 +4002,40 @@ mod tests {
                 if location.x.to_bits() == 128.0_f32.to_bits()
                     && region_id == Uuid::nil()
                     && region_handle == 281_483_566_841_976
+        ));
+    }
+
+    #[test]
+    fn request_estate_covenant_parses() {
+        assert!(matches!(
+            build("request_estate_covenant"),
+            Ok(Command::RequestEstateCovenant)
+        ));
+    }
+
+    #[test]
+    fn telehub_info_request_parses() {
+        assert!(matches!(
+            build("request_telehub_info"),
+            Ok(Command::RequestTelehubInfo)
+        ));
+    }
+
+    #[test]
+    fn connect_telehub_parses_local_id() {
+        assert!(matches!(
+            build("connect_telehub 42"),
+            Ok(Command::ConnectTelehub {
+                object_local_id: 42
+            })
+        ));
+    }
+
+    #[test]
+    fn remove_telehub_spawn_point_parses_index() {
+        assert!(matches!(
+            build("remove_telehub_spawn_point 2"),
+            Ok(Command::RemoveTelehubSpawnPoint { spawn_index: 2 })
         ));
     }
 }

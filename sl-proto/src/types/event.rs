@@ -7,16 +7,16 @@ use super::{
     AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPick, AvatarPickerResult,
     AvatarProperties, ChatMessage, ClassifiedInfo, CoarseLocation, DirClassifiedResult,
     DirEventResult, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
-    DisconnectReason, EconomyData, EnvironmentSettings, EstateAccessKind, EstateInfo, EventInfo,
-    Friend, FriendRights, GroupMember, GroupMembership, GroupName, GroupNotice, GroupProfile,
-    GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder,
-    InventoryItem, LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapRegionInfo, Maturity,
-    MoneyBalance, MuteEntry, NeighborInfo, Object, ObjectProperties, ObjectPropertiesFamily,
-    ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, PickInfo, PlacesResult,
-    PlayingAnimation, RegionIdentity, RegionLimits, ScriptDialog, ScriptPermissionRequest,
-    ScriptTeleportRequest, SoundFlags, SoundPreload, TeleportFlags, TerrainPatch, Texture,
-    TransferStatus, ViewerEffect, Wearable,
+    DisconnectReason, EconomyData, EnvironmentSettings, EstateAccessKind, EstateCovenant,
+    EstateInfo, EventInfo, Friend, FriendRights, GroupMember, GroupMembership, GroupName,
+    GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
+    InventoryFolder, InventoryItem, LoadUrlRequest, LoginAccount, MapItem, MapItemType,
+    MapRegionInfo, Maturity, MoneyBalance, MuteEntry, NeighborInfo, Object, ObjectProperties,
+    ObjectPropertiesFamily, ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, PickInfo,
+    PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, ScriptDialog,
+    ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload, TelehubInfo,
+    TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
 };
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
@@ -150,6 +150,13 @@ pub enum Event {
         /// The agent/group ids in this chunk of the list.
         members: Vec<Uuid>,
     },
+    /// The estate covenant summary, from an `EstateCovenantReply` in response to
+    /// [`Session::request_estate_covenant`](crate::Session::request_estate_covenant).
+    EstateCovenant(EstateCovenant),
+    /// The region's telehub configuration, from a `TelehubInfo` reply to
+    /// [`Session::request_telehub_info`](crate::Session::request_telehub_info)
+    /// (and after each telehub-management command).
+    TelehubInfo(TelehubInfo),
     /// A neighbouring simulator was announced via `EnableSimulator`.
     NeighborDiscovered(NeighborInfo),
     /// A neighbouring region's child-agent seed capability arrived
