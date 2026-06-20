@@ -297,6 +297,14 @@ pub const CAP_EXT_ENVIRONMENT: &str = "ExtEnvironment";
 /// stock OpenSim serves it only when its user-management component is present.
 pub const CAP_GET_DISPLAY_NAMES: &str = "GetDisplayNames";
 
+/// The HTTP capability that resolves a region location to a grid-wide **parcel
+/// id** (`RemoteParcelRequest`): a POST of `{ location, region_id | region_handle
+/// }` returning `{ parcel_id }`. Driven by the runtimes' `RequestRemoteParcelId`
+/// command; the reply is decoded by [`Session::handle_caps_event`] into
+/// [`Event::RemoteParcelId`]. The resolved id then feeds a UDP `ParcelInfoRequest`
+/// ([`Session::request_parcel_info`]) for the parcel's listing.
+pub const CAP_REMOTE_PARCEL_REQUEST: &str = "RemoteParcelRequest";
+
 /// The viewer's `TELEPORT_FLAGS_VIA_LURE` (`1 << 2`), sent in a
 /// `TeleportLureRequest` when accepting a teleport lure (#28).
 const TELEPORT_FLAGS_VIA_LURE: u32 = 4;
@@ -350,6 +358,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_CREATE_INVENTORY_CATEGORY,
     CAP_EXT_ENVIRONMENT,
     CAP_GET_DISPLAY_NAMES,
+    CAP_REMOTE_PARCEL_REQUEST,
 ];
 
 /// The maximum UDP datagram size an I/O driver should be prepared to receive.

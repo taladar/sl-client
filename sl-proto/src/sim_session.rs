@@ -49,7 +49,9 @@ use sl_wire::messages::{
 use sl_wire::messages::{
     ObjectPropertiesFamily as ObjectPropertiesFamilyMessage,
     ObjectPropertiesFamilyObjectDataBlock as ObjectPropertiesFamilyObjectDataBlockMessage,
-    PayPriceReply, PayPriceReplyButtonDataBlock, PayPriceReplyObjectDataBlock,
+    ParcelInfoReply, ParcelInfoReplyAgentDataBlock, ParcelInfoReplyDataBlock,
+    ParcelObjectOwnersReply, ParcelObjectOwnersReplyDataBlock, PayPriceReply,
+    PayPriceReplyButtonDataBlock, PayPriceReplyObjectDataBlock,
 };
 use sl_wire::{
     AnyMessage, ControlFlags, EventQueueEvent, Llsd, MessageId, PacketFlags, Reader, WireError,
@@ -67,8 +69,8 @@ use crate::types::{
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
     DirPeopleResult, DirPlaceResult, EventInfo, GroupName, InstantMessage, LandSearchType, MapItem,
     MapItemType, MapRegionInfo, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory,
-    PlacesResult, RegionIdentity, Reliability, RestoreItem, RezAttachment, SaleType, Throttle,
-    Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    ParcelDetails, ParcelObjectOwner, PlacesResult, RegionIdentity, Reliability, RestoreItem,
+    RezAttachment, SaleType, Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 
 /// How long to batch owed acknowledgements before flushing them as a `PacketAck`
@@ -486,6 +488,62 @@ pub enum ServerEvent {
     RezObjectFromNotecard {
         /// The rez parameters (ray placement, permissions, notecard, items).
         rez: NotecardRez,
+    },
+    /// The client wants to join all its leased parcels within a metre rectangle
+    /// into one parcel (`ParcelJoin`).
+    JoinParcels {
+        /// The western edge of the rectangle (metres, region-local).
+        west: f32,
+        /// The southern edge (metres).
+        south: f32,
+        /// The eastern edge (metres).
+        east: f32,
+        /// The northern edge (metres).
+        north: f32,
+    },
+    /// The client wants to subdivide a parcel along a metre rectangle
+    /// (`ParcelDivide`).
+    DivideParcel {
+        /// The western edge of the rectangle (metres, region-local).
+        west: f32,
+        /// The southern edge (metres).
+        south: f32,
+        /// The eastern edge (metres).
+        east: f32,
+        /// The northern edge (metres).
+        north: f32,
+    },
+    /// The client asked for a parcel's per-owner object tallies
+    /// (`ParcelObjectOwnersRequest`); the simulator answers with
+    /// [`SimSession::send_parcel_object_owners_reply`].
+    RequestParcelObjectOwners {
+        /// The parcel's region-local id.
+        local_id: i32,
+    },
+    /// The client wants to buy a temporary access pass to a parcel
+    /// (`ParcelBuyPass`).
+    BuyParcelPass {
+        /// The parcel's region-local id.
+        local_id: i32,
+    },
+    /// The client wants to disable scripted objects on a parcel
+    /// (`ParcelDisableObjects`).
+    DisableParcelObjects {
+        /// The parcel's region-local id.
+        local_id: i32,
+        /// Which objects to disable (combined `ParcelReturnType` constants).
+        return_type: u32,
+        /// The owner-id scope (empty for none).
+        owner_ids: Vec<Uuid>,
+        /// The explicit object/task-id scope (empty for none).
+        task_ids: Vec<Uuid>,
+    },
+    /// The client asked for a parcel's basic listing by grid-wide parcel id
+    /// (`ParcelInfoRequest`); the simulator answers with
+    /// [`SimSession::send_parcel_info_reply`].
+    RequestParcelInfo {
+        /// The parcel's grid-wide id.
+        parcel_id: Uuid,
     },
     /// The client requested a clean logout (`LogoutRequest`); the simulator has
     /// replied with a `LogoutReply` and closed the session.
@@ -1375,6 +1433,80 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends a `ParcelObjectOwnersReply`: the per-owner object tallies for a
+    /// parcel, in response to a client's `ParcelObjectOwnersRequest` (surfaced as
+    /// [`ServerEvent::RequestParcelObjectOwners`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_parcel_object_owners_reply(
+        &mut self,
+        owners: &[ParcelObjectOwner],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ParcelObjectOwnersReply(ParcelObjectOwnersReply {
+            data: owners
+                .iter()
+                .map(|owner| ParcelObjectOwnersReplyDataBlock {
+                    owner_id: owner.owner_id,
+                    is_group_owned: owner.is_group_owned,
+                    count: owner.count,
+                    online_status: owner.online_status,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `ParcelInfoReply`: a parcel's basic listing, in response to a
+    /// client's `ParcelInfoRequest` (surfaced as
+    /// [`ServerEvent::RequestParcelInfo`]). The `AgentData.AgentID` is this
+    /// session's agent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_parcel_info_reply(
+        &mut self,
+        details: &ParcelDetails,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ParcelInfoReply(ParcelInfoReply {
+            agent_data: ParcelInfoReplyAgentDataBlock {
+                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+            },
+            data: ParcelInfoReplyDataBlock {
+                parcel_id: details.parcel_id,
+                owner_id: details.owner_id,
+                name: with_nul(&details.name),
+                desc: with_nul(&details.description),
+                actual_area: details.actual_area,
+                billable_area: details.billable_area,
+                flags: details.flags,
+                global_x: details.global_x,
+                global_y: details.global_y,
+                global_z: details.global_z,
+                sim_name: with_nul(&details.sim_name),
+                snapshot_id: details.snapshot_id,
+                dwell: details.dwell,
+                sale_price: details.sale_price,
+                auction_id: details.auction_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
     /// Sends a `StartPingCheck` to the client; the client answers with a
     /// `CompletePingCheck`. Returns the ping id sent (so a caller can match the
     /// reply), or `None` if the circuit is not open.
@@ -1941,6 +2073,52 @@ impl SimSession {
                         object_id: rez.notecard_data.object_id,
                         item_ids: rez.inventory_data.iter().map(|item| item.item_id).collect(),
                     },
+                });
+            }
+            AnyMessage::ParcelJoin(join) => {
+                let data = &join.parcel_data;
+                self.events.push_back(ServerEvent::JoinParcels {
+                    west: data.west,
+                    south: data.south,
+                    east: data.east,
+                    north: data.north,
+                });
+            }
+            AnyMessage::ParcelDivide(divide) => {
+                let data = &divide.parcel_data;
+                self.events.push_back(ServerEvent::DivideParcel {
+                    west: data.west,
+                    south: data.south,
+                    east: data.east,
+                    north: data.north,
+                });
+            }
+            AnyMessage::ParcelObjectOwnersRequest(request) => {
+                self.events
+                    .push_back(ServerEvent::RequestParcelObjectOwners {
+                        local_id: request.parcel_data.local_id,
+                    });
+            }
+            AnyMessage::ParcelBuyPass(pass) => {
+                self.events.push_back(ServerEvent::BuyParcelPass {
+                    local_id: pass.parcel_data.local_id,
+                });
+            }
+            AnyMessage::ParcelDisableObjects(disable) => {
+                self.events.push_back(ServerEvent::DisableParcelObjects {
+                    local_id: disable.parcel_data.local_id,
+                    return_type: disable.parcel_data.return_type,
+                    owner_ids: disable
+                        .owner_i_ds
+                        .iter()
+                        .map(|owner| owner.owner_id)
+                        .collect(),
+                    task_ids: disable.task_i_ds.iter().map(|task| task.task_id).collect(),
+                });
+            }
+            AnyMessage::ParcelInfoRequest(request) => {
+                self.events.push_back(ServerEvent::RequestParcelInfo {
+                    parcel_id: request.data.parcel_id,
                 });
             }
             AnyMessage::LogoutRequest(_) => {

@@ -12,10 +12,11 @@ use super::{
     GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage, InventoryFolder,
     InventoryItem, LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapRegionInfo, Maturity,
     MoneyBalance, MuteEntry, NeighborInfo, Object, ObjectProperties, ObjectPropertiesFamily,
-    ParcelAccessEntry, ParcelAccessScope, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits,
-    ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload,
-    TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
+    ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, PickInfo, PlacesResult,
+    PlayingAnimation, RegionIdentity, RegionLimits, ScriptDialog, ScriptPermissionRequest,
+    ScriptTeleportRequest, SoundFlags, SoundPreload, TeleportFlags, TerrainPatch, Texture,
+    TransferStatus, ViewerEffect, Wearable,
 };
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
@@ -119,6 +120,21 @@ pub enum Event {
         /// The list entries.
         entries: Vec<ParcelAccessEntry>,
     },
+    /// A parcel's per-owner object tallies, from a `ParcelObjectOwnersReply` in
+    /// response to
+    /// [`Session::request_parcel_object_owners`](crate::Session::request_parcel_object_owners).
+    ParcelObjectOwners {
+        /// One row per owner with objects on the parcel.
+        owners: Vec<ParcelObjectOwner>,
+    },
+    /// A parcel's basic listing, from a `ParcelInfoReply` in response to
+    /// [`Session::request_parcel_info`](crate::Session::request_parcel_info).
+    ParcelDetails(ParcelDetails),
+    /// The grid-wide parcel id covering a region location, from a
+    /// `RemoteParcelRequest` capability reply to the runtimes'
+    /// [`Command::RequestRemoteParcelId`](crate::Command::RequestRemoteParcelId).
+    /// Feed it to [`Session::request_parcel_info`](crate::Session::request_parcel_info).
+    RemoteParcelId(Uuid),
     /// An estate's configuration, from an `EstateOwnerMessage` `estateupdateinfo`
     /// reply to [`Session::request_estate_info`](crate::Session::request_estate_info).
     EstateInfo(Box<EstateInfo>),

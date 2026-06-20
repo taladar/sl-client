@@ -16,6 +16,7 @@ mod message;
 /// time from the vendored `message_template.msg`.
 pub mod messages;
 mod parcel_flags;
+mod remote_parcel;
 mod voice;
 mod zerocode;
 
@@ -80,6 +81,10 @@ pub use material::{
 pub use message::{Message, MessageId};
 pub use messages::{AnyMessage, message_name};
 pub use parcel_flags::{ParcelFlags, RegionFlags, sim_access};
+pub use remote_parcel::{
+    RemoteParcelRequest, build_remote_parcel_request, build_remote_parcel_response,
+    parse_remote_parcel_reply, parse_remote_parcel_request,
+};
 pub use voice::{
     IceCandidate, ParcelVoiceInfo, VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC,
     VoiceAccountInfo, VoiceProvisionRequest, build_parcel_voice_info_request,

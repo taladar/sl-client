@@ -21,7 +21,7 @@ use sl_proto::{
     CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
     CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
-    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_RENDER_MATERIALS,
+    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE,
     CAP_VOICE_SIGNALING, Event as SessionEvent, Llsd, LoginResponse, RECV_BUFFER_SIZE, Session,
     ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
@@ -30,11 +30,11 @@ use sl_proto::{
     build_create_inventory_category_request, build_modify_material_params_request,
     build_object_media_navigate_request, build_object_media_update_request,
     build_parcel_voice_info_request, build_provision_voice_account_request,
-    build_region_experiences_request, build_set_experience_permission_request,
-    build_update_experience_request, build_update_item_asset_request,
-    build_upload_baked_texture_request, build_voice_signaling_request, display_names_query,
-    experience_id_query, experience_info_query, find_experience_query, forget_experience_query,
-    group_experiences_query, parse_login_response,
+    build_region_experiences_request, build_remote_parcel_request,
+    build_set_experience_permission_request, build_update_experience_request,
+    build_update_item_asset_request, build_upload_baked_texture_request,
+    build_voice_signaling_request, display_names_query, experience_id_query, experience_info_query,
+    find_experience_query, forget_experience_query, group_experiences_query, parse_login_response,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -1259,6 +1259,43 @@ fn advance_running(
             Command::ReleaseParcel { local_id } => {
                 session.release_parcel(*local_id, now).ok();
             }
+            Command::JoinParcels {
+                west,
+                south,
+                east,
+                north,
+            } => {
+                session.join_parcels(*west, *south, *east, *north, now).ok();
+            }
+            Command::DivideParcel {
+                west,
+                south,
+                east,
+                north,
+            } => {
+                session
+                    .divide_parcel(*west, *south, *east, *north, now)
+                    .ok();
+            }
+            Command::RequestParcelObjectOwners { local_id } => {
+                session.request_parcel_object_owners(*local_id, now).ok();
+            }
+            Command::BuyParcelPass { local_id } => {
+                session.buy_parcel_pass(*local_id, now).ok();
+            }
+            Command::DisableParcelObjects {
+                local_id,
+                return_type,
+                owner_ids,
+                task_ids,
+            } => {
+                session
+                    .disable_parcel_objects(*local_id, *return_type, owner_ids, task_ids, now)
+                    .ok();
+            }
+            Command::RequestParcelInfo { parcel_id } => {
+                session.request_parcel_info(*parcel_id, now).ok();
+            }
             Command::RequestEstateInfo => {
                 session.request_estate_info(now).ok();
             }
@@ -1811,6 +1848,29 @@ fn advance_running(
                     let events_tx = caps.events_tx.clone();
                     std::thread::spawn(move || {
                         run_get_caps_llsd(&url, CAP_GET_DISPLAY_NAMES, &events_tx);
+                    });
+                }
+            }
+            Command::RequestRemoteParcelId {
+                location,
+                region_id,
+                region_handle,
+            } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_REMOTE_PARCEL_REQUEST).cloned()
+                {
+                    let body = build_remote_parcel_request(
+                        [
+                            f64::from(location.x),
+                            f64::from(location.y),
+                            f64::from(location.z),
+                        ],
+                        *region_id,
+                        *region_handle,
+                    );
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_voice_cap(&url, body, CAP_REMOTE_PARCEL_REQUEST, &events_tx);
                     });
                 }
             }

@@ -9,6 +9,7 @@
 
 pub(crate) use big::{
     f64_from_be, f64_to_be, i32_from_be, i32_to_be, u16_from_be, u16_to_be, u32_from_be, u32_to_be,
+    u64_from_be, u64_to_be,
 };
 pub(crate) use little::{
     f32_from_le, f32_to_le, f64_from_le, f64_to_le, i16_from_le, i16_to_le, i32_from_le, i32_to_le,
@@ -49,6 +50,16 @@ mod big {
 
     /// Writes an `i32` as four big-endian bytes (binary-LLSD integers).
     pub(crate) const fn i32_to_be(value: i32) -> [u8; 4] {
+        value.to_be_bytes()
+    }
+
+    /// Reads a big-endian `u64` from eight bytes (binary-LLSD region handles).
+    pub(crate) const fn u64_from_be(bytes: [u8; 8]) -> u64 {
+        u64::from_be_bytes(bytes)
+    }
+
+    /// Writes a `u64` as eight big-endian bytes (binary-LLSD region handles).
+    pub(crate) const fn u64_to_be(value: u64) -> [u8; 8] {
         value.to_be_bytes()
     }
 

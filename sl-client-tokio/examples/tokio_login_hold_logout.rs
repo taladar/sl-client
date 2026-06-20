@@ -496,6 +496,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::EventInfoReply { .. }
             | Event::ObjectPropertiesFamily { .. }
             | Event::PayPriceReply { .. }
+            | Event::ParcelObjectOwners { .. }
+            | Event::ParcelDetails(_)
+            | Event::RemoteParcelId(_)
             | Event::Environment(_)
             | Event::MoneyBalance(_)
             | Event::EconomyData(_)

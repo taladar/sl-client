@@ -2091,6 +2091,80 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "join_parcels",
+            usage: "<west> <south> <east> <north>",
+            build: |args, ctx| {
+                Ok(Command::JoinParcels {
+                    west: args.req_parse(ctx, "west", 0, "f32")?,
+                    south: args.req_parse(ctx, "south", 1, "f32")?,
+                    east: args.req_parse(ctx, "east", 2, "f32")?,
+                    north: args.req_parse(ctx, "north", 3, "f32")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "divide_parcel",
+            usage: "<west> <south> <east> <north>",
+            build: |args, ctx| {
+                Ok(Command::DivideParcel {
+                    west: args.req_parse(ctx, "west", 0, "f32")?,
+                    south: args.req_parse(ctx, "south", 1, "f32")?,
+                    east: args.req_parse(ctx, "east", 2, "f32")?,
+                    north: args.req_parse(ctx, "north", 3, "f32")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_parcel_object_owners",
+            usage: "<local_id>",
+            build: |args, ctx| {
+                Ok(Command::RequestParcelObjectOwners {
+                    local_id: args.req_parse(ctx, "local_id", 0, "i32")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "buy_parcel_pass",
+            usage: "<local_id>",
+            build: |args, ctx| {
+                Ok(Command::BuyParcelPass {
+                    local_id: args.req_parse(ctx, "local_id", 0, "i32")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "disable_parcel_objects",
+            usage: "<local_id> <return_type-u32> [owner_ids=] [task_ids=]",
+            build: |args, ctx| {
+                Ok(Command::DisableParcelObjects {
+                    local_id: args.req_parse(ctx, "local_id", 0, "i32")?,
+                    return_type: ParcelReturnType(args.req_parse(ctx, "return_type", 1, "u32")?),
+                    owner_ids: args.vec_uuid(ctx, "owner_ids", 2)?,
+                    task_ids: args.vec_uuid(ctx, "task_ids", 3)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_parcel_info",
+            usage: "<parcel_id>",
+            build: |args, ctx| {
+                Ok(Command::RequestParcelInfo {
+                    parcel_id: args.req_uuid(ctx, "parcel_id", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_remote_parcel_id",
+            usage: "<location-x,y,z> [region_id] [region_handle-u64]",
+            build: |args, ctx| {
+                Ok(Command::RequestRemoteParcelId {
+                    location: args.req_vector(ctx, "location", 0)?,
+                    region_id: args.uuid_or_nil(ctx, "region_id", 1)?,
+                    region_handle: args.parse_or(ctx, "region_handle", 2, "u64", 0_u64)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "request_estate_info",
             usage: "",
             build: |_args, _ctx| Ok(Command::RequestEstateInfo),
@@ -3846,6 +3920,46 @@ mod tests {
             build(&format!("rez_object_from_notecard {ONE} <1,2,3> <4,5,6> {TWO}")),
             Ok(Command::RezObjectFromNotecard { rez })
                 if rez.notecard_item_id == uuid(ONE) && rez.item_ids == vec![uuid(TWO)]
+        ));
+    }
+
+    #[test]
+    fn join_parcels_parses_rectangle() {
+        assert!(matches!(
+            build("join_parcels 16 32 48 64"),
+            Ok(Command::JoinParcels { west, south, east, north })
+                if west.to_bits() == 16.0_f32.to_bits()
+                    && south.to_bits() == 32.0_f32.to_bits()
+                    && east.to_bits() == 48.0_f32.to_bits()
+                    && north.to_bits() == 64.0_f32.to_bits()
+        ));
+    }
+
+    #[test]
+    fn disable_parcel_objects_parses_scope() {
+        assert!(matches!(
+            build(&format!("disable_parcel_objects 7 8 owner_ids={ONE} task_ids={TWO}")),
+            Ok(Command::DisableParcelObjects { local_id: 7, return_type, owner_ids, task_ids })
+                if return_type.0 == 8 && owner_ids == vec![uuid(ONE)] && task_ids == vec![uuid(TWO)]
+        ));
+    }
+
+    #[test]
+    fn request_parcel_info_parses_id() {
+        assert!(matches!(
+            build(&format!("request_parcel_info {ONE}")),
+            Ok(Command::RequestParcelInfo { parcel_id }) if parcel_id == uuid(ONE)
+        ));
+    }
+
+    #[test]
+    fn request_remote_parcel_id_parses_location_and_handle() {
+        assert!(matches!(
+            build("request_remote_parcel_id <128,64,22> 00000000-0000-0000-0000-000000000000 281483566841976"),
+            Ok(Command::RequestRemoteParcelId { location, region_id, region_handle })
+                if location.x.to_bits() == 128.0_f32.to_bits()
+                    && region_id == Uuid::nil()
+                    && region_handle == 281_483_566_841_976
         ));
     }
 }

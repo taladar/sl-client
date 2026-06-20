@@ -14,10 +14,11 @@ mod test {
         DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
         DirPeopleResult, DirPlaceResult, Event, EventInfo, GroupName, ImDialog, LandSearchType,
         LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity, NotecardRez, ObjectBuyItem,
-        ObjectPropertiesFamily, ParcelCategory, PlacesResult, PointAtType, ProductType,
-        RegionIdentity, RestoreItem, RezAttachment, SaleType, ServerEvent, Session, SimSession,
-        Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        enable_simulator_to_caps_llsd, grid_to_handle, parse_event_queue_response,
+        ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner, ParcelReturnType,
+        PlacesResult, PointAtType, ProductType, RegionIdentity, RestoreItem, RezAttachment,
+        SaleType, ServerEvent, Session, SimSession, Throttle, Transmit, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd, grid_to_handle,
+        parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -1073,6 +1074,134 @@ mod test {
         assert_eq!(properties.object_id, object);
         assert_eq!(properties.sale_price, 250);
         assert_eq!(properties.name, "Vendor");
+        Ok(())
+    }
+
+    #[test]
+    fn parcel_management_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        // Client -> sim: the G7 parcel command surface.
+        client.join_parcels(16.0, 32.0, 48.0, 64.0, now)?;
+        client.divide_parcel(1.0, 2.0, 3.0, 4.0, now)?;
+        client.request_parcel_object_owners(7, now)?;
+        client.buy_parcel_pass(7, now)?;
+        client.disable_parcel_objects(
+            7,
+            ParcelReturnType::OTHER,
+            &[uuid::Uuid::from_u128(0x99)],
+            &[uuid::Uuid::from_u128(0xAB)],
+            now,
+        )?;
+        client.request_parcel_info(uuid::Uuid::from_u128(0x00C0_FFEE), now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let server_events = drain_server(&mut sim);
+        let join = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::JoinParcels { west, north, .. } => Some((*west, *north)),
+                _ => None,
+            })
+            .ok_or("expected a JoinParcels server event")?;
+        assert_eq!(join.0.to_bits(), 16.0_f32.to_bits());
+        assert_eq!(join.1.to_bits(), 64.0_f32.to_bits());
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::DivideParcel { .. })),
+            "expected a DivideParcel server event"
+        );
+        let owners = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RequestParcelObjectOwners { local_id } => Some(*local_id),
+                _ => None,
+            })
+            .ok_or("expected a RequestParcelObjectOwners server event")?;
+        assert_eq!(owners, 7);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::BuyParcelPass { local_id: 7 })),
+            "expected a BuyParcelPass server event"
+        );
+        let disable = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::DisableParcelObjects {
+                    return_type,
+                    owner_ids,
+                    task_ids,
+                    ..
+                } => Some((*return_type, owner_ids.len(), task_ids.len())),
+                _ => None,
+            })
+            .ok_or("expected a DisableParcelObjects server event")?;
+        assert_eq!(disable, (ParcelReturnType::OTHER.0, 1, 1));
+        let info = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RequestParcelInfo { parcel_id } => Some(*parcel_id),
+                _ => None,
+            })
+            .ok_or("expected a RequestParcelInfo server event")?;
+        assert_eq!(info, uuid::Uuid::from_u128(0x00C0_FFEE));
+
+        // Sim -> client: the two reply encoders.
+        sim.send_parcel_object_owners_reply(
+            &[ParcelObjectOwner {
+                owner_id: uuid::Uuid::from_u128(0x21),
+                is_group_owned: false,
+                count: 9,
+                online_status: true,
+            }],
+            now,
+        )?;
+        sim.send_parcel_info_reply(
+            &ParcelDetails {
+                parcel_id: uuid::Uuid::from_u128(0x00C0_FFEE),
+                owner_id: uuid::Uuid::from_u128(0x55),
+                name: "Sunny Plaza".to_owned(),
+                description: "A nice spot".to_owned(),
+                actual_area: 512,
+                billable_area: 480,
+                flags: 0x4,
+                global_x: 256_000.0,
+                global_y: 257_024.0,
+                global_z: 23.5,
+                sim_name: "Default Region".to_owned(),
+                snapshot_id: uuid::Uuid::from_u128(0x77),
+                dwell: 88.0,
+                sale_price: 1000,
+                auction_id: 0,
+            },
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        let owners = client_events
+            .iter()
+            .find_map(|e| match e {
+                Event::ParcelObjectOwners { owners } => Some(owners),
+                _ => None,
+            })
+            .ok_or("expected a ParcelObjectOwners client event")?;
+        assert_eq!(owners.first().ok_or("expected one owner")?.count, 9);
+        let details = client_events
+            .iter()
+            .find_map(|e| match e {
+                Event::ParcelDetails(details) => Some(details),
+                _ => None,
+            })
+            .ok_or("expected a ParcelDetails client event")?;
+        assert_eq!(details.name, "Sunny Plaza");
+        assert_eq!(details.parcel_id, uuid::Uuid::from_u128(0x00C0_FFEE));
+        assert_eq!(details.sale_price, 1000);
         Ok(())
     }
 

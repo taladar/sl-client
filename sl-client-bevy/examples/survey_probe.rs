@@ -249,6 +249,9 @@ fn on_events(
             | SlSessionEvent::EventInfoReply { .. }
             | SlSessionEvent::ObjectPropertiesFamily { .. }
             | SlSessionEvent::PayPriceReply { .. }
+            | SlSessionEvent::ParcelObjectOwners { .. }
+            | SlSessionEvent::ParcelDetails(_)
+            | SlSessionEvent::RemoteParcelId(_)
             | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged { region_handle, sim } => {

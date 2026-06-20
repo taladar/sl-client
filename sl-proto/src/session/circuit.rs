@@ -118,14 +118,21 @@ use sl_wire::messages::{
     ParcelAccessListRequestAgentDataBlock, ParcelAccessListRequestDataBlock,
     ParcelAccessListUpdate, ParcelAccessListUpdateAgentDataBlock, ParcelAccessListUpdateDataBlock,
     ParcelAccessListUpdateListBlock, ParcelBuy, ParcelBuyAgentDataBlock, ParcelBuyDataBlock,
-    ParcelBuyParcelDataBlock, ParcelDeedToGroup, ParcelDeedToGroupAgentDataBlock,
-    ParcelDeedToGroupDataBlock, ParcelDwellRequest, ParcelDwellRequestAgentDataBlock,
-    ParcelDwellRequestDataBlock, ParcelPropertiesRequest, ParcelPropertiesRequestAgentDataBlock,
-    ParcelPropertiesRequestParcelDataBlock, ParcelPropertiesUpdate,
-    ParcelPropertiesUpdateAgentDataBlock, ParcelPropertiesUpdateParcelDataBlock, ParcelReclaim,
-    ParcelReclaimAgentDataBlock, ParcelReclaimDataBlock, ParcelRelease,
-    ParcelReleaseAgentDataBlock, ParcelReleaseDataBlock, ParcelReturnObjects,
-    ParcelReturnObjectsAgentDataBlock, ParcelReturnObjectsOwnerIDsBlock,
+    ParcelBuyParcelDataBlock, ParcelBuyPass, ParcelBuyPassAgentDataBlock,
+    ParcelBuyPassParcelDataBlock, ParcelDeedToGroup, ParcelDeedToGroupAgentDataBlock,
+    ParcelDeedToGroupDataBlock, ParcelDisableObjects, ParcelDisableObjectsAgentDataBlock,
+    ParcelDisableObjectsOwnerIDsBlock, ParcelDisableObjectsParcelDataBlock,
+    ParcelDisableObjectsTaskIDsBlock, ParcelDivide, ParcelDivideAgentDataBlock,
+    ParcelDivideParcelDataBlock, ParcelDwellRequest, ParcelDwellRequestAgentDataBlock,
+    ParcelDwellRequestDataBlock, ParcelInfoRequest, ParcelInfoRequestAgentDataBlock,
+    ParcelInfoRequestDataBlock, ParcelJoin, ParcelJoinAgentDataBlock, ParcelJoinParcelDataBlock,
+    ParcelObjectOwnersRequest, ParcelObjectOwnersRequestAgentDataBlock,
+    ParcelObjectOwnersRequestParcelDataBlock, ParcelPropertiesRequest,
+    ParcelPropertiesRequestAgentDataBlock, ParcelPropertiesRequestParcelDataBlock,
+    ParcelPropertiesUpdate, ParcelPropertiesUpdateAgentDataBlock,
+    ParcelPropertiesUpdateParcelDataBlock, ParcelReclaim, ParcelReclaimAgentDataBlock,
+    ParcelReclaimDataBlock, ParcelRelease, ParcelReleaseAgentDataBlock, ParcelReleaseDataBlock,
+    ParcelReturnObjects, ParcelReturnObjectsAgentDataBlock, ParcelReturnObjectsOwnerIDsBlock,
     ParcelReturnObjectsParcelDataBlock, ParcelReturnObjectsTaskIDsBlock, ParcelSelectObjects,
     ParcelSelectObjectsAgentDataBlock, ParcelSelectObjectsParcelDataBlock,
     ParcelSelectObjectsReturnIDsBlock, PickDelete, PickDeleteAgentDataBlock, PickDeleteDataBlock,
@@ -2866,6 +2873,138 @@ impl Circuit {
                 session_id: self.session_id,
             },
             data: ParcelReleaseDataBlock { local_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelJoin` reliably (merge all owned, leased parcels within the
+    /// metre rectangle into one).
+    pub(crate) fn send_parcel_join(
+        &mut self,
+        west: f32,
+        south: f32,
+        east: f32,
+        north: f32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelJoin(ParcelJoin {
+            agent_data: ParcelJoinAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            parcel_data: ParcelJoinParcelDataBlock {
+                west,
+                south,
+                east,
+                north,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelDivide` reliably (chop the metre rectangle out of its
+    /// parcel into a new parcel).
+    pub(crate) fn send_parcel_divide(
+        &mut self,
+        west: f32,
+        south: f32,
+        east: f32,
+        north: f32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelDivide(ParcelDivide {
+            agent_data: ParcelDivideAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            parcel_data: ParcelDivideParcelDataBlock {
+                west,
+                south,
+                east,
+                north,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelObjectOwnersRequest` reliably (the per-owner object tally
+    /// for the parcel).
+    pub(crate) fn send_parcel_object_owners_request(
+        &mut self,
+        local_id: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelObjectOwnersRequest(ParcelObjectOwnersRequest {
+            agent_data: ParcelObjectOwnersRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            parcel_data: ParcelObjectOwnersRequestParcelDataBlock { local_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelBuyPass` reliably (purchase a temporary access pass to the
+    /// parcel at its configured price).
+    pub(crate) fn send_parcel_buy_pass(
+        &mut self,
+        local_id: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelBuyPass(ParcelBuyPass {
+            agent_data: ParcelBuyPassAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            parcel_data: ParcelBuyPassParcelDataBlock { local_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelDisableObjects` reliably (stop the parcel objects matching
+    /// `return_type`, or the explicit `task_ids` when using the list type).
+    pub(crate) fn send_parcel_disable_objects(
+        &mut self,
+        local_id: i32,
+        return_type: u32,
+        owner_ids: &[Uuid],
+        task_ids: &[Uuid],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelDisableObjects(ParcelDisableObjects {
+            agent_data: ParcelDisableObjectsAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            parcel_data: ParcelDisableObjectsParcelDataBlock {
+                local_id,
+                return_type,
+            },
+            task_i_ds: task_ids
+                .iter()
+                .map(|id| ParcelDisableObjectsTaskIDsBlock { task_id: *id })
+                .collect(),
+            owner_i_ds: owner_ids
+                .iter()
+                .map(|id| ParcelDisableObjectsOwnerIDsBlock { owner_id: *id })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelInfoRequest` reliably (the basic listing for a grid-wide
+    /// parcel id).
+    pub(crate) fn send_parcel_info_request(
+        &mut self,
+        parcel_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelInfoRequest(ParcelInfoRequest {
+            agent_data: ParcelInfoRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: ParcelInfoRequestDataBlock { parcel_id },
         });
         self.send(&message, Reliability::Reliable, now)
     }
