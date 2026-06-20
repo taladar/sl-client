@@ -20,16 +20,16 @@ use std::collections::BTreeMap;
 use sl_proto::{
     AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, Command, ControlFlags,
     CreateGroupParams, DeRezDestination, DirFindFlags, EstateAccessDelta, ExperiencePermission,
-    ExperienceUpdate, FriendRights, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit,
-    GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType,
-    LandSearchType, LindenAmount, LookAtType, MapItemType, Material, MaterialOverrideUpdate,
-    Maturity, MediaEntry, MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
-    ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate,
-    PermissionField, PickUpdate, PointAtType, PrimShape, ProfileUpdate, RegionInfoUpdate,
-    RestoreItem, RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable,
-    WearableType,
+    ExperienceUpdate, FriendRights, GestureActivation, GroupNoticeAttachment, GroupRoleChange,
+    GroupRoleEdit, GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer,
+    InventoryType, LandSearchType, LindenAmount, LookAtType, MapItemType, Material,
+    MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MuteFlags, MuteType,
+    NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform,
+    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
+    ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PointAtType, PrimShape,
+    ProfileUpdate, RegionInfoUpdate, RestoreItem, RezAttachment, Rotation, SaleType,
+    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -3293,6 +3293,35 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| Ok(Command::StopAnimation(args.req_uuid(ctx, "anim_id", 0)?)),
         },
         CommandSpec {
+            name: "activate_gestures",
+            usage: "<item_id:asset_id,item_id:asset_id,…>",
+            build: |args, ctx| {
+                let mut gestures = Vec::new();
+                for record in args.vec_records(ctx, "gestures", 0)? {
+                    gestures.push(GestureActivation {
+                        item_id: args::literal_uuid(
+                            "gestures",
+                            record_field("gestures", &record, 0)?,
+                        )?,
+                        asset_id: args::literal_uuid(
+                            "gestures",
+                            record_field("gestures", &record, 1)?,
+                        )?,
+                    });
+                }
+                Ok(Command::ActivateGestures { gestures })
+            },
+        },
+        CommandSpec {
+            name: "deactivate_gestures",
+            usage: "<item_id,item_id,…>",
+            build: |args, ctx| {
+                Ok(Command::DeactivateGestures {
+                    item_ids: args.vec_uuid(ctx, "item_ids", 0)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "upload_asset_udp",
             usage: "<asset_type-code> data=<hex> [temp_file=] [store_local=]",
             build: |args, ctx| {
@@ -3994,6 +4023,26 @@ mod tests {
         assert!(matches!(
             build(&format!("set_animations {ONE}:true,{TWO}:false")),
             Ok(Command::SetAnimations(pairs)) if pairs.len() == 2
+        ));
+    }
+
+    #[test]
+    fn activate_gestures_pairs() {
+        let one = Uuid::parse_str(ONE).ok();
+        let two = Uuid::parse_str(TWO).ok();
+        assert!(matches!(
+            build(&format!("activate_gestures {ONE}:{TWO}")),
+            Ok(Command::ActivateGestures { gestures })
+                if gestures.first().map(|g| g.item_id) == one
+                    && gestures.first().map(|g| g.asset_id) == two
+        ));
+    }
+
+    #[test]
+    fn deactivate_gestures_uuid_list() {
+        assert!(matches!(
+            build(&format!("deactivate_gestures {ONE},{TWO}")),
+            Ok(Command::DeactivateGestures { item_ids }) if item_ids.len() == 2
         ));
     }
 

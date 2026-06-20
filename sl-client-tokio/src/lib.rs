@@ -647,6 +647,12 @@ impl Client {
                         Some(Command::EjectGroupMembers { group_id, member_ids }) => {
                             self.session.eject_group_members(group_id, &member_ids, Instant::now())?;
                         }
+                        Some(Command::ActivateGestures { gestures }) => {
+                            self.session.activate_gestures(&gestures, Instant::now())?;
+                        }
+                        Some(Command::DeactivateGestures { item_ids }) => {
+                            self.session.deactivate_gestures(&item_ids, Instant::now())?;
+                        }
                         Some(Command::SendGroupNotice { group_id, subject, message, attachment }) => {
                             self.session.send_group_notice(group_id, &subject, &message, attachment, Instant::now())?;
                         }

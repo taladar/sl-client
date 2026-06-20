@@ -13,18 +13,18 @@ mod test {
         ClassifiedUpdate, ClickAction, CoarseLocation, ControlFlags, CreateGroupParams, DayCycle,
         DayCycleFrame, DeRezDestination, Diagnostic, DirFindFlags, DisconnectReason,
         EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, FriendRights,
-        GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
-        GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate, InventoryItem, LandingType,
-        LindenAmount, LoginAccount, LoginParams, LookAtType, MapItemType, Material, Maturity,
-        MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem,
-        ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-        ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelMediaCommand, ParcelRequestResult,
-        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, PickUpdate, PointAtType,
-        PrimShape, ProductType, ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem,
-        RezAttachment, SaleType, ScriptPermissions, Session, SkySettings, SoundFlags,
-        TeleportFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
-        group_powers, pcode,
+        GestureActivation, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit,
+        GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate,
+        InventoryItem, LandingType, LindenAmount, LoginAccount, LoginParams, LookAtType,
+        MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType,
+        NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform,
+        ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
+        ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
+        PermissionField, PickUpdate, PointAtType, PrimShape, ProductType, ProfileUpdate,
+        RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType, ScriptPermissions,
+        Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType, Throttle,
+        TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings,
+        WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -2649,6 +2649,55 @@ mod test {
             eject.eject_data.first().map(|d| d.ejectee_id),
             Some(ejectee)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn activate_gestures_packs_request() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let item = uuid::Uuid::from_u128(0x6E5_7001);
+        let asset = uuid::Uuid::from_u128(0x6E5_7002);
+        session.activate_gestures(
+            &[GestureActivation {
+                item_id: item,
+                asset_id: asset,
+            }],
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let activate = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ActivateGestures(a) => Some(a),
+                _ => None,
+            })
+            .ok_or("expected an ActivateGestures")?;
+        let entry = activate.data.first().ok_or("first gesture")?;
+        assert_eq!(entry.item_id, item);
+        assert_eq!(entry.asset_id, asset);
+        Ok(())
+    }
+
+    #[test]
+    fn deactivate_gestures_packs_request() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let item = uuid::Uuid::from_u128(0x6E5_7003);
+        session.deactivate_gestures(&[item], now)?;
+        let sent = drain(&mut session)?;
+        let deactivate = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::DeactivateGestures(d) => Some(d),
+                _ => None,
+            })
+            .ok_or("expected a DeactivateGestures")?;
+        assert_eq!(deactivate.data.first().map(|d| d.item_id), Some(item));
         Ok(())
     }
 

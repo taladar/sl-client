@@ -623,6 +623,8 @@ const fn command_name(command: &Command) -> &'static str {
         Command::SetAnimations(..) => "set_animations",
         Command::PlayAnimation(..) => "play_animation",
         Command::StopAnimation(..) => "stop_animation",
+        Command::ActivateGestures { .. } => "activate_gestures",
+        Command::DeactivateGestures { .. } => "deactivate_gestures",
         Command::AttachObject { .. } => "attach_object",
         Command::DetachObjects { .. } => "detach_objects",
         Command::DropAttachments { .. } => "drop_attachments",

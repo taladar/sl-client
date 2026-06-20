@@ -39,12 +39,12 @@ use crate::types::{
     Camera, ChatType, ClassifiedUpdate, ClickAction, CoarseLocation, CreateGroupParams,
     DeRezDestination, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags,
     DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DisconnectReason,
-    EstateAccessDelta, EstateCovenant, Event, EventInfo, FriendRights, GroupNoticeAttachment,
-    GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate,
-    InventoryFolder, InventoryItem, InventoryOffer, LandSearchType, LoadUrlRequest, LoginAccount,
-    LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MoneyTransactionType,
-    MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NotecardRez, Object, ObjectBuyItem,
-    ObjectFlagSettings, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
+    EstateAccessDelta, EstateCovenant, Event, EventInfo, FriendRights, GestureActivation,
+    GroupNoticeAttachment, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog,
+    ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer, LandSearchType,
+    LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType, Material, Maturity,
+    MoneyTransactionType, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NotecardRez, Object,
+    ObjectBuyItem, ObjectFlagSettings, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
     ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand,
     ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
     PermissionField, PickUpdate, PlacesResult, PrimShape, ProfileUpdate, RegionInfoUpdate,
@@ -3628,6 +3628,38 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_eject_group_members(group_id, member_ids, now)?;
+        Ok(())
+    }
+
+    /// Marks each gesture in `gestures` active for this session
+    /// (`ActivateGestures`), so the simulator preloads them and they fire on
+    /// their trigger words/keys. The gesture assets are uploaded separately;
+    /// this only toggles which are live. There is no reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn activate_gestures(
+        &mut self,
+        gestures: &[GestureActivation],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_activate_gestures(gestures, now)?;
+        Ok(())
+    }
+
+    /// Marks each gesture named in `item_ids` inactive for this session
+    /// (`DeactivateGestures`). There is no reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn deactivate_gestures(&mut self, item_ids: &[Uuid], now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_deactivate_gestures(item_ids, now)?;
         Ok(())
     }
 
