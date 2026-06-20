@@ -711,6 +711,8 @@ impl Survey {
             | Event::AvatarPickerReply { .. }
             | Event::PlacesReply { .. }
             | Event::EventInfoReply { .. }
+            | Event::ObjectPropertiesFamily { .. }
+            | Event::PayPriceReply { .. }
             | Event::Environment(_) => {}
         }
         Ok(false)

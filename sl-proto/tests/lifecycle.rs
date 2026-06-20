@@ -16,14 +16,15 @@ mod test {
         GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
         GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate, InventoryItem, LandingType,
         LindenAmount, LoginAccount, LoginParams, LookAtType, MapItemType, Material, Maturity,
-        MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, ObjectFlagSettings,
-        ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-        ParcelFlags, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-        ParcelUpdate, PermissionField, PickUpdate, PointAtType, PrimShape, ProductType,
-        ProfileUpdate, RegionInfoUpdate, Reliability, RezAttachment, SaleType, ScriptPermissions,
-        Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType, Throttle,
-        TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings,
-        WearableType, avatar_texture, group_powers, pcode,
+        MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem,
+        ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+        ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelMediaCommand, ParcelRequestResult,
+        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, PickUpdate, PointAtType,
+        PrimShape, ProductType, ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem,
+        RezAttachment, SaleType, ScriptPermissions, Session, SkySettings, SoundFlags,
+        TeleportFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
+        group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -77,7 +78,9 @@ mod test {
         MapItemReply, MapItemReplyAgentDataBlock, MapItemReplyDataBlock,
         MapItemReplyRequestDataBlock, MoneyBalanceReply, MoneyBalanceReplyMoneyDataBlock,
         MoneyBalanceReplyTransactionInfoBlock, MuteListUpdate, MuteListUpdateMuteDataBlock,
-        ObjectProperties as WireObjectProperties, ObjectPropertiesObjectDataBlock, ObjectUpdate,
+        ObjectProperties as WireObjectProperties,
+        ObjectPropertiesFamily as ObjectPropertiesFamilyMessage,
+        ObjectPropertiesFamilyObjectDataBlock, ObjectPropertiesObjectDataBlock, ObjectUpdate,
         ObjectUpdateCached, ObjectUpdateCachedObjectDataBlock, ObjectUpdateCachedRegionDataBlock,
         ObjectUpdateCompressed, ObjectUpdateCompressedObjectDataBlock,
         ObjectUpdateCompressedRegionDataBlock, ObjectUpdateObjectDataBlock,
@@ -89,7 +92,8 @@ mod test {
         ParcelMediaUpdateDataBlockBlock, ParcelMediaUpdateDataBlockExtendedBlock, ParcelProperties,
         ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
         ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
-        PickInfoReply, PickInfoReplyAgentDataBlock, PickInfoReplyDataBlock, PreloadSound,
+        PayPriceReply, PayPriceReplyButtonDataBlock, PayPriceReplyObjectDataBlock, PickInfoReply,
+        PickInfoReplyAgentDataBlock, PickInfoReplyDataBlock, PreloadSound,
         PreloadSoundDataBlockBlock, RegionHandshake, RegionHandshakeRegionInfo2Block,
         RegionHandshakeRegionInfo3Block, RegionHandshakeRegionInfo4Block,
         RegionHandshakeRegionInfoBlock, RegionInfo, RegionInfoAgentDataBlock,
@@ -4156,6 +4160,313 @@ mod test {
         assert_eq!(info.amount, 50);
         assert_eq!(info.sim_name, "Sandbox");
         assert_eq!(info.global_position, (256_000.0, 257_000.0, 30.0));
+        Ok(())
+    }
+
+    #[test]
+    fn object_commerce_commands_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let object = uuid::Uuid::from_u128(0xB0B);
+        session.buy_object(
+            uuid::Uuid::nil(),
+            uuid::Uuid::from_u128(0xCA7),
+            &[ObjectBuyItem {
+                local_id: 99,
+                sale_type: SaleType::Copy,
+                sale_price: 250,
+            }],
+            now,
+        )?;
+        session.buy_object_inventory(
+            object,
+            uuid::Uuid::from_u128(0x17E),
+            uuid::Uuid::nil(),
+            now,
+        )?;
+        session.request_pay_price(object, now)?;
+        session.request_object_properties_family(0x04, object, now)?;
+        session.spin_object_start(object, now)?;
+        session.spin_object_update(
+            object,
+            Rotation {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                s: 1.0,
+            },
+            now,
+        )?;
+        session.spin_object_stop(object, now)?;
+        session.duplicate_objects_on_ray(
+            &[99],
+            uuid::Uuid::nil(),
+            Vector {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+            Vector {
+                x: 4.0,
+                y: 5.0,
+                z: 6.0,
+            },
+            false,
+            true,
+            true,
+            false,
+            uuid::Uuid::nil(),
+            0,
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+
+        let buy = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectBuy(buy) => Some(buy),
+                _ => None,
+            })
+            .ok_or("expected an ObjectBuy")?;
+        assert_eq!(buy.agent_data.category_id, uuid::Uuid::from_u128(0xCA7));
+        let item = buy.object_data.first().ok_or("expected one buy item")?;
+        assert_eq!(item.object_local_id, 99);
+        assert_eq!(item.sale_type, SaleType::Copy.to_code());
+        assert_eq!(item.sale_price, 250);
+
+        let inv = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::BuyObjectInventory(buy) => Some(buy),
+                _ => None,
+            })
+            .ok_or("expected a BuyObjectInventory")?;
+        assert_eq!(inv.data.object_id, object);
+        assert_eq!(inv.data.item_id, uuid::Uuid::from_u128(0x17E));
+
+        let pay = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RequestPayPrice(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("expected a RequestPayPrice")?;
+        assert_eq!(pay.object_data.object_id, object);
+
+        let family = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RequestObjectPropertiesFamily(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("expected a RequestObjectPropertiesFamily")?;
+        assert_eq!(family.object_data.request_flags, 0x04);
+        assert_eq!(family.object_data.object_id, object);
+
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::ObjectSpinStart(_))),
+            "expected an ObjectSpinStart"
+        );
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::ObjectSpinUpdate(_))),
+            "expected an ObjectSpinUpdate"
+        );
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::ObjectSpinStop(_))),
+            "expected an ObjectSpinStop"
+        );
+
+        let dup = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectDuplicateOnRay(dup) => Some(dup),
+                _ => None,
+            })
+            .ok_or("expected an ObjectDuplicateOnRay")?;
+        assert!(dup.agent_data.ray_end_is_intersection);
+        assert!(dup.agent_data.copy_centers);
+        assert!(!dup.agent_data.copy_rotates);
+        let dup_item = dup.object_data.first().ok_or("expected one dup item")?;
+        assert_eq!(dup_item.object_local_id, 99);
+        Ok(())
+    }
+
+    #[test]
+    fn rez_commands_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.rez_restore_to_world(
+            &RestoreItem {
+                item_id: uuid::Uuid::from_u128(0x17E),
+                folder_id: uuid::Uuid::nil(),
+                creator_id: uuid::Uuid::nil(),
+                owner_id: uuid::Uuid::nil(),
+                group_id: uuid::Uuid::nil(),
+                base_mask: 0x0008_e000,
+                owner_mask: 0x0008_e000,
+                group_mask: 0,
+                everyone_mask: 0,
+                next_owner_mask: 0x0008_e000,
+                group_owned: false,
+                transaction_id: uuid::Uuid::nil(),
+                asset_type: 6,
+                inv_type: 6,
+                flags: 0,
+                sale_type: SaleType::NotForSale,
+                sale_price: 0,
+                name: "Cube".to_owned(),
+                description: "a cube".to_owned(),
+                creation_date: 1_750_000_000,
+                crc: 0,
+            },
+            now,
+        )?;
+        session.rez_object_from_notecard(
+            &NotecardRez {
+                group_id: uuid::Uuid::nil(),
+                from_task_id: uuid::Uuid::nil(),
+                bypass_raycast: false,
+                ray_start: Vector {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 3.0,
+                },
+                ray_end: Vector {
+                    x: 4.0,
+                    y: 5.0,
+                    z: 6.0,
+                },
+                ray_target_id: uuid::Uuid::nil(),
+                ray_end_is_intersection: true,
+                rez_selected: false,
+                remove_item: false,
+                item_flags: 0,
+                group_mask: 0,
+                everyone_mask: 0,
+                next_owner_mask: 0x0008_e000,
+                notecard_item_id: uuid::Uuid::from_u128(0xCA5E),
+                object_id: uuid::Uuid::nil(),
+                item_ids: vec![uuid::Uuid::from_u128(0x1), uuid::Uuid::from_u128(0x2)],
+            },
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+
+        let restore = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RezRestoreToWorld(restore) => Some(restore),
+                _ => None,
+            })
+            .ok_or("expected a RezRestoreToWorld")?;
+        assert_eq!(restore.inventory_data.item_id, uuid::Uuid::from_u128(0x17E));
+        assert_eq!(restore.inventory_data.r#type, 6);
+        assert_eq!(restore.inventory_data.creation_date, 1_750_000_000);
+
+        let rez = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RezObjectFromNotecard(rez) => Some(rez),
+                _ => None,
+            })
+            .ok_or("expected a RezObjectFromNotecard")?;
+        assert_eq!(
+            rez.notecard_data.notecard_item_id,
+            uuid::Uuid::from_u128(0xCA5E)
+        );
+        assert!(rez.rez_data.ray_end_is_intersection);
+        assert_eq!(rez.inventory_data.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn pay_price_reply_surfaces_buttons() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let object = uuid::Uuid::from_u128(0xB0B);
+        let message = AnyMessage::PayPriceReply(PayPriceReply {
+            object_data: PayPriceReplyObjectDataBlock {
+                object_id: object,
+                default_pay_price: 10,
+            },
+            button_data: vec![
+                PayPriceReplyButtonDataBlock { pay_button: 1 },
+                PayPriceReplyButtonDataBlock { pay_button: 5 },
+                PayPriceReplyButtonDataBlock { pay_button: 20 },
+            ],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let (object_id, default_pay_price, pay_buttons) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::PayPriceReply {
+                    object_id,
+                    default_pay_price,
+                    pay_buttons,
+                } => Some((object_id, default_pay_price, pay_buttons)),
+                _ => None,
+            })
+            .ok_or("expected a PayPriceReply event")?;
+        assert_eq!(object_id, object);
+        assert_eq!(default_pay_price, 10);
+        assert_eq!(pay_buttons, vec![1, 5, 20]);
+        Ok(())
+    }
+
+    #[test]
+    fn object_properties_family_surfaces() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let object = uuid::Uuid::from_u128(0xB0B);
+        let owner = uuid::Uuid::from_u128(0x0E);
+        let message = AnyMessage::ObjectPropertiesFamily(ObjectPropertiesFamilyMessage {
+            object_data: ObjectPropertiesFamilyObjectDataBlock {
+                request_flags: 0x04,
+                object_id: object,
+                owner_id: owner,
+                group_id: uuid::Uuid::nil(),
+                base_mask: 0x0008_e000,
+                owner_mask: 0x0008_e000,
+                group_mask: 0,
+                everyone_mask: 0,
+                next_owner_mask: 0x0008_e000,
+                ownership_cost: 0,
+                sale_type: SaleType::Copy.to_code(),
+                sale_price: 250,
+                category: 0,
+                last_owner_id: uuid::Uuid::nil(),
+                name: b"Vendor\0".to_vec(),
+                description: b"A vendor\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let properties = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ObjectPropertiesFamily { properties } => Some(properties),
+                _ => None,
+            })
+            .ok_or("expected an ObjectPropertiesFamily event")?;
+        assert_eq!(properties.request_flags, 0x04);
+        assert_eq!(properties.object_id, object);
+        assert_eq!(properties.owner_id, owner);
+        assert_eq!(properties.sale_type, SaleType::Copy.to_code());
+        assert_eq!(properties.sale_price, 250);
+        assert_eq!(properties.name, "Vendor");
+        assert_eq!(properties.description, "A vendor");
         Ok(())
     }
 

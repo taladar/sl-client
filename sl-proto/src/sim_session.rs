@@ -46,6 +46,11 @@ use sl_wire::messages::{
     UUIDGroupNameReplyUUIDNameBlockBlock, UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock,
     ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
 };
+use sl_wire::messages::{
+    ObjectPropertiesFamily as ObjectPropertiesFamilyMessage,
+    ObjectPropertiesFamilyObjectDataBlock as ObjectPropertiesFamilyObjectDataBlockMessage,
+    PayPriceReply, PayPriceReplyButtonDataBlock, PayPriceReplyObjectDataBlock,
+};
 use sl_wire::{
     AnyMessage, ControlFlags, EventQueueEvent, Llsd, MessageId, PacketFlags, Reader, WireError,
     Writer, build_event_queue_response, encode_datagram, parse_datagram, zero_decode,
@@ -61,8 +66,9 @@ use crate::types::{
     AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatType, CoarseLocation,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
     DirPeopleResult, DirPlaceResult, EventInfo, GroupName, InstantMessage, LandSearchType, MapItem,
-    MapItemType, MapRegionInfo, ParcelCategory, PlacesResult, RegionIdentity, Reliability,
-    RezAttachment, Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    MapItemType, MapRegionInfo, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory,
+    PlacesResult, RegionIdentity, Reliability, RestoreItem, RezAttachment, SaleType, Throttle,
+    Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 
 /// How long to batch owed acknowledgements before flushing them as a `PacketAck`
@@ -393,6 +399,93 @@ pub enum ServerEvent {
     EventNotificationRemoveRequest {
         /// The event whose reminder to cancel.
         event_id: u32,
+    },
+    /// The client wants to buy in-world objects (`ObjectBuy`).
+    BuyObject {
+        /// The active group ([`Uuid::nil`] for none).
+        group_id: Uuid,
+        /// The inventory folder a derezed purchase is placed in.
+        category_id: Uuid,
+        /// The objects to buy (each with its advertised sale type and price).
+        objects: Vec<ObjectBuyItem>,
+    },
+    /// The client wants to buy an item out of an object's contents
+    /// (`BuyObjectInventory`).
+    BuyObjectInventory {
+        /// The object whose contents holds the item.
+        object_id: Uuid,
+        /// The inventory item to buy.
+        item_id: Uuid,
+        /// The folder the bought item is placed in.
+        folder_id: Uuid,
+    },
+    /// The client asked for an object's pay-button layout (`RequestPayPrice`);
+    /// the simulator answers with [`SimSession::send_pay_price_reply`].
+    RequestPayPrice {
+        /// The object queried.
+        object_id: Uuid,
+    },
+    /// The client asked for an object's condensed broadcast properties
+    /// (`RequestObjectPropertiesFamily`); the simulator answers with
+    /// [`SimSession::send_object_properties_family`].
+    RequestObjectPropertiesFamily {
+        /// The request flags, echoed back in the reply.
+        request_flags: u32,
+        /// The object queried.
+        object_id: Uuid,
+    },
+    /// The client began an interactive object spin (`ObjectSpinStart`).
+    SpinObjectStart {
+        /// The object being spun.
+        object_id: Uuid,
+    },
+    /// The client updated an in-progress object spin (`ObjectSpinUpdate`).
+    SpinObjectUpdate {
+        /// The object being spun.
+        object_id: Uuid,
+        /// The new rotation.
+        rotation: Rotation,
+    },
+    /// The client ended an interactive object spin (`ObjectSpinStop`).
+    SpinObjectStop {
+        /// The object being spun.
+        object_id: Uuid,
+    },
+    /// The client wants to duplicate objects onto a raycast surface
+    /// (`ObjectDuplicateOnRay`).
+    DuplicateObjectsOnRay {
+        /// The region-local ids to duplicate.
+        local_ids: Vec<u32>,
+        /// The active group the copies are set to ([`Uuid::nil`] for none).
+        group_id: Uuid,
+        /// The ray's start point (region-local).
+        ray_start: Vector,
+        /// The ray's end point (region-local).
+        ray_end: Vector,
+        /// When set, the simulator trusts `ray_end` rather than raycasting.
+        bypass_raycast: bool,
+        /// Whether `ray_end` is the actual intersection point.
+        ray_end_is_intersection: bool,
+        /// Whether to copy each object's centre offset.
+        copy_centers: bool,
+        /// Whether to copy each object's rotation.
+        copy_rotates: bool,
+        /// The object the ray is cast against ([`Uuid::nil`] for the terrain).
+        ray_target_id: Uuid,
+        /// The duplicate flags (see `object_flags.h`).
+        duplicate_flags: u32,
+    },
+    /// The client wants to restore an inventory item to the world
+    /// (`RezRestoreToWorld`).
+    RezRestoreToWorld {
+        /// The full inventory item to restore.
+        item: RestoreItem,
+    },
+    /// The client wants to rez an object embedded in a notecard
+    /// (`RezObjectFromNotecard`).
+    RezObjectFromNotecard {
+        /// The rez parameters (ray placement, permissions, notecard, items).
+        rez: NotecardRez,
     },
     /// The client requested a clean logout (`LogoutRequest`); the simulator has
     /// replied with a `LogoutReply` and closed the session.
@@ -1209,6 +1302,79 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends a `PayPriceReply`: an object's pay-button layout, in response to a
+    /// client's `RequestPayPrice` (surfaced as [`ServerEvent::RequestPayPrice`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_pay_price_reply(
+        &mut self,
+        object_id: Uuid,
+        default_pay_price: i32,
+        pay_buttons: &[i32],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::PayPriceReply(PayPriceReply {
+            object_data: PayPriceReplyObjectDataBlock {
+                object_id,
+                default_pay_price,
+            },
+            button_data: pay_buttons
+                .iter()
+                .map(|amount| PayPriceReplyButtonDataBlock {
+                    pay_button: *amount,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `ObjectPropertiesFamily`: an object's condensed broadcast
+    /// properties, in response to a client's `RequestObjectPropertiesFamily`
+    /// (surfaced as [`ServerEvent::RequestObjectPropertiesFamily`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_object_properties_family(
+        &mut self,
+        properties: &ObjectPropertiesFamily,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ObjectPropertiesFamily(ObjectPropertiesFamilyMessage {
+            object_data: ObjectPropertiesFamilyObjectDataBlockMessage {
+                request_flags: properties.request_flags,
+                object_id: properties.object_id,
+                owner_id: properties.owner_id,
+                group_id: properties.group_id,
+                base_mask: properties.base_mask,
+                owner_mask: properties.owner_mask,
+                group_mask: properties.group_mask,
+                everyone_mask: properties.everyone_mask,
+                next_owner_mask: properties.next_owner_mask,
+                ownership_cost: properties.ownership_cost,
+                sale_type: properties.sale_type,
+                sale_price: properties.sale_price,
+                category: properties.category,
+                last_owner_id: properties.last_owner_id,
+                name: with_nul(&properties.name),
+                description: with_nul(&properties.description),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
     /// Sends a `StartPingCheck` to the client; the client answers with a
     /// `CompletePingCheck`. Returns the ping id sent (so a caller can match the
     /// reply), or `None` if the circuit is not open.
@@ -1656,6 +1822,126 @@ impl SimSession {
                     .push_back(ServerEvent::EventNotificationRemoveRequest {
                         event_id: request.event_data.event_id,
                     });
+            }
+            AnyMessage::ObjectBuy(buy) => {
+                self.events.push_back(ServerEvent::BuyObject {
+                    group_id: buy.agent_data.group_id,
+                    category_id: buy.agent_data.category_id,
+                    objects: buy
+                        .object_data
+                        .iter()
+                        .map(|item| ObjectBuyItem {
+                            local_id: item.object_local_id,
+                            sale_type: SaleType::from_code(item.sale_type),
+                            sale_price: item.sale_price,
+                        })
+                        .collect(),
+                });
+            }
+            AnyMessage::BuyObjectInventory(buy) => {
+                self.events.push_back(ServerEvent::BuyObjectInventory {
+                    object_id: buy.data.object_id,
+                    item_id: buy.data.item_id,
+                    folder_id: buy.data.folder_id,
+                });
+            }
+            AnyMessage::RequestPayPrice(request) => {
+                self.events.push_back(ServerEvent::RequestPayPrice {
+                    object_id: request.object_data.object_id,
+                });
+            }
+            AnyMessage::RequestObjectPropertiesFamily(request) => {
+                self.events
+                    .push_back(ServerEvent::RequestObjectPropertiesFamily {
+                        request_flags: request.object_data.request_flags,
+                        object_id: request.object_data.object_id,
+                    });
+            }
+            AnyMessage::ObjectSpinStart(spin) => {
+                self.events.push_back(ServerEvent::SpinObjectStart {
+                    object_id: spin.object_data.object_id,
+                });
+            }
+            AnyMessage::ObjectSpinUpdate(spin) => {
+                self.events.push_back(ServerEvent::SpinObjectUpdate {
+                    object_id: spin.object_data.object_id,
+                    rotation: spin.object_data.rotation.clone(),
+                });
+            }
+            AnyMessage::ObjectSpinStop(spin) => {
+                self.events.push_back(ServerEvent::SpinObjectStop {
+                    object_id: spin.object_data.object_id,
+                });
+            }
+            AnyMessage::ObjectDuplicateOnRay(dup) => {
+                let agent = &dup.agent_data;
+                self.events.push_back(ServerEvent::DuplicateObjectsOnRay {
+                    local_ids: dup
+                        .object_data
+                        .iter()
+                        .map(|item| item.object_local_id)
+                        .collect(),
+                    group_id: agent.group_id,
+                    ray_start: agent.ray_start.clone(),
+                    ray_end: agent.ray_end.clone(),
+                    bypass_raycast: agent.bypass_raycast,
+                    ray_end_is_intersection: agent.ray_end_is_intersection,
+                    copy_centers: agent.copy_centers,
+                    copy_rotates: agent.copy_rotates,
+                    ray_target_id: agent.ray_target_id,
+                    duplicate_flags: agent.duplicate_flags,
+                });
+            }
+            AnyMessage::RezRestoreToWorld(restore) => {
+                let data = &restore.inventory_data;
+                self.events.push_back(ServerEvent::RezRestoreToWorld {
+                    item: RestoreItem {
+                        item_id: data.item_id,
+                        folder_id: data.folder_id,
+                        creator_id: data.creator_id,
+                        owner_id: data.owner_id,
+                        group_id: data.group_id,
+                        base_mask: data.base_mask,
+                        owner_mask: data.owner_mask,
+                        group_mask: data.group_mask,
+                        everyone_mask: data.everyone_mask,
+                        next_owner_mask: data.next_owner_mask,
+                        group_owned: data.group_owned,
+                        transaction_id: data.transaction_id,
+                        asset_type: data.r#type,
+                        inv_type: data.inv_type,
+                        flags: data.flags,
+                        sale_type: SaleType::from_code(data.sale_type),
+                        sale_price: data.sale_price,
+                        name: trimmed_string(&data.name),
+                        description: trimmed_string(&data.description),
+                        creation_date: data.creation_date,
+                        crc: data.crc,
+                    },
+                });
+            }
+            AnyMessage::RezObjectFromNotecard(rez) => {
+                let rez_data = &rez.rez_data;
+                self.events.push_back(ServerEvent::RezObjectFromNotecard {
+                    rez: NotecardRez {
+                        group_id: rez.agent_data.group_id,
+                        from_task_id: rez_data.from_task_id,
+                        bypass_raycast: rez_data.bypass_raycast != 0,
+                        ray_start: rez_data.ray_start.clone(),
+                        ray_end: rez_data.ray_end.clone(),
+                        ray_target_id: rez_data.ray_target_id,
+                        ray_end_is_intersection: rez_data.ray_end_is_intersection,
+                        rez_selected: rez_data.rez_selected,
+                        remove_item: rez_data.remove_item,
+                        item_flags: rez_data.item_flags,
+                        group_mask: rez_data.group_mask,
+                        everyone_mask: rez_data.everyone_mask,
+                        next_owner_mask: rez_data.next_owner_mask,
+                        notecard_item_id: rez.notecard_data.notecard_item_id,
+                        object_id: rez.notecard_data.object_id,
+                        item_ids: rez.inventory_data.iter().map(|item| item.item_id).collect(),
+                    },
+                });
             }
             AnyMessage::LogoutRequest(_) => {
                 self.send_logout_reply(now)?;

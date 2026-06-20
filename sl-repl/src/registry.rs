@@ -23,12 +23,13 @@ use sl_proto::{
     ExperienceUpdate, FriendRights, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit,
     GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType,
     LandSearchType, LindenAmount, LookAtType, MapItemType, Material, MaterialOverrideUpdate,
-    Maturity, MediaEntry, MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem,
-    ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-    ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate,
-    PointAtType, PrimShape, ProfileUpdate, RegionInfoUpdate, RezAttachment, Rotation, SaleType,
-    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    VoiceProvisionRequest, Wearable, WearableType,
+    Maturity, MediaEntry, MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
+    ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate,
+    PermissionField, PickUpdate, PointAtType, PrimShape, ProfileUpdate, RegionInfoUpdate,
+    RestoreItem, RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable,
+    WearableType,
 };
 
 use crate::args::{self, Args};
@@ -147,6 +148,22 @@ fn enum_arg<T>(
 ) -> Result<T, ReplError> {
     let value = args.req_str(ctx, field, pos)?;
     f(field, &value)
+}
+
+/// Parse an enum argument like [`enum_arg`], falling back to `default` when the
+/// argument is absent (an optional positional or keyword field).
+fn enum_arg_or<T>(
+    args: &Args,
+    ctx: &dyn ReplContext,
+    field: &str,
+    pos: usize,
+    f: fn(&str, &str) -> Result<T, ReplError>,
+    default: T,
+) -> Result<T, ReplError> {
+    match args.opt_str(ctx, field, pos)? {
+        Some(value) => f(field, &value),
+        None => Ok(default),
+    }
 }
 
 /// The `idx`-th colon-field of a list record, or an error.
@@ -2462,6 +2479,196 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "buy_object",
+            usage: "<group_id> <category_id> <local_id:sale_type:sale_price,…>",
+            build: |args, ctx| {
+                let group_id = args.uuid_or_nil(ctx, "group_id", 0)?;
+                let category_id = args.uuid_or_nil(ctx, "category_id", 1)?;
+                let mut objects = Vec::new();
+                for record in args.vec_records(ctx, "objects", 2)? {
+                    objects.push(ObjectBuyItem {
+                        local_id: args::literal(
+                            "objects",
+                            record_field("objects", &record, 0)?,
+                            "u32",
+                        )?,
+                        sale_type: parse_sale_type(
+                            "objects",
+                            record_field("objects", &record, 1)?,
+                        )?,
+                        sale_price: args::literal(
+                            "objects",
+                            record_field("objects", &record, 2)?,
+                            "i32",
+                        )?,
+                    });
+                }
+                Ok(Command::BuyObject {
+                    group_id,
+                    category_id,
+                    objects,
+                })
+            },
+        },
+        CommandSpec {
+            name: "buy_object_inventory",
+            usage: "<object_id> <item_id> <folder_id>",
+            build: |args, ctx| {
+                Ok(Command::BuyObjectInventory {
+                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    item_id: args.req_uuid(ctx, "item_id", 1)?,
+                    folder_id: args.uuid_or_nil(ctx, "folder_id", 2)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_pay_price",
+            usage: "<object_id>",
+            build: |args, ctx| {
+                Ok(Command::RequestPayPrice {
+                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_object_properties_family",
+            usage: "<object_id> [request_flags=]",
+            build: |args, ctx| {
+                Ok(Command::RequestObjectPropertiesFamily {
+                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    request_flags: args.parse_or(ctx, "request_flags", 1, "u32", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "spin_object_start",
+            usage: "<object_id>",
+            build: |args, ctx| {
+                Ok(Command::SpinObjectStart {
+                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "spin_object_update",
+            usage: "<object_id> <rotation>",
+            build: |args, ctx| {
+                Ok(Command::SpinObjectUpdate {
+                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    rotation: args.req_rotation(ctx, "rotation", 1)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "spin_object_stop",
+            usage: "<object_id>",
+            build: |args, ctx| {
+                Ok(Command::SpinObjectStop {
+                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "duplicate_objects_on_ray",
+            usage: "<local_id,…> <ray_start-vec> <ray_end-vec> [group_id=] [ray_target_id=] \
+                    [bypass_raycast=] [ray_end_is_intersection=] [copy_centers=] [copy_rotates=] \
+                    [duplicate_flags=]",
+            build: |args, ctx| {
+                Ok(Command::DuplicateObjectsOnRay {
+                    local_ids: args.vec_parse(ctx, "local_ids", 0, "u32")?,
+                    ray_start: args.req_vector(ctx, "ray_start", 1)?,
+                    ray_end: args.req_vector(ctx, "ray_end", 2)?,
+                    group_id: args.uuid_or_nil(ctx, "group_id", 100)?,
+                    ray_target_id: args.uuid_or_nil(ctx, "ray_target_id", 101)?,
+                    bypass_raycast: args.bool_or(ctx, "bypass_raycast", 102, false)?,
+                    ray_end_is_intersection: args.bool_or(
+                        ctx,
+                        "ray_end_is_intersection",
+                        103,
+                        false,
+                    )?,
+                    copy_centers: args.bool_or(ctx, "copy_centers", 104, true)?,
+                    copy_rotates: args.bool_or(ctx, "copy_rotates", 105, true)?,
+                    duplicate_flags: args.parse_or(ctx, "duplicate_flags", 106, "u32", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "rez_restore_to_world",
+            usage: "<item_id> [folder_id=] [creator_id=] [owner_id=] [group_id=] [base_mask=] \
+                    [owner_mask=] [group_mask=] [everyone_mask=] [next_owner_mask=] \
+                    [group_owned=] [transaction_id=] [asset_type=] [inv_type=] [flags=] \
+                    [sale_type=] [sale_price=] [name=] [description=] [creation_date=] [crc=]",
+            build: |args, ctx| {
+                Ok(Command::RezRestoreToWorld {
+                    item: RestoreItem {
+                        item_id: args.req_uuid(ctx, "item_id", 0)?,
+                        folder_id: args.uuid_or_nil(ctx, "folder_id", 100)?,
+                        creator_id: args.uuid_or_nil(ctx, "creator_id", 101)?,
+                        owner_id: args.uuid_or_nil(ctx, "owner_id", 102)?,
+                        group_id: args.uuid_or_nil(ctx, "group_id", 103)?,
+                        base_mask: args.parse_or(ctx, "base_mask", 104, "u32", 0)?,
+                        owner_mask: args.parse_or(ctx, "owner_mask", 105, "u32", 0)?,
+                        group_mask: args.parse_or(ctx, "group_mask", 106, "u32", 0)?,
+                        everyone_mask: args.parse_or(ctx, "everyone_mask", 107, "u32", 0)?,
+                        next_owner_mask: args.parse_or(ctx, "next_owner_mask", 108, "u32", 0)?,
+                        group_owned: args.bool_or(ctx, "group_owned", 109, false)?,
+                        transaction_id: args.uuid_or_nil(ctx, "transaction_id", 110)?,
+                        asset_type: args.parse_or(ctx, "asset_type", 111, "i8", -1)?,
+                        inv_type: args.parse_or(ctx, "inv_type", 112, "i8", -1)?,
+                        flags: args.parse_or(ctx, "flags", 113, "u32", 0)?,
+                        sale_type: enum_arg_or(
+                            args,
+                            ctx,
+                            "sale_type",
+                            114,
+                            parse_sale_type,
+                            SaleType::NotForSale,
+                        )?,
+                        sale_price: args.parse_or(ctx, "sale_price", 115, "i32", 0)?,
+                        name: args.str_or(ctx, "name", 116, "")?,
+                        description: args.str_or(ctx, "description", 117, "")?,
+                        creation_date: args.parse_or(ctx, "creation_date", 118, "i32", 0)?,
+                        crc: args.parse_or(ctx, "crc", 119, "u32", 0)?,
+                    },
+                })
+            },
+        },
+        CommandSpec {
+            name: "rez_object_from_notecard",
+            usage: "<notecard_item_id> <ray_start-vec> <ray_end-vec> <item_id,…> [group_id=] \
+                    [from_task_id=] [object_id=] [ray_target_id=] [bypass_raycast=] \
+                    [ray_end_is_intersection=] [rez_selected=] [remove_item=] [item_flags=] \
+                    [group_mask=] [everyone_mask=] [next_owner_mask=]",
+            build: |args, ctx| {
+                Ok(Command::RezObjectFromNotecard {
+                    rez: NotecardRez {
+                        notecard_item_id: args.req_uuid(ctx, "notecard_item_id", 0)?,
+                        ray_start: args.req_vector(ctx, "ray_start", 1)?,
+                        ray_end: args.req_vector(ctx, "ray_end", 2)?,
+                        item_ids: args.vec_uuid(ctx, "item_ids", 3)?,
+                        group_id: args.uuid_or_nil(ctx, "group_id", 100)?,
+                        from_task_id: args.uuid_or_nil(ctx, "from_task_id", 101)?,
+                        object_id: args.uuid_or_nil(ctx, "object_id", 102)?,
+                        ray_target_id: args.uuid_or_nil(ctx, "ray_target_id", 103)?,
+                        bypass_raycast: args.bool_or(ctx, "bypass_raycast", 104, false)?,
+                        ray_end_is_intersection: args.bool_or(
+                            ctx,
+                            "ray_end_is_intersection",
+                            105,
+                            false,
+                        )?,
+                        rez_selected: args.bool_or(ctx, "rez_selected", 106, false)?,
+                        remove_item: args.bool_or(ctx, "remove_item", 107, false)?,
+                        item_flags: args.parse_or(ctx, "item_flags", 108, "u32", 0)?,
+                        group_mask: args.parse_or(ctx, "group_mask", 109, "u32", 0)?,
+                        everyone_mask: args.parse_or(ctx, "everyone_mask", 110, "u32", 0)?,
+                        next_owner_mask: args.parse_or(ctx, "next_owner_mask", 111, "u32", 0)?,
+                    },
+                })
+            },
+        },
+        CommandSpec {
             name: "request_texture",
             usage: "<texture_id> [discard_level=0] [priority=1.0]",
             build: |args, ctx| {
@@ -3317,7 +3524,10 @@ fn byte_range(args: &Args, ctx: &dyn ReplContext) -> Result<Option<(u32, u32)>, 
 mod tests {
     use std::collections::BTreeMap;
 
-    use sl_proto::{AssetType, ChatType, Command, ControlFlags, FriendRights, MapItemType, Uuid};
+    use sl_proto::{
+        AssetType, ChatType, Command, ControlFlags, FriendRights, MapItemType, ObjectBuyItem,
+        SaleType, Uuid,
+    };
 
     use super::Registry;
     use crate::context::{NoContext, ReplContext};
@@ -3599,5 +3809,43 @@ mod tests {
     #[test]
     fn missing_required_argument_errors() {
         assert!(matches!(build("sit"), Err(ReplError::MissingArg { .. })));
+    }
+
+    #[test]
+    fn buy_object_parses_records() {
+        assert!(matches!(
+            build(&format!("buy_object {ONE} {TWO} 99:copy:250")),
+            Ok(Command::BuyObject { objects, .. })
+                if matches!(
+                    objects.first(),
+                    Some(ObjectBuyItem { local_id: 99, sale_type: SaleType::Copy, sale_price: 250 })
+                )
+        ));
+    }
+
+    #[test]
+    fn request_object_properties_family_keyword_flags() {
+        assert!(matches!(
+            build(&format!("request_object_properties_family {ONE} request_flags=4")),
+            Ok(Command::RequestObjectPropertiesFamily { request_flags: 4, object_id })
+                if object_id == uuid(ONE)
+        ));
+    }
+
+    #[test]
+    fn spin_object_update_parses_rotation() {
+        assert!(matches!(
+            build(&format!("spin_object_update {ONE} <0,0,0,1>")),
+            Ok(Command::SpinObjectUpdate { object_id, .. }) if object_id == uuid(ONE)
+        ));
+    }
+
+    #[test]
+    fn rez_object_from_notecard_parses() {
+        assert!(matches!(
+            build(&format!("rez_object_from_notecard {ONE} <1,2,3> <4,5,6> {TWO}")),
+            Ok(Command::RezObjectFromNotecard { rez })
+                if rez.notecard_item_id == uuid(ONE) && rez.item_ids == vec![uuid(TWO)]
+        ));
     }
 }

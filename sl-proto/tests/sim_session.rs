@@ -13,8 +13,9 @@ mod test {
         AttachmentPoint, AvatarName, AvatarPickerResult, ChatType, CoarseLocation,
         DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
         DirPeopleResult, DirPlaceResult, Event, EventInfo, GroupName, ImDialog, LandSearchType,
-        LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity, ParcelCategory, PlacesResult,
-        PointAtType, ProductType, RegionIdentity, RezAttachment, ServerEvent, Session, SimSession,
+        LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity, NotecardRez, ObjectBuyItem,
+        ObjectPropertiesFamily, ParcelCategory, PlacesResult, PointAtType, ProductType,
+        RegionIdentity, RestoreItem, RezAttachment, SaleType, ServerEvent, Session, SimSession,
         Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
         enable_simulator_to_caps_llsd, grid_to_handle, parse_event_queue_response,
     };
@@ -870,6 +871,208 @@ mod test {
         assert_eq!(info.name, "Beach Party");
         assert_eq!(info.amount, 50);
         assert_eq!(info.global_position, (256_000.0, 257_000.0, 30.0));
+        Ok(())
+    }
+
+    #[test]
+    fn object_commerce_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let object = uuid::Uuid::from_u128(0xB0B);
+
+        // Client -> sim: the full commerce/spin/rez command surface.
+        client.buy_object(
+            uuid::Uuid::nil(),
+            uuid::Uuid::from_u128(0xCA7),
+            &[ObjectBuyItem {
+                local_id: 99,
+                sale_type: SaleType::Copy,
+                sale_price: 250,
+            }],
+            now,
+        )?;
+        client.buy_object_inventory(
+            object,
+            uuid::Uuid::from_u128(0x17E),
+            uuid::Uuid::nil(),
+            now,
+        )?;
+        client.request_pay_price(object, now)?;
+        client.request_object_properties_family(0x04, object, now)?;
+        client.spin_object_start(object, now)?;
+        client.spin_object_stop(object, now)?;
+        client.rez_restore_to_world(
+            &RestoreItem {
+                item_id: uuid::Uuid::from_u128(0x17E),
+                folder_id: uuid::Uuid::nil(),
+                creator_id: uuid::Uuid::nil(),
+                owner_id: uuid::Uuid::nil(),
+                group_id: uuid::Uuid::nil(),
+                base_mask: 0,
+                owner_mask: 0,
+                group_mask: 0,
+                everyone_mask: 0,
+                next_owner_mask: 0,
+                group_owned: false,
+                transaction_id: uuid::Uuid::nil(),
+                asset_type: 6,
+                inv_type: 6,
+                flags: 0,
+                sale_type: SaleType::NotForSale,
+                sale_price: 0,
+                name: "Cube".to_owned(),
+                description: String::new(),
+                creation_date: 0,
+                crc: 0,
+            },
+            now,
+        )?;
+        client.rez_object_from_notecard(
+            &NotecardRez {
+                group_id: uuid::Uuid::nil(),
+                from_task_id: uuid::Uuid::nil(),
+                bypass_raycast: false,
+                ray_start: sl_types::lsl::Vector {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 3.0,
+                },
+                ray_end: sl_types::lsl::Vector {
+                    x: 4.0,
+                    y: 5.0,
+                    z: 6.0,
+                },
+                ray_target_id: uuid::Uuid::nil(),
+                ray_end_is_intersection: true,
+                rez_selected: false,
+                remove_item: false,
+                item_flags: 0,
+                group_mask: 0,
+                everyone_mask: 0,
+                next_owner_mask: 0,
+                notecard_item_id: uuid::Uuid::from_u128(0xCA5E),
+                object_id: uuid::Uuid::nil(),
+                item_ids: vec![uuid::Uuid::from_u128(0x1)],
+            },
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let server_events = drain_server(&mut sim);
+        let buy = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::BuyObject { objects, .. } => Some(objects),
+                _ => None,
+            })
+            .ok_or("expected a BuyObject server event")?;
+        assert_eq!(buy.first().ok_or("expected one buy item")?.local_id, 99);
+        assert_eq!(
+            buy.first().ok_or("expected one buy item")?.sale_type,
+            SaleType::Copy
+        );
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::BuyObjectInventory { .. })),
+            "expected a BuyObjectInventory server event"
+        );
+        let pay = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RequestPayPrice { object_id } => Some(*object_id),
+                _ => None,
+            })
+            .ok_or("expected a RequestPayPrice server event")?;
+        assert_eq!(pay, object);
+        let family = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RequestObjectPropertiesFamily {
+                    request_flags,
+                    object_id,
+                } => Some((*request_flags, *object_id)),
+                _ => None,
+            })
+            .ok_or("expected a RequestObjectPropertiesFamily server event")?;
+        assert_eq!(family, (0x04, object));
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::SpinObjectStart { .. })),
+            "expected a SpinObjectStart server event"
+        );
+        let restore = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RezRestoreToWorld { item } => Some(item),
+                _ => None,
+            })
+            .ok_or("expected a RezRestoreToWorld server event")?;
+        assert_eq!(restore.item_id, uuid::Uuid::from_u128(0x17E));
+        assert_eq!(restore.asset_type, 6);
+        let rez = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RezObjectFromNotecard { rez } => Some(rez),
+                _ => None,
+            })
+            .ok_or("expected a RezObjectFromNotecard server event")?;
+        assert_eq!(rez.notecard_item_id, uuid::Uuid::from_u128(0xCA5E));
+        assert_eq!(rez.item_ids.len(), 1);
+
+        // Sim -> client: the two reply encoders.
+        sim.send_pay_price_reply(object, 10, &[1, 5, 20], now)?;
+        sim.send_object_properties_family(
+            &ObjectPropertiesFamily {
+                request_flags: 0x04,
+                object_id: object,
+                owner_id: uuid::Uuid::from_u128(0x0E),
+                group_id: uuid::Uuid::nil(),
+                base_mask: 0,
+                owner_mask: 0,
+                group_mask: 0,
+                everyone_mask: 0,
+                next_owner_mask: 0,
+                ownership_cost: 0,
+                sale_type: SaleType::Copy.to_code(),
+                sale_price: 250,
+                category: 0,
+                last_owner_id: uuid::Uuid::nil(),
+                name: "Vendor".to_owned(),
+                description: "A vendor".to_owned(),
+            },
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        let (default_pay_price, pay_buttons) = client_events
+            .iter()
+            .find_map(|e| match e {
+                Event::PayPriceReply {
+                    default_pay_price,
+                    pay_buttons,
+                    ..
+                } => Some((*default_pay_price, pay_buttons.clone())),
+                _ => None,
+            })
+            .ok_or("expected a PayPriceReply client event")?;
+        assert_eq!(default_pay_price, 10);
+        assert_eq!(pay_buttons, vec![1, 5, 20]);
+        let properties = client_events
+            .iter()
+            .find_map(|e| match e {
+                Event::ObjectPropertiesFamily { properties } => Some(properties),
+                _ => None,
+            })
+            .ok_or("expected an ObjectPropertiesFamily client event")?;
+        assert_eq!(properties.object_id, object);
+        assert_eq!(properties.sale_price, 250);
+        assert_eq!(properties.name, "Vendor");
         Ok(())
     }
 

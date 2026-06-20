@@ -11,10 +11,10 @@ use crate::types::directory::category_to_wire;
 use crate::types::{
     AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction, CreateGroupParams,
     DeRezDestination, DirFindFlags, GroupRoleEdit, GroupRoleMemberChange, ImDialog,
-    InterestsUpdate, InventoryItem, LandSearchType, Material, NewInventoryItem, ObjectFlagSettings,
-    ObjectTransform, ParcelAccessEntry, ParcelCategory, ParcelUpdate, PermissionField, PickUpdate,
-    PrimShape, ProfileUpdate, Reliability, RezAttachment, SaleType, Throttle, ViewerEffect,
-    Wearable,
+    InterestsUpdate, InventoryItem, LandSearchType, Material, NewInventoryItem, NotecardRez,
+    ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelCategory,
+    ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProfileUpdate, Reliability, RestoreItem,
+    RezAttachment, SaleType, Throttle, ViewerEffect, Wearable,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
@@ -165,6 +165,19 @@ use sl_wire::messages::{
     UpdateMuteListEntryAgentDataBlock, UpdateMuteListEntryMuteDataBlock, UseCircuitCode,
     UseCircuitCodeCircuitCodeBlock, ViewerEffect as ViewerEffectMessage,
     ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
+};
+use sl_wire::messages::{
+    BuyObjectInventory, BuyObjectInventoryAgentDataBlock, BuyObjectInventoryDataBlock, ObjectBuy,
+    ObjectBuyAgentDataBlock, ObjectBuyObjectDataBlock, ObjectDuplicateOnRay,
+    ObjectDuplicateOnRayAgentDataBlock, ObjectDuplicateOnRayObjectDataBlock, ObjectSpinStart,
+    ObjectSpinStartAgentDataBlock, ObjectSpinStartObjectDataBlock, ObjectSpinStop,
+    ObjectSpinStopAgentDataBlock, ObjectSpinStopObjectDataBlock, ObjectSpinUpdate,
+    ObjectSpinUpdateAgentDataBlock, ObjectSpinUpdateObjectDataBlock, RequestObjectPropertiesFamily,
+    RequestObjectPropertiesFamilyAgentDataBlock, RequestObjectPropertiesFamilyObjectDataBlock,
+    RequestPayPrice, RequestPayPriceObjectDataBlock, RezObjectFromNotecard,
+    RezObjectFromNotecardAgentDataBlock, RezObjectFromNotecardInventoryDataBlock,
+    RezObjectFromNotecardNotecardDataBlock, RezObjectFromNotecardRezDataBlock, RezRestoreToWorld,
+    RezRestoreToWorldAgentDataBlock, RezRestoreToWorldInventoryDataBlock,
 };
 use sl_wire::{AnyMessage, PacketFlags, WireError, Writer, encode_datagram};
 use std::collections::{BTreeMap, VecDeque};
@@ -3539,6 +3552,263 @@ impl Circuit {
                 .map(|id| ObjectDelinkObjectDataBlock {
                     object_local_id: *id,
                 })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectBuy` reliably (purchase `objects` into `category_id`).
+    pub(crate) fn send_object_buy(
+        &mut self,
+        group_id: Uuid,
+        category_id: Uuid,
+        objects: &[ObjectBuyItem],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectBuy(ObjectBuy {
+            agent_data: ObjectBuyAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                group_id,
+                category_id,
+            },
+            object_data: objects
+                .iter()
+                .map(|item| ObjectBuyObjectDataBlock {
+                    object_local_id: item.local_id,
+                    sale_type: item.sale_type.to_code(),
+                    sale_price: item.sale_price,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `BuyObjectInventory` reliably (buy `item_id` out of `object_id`).
+    pub(crate) fn send_buy_object_inventory(
+        &mut self,
+        object_id: Uuid,
+        item_id: Uuid,
+        folder_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::BuyObjectInventory(BuyObjectInventory {
+            agent_data: BuyObjectInventoryAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            data: BuyObjectInventoryDataBlock {
+                object_id,
+                item_id,
+                folder_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RequestPayPrice` reliably (ask `object_id` for its pay buttons).
+    pub(crate) fn send_request_pay_price(
+        &mut self,
+        object_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RequestPayPrice(RequestPayPrice {
+            object_data: RequestPayPriceObjectDataBlock { object_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RequestObjectPropertiesFamily` reliably (ask `object_id` for its
+    /// condensed broadcast properties).
+    pub(crate) fn send_request_object_properties_family(
+        &mut self,
+        request_flags: u32,
+        object_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RequestObjectPropertiesFamily(RequestObjectPropertiesFamily {
+            agent_data: RequestObjectPropertiesFamilyAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: RequestObjectPropertiesFamilyObjectDataBlock {
+                request_flags,
+                object_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectSpinStart` reliably (begin spinning `object_id`).
+    pub(crate) fn send_object_spin_start(
+        &mut self,
+        object_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectSpinStart(ObjectSpinStart {
+            agent_data: ObjectSpinStartAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: ObjectSpinStartObjectDataBlock { object_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectSpinUpdate` reliably (the latest spin `rotation`).
+    pub(crate) fn send_object_spin_update(
+        &mut self,
+        object_id: Uuid,
+        rotation: Rotation,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectSpinUpdate(ObjectSpinUpdate {
+            agent_data: ObjectSpinUpdateAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: ObjectSpinUpdateObjectDataBlock {
+                object_id,
+                rotation,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectSpinStop` reliably (end spinning `object_id`).
+    pub(crate) fn send_object_spin_stop(
+        &mut self,
+        object_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectSpinStop(ObjectSpinStop {
+            agent_data: ObjectSpinStopAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            object_data: ObjectSpinStopObjectDataBlock { object_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectDuplicateOnRay` reliably (copy `local_ids`, dropping the
+    /// copies against the surface the ray hits).
+    #[expect(
+        clippy::too_many_arguments,
+        clippy::fn_params_excessive_bools,
+        reason = "mirrors the ObjectDuplicateOnRay wire block one-to-one"
+    )]
+    pub(crate) fn send_object_duplicate_on_ray(
+        &mut self,
+        local_ids: &[u32],
+        group_id: Uuid,
+        ray_start: Vector,
+        ray_end: Vector,
+        bypass_raycast: bool,
+        ray_end_is_intersection: bool,
+        copy_centers: bool,
+        copy_rotates: bool,
+        ray_target_id: Uuid,
+        duplicate_flags: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectDuplicateOnRay(ObjectDuplicateOnRay {
+            agent_data: ObjectDuplicateOnRayAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                group_id,
+                ray_start,
+                ray_end,
+                bypass_raycast,
+                ray_end_is_intersection,
+                copy_centers,
+                copy_rotates,
+                ray_target_id,
+                duplicate_flags,
+            },
+            object_data: local_ids
+                .iter()
+                .map(|id| ObjectDuplicateOnRayObjectDataBlock {
+                    object_local_id: *id,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RezRestoreToWorld` reliably (restore `item` to its last place).
+    pub(crate) fn send_rez_restore_to_world(
+        &mut self,
+        item: &RestoreItem,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RezRestoreToWorld(RezRestoreToWorld {
+            agent_data: RezRestoreToWorldAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            inventory_data: RezRestoreToWorldInventoryDataBlock {
+                item_id: item.item_id,
+                folder_id: item.folder_id,
+                creator_id: item.creator_id,
+                owner_id: item.owner_id,
+                group_id: item.group_id,
+                base_mask: item.base_mask,
+                owner_mask: item.owner_mask,
+                group_mask: item.group_mask,
+                everyone_mask: item.everyone_mask,
+                next_owner_mask: item.next_owner_mask,
+                group_owned: item.group_owned,
+                transaction_id: item.transaction_id,
+                r#type: item.asset_type,
+                inv_type: item.inv_type,
+                flags: item.flags,
+                sale_type: item.sale_type.to_code(),
+                sale_price: item.sale_price,
+                name: with_nul(&item.name),
+                description: with_nul(&item.description),
+                creation_date: item.creation_date,
+                crc: item.crc,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RezObjectFromNotecard` reliably (rez the items embedded in a
+    /// notecard asset).
+    pub(crate) fn send_rez_object_from_notecard(
+        &mut self,
+        rez: &NotecardRez,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RezObjectFromNotecard(RezObjectFromNotecard {
+            agent_data: RezObjectFromNotecardAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                group_id: rez.group_id,
+            },
+            rez_data: RezObjectFromNotecardRezDataBlock {
+                from_task_id: rez.from_task_id,
+                bypass_raycast: u8::from(rez.bypass_raycast),
+                ray_start: rez.ray_start.clone(),
+                ray_end: rez.ray_end.clone(),
+                ray_target_id: rez.ray_target_id,
+                ray_end_is_intersection: rez.ray_end_is_intersection,
+                rez_selected: rez.rez_selected,
+                remove_item: rez.remove_item,
+                item_flags: rez.item_flags,
+                group_mask: rez.group_mask,
+                everyone_mask: rez.everyone_mask,
+                next_owner_mask: rez.next_owner_mask,
+            },
+            notecard_data: RezObjectFromNotecardNotecardDataBlock {
+                notecard_item_id: rez.notecard_item_id,
+                object_id: rez.object_id,
+            },
+            inventory_data: rez
+                .item_ids
+                .iter()
+                .map(|id| RezObjectFromNotecardInventoryDataBlock { item_id: *id })
                 .collect(),
         });
         self.send(&message, Reliability::Reliable, now)

@@ -1556,6 +1556,83 @@ fn advance_running(
                     .event_notification_remove_request(*event_id, now)
                     .ok();
             }
+            Command::BuyObject {
+                group_id,
+                category_id,
+                objects,
+            } => {
+                session
+                    .buy_object(*group_id, *category_id, objects, now)
+                    .ok();
+            }
+            Command::BuyObjectInventory {
+                object_id,
+                item_id,
+                folder_id,
+            } => {
+                session
+                    .buy_object_inventory(*object_id, *item_id, *folder_id, now)
+                    .ok();
+            }
+            Command::RequestPayPrice { object_id } => {
+                session.request_pay_price(*object_id, now).ok();
+            }
+            Command::RequestObjectPropertiesFamily {
+                request_flags,
+                object_id,
+            } => {
+                session
+                    .request_object_properties_family(*request_flags, *object_id, now)
+                    .ok();
+            }
+            Command::SpinObjectStart { object_id } => {
+                session.spin_object_start(*object_id, now).ok();
+            }
+            Command::SpinObjectUpdate {
+                object_id,
+                rotation,
+            } => {
+                session
+                    .spin_object_update(*object_id, rotation.clone(), now)
+                    .ok();
+            }
+            Command::SpinObjectStop { object_id } => {
+                session.spin_object_stop(*object_id, now).ok();
+            }
+            Command::DuplicateObjectsOnRay {
+                local_ids,
+                group_id,
+                ray_start,
+                ray_end,
+                bypass_raycast,
+                ray_end_is_intersection,
+                copy_centers,
+                copy_rotates,
+                ray_target_id,
+                duplicate_flags,
+            } => {
+                session
+                    .duplicate_objects_on_ray(
+                        local_ids,
+                        *group_id,
+                        ray_start.clone(),
+                        ray_end.clone(),
+                        *bypass_raycast,
+                        *ray_end_is_intersection,
+                        *copy_centers,
+                        *copy_rotates,
+                        *ray_target_id,
+                        *duplicate_flags,
+                        now,
+                    )
+                    .ok();
+            }
+            Command::RezRestoreToWorld { item } => {
+                session.rez_restore_to_world(item, now).ok();
+            }
+            Command::RezObjectFromNotecard { rez } => {
+                session.rez_object_from_notecard(rez, now).ok();
+            }
             Command::UploadAssetUdp {
                 asset_type,
                 data,

@@ -3,6 +3,7 @@
 use super::pcode;
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
+use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
 // Object interaction & editing (#17): value types for the editing surface.
@@ -568,4 +569,125 @@ impl ProductType {
             Self::Unknown
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Object commerce & rez (G6): purchase, pay, and the raycast/notecard rez paths.
+// ---------------------------------------------------------------------------
+
+/// One object to purchase in an `ObjectBuy`, as passed to
+/// [`Session::buy_object`](crate::Session::buy_object). The sale type and price
+/// must match what the object advertises (from its
+/// [`ObjectPropertiesFamily`](crate::ObjectPropertiesFamily) or
+/// [`ObjectProperties`](crate::ObjectProperties)); the simulator rejects a
+/// mismatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObjectBuyItem {
+    /// The object's region-local id (the root prim).
+    pub local_id: u32,
+    /// How the object is offered for sale.
+    pub sale_type: SaleType,
+    /// The advertised sale price, in L$.
+    pub sale_price: i32,
+}
+
+/// The parameters for rezzing an in-world object out of an embedded notecard
+/// asset (`RezObjectFromNotecard`), as passed to
+/// [`Session::rez_object_from_notecard`](crate::Session::rez_object_from_notecard).
+/// The ray fields place the new object exactly as the regular inventory-rez
+/// path does.
+#[derive(Debug, Clone, PartialEq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "mirrors the independent boolean toggles of the RezObjectFromNotecard wire block"
+)]
+pub struct NotecardRez {
+    /// The active group the new object is set to ([`Uuid::nil`] for none).
+    pub group_id: Uuid,
+    /// The task (prim) whose inventory holds the notecard, when rezzing from an
+    /// in-world object's contents ([`Uuid::nil`] when rezzing from the agent's
+    /// own inventory notecard).
+    pub from_task_id: Uuid,
+    /// When set, the simulator trusts `ray_end` rather than raycasting.
+    pub bypass_raycast: bool,
+    /// The ray's start point (region-local).
+    pub ray_start: Vector,
+    /// The ray's end point (region-local).
+    pub ray_end: Vector,
+    /// The object the ray is cast against ([`Uuid::nil`] for the terrain).
+    pub ray_target_id: Uuid,
+    /// Whether `ray_end` is the actual intersection point.
+    pub ray_end_is_intersection: bool,
+    /// Whether the rezzed object should be left selected.
+    pub rez_selected: bool,
+    /// Whether to remove the source notecard item after rezzing.
+    pub remove_item: bool,
+    /// The item flags to apply to the rezzed object.
+    pub item_flags: u32,
+    /// The group permissions mask for the rezzed object.
+    pub group_mask: u32,
+    /// The everyone permissions mask for the rezzed object.
+    pub everyone_mask: u32,
+    /// The next-owner permissions mask for the rezzed object.
+    pub next_owner_mask: u32,
+    /// The notecard inventory item the object asset is embedded in.
+    pub notecard_item_id: Uuid,
+    /// The object that holds the notecard ([`Uuid::nil`] when the notecard is in
+    /// the agent's own inventory).
+    pub object_id: Uuid,
+    /// The embedded inventory item ids to rez out of the notecard.
+    pub item_ids: Vec<Uuid>,
+}
+
+/// A full inventory item to restore to the world at its last in-world position
+/// (`RezRestoreToWorld`), as passed to
+/// [`Session::rez_restore_to_world`](crate::Session::rez_restore_to_world). The
+/// message is [`UDPDeprecated`] on the wire, but a viewer can still send it; the
+/// simulator rezzes the object back where it last sat.
+///
+/// [`UDPDeprecated`]: https://wiki.secondlife.com/wiki/Message_Layout
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestoreItem {
+    /// The inventory item id to restore.
+    pub item_id: Uuid,
+    /// The folder the item lives in.
+    pub folder_id: Uuid,
+    /// The item's creator (for the rezzed object's permissions).
+    pub creator_id: Uuid,
+    /// The item's owner (for the rezzed object's permissions).
+    pub owner_id: Uuid,
+    /// The group the item is set to (for permissions).
+    pub group_id: Uuid,
+    /// The base permissions mask.
+    pub base_mask: u32,
+    /// The owner permissions mask.
+    pub owner_mask: u32,
+    /// The group permissions mask.
+    pub group_mask: u32,
+    /// The everyone permissions mask.
+    pub everyone_mask: u32,
+    /// The next-owner permissions mask.
+    pub next_owner_mask: u32,
+    /// Whether the item is group-owned.
+    pub group_owned: bool,
+    /// A caller-chosen transaction id correlating the operation.
+    pub transaction_id: Uuid,
+    /// The asset type (`AssetType`).
+    pub asset_type: i8,
+    /// The inventory type (`InventoryType`).
+    pub inv_type: i8,
+    /// The item flags.
+    pub flags: u32,
+    /// How the item is offered for sale.
+    pub sale_type: SaleType,
+    /// The sale price, in L$.
+    pub sale_price: i32,
+    /// The item name.
+    pub name: String,
+    /// The item description.
+    pub description: String,
+    /// The creation timestamp (seconds since the Unix epoch).
+    pub creation_date: i32,
+    /// The item's CRC.
+    pub crc: u32,
 }
