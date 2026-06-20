@@ -246,6 +246,7 @@ fn on_events(
             | SlSessionEvent::DirLandReply { .. }
             | SlSessionEvent::AvatarPickerReply { .. }
             | SlSessionEvent::PlacesReply { .. }
+            | SlSessionEvent::EventInfoReply { .. }
             | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged { region_handle, sim } => {

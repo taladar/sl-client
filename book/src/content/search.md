@@ -77,6 +77,34 @@ Three dedicated queries cover the remaining directory tabs:
 The places and classified replies also carry a `status` word
 (`STATUS_SEARCH_PLACES_*` / `STATUS_SEARCH_CLASSIFIEDS_*`).
 
+## Events directory
+
+A `DirEventResult` (or the events directory floater) only carries an event's
+summary; its `event_id` keys the rest. `EventInfoRequest` fetches the full
+listing, which arrives as `Event::EventInfoReply` carrying an `EventInfo`: the
+running avatar (`creator`), name, category, description, the human-readable
+`date` plus a Unix `date_utc`, the `duration` in minutes, the cover charge
+(`cover` non-zero, with the L$ `amount`), the region name, the global position
+and the `EVENT_FLAG_*` maturity flags.
+
+```rust,ignore
+session.event_info_request(event_id, now)?;
+// later: Event::EventInfoReply { info }
+```
+
+Two fire-and-forget requests manage event reminders (there is no direct reply):
+`EventNotificationAddRequest` subscribes to a reminder as the event approaches,
+and `EventNotificationRemoveRequest` cancels it.
+
+```rust,ignore
+session.event_notification_add_request(event_id, now)?;
+session.event_notification_remove_request(event_id, now)?;
+```
+
+The `EventLocationRequest` / `EventLocationReply` pair is *not* wrapped: those
+are trusted simulator↔dataserver messages the viewer never sends or receives
+(the event's location already arrives in `EventInfoReply`'s global position).
+
 ## Avatar-name autocomplete
 
 `AvatarPickerRequest` is the lookup behind the avatar picker: send a partial
@@ -101,19 +129,21 @@ price).
 
 The simulator side mirrors every query and reply. Each inbound query surfaces as
 a `ServerEvent` (`ServerEvent::DirFindQuery`, `DirPlacesQuery`, `DirLandQuery`,
-`DirClassifiedQuery`, `AvatarPickerRequest`, `PlacesQuery`) and `SimSession`
-gains a matching reply encoder (`send_dir_people_reply`,
+`DirClassifiedQuery`, `AvatarPickerRequest`, `PlacesQuery`, `EventInfoRequest`,
+`EventNotificationAddRequest`, `EventNotificationRemoveRequest`) and
+`SimSession` gains a matching reply encoder (`send_dir_people_reply`,
 `send_dir_groups_reply`, `send_dir_events_reply`, `send_dir_classified_reply`,
 `send_dir_places_reply`, `send_dir_land_reply`, `send_avatar_picker_reply`,
-`send_places_reply`), so the whole surface round-trips through the real wire
-path.
+`send_places_reply`, `send_event_info_reply`), so the whole surface round-trips
+through the real wire path.
 
 ## REPL
 
 The REPL exposes one command per query: `dir_find_query`, `dir_places_query`,
-`dir_land_query`, `dir_classified_query`, `avatar_picker_request` and
-`places_query`. Flags are passed as raw `u32` bit values (the `DFQ_*` /
-`ST_*` numbers), so for a people search you might run:
+`dir_land_query`, `dir_classified_query`, `avatar_picker_request`,
+`places_query`, `event_info_request`, `event_notification_add_request` and
+`event_notification_remove_request`. Flags are passed as raw `u32` bit values
+(the `DFQ_*` / `ST_*` numbers), so for a people search you might run:
 
 ```text
 dir_find_query <query_id> alice 3 0

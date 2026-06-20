@@ -57,7 +57,11 @@ use sl_wire::messages::{
     EjectGroupMemberRequest, EjectGroupMemberRequestAgentDataBlock,
     EjectGroupMemberRequestEjectDataBlock, EjectGroupMemberRequestGroupDataBlock,
     EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
-    EstateOwnerMessageParamListBlock, FetchInventoryDescendents,
+    EstateOwnerMessageParamListBlock, EventInfoRequest, EventInfoRequestAgentDataBlock,
+    EventInfoRequestEventDataBlock, EventNotificationAddRequest,
+    EventNotificationAddRequestAgentDataBlock, EventNotificationAddRequestEventDataBlock,
+    EventNotificationRemoveRequest, EventNotificationRemoveRequestAgentDataBlock,
+    EventNotificationRemoveRequestEventDataBlock, FetchInventoryDescendents,
     FetchInventoryDescendentsAgentDataBlock, FetchInventoryDescendentsInventoryDataBlock,
     FindAgent, FindAgentAgentBlockBlock, GenericMessage, GenericMessageAgentDataBlock,
     GenericMessageMethodDataBlock, GenericMessageParamListBlock, GodKickUser,
@@ -1996,6 +2000,57 @@ impl Circuit {
                 category: category_to_wire(category),
                 sim_name: with_nul(sim_name),
             },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `EventInfoRequest` reliably: the full-detail lookup for an
+    /// in-world event by id.
+    pub(crate) fn send_event_info_request(
+        &mut self,
+        event_id: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::EventInfoRequest(EventInfoRequest {
+            agent_data: EventInfoRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            event_data: EventInfoRequestEventDataBlock { event_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `EventNotificationAddRequest` reliably: subscribe to a reminder
+    /// for an in-world event.
+    pub(crate) fn send_event_notification_add_request(
+        &mut self,
+        event_id: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::EventNotificationAddRequest(EventNotificationAddRequest {
+            agent_data: EventNotificationAddRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            event_data: EventNotificationAddRequestEventDataBlock { event_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `EventNotificationRemoveRequest` reliably: cancel a previously
+    /// added event reminder.
+    pub(crate) fn send_event_notification_remove_request(
+        &mut self,
+        event_id: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::EventNotificationRemoveRequest(EventNotificationRemoveRequest {
+            agent_data: EventNotificationRemoveRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            event_data: EventNotificationRemoveRequestEventDataBlock { event_id },
         });
         self.send(&message, Reliability::Reliable, now)
     }

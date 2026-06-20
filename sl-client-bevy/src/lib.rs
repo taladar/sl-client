@@ -1545,6 +1545,17 @@ fn advance_running(
                     )
                     .ok();
             }
+            Command::EventInfoRequest { event_id } => {
+                session.event_info_request(*event_id, now).ok();
+            }
+            Command::EventNotificationAddRequest { event_id } => {
+                session.event_notification_add_request(*event_id, now).ok();
+            }
+            Command::EventNotificationRemoveRequest { event_id } => {
+                session
+                    .event_notification_remove_request(*event_id, now)
+                    .ok();
+            }
             Command::UploadAssetUdp {
                 asset_type,
                 data,

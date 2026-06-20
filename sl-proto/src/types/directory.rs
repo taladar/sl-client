@@ -307,6 +307,45 @@ pub struct PlacesResult {
     pub price: i32,
 }
 
+/// The full detail of a single in-world event, carried in an
+/// [`EventInfoReply`](crate::Event::EventInfoReply) in response to an
+/// [`EventInfoRequest`](crate::Command::EventInfoRequest). The event id comes
+/// from a [`DirEventResult`] of an events `DirFindQuery`, or from the events
+/// directory; this fills in the rest of the listing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EventInfo {
+    /// The event id (the same id passed to `EventInfoRequest`).
+    pub event_id: u32,
+    /// The avatar running the event (the viewer parses the `Creator` string as a
+    /// UUID; a non-UUID value reads as [`Uuid::nil`](uuid::Uuid::nil)).
+    pub creator: Uuid,
+    /// The event's name.
+    pub name: String,
+    /// The event's category (a human-readable label, e.g. `"Discussion"`).
+    pub category: String,
+    /// The event's description.
+    pub description: String,
+    /// The event's start time, as the human-readable string the dataserver
+    /// formats.
+    pub date: String,
+    /// The event's start time, as a Unix timestamp (seconds).
+    pub date_utc: u32,
+    /// The event's duration, in minutes.
+    pub duration: u32,
+    /// Whether a cover charge applies (non-zero) and, with it, the legacy cover
+    /// flag the dataserver sets.
+    pub cover: u32,
+    /// The cover charge, in L$ (meaningful only when [`cover`](Self::cover) is
+    /// non-zero).
+    pub amount: u32,
+    /// The name of the region the event is in.
+    pub sim_name: String,
+    /// The event's global position, in metres (`(x, y, z)`).
+    pub global_position: (f64, f64, f64),
+    /// The event flags (e.g. mature/adult; `EVENT_FLAG_*`).
+    pub flags: u32,
+}
+
 /// Converts a [`ParcelCategory`] to the signed wire byte the `*PlacesQuery`
 /// `Category` field uses.
 #[must_use]

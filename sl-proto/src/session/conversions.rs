@@ -46,6 +46,14 @@ pub(crate) fn trimmed_string(bytes: &[u8]) -> String {
         .to_owned()
 }
 
+/// Parses a UUID from a wire string field that carries a UUID in text form
+/// (e.g. the `Creator` of an `EventInfoReply`), dropping any trailing NUL
+/// padding. A value that does not parse becomes [`Uuid::nil`], matching the
+/// viewer's `LLUUID(buffer)` behaviour.
+pub(crate) fn parse_uuid_string(bytes: &[u8]) -> Uuid {
+    Uuid::parse_str(trimmed_string(bytes).trim()).unwrap_or_else(|_err| Uuid::nil())
+}
+
 /// Converts a wire array index that uses a negative value to mean "absent"
 /// (e.g. the `You`/`Prey` fields of `CoarseLocationUpdate`) into an
 /// `Option<usize>`: negative values become `None`.

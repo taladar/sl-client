@@ -13,9 +13,9 @@ use super::conversions::{
     inventory_item, inventory_item_from_create, inventory_offer_bucket, map_item, map_region_info,
     money_balance, neighbor_info, object_from_full_update, object_properties,
     offline_messages_from_llsd, pack_uuids, parcel_info, parcel_info_from_llsd,
-    parse_lure_region_handle, parse_mute_list, pick_info, region_identity, region_limits,
-    script_dialog, script_permission_request, server_appearance_update_from_llsd, skeleton_folder,
-    teleport_finish_from_llsd, trimmed_string,
+    parse_lure_region_handle, parse_mute_list, parse_uuid_string, pick_info, region_identity,
+    region_limits, script_dialog, script_permission_request, server_appearance_update_from_llsd,
+    skeleton_folder, teleport_finish_from_llsd, trimmed_string,
 };
 use super::{
     AGENT_UPDATE_INTERVAL, AssetTransfer, AssetUpload, CAP_AGENT_EXPERIENCES,
@@ -37,11 +37,11 @@ use crate::types::{
     Camera, ChatType, ClassifiedUpdate, ClickAction, CoarseLocation, CreateGroupParams,
     DeRezDestination, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags,
     DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DisconnectReason,
-    EstateAccessDelta, Event, FriendRights, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMember,
-    GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem,
-    InventoryOffer, LandSearchType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams,
-    MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType, NeighborInfo,
-    NewInventoryItem, Object, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
+    EstateAccessDelta, Event, EventInfo, FriendRights, GroupNoticeAttachment, GroupRoleEdit,
+    GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder,
+    InventoryItem, InventoryOffer, LandSearchType, LoadUrlRequest, LoginAccount, LoginHttpRequest,
+    LoginParams, MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType,
+    NeighborInfo, NewInventoryItem, Object, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
     ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelMediaCommand,
     ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
     PickUpdate, PlacesResult, PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability,
@@ -2125,6 +2125,28 @@ impl Session {
                             price: block.price,
                         })
                         .collect(),
+                });
+            }
+            // The full detail of an event, in reply to an `EventInfoRequest`.
+            AnyMessage::EventInfoReply(reply) => {
+                let data = &reply.event_data;
+                let [global_x, global_y, global_z] = data.global_pos;
+                self.events.push_back(Event::EventInfoReply {
+                    info: EventInfo {
+                        event_id: data.event_id,
+                        creator: parse_uuid_string(&data.creator),
+                        name: trimmed_string(&data.name),
+                        category: trimmed_string(&data.category),
+                        description: trimmed_string(&data.desc),
+                        date: trimmed_string(&data.date),
+                        date_utc: data.date_utc,
+                        duration: data.duration,
+                        cover: data.cover,
+                        amount: data.amount,
+                        sim_name: trimmed_string(&data.sim_name),
+                        global_position: (global_x, global_y, global_z),
+                        flags: data.event_flags,
+                    },
                 });
             }
             AnyMessage::GenericMessage(generic)
@@ -4456,6 +4478,54 @@ impl Session {
             sim_name,
             now,
         )?;
+        Ok(())
+    }
+
+    /// Requests the full detail of an in-world event via `EventInfoRequest`,
+    /// using the `event_id` from an events [`Event::DirEventsReply`] (or the
+    /// events directory). The reply arrives as [`Event::EventInfoReply`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn event_info_request(&mut self, event_id: u32, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_event_info_request(event_id, now)?;
+        Ok(())
+    }
+
+    /// Subscribes to a reminder for an in-world event via
+    /// `EventNotificationAddRequest`. There is no direct reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn event_notification_add_request(
+        &mut self,
+        event_id: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_event_notification_add_request(event_id, now)?;
+        Ok(())
+    }
+
+    /// Cancels a previously-added event reminder via
+    /// `EventNotificationRemoveRequest`. There is no direct reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn event_notification_remove_request(
+        &mut self,
+        event_id: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_event_notification_remove_request(event_id, now)?;
         Ok(())
     }
 

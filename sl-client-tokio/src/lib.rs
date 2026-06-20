@@ -947,6 +947,15 @@ impl Client {
                         Some(Command::PlacesQuery { query_id, transaction_id, query_text, flags, category, sim_name }) => {
                             self.session.places_query(query_id, transaction_id, &query_text, flags, category, &sim_name, Instant::now())?;
                         }
+                        Some(Command::EventInfoRequest { event_id }) => {
+                            self.session.event_info_request(event_id, Instant::now())?;
+                        }
+                        Some(Command::EventNotificationAddRequest { event_id }) => {
+                            self.session.event_notification_add_request(event_id, Instant::now())?;
+                        }
+                        Some(Command::EventNotificationRemoveRequest { event_id }) => {
+                            self.session.event_notification_remove_request(event_id, Instant::now())?;
+                        }
                         Some(Command::UploadAssetUdp { asset_type, data, temp_file, store_local }) => {
                             self.session.upload_asset_udp(asset_type, data, temp_file, store_local, Instant::now())?;
                         }

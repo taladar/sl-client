@@ -54,7 +54,8 @@ mod test {
         EconomyData, EconomyDataInfoBlock, EjectGroupMemberReply,
         EjectGroupMemberReplyAgentDataBlock, EjectGroupMemberReplyEjectDataBlock,
         EjectGroupMemberReplyGroupDataBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
-        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock, FindAgent,
+        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock, EventInfoReply,
+        EventInfoReplyAgentDataBlock, EventInfoReplyEventDataBlock, FindAgent,
         FindAgentAgentBlockBlock, FindAgentLocationBlockBlock, GenericMessage,
         GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GenericStreamingMessage,
         GenericStreamingMessageDataBlockBlock, GenericStreamingMessageMethodDataBlock,
@@ -4065,6 +4066,96 @@ mod test {
         assert_eq!(person.first_name, "Alice");
         assert_eq!(person.last_name, "Resident");
         assert!(person.online);
+        Ok(())
+    }
+
+    #[test]
+    fn event_info_request_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.event_info_request(42, now)?;
+        session.event_notification_add_request(42, now)?;
+        session.event_notification_remove_request(7, now)?;
+        let sent = drain(&mut session)?;
+
+        let info = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::EventInfoRequest(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("expected an EventInfoRequest")?;
+        assert_eq!(info.event_data.event_id, 42);
+
+        let add = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::EventNotificationAddRequest(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("expected an EventNotificationAddRequest")?;
+        assert_eq!(add.event_data.event_id, 42);
+
+        let remove = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::EventNotificationRemoveRequest(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("expected an EventNotificationRemoveRequest")?;
+        assert_eq!(remove.event_data.event_id, 7);
+        Ok(())
+    }
+
+    #[test]
+    fn event_info_reply_surfaces_detail() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let creator = uuid::Uuid::from_u128(0x33);
+        let message = AnyMessage::EventInfoReply(EventInfoReply {
+            agent_data: EventInfoReplyAgentDataBlock {
+                agent_id: uuid::Uuid::nil(),
+            },
+            event_data: EventInfoReplyEventDataBlock {
+                event_id: 42,
+                creator: format!("{creator}\0").into_bytes(),
+                name: b"Beach Party\0".to_vec(),
+                category: b"Discussion\0".to_vec(),
+                desc: b"Come along\0".to_vec(),
+                date: b"2026-06-20 12:00:00\0".to_vec(),
+                date_utc: 1_750_000_000,
+                duration: 60,
+                cover: 1,
+                amount: 50,
+                sim_name: b"Sandbox\0".to_vec(),
+                global_pos: [256_000.0, 257_000.0, 30.0],
+                event_flags: 0,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let info = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::EventInfoReply { info } => Some(info),
+                _ => None,
+            })
+            .ok_or("expected an EventInfoReply event")?;
+        assert_eq!(info.event_id, 42);
+        assert_eq!(info.creator, creator);
+        assert_eq!(info.name, "Beach Party");
+        assert_eq!(info.category, "Discussion");
+        assert_eq!(info.description, "Come along");
+        assert_eq!(info.date_utc, 1_750_000_000);
+        assert_eq!(info.duration, 60);
+        assert_eq!(info.cover, 1);
+        assert_eq!(info.amount, 50);
+        assert_eq!(info.sim_name, "Sandbox");
+        assert_eq!(info.global_position, (256_000.0, 257_000.0, 30.0));
         Ok(())
     }
 

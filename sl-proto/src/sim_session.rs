@@ -39,12 +39,12 @@ use sl_wire::messages::{
     DirPeopleReply, DirPeopleReplyAgentDataBlock, DirPeopleReplyQueryDataBlock,
     DirPeopleReplyQueryRepliesBlock, DirPlacesReply, DirPlacesReplyAgentDataBlock,
     DirPlacesReplyQueryDataBlock, DirPlacesReplyQueryRepliesBlock, DirPlacesReplyStatusDataBlock,
-    FindAgent, FindAgentAgentBlockBlock, FindAgentLocationBlockBlock, LogoutReply,
-    LogoutReplyAgentDataBlock, PacketAck, PlacesReply, PlacesReplyAgentDataBlock,
-    PlacesReplyQueryDataBlock, PlacesReplyTransactionDataBlock, StartPingCheck,
-    StartPingCheckPingIDBlock, UUIDGroupNameReply, UUIDGroupNameReplyUUIDNameBlockBlock,
-    UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock, ViewerEffect as ViewerEffectMessage,
-    ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
+    EventInfoReply, EventInfoReplyAgentDataBlock, EventInfoReplyEventDataBlock, FindAgent,
+    FindAgentAgentBlockBlock, FindAgentLocationBlockBlock, LogoutReply, LogoutReplyAgentDataBlock,
+    PacketAck, PlacesReply, PlacesReplyAgentDataBlock, PlacesReplyQueryDataBlock,
+    PlacesReplyTransactionDataBlock, StartPingCheck, StartPingCheckPingIDBlock, UUIDGroupNameReply,
+    UUIDGroupNameReplyUUIDNameBlockBlock, UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock,
+    ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
 };
 use sl_wire::{
     AnyMessage, ControlFlags, EventQueueEvent, Llsd, MessageId, PacketFlags, Reader, WireError,
@@ -60,7 +60,7 @@ use crate::types::directory::category_from_wire;
 use crate::types::{
     AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatType, CoarseLocation,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, GroupName, InstantMessage, LandSearchType, MapItem,
+    DirPeopleResult, DirPlaceResult, EventInfo, GroupName, InstantMessage, LandSearchType, MapItem,
     MapItemType, MapRegionInfo, ParcelCategory, PlacesResult, RegionIdentity, Reliability,
     RezAttachment, Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
@@ -375,6 +375,24 @@ pub enum ServerEvent {
         category: ParcelCategory,
         /// An optional region-name filter (empty for any region).
         sim_name: String,
+    },
+    /// The client requested an in-world event's full detail (`EventInfoRequest`);
+    /// the simulator answers with [`SimSession::send_event_info_reply`].
+    EventInfoRequest {
+        /// The event to look up.
+        event_id: u32,
+    },
+    /// The client subscribed to a reminder for an in-world event
+    /// (`EventNotificationAddRequest`). There is no direct reply.
+    EventNotificationAddRequest {
+        /// The event to be reminded about.
+        event_id: u32,
+    },
+    /// The client cancelled an event reminder (`EventNotificationRemoveRequest`).
+    /// There is no direct reply.
+    EventNotificationRemoveRequest {
+        /// The event whose reminder to cancel.
+        event_id: u32,
     },
     /// The client requested a clean logout (`LogoutRequest`); the simulator has
     /// replied with a `LogoutReply` and closed the session.
@@ -1154,6 +1172,43 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends an `EventInfoReply`: the full detail of an in-world event, in
+    /// response to a client's `EventInfoRequest` (surfaced as
+    /// [`ServerEvent::EventInfoRequest`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_event_info_reply(&mut self, info: &EventInfo, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let (global_x, global_y, global_z) = info.global_position;
+        let message = AnyMessage::EventInfoReply(EventInfoReply {
+            agent_data: EventInfoReplyAgentDataBlock {
+                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+            },
+            event_data: EventInfoReplyEventDataBlock {
+                event_id: info.event_id,
+                creator: with_nul(&info.creator.to_string()),
+                name: with_nul(&info.name),
+                category: with_nul(&info.category),
+                desc: with_nul(&info.description),
+                date: with_nul(&info.date),
+                date_utc: info.date_utc,
+                duration: info.duration,
+                cover: info.cover,
+                amount: info.amount,
+                sim_name: with_nul(&info.sim_name),
+                global_pos: [global_x, global_y, global_z],
+                event_flags: info.flags,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
     /// Sends a `StartPingCheck` to the client; the client answers with a
     /// `CompletePingCheck`. Returns the ping id sent (so a caller can match the
     /// reply), or `None` if the circuit is not open.
@@ -1584,6 +1639,23 @@ impl SimSession {
                     category: category_from_wire(query.query_data.category),
                     sim_name: trimmed_string(&query.query_data.sim_name),
                 });
+            }
+            AnyMessage::EventInfoRequest(request) => {
+                self.events.push_back(ServerEvent::EventInfoRequest {
+                    event_id: request.event_data.event_id,
+                });
+            }
+            AnyMessage::EventNotificationAddRequest(request) => {
+                self.events
+                    .push_back(ServerEvent::EventNotificationAddRequest {
+                        event_id: request.event_data.event_id,
+                    });
+            }
+            AnyMessage::EventNotificationRemoveRequest(request) => {
+                self.events
+                    .push_back(ServerEvent::EventNotificationRemoveRequest {
+                        event_id: request.event_data.event_id,
+                    });
             }
             AnyMessage::LogoutRequest(_) => {
                 self.send_logout_reply(now)?;
