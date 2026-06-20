@@ -364,6 +364,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     physical_events.len(),
                 );
             }
+            Event::CoarseLocationUpdate { locations, .. } => {
+                info!(
+                    "coarse-location update: {} nearby avatar(s)",
+                    locations.len()
+                );
+            }
+            Event::ViewerEffect(effects) => {
+                info!("{} viewer effect(s)", effects.len());
+            }
+            Event::FindAgentReply {
+                prey, locations, ..
+            } => {
+                info!(
+                    "find-agent reply for {prey}: {} location(s)",
+                    locations.len()
+                );
+            }
             Event::SoundTrigger {
                 sound_id,
                 object_id,

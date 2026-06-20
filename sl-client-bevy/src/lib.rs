@@ -1445,6 +1445,15 @@ fn advance_running(
                     .rez_attachments(*compound_id, *first_detach_all, attachments, now)
                     .ok();
             }
+            Command::ViewerEffect(effects) => {
+                session.send_viewer_effect(effects, now).ok();
+            }
+            Command::TrackAgent { prey_id } => {
+                session.track_agent(*prey_id, now).ok();
+            }
+            Command::FindAgent { hunter, prey } => {
+                session.find_agent(*hunter, *prey, now).ok();
+            }
             Command::UploadAssetUdp {
                 asset_type,
                 data,

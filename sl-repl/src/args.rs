@@ -174,7 +174,7 @@ fn parse_rotation(field: &str, value: &str) -> Result<Rotation, ReplError> {
 }
 
 /// Parse a hex string (an even number of `[0-9a-fA-F]` digits) into bytes.
-fn parse_hex(field: &str, value: &str) -> Result<Vec<u8>, ReplError> {
+pub(crate) fn parse_hex(field: &str, value: &str) -> Result<Vec<u8>, ReplError> {
     let invalid = || ReplError::InvalidArg {
         field: field.to_owned(),
         value: value.to_owned(),

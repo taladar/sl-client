@@ -27,9 +27,12 @@ use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
     AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
     AgentMovementCompleteSimDataBlock, ChatFromSimulator, ChatFromSimulatorChatDataBlock,
-    CompletePingCheck, CompletePingCheckPingIDBlock, LogoutReply, LogoutReplyAgentDataBlock,
+    CoarseLocationUpdate, CoarseLocationUpdateAgentDataBlock, CoarseLocationUpdateIndexBlock,
+    CoarseLocationUpdateLocationBlock, CompletePingCheck, CompletePingCheckPingIDBlock, FindAgent,
+    FindAgentAgentBlockBlock, FindAgentLocationBlockBlock, LogoutReply, LogoutReplyAgentDataBlock,
     PacketAck, StartPingCheck, StartPingCheckPingIDBlock, UUIDGroupNameReply,
     UUIDGroupNameReplyUUIDNameBlockBlock, UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock,
+    ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
 };
 use sl_wire::{
     AnyMessage, ControlFlags, EventQueueEvent, Llsd, MessageId, PacketFlags, Reader, WireError,
@@ -42,8 +45,9 @@ use crate::session::{
     build_map_block_reply, build_map_item_reply, instant_message, region_handshake_message,
 };
 use crate::types::{
-    AttachmentPoint, AvatarName, Camera, ChatType, GroupName, InstantMessage, MapItem, MapItemType,
-    MapRegionInfo, RegionIdentity, Reliability, RezAttachment, Throttle, Transmit,
+    AttachmentPoint, AvatarName, Camera, ChatType, CoarseLocation, GroupName, InstantMessage,
+    MapItem, MapItemType, MapRegionInfo, RegionIdentity, Reliability, RezAttachment, Throttle,
+    Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 
 /// How long to batch owed acknowledgements before flushing them as a `PacketAck`
@@ -254,6 +258,25 @@ pub enum ServerEvent {
         first_detach_all: bool,
         /// The items the client wore.
         attachments: Vec<RezAttachment>,
+    },
+    /// The client emitted one or more viewer effects (`ViewerEffect`): look-at /
+    /// point-at gaze hints, the editing/touch beam, and other transient HUD
+    /// effects. A simulator would relay these to other nearby viewers.
+    ViewerEffect(Vec<ViewerEffect>),
+    /// The client asked to track an agent's position (`TrackAgent`); the
+    /// simulator would stream the tracked agent's coarse location back via
+    /// [`SimSession::send_coarse_location_update`].
+    TrackAgent {
+        /// The agent to track.
+        prey_id: Uuid,
+    },
+    /// The client asked for an agent's global position (`FindAgent`); the
+    /// simulator answers with [`SimSession::send_find_agent_reply`].
+    FindAgent {
+        /// The requesting agent (the "hunter").
+        hunter: Uuid,
+        /// The agent to locate (the "prey").
+        prey: Uuid,
     },
     /// The client requested a clean logout (`LogoutRequest`); the simulator has
     /// replied with a `LogoutReply` and closed the session.
@@ -609,6 +632,119 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends a `CoarseLocationUpdate` with the coarse (minimap) positions of
+    /// nearby avatars. `you`/`prey` are indices into `locations` (the agent's own
+    /// entry and the tracked agent, if any); out-of-range or absent indices are
+    /// sent as `-1`. Sent unreliably (it is refreshed periodically).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_coarse_location_update(
+        &mut self,
+        locations: &[CoarseLocation],
+        you: Option<usize>,
+        prey: Option<usize>,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::CoarseLocationUpdate(CoarseLocationUpdate {
+            location: locations
+                .iter()
+                .map(|location| CoarseLocationUpdateLocationBlock {
+                    x: location.x,
+                    y: location.y,
+                    z: u8::try_from(location.z / 4).unwrap_or(u8::MAX),
+                })
+                .collect(),
+            index: CoarseLocationUpdateIndexBlock {
+                you: from_index(you),
+                prey: from_index(prey),
+            },
+            agent_data: locations
+                .iter()
+                .map(|location| CoarseLocationUpdateAgentDataBlock {
+                    agent_id: location.agent_id,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Unreliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `ViewerEffect` relaying `effects` to the client (look-at /
+    /// point-at gaze hints, beams, …) on behalf of `source_agent`. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_viewer_effect(
+        &mut self,
+        source_agent: Uuid,
+        effects: &[ViewerEffect],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ViewerEffect(ViewerEffectMessage {
+            agent_data: ViewerEffectAgentDataBlock {
+                agent_id: source_agent,
+                session_id: Uuid::nil(),
+            },
+            effect: effects
+                .iter()
+                .map(|effect| ViewerEffectEffectBlock {
+                    id: effect.id,
+                    agent_id: effect.agent_id,
+                    r#type: effect.effect_type.to_code(),
+                    duration: effect.duration,
+                    color: effect.color,
+                    type_data: effect.data.to_wire(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `FindAgent` reply carrying the located global `(x, y)` positions —
+    /// the answer to a client's `FindAgent` (surfaced as
+    /// [`ServerEvent::FindAgent`]). Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_find_agent_reply(
+        &mut self,
+        hunter: Uuid,
+        prey: Uuid,
+        locations: &[(f64, f64)],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::FindAgent(FindAgent {
+            agent_block: FindAgentAgentBlockBlock {
+                hunter,
+                prey,
+                space_ip: [0, 0, 0, 0],
+            },
+            location_block: locations
+                .iter()
+                .map(|&(global_x, global_y)| FindAgentLocationBlockBlock { global_x, global_y })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
     /// Sends a `StartPingCheck` to the client; the client answers with a
     /// `CompletePingCheck`. Returns the ping id sent (so a caller can match the
     /// reply), or `None` if the circuit is not open.
@@ -958,6 +1094,35 @@ impl SimSession {
                     attachments,
                 });
             }
+            AnyMessage::ViewerEffect(effect) => {
+                let effects = effect
+                    .effect
+                    .iter()
+                    .map(|block| {
+                        let effect_type = ViewerEffectType::from_code(block.r#type);
+                        ViewerEffect {
+                            id: block.id,
+                            agent_id: block.agent_id,
+                            effect_type,
+                            duration: block.duration,
+                            color: block.color,
+                            data: ViewerEffectData::from_wire(effect_type, &block.type_data),
+                        }
+                    })
+                    .collect();
+                self.events.push_back(ServerEvent::ViewerEffect(effects));
+            }
+            AnyMessage::TrackAgent(track) => {
+                self.events.push_back(ServerEvent::TrackAgent {
+                    prey_id: track.target_data.prey_id,
+                });
+            }
+            AnyMessage::FindAgent(find) => {
+                self.events.push_back(ServerEvent::FindAgent {
+                    hunter: find.agent_block.hunter,
+                    prey: find.agent_block.prey,
+                });
+            }
             AnyMessage::LogoutRequest(_) => {
                 self.send_logout_reply(now)?;
                 self.close(ServerEvent::LoggedOut);
@@ -1091,6 +1256,16 @@ fn with_nul(s: &str) -> Vec<u8> {
     let mut bytes = s.as_bytes().to_vec();
     bytes.push(0);
     bytes
+}
+
+/// Encodes an optional array index for the `You`/`Prey` fields of
+/// `CoarseLocationUpdate`: `None` (and any index that does not fit) becomes the
+/// "absent" sentinel `-1` (the inverse of the `index_into` decoder).
+fn from_index(index: Option<usize>) -> i16 {
+    match index {
+        Some(value) => i16::try_from(value).unwrap_or(-1),
+        None => -1,
+    }
 }
 
 /// Decodes the seven little-endian `f32` bits-per-second rates an `AgentThrottle`

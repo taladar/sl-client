@@ -24,6 +24,10 @@ Once logged in, the region pushes online/offline transitions for your friends:
 online or went offline. A client merges these into the friends list to show
 presence.
 
+To locate an agent in-world (a friend on the map, or any avatar nearby), see
+[Nearby Avatars & Viewer Effects](nearby.md): the coarse-location feed, plus the
+`TrackAgent` / `FindAgent` lookups.
+
 ## Managing friendships
 
 - **Offer / respond** — `Command::OfferFriendship`, then the recipient's

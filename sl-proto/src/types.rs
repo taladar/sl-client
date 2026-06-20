@@ -17,6 +17,7 @@ mod group;
 mod inventory;
 mod map;
 mod name;
+mod nearby;
 mod object;
 mod parcel;
 mod region;
@@ -59,6 +60,9 @@ pub use map::{
     NeighborInfo, RegionInfoUpdate,
 };
 pub use name::{AvatarName, GroupName};
+pub use nearby::{
+    CoarseLocation, LookAtType, PointAtType, ViewerEffect, ViewerEffectData, ViewerEffectType,
+};
 pub use object::{
     ExtendedMesh, FlexibleData, LightData, LightImage, NameValue, Object, ObjectExtraParams,
     ObjectMotion, ObjectProperties, ParticleSystem, PrimShapeParams, ReflectionProbe,

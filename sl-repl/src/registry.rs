@@ -21,13 +21,14 @@ use sl_proto::{
     AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, Command, ControlFlags,
     CreateGroupParams, DeRezDestination, EstateAccessDelta, ExperiencePermission, ExperienceUpdate,
     FriendRights, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
-    InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LindenAmount, MapItemType,
-    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MuteFlags,
-    MuteType, NewInventoryItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
+    InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LindenAmount, LookAtType,
+    MapItemType, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType,
+    MuteFlags, MuteType, NewInventoryItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
     ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
-    ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProfileUpdate, RegionInfoUpdate,
-    RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
-    VoiceProvisionRequest, Wearable, WearableType,
+    ParcelUpdate, PermissionField, PickUpdate, PointAtType, PrimShape, ProfileUpdate,
+    RegionInfoUpdate, RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable,
+    WearableType,
 };
 
 use crate::args::{self, Args};
@@ -514,6 +515,158 @@ fn parse_attachment_point(field: &str, value: &str) -> Result<AttachmentPoint, R
                 .ok_or_else(|| invalid(field, value, "attachment point"))?,
         ),
     })
+}
+
+/// Parse a [`ViewerEffectType`] from its name or wire byte.
+fn parse_viewer_effect_type(field: &str, value: &str) -> Result<ViewerEffectType, ReplError> {
+    Ok(match norm(value).as_str() {
+        "text" => ViewerEffectType::Text,
+        "icon" => ViewerEffectType::Icon,
+        "connector" => ViewerEffectType::Connector,
+        "flexibleobject" => ViewerEffectType::FlexibleObject,
+        "animalcontrols" => ViewerEffectType::AnimalControls,
+        "localanimationobject" => ViewerEffectType::LocalAnimationObject,
+        "cloth" => ViewerEffectType::Cloth,
+        "beam" => ViewerEffectType::Beam,
+        "glow" => ViewerEffectType::Glow,
+        "point" => ViewerEffectType::Point,
+        "trail" => ViewerEffectType::Trail,
+        "sphere" => ViewerEffectType::Sphere,
+        "spiral" => ViewerEffectType::Spiral,
+        "edit" => ViewerEffectType::Edit,
+        "lookat" => ViewerEffectType::LookAt,
+        "pointat" => ViewerEffectType::PointAt,
+        "voicevisualizer" => ViewerEffectType::VoiceVisualizer,
+        "nametag" => ViewerEffectType::NameTag,
+        "blob" => ViewerEffectType::Blob,
+        "resetskeleton" => ViewerEffectType::ResetSkeleton,
+        _ => ViewerEffectType::from_code(
+            value
+                .parse::<u8>()
+                .ok()
+                .ok_or_else(|| invalid(field, value, "viewer-effect type"))?,
+        ),
+    })
+}
+
+/// Parse a [`LookAtType`] from its name or wire byte.
+fn parse_lookat_type(field: &str, value: &str) -> Result<LookAtType, ReplError> {
+    Ok(match norm(value).as_str() {
+        "none" => LookAtType::None,
+        "idle" => LookAtType::Idle,
+        "autolisten" => LookAtType::AutoListen,
+        "freelook" => LookAtType::FreeLook,
+        "respond" => LookAtType::Respond,
+        "hover" => LookAtType::Hover,
+        "conversation" => LookAtType::Conversation,
+        "select" => LookAtType::Select,
+        "focus" => LookAtType::Focus,
+        "mouselook" => LookAtType::MouseLook,
+        "clear" => LookAtType::Clear,
+        _ => LookAtType::from_code(
+            value
+                .parse::<u8>()
+                .ok()
+                .ok_or_else(|| invalid(field, value, "look-at type"))?,
+        ),
+    })
+}
+
+/// Parse a [`PointAtType`] from its name or wire byte.
+fn parse_pointat_type(field: &str, value: &str) -> Result<PointAtType, ReplError> {
+    Ok(match norm(value).as_str() {
+        "none" => PointAtType::None,
+        "select" => PointAtType::Select,
+        "grab" => PointAtType::Grab,
+        "clear" => PointAtType::Clear,
+        _ => PointAtType::from_code(
+            value
+                .parse::<u8>()
+                .ok()
+                .ok_or_else(|| invalid(field, value, "point-at type"))?,
+        ),
+    })
+}
+
+/// Parse a `[u8; 4]` `RGBA` colour from an 8-hex-digit string, defaulting to
+/// opaque white when the field is absent.
+fn color_or_white(
+    args: &Args,
+    ctx: &dyn ReplContext,
+    field: &str,
+    pos: usize,
+) -> Result<[u8; 4], ReplError> {
+    let Some(value) = args.opt_str(ctx, field, pos)? else {
+        return Ok([255, 255, 255, 255]);
+    };
+    let bytes = args::parse_hex(field, &value)?;
+    <[u8; 4]>::try_from(bytes.as_slice())
+        .ok()
+        .ok_or_else(|| invalid(field, &value, "RGBA colour (8 hex digits)"))
+}
+
+/// An optional global `<x,y,z>` position as a `[f64; 3]`, defaulting to the
+/// origin.
+fn position_or_zero(
+    args: &Args,
+    ctx: &dyn ReplContext,
+    field: &str,
+    pos: usize,
+) -> Result<[f64; 3], ReplError> {
+    let (x, y, z) = global_or_zero(args, ctx, field, pos)?;
+    Ok([x, y, z])
+}
+
+/// The default [`ViewerEffectData`] kind for an effect type: structured for the
+/// look-at / point-at / spiral-family types, `raw` otherwise.
+const fn default_effect_data_kind(effect_type: ViewerEffectType) -> &'static str {
+    match effect_type {
+        ViewerEffectType::LookAt => "lookat",
+        ViewerEffectType::PointAt => "pointat",
+        ViewerEffectType::Beam
+        | ViewerEffectType::Glow
+        | ViewerEffectType::Point
+        | ViewerEffectType::Sphere
+        | ViewerEffectType::Spiral
+        | ViewerEffectType::Edit => "spiral",
+        _ => "raw",
+    }
+}
+
+/// Build the [`ViewerEffectData`] for a `viewer_effect` command: an explicit
+/// `data=` selector picks the layout, otherwise it is inferred from the effect
+/// type. The structured layouts read `source`/`target`/`position` (and a
+/// `look_at`/`point_at` kind); `raw` reads a `raw=<hex>` blob.
+fn parse_effect_data(
+    args: &Args,
+    ctx: &dyn ReplContext,
+    effect_type: ViewerEffectType,
+) -> Result<ViewerEffectData, ReplError> {
+    let selector = args.str_or(ctx, "data", 200, default_effect_data_kind(effect_type))?;
+    match norm(&selector).as_str() {
+        "lookat" => Ok(ViewerEffectData::LookAt {
+            source: args.uuid_or_nil(ctx, "source", 201)?,
+            target: args.uuid_or_nil(ctx, "target", 202)?,
+            target_position: position_or_zero(args, ctx, "position", 203)?,
+            look_at_type: parse_lookat_type("look_at", &args.str_or(ctx, "look_at", 204, "none")?)?,
+        }),
+        "pointat" => Ok(ViewerEffectData::PointAt {
+            source: args.uuid_or_nil(ctx, "source", 201)?,
+            target: args.uuid_or_nil(ctx, "target", 202)?,
+            target_position: position_or_zero(args, ctx, "position", 203)?,
+            point_at_type: parse_pointat_type(
+                "point_at",
+                &args.str_or(ctx, "point_at", 205, "none")?,
+            )?,
+        }),
+        "spiral" => Ok(ViewerEffectData::Spiral {
+            source: args.uuid_or_nil(ctx, "source", 201)?,
+            target: args.uuid_or_nil(ctx, "target", 202)?,
+            position: position_or_zero(args, ctx, "position", 203)?,
+        }),
+        "raw" => Ok(ViewerEffectData::Raw(args.bytes_or_empty(ctx, "raw", 206)?)),
+        _ => Err(invalid("data", &selector, "lookat|pointat|spiral|raw")),
+    }
 }
 
 /// Parse an [`ExperiencePermission`] from `allow`/`block`/`forget`.
@@ -2492,6 +2645,42 @@ fn all_specs() -> Vec<CommandSpec> {
                     compound_id,
                     first_detach_all,
                     attachments,
+                })
+            },
+        },
+        CommandSpec {
+            name: "viewer_effect",
+            usage: "<effect_type> [id=] [agent=] [duration=] [color=<hex8>] \
+                    [data=lookat|pointat|spiral|raw] [source=] [target=] [position=<x,y,z>] \
+                    [look_at=] [point_at=] [raw=<hex>]",
+            build: |args, ctx| {
+                let effect_type = enum_arg(args, ctx, "effect_type", 0, parse_viewer_effect_type)?;
+                Ok(Command::ViewerEffect(vec![ViewerEffect {
+                    id: args.uuid_or_nil(ctx, "id", 100)?,
+                    agent_id: args.uuid_or_nil(ctx, "agent", 101)?,
+                    effect_type,
+                    duration: args.parse_or(ctx, "duration", 102, "f32", 1.0_f32)?,
+                    color: color_or_white(args, ctx, "color", 103)?,
+                    data: parse_effect_data(args, ctx, effect_type)?,
+                }]))
+            },
+        },
+        CommandSpec {
+            name: "track_agent",
+            usage: "<prey_id>",
+            build: |args, ctx| {
+                Ok(Command::TrackAgent {
+                    prey_id: args.req_uuid(ctx, "prey_id", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "find_agent",
+            usage: "<hunter> <prey>",
+            build: |args, ctx| {
+                Ok(Command::FindAgent {
+                    hunter: args.req_uuid(ctx, "hunter", 0)?,
+                    prey: args.req_uuid(ctx, "prey", 1)?,
                 })
             },
         },

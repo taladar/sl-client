@@ -12,7 +12,7 @@ use crate::types::{
     DeRezDestination, GroupRoleEdit, GroupRoleMemberChange, ImDialog, InterestsUpdate,
     InventoryItem, Material, NewInventoryItem, ObjectFlagSettings, ObjectTransform,
     ParcelAccessEntry, ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProfileUpdate,
-    Reliability, RezAttachment, SaleType, Throttle, Wearable,
+    Reliability, RezAttachment, SaleType, Throttle, ViewerEffect, Wearable,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
@@ -52,20 +52,21 @@ use sl_wire::messages::{
     EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
     EstateOwnerMessageParamListBlock, FetchInventoryDescendents,
     FetchInventoryDescendentsAgentDataBlock, FetchInventoryDescendentsInventoryDataBlock,
-    GenericMessage, GenericMessageAgentDataBlock, GenericMessageMethodDataBlock,
-    GenericMessageParamListBlock, GodKickUser, GodKickUserUserInfoBlock, GodlikeMessage,
-    GodlikeMessageAgentDataBlock, GodlikeMessageMethodDataBlock, GodlikeMessageParamListBlock,
-    GrantUserRights, GrantUserRightsAgentDataBlock, GrantUserRightsRightsBlock,
-    GroupMembersRequest, GroupMembersRequestAgentDataBlock, GroupMembersRequestGroupDataBlock,
-    GroupNoticeRequest, GroupNoticeRequestAgentDataBlock, GroupNoticeRequestDataBlock,
-    GroupNoticesListRequest, GroupNoticesListRequestAgentDataBlock,
-    GroupNoticesListRequestDataBlock, GroupProfileRequest, GroupProfileRequestAgentDataBlock,
-    GroupProfileRequestGroupDataBlock, GroupRoleChanges, GroupRoleChangesAgentDataBlock,
-    GroupRoleChangesRoleChangeBlock, GroupRoleDataRequest, GroupRoleDataRequestAgentDataBlock,
-    GroupRoleDataRequestGroupDataBlock, GroupRoleMembersRequest,
-    GroupRoleMembersRequestAgentDataBlock, GroupRoleMembersRequestGroupDataBlock, GroupRoleUpdate,
-    GroupRoleUpdateAgentDataBlock, GroupRoleUpdateRoleDataBlock, GroupTitlesRequest,
-    GroupTitlesRequestAgentDataBlock, ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
+    FindAgent, FindAgentAgentBlockBlock, GenericMessage, GenericMessageAgentDataBlock,
+    GenericMessageMethodDataBlock, GenericMessageParamListBlock, GodKickUser,
+    GodKickUserUserInfoBlock, GodlikeMessage, GodlikeMessageAgentDataBlock,
+    GodlikeMessageMethodDataBlock, GodlikeMessageParamListBlock, GrantUserRights,
+    GrantUserRightsAgentDataBlock, GrantUserRightsRightsBlock, GroupMembersRequest,
+    GroupMembersRequestAgentDataBlock, GroupMembersRequestGroupDataBlock, GroupNoticeRequest,
+    GroupNoticeRequestAgentDataBlock, GroupNoticeRequestDataBlock, GroupNoticesListRequest,
+    GroupNoticesListRequestAgentDataBlock, GroupNoticesListRequestDataBlock, GroupProfileRequest,
+    GroupProfileRequestAgentDataBlock, GroupProfileRequestGroupDataBlock, GroupRoleChanges,
+    GroupRoleChangesAgentDataBlock, GroupRoleChangesRoleChangeBlock, GroupRoleDataRequest,
+    GroupRoleDataRequestAgentDataBlock, GroupRoleDataRequestGroupDataBlock,
+    GroupRoleMembersRequest, GroupRoleMembersRequestAgentDataBlock,
+    GroupRoleMembersRequestGroupDataBlock, GroupRoleUpdate, GroupRoleUpdateAgentDataBlock,
+    GroupRoleUpdateRoleDataBlock, GroupTitlesRequest, GroupTitlesRequestAgentDataBlock,
+    ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
     ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
     InviteGroupRequest, InviteGroupRequestAgentDataBlock, InviteGroupRequestGroupDataBlock,
     InviteGroupRequestInviteDataBlock, JoinGroupRequest, JoinGroupRequestAgentDataBlock,
@@ -144,12 +145,14 @@ use sl_wire::messages::{
     StartLureTargetDataBlock, TeleportLocationRequest, TeleportLocationRequestAgentDataBlock,
     TeleportLocationRequestInfoBlock, TeleportLureRequest, TeleportLureRequestInfoBlock,
     TerminateFriendship, TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock,
-    TransferRequest, TransferRequestTransferInfoBlock, UUIDGroupNameRequest,
-    UUIDGroupNameRequestUUIDNameBlockBlock, UUIDNameRequest, UUIDNameRequestUUIDNameBlockBlock,
-    UpdateInventoryFolder, UpdateInventoryFolderAgentDataBlock,
-    UpdateInventoryFolderFolderDataBlock, UpdateInventoryItem, UpdateInventoryItemAgentDataBlock,
-    UpdateInventoryItemInventoryDataBlock, UpdateMuteListEntry, UpdateMuteListEntryAgentDataBlock,
-    UpdateMuteListEntryMuteDataBlock, UseCircuitCode, UseCircuitCodeCircuitCodeBlock,
+    TrackAgent, TrackAgentAgentDataBlock, TrackAgentTargetDataBlock, TransferRequest,
+    TransferRequestTransferInfoBlock, UUIDGroupNameRequest, UUIDGroupNameRequestUUIDNameBlockBlock,
+    UUIDNameRequest, UUIDNameRequestUUIDNameBlockBlock, UpdateInventoryFolder,
+    UpdateInventoryFolderAgentDataBlock, UpdateInventoryFolderFolderDataBlock, UpdateInventoryItem,
+    UpdateInventoryItemAgentDataBlock, UpdateInventoryItemInventoryDataBlock, UpdateMuteListEntry,
+    UpdateMuteListEntryAgentDataBlock, UpdateMuteListEntryMuteDataBlock, UseCircuitCode,
+    UseCircuitCodeCircuitCodeBlock, ViewerEffect as ViewerEffectMessage,
+    ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
 };
 use sl_wire::{AnyMessage, PacketFlags, WireError, Writer, encode_datagram};
 use std::collections::{BTreeMap, VecDeque};
@@ -1760,6 +1763,73 @@ impl Circuit {
                     description: with_nul(&rez.description),
                 })
                 .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ViewerEffect` reliably, batching `effects` into one message
+    /// (look-at / point-at gaze hints, the editing/touch beam, and other
+    /// transient HUD effects). Each effect's `TypeData` is serialised from its
+    /// typed [`ViewerEffectData`](crate::ViewerEffectData).
+    pub(crate) fn send_viewer_effect(
+        &mut self,
+        effects: &[ViewerEffect],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ViewerEffect(ViewerEffectMessage {
+            agent_data: ViewerEffectAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            effect: effects
+                .iter()
+                .map(|effect| ViewerEffectEffectBlock {
+                    id: effect.id,
+                    agent_id: effect.agent_id,
+                    r#type: effect.effect_type.to_code(),
+                    duration: effect.duration,
+                    color: effect.color,
+                    type_data: effect.data.to_wire(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `TrackAgent` reliably, asking the simulator to track `prey_id`'s
+    /// position (streamed back via `CoarseLocationUpdate`).
+    pub(crate) fn send_track_agent(
+        &mut self,
+        prey_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::TrackAgent(TrackAgent {
+            agent_data: TrackAgentAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            target_data: TrackAgentTargetDataBlock { prey_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `FindAgent` reliably, asking the simulator for `prey`'s global
+    /// position on behalf of `hunter`. The request carries an empty location
+    /// block and a zero space address; the simulator answers with a `FindAgent`
+    /// carrying the found positions.
+    pub(crate) fn send_find_agent(
+        &mut self,
+        hunter: Uuid,
+        prey: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::FindAgent(FindAgent {
+            agent_block: FindAgentAgentBlockBlock {
+                hunter,
+                prey,
+                space_ip: [0, 0, 0, 0],
+            },
+            location_block: Vec::new(),
         });
         self.send(&message, Reliability::Reliable, now)
     }

@@ -5,15 +5,15 @@ use std::net::SocketAddr;
 use super::{
     ActiveGroup, AlertInfo, Asset, AssetType, AvatarAppearance, AvatarClassified,
     AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPick, AvatarProperties, ChatMessage,
-    ClassifiedInfo, DisconnectReason, EconomyData, EnvironmentSettings, EstateAccessKind,
-    EstateInfo, Friend, FriendRights, GroupMember, GroupMembership, GroupName, GroupNotice,
-    GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
+    ClassifiedInfo, CoarseLocation, DisconnectReason, EconomyData, EnvironmentSettings,
+    EstateAccessKind, EstateInfo, Friend, FriendRights, GroupMember, GroupMembership, GroupName,
+    GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, ImDialog, InstantMessage,
     InventoryFolder, InventoryItem, LoadUrlRequest, LoginAccount, MapItem, MapItemType,
     MapRegionInfo, Maturity, MoneyBalance, MuteEntry, NeighborInfo, Object, ObjectProperties,
     ParcelAccessEntry, ParcelAccessScope, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
     ParcelOverlayInfo, PickInfo, PlayingAnimation, RegionIdentity, RegionLimits, ScriptDialog,
     ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload, TeleportFlags,
-    TerrainPatch, Texture, TransferStatus, Wearable,
+    TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
 };
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
@@ -941,6 +941,32 @@ pub enum Event {
         /// the block and OpenSim never populates it), so the bytes are
         /// surfaced verbatim rather than decoded. Almost always empty.
         physical_events: Vec<Vec<u8>>,
+    },
+    /// Coarse (minimap) positions of nearby avatars (`CoarseLocationUpdate`).
+    /// The simulator pushes this periodically; each [`CoarseLocation`] gives an
+    /// avatar's whole-metre position relative to the region's south-west corner.
+    CoarseLocationUpdate {
+        /// The nearby avatars' coarse positions.
+        locations: Vec<CoarseLocation>,
+        /// The index of the agent's own entry in `locations`, if present.
+        you: Option<usize>,
+        /// The index of the tracked ("prey") agent in `locations`, if any (set
+        /// after a [`Command::TrackAgent`](crate::Command::TrackAgent)).
+        prey: Option<usize>,
+    },
+    /// Transient HUD effects from nearby avatars (`ViewerEffect`): look-at /
+    /// point-at gaze hints, the editing/touch beam, and the other effects a
+    /// viewer renders for a short time. A single message may batch several.
+    ViewerEffect(Vec<ViewerEffect>),
+    /// The reply to a [`Command::FindAgent`](crate::Command::FindAgent) lookup
+    /// (`FindAgent`): the located global positions of the queried agent.
+    FindAgentReply {
+        /// The requesting agent (the "hunter").
+        hunter: Uuid,
+        /// The located agent (the "prey").
+        prey: Uuid,
+        /// The found global `(x, y)` positions, in metres.
+        locations: Vec<(f64, f64)>,
     },
     /// A one-shot spatial sound the simulator wants played at a fixed location
     /// (`SoundTrigger` — e.g. a scripted `llTriggerSound`, a collision sound, or
