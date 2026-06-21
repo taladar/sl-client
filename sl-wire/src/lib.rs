@@ -21,6 +21,7 @@ mod object_cost;
 mod object_physics;
 mod parcel_flags;
 mod permissions;
+mod reflection_probe_flags;
 mod remote_parcel;
 mod resource_report;
 mod sim_features;
@@ -108,6 +109,7 @@ pub use object_physics::{
 };
 pub use parcel_flags::{ParcelFlags, RegionFlags, sim_access};
 pub use permissions::{Permissions, Permissions5};
+pub use reflection_probe_flags::ReflectionProbeFlags;
 pub use remote_parcel::{
     RemoteParcelRequest, build_remote_parcel_request, build_remote_parcel_response,
     parse_remote_parcel_reply, parse_remote_parcel_request,

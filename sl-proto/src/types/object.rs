@@ -4,6 +4,7 @@ use sl_types::attachment::AttachmentPoint;
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::Permissions5;
+use sl_wire::ReflectionProbeFlags;
 use uuid::Uuid;
 
 /// Linden `PCode` constants: the object-class byte (`p_code`) in an object
@@ -479,14 +480,11 @@ pub struct ReflectionProbe {
     pub ambiance: f32,
     /// The near-clip distance of the probe's reflection capture, in metres.
     pub clip_distance: f32,
-    /// Whether the influence volume is a box (`true`) rather than a sphere
-    /// (`false`) — `FLAG_BOX_VOLUME`.
-    pub is_box: bool,
-    /// Whether dynamic objects (e.g. avatars) are rendered into the probe —
-    /// `FLAG_DYNAMIC`.
-    pub is_dynamic: bool,
-    /// Whether the probe drives a realtime mirror — `FLAG_MIRROR`.
-    pub is_mirror: bool,
+    /// The probe's flag set (`FLAG_BOX_VOLUME` / `FLAG_DYNAMIC` / `FLAG_MIRROR`):
+    /// whether the influence volume is a box rather than a sphere, whether
+    /// dynamic objects (e.g. avatars) are rendered into the probe, and whether
+    /// the probe drives a realtime mirror.
+    pub flags: ReflectionProbeFlags,
 }
 
 /// Mode (`mMode`) bit flags for a [`TextureAnimation`] (`LLTextureAnim`), matching

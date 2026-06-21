@@ -21,11 +21,11 @@ mod test {
         ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
         ParcelFlags, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
         ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate, PointAtType,
-        Postcard, PrimShape, ProductType, ProfileUpdate, RegionInfoUpdate, Reliability,
-        RestoreItem, RezAttachment, SaleType, ScriptPermissions, Session, SkySettings, SoundFlags,
-        TeleportFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
-        group_powers, pcode,
+        Postcard, PrimShape, ProductType, ProfileUpdate, ReflectionProbeFlags, RegionInfoUpdate,
+        Reliability, RestoreItem, RezAttachment, SaleType, ScriptPermissions, Session, SkySettings,
+        SoundFlags, TeleportFlags, TerrainLayerType, Throttle, TransferStatus, Transmit,
+        ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
+        avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -9180,9 +9180,9 @@ mod test {
 
         let probe = extra.reflection_probe.ok_or("expected probe")?;
         assert!((probe.ambiance - 0.5).abs() < f32::EPSILON);
-        assert!(probe.is_box);
-        assert!(!probe.is_dynamic);
-        assert!(probe.is_mirror);
+        assert!(probe.flags.contains(ReflectionProbeFlags::BOX_VOLUME));
+        assert!(!probe.flags.contains(ReflectionProbeFlags::DYNAMIC));
+        assert!(probe.flags.contains(ReflectionProbeFlags::MIRROR));
         Ok(())
     }
 

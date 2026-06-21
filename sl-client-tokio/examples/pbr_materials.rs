@@ -20,8 +20,8 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use sl_client_tokio::{
-    Client, Command, DisconnectReason, Event, LoginParams, LoginRequest, Throttle, Uuid,
-    decode_texture_entry,
+    Client, Command, DisconnectReason, Event, LoginParams, LoginRequest, ReflectionProbeFlags,
+    Throttle, Uuid, decode_texture_entry,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -99,9 +99,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         object.local_id,
                         probe.ambiance,
                         probe.clip_distance,
-                        probe.is_box,
-                        probe.is_dynamic,
-                        probe.is_mirror,
+                        probe.flags.contains(ReflectionProbeFlags::BOX_VOLUME),
+                        probe.flags.contains(ReflectionProbeFlags::DYNAMIC),
+                        probe.flags.contains(ReflectionProbeFlags::MIRROR),
                     );
                 }
                 if !object.extra.render_material.is_empty() {
