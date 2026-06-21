@@ -458,6 +458,19 @@ complementing the existing `RequestMapBlocks`/`RequestMapItems`). Mixed.
 
 - [ ] G16 abuse reports, postcards, map-layer tiles.
 
+### G17 — Viewer freeze (receive-side event)
+
+`ViewerFrozenMessage` (Low 137, `Trusted`, sim→viewer): a single
+`FrozenData.Data` `BOOL` telling the viewer it has been frozen (`true`) or
+thawed (`false`) by an estate manager (`llfreezeavatar` / the estate-tools
+freeze). The frozen viewer suppresses its own movement/controls until thawed.
+Receive-only — decode into an `Event`; the server side gets a matching
+`SimSession::send_*` encoder. This was the one message deferred out of G13's
+alert set (it is a freeze toggle, not an alert string), so it follows the same
+receive-only pattern. OpenSim-testable (estate freeze).
+
+- [ ] G17 viewer freeze/thaw event.
+
 ## Book documentation
 
 Mirror each tier into `book/src/content/`, updating `book/src/SUMMARY.md`:
@@ -468,5 +481,5 @@ Mirror each tier into `book/src/content/`, updating `book/src/SUMMARY.md`:
   events).
 - Extend existing chapters: `region.md` (G7, G8, G14, plus G3 display names
   alongside the existing name resolution); `groups.md` (G10); `appearance.md`
-  (G11, G12); `friends.md` (G2 tracking/coarse-location); `world.md` (G13, G16);
-  `inventory.md`/`materials.md` (G15 where relevant).
+  (G11, G12); `friends.md` (G2 tracking/coarse-location); `world.md` (G13, G16,
+  G17); `inventory.md`/`materials.md` (G15 where relevant).
