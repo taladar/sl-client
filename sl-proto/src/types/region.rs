@@ -1,6 +1,7 @@
 //! Region identity, limits, chat and combat settings.
 
 use super::{Maturity, ProductType};
+use sl_wire::RegionHandle;
 use uuid::Uuid;
 
 /// A region's identity, maturity, and product type, parsed from `RegionHandshake`.
@@ -18,7 +19,7 @@ pub struct RegionIdentity {
     /// handle the session has learned for the simulator — seeded from the login
     /// response's `region_x` / `region_y` for the start region, and otherwise from
     /// `EnableSimulator` / object updates.
-    pub region_handle: u64,
+    pub region_handle: RegionHandle,
     /// The region's grid X coordinate (region index = the handle's global X metres
     /// divided by 256), derived from [`Self::region_handle`]; `0` when the handle
     /// is unknown.

@@ -9,7 +9,7 @@
 //! reply fails to decode). The inventory skeleton and group memberships already
 //! arrive unsolicited at login, so they are not re-requested here.
 
-use sl_proto::{Command, MapItemType, Uuid, VoiceProvisionRequest};
+use sl_proto::{Command, MapItemType, RegionHandle, Uuid, VoiceProvisionRequest};
 
 /// Build the ordered smoke-test battery of read-only requests for the logged-in
 /// agent `self_agent`.
@@ -54,7 +54,7 @@ pub fn smoke_battery(self_agent: Uuid) -> Vec<Command> {
         // World-map avatar overlay for the current region (handle 0).
         Command::RequestMapItems {
             item_type: MapItemType::AgentLocations,
-            region_handle: 0,
+            region_handle: RegionHandle(0),
         },
         // Voice: provision the account (default Vivox) and the parcel channel.
         Command::RequestVoiceAccount {

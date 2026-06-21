@@ -28,9 +28,10 @@ use sl_proto::{
     MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectPermMasks,
     ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
     ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, Permissions, Permissions5,
-    PickUpdate, PointAtType, Postcard, PrimShape, ProfileUpdate, RegionInfoUpdate, RestoreItem,
-    RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
+    PickUpdate, PointAtType, Postcard, PrimShape, ProfileUpdate, RegionHandle, RegionInfoUpdate,
+    RestoreItem, RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable,
+    WearableType,
 };
 
 use crate::args::{self, Args};
@@ -2138,7 +2139,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<region_handle> <position-vec> <look_at-vec>",
             build: |args, ctx| {
                 Ok(Command::Teleport {
-                    region_handle: args.req_parse(ctx, "region_handle", 0, "u64")?,
+                    region_handle: RegionHandle(args.req_parse(ctx, "region_handle", 0, "u64")?),
                     position: args.req_vector(ctx, "position", 1)?,
                     look_at: args.opt_vector(ctx, "look_at", 2)?.unwrap_or(Vector {
                         x: 1.0,
@@ -2385,7 +2386,13 @@ fn all_specs() -> Vec<CommandSpec> {
                 Ok(Command::RequestRemoteParcelId {
                     location: args.req_vector(ctx, "location", 0)?,
                     region_id: args.uuid_or_nil(ctx, "region_id", 1)?,
-                    region_handle: args.parse_or(ctx, "region_handle", 2, "u64", 0_u64)?,
+                    region_handle: RegionHandle(args.parse_or(
+                        ctx,
+                        "region_handle",
+                        2,
+                        "u64",
+                        0_u64,
+                    )?),
                 })
             },
         },
@@ -2656,7 +2663,13 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::RequestMapItems {
                     item_type: enum_arg(args, ctx, "item_type", 0, parse_map_item_type)?,
-                    region_handle: args.parse_or(ctx, "region_handle", 1, "u64", 0)?,
+                    region_handle: RegionHandle(args.parse_or(
+                        ctx,
+                        "region_handle",
+                        1,
+                        "u64",
+                        0_u64,
+                    )?),
                 })
             },
         },
@@ -4153,7 +4166,8 @@ mod tests {
 
     use sl_proto::{
         AbuseReportType, AgentPreferences, AssetType, ChatType, Command, ControlFlags,
-        FriendRights, LandStatReportType, MapItemType, MovementMode, ObjectBuyItem, SaleType, Uuid,
+        FriendRights, LandStatReportType, MapItemType, MovementMode, ObjectBuyItem, RegionHandle,
+        SaleType, Uuid,
     };
 
     use super::Registry;
@@ -4240,7 +4254,7 @@ mod tests {
         assert!(matches!(
             build("teleport 123456789 <1,2,3> <0,0,0>"),
             Ok(Command::Teleport {
-                region_handle: 123_456_789,
+                region_handle: RegionHandle(123_456_789),
                 ..
             })
         ));
@@ -4638,7 +4652,7 @@ mod tests {
             Ok(Command::RequestRemoteParcelId { location, region_id, region_handle })
                 if location.x.to_bits() == 128.0_f32.to_bits()
                     && region_id == Uuid::nil()
-                    && region_handle == 281_483_566_841_976
+                    && region_handle == RegionHandle(281_483_566_841_976)
         ));
     }
 

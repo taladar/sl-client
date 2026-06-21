@@ -16,10 +16,11 @@ use crate::types::{
     ParcelRequestResult, ParcelStatus, PickInfo, PlayingAnimation, PrimShapeParams, ProductType,
     RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits, ScriptDialog,
     ScriptPermissionRequest, ScriptPermissions, SkySettings, WaterSettings, avatar_texture,
-    grid_to_handle, handle_to_grid,
+    handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
+use sl_wire::RegionHandle;
 use sl_wire::messages::{
     AgentDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
     AvatarGroupsReplyGroupDataBlock, AvatarInterestsReplyPropertiesDataBlock,
@@ -99,8 +100,8 @@ pub(crate) fn pack_uuids(uuids: &[Uuid]) -> Vec<u8> {
 /// `BuildFakeParcelID`: the handle is the first eight little-endian bytes).
 /// Returns `0` for an id that is not a fake parcel id (e.g. a Second Life lure
 /// id), in which case the destination is learned from `TeleportFinish` instead.
-pub(crate) fn parse_lure_region_handle(lure_id: Uuid) -> u64 {
-    sl_wire::Reader::new(lure_id.as_bytes()).u64().unwrap_or(0)
+pub(crate) fn parse_lure_region_handle(lure_id: Uuid) -> RegionHandle {
+    RegionHandle(sl_wire::Reader::new(lure_id.as_bytes()).u64().unwrap_or(0))
 }
 
 /// A fully-specified outgoing `ImprovedInstantMessage`, the argument of
@@ -163,7 +164,7 @@ pub(crate) fn parse_mute_line(line: &str) -> Option<MuteEntry> {
 /// simulator); its grid coordinates are derived from it.
 pub(crate) fn region_identity(
     handshake: &sl_wire::messages::RegionHandshake,
-    region_handle: u64,
+    region_handle: RegionHandle,
 ) -> RegionIdentity {
     let info = &handshake.region_info;
     let info3 = &handshake.region_info3;
@@ -175,7 +176,7 @@ pub(crate) fn region_identity(
         |i4| i4.region_flags_extended,
     );
     let region_protocols = info4.map_or(0, |i4| i4.region_protocols);
-    let (grid_x, grid_y) = handle_to_grid(region_handle);
+    let (grid_x, grid_y) = region_handle.grid_coordinates();
     RegionIdentity {
         sim_name: trimmed_string(&info.sim_name),
         region_id: handshake.region_info2.region_id,
@@ -1282,7 +1283,7 @@ pub(crate) fn neighbor_info(info: &EnableSimulatorSimulatorInfoBlock) -> Neighbo
     let sim = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(info.ip)), port);
     let (grid_x, grid_y) = handle_to_grid(info.handle);
     NeighborInfo {
-        region_handle: info.handle,
+        region_handle: RegionHandle(info.handle),
         sim,
         grid_x,
         grid_y,
@@ -1309,7 +1310,7 @@ pub(crate) fn map_region_info(
         name,
         grid_x,
         grid_y,
-        region_handle: grid_to_handle(grid_x, grid_y),
+        region_handle: RegionHandle::from_grid(grid_x, grid_y),
         maturity: Maturity::from_sim_access(data.access),
         region_flags: data.region_flags,
         size_x: size
@@ -3243,7 +3244,7 @@ pub(crate) fn pack_quaternion_to_vec3(rotation: &Rotation) -> [f32; 3] {
 /// Builds an [`Object`] from a full `ObjectUpdate` object-data block.
 pub(crate) fn object_from_full_update(
     block: &ObjectUpdateObjectDataBlock,
-    region_handle: u64,
+    region_handle: RegionHandle,
 ) -> Object {
     Object {
         region_handle,

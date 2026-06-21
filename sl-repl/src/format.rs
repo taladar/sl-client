@@ -732,7 +732,7 @@ mod tests {
     use std::net::SocketAddr;
 
     use pretty_assertions::assert_eq;
-    use sl_proto::{Command, Diagnostic, Event, MessageId, Uuid, WireError};
+    use sl_proto::{Command, Diagnostic, Event, MessageId, RegionHandle, Uuid, WireError};
 
     use super::{format_command, format_diagnostic, format_event, hexdump};
     use crate::context::{NoContext, SessionContext};
@@ -802,10 +802,10 @@ mod tests {
             .parse()
             .unwrap_or_else(|_| SocketAddr::from(([127, 0, 0, 1], 9000)));
         let mut ctx = SessionContext::new();
-        ctx.set_region(1_099_511_628_032, "Da Boom");
+        ctx.set_region(RegionHandle(1_099_511_628_032), "Da Boom");
         let formatted = format_event(
             &Event::RegionChanged {
-                region_handle: 1_099_511_628_032,
+                region_handle: RegionHandle(1_099_511_628_032),
                 sim,
             },
             &ctx,

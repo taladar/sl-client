@@ -55,14 +55,14 @@ use crate::types::{
     RestoreItem, RezAttachment, SaleType, ScriptControl, ScriptControlAction, ScriptPermissions,
     ScriptTeleportRequest, SoundFlags, SoundPreload, TelehubInfo, TeleportFlags, TerrainLayerType,
     TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, Wearable, WearableType, global_to_handle, handle_to_grid,
+    ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::{
     AbuseReport, AnyMessage, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd, MessageId,
     ObjectMediaResponse, PacketFlags, ParcelVoiceInfo, Permissions, Permissions5, Reader,
-    VoiceAccountInfo, build_group_notice_bucket, build_login_request, message_name,
+    RegionHandle, VoiceAccountInfo, build_group_notice_bucket, build_login_request, message_name,
     parse_agent_preferences, parse_attachment_resources, parse_datagram, parse_display_names,
     parse_experience_ids, parse_experience_infos, parse_experience_permissions,
     parse_get_object_cost, parse_get_object_physics_data, parse_gltf_material_override,
@@ -223,7 +223,7 @@ impl Session {
             }
             "TeleportFinish" => {
                 if let Some(finish) = teleport_finish_from_llsd(body) {
-                    let region_handle = self.teleport_target.unwrap_or(0);
+                    let region_handle = self.teleport_target.unwrap_or(RegionHandle(0));
                     if matches!(self.state, SessionState::Teleporting) {
                         self.events.push_back(Event::TeleportFinished {
                             region_handle,
@@ -243,9 +243,10 @@ impl Session {
             // crossing.
             "EnableSimulator" => {
                 if let Some((handle, sim)) = enable_simulator_from_caps_llsd(body) {
+                    let handle = RegionHandle(handle);
                     self.open_child_circuit(sim, now)?;
                     self.regions.insert(sim, handle);
-                    let (grid_x, grid_y) = handle_to_grid(handle);
+                    let (grid_x, grid_y) = handle.grid_coordinates();
                     self.events
                         .push_back(Event::NeighborDiscovered(NeighborInfo {
                             region_handle: handle,
@@ -280,7 +281,7 @@ impl Session {
             // Promote the pre-opened child circuit for the destination to root.
             "CrossedRegion" if matches!(self.state, SessionState::Active) => {
                 if let Some((handle, dest, seed)) = crossed_region_from_caps_llsd(body) {
-                    self.promote_child_to_root(dest, handle, Some(seed), now)?;
+                    self.promote_child_to_root(dest, RegionHandle(handle), Some(seed), now)?;
                 } else {
                     self.caps_decode_failed(message);
                 }
@@ -593,7 +594,7 @@ impl Session {
     fn begin_handover(
         &mut self,
         dest: SocketAddr,
-        region_handle: u64,
+        region_handle: RegionHandle,
         seed_capability: Option<String>,
         now: Instant,
     ) -> Result<(), Error> {
@@ -712,7 +713,7 @@ impl Session {
     fn promote_child_to_root(
         &mut self,
         dest: SocketAddr,
-        region_handle: u64,
+        region_handle: RegionHandle,
         seed: Option<String>,
         now: Instant,
     ) -> Result<(), Error> {
@@ -816,7 +817,7 @@ impl Session {
                 // not itself carry the handle.
                 if let (Some(region_x), Some(region_y)) = (success.region_x, success.region_y) {
                     self.regions
-                        .insert(sim_addr, global_to_handle(region_x, region_y));
+                        .insert(sim_addr, RegionHandle::from_global(region_x, region_y));
                 }
                 self.seed_capability = Some(success.seed_capability.clone());
                 self.inventory_root = success.inventory_root;
@@ -1016,14 +1017,14 @@ impl Session {
     ) -> bool {
         match message {
             AnyMessage::ObjectUpdate(update) => {
-                let region_handle = update.region_data.region_handle;
+                let region_handle = RegionHandle(update.region_data.region_handle);
                 self.note_time_dilation(from, region_handle, update.region_data.time_dilation);
                 for block in &update.object_data {
                     self.upsert_object(from, object_from_full_update(block, region_handle));
                 }
             }
             AnyMessage::ObjectUpdateCompressed(update) => {
-                let region_handle = update.region_data.region_handle;
+                let region_handle = RegionHandle(update.region_data.region_handle);
                 self.note_time_dilation(from, region_handle, update.region_data.time_dilation);
                 for block in &update.object_data {
                     if let Some(object) = crate::object_update::compressed_object(
@@ -1038,7 +1039,7 @@ impl Session {
             AnyMessage::ObjectUpdateCached(update) => {
                 self.note_time_dilation(
                     from,
-                    update.region_data.region_handle,
+                    RegionHandle(update.region_data.region_handle),
                     update.region_data.time_dilation,
                 );
                 // We keep no persistent object cache across sessions, so any entry
@@ -1060,7 +1061,7 @@ impl Session {
             AnyMessage::ImprovedTerseObjectUpdate(update) => {
                 self.note_time_dilation(
                     from,
-                    update.region_data.region_handle,
+                    RegionHandle(update.region_data.region_handle),
                     update.region_data.time_dilation,
                 );
                 // Terse updates carry only motion. Apply to known objects; for
@@ -1085,7 +1086,7 @@ impl Session {
                         .objects
                         .get_mut(&from)
                         .and_then(|sim| sim.remove(&block.id))
-                        .map_or(0, |object| object.region_handle);
+                        .map_or(RegionHandle(0), |object| object.region_handle);
                     self.events.push_back(Event::ObjectRemoved {
                         region_handle,
                         local_id: block.id,
@@ -1115,7 +1116,7 @@ impl Session {
                 if message.method_data.method == GLTF_MATERIAL_OVERRIDE_METHOD =>
             {
                 if let Some(decoded) = parse_gltf_material_override(&message.data_block.data) {
-                    let region_handle = self.regions.get(&from).copied().unwrap_or(0);
+                    let region_handle = self.regions.get(&from).copied().unwrap_or(RegionHandle(0));
                     self.events.push_back(Event::GltfMaterialOverride {
                         region_handle,
                         local_id: decoded.local_id,
@@ -1136,7 +1137,7 @@ impl Session {
         let Some((layer, patches)) = terrain::decode_layer(data) else {
             return;
         };
-        let region_handle = self.regions.get(&from).copied().unwrap_or(0);
+        let region_handle = self.regions.get(&from).copied().unwrap_or(RegionHandle(0));
         let cache = self.terrain.entry(from).or_default();
         let mut emit = Vec::with_capacity(patches.len());
         for decoded in patches {
@@ -1154,7 +1155,7 @@ impl Session {
     /// differs from the last one seen for that sim (so a steady region does not
     /// re-emit on every update). `raw` is the 16-bit wire value; the event carries
     /// the `0.0`..=`1.0` fraction.
-    fn note_time_dilation(&mut self, from: SocketAddr, region_handle: u64, raw: u16) {
+    fn note_time_dilation(&mut self, from: SocketAddr, region_handle: RegionHandle, raw: u16) {
         if self.time_dilation.insert(from, raw) == Some(raw) {
             return;
         }
@@ -1172,7 +1173,7 @@ impl Session {
     fn upsert_object(&mut self, from: SocketAddr, mut object: Object) {
         // Remember this sim's region handle so terrain patches (whose `LayerData`
         // message carries no handle) can be labelled with it.
-        if object.region_handle != 0 {
+        if object.region_handle != RegionHandle(0) {
             self.regions.insert(from, object.region_handle);
         }
         let sim = self.objects.entry(from).or_default();
@@ -1282,7 +1283,7 @@ impl Session {
                     if let Some(circuit) = self.circuit.as_mut() {
                         circuit.send_region_handshake_reply(now)?;
                     }
-                    let region_handle = self.regions.get(&from).copied().unwrap_or(0);
+                    let region_handle = self.regions.get(&from).copied().unwrap_or(RegionHandle(0));
                     self.events
                         .push_back(Event::RegionInfoHandshake(Box::new(region_identity(
                             handshake,
@@ -1757,12 +1758,12 @@ impl Session {
                     let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(info.sim_ip)), port);
                     let seed = Some(String::from_utf8_lossy(&info.seed_capability).into_owned());
                     self.events.push_back(Event::TeleportFinished {
-                        region_handle: info.region_handle,
+                        region_handle: RegionHandle(info.region_handle),
                         sim: dest,
                         maturity: Maturity::from_sim_access(info.sim_access),
                         flags: TeleportFlags(info.teleport_flags),
                     });
-                    self.begin_handover(dest, info.region_handle, seed, now)?;
+                    self.begin_handover(dest, RegionHandle(info.region_handle), seed, now)?;
                 }
             }
             AnyMessage::CrossedRegion(crossed) => {
@@ -1776,7 +1777,7 @@ impl Session {
                     let port = region.sim_port.swap_bytes();
                     let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(region.sim_ip)), port);
                     let seed = Some(String::from_utf8_lossy(&region.seed_capability).into_owned());
-                    self.promote_child_to_root(dest, region.region_handle, seed, now)?;
+                    self.promote_child_to_root(dest, RegionHandle(region.region_handle), seed, now)?;
                 }
             }
             AnyMessage::StartPingCheck(ping) => {
@@ -2036,7 +2037,7 @@ impl Session {
                     owner_id: block.owner_id,
                     object_id: block.object_id,
                     parent_id: (!block.parent_id.is_nil()).then_some(block.parent_id),
-                    region_handle: block.handle,
+                    region_handle: RegionHandle(block.handle),
                     position: block.position.clone(),
                     gain: block.gain,
                 });
@@ -6755,11 +6756,11 @@ impl Session {
     pub fn request_map_items(
         &mut self,
         item_type: MapItemType,
-        region_handle: u64,
+        region_handle: RegionHandle,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_map_item_request(item_type.to_u32(), region_handle, now)?;
+        circuit.send_map_item_request(item_type.to_u32(), region_handle.0, now)?;
         Ok(())
     }
 
@@ -6818,7 +6819,7 @@ impl Session {
     }
 
     /// All cached scene objects in the region identified by `region_handle`.
-    pub fn objects_in_region(&self, region_handle: u64) -> impl Iterator<Item = &Object> {
+    pub fn objects_in_region(&self, region_handle: RegionHandle) -> impl Iterator<Item = &Object> {
         self.objects()
             .filter(move |object| object.region_handle == region_handle)
     }
@@ -6845,7 +6846,7 @@ impl Session {
     /// All cached terrain patches in the region identified by `region_handle`.
     pub fn terrain_patches_in_region(
         &self,
-        region_handle: u64,
+        region_handle: RegionHandle,
     ) -> impl Iterator<Item = &TerrainPatch> {
         self.terrain_patches()
             .filter(move |patch| patch.region_handle == region_handle)
@@ -7405,7 +7406,7 @@ impl Session {
     /// the request fails to encode.
     pub fn teleport_to(
         &mut self,
-        region_handle: u64,
+        region_handle: RegionHandle,
         position: Vector,
         look_at: Vector,
         now: Instant,
@@ -7414,7 +7415,7 @@ impl Session {
             return Err(Error::NotActive);
         }
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_teleport_location_request(region_handle, position, look_at, now)?;
+        circuit.send_teleport_location_request(region_handle.0, position, look_at, now)?;
         circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
         self.teleport_target = Some(region_handle);
         self.state = SessionState::Teleporting;

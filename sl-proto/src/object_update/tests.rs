@@ -2,7 +2,7 @@
 
 use pretty_assertions::assert_eq;
 use sl_types::lsl::Vector;
-use sl_wire::Writer;
+use sl_wire::{RegionHandle, Writer};
 use uuid::Uuid;
 
 use super::{
@@ -199,7 +199,7 @@ fn rich_compressed_blob() -> Vec<u8> {
 #[test]
 fn compressed_object_round_trips() -> Result<(), TestError> {
     let blob = rich_compressed_blob();
-    let object = compressed_object(&blob, 42, 0x55).ok_or("the blob decodes")?;
+    let object = compressed_object(&blob, RegionHandle(42), 0x55).ok_or("the blob decodes")?;
     // Spot-check a few decoded fields.
     assert_eq!(object.local_id, 424_242);
     assert_eq!(object.parent_id, 7);
@@ -213,7 +213,8 @@ fn compressed_object_round_trips() -> Result<(), TestError> {
     // reproduced byte-for-byte (the encoder is the exact inverse).
     let reencoded = encode_compressed_object(&object);
     assert_eq!(reencoded, blob);
-    let roundtrip = compressed_object(&reencoded, 42, 0x55).ok_or("the re-encoded blob decodes")?;
+    let roundtrip = compressed_object(&reencoded, RegionHandle(42), 0x55)
+        .ok_or("the re-encoded blob decodes")?;
     assert_eq!(roundtrip, object);
     Ok(())
 }
@@ -243,11 +244,11 @@ fn minimal_compressed_object_round_trips() -> Result<(), TestError> {
     writer.put_u32(0); // texture entry length
     let blob = writer.into_bytes();
 
-    let object = compressed_object(&blob, 1, 0).ok_or("the minimal blob decodes")?;
+    let object = compressed_object(&blob, RegionHandle(1), 0).ok_or("the minimal blob decodes")?;
     let reencoded = encode_compressed_object(&object);
     assert_eq!(reencoded, blob);
     assert_eq!(
-        compressed_object(&reencoded, 1, 0).ok_or("the re-encoded blob decodes")?,
+        compressed_object(&reencoded, RegionHandle(1), 0).ok_or("the re-encoded blob decodes")?,
         object
     );
     Ok(())

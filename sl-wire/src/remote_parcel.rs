@@ -26,6 +26,7 @@ use uuid::Uuid;
 
 use crate::endian::{u64_from_be, u64_to_be};
 use crate::llsd::Llsd;
+use crate::region_handle::RegionHandle;
 
 /// A decoded `RemoteParcelRequest` body: the region location to resolve, plus the
 /// region identity the grid uses to find it. Exactly one of
@@ -39,7 +40,7 @@ pub struct RemoteParcelRequest {
     /// The region's grid-wide id (nil when the viewer only knew the handle).
     pub region_id: Uuid,
     /// The 256 m region handle (zero when the viewer sent a `region_id` instead).
-    pub region_handle: u64,
+    pub region_handle: RegionHandle,
 }
 
 // ---------------------------------------------------------------------------
@@ -57,7 +58,7 @@ pub struct RemoteParcelRequest {
 pub fn build_remote_parcel_request(
     location: [f64; 3],
     region_id: Uuid,
-    region_handle: u64,
+    region_handle: RegionHandle,
 ) -> String {
     let mut map: HashMap<String, Llsd> = HashMap::new();
     let _previous = map.insert(
@@ -67,7 +68,7 @@ pub fn build_remote_parcel_request(
     if region_id.is_nil() {
         let _previous = map.insert(
             "region_handle".to_owned(),
-            Llsd::Binary(u64_to_be(region_handle).to_vec()),
+            Llsd::Binary(u64_to_be(region_handle.0).to_vec()),
         );
     } else {
         let _previous = map.insert("region_id".to_owned(), Llsd::Uuid(region_id));
@@ -109,7 +110,8 @@ pub fn parse_remote_parcel_request(body: &Llsd) -> RemoteParcelRequest {
         .and_then(Llsd::as_binary)
         .and_then(|bytes| bytes.get(0..8))
         .and_then(|head| <[u8; 8]>::try_from(head).ok())
-        .map_or(0, u64_from_be);
+        .map(|head| RegionHandle(u64_from_be(head)))
+        .unwrap_or_default();
     RemoteParcelRequest {
         location,
         region_id,
@@ -140,6 +142,7 @@ mod tests {
         parse_remote_parcel_request,
     };
     use crate::llsd::parse_llsd_xml;
+    use crate::region_handle::RegionHandle;
 
     /// Parses a UUID in a test, surfacing a `String` error for the `?` operator.
     fn uuid(text: &str) -> Result<Uuid, String> {
@@ -151,7 +154,7 @@ mod tests {
     #[test]
     fn request_with_region_id_round_trips() -> Result<(), String> {
         let region = uuid("11111111-1111-1111-1111-111111111111")?;
-        let body = build_remote_parcel_request([128.0, 64.5, 22.0], region, 0);
+        let body = build_remote_parcel_request([128.0, 64.5, 22.0], region, RegionHandle(0));
         let parsed =
             parse_remote_parcel_request(&parse_llsd_xml(&body).map_err(|e| format!("{e:?}"))?);
         assert_eq!(
@@ -159,7 +162,7 @@ mod tests {
             [128.0_f64, 64.5, 22.0].map(f64::to_bits)
         );
         assert_eq!(parsed.region_id, region);
-        assert_eq!(parsed.region_handle, 0);
+        assert_eq!(parsed.region_handle, RegionHandle(0));
         Ok(())
     }
 
@@ -167,7 +170,7 @@ mod tests {
     /// big-endian binary, which the parser reads back exactly.
     #[test]
     fn request_with_region_handle_round_trips() -> Result<(), String> {
-        let handle = 0x0003_F480_0003_F480_u64;
+        let handle = RegionHandle(0x0003_F480_0003_F480_u64);
         let body = build_remote_parcel_request([1.0, 2.0, 3.0], Uuid::nil(), handle);
         let parsed =
             parse_remote_parcel_request(&parse_llsd_xml(&body).map_err(|e| format!("{e:?}"))?);

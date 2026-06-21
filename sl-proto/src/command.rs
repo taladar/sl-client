@@ -14,9 +14,9 @@ use crate::{
     MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
     ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
     ParcelCategory, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, Postcard,
-    PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, Rotation,
-    SaleType, ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
-    Wearable,
+    PrimShape, ProfileUpdate, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem,
+    RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect,
+    VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -587,7 +587,7 @@ pub enum Command {
     /// Teleport to `position` (region-local) in the region `region_handle`.
     Teleport {
         /// The destination region handle.
-        region_handle: u64,
+        region_handle: RegionHandle,
         /// The destination position within the region.
         position: Vector,
         /// The look-at direction on arrival.
@@ -871,7 +871,7 @@ pub enum Command {
         /// The region's grid-wide id (nil to send `region_handle` instead).
         region_id: Uuid,
         /// The 256 m region handle (used when `region_id` is nil).
-        region_handle: u64,
+        region_handle: RegionHandle,
     },
     /// Request the region's estate config + access lists (`getinfo`); replies
     /// arrive as [`Event::EstateInfo`](crate::Event::EstateInfo) and [`Event::EstateAccessList`](crate::Event::EstateAccessList).
@@ -995,7 +995,7 @@ pub enum Command {
         /// The kind of item to request (avatars, telehubs, land for sale, …).
         item_type: MapItemType,
         /// The target region handle (0 = the current region).
-        region_handle: u64,
+        region_handle: RegionHandle,
     },
     /// Request the world-map image-tile layers (`MapLayerRequest`); the reply
     /// arrives as [`Event::MapLayers`](crate::Event::MapLayers).
