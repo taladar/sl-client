@@ -446,6 +446,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::MeanCollisionAlert(..) => "mean_collision_alert",
         Event::HealthMessage { .. } => "health_message",
         Event::CameraConstraint { .. } => "camera_constraint",
+        Event::ViewerFrozen { .. } => "viewer_frozen",
         Event::LoggedOut => "logged_out",
         Event::Disconnected(..) => "disconnected",
     }

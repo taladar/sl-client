@@ -733,6 +733,7 @@ impl Survey {
             | Event::MeanCollisionAlert(_)
             | Event::HealthMessage { .. }
             | Event::CameraConstraint { .. }
+            | Event::ViewerFrozen { .. }
             | Event::SimulatorFeatures(_)
             | Event::AgentPreferences(_)
             | Event::ObjectCosts(_)

@@ -1359,6 +1359,14 @@ pub enum Event {
         /// The camera collision plane as `[nx, ny, nz, d]`.
         plane: [f32; 4],
     },
+    /// An estate manager froze or thawed the agent (`ViewerFrozenMessage`):
+    /// `frozen` is `true` when the viewer has been frozen (it should suppress
+    /// its own movement and controls) and `false` when it has been thawed. This
+    /// is the receive side of the estate-tools freeze / `llFreezeAvatar`.
+    ViewerFrozen {
+        /// `true` when frozen, `false` when thawed.
+        frozen: bool,
+    },
     /// The session logged out cleanly (a `LogoutReply` was received).
     LoggedOut,
     /// The session disconnected for the given reason.

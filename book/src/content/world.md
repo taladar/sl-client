@@ -165,6 +165,17 @@ notifications a viewer surfaces directly to the user or its HUD:
 - **Camera constraint** — a `CameraConstraint` hands the viewer a collision
   plane `[nx, ny, nz, d]` so it can keep the third-person camera from clipping
   into an obstruction.
+- **Viewer freeze** — a `ViewerFrozenMessage` carries a single boolean telling
+  the viewer it has been frozen (`true`) or thawed (`false`) by an estate
+  manager or parcel owner (the estate-tools freeze, the parcel "freeze"
+  option, or `llFreezeAvatar`). The freeze is enforced **server-side**: the
+  simulator stops processing the agent's movement input, so walking, flying,
+  turning, and in-world interaction are all suppressed until it thaws (the
+  reference viewer's handler is a no-op — the message is purely informational,
+  letting the viewer show the user why their controls stopped responding).
+  Teleporting is **not** blocked: a teleport request is a separate message path
+  the freeze does not gate, so teleporting away (or relogging) is the usual way
+  out of a freeze, which is region-local.
 
 None of these has a reply; the client just acts on them.
 
@@ -216,10 +227,11 @@ None of these has a reply; the client just acts on them.
 >   `Command::SendPostcard` encodes the `SendPostcard` UDP message, decoded on
 >   the simulator side into `ServerEvent::PostcardReceived`.
 > - Simulator notifications are receive-only: `AlertMessage`,
->   `AgentAlertMessage`, `MeanCollisionAlert`, `HealthMessage`, and
->   `CameraConstraint` decode into the same-named `Event`s (the `AlertInfo` type
->   is in `sl-proto/src/types/script.rs`; `MeanCollision` /
+>   `AgentAlertMessage`, `MeanCollisionAlert`, `HealthMessage`,
+>   `CameraConstraint`, and `ViewerFrozenMessage` decode into the same-named
+>   `Event`s (`ViewerFrozenMessage` → `Event::ViewerFrozen { frozen }`; the
+>   `AlertInfo` type is in `sl-proto/src/types/script.rs`; `MeanCollision` /
 >   `MeanCollisionType` in `sl-proto/src/types/alert.rs`). The simulator side
 >   emits them with `SimSession::send_alert_message`,
 >   `send_agent_alert_message`, `send_mean_collision_alert`,
->   `send_health_message`, and `send_camera_constraint`.
+>   `send_health_message`, `send_camera_constraint`, and `send_viewer_frozen`.

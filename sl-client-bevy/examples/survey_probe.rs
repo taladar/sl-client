@@ -269,6 +269,7 @@ fn on_events(
             | SlSessionEvent::MeanCollisionAlert(_)
             | SlSessionEvent::HealthMessage { .. }
             | SlSessionEvent::CameraConstraint { .. }
+            | SlSessionEvent::ViewerFrozen { .. }
             | SlSessionEvent::SimulatorFeatures(_)
             | SlSessionEvent::AgentPreferences(_)
             | SlSessionEvent::ObjectCosts(_)
