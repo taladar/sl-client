@@ -20,8 +20,8 @@ use std::collections::BTreeMap;
 use sl_proto::{
     AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentMode, AttachmentPoint,
     Camera, ChatType, ClassifiedUpdate, Command, ControlFlags, CreateGroupParams, DeRezDestination,
-    DirFindFlags, EstateAccessDelta, ExperiencePermission, ExperienceUpdate, FriendRights,
-    GestureActivation, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit,
+    DetachOrder, DirFindFlags, EstateAccessDelta, ExperiencePermission, ExperienceUpdate,
+    FriendRights, GestureActivation, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit,
     GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType,
     LandSearchType, LandStatReportType, LindenAmount, LookAtType, MapItemType, Material,
     MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MovementMode, MuteFlags,
@@ -617,6 +617,17 @@ fn parse_movement_mode(field: &str, value: &str) -> Result<MovementMode, ReplErr
         "run" | "alwaysrun" | "always_run" | "true" | "yes" | "1" => MovementMode::AlwaysRun,
         "walk" | "false" | "no" | "0" => MovementMode::Walk,
         _ => return Err(invalid(field, value, "run|walk")),
+    })
+}
+
+/// Parse a [`DetachOrder`] from `detach`/`keep` (or the legacy boolean spelling:
+/// `true`/`yes`/`1` = [`DetachOrder::DetachAllFirst`],
+/// `false`/`no`/`0` = [`DetachOrder::Keep`]).
+fn parse_detach_order(field: &str, value: &str) -> Result<DetachOrder, ReplError> {
+    Ok(match norm(value).as_str() {
+        "detach" | "detachall" | "detach_all" | "true" | "yes" | "1" => DetachOrder::DetachAllFirst,
+        "keep" | "false" | "no" | "0" => DetachOrder::Keep,
+        _ => return Err(invalid(field, value, "detach|keep")),
     })
 }
 
@@ -3366,10 +3377,17 @@ fn all_specs() -> Vec<CommandSpec> {
         CommandSpec {
             name: "rez_attachments",
             usage: "<compound_id> <item_id:owner_id:attachment_point[:add|replace],…> \
-                    [first_detach_all=]",
+                    [detach=detach|keep]",
             build: |args, ctx| {
                 let compound_id = args.uuid_or_nil(ctx, "compound_id", 0)?;
-                let first_detach_all = args.bool_or(ctx, "first_detach_all", 100, false)?;
+                let detach = enum_arg_or(
+                    args,
+                    ctx,
+                    "detach",
+                    100,
+                    parse_detach_order,
+                    DetachOrder::Keep,
+                )?;
                 let mut attachments = Vec::new();
                 for record in args.vec_records(ctx, "attachments", 1)? {
                     let mode = match record.get(3) {
@@ -3396,7 +3414,7 @@ fn all_specs() -> Vec<CommandSpec> {
                 }
                 Ok(Command::RezAttachments {
                     compound_id,
-                    first_detach_all,
+                    detach,
                     attachments,
                 })
             },

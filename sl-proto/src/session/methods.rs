@@ -39,15 +39,15 @@ use crate::terrain;
 use crate::types::{
     AlertInfo, Asset, AssetType, AttachmentMode, AttachmentPoint, AvatarClassified, AvatarPick,
     AvatarPickerResult, Camera, ChatType, ClassifiedUpdate, ClickAction, CoarseLocation,
-    CreateGroupParams, DeRezDestination, Diagnostic, DirClassifiedResult, DirEventResult,
-    DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DisconnectReason,
-    EstateAccessDelta, EstateCovenant, Event, EventInfo, FollowCamProperty, FollowCamPropertyValue,
-    FriendRights, GestureActivation, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMember,
-    GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem,
-    InventoryOffer, LandSearchType, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
-    LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MeanCollision,
-    MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NeighborInfo,
-    NewInventoryItem, NotecardRez, Object, ObjectBuyItem, ObjectFlagSettings,
+    CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic, DirClassifiedResult,
+    DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
+    DisconnectReason, EstateAccessDelta, EstateCovenant, Event, EventInfo, FollowCamProperty,
+    FollowCamPropertyValue, FriendRights, GestureActivation, GroupNoticeAttachment, GroupRoleEdit,
+    GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder,
+    InventoryItem, InventoryOffer, LandSearchType, LandStatItem, LandStatReportType,
+    LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType, Material, Maturity,
+    MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
+    NeighborInfo, NewInventoryItem, NotecardRez, Object, ObjectBuyItem, ObjectFlagSettings,
     ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
     ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo,
     ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
@@ -4876,8 +4876,8 @@ impl Session {
 
     /// Wears several inventory items as attachments in one compound message via
     /// `RezMultipleAttachmentsFromInv`. `compound_id` is a fresh caller-chosen id
-    /// correlating the message's parts; `first_detach_all` detaches everything
-    /// currently worn first.
+    /// correlating the message's parts; `detach` says whether to detach
+    /// everything currently worn first.
     ///
     /// # Errors
     ///
@@ -4886,12 +4886,12 @@ impl Session {
     pub fn rez_attachments(
         &mut self,
         compound_id: Uuid,
-        first_detach_all: bool,
+        detach: DetachOrder,
         attachments: &[RezAttachment],
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_rez_multiple_attachments(compound_id, first_detach_all, attachments, now)?;
+        circuit.send_rez_multiple_attachments(compound_id, detach, attachments, now)?;
         Ok(())
     }
 

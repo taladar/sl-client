@@ -7,9 +7,9 @@
 use crate::{
     AbuseReport, AgentPreferences, AnyMessage, AssetType, AttachmentMode, AttachmentPoint, Camera,
     ChatType, ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, DeRezDestination,
-    DirFindFlags, EstateAccessDelta, ExperiencePermission, ExperienceUpdate, FriendRights,
-    GestureActivation, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMemberChange, IceCandidate,
-    InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LandSearchType,
+    DetachOrder, DirFindFlags, EstateAccessDelta, ExperiencePermission, ExperienceUpdate,
+    FriendRights, GestureActivation, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMemberChange,
+    IceCandidate, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LandSearchType,
     LandStatReportType, LindenAmount, MapItemType, Material, MaterialOverrideUpdate, MediaEntry,
     MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
     ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
@@ -1527,9 +1527,9 @@ pub enum Command {
         /// A fresh, caller-chosen id correlating the compound message's parts
         /// (the viewer generates a new UUID per request).
         compound_id: Uuid,
-        /// Detach everything currently worn before wearing these (`true`), e.g.
-        /// when replacing the whole outfit.
-        first_detach_all: bool,
+        /// Whether to first detach everything currently worn (e.g. when replacing
+        /// the whole outfit) or keep it and add these alongside.
+        detach: DetachOrder,
         /// The items to wear.
         attachments: Vec<RezAttachment>,
     },

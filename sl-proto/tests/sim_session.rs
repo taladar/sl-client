@@ -11,9 +11,9 @@ mod test {
     use pretty_assertions::assert_eq;
     use sl_proto::{
         AbuseReport, AbuseReportType, AlertInfo, AttachmentMode, AttachmentPoint, AvatarName,
-        AvatarPickerResult, ChatType, CoarseLocation, ControlFlags, DirClassifiedResult,
-        DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult,
-        DirPlaceResult, EstateCovenant, Event, EventInfo, FollowCamProperty,
+        AvatarPickerResult, ChatType, CoarseLocation, ControlFlags, DetachOrder,
+        DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
+        DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventInfo, FollowCamProperty,
         FollowCamPropertyValue, GestureActivation, GroupAccountDetails, GroupAccountDetailsEntry,
         GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
         GroupActiveProposalItem, GroupName, GroupVote, GroupVoteHistoryItem, ImDialog,
@@ -337,7 +337,7 @@ mod test {
             name: String::new(),
             description: String::new(),
         }];
-        client.rez_attachments(compound, false, &attachments, now)?;
+        client.rez_attachments(compound, DetachOrder::Keep, &attachments, now)?;
         pump(&mut client, &mut sim, now)?;
 
         let events = drain_server(&mut sim);
@@ -346,14 +346,14 @@ mod test {
             .find_map(|e| match e {
                 ServerEvent::RezAttachments {
                     compound_id,
-                    first_detach_all,
+                    detach,
                     attachments,
-                } => Some((*compound_id, *first_detach_all, attachments.clone())),
+                } => Some((*compound_id, *detach, attachments.clone())),
                 _ => None,
             })
             .ok_or("expected a RezAttachments server event")?;
         assert_eq!(rez.0, compound);
-        assert!(!rez.1);
+        assert_eq!(rez.1, DetachOrder::Keep);
         let first = rez.2.first().ok_or("first attachment")?;
         assert_eq!(first.attachment_point, AttachmentPoint::LeftHand);
         assert_eq!(first.mode, AttachmentMode::Add);

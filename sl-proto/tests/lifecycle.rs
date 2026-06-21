@@ -11,21 +11,22 @@ mod test {
     use sl_proto::{
         AbuseReport, AbuseReportType, AssetType, AttachmentMode, AttachmentPoint, Camera,
         ChatAudible, ChatSourceType, ChatType, ClassifiedUpdate, ClickAction, CoarseLocation,
-        ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, Diagnostic,
-        DirFindFlags, DisconnectReason, EnvironmentSettings, EstateAccessDelta, EstateAccessKind,
-        Event, FollowCamProperty, FriendRights, GestureActivation, GroupNoticeAttachment,
-        GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog,
-        ImageCodec, InterestsUpdate, InventoryItem, LandingType, LindenAmount, LoginAccount,
-        LoginParams, LookAtType, MapItemType, Material, Maturity, MeanCollisionType,
-        MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
-        ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-        ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelMediaCommand, ParcelRequestResult,
-        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5,
-        PickUpdate, PointAtType, Postcard, PrimShape, ProductType, ProfileUpdate,
-        ReflectionProbeFlags, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType,
-        ScriptPermissions, Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType,
-        Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        WaterSettings, WearableType, avatar_texture, group_powers, pcode,
+        ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, DetachOrder,
+        Diagnostic, DirFindFlags, DisconnectReason, EnvironmentSettings, EstateAccessDelta,
+        EstateAccessKind, Event, FollowCamProperty, FriendRights, GestureActivation,
+        GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
+        GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate, InventoryItem, LandingType,
+        LindenAmount, LoginAccount, LoginParams, LookAtType, MapItemType, Material, Maturity,
+        MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
+        NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform,
+        ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
+        ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
+        PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
+        ProductType, ProfileUpdate, ReflectionProbeFlags, RegionInfoUpdate, Reliability,
+        RestoreItem, RezAttachment, SaleType, ScriptPermissions, Session, SkySettings, SoundFlags,
+        TeleportFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
+        group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -4179,7 +4180,7 @@ mod test {
                 description: String::new(),
             },
         ];
-        session.rez_attachments(compound, true, &attachments, now)?;
+        session.rez_attachments(compound, DetachOrder::DetachAllFirst, &attachments, now)?;
         let sent = drain(&mut session)?;
         let rez = sent
             .iter()

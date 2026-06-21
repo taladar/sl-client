@@ -46,35 +46,35 @@ pub use sl_proto::{
     ActiveGroup, AgentPreferences, AnimatedObjects, AnyMessage, Asset, AssetType, AvatarClassified,
     AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, Camera, CameraError,
     ChatAudible, ChatMessage, ChatSourceType, ChatType, ClassifiedInfo, ClassifiedUpdate,
-    ClickAction, Command, ControlFlags, CreateGroupParams, DeRezDestination, Diagnostic,
-    DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, Event,
-    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh,
-    FlexibleData, Friend, FriendRights, GltfMaterialOverride, GroupMember, GroupMembership,
-    GroupNotice, GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit,
-    GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation,
-    IceCandidate, ImDialog, ImageCodec, InstantMessage, InterestsUpdate, InventoryFolder,
-    InventoryItem, InventoryOffer, InventoryType, Kilobits, LandingType, LegacyMaterial, LightData,
-    LightImage, LindenAmount, LoadUrlRequest, LoginAccount, LoginParams, LoginRequest,
-    LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
-    MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate,
-    Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
-    MovementMode, MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, Object,
-    ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks,
-    ObjectProperties, ObjectTransform, OpenSimExtras, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-    ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, PhysicsShapeTypes, PickInfo,
-    PickUpdate, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
-    ReflectionProbe, ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionFlags,
-    RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry,
-    RenderMaterialRef, Rotation, SaleType, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTeleportRequest, SculptData, SimulatorFeatures, SoundFlags,
-    SoundPreload, StartLocation, StartLocationParseError, TerrainLayerType, TerrainPatch, Texture,
-    TextureAnimation, TextureEntry, TextureFace, Throttle, ThrottleBuilder, ThrottleError,
-    TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable,
-    WearableType, avatar_texture, decode_particle_system, decode_texture_anim,
-    decode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
-    particle_pattern, pcode, sim_access, texture_anim_mode,
+    ClickAction, Command, ControlFlags, CreateGroupParams, DeRezDestination, DetachOrder,
+    Diagnostic, DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo,
+    Event, ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate,
+    ExtendedMesh, FlexibleData, Friend, FriendRights, GltfMaterialOverride, GroupMember,
+    GroupMembership, GroupNotice, GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleChange,
+    GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
+    HomeLocation, IceCandidate, ImDialog, ImageCodec, InstantMessage, InterestsUpdate,
+    InventoryFolder, InventoryItem, InventoryOffer, InventoryType, Kilobits, LandingType,
+    LegacyMaterial, LightData, LightImage, LindenAmount, LoadUrlRequest, LoginAccount, LoginParams,
+    LoginRequest, LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
+    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
+    MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction,
+    MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType, NeighborInfo,
+    NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse,
+    ObjectMotion, ObjectPermMasks, ObjectProperties, ObjectTransform, OpenSimExtras,
+    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
+    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
+    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
+    PhysicsShapeTypes, PickInfo, PickUpdate, PlayingAnimation, PrimShape, PrimShapeParams,
+    ProductType, ProfileUpdate, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
+    RegionCombatSettings, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability,
+    RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData,
+    SimulatorFeatures, SoundFlags, SoundPreload, StartLocation, StartLocationParseError,
+    TerrainLayerType, TerrainPatch, Texture, TextureAnimation, TextureEntry, TextureFace, Throttle,
+    ThrottleBuilder, ThrottleError, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo,
+    VoiceProvisionRequest, Wearable, WearableType, avatar_texture, decode_particle_system,
+    decode_texture_anim, decode_texture_entry, grid_to_handle, group_powers, handle_to_global,
+    handle_to_grid, particle_pattern, pcode, sim_access, texture_anim_mode,
 };
 
 mod appearance;
@@ -1051,8 +1051,8 @@ impl Client {
                         Some(Command::RezAttachment(rez)) => {
                             self.session.rez_attachment(&rez, Instant::now())?;
                         }
-                        Some(Command::RezAttachments { compound_id, first_detach_all, attachments }) => {
-                            self.session.rez_attachments(compound_id, first_detach_all, &attachments, Instant::now())?;
+                        Some(Command::RezAttachments { compound_id, detach, attachments }) => {
+                            self.session.rez_attachments(compound_id, detach, &attachments, Instant::now())?;
                         }
                         Some(Command::ViewerEffect(effects)) => {
                             self.session.send_viewer_effect(&effects, Instant::now())?;

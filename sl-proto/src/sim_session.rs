@@ -96,7 +96,7 @@ use crate::session::{
 use crate::types::directory::category_from_wire;
 use crate::types::{
     AlertInfo, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatType,
-    CoarseLocation, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
+    CoarseLocation, DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
     DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant, EventInfo,
     FollowCamPropertyValue, GestureActivation, GroupAccountDetails, GroupAccountSummary,
     GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem,
@@ -313,7 +313,7 @@ pub enum ServerEvent {
         /// The compound message's correlation id.
         compound_id: Uuid,
         /// Whether everything worn was detached first.
-        first_detach_all: bool,
+        detach: DetachOrder,
         /// The items the client wore.
         attachments: Vec<RezAttachment>,
     },
@@ -2762,7 +2762,7 @@ impl SimSession {
                     .collect();
                 self.events.push_back(ServerEvent::RezAttachments {
                     compound_id: rez.header_data.compound_msg_id,
-                    first_detach_all: rez.header_data.first_detach_all,
+                    detach: DetachOrder::from_first_detach_all(rez.header_data.first_detach_all),
                     attachments,
                 });
             }

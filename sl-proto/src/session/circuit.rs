@@ -10,9 +10,9 @@ use super::{
 use crate::types::directory::category_to_wire;
 use crate::types::{
     AssetType, AttachmentMode, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction,
-    CreateGroupParams, DeRezDestination, DirFindFlags, GestureActivation, GroupRoleEdit,
-    GroupRoleMemberChange, ImDialog, InterestsUpdate, InventoryItem, LandSearchType, Material,
-    MovementMode, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
+    CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, GestureActivation,
+    GroupRoleEdit, GroupRoleMemberChange, ImDialog, InterestsUpdate, InventoryItem, LandSearchType,
+    Material, MovementMode, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
     ObjectTransform, ParcelAccessEntry, ParcelCategory, ParcelUpdate, PermissionField, PickUpdate,
     Postcard, PrimShape, ProfileUpdate, Reliability, RestoreItem, RezAttachment, SaleType,
     Throttle, ViewerEffect, Wearable,
@@ -2109,13 +2109,13 @@ impl Circuit {
 
     /// Queues a `RezMultipleAttachmentsFromInv` reliably, wearing several
     /// inventory items as attachments in one compound message. `compound_id`
-    /// correlates the message's parts; `first_detach_all` detaches everything
+    /// correlates the message's parts; `detach` says whether to detach everything
     /// worn first. The permission/flags fields are left zero (see
     /// [`send_rez_single_attachment`](Self::send_rez_single_attachment)).
     pub(crate) fn send_rez_multiple_attachments(
         &mut self,
         compound_id: Uuid,
-        first_detach_all: bool,
+        detach: DetachOrder,
         attachments: &[RezAttachment],
         now: Instant,
     ) -> Result<(), WireError> {
@@ -2132,7 +2132,7 @@ impl Circuit {
             header_data: RezMultipleAttachmentsFromInvHeaderDataBlock {
                 compound_msg_id: compound_id,
                 total_objects,
-                first_detach_all,
+                first_detach_all: detach.detaches_all_first(),
             },
             object_data: attachments
                 .iter()

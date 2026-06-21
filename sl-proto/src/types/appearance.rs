@@ -728,6 +728,44 @@ impl AttachmentMode {
     }
 }
 
+/// Whether wearing a batch of attachments should first *detach everything
+/// currently worn* — replacing the whole outfit — or *keep* what is already worn
+/// and add the batch alongside it. This is the `FirstDetachAll` wire flag on
+/// `RezMultipleAttachmentsFromInv`, modelled as a named intent rather than a
+/// bare `bool`, carried by
+/// [`Command::RezAttachments`](crate::Command::RezAttachments) and its matching
+/// server event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetachOrder {
+    /// Detach everything currently worn before wearing the batch — replacing the
+    /// whole outfit (the `FirstDetachAll` flag is set).
+    DetachAllFirst,
+    /// Keep whatever is already worn and add the batch alongside it (the
+    /// `FirstDetachAll` flag is clear).
+    Keep,
+}
+
+impl DetachOrder {
+    /// Whether this order sets the `FirstDetachAll` wire flag: `true` for
+    /// [`DetachAllFirst`](Self::DetachAllFirst), `false` for [`Keep`](Self::Keep).
+    #[must_use]
+    pub const fn detaches_all_first(self) -> bool {
+        matches!(self, Self::DetachAllFirst)
+    }
+
+    /// The order for a `FirstDetachAll` flag bit:
+    /// [`DetachAllFirst`](Self::DetachAllFirst) when set, [`Keep`](Self::Keep)
+    /// when clear.
+    #[must_use]
+    pub const fn from_first_detach_all(first_detach_all: bool) -> Self {
+        if first_detach_all {
+            Self::DetachAllFirst
+        } else {
+            Self::Keep
+        }
+    }
+}
+
 /// An inventory item to wear as an attachment, passed to
 /// [`Command::RezAttachment`](crate::Command::RezAttachment) and
 /// [`Command::RezAttachments`](crate::Command::RezAttachments) (the
@@ -807,6 +845,25 @@ mod tests {
             AttachmentMode::from_add_flag(false),
             AttachmentMode::Replace
         );
+    }
+
+    #[test]
+    fn detach_order_maps_to_first_detach_all_flag() {
+        use super::DetachOrder;
+        assert!(DetachOrder::DetachAllFirst.detaches_all_first());
+        assert!(!DetachOrder::Keep.detaches_all_first());
+        assert_eq!(
+            DetachOrder::from_first_detach_all(true),
+            DetachOrder::DetachAllFirst
+        );
+        assert_eq!(DetachOrder::from_first_detach_all(false), DetachOrder::Keep);
+        // The flag round-trips bit-identically to the historical `bool`.
+        for order in [DetachOrder::DetachAllFirst, DetachOrder::Keep] {
+            assert_eq!(
+                DetachOrder::from_first_detach_all(order.detaches_all_first()),
+                order
+            );
+        }
     }
 
     #[test]
