@@ -5,15 +5,15 @@
 //! copies.
 
 use crate::{
-    AgentPreferences, AnyMessage, AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate,
-    ClickAction, ControlFlags, CreateGroupParams, DeRezDestination, DirFindFlags,
+    AbuseReport, AgentPreferences, AnyMessage, AssetType, AttachmentPoint, Camera, ChatType,
+    ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, DeRezDestination, DirFindFlags,
     EstateAccessDelta, ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation,
     GroupNoticeAttachment, GroupRoleEdit, GroupRoleMemberChange, IceCandidate, InterestsUpdate,
     InventoryItem, InventoryOffer, InventoryType, LandSearchType, LandStatReportType, LindenAmount,
     MapItemType, Material, MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MuteFlags,
     MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform,
     ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelReturnType, ParcelUpdate,
-    PermissionField, PickUpdate, PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability,
+    PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability,
     RestoreItem, RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
     ViewerEffect, VoiceProvisionRequest, Wearable,
 };
@@ -996,6 +996,21 @@ pub enum Command {
         /// The target region handle (0 = the current region).
         region_handle: u64,
     },
+    /// Request the world-map image-tile layers (`MapLayerRequest`); the reply
+    /// arrives as [`Event::MapLayers`](crate::Event::MapLayers).
+    RequestMapLayer,
+    /// File an abuse / bug report over the legacy `UserReport` UDP message.
+    /// Fire-and-forget; there is no reply.
+    SendAbuseReport(Box<AbuseReport>),
+    /// File an abuse / bug report over the modern `SendUserReport` capability
+    /// (a POST). Falls back to nothing if the cap is absent; prefer
+    /// [`Command::SendAbuseReport`] on grids without the cap (e.g. OpenSim).
+    /// Fire-and-forget; the simulator returns only an HTTP status.
+    SendAbuseReportViaCaps(Box<AbuseReport>),
+    /// Email a snapshot postcard over the `SendPostcard` UDP message (the
+    /// snapshot must already be uploaded as the referenced asset).
+    /// Fire-and-forget; there is no reply.
+    SendPostcard(Box<Postcard>),
     /// Request the full `ObjectUpdate` for the given region-local ids
     /// (`RequestMultipleObjects`); updates arrive as [`Event::ObjectAdded`](crate::Event::ObjectAdded) /
     /// [`Event::ObjectUpdated`](crate::Event::ObjectUpdated).

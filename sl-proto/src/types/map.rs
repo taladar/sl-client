@@ -304,6 +304,29 @@ impl MapItem {
     }
 }
 
+/// One world-map image-tile layer from a `MapLayerReply` (`LayerData` block):
+/// the texture covering a rectangular run of regions on the grid. The world map
+/// stitches these tiles into the zoomed-out map; `MapBlockReply` then fills in
+/// the per-region names and details ([`MapRegionInfo`]).
+///
+/// The rectangle bounds are **inclusive grid coordinates** (region indices):
+/// the tile covers regions `left..=right` by `bottom..=top`. Second Life's main
+/// grid is a single global layer (`left = bottom = 0`, `right = top` very large);
+/// OpenSim grids report their own coverage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapLayer {
+    /// The left (minimum x) grid coordinate the tile covers, inclusive.
+    pub left: u32,
+    /// The right (maximum x) grid coordinate the tile covers, inclusive.
+    pub right: u32,
+    /// The top (maximum y) grid coordinate the tile covers, inclusive.
+    pub top: u32,
+    /// The bottom (minimum y) grid coordinate the tile covers, inclusive.
+    pub bottom: u32,
+    /// The map-tile texture id for this layer.
+    pub image_id: Uuid,
+}
+
 /// A neighbouring simulator announced via `EnableSimulator`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NeighborInfo {

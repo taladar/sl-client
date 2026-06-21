@@ -88,7 +88,8 @@ use uuid::Uuid;
 
 use crate::error::Error;
 use crate::session::{
-    build_map_block_reply, build_map_item_reply, instant_message, region_handshake_message,
+    build_map_block_reply, build_map_item_reply, build_map_layer_reply, instant_message,
+    region_handshake_message,
 };
 use crate::types::directory::category_from_wire;
 use crate::types::{
@@ -97,12 +98,13 @@ use crate::types::{
     DirPeopleResult, DirPlaceResult, EstateCovenant, EventInfo, FollowCamPropertyValue,
     GestureActivation, GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions,
     GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, InstantMessage, LandSearchType,
-    LandStatItem, LandStatReportType, MapItem, MapItemType, MapRegionInfo, MeanCollision,
+    LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer, MapRegionInfo, MeanCollision,
     NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails,
-    ParcelObjectOwner, PlacesResult, RegionIdentity, Reliability, RestoreItem, RezAttachment,
-    SaleType, ScriptControl, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
-    ViewerEffectType,
+    ParcelObjectOwner, PlacesResult, Postcard, RegionIdentity, Reliability, RestoreItem,
+    RezAttachment, SaleType, ScriptControl, TelehubInfo, Throttle, Transmit, ViewerEffect,
+    ViewerEffectData, ViewerEffectType,
 };
+use sl_wire::AbuseReport;
 
 /// How long to batch owed acknowledgements before flushing them as a `PacketAck`
 /// (matches the client [`Session`](crate::Session)).
@@ -760,6 +762,13 @@ pub enum ServerEvent {
         /// The zero-based index of the spawn point to remove.
         spawn_index: u32,
     },
+    /// The client filed an abuse / bug report over the legacy `UserReport` UDP
+    /// message (the modern path is the `SendUserReport` capability). The
+    /// simulator routes it to the grid's abuse desk; fire-and-forget.
+    AbuseReportReceived(Box<AbuseReport>),
+    /// The client emailed a snapshot postcard (`SendPostcard`). The simulator
+    /// renders and sends the email; fire-and-forget.
+    PostcardReceived(Box<Postcard>),
     /// The client requested a clean logout (`LogoutRequest`); the simulator has
     /// replied with a `LogoutReply` and closed the session.
     LoggedOut,
@@ -1030,6 +1039,30 @@ impl SimSession {
         let agent_id = self.agent_id.unwrap_or_else(Uuid::nil);
         let message =
             AnyMessage::MapItemReply(build_map_item_reply(agent_id, flags, item_type, items));
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `MapLayerReply` reporting `layers` to the client (the inverse of
+    /// the client's `MapLayerRequest`). `flags` is the request's map-layer flag,
+    /// echoed in the agent block. The reply is sent reliably; the batch is
+    /// capped at 255 layers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode (e.g. more than 255 layers).
+    pub fn send_map_layer_reply(
+        &mut self,
+        flags: u32,
+        layers: &[MapLayer],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let agent_id = self.agent_id.unwrap_or_else(Uuid::nil);
+        let message = AnyMessage::MapLayerReply(build_map_layer_reply(agent_id, flags, layers));
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
     }
@@ -3065,6 +3098,39 @@ impl SimSession {
                 if let Some(event) = telehub_server_event(&message.param_list) {
                     self.events.push_back(event);
                 }
+            }
+            AnyMessage::UserReport(report) => {
+                let data = &report.report_data;
+                self.events
+                    .push_back(ServerEvent::AbuseReportReceived(Box::new(AbuseReport {
+                        report_type: sl_wire::AbuseReportType::from_u8(data.report_type),
+                        category: data.category,
+                        position: data.position.clone(),
+                        check_flags: data.check_flags,
+                        screenshot_id: data.screenshot_id,
+                        object_id: data.object_id,
+                        abuser_id: data.abuser_id,
+                        abuse_region_name: trimmed_string(&data.abuse_region_name),
+                        abuse_region_id: data.abuse_region_id,
+                        summary: trimmed_string(&data.summary),
+                        details: trimmed_string(&data.details),
+                        version_string: trimmed_string(&data.version_string),
+                    })));
+            }
+            AnyMessage::SendPostcard(postcard) => {
+                let data = &postcard.agent_data;
+                self.events
+                    .push_back(ServerEvent::PostcardReceived(Box::new(Postcard {
+                        asset_id: data.asset_id,
+                        pos_global: data.pos_global,
+                        to: trimmed_string(&data.to),
+                        from: trimmed_string(&data.from),
+                        name: trimmed_string(&data.name),
+                        subject: trimmed_string(&data.subject),
+                        message: trimmed_string(&data.msg),
+                        allow_publish: data.allow_publish,
+                        mature_publish: data.mature_publish,
+                    })));
             }
             AnyMessage::LogoutRequest(_) => {
                 self.send_logout_reply(now)?;

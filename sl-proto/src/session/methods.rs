@@ -12,12 +12,12 @@ use super::conversions::{
     group_members_from_caps_llsd, group_membership, group_memberships_from_caps_llsd, group_names,
     group_notice, group_profile, group_role, group_title, group_vote_history_item, index_into,
     instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
-    inventory_item_from_create, inventory_offer_bucket, map_item, map_region_info, money_balance,
-    neighbor_info, object_from_full_update, object_properties, offline_messages_from_llsd,
-    pack_uuids, parcel_info, parcel_info_from_llsd, parse_lure_region_handle, parse_mute_list,
-    parse_uuid_string, pick_info, region_identity, region_limits, script_dialog,
-    script_permission_request, server_appearance_update_from_llsd, skeleton_folder,
-    teleport_finish_from_llsd, trimmed_string,
+    inventory_item_from_create, inventory_offer_bucket, map_item, map_layer, map_region_info,
+    money_balance, neighbor_info, object_from_full_update, object_properties,
+    offline_messages_from_llsd, pack_uuids, parcel_info, parcel_info_from_llsd,
+    parse_lure_region_handle, parse_mute_list, parse_uuid_string, pick_info, region_identity,
+    region_limits, script_dialog, script_permission_request, server_appearance_update_from_llsd,
+    skeleton_folder, teleport_finish_from_llsd, trimmed_string,
 };
 use super::{
     AGENT_UPDATE_INTERVAL, AssetTransfer, AssetUpload, CAP_AGENT_EXPERIENCES,
@@ -50,7 +50,7 @@ use crate::types::{
     NotecardRez, Object, ObjectBuyItem, ObjectFlagSettings, ObjectPropertiesFamily,
     ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
     ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PlacesResult, PrimShape,
+    ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PlacesResult, Postcard, PrimShape,
     ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType,
     ScriptControl, ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload, TelehubInfo,
     TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit,
@@ -60,14 +60,15 @@ use crate::types::{
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::{
-    AnyMessage, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd, MessageId, ObjectMediaResponse,
-    PacketFlags, ParcelVoiceInfo, Reader, VoiceAccountInfo, build_group_notice_bucket,
-    build_login_request, message_name, parse_agent_preferences, parse_attachment_resources,
-    parse_datagram, parse_display_names, parse_experience_ids, parse_experience_infos,
-    parse_experience_permissions, parse_get_object_cost, parse_get_object_physics_data,
-    parse_gltf_material_override, parse_land_resource_detail, parse_land_resource_summary,
-    parse_land_resources_reply, parse_object_physics_properties, parse_region_experiences,
-    parse_remote_parcel_reply, parse_resource_cost_selected, parse_simulator_features, zero_decode,
+    AbuseReport, AnyMessage, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd, MessageId,
+    ObjectMediaResponse, PacketFlags, ParcelVoiceInfo, Reader, VoiceAccountInfo,
+    build_group_notice_bucket, build_login_request, message_name, parse_agent_preferences,
+    parse_attachment_resources, parse_datagram, parse_display_names, parse_experience_ids,
+    parse_experience_infos, parse_experience_permissions, parse_get_object_cost,
+    parse_get_object_physics_data, parse_gltf_material_override, parse_land_resource_detail,
+    parse_land_resource_summary, parse_land_resources_reply, parse_object_physics_properties,
+    parse_region_experiences, parse_remote_parcel_reply, parse_resource_cost_selected,
+    parse_simulator_features, zero_decode,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -1702,6 +1703,11 @@ impl Session {
                 self.events.push_back(Event::MapItems {
                     item_type: MapItemType::from_u32(reply.request_data.item_type),
                     items: reply.data.iter().map(map_item).collect(),
+                });
+            }
+            AnyMessage::MapLayerReply(reply) => {
+                self.events.push_back(Event::MapLayers {
+                    layers: reply.layer_data.iter().map(map_layer).collect(),
                 });
             }
             AnyMessage::TeleportStart(_) => {
@@ -6747,6 +6753,51 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_map_item_request(item_type.to_u32(), region_handle, now)?;
+        Ok(())
+    }
+
+    /// Requests the world-map image-tile layers via `MapLayerRequest`. The reply
+    /// arrives as an [`Event::MapLayers`], giving the textures and the grid
+    /// rectangles they cover (complementing the per-region detail from
+    /// [`Session::request_map_blocks`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_map_layer(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_map_layer_request(now)?;
+        Ok(())
+    }
+
+    /// Files an abuse / bug report over the legacy `UserReport` UDP message.
+    /// Fire-and-forget; there is no reply. On Second Life prefer the
+    /// `SendUserReport` capability ([`Command::SendAbuseReportViaCaps`](crate::Command::SendAbuseReportViaCaps),
+    /// driven by the runtimes); the UDP path is the fallback (and the only path
+    /// OpenSim implements).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the report fails to encode.
+    pub fn send_abuse_report(&mut self, report: &AbuseReport, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_user_report(report, now)?;
+        Ok(())
+    }
+
+    /// Emails a snapshot postcard over the `SendPostcard` UDP message (the
+    /// referenced snapshot asset must already be uploaded). Fire-and-forget;
+    /// there is no reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the postcard fails to encode.
+    pub fn send_postcard(&mut self, postcard: &Postcard, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_postcard(postcard, now)?;
         Ok(())
     }
 

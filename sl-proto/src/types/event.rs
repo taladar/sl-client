@@ -12,13 +12,13 @@ use super::{
     GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupMember,
     GroupMembership, GroupName, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle,
     GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem, LandStatItem,
-    LandStatReportType, LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapRegionInfo,
-    Maturity, MeanCollision, MoneyBalance, MuteEntry, NeighborInfo, Object, ObjectProperties,
-    ObjectPropertiesFamily, ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, PickInfo,
-    PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, ScriptControl, ScriptDialog,
-    ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload, TelehubInfo,
-    TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
+    LandStatReportType, LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapLayer,
+    MapRegionInfo, Maturity, MeanCollision, MoneyBalance, MuteEntry, NeighborInfo, Object,
+    ObjectProperties, ObjectPropertiesFamily, ParcelAccessEntry, ParcelAccessScope, ParcelDetails,
+    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
+    PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, ScriptControl,
+    ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload,
+    TelehubInfo, TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
 };
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
@@ -261,6 +261,13 @@ pub enum Event {
         item_type: MapItemType,
         /// The items returned for the queried region(s).
         items: Vec<MapItem>,
+    },
+    /// World-map image-tile layers from a `MapLayerReply`, in response to
+    /// [`Session::request_map_layer`](crate::Session::request_map_layer). Each
+    /// [`MapLayer`] gives the texture covering a rectangular run of regions.
+    MapLayers {
+        /// The image-tile layers covering the grid.
+        layers: Vec<MapLayer>,
     },
     /// A teleport has begun (`TeleportStart`).
     TeleportStarted,

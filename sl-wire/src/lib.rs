@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+mod abuse_report;
 mod agent_preferences;
 mod control_flags;
 mod display_name;
@@ -25,6 +26,9 @@ mod sim_features;
 mod voice;
 mod zerocode;
 
+pub use abuse_report::{
+    AbuseReport, AbuseReportType, build_send_user_report, parse_send_user_report,
+};
 pub use agent_preferences::{
     AgentPreferences, ObjectPermMasks, build_agent_preferences_request,
     build_agent_preferences_response, parse_agent_preferences,

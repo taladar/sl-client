@@ -13,10 +13,11 @@ use crate::types::{
     DeRezDestination, DirFindFlags, GestureActivation, GroupRoleEdit, GroupRoleMemberChange,
     ImDialog, InterestsUpdate, InventoryItem, LandSearchType, Material, NewInventoryItem,
     NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
-    ParcelCategory, ParcelUpdate, PermissionField, PickUpdate, PrimShape, ProfileUpdate,
+    ParcelCategory, ParcelUpdate, PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate,
     Reliability, RestoreItem, RezAttachment, SaleType, Throttle, ViewerEffect, Wearable,
 };
 use sl_types::lsl::{Rotation, Vector};
+use sl_wire::AbuseReport;
 use sl_wire::messages::{
     AcceptFriendship, AcceptFriendshipAgentDataBlock, AcceptFriendshipFolderDataBlock,
     AcceptFriendshipTransactionBlockBlock, ActivateGestures, ActivateGesturesAgentDataBlock,
@@ -88,34 +89,34 @@ use sl_wire::messages::{
     LandStatRequestRequestDataBlock, LeaveGroupRequest, LeaveGroupRequestAgentDataBlock,
     LeaveGroupRequestGroupDataBlock, LogoutRequest, LogoutRequestAgentDataBlock, MapBlockRequest,
     MapBlockRequestAgentDataBlock, MapBlockRequestPositionDataBlock, MapItemRequest,
-    MapItemRequestAgentDataBlock, MapItemRequestRequestDataBlock, MapNameRequest,
-    MapNameRequestAgentDataBlock, MapNameRequestNameDataBlock, MoneyBalanceRequest,
-    MoneyBalanceRequestAgentDataBlock, MoneyBalanceRequestMoneyDataBlock, MoneyTransferRequest,
-    MoneyTransferRequestAgentDataBlock, MoneyTransferRequestMoneyDataBlock, MoveInventoryFolder,
-    MoveInventoryFolderAgentDataBlock, MoveInventoryFolderInventoryDataBlock, MoveInventoryItem,
-    MoveInventoryItemAgentDataBlock, MoveInventoryItemInventoryDataBlock, MultipleObjectUpdate,
-    MultipleObjectUpdateAgentDataBlock, MultipleObjectUpdateObjectDataBlock, MuteListRequest,
-    MuteListRequestAgentDataBlock, MuteListRequestMuteDataBlock, ObjectAdd,
-    ObjectAddAgentDataBlock, ObjectAddObjectDataBlock, ObjectAttach, ObjectAttachAgentDataBlock,
-    ObjectAttachObjectDataBlock, ObjectCategory, ObjectCategoryAgentDataBlock,
-    ObjectCategoryObjectDataBlock, ObjectClickAction, ObjectClickActionAgentDataBlock,
-    ObjectClickActionObjectDataBlock, ObjectDeGrab, ObjectDeGrabAgentDataBlock,
-    ObjectDeGrabObjectDataBlock, ObjectDelete, ObjectDeleteAgentDataBlock,
-    ObjectDeleteObjectDataBlock, ObjectDelink, ObjectDelinkAgentDataBlock,
-    ObjectDelinkObjectDataBlock, ObjectDescription, ObjectDescriptionAgentDataBlock,
-    ObjectDescriptionObjectDataBlock, ObjectDeselect, ObjectDeselectAgentDataBlock,
-    ObjectDeselectObjectDataBlock, ObjectDetach, ObjectDetachAgentDataBlock,
-    ObjectDetachObjectDataBlock, ObjectDrop, ObjectDropAgentDataBlock, ObjectDropObjectDataBlock,
-    ObjectDuplicate, ObjectDuplicateAgentDataBlock, ObjectDuplicateObjectDataBlock,
-    ObjectDuplicateSharedDataBlock, ObjectFlagUpdate, ObjectFlagUpdateAgentDataBlock, ObjectGrab,
-    ObjectGrabAgentDataBlock, ObjectGrabObjectDataBlock, ObjectGrabUpdate,
-    ObjectGrabUpdateAgentDataBlock, ObjectGrabUpdateObjectDataBlock, ObjectGroup,
-    ObjectGroupAgentDataBlock, ObjectGroupObjectDataBlock, ObjectIncludeInSearch,
-    ObjectIncludeInSearchAgentDataBlock, ObjectIncludeInSearchObjectDataBlock, ObjectLink,
-    ObjectLinkAgentDataBlock, ObjectLinkObjectDataBlock, ObjectMaterial,
-    ObjectMaterialAgentDataBlock, ObjectMaterialObjectDataBlock, ObjectName,
-    ObjectNameAgentDataBlock, ObjectNameObjectDataBlock, ObjectPermissions,
-    ObjectPermissionsAgentDataBlock, ObjectPermissionsHeaderDataBlock,
+    MapItemRequestAgentDataBlock, MapItemRequestRequestDataBlock, MapLayerRequest,
+    MapLayerRequestAgentDataBlock, MapNameRequest, MapNameRequestAgentDataBlock,
+    MapNameRequestNameDataBlock, MoneyBalanceRequest, MoneyBalanceRequestAgentDataBlock,
+    MoneyBalanceRequestMoneyDataBlock, MoneyTransferRequest, MoneyTransferRequestAgentDataBlock,
+    MoneyTransferRequestMoneyDataBlock, MoveInventoryFolder, MoveInventoryFolderAgentDataBlock,
+    MoveInventoryFolderInventoryDataBlock, MoveInventoryItem, MoveInventoryItemAgentDataBlock,
+    MoveInventoryItemInventoryDataBlock, MultipleObjectUpdate, MultipleObjectUpdateAgentDataBlock,
+    MultipleObjectUpdateObjectDataBlock, MuteListRequest, MuteListRequestAgentDataBlock,
+    MuteListRequestMuteDataBlock, ObjectAdd, ObjectAddAgentDataBlock, ObjectAddObjectDataBlock,
+    ObjectAttach, ObjectAttachAgentDataBlock, ObjectAttachObjectDataBlock, ObjectCategory,
+    ObjectCategoryAgentDataBlock, ObjectCategoryObjectDataBlock, ObjectClickAction,
+    ObjectClickActionAgentDataBlock, ObjectClickActionObjectDataBlock, ObjectDeGrab,
+    ObjectDeGrabAgentDataBlock, ObjectDeGrabObjectDataBlock, ObjectDelete,
+    ObjectDeleteAgentDataBlock, ObjectDeleteObjectDataBlock, ObjectDelink,
+    ObjectDelinkAgentDataBlock, ObjectDelinkObjectDataBlock, ObjectDescription,
+    ObjectDescriptionAgentDataBlock, ObjectDescriptionObjectDataBlock, ObjectDeselect,
+    ObjectDeselectAgentDataBlock, ObjectDeselectObjectDataBlock, ObjectDetach,
+    ObjectDetachAgentDataBlock, ObjectDetachObjectDataBlock, ObjectDrop, ObjectDropAgentDataBlock,
+    ObjectDropObjectDataBlock, ObjectDuplicate, ObjectDuplicateAgentDataBlock,
+    ObjectDuplicateObjectDataBlock, ObjectDuplicateSharedDataBlock, ObjectFlagUpdate,
+    ObjectFlagUpdateAgentDataBlock, ObjectGrab, ObjectGrabAgentDataBlock,
+    ObjectGrabObjectDataBlock, ObjectGrabUpdate, ObjectGrabUpdateAgentDataBlock,
+    ObjectGrabUpdateObjectDataBlock, ObjectGroup, ObjectGroupAgentDataBlock,
+    ObjectGroupObjectDataBlock, ObjectIncludeInSearch, ObjectIncludeInSearchAgentDataBlock,
+    ObjectIncludeInSearchObjectDataBlock, ObjectLink, ObjectLinkAgentDataBlock,
+    ObjectLinkObjectDataBlock, ObjectMaterial, ObjectMaterialAgentDataBlock,
+    ObjectMaterialObjectDataBlock, ObjectName, ObjectNameAgentDataBlock, ObjectNameObjectDataBlock,
+    ObjectPermissions, ObjectPermissionsAgentDataBlock, ObjectPermissionsHeaderDataBlock,
     ObjectPermissionsObjectDataBlock, ObjectSaleInfo, ObjectSaleInfoAgentDataBlock,
     ObjectSaleInfoObjectDataBlock, ObjectSelect, ObjectSelectAgentDataBlock,
     ObjectSelectObjectDataBlock, PacketAck, PacketAckPacketsBlock, ParcelAccessListRequest,
@@ -160,21 +161,22 @@ use sl_wire::messages::{
     RezMultipleAttachmentsFromInvObjectDataBlock, RezSingleAttachmentFromInv,
     RezSingleAttachmentFromInvAgentDataBlock, RezSingleAttachmentFromInvObjectDataBlock,
     ScriptAnswerYes, ScriptAnswerYesAgentDataBlock, ScriptAnswerYesDataBlock, ScriptDialogReply,
-    ScriptDialogReplyAgentDataBlock, ScriptDialogReplyDataBlock, SendXferPacket,
-    SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock, SetGroupAcceptNotices,
-    SetGroupAcceptNoticesAgentDataBlock, SetGroupAcceptNoticesDataBlock,
-    SetGroupAcceptNoticesNewDataBlock, SetGroupContribution, SetGroupContributionAgentDataBlock,
-    SetGroupContributionDataBlock, StartLure, StartLureAgentDataBlock, StartLureInfoBlock,
-    StartLureTargetDataBlock, TeleportLocationRequest, TeleportLocationRequestAgentDataBlock,
-    TeleportLocationRequestInfoBlock, TeleportLureRequest, TeleportLureRequestInfoBlock,
-    TerminateFriendship, TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock,
-    TrackAgent, TrackAgentAgentDataBlock, TrackAgentTargetDataBlock, TransferRequest,
-    TransferRequestTransferInfoBlock, UUIDGroupNameRequest, UUIDGroupNameRequestUUIDNameBlockBlock,
-    UUIDNameRequest, UUIDNameRequestUUIDNameBlockBlock, UpdateInventoryFolder,
-    UpdateInventoryFolderAgentDataBlock, UpdateInventoryFolderFolderDataBlock, UpdateInventoryItem,
-    UpdateInventoryItemAgentDataBlock, UpdateInventoryItemInventoryDataBlock, UpdateMuteListEntry,
-    UpdateMuteListEntryAgentDataBlock, UpdateMuteListEntryMuteDataBlock, UseCircuitCode,
-    UseCircuitCodeCircuitCodeBlock, ViewerEffect as ViewerEffectMessage,
+    ScriptDialogReplyAgentDataBlock, ScriptDialogReplyDataBlock, SendPostcard,
+    SendPostcardAgentDataBlock, SendXferPacket, SendXferPacketDataPacketBlock,
+    SendXferPacketXferIDBlock, SetGroupAcceptNotices, SetGroupAcceptNoticesAgentDataBlock,
+    SetGroupAcceptNoticesDataBlock, SetGroupAcceptNoticesNewDataBlock, SetGroupContribution,
+    SetGroupContributionAgentDataBlock, SetGroupContributionDataBlock, StartLure,
+    StartLureAgentDataBlock, StartLureInfoBlock, StartLureTargetDataBlock, TeleportLocationRequest,
+    TeleportLocationRequestAgentDataBlock, TeleportLocationRequestInfoBlock, TeleportLureRequest,
+    TeleportLureRequestInfoBlock, TerminateFriendship, TerminateFriendshipAgentDataBlock,
+    TerminateFriendshipExBlockBlock, TrackAgent, TrackAgentAgentDataBlock,
+    TrackAgentTargetDataBlock, TransferRequest, TransferRequestTransferInfoBlock,
+    UUIDGroupNameRequest, UUIDGroupNameRequestUUIDNameBlockBlock, UUIDNameRequest,
+    UUIDNameRequestUUIDNameBlockBlock, UpdateInventoryFolder, UpdateInventoryFolderAgentDataBlock,
+    UpdateInventoryFolderFolderDataBlock, UpdateInventoryItem, UpdateInventoryItemAgentDataBlock,
+    UpdateInventoryItemInventoryDataBlock, UpdateMuteListEntry, UpdateMuteListEntryAgentDataBlock,
+    UpdateMuteListEntryMuteDataBlock, UseCircuitCode, UseCircuitCodeCircuitCodeBlock, UserReport,
+    UserReportAgentDataBlock, UserReportReportDataBlock, ViewerEffect as ViewerEffectMessage,
     ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
 };
 use sl_wire::messages::{
@@ -3557,6 +3559,79 @@ impl Circuit {
             request_data: MapItemRequestRequestDataBlock {
                 item_type,
                 region_handle,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `MapLayerRequest` reliably. The reply is one or more
+    /// `MapLayerReply` blocks (decoded into [`Event::MapLayers`]) describing the
+    /// world-map image tiles. `flags` selects the map layer (the viewer sends
+    /// the map-layer flag); estate/godlike are filled by the sim.
+    pub(crate) fn send_map_layer_request(&mut self, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::MapLayerRequest(MapLayerRequest {
+            agent_data: MapLayerRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                flags: MAP_LAYER_FLAG,
+                estate_id: 0,
+                godlike: false,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `UserReport` reliably: an abuse / bug report filed over the
+    /// legacy UDP path (the modern equivalent is the `SendUserReport`
+    /// capability). Fire-and-forget; there is no reply.
+    pub(crate) fn send_user_report(
+        &mut self,
+        report: &AbuseReport,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::UserReport(UserReport {
+            agent_data: UserReportAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            report_data: UserReportReportDataBlock {
+                report_type: report.report_type.to_u8(),
+                category: report.category,
+                position: report.position.clone(),
+                check_flags: report.check_flags,
+                screenshot_id: report.screenshot_id,
+                object_id: report.object_id,
+                abuser_id: report.abuser_id,
+                abuse_region_name: with_nul(&report.abuse_region_name),
+                abuse_region_id: report.abuse_region_id,
+                summary: with_nul(&report.summary),
+                details: with_nul(&report.details),
+                version_string: with_nul(&report.version_string),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `SendPostcard` reliably: emails the referenced snapshot asset.
+    /// Fire-and-forget; there is no reply.
+    pub(crate) fn send_postcard(
+        &mut self,
+        postcard: &Postcard,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::SendPostcard(SendPostcard {
+            agent_data: SendPostcardAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                asset_id: postcard.asset_id,
+                pos_global: postcard.pos_global,
+                to: with_nul(&postcard.to),
+                from: with_nul(&postcard.from),
+                name: with_nul(&postcard.name),
+                subject: with_nul(&postcard.subject),
+                msg: with_nul(&postcard.message),
+                allow_publish: postcard.allow_publish,
+                mature_publish: postcard.mature_publish,
             },
         });
         self.send(&message, Reliability::Reliable, now)

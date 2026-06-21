@@ -9,18 +9,18 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
-        AssetType, AttachmentPoint, Camera, ChatAudible, ChatSourceType, ChatType,
-        ClassifiedUpdate, ClickAction, CoarseLocation, ControlFlags, CreateGroupParams, DayCycle,
-        DayCycleFrame, DeRezDestination, Diagnostic, DirFindFlags, DisconnectReason,
-        EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, FollowCamProperty,
-        FriendRights, GestureActivation, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit,
-        GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate,
-        InventoryItem, LandingType, LindenAmount, LoginAccount, LoginParams, LookAtType,
-        MapItemType, Material, Maturity, MeanCollisionType, MoneyTransactionType, MuteFlags,
-        MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
+        AbuseReport, AbuseReportType, AssetType, AttachmentPoint, Camera, ChatAudible,
+        ChatSourceType, ChatType, ClassifiedUpdate, ClickAction, CoarseLocation, ControlFlags,
+        CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, Diagnostic, DirFindFlags,
+        DisconnectReason, EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event,
+        FollowCamProperty, FriendRights, GestureActivation, GroupNoticeAttachment, GroupRoleChange,
+        GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImageCodec,
+        InterestsUpdate, InventoryItem, LandingType, LindenAmount, LoginAccount, LoginParams,
+        LookAtType, MapItemType, Material, Maturity, MeanCollisionType, MoneyTransactionType,
+        MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
         ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
         ParcelFlags, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-        ParcelUpdate, PermissionField, PickUpdate, PointAtType, PrimShape, ProductType,
+        ParcelUpdate, PermissionField, PickUpdate, PointAtType, Postcard, PrimShape, ProductType,
         ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType,
         ScriptPermissions, Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType,
         Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
@@ -81,7 +81,8 @@ mod test {
         LayerDataLayerDataBlock, LayerDataLayerIDBlock, LogoutRequest, LogoutRequestAgentDataBlock,
         MapBlockReply, MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock,
         MapItemReply, MapItemReplyAgentDataBlock, MapItemReplyDataBlock,
-        MapItemReplyRequestDataBlock, MoneyBalanceReply, MoneyBalanceReplyMoneyDataBlock,
+        MapItemReplyRequestDataBlock, MapLayerReply, MapLayerReplyAgentDataBlock,
+        MapLayerReplyLayerDataBlock, MoneyBalanceReply, MoneyBalanceReplyMoneyDataBlock,
         MoneyBalanceReplyTransactionInfoBlock, MuteListUpdate, MuteListUpdateMuteDataBlock,
         ObjectProperties as WireObjectProperties,
         ObjectPropertiesFamily as ObjectPropertiesFamilyMessage,
@@ -8608,6 +8609,133 @@ mod test {
         assert_eq!(region.water_height, 20);
         assert_eq!(region.agents, 3);
         assert_eq!(region.region_handle, sl_proto::grid_to_handle(1000, 1001));
+        Ok(())
+    }
+
+    /// A `MapLayerReply` surfaces as an [`Event::MapLayers`] with each tile's
+    /// grid rectangle and texture, after the client sends `request_map_layer`.
+    #[test]
+    fn map_layer_reply_reports_tiles() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        session.request_map_layer(now)?;
+        let sent = drain(&mut session)?;
+        sent.iter()
+            .find_map(|m| match m {
+                AnyMessage::MapLayerRequest(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("expected a MapLayerRequest")?;
+
+        let reply = AnyMessage::MapLayerReply(MapLayerReply {
+            agent_data: MapLayerReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                flags: 2,
+            },
+            layer_data: vec![MapLayerReplyLayerDataBlock {
+                left: 0,
+                right: 9999,
+                top: 9999,
+                bottom: 0,
+                image_id: uuid::Uuid::from_u128(0xABCD),
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&reply, 9, true)?, now)?;
+
+        let layers = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::MapLayers { layers } => Some(layers),
+                _ => None,
+            })
+            .ok_or("expected a MapLayers event")?;
+        assert_eq!(layers.len(), 1);
+        let layer = layers.first().ok_or("one layer")?;
+        assert_eq!(layer.left, 0);
+        assert_eq!(layer.right, 9999);
+        assert_eq!(layer.top, 9999);
+        assert_eq!(layer.bottom, 0);
+        assert_eq!(layer.image_id, uuid::Uuid::from_u128(0xABCD));
+        Ok(())
+    }
+
+    /// `send_abuse_report` encodes a `UserReport` carrying the report fields.
+    #[test]
+    fn abuse_report_encodes_user_report() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let report = AbuseReport {
+            report_type: AbuseReportType::Complaint,
+            category: 66,
+            position: Vector {
+                x: 128.0,
+                y: 64.0,
+                z: 22.0,
+            },
+            check_flags: 0,
+            screenshot_id: uuid::Uuid::nil(),
+            object_id: uuid::Uuid::from_u128(0x22),
+            abuser_id: uuid::Uuid::from_u128(0x33),
+            abuse_region_name: "TestRegion".to_owned(),
+            abuse_region_id: uuid::Uuid::nil(),
+            summary: "Griefing".to_owned(),
+            details: "Detail".to_owned(),
+            version_string: "7.1 Lnx".to_owned(),
+        };
+        session.send_abuse_report(&report, now)?;
+        let sent = drain(&mut session)?;
+        let message = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::UserReport(report) => Some(report),
+                _ => None,
+            })
+            .ok_or("expected a UserReport")?;
+        assert_eq!(message.report_data.report_type, 2);
+        assert_eq!(message.report_data.category, 66);
+        assert_eq!(message.report_data.abuser_id, uuid::Uuid::from_u128(0x33));
+        assert_eq!(message.report_data.summary, b"Griefing\0");
+        assert_eq!(message.report_data.details, b"Detail\0");
+        Ok(())
+    }
+
+    /// `send_postcard` encodes a `SendPostcard` carrying the email fields.
+    #[test]
+    fn postcard_encodes_send_postcard() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let postcard = Postcard {
+            asset_id: uuid::Uuid::from_u128(0x55),
+            pos_global: [256_128.0, 256_064.0, 22.0],
+            to: "friend@example.com".to_owned(),
+            from: "me@example.com".to_owned(),
+            name: "Me".to_owned(),
+            subject: "Hi".to_owned(),
+            message: "Wish you were here".to_owned(),
+            allow_publish: true,
+            mature_publish: false,
+        };
+        session.send_postcard(&postcard, now)?;
+        let sent = drain(&mut session)?;
+        let message = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::SendPostcard(postcard) => Some(postcard),
+                _ => None,
+            })
+            .ok_or("expected a SendPostcard")?;
+        assert_eq!(message.agent_data.asset_id, uuid::Uuid::from_u128(0x55));
+        assert_eq!(message.agent_data.to, b"friend@example.com\0");
+        assert_eq!(message.agent_data.subject, b"Hi\0");
+        assert!(message.agent_data.allow_publish);
+        assert!(!message.agent_data.mature_publish);
         Ok(())
     }
 

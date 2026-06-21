@@ -27,6 +27,23 @@ pub(crate) fn blocking_get_llsd(url: &str) -> Option<Llsd> {
     parse_llsd_xml(&text).ok()
 }
 
+/// POSTs `body` to a capability URL and ignores the reply (blocking) — a
+/// fire-and-forget capability call where the simulator returns only an HTTP
+/// status (e.g. the `SendUserReport` abuse-report cap). There is no event.
+pub(crate) fn run_caps_oneway(cap_url: &str, body: String) {
+    let Ok(http) = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    else {
+        return;
+    };
+    http.post(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .ok();
+}
+
 /// GETs an experience capability URL and forwards its LLSD reply to `caps_tx`
 /// tagged `cap`, for the session to decode in
 /// [`Session::handle_caps_event`](sl_proto::Session::handle_caps_event).

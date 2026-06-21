@@ -647,6 +647,7 @@ impl Survey {
             | Event::EstateInfo(_)
             | Event::EstateAccessList { .. }
             | Event::MapItems { .. }
+            | Event::MapLayers { .. }
             | Event::NeighborSeed { .. }
             | Event::ObjectAdded(_)
             | Event::ObjectUpdated(_)
