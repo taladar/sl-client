@@ -92,8 +92,8 @@ pub use region::{RegionChatSettings, RegionCombatSettings, RegionIdentity, Regio
 pub use report::Postcard;
 pub use script::{
     AlertInfo, FollowCamProperty, FollowCamPropertyValue, LoadUrlRequest, MuteEntry, MuteFlags,
-    MuteType, ScriptControl, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest,
+    MuteType, ScriptControl, ScriptControlAction, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTeleportRequest,
 };
 pub use session::{
     Camera, CameraError, DisconnectReason, Kilobits, LoginHttpRequest, LoginParams, MovementMode,

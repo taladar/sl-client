@@ -1293,7 +1293,7 @@ impl SimSession {
             data: controls
                 .iter()
                 .map(|control| ScriptControlChangeDataBlock {
-                    take_controls: control.take,
+                    take_controls: control.action.takes_controls(),
                     controls: control.controls.bits(),
                     pass_to_agent: control.pass_to_agent,
                 })

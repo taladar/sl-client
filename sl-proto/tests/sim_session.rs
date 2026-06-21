@@ -22,9 +22,9 @@ mod test {
         NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails,
         ParcelObjectOwner, ParcelReturnType, Permissions5, PlacesResult, PointAtType, Postcard,
         ProductType, RegionIdentity, RestoreItem, RezAttachment, SaleType, ScriptControl,
-        ServerEvent, Session, SimSession, TelehubInfo, Throttle, Transmit, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd, grid_to_handle,
-        parse_event_queue_response,
+        ScriptControlAction, ServerEvent, Session, SimSession, TelehubInfo, Throttle, Transmit,
+        ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
+        grid_to_handle, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -1724,7 +1724,7 @@ mod test {
         // Sim -> client: a script takes controls, sets follow-cam, then clears it.
         sim.send_script_control_change(
             &[ScriptControl {
-                take: true,
+                action: ScriptControlAction::Take,
                 controls: ControlFlags::AT_POS | ControlFlags::UP_POS,
                 pass_to_agent: true,
             }],
@@ -1749,7 +1749,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a ScriptControlChange client event")?;
-        assert!(control.take);
+        assert_eq!(control.action, ScriptControlAction::Take);
         assert!(control.pass_to_agent);
         assert_eq!(
             control.controls,

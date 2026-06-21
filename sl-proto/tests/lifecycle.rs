@@ -23,10 +23,10 @@ mod test {
         ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
         PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
         ProductType, ProfileUpdate, ReflectionProbeFlags, RegionInfoUpdate, Reliability,
-        RestoreItem, RezAttachment, SaleType, ScriptPermissions, Session, SkySettings, SoundFlags,
-        TeleportFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
-        group_powers, pcode,
+        RestoreItem, RezAttachment, SaleType, ScriptControlAction, ScriptPermissions, Session,
+        SkySettings, SoundFlags, TeleportFlags, TerrainLayerType, Throttle, TransferStatus,
+        Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
+        avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -2835,7 +2835,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a ScriptControlChange event")?;
-        assert!(control.take);
+        assert_eq!(control.action, ScriptControlAction::Take);
         assert!(!control.pass_to_agent);
         assert_eq!(control.controls, ControlFlags::AT_POS | ControlFlags::FLY);
         Ok(())
