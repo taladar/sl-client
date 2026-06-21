@@ -21,10 +21,11 @@ use sl_proto::{
     CAP_LAND_RESOURCES, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
     CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
-    CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Llsd, RECV_BUFFER_SIZE,
-    SelectedCostKind, Session, ais_category_children_fetch_url, ais_category_children_url,
-    ais_category_url, ais_create_category_url, ais_item_url, build_agent_preferences_request,
+    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE,
+    CAP_VOICE_SIGNALING, Llsd, RECV_BUFFER_SIZE, SelectedCostKind, Session,
+    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    ais_create_category_url, ais_item_url, build_agent_preferences_request,
     build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
     build_ais_update_item_body, build_create_inventory_category_request,
     build_get_object_cost_request, build_get_object_physics_data_request,
@@ -32,11 +33,11 @@ use sl_proto::{
     build_object_media_navigate_request, build_object_media_update_request,
     build_parcel_voice_info_request, build_provision_voice_account_request,
     build_region_experiences_request, build_remote_parcel_request,
-    build_resource_cost_selected_request, build_set_experience_permission_request,
-    build_update_experience_request, build_update_item_asset_request,
-    build_upload_baked_texture_request, build_voice_signaling_request, display_names_query,
-    experience_id_query, experience_info_query, find_experience_query, forget_experience_query,
-    group_experiences_query, parse_login_response,
+    build_resource_cost_selected_request, build_send_user_report,
+    build_set_experience_permission_request, build_update_experience_request,
+    build_update_item_asset_request, build_upload_baked_texture_request,
+    build_voice_signaling_request, display_names_query, experience_id_query, experience_info_query,
+    find_experience_query, forget_experience_query, group_experiences_query, parse_login_response,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
@@ -95,7 +96,8 @@ use crate::experiences::{
 };
 use crate::fetch::{fetch_asset_http, fetch_mesh_http, fetch_texture_http};
 use crate::http::{
-    delete_caps_llsd, fetch_land_resources, get_caps_llsd, patch_caps_llsd, put_caps_llsd,
+    delete_caps_llsd, fetch_land_resources, get_caps_llsd, patch_caps_llsd, post_caps_oneway,
+    put_caps_llsd,
 };
 use crate::inventory::{fetch_group_members, fetch_inventory};
 use crate::materials::{fetch_render_materials, post_modify_material_params};
@@ -770,6 +772,21 @@ impl Client {
                         }
                         Some(Command::RequestMapItems { item_type, region_handle }) => {
                             self.session.request_map_items(item_type, region_handle, Instant::now())?;
+                        }
+                        Some(Command::RequestMapLayer) => {
+                            self.session.request_map_layer(Instant::now())?;
+                        }
+                        Some(Command::SendAbuseReport(report)) => {
+                            self.session.send_abuse_report(&report, Instant::now())?;
+                        }
+                        Some(Command::SendAbuseReportViaCaps(report)) => {
+                            if let Some(url) = caps.get(CAP_SEND_USER_REPORT).cloned() {
+                                let body = build_send_user_report(&report);
+                                tokio::spawn(post_caps_oneway(url, body, http.clone()));
+                            }
+                        }
+                        Some(Command::SendPostcard(postcard)) => {
+                            self.session.send_postcard(&postcard, Instant::now())?;
                         }
                         Some(Command::RequestObjects { local_ids }) => {
                             self.session.request_objects(&local_ids, Instant::now())?;

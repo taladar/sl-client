@@ -10,6 +10,18 @@ use uuid::Uuid;
 
 use crate::caps::report_caps_failure;
 
+/// POSTs `body` to a capability URL and ignores the reply — a fire-and-forget
+/// capability call where the simulator returns only an HTTP status (e.g. the
+/// `SendUserReport` abuse-report cap). Errors are swallowed; there is no event.
+pub(crate) async fn post_caps_oneway(cap_url: String, body: String, http: ReqwestClient) {
+    http.post(&cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+        .ok();
+}
+
 /// GETs `url` and parses the LLSD-XML reply, returning `None` on any
 /// transport/parse failure. Shared by the experience capability fetches.
 pub(crate) async fn get_llsd(url: &str, http: &ReqwestClient) -> Option<Llsd> {

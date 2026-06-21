@@ -23,6 +23,7 @@ mod nearby;
 mod object;
 mod parcel;
 mod region;
+mod report;
 mod script;
 mod session;
 mod terrain;
@@ -68,7 +69,7 @@ pub use inventory::{
 };
 pub use map::{
     EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, MapItem, MapItemType,
-    MapRegionInfo, NeighborInfo, RegionInfoUpdate, TelehubInfo,
+    MapLayer, MapRegionInfo, NeighborInfo, RegionInfoUpdate, TelehubInfo,
 };
 pub use name::{AvatarName, GroupName};
 pub use nearby::{
@@ -87,6 +88,7 @@ pub use parcel::{
     ParcelReturnType, ParcelStatus, ParcelUpdate,
 };
 pub use region::{RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits};
+pub use report::Postcard;
 pub use script::{
     AlertInfo, FollowCamProperty, FollowCamPropertyValue, LoadUrlRequest, MuteEntry, MuteFlags,
     MuteType, ScriptControl, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,

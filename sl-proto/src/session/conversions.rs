@@ -10,7 +10,7 @@ use crate::types::{
     GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
     GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
     GroupNotice, GroupProfile, GroupRole, GroupTitle, GroupVote, GroupVoteHistoryItem, ImDialog,
-    InstantMessage, InventoryFolder, InventoryItem, LandingType, MapItem, MapItemType,
+    InstantMessage, InventoryFolder, InventoryItem, LandingType, MapItem, MapItemType, MapLayer,
     MapRegionInfo, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType,
     NeighborInfo, Object, ObjectProperties, ParcelCategory, ParcelInfo, ParcelRequestResult,
     ParcelStatus, PickInfo, PlayingAnimation, PrimShapeParams, ProductType, RegionChatSettings,
@@ -32,10 +32,10 @@ use sl_wire::messages::{
     ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageMessageBlockBlock,
     InventoryDescendentsFolderDataBlock, InventoryDescendentsItemDataBlock, MapBlockReply,
     MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapItemReply,
-    MapItemReplyAgentDataBlock, MapItemReplyDataBlock, MapItemReplyRequestDataBlock,
-    ObjectPropertiesObjectDataBlock, ObjectUpdateObjectDataBlock, ParcelProperties,
-    PickInfoReplyDataBlock, UUIDGroupNameReply, UUIDNameReply,
-    UpdateCreateInventoryItemInventoryDataBlock,
+    MapItemReplyAgentDataBlock, MapItemReplyDataBlock, MapItemReplyRequestDataBlock, MapLayerReply,
+    MapLayerReplyAgentDataBlock, MapLayerReplyLayerDataBlock, ObjectPropertiesObjectDataBlock,
+    ObjectUpdateObjectDataBlock, ParcelProperties, PickInfoReplyDataBlock, UUIDGroupNameReply,
+    UUIDNameReply, UpdateCreateInventoryItemInventoryDataBlock,
 };
 use sl_wire::{Llsd, SkeletonFolder};
 use std::collections::{BTreeMap, HashMap};
@@ -1418,6 +1418,42 @@ pub fn build_map_item_reply(
             item_type: item_type.to_u32(),
         },
         data: items.iter().map(map_item_to_data_block).collect(),
+    }
+}
+
+/// Builds a [`MapLayer`] from a `MapLayerReply` `LayerData` block. The bounds
+/// are inclusive grid coordinates.
+pub(crate) const fn map_layer(data: &MapLayerReplyLayerDataBlock) -> MapLayer {
+    MapLayer {
+        left: data.left,
+        right: data.right,
+        top: data.top,
+        bottom: data.bottom,
+        image_id: data.image_id,
+    }
+}
+
+/// Encodes a [`MapLayer`] into a `MapLayerReply` `LayerData` block — the
+/// simulator-side inverse of [`map_layer`].
+pub(crate) const fn map_layer_to_data_block(layer: &MapLayer) -> MapLayerReplyLayerDataBlock {
+    MapLayerReplyLayerDataBlock {
+        left: layer.left,
+        right: layer.right,
+        top: layer.top,
+        bottom: layer.bottom,
+        image_id: layer.image_id,
+    }
+}
+
+/// Builds a `MapLayerReply` reporting `layers`, the simulator-side inverse of
+/// the client's `MapLayerRequest` (decoded into [`Event::MapLayers`]). `agent_id`
+/// and `flags` fill the agent block (the client ignores them). The `layer_data`
+/// array is capped at the 255 entries the wire count byte allows.
+#[must_use]
+pub fn build_map_layer_reply(agent_id: Uuid, flags: u32, layers: &[MapLayer]) -> MapLayerReply {
+    MapLayerReply {
+        agent_data: MapLayerReplyAgentDataBlock { agent_id, flags },
+        layer_data: layers.iter().map(map_layer_to_data_block).collect(),
     }
 }
 

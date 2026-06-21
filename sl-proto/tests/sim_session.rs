@@ -10,20 +10,20 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        AlertInfo, AttachmentPoint, AvatarName, AvatarPickerResult, ChatType, CoarseLocation,
-        ControlFlags, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
-        DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventInfo,
-        FollowCamProperty, FollowCamPropertyValue, GestureActivation, GroupAccountDetails,
-        GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
-        GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVote,
-        GroupVoteHistoryItem, ImDialog, LandSearchType, LandStatItem, LandStatReportType,
-        LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity, MeanCollision,
-        MeanCollisionType, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory,
-        ParcelDetails, ParcelObjectOwner, ParcelReturnType, PlacesResult, PointAtType, ProductType,
-        RegionIdentity, RestoreItem, RezAttachment, SaleType, ScriptControl, ServerEvent, Session,
-        SimSession, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, enable_simulator_to_caps_llsd, grid_to_handle,
-        parse_event_queue_response,
+        AbuseReport, AbuseReportType, AlertInfo, AttachmentPoint, AvatarName, AvatarPickerResult,
+        ChatType, CoarseLocation, ControlFlags, DirClassifiedResult, DirEventResult, DirFindFlags,
+        DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant, Event,
+        EventInfo, FollowCamProperty, FollowCamPropertyValue, GestureActivation,
+        GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
+        GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
+        GroupVote, GroupVoteHistoryItem, ImDialog, LandSearchType, LandStatItem,
+        LandStatReportType, LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo, Maturity,
+        MeanCollision, MeanCollisionType, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily,
+        ParcelCategory, ParcelDetails, ParcelObjectOwner, ParcelReturnType, PlacesResult,
+        PointAtType, Postcard, ProductType, RegionIdentity, RestoreItem, RezAttachment, SaleType,
+        ScriptControl, ServerEvent, Session, SimSession, TelehubInfo, Throttle, Transmit,
+        ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
+        grid_to_handle, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -2284,6 +2284,111 @@ mod test {
             .ok_or("expected a MapItems client event")?;
         assert_eq!(reply.0, MapItemType::AgentLocations);
         assert_eq!(reply.1, items);
+        Ok(())
+    }
+
+    #[test]
+    fn simulator_map_layer_reply_reaches_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let layers = vec![
+            MapLayer {
+                left: 0,
+                right: 9999,
+                top: 9999,
+                bottom: 0,
+                image_id: uuid::Uuid::from_u128(0xABCD),
+            },
+            MapLayer {
+                left: 1000,
+                right: 1100,
+                top: 1200,
+                bottom: 1000,
+                image_id: uuid::Uuid::from_u128(0x1234),
+            },
+        ];
+        sim.send_map_layer_reply(2, &layers, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let decoded: Vec<MapLayer> = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::MapLayers { layers } => Some(layers),
+                _ => None,
+            })
+            .ok_or("expected a MapLayers client event")?;
+        assert_eq!(decoded, layers);
+        Ok(())
+    }
+
+    #[test]
+    fn client_abuse_report_reaches_server() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let report = AbuseReport {
+            report_type: AbuseReportType::Complaint,
+            category: 66,
+            position: sl_types::lsl::Vector {
+                x: 128.0,
+                y: 64.0,
+                z: 22.0,
+            },
+            check_flags: 0,
+            screenshot_id: uuid::Uuid::nil(),
+            object_id: uuid::Uuid::from_u128(0x22),
+            abuser_id: uuid::Uuid::from_u128(0x33),
+            abuse_region_name: "TestRegion".to_owned(),
+            abuse_region_id: uuid::Uuid::nil(),
+            summary: "Griefing".to_owned(),
+            details: "Detail".to_owned(),
+            version_string: "7.1 Lnx".to_owned(),
+        };
+        client.send_abuse_report(&report, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let received = drain_server(&mut sim)
+            .into_iter()
+            .find_map(|event| match event {
+                ServerEvent::AbuseReportReceived(report) => Some(*report),
+                _ => None,
+            })
+            .ok_or("expected an AbuseReportReceived server event")?;
+        assert_eq!(received, report);
+        Ok(())
+    }
+
+    #[test]
+    fn client_postcard_reaches_server() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let postcard = Postcard {
+            asset_id: uuid::Uuid::from_u128(0x55),
+            pos_global: [256_128.0, 256_064.0, 22.0],
+            to: "friend@example.com".to_owned(),
+            from: "me@example.com".to_owned(),
+            name: "Me".to_owned(),
+            subject: "Hi".to_owned(),
+            message: "Wish you were here".to_owned(),
+            allow_publish: true,
+            mature_publish: false,
+        };
+        client.send_postcard(&postcard, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let received = drain_server(&mut sim)
+            .into_iter()
+            .find_map(|event| match event {
+                ServerEvent::PostcardReceived(postcard) => Some(*postcard),
+                _ => None,
+            })
+            .ok_or("expected a PostcardReceived server event")?;
+        assert_eq!(received, postcard);
         Ok(())
     }
 

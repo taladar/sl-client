@@ -111,6 +111,40 @@ top:
   (`Event::AvatarAnimation`),
 - and the usual name/identity data.
 
+## The world map
+
+The world map is assembled from three separate queries, all sent to the current
+region's circuit and answered over UDP:
+
+- **Map blocks** — `Command::RequestMapBlocks` (a grid-coordinate rectangle) or
+  `RequestMapByName` (search by name) ask for the per-region details: name, grid
+  coordinates, maturity, size, and the region's map-tile texture id. Each region
+  arrives as an `Event::MapBlock`.
+- **Map items** — `Command::RequestMapItems` asks for a map overlay of a given
+  kind (avatar "green dots", telehubs, land for sale, events). They arrive as an
+  `Event::MapItems` carrying global-coordinate `MapItem`s.
+- **Map layers** — `Command::RequestMapLayer` asks for the zoomed-out image
+  tiles: each `MapLayer` (in the resulting `Event::MapLayers`) gives a texture
+  and the inclusive grid rectangle (`left..=right` by `bottom..=top`) it covers.
+  The viewer stitches these tiles into the background of the world map, then
+  overlays the per-region detail from the map blocks. Second Life's main grid is
+  a single global layer; OpenSim grids report their own coverage.
+
+## Reporting abuse & filing postcards
+
+Two outbound, fire-and-forget viewer actions reach the grid here:
+
+- **Abuse / bug reports** — the "Report Abuse" floater gathers a complaint (the
+  abuser, the offending object, a summary and free-text details, a snapshot, and
+  the region the abuse happened in) and sends it. Second Life prefers the
+  `SendUserReport` capability (`Command::SendAbuseReportViaCaps`, an LLSD POST),
+  falling back to the legacy `UserReport` UDP message
+  (`Command::SendAbuseReport`); OpenSim implements only the UDP path. Either way
+  there is no reply.
+- **Postcards** — `Command::SendPostcard` emails a snapshot (already uploaded as
+  an asset) to one or more addresses with a subject and message, optionally
+  asking the grid to publish it on its web gallery. Fire-and-forget.
+
 ## Simulator notifications
 
 Beyond world geometry, the simulator pushes a handful of receive-only
@@ -165,6 +199,22 @@ None of these has a reply; the client just acts on them.
 >   `send_parcel_info_reply`.
 > - `RequestRemoteParcelId` posts the `RemoteParcelRequest` capability
 >   (`sl-wire/src/remote_parcel.rs`), decoded into `Event::RemoteParcelId`.
+> - The world map's three queries are `Command::RequestMapBlocks` /
+>   `RequestMapByName` (→ `Event::MapBlock`, `MapRegionInfo`),
+>   `RequestMapItems` (→ `Event::MapItems`, `MapItem`/`MapItemType`), and
+>   `RequestMapLayer` (→ `Event::MapLayers`, `MapLayer`) — types in
+>   `sl-proto/src/types/map.rs`, UDP encoders in
+>   `sl-proto/src/session/circuit.rs`. The simulator side answers with
+>   `SimSession::send_map_block_reply` / `send_map_item_reply` /
+>   `send_map_layer_reply`.
+> - Abuse reports use `sl-wire/src/abuse_report.rs` (`AbuseReport`,
+>   `AbuseReportType`): `Command::SendAbuseReport` encodes the `UserReport` UDP
+>   message; `Command::SendAbuseReportViaCaps` posts the `SendUserReport`
+>   capability (`build_send_user_report`). The simulator decodes the UDP form
+>   into `ServerEvent::AbuseReportReceived`.
+> - Postcards are `sl-proto/src/types/report.rs` (`Postcard`):
+>   `Command::SendPostcard` encodes the `SendPostcard` UDP message, decoded on
+>   the simulator side into `ServerEvent::PostcardReceived`.
 > - Simulator notifications are receive-only: `AlertMessage`,
 >   `AgentAlertMessage`, `MeanCollisionAlert`, `HealthMessage`, and
 >   `CameraConstraint` decode into the same-named `Event`s (the `AlertInfo` type

@@ -289,6 +289,7 @@ fn on_events(
             | SlSessionEvent::NeighborSeed { .. }
             | SlSessionEvent::MapBlock(_)
             | SlSessionEvent::MapItems { .. }
+            | SlSessionEvent::MapLayers { .. }
             | SlSessionEvent::ObjectAdded(_)
             | SlSessionEvent::ObjectUpdated(_)
             | SlSessionEvent::TimeDilation { .. }

@@ -18,18 +18,19 @@
 use std::collections::BTreeMap;
 
 use sl_proto::{
-    AgentPreferences, AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, Command,
-    ControlFlags, CreateGroupParams, DeRezDestination, DirFindFlags, EstateAccessDelta,
-    ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation, GroupNoticeAttachment,
-    GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange, InterestsUpdate, InventoryItem,
-    InventoryOffer, InventoryType, LandSearchType, LandStatReportType, LindenAmount, LookAtType,
-    MapItemType, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType,
-    MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
-    ObjectPermMasks, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-    ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate,
-    PointAtType, PrimShape, ProfileUpdate, RegionInfoUpdate, RestoreItem, RezAttachment, Rotation,
-    SaleType, ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
+    AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentPoint, Camera, ChatType,
+    ClassifiedUpdate, Command, ControlFlags, CreateGroupParams, DeRezDestination, DirFindFlags,
+    EstateAccessDelta, ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation,
+    GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange, InterestsUpdate,
+    InventoryItem, InventoryOffer, InventoryType, LandSearchType, LandStatReportType, LindenAmount,
+    LookAtType, MapItemType, Material, MaterialOverrideUpdate, Maturity, MediaEntry,
+    MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem,
+    ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate,
+    PermissionField, PickUpdate, PointAtType, Postcard, PrimShape, ProfileUpdate, RegionInfoUpdate,
+    RestoreItem, RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable,
+    WearableType,
 };
 
 use crate::args::{self, Args};
@@ -265,6 +266,54 @@ fn parse_map_item_type(field: &str, value: &str) -> Result<MapItemType, ReplErro
                 .ok_or_else(|| invalid(field, value, "map item type"))?,
         ),
     })
+}
+
+/// Parses an [`AbuseReportType`] from `bug`/`complaint` (or a raw byte).
+fn parse_abuse_report_type(field: &str, value: &str) -> Result<AbuseReportType, ReplError> {
+    Ok(match norm(value).as_str() {
+        "bug" => AbuseReportType::Bug,
+        "complaint" | "abuse" => AbuseReportType::Complaint,
+        _ => AbuseReportType::from_u8(
+            value
+                .parse::<u8>()
+                .ok()
+                .ok_or_else(|| invalid(field, value, "abuse report type"))?,
+        ),
+    })
+}
+
+/// Builds an [`AbuseReport`] from the shared `send_abuse_report` /
+/// `send_abuse_report_caps` argument list, so both the UDP and capability
+/// commands parse identically.
+fn abuse_report_from_args(
+    args: &Args,
+    ctx: &dyn ReplContext,
+) -> Result<Box<AbuseReport>, ReplError> {
+    Ok(Box::new(AbuseReport {
+        report_type: enum_arg_or(
+            args,
+            ctx,
+            "report_type",
+            4,
+            parse_abuse_report_type,
+            AbuseReportType::Complaint,
+        )?,
+        category: args.parse_or(ctx, "category", 3, "u8", 0)?,
+        position: args.opt_vector(ctx, "position", 6)?.unwrap_or(Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        }),
+        check_flags: 0,
+        screenshot_id: Uuid::nil(),
+        object_id: args.uuid_or_nil(ctx, "object_id", 5)?,
+        abuser_id: args.uuid_or_nil(ctx, "abuser_id", 1)?,
+        abuse_region_name: args.opt_str(ctx, "region_name", 2)?.unwrap_or_default(),
+        abuse_region_id: Uuid::nil(),
+        summary: args.req_str(ctx, "summary", 0)?,
+        details: String::new(),
+        version_string: String::new(),
+    }))
 }
 
 /// Parse a [`ParcelAccessScope`] from `access`/`ban`.
@@ -2563,6 +2612,50 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "request_map_layer",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::RequestMapLayer),
+        },
+        CommandSpec {
+            name: "send_abuse_report",
+            usage: "<summary> [abuser_id=nil] [region_name] [category=0] \
+                    [report_type=complaint|bug] [object_id=nil] [position=<x,y,z>]",
+            build: |args, ctx| Ok(Command::SendAbuseReport(abuse_report_from_args(args, ctx)?)),
+        },
+        CommandSpec {
+            name: "send_abuse_report_caps",
+            usage: "<summary> [abuser_id=nil] [region_name] [category=0] \
+                    [report_type=complaint|bug] [object_id=nil] [position=<x,y,z>]",
+            build: |args, ctx| {
+                Ok(Command::SendAbuseReportViaCaps(abuse_report_from_args(
+                    args, ctx,
+                )?))
+            },
+        },
+        CommandSpec {
+            name: "send_postcard",
+            usage: "<asset_id> <to> [subject] [message] [name] [from] \
+                    [position=<x,y,z>] [allow_publish=false] [mature_publish=false]",
+            build: |args, ctx| {
+                let (pos_x, pos_y, pos_z) = args
+                    .opt_str(ctx, "position", 6)?
+                    .map(|value| parse_global("position", &value))
+                    .transpose()?
+                    .unwrap_or((0.0, 0.0, 0.0));
+                Ok(Command::SendPostcard(Box::new(Postcard {
+                    asset_id: args.req_uuid(ctx, "asset_id", 0)?,
+                    pos_global: [pos_x, pos_y, pos_z],
+                    to: args.req_str(ctx, "to", 1)?,
+                    from: args.opt_str(ctx, "from", 5)?.unwrap_or_default(),
+                    name: args.opt_str(ctx, "name", 4)?.unwrap_or_default(),
+                    subject: args.opt_str(ctx, "subject", 2)?.unwrap_or_default(),
+                    message: args.opt_str(ctx, "message", 3)?.unwrap_or_default(),
+                    allow_publish: args.bool_or(ctx, "allow_publish", 7, false)?,
+                    mature_publish: args.bool_or(ctx, "mature_publish", 8, false)?,
+                })))
+            },
+        },
+        CommandSpec {
             name: "request_objects",
             usage: "<local_id,local_id,…>",
             build: |args, ctx| {
@@ -3953,8 +4046,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use sl_proto::{
-        AgentPreferences, AssetType, ChatType, Command, ControlFlags, FriendRights,
-        LandStatReportType, MapItemType, ObjectBuyItem, SaleType, Uuid,
+        AbuseReportType, AgentPreferences, AssetType, ChatType, Command, ControlFlags,
+        FriendRights, LandStatReportType, MapItemType, ObjectBuyItem, SaleType, Uuid,
     };
 
     use super::Registry;
@@ -4133,6 +4226,46 @@ mod tests {
                 item_type: MapItemType::LandForSale,
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn request_map_layer_takes_no_args() {
+        assert!(matches!(
+            build("request_map_layer"),
+            Ok(Command::RequestMapLayer)
+        ));
+    }
+
+    #[test]
+    fn abuse_report_parses_summary_and_abuser() {
+        assert!(matches!(
+            build(&format!("send_abuse_report Griefing {ONE} TestRegion 66 bug")),
+            Ok(Command::SendAbuseReport(report))
+                if report.summary == "Griefing"
+                    && report.abuser_id == uuid(ONE)
+                    && report.abuse_region_name == "TestRegion"
+                    && report.category == 66
+                    && report.report_type == AbuseReportType::Bug
+        ));
+    }
+
+    #[test]
+    fn abuse_report_caps_uses_caps_command() {
+        assert!(matches!(
+            build("send_abuse_report_caps Griefing"),
+            Ok(Command::SendAbuseReportViaCaps(report)) if report.summary == "Griefing"
+        ));
+    }
+
+    #[test]
+    fn postcard_parses_asset_and_recipient() {
+        assert!(matches!(
+            build(&format!("send_postcard {ONE} friend@example.com Subject")),
+            Ok(Command::SendPostcard(postcard))
+                if postcard.asset_id == uuid(ONE)
+                    && postcard.to == "friend@example.com"
+                    && postcard.subject == "Subject"
         ));
     }
 

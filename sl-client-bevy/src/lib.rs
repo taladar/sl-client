@@ -24,18 +24,18 @@ use sl_proto::{
     CAP_LAND_RESOURCES, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
     CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
     CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
-    CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Event as SessionEvent,
-    Llsd, LoginResponse, RECV_BUFFER_SIZE, SelectedCostKind, Session,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, build_agent_preferences_request,
+    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE,
+    CAP_VOICE_SIGNALING, Event as SessionEvent, Llsd, LoginResponse, RECV_BUFFER_SIZE,
+    SelectedCostKind, Session, ais_category_children_fetch_url, ais_category_children_url,
+    ais_category_url, ais_create_category_url, ais_item_url, build_agent_preferences_request,
     build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
     build_ais_update_item_body, build_create_inventory_category_request,
     build_get_object_cost_request, build_get_object_physics_data_request,
     build_modify_material_params_request, build_object_media_navigate_request,
     build_object_media_update_request, build_parcel_voice_info_request,
     build_provision_voice_account_request, build_region_experiences_request,
-    build_remote_parcel_request, build_resource_cost_selected_request,
+    build_remote_parcel_request, build_resource_cost_selected_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_upload_baked_texture_request,
     build_voice_signaling_request, display_names_query, experience_id_query, experience_info_query,
@@ -94,8 +94,8 @@ use crate::caps::{CAPS_FAILURE_PREFIX, post_neighbour_seed, start_caps};
 use crate::experiences::{run_experience_status, run_group_experiences};
 use crate::fetch::{emit_disconnect, run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
 use crate::http::{
-    run_delete_caps_llsd, run_get_caps_llsd, run_land_resources, run_patch_caps_llsd,
-    run_put_caps_llsd,
+    run_caps_oneway, run_delete_caps_llsd, run_get_caps_llsd, run_land_resources,
+    run_patch_caps_llsd, run_put_caps_llsd,
 };
 use crate::inventory::{
     run_group_members_fetch, run_inventory_fetch, run_server_appearance_update,
@@ -1192,6 +1192,25 @@ fn advance_running(
                 session
                     .request_map_items(*item_type, *region_handle, now)
                     .ok();
+            }
+            Command::RequestMapLayer => {
+                session.request_map_layer(now).ok();
+            }
+            Command::SendAbuseReport(report) => {
+                session.send_abuse_report(report, now).ok();
+            }
+            Command::SendAbuseReportViaCaps(report) => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_SEND_USER_REPORT).cloned()
+                {
+                    let body = build_send_user_report(report);
+                    std::thread::spawn(move || {
+                        run_caps_oneway(&url, body);
+                    });
+                }
+            }
+            Command::SendPostcard(postcard) => {
+                session.send_postcard(postcard, now).ok();
             }
             Command::RequestObjects { local_ids } => {
                 session.request_objects(local_ids, now).ok();

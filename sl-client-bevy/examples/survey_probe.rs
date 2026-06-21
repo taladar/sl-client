@@ -181,6 +181,7 @@ fn on_events(
             | SlSessionEvent::MoneyBalance(_)
             | SlSessionEvent::EconomyData(_)
             | SlSessionEvent::MapItems { .. }
+            | SlSessionEvent::MapLayers { .. }
             | SlSessionEvent::NeighborSeed { .. }
             | SlSessionEvent::ObjectAdded(_)
             | SlSessionEvent::ObjectUpdated(_)
