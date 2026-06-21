@@ -235,6 +235,8 @@ fn write_diagnostic(out: &mut String, diagnostic: &Diagnostic) -> std::fmt::Resu
             Some(seq) => write!(out, "ExpectedReplyMissing request={request} sequence={seq}")?,
             None => write!(out, "ExpectedReplyMissing request={request} sequence=-")?,
         },
+        // `Diagnostic` is `#[non_exhaustive]`: render any future kind generically.
+        other => write!(out, "{other:?}")?,
     }
     Ok(())
 }

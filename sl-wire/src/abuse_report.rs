@@ -26,6 +26,7 @@ use crate::llsd::Llsd;
 
 /// The kind of report carried by an [`AbuseReport`] (the `ReportType` byte).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum AbuseReportType {
     /// A bug report (`1`).
     Bug,

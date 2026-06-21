@@ -14,6 +14,7 @@ use uuid::Uuid;
 /// always wears exactly one of each; the rest are *clothing* layers that may be
 /// absent or stacked. [`WearableType::is_body_part`] distinguishes them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum WearableType {
     /// Body shape (`WT_SHAPE`).
     Shape,
@@ -410,6 +411,7 @@ pub struct AvatarAttachment {
 /// point itself (the low 7 bits); use [`split_code`](Self::split_code) /
 /// [`with_mode`](Self::with_mode) to combine or separate the two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum AttachmentPoint {
     /// The item's default attachment point (`0`); the simulator picks the slot
     /// the object was last attached to (or its scripted default).

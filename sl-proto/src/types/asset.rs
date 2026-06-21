@@ -11,6 +11,7 @@ use uuid::Uuid;
 /// [transfer](crate::Session::request_asset) and to pick the
 /// [`GetAsset`](crate::CAP_GET_ASSET) HTTP query parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum AssetType {
     /// A texture (`AT_TEXTURE`, a JPEG-2000 / `.j2c` image).
     Texture,
@@ -215,6 +216,7 @@ impl AssetType {
 /// [`Wearable`](Self::Wearable). Used to build the CAPS upload
 /// (`NewFileAgentInventory`) request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum InventoryType {
     /// A texture (`IT_TEXTURE`).
     Texture,
@@ -332,6 +334,7 @@ impl InventoryType {
 /// The image codec of a texture delivered over the legacy UDP image path
 /// (`ImageData`'s `Codec` field / `EImageCodec`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ImageCodec {
     /// JPEG 2000 codestream (`IMG_CODEC_J2C`) — the normal Second Life texture
     /// format.
@@ -372,6 +375,7 @@ impl ImageCodec {
 /// The status of a generic asset [transfer](crate::Session::request_asset)
 /// (`LLTSCode`), reported in a `TransferInfo`/`TransferPacket`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TransferStatus {
     /// In progress (`LLTS_OK`).
     Ok,

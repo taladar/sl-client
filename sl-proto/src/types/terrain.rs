@@ -6,6 +6,7 @@
 /// the per-region wind field, cloud density, and water height respectively, in
 /// the same patched-DCT encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TerrainLayerType {
     /// Terrain heightmap (`'L'`). Each cell is a ground height in metres.
     Land,

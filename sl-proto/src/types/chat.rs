@@ -6,6 +6,7 @@ use uuid::Uuid;
 /// The kind of a chat message, from the `Type`/`ChatType` byte shared by
 /// `ChatFromViewer` (outgoing) and `ChatFromSimulator` (incoming).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ChatType {
     /// Whisper: a reduced (10 m) range.
     Whisper,
@@ -68,6 +69,7 @@ impl ChatType {
 /// What kind of source produced a chat message, from the `SourceType` byte of
 /// `ChatFromSimulator`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ChatSourceType {
     /// The system / region (no avatar or object).
     System,
@@ -95,6 +97,7 @@ impl ChatSourceType {
 /// Whether a chat message was audible at the listener, from the `Audible` byte
 /// of `ChatFromSimulator` (a signed value: `-1`/`255` means not audible).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ChatAudible {
     /// Not audible (out of range); the message text may be elided.
     Not,
@@ -145,6 +148,7 @@ pub struct ChatMessage {
 /// the commonly handled dialogs are named; the rest are preserved verbatim via
 /// [`ImDialog::Unknown`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ImDialog {
     /// An ordinary 1:1 instant message (`IM_NOTHING_SPECIAL`).
     Message,

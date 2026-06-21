@@ -6,6 +6,7 @@ use crate::message::MessageId;
 
 /// An error encountered while decoding or encoding LLUDP wire data.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum WireError {
     /// A datagram carried a message id with no corresponding known message.
     #[error("unrecognized message id {id:?}")]

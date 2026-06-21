@@ -27,6 +27,7 @@ pub struct CoarseLocation {
 /// (`LLHUDObject`'s effect enumeration). Most effects a normal viewer emits are
 /// [`LookAt`](Self::LookAt), [`PointAt`](Self::PointAt) and the beam family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ViewerEffectType {
     /// Floating text (`LL_HUD_TEXT`, `0`).
     Text,
@@ -144,6 +145,7 @@ impl ViewerEffectType {
 /// What an avatar's gaze (a [`ViewerEffectType::LookAt`] effect) is directed at
 /// (`ELookAtType`). The numeric order doubles as a priority: higher targets win.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum LookAtType {
     /// No look-at target (`0`).
     None,
@@ -215,6 +217,7 @@ impl LookAtType {
 /// What an avatar's pointing gesture (a [`ViewerEffectType::PointAt`] effect) is
 /// directed at (`EPointAtType`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PointAtType {
     /// No point-at target (`0`).
     None,
@@ -261,6 +264,7 @@ impl PointAtType {
 /// payload whose length does not match its type) is kept verbatim as
 /// [`Raw`](Self::Raw) so it still round-trips.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ViewerEffectData {
     /// An avatar's gaze target (the 57-byte `LLHUDEffectLookAt` layout): the
     /// source avatar, an optional target object, the target position (a global

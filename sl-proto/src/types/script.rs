@@ -215,6 +215,7 @@ pub struct ScriptControl {
 /// numeric values match the viewer's `EFollowCamAttributes`
 /// (`llfollowcamparams.h`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FollowCamProperty {
     /// `FOLLOWCAM_PITCH` — camera pitch angle (degrees).
     Pitch,
@@ -343,6 +344,7 @@ pub struct FollowCamPropertyValue {
 
 /// The kind of thing a mute-list entry blocks, from the `MuteType` field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MuteType {
     /// A mute by display name only (no specific id).
     ByName,

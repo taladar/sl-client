@@ -285,14 +285,38 @@ Replace ambiguous `bool`s and magic ints with named enums.
   `teleport_flags == TeleportFlags::VIA_LURE`, i.e. `4`). NO sl-types touched
   (both are client wire-protocol concepts). The
   REPL/runtimes are unaffected (the map-reply helpers are server-only and
-  `accept_teleport_lure`'s public signature did not change). **NEXT: Phase 3
-  final item — `#[non_exhaustive]` case-by-case on data enums external consumers
-  match (NOT on `Command`/`Event`).**
-- [ ] `#[non_exhaustive]` — apply **case-by-case** to data enums external
-  consumers match (`Diagnostic`, `ChatType`, …). **Do NOT** add it to
-  `Command`/`Event`: `sl-repl/src/format.rs` matches them exhaustively (no `_`
-  arm) on purpose so a new variant fails to compile; `#[non_exhaustive]` would
-  defeat that safety net.
+  `accept_teleport_lure`'s public signature did not change).
+- [x] `#[non_exhaustive]` — applied **case-by-case** to 49 public data/value/
+  error enums in `sl-proto`/`sl-wire` that model open-ended protocol value sets
+  (LL may add values) or are caller-facing error types, so downstream crates
+  must add a `_` arm and a future variant is a non-breaking change.
+  **Included:** the chat enums
+  (`ChatType`/`ChatSourceType`/`ChatAudible`/`ImDialog`),
+  `Diagnostic`, asset/inventory (`AssetType`/`InventoryType`/`ImageCodec`/
+  `TransferStatus`), `WearableType`/`AttachmentPoint`, editing
+  (`ClickAction`/`Material`/`SaleType`/`DeRezDestination`/`PermissionField`/
+  `Maturity`/`ProductType`), parcel (`ParcelRequestResult`/`ParcelStatus`/
+  `LandingType`/`ParcelMediaCommand`/`ParcelCategory`/`LandStatReportType`),
+  `TerrainLayerType`, `MoneyTransactionType`, map
+  (`EstateAccessDelta`/`EstateAccessKind`/`MapItemType`), nearby
+  (`ViewerEffectType`/`LookAtType`/`PointAtType`/`ViewerEffectData`),
+  `GroupRoleUpdateType`, script (`FollowCamProperty`/`MuteType`),
+  `MeanCollisionType`, `DisconnectReason`, sl-wire (`PhysicsShapeType`/
+  `SelectedCostKind`/`AbuseReportType`/`ExperiencePermission`),
+  and the caller-facing error enums (`Error`, `WireError`, `ThrottleError`,
+  `CameraError`, `StartLocationParseError`, `LoginParseError`). **Excluded
+  (case-by-case):** `Command`/`Event`/`ServerEvent` (dispatch enums deliberately
+  matched exhaustively — `sl-repl/src/format.rs` for the first two — as a
+  compile-time safety net); `LoginResponse` (matched exhaustively in
+  `sl-proto::handle_login_response` — a new login outcome *should* fail to
+  compile, not silently fall through a `_`); the closed wire-spec structural
+  enums `Llsd`/`MessageId`/`StartLocation`; and the closed binary client-intent
+  enums `Reliability`/`MovementMode`/`AttachmentMode`/`DetachOrder`/
+  `ScriptControlAction`/`ParcelAccessScope`/`GroupRoleChange` (a 2-value set
+  will not grow). Only three external match sites needed a new `_` arm
+  (`sl-repl/src/format.rs` `write_diagnostic`, `sl-survey` `maturity_str`/
+  `product_str`); `wildcard_enum_match_arm` is not among the enabled restriction
+  lints so `_` arms are clippy-clean. NO sl-types touched. **Phase 3 COMPLETE.**
 
 ### Phase 4 — Domain ID newtypes (medium-high invasiveness)
 

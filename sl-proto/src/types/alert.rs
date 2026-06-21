@@ -12,6 +12,7 @@ use uuid::Uuid;
 /// [`victim`](MeanCollision::victim)). The numeric values match the viewer's
 /// `EMeanCollisionType` (`mean_collision_data.h`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MeanCollisionType {
     /// `MEAN_INVALID` (`0`) — an unset / placeholder type.
     Invalid,

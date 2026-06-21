@@ -102,6 +102,7 @@ impl FromStr for StartLocation {
 
 /// An error parsing a [`StartLocation`] from its `start` wire string.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum StartLocationParseError {
     /// The value matched none of `"last"`, `"home"`, or a `"uri:"` location.
     #[error(
@@ -444,6 +445,7 @@ pub struct LoginFailure {
 
 /// An error encountered while parsing a login response.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum LoginParseError {
     /// The response was not well-formed XML.
     #[error("malformed XML in login response: {0}")]
