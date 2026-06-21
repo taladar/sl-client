@@ -11,11 +11,12 @@ use crate::{
     GestureActivation, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMemberChange, IceCandidate,
     InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LandSearchType,
     LandStatReportType, LindenAmount, MapItemType, Material, MaterialOverrideUpdate, MediaEntry,
-    MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem,
-    ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
-    ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, Postcard, PrimShape,
-    ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, Rotation, SaleType,
-    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
+    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
+    ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
+    ParcelCategory, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, Postcard,
+    PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, Rotation,
+    SaleType, ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
+    Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1446,8 +1447,8 @@ pub enum Command {
     /// Choose whether the avatar runs or walks for ground movement
     /// (`SetAlwaysRun`). Fire-and-forget; there is no reply.
     SetAlwaysRun {
-        /// `true` to always run, `false` to walk.
-        always_run: bool,
+        /// Whether the avatar always runs or walks.
+        mode: MovementMode,
     },
     /// Tell the simulator the viewer has stalled and is not reading the network
     /// (`AgentPause`), so it stops streaming updates until a

@@ -12,10 +12,10 @@ use crate::types::{
     AssetType, AttachmentMode, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction,
     CreateGroupParams, DeRezDestination, DirFindFlags, GestureActivation, GroupRoleEdit,
     GroupRoleMemberChange, ImDialog, InterestsUpdate, InventoryItem, LandSearchType, Material,
-    NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform,
-    ParcelAccessEntry, ParcelCategory, ParcelUpdate, PermissionField, PickUpdate, Postcard,
-    PrimShape, ProfileUpdate, Reliability, RestoreItem, RezAttachment, SaleType, Throttle,
-    ViewerEffect, Wearable,
+    MovementMode, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
+    ObjectTransform, ParcelAccessEntry, ParcelCategory, ParcelUpdate, PermissionField, PickUpdate,
+    Postcard, PrimShape, ProfileUpdate, Reliability, RestoreItem, RezAttachment, SaleType,
+    Throttle, ViewerEffect, Wearable,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::AbuseReport;
@@ -1401,18 +1401,18 @@ impl Circuit {
         self.pause_serial_num
     }
 
-    /// Queues a `SetAlwaysRun` reliably, choosing whether the avatar runs
-    /// (`always_run`) or walks for ground movement.
+    /// Queues a `SetAlwaysRun` reliably, choosing whether the avatar runs or
+    /// walks for ground movement.
     pub(crate) fn send_set_always_run(
         &mut self,
-        always_run: bool,
+        mode: MovementMode,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::SetAlwaysRun(SetAlwaysRun {
             agent_data: SetAlwaysRunAgentDataBlock {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
-                always_run,
+                always_run: mode.is_always_run(),
             },
         });
         self.send(&message, Reliability::Reliable, now)

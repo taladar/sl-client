@@ -96,7 +96,7 @@ pub use script::{
     ScriptTeleportRequest,
 };
 pub use session::{
-    Camera, CameraError, DisconnectReason, Kilobits, LoginHttpRequest, LoginParams, Reliability,
-    Throttle, ThrottleBuilder, ThrottleError, Transmit,
+    Camera, CameraError, DisconnectReason, Kilobits, LoginHttpRequest, LoginParams, MovementMode,
+    Reliability, Throttle, ThrottleBuilder, ThrottleError, Transmit,
 };
 pub use terrain::{TerrainLayerType, TerrainPatch};
