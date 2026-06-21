@@ -18,13 +18,13 @@ mod test {
         GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
         GroupActiveProposalItem, GroupName, GroupVote, GroupVoteHistoryItem, ImDialog,
         LandSearchType, LandStatItem, LandStatReportType, LoginParams, MapItem, MapItemType,
-        MapLayer, MapRegionInfo, Maturity, MeanCollision, MeanCollisionType, MovementMode,
-        NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails,
-        ParcelObjectOwner, ParcelReturnType, Permissions5, PlacesResult, PointAtType, Postcard,
-        ProductType, RegionIdentity, RestoreItem, RezAttachment, SaleType, ScriptControl,
-        ScriptControlAction, ServerEvent, Session, SimSession, TelehubInfo, Throttle, Transmit,
-        ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
-        grid_to_handle, parse_event_queue_response,
+        MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
+        MovementMode, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory,
+        ParcelDetails, ParcelObjectOwner, ParcelReturnType, Permissions5, PlacesResult,
+        PointAtType, Postcard, ProductType, RegionIdentity, RestoreItem, RezAttachment, SaleType,
+        ScriptControl, ScriptControlAction, ServerEvent, Session, SimSession, TelehubInfo,
+        Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        enable_simulator_to_caps_llsd, grid_to_handle, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -2297,7 +2297,7 @@ mod test {
                 map_image_id: uuid::Uuid::from_u128(0x1234),
             },
         ];
-        sim.send_map_block_reply(2, &regions, now)?;
+        sim.send_map_block_reply(MapRequestFlags(MapRequestFlags::LAYER), &regions, now)?;
         pump(&mut client, &mut sim, now)?;
 
         let decoded: Vec<MapRegionInfo> = drain_client(&mut client)
@@ -2336,7 +2336,12 @@ mod test {
                 name: "Parcel For Sale".to_owned(),
             },
         ];
-        sim.send_map_item_reply(2, MapItemType::AgentLocations, &items, now)?;
+        sim.send_map_item_reply(
+            MapRequestFlags(MapRequestFlags::LAYER),
+            MapItemType::AgentLocations,
+            &items,
+            now,
+        )?;
         pump(&mut client, &mut sim, now)?;
 
         let reply = drain_client(&mut client)
@@ -2373,7 +2378,7 @@ mod test {
                 image_id: uuid::Uuid::from_u128(0x1234),
             },
         ];
-        sim.send_map_layer_reply(2, &layers, now)?;
+        sim.send_map_layer_reply(MapRequestFlags(MapRequestFlags::LAYER), &layers, now)?;
         pump(&mut client, &mut sim, now)?;
 
         let decoded: Vec<MapLayer> = drain_client(&mut client)

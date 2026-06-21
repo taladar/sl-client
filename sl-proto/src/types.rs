@@ -70,7 +70,7 @@ pub use inventory::{
 };
 pub use map::{
     EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, MapItem, MapItemType,
-    MapLayer, MapRegionInfo, NeighborInfo, RegionInfoUpdate, TelehubInfo,
+    MapLayer, MapRegionInfo, MapRequestFlags, NeighborInfo, RegionInfoUpdate, TelehubInfo,
 };
 pub use name::{AvatarName, GroupName};
 pub use nearby::{

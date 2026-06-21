@@ -11156,7 +11156,7 @@ mod test {
             })
             .ok_or("expected a TeleportLureRequest")?;
         assert_eq!(req.info.lure_id, lure_id);
-        assert_eq!(req.info.teleport_flags, 4); // TELEPORT_FLAGS_VIA_LURE
+        assert_eq!(req.info.teleport_flags, TeleportFlags::VIA_LURE); // 1 << 2
         Ok(())
     }
 

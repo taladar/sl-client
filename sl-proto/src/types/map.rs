@@ -327,6 +327,37 @@ pub struct MapLayer {
     pub image_id: Uuid,
 }
 
+/// The `Flags` bitfield the viewer sends in the agent block of the world-map
+/// request messages (`MapBlockRequest`, `MapNameRequest`, `MapItemRequest`,
+/// `MapLayerRequest`) and which the simulator echoes back in the matching reply.
+/// Mirrors the reference viewer's `LLWorldMapMessage` flag constants
+/// (`indra/newview/llworldmapmessage.cpp`): a named type in place of the bare
+/// `2` "map-layer" magic int. Surfaced by the server-side
+/// [`ServerEvent`](crate::ServerEvent) map-request events and consumed by the
+/// `SimSession::send_map_*_reply` helpers.
+///
+/// The bits are independent; an all-clear value (`MapRequestFlags(0)`) is what
+/// `MapBlockRequest` carries when it does not select the layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MapRequestFlags(pub u32);
+
+impl MapRequestFlags {
+    /// Request the world-map image layer (the viewer's `LAYER_FLAG`). Sent on
+    /// the name/item/layer requests to select the terrain map tiles.
+    pub const LAYER: u32 = 2;
+    /// Ask the simulator to also report non-existent ("null") regions in a
+    /// `MapBlockReply` (the viewer's `MAP_SIM_RETURN_NULL_SIMS`, used when
+    /// probing whether a region exists). Overwrites [`LAYER`](Self::LAYER) on a
+    /// `MapBlockRequest`.
+    pub const RETURN_NULL_SIMS: u32 = 0x0001_0000;
+
+    /// Whether all of the bits in `mask` are set.
+    #[must_use]
+    pub const fn contains(self, mask: u32) -> bool {
+        self.0 & mask == mask
+    }
+}
+
 /// A neighbouring simulator announced via `EnableSimulator`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NeighborInfo {
@@ -338,4 +369,41 @@ pub struct NeighborInfo {
     pub grid_x: u32,
     /// The neighbour's grid y coordinate (region index, i.e. global metres / 256).
     pub grid_y: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MapRequestFlags;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn map_request_flag_constants_match_the_viewer() {
+        // The two named bits the reference viewer (`llworldmapmessage.cpp`)
+        // ever sets, by their exact wire values.
+        assert_eq!(MapRequestFlags::LAYER, 2);
+        assert_eq!(MapRequestFlags::RETURN_NULL_SIMS, 0x0001_0000);
+    }
+
+    #[test]
+    fn map_request_flags_round_trip_bit_identically() {
+        // Wrapping a raw word and reading `.0` back is the identity, so the
+        // codec boundary stays byte-identical to the old raw `u32`.
+        for raw in [0, MapRequestFlags::LAYER, MapRequestFlags::RETURN_NULL_SIMS] {
+            assert_eq!(MapRequestFlags(raw).0, raw);
+        }
+    }
+
+    #[test]
+    fn map_request_flags_contains_checks_the_mask() {
+        let layer = MapRequestFlags(MapRequestFlags::LAYER);
+        assert!(layer.contains(MapRequestFlags::LAYER));
+        assert!(!layer.contains(MapRequestFlags::RETURN_NULL_SIMS));
+
+        let both = MapRequestFlags(MapRequestFlags::LAYER | MapRequestFlags::RETURN_NULL_SIMS);
+        assert!(both.contains(MapRequestFlags::LAYER));
+        assert!(both.contains(MapRequestFlags::RETURN_NULL_SIMS));
+
+        // An all-clear value (what `MapBlockRequest` carries) contains nothing.
+        assert!(!MapRequestFlags(0).contains(MapRequestFlags::LAYER));
+    }
 }

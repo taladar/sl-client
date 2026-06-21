@@ -11,11 +11,12 @@ use crate::types::{
     GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
     GroupNotice, GroupProfile, GroupRole, GroupTitle, GroupVote, GroupVoteHistoryItem, ImDialog,
     InstantMessage, InventoryFolder, InventoryItem, LandingType, MapItem, MapItemType, MapLayer,
-    MapRegionInfo, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, Object, ObjectProperties, ParcelCategory, ParcelInfo, ParcelRequestResult,
-    ParcelStatus, PickInfo, PlayingAnimation, PrimShapeParams, ProductType, RegionChatSettings,
-    RegionCombatSettings, RegionIdentity, RegionLimits, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, SkySettings, WaterSettings, avatar_texture, grid_to_handle, handle_to_grid,
+    MapRegionInfo, MapRequestFlags, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags,
+    MuteType, NeighborInfo, Object, ObjectProperties, ParcelCategory, ParcelInfo,
+    ParcelRequestResult, ParcelStatus, PickInfo, PlayingAnimation, PrimShapeParams, ProductType,
+    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, SkySettings, WaterSettings, avatar_texture,
+    grid_to_handle, handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
@@ -1371,7 +1372,7 @@ pub(crate) fn map_region_info_to_data_block(info: &MapRegionInfo) -> MapBlockRep
 #[must_use]
 pub fn build_map_block_reply(
     agent_id: Uuid,
-    flags: u32,
+    flags: MapRequestFlags,
     regions: &[MapRegionInfo],
 ) -> MapBlockReply {
     let needs_size = regions
@@ -1389,7 +1390,10 @@ pub fn build_map_block_reply(
         Vec::new()
     };
     MapBlockReply {
-        agent_data: MapBlockReplyAgentDataBlock { agent_id, flags },
+        agent_data: MapBlockReplyAgentDataBlock {
+            agent_id,
+            flags: flags.0,
+        },
         data: regions.iter().map(map_region_info_to_data_block).collect(),
         size,
     }
@@ -1417,12 +1421,15 @@ pub(crate) fn map_item_to_data_block(item: &MapItem) -> MapItemReplyDataBlock {
 #[must_use]
 pub fn build_map_item_reply(
     agent_id: Uuid,
-    flags: u32,
+    flags: MapRequestFlags,
     item_type: MapItemType,
     items: &[MapItem],
 ) -> MapItemReply {
     MapItemReply {
-        agent_data: MapItemReplyAgentDataBlock { agent_id, flags },
+        agent_data: MapItemReplyAgentDataBlock {
+            agent_id,
+            flags: flags.0,
+        },
         request_data: MapItemReplyRequestDataBlock {
             item_type: item_type.to_u32(),
         },
@@ -1459,9 +1466,16 @@ pub(crate) const fn map_layer_to_data_block(layer: &MapLayer) -> MapLayerReplyLa
 /// and `flags` fill the agent block (the client ignores them). The `layer_data`
 /// array is capped at the 255 entries the wire count byte allows.
 #[must_use]
-pub fn build_map_layer_reply(agent_id: Uuid, flags: u32, layers: &[MapLayer]) -> MapLayerReply {
+pub fn build_map_layer_reply(
+    agent_id: Uuid,
+    flags: MapRequestFlags,
+    layers: &[MapLayer],
+) -> MapLayerReply {
     MapLayerReply {
-        agent_data: MapLayerReplyAgentDataBlock { agent_id, flags },
+        agent_data: MapLayerReplyAgentDataBlock {
+            agent_id,
+            flags: flags.0,
+        },
         layer_data: layers.iter().map(map_layer_to_data_block).collect(),
     }
 }
