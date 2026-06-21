@@ -2625,11 +2625,13 @@ fn all_specs() -> Vec<CommandSpec> {
         CommandSpec {
             name: "send_abuse_report_caps",
             usage: "<summary> [abuser_id=nil] [region_name] [category=0] \
-                    [report_type=complaint|bug] [object_id=nil] [position=<x,y,z>]",
+                    [report_type=complaint|bug] [object_id=nil] [position=<x,y,z>] \
+                    [screenshot=<hex>]",
             build: |args, ctx| {
-                Ok(Command::SendAbuseReportViaCaps(abuse_report_from_args(
-                    args, ctx,
-                )?))
+                Ok(Command::SendAbuseReportViaCaps {
+                    report: abuse_report_from_args(args, ctx)?,
+                    screenshot: args.opt_bytes(ctx, "screenshot", 7)?,
+                })
             },
         },
         CommandSpec {
@@ -4254,7 +4256,17 @@ mod tests {
     fn abuse_report_caps_uses_caps_command() {
         assert!(matches!(
             build("send_abuse_report_caps Griefing"),
-            Ok(Command::SendAbuseReportViaCaps(report)) if report.summary == "Griefing"
+            Ok(Command::SendAbuseReportViaCaps { report, screenshot: None })
+                if report.summary == "Griefing"
+        ));
+    }
+
+    #[test]
+    fn abuse_report_caps_parses_screenshot() {
+        assert!(matches!(
+            build("send_abuse_report_caps Griefing screenshot=deadbeef"),
+            Ok(Command::SendAbuseReportViaCaps { report, screenshot: Some(bytes) })
+                if report.summary == "Griefing" && bytes == [0xde, 0xad, 0xbe, 0xef]
         ));
     }
 

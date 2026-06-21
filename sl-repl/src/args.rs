@@ -521,6 +521,19 @@ impl Args {
         }
     }
 
+    /// An optional hex-encoded byte string argument, `None` when absent.
+    pub(crate) fn opt_bytes(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        pos: usize,
+    ) -> Result<Option<Vec<u8>>, ReplError> {
+        match self.opt_str(ctx, field, pos)? {
+            Some(value) => Ok(Some(parse_hex(field, &value)?)),
+            None => Ok(None),
+        }
+    }
+
     /// A comma-separated list of [`Uuid`]s (empty when the field is absent).
     pub(crate) fn vec_uuid(
         &self,

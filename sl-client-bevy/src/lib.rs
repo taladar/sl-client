@@ -24,18 +24,19 @@ use sl_proto::{
     CAP_LAND_RESOURCES, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
     CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
     CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE,
-    CAP_VOICE_SIGNALING, Event as SessionEvent, Llsd, LoginResponse, RECV_BUFFER_SIZE,
-    SelectedCostKind, Session, ais_category_children_fetch_url, ais_category_children_url,
-    ais_category_url, ais_create_category_url, ais_item_url, build_agent_preferences_request,
-    build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
-    build_ais_update_item_body, build_create_inventory_category_request,
-    build_get_object_cost_request, build_get_object_physics_data_request,
-    build_modify_material_params_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_parcel_voice_info_request,
-    build_provision_voice_account_request, build_region_experiences_request,
-    build_remote_parcel_request, build_resource_cost_selected_request, build_send_user_report,
+    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
+    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
+    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Event as SessionEvent, Llsd, LoginResponse,
+    RECV_BUFFER_SIZE, SelectedCostKind, Session, ais_category_children_fetch_url,
+    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
+    build_agent_preferences_request, build_ais_create_category_body, build_ais_move_body,
+    build_ais_rename_category_body, build_ais_update_item_body,
+    build_create_inventory_category_request, build_get_object_cost_request,
+    build_get_object_physics_data_request, build_modify_material_params_request,
+    build_object_media_navigate_request, build_object_media_update_request,
+    build_parcel_voice_info_request, build_provision_voice_account_request,
+    build_region_experiences_request, build_remote_parcel_request,
+    build_resource_cost_selected_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_upload_baked_texture_request,
     build_voice_signaling_request, display_names_query, experience_id_query, experience_info_query,
@@ -103,7 +104,8 @@ use crate::inventory::{
 use crate::materials::{run_modify_material_params, run_render_materials_fetch};
 use crate::media::{run_object_media_fetch, run_object_media_post};
 use crate::upload::{
-    emit_upload_failure, emit_upload_unavailable, run_caps_upload, spawn_new_file_upload,
+    emit_upload_failure, emit_upload_unavailable, run_caps_upload, run_report_screenshot_upload,
+    spawn_new_file_upload,
 };
 use crate::voice::{run_voice_cap, run_voice_signaling};
 
@@ -1199,14 +1201,41 @@ fn advance_running(
             Command::SendAbuseReport(report) => {
                 session.send_abuse_report(report, now).ok();
             }
-            Command::SendAbuseReportViaCaps(report) => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_SEND_USER_REPORT).cloned()
-                {
-                    let body = build_send_user_report(report);
-                    std::thread::spawn(move || {
-                        run_caps_oneway(&url, body);
-                    });
+            Command::SendAbuseReportViaCaps { report, screenshot } => {
+                if let Some(caps) = caps.as_ref() {
+                    // With a snapshot and the screenshot cap available, upload the
+                    // snapshot over the two-step uploader (filling `screenshot_id`
+                    // with a fresh texture asset id) and POST the report referencing
+                    // it; otherwise the plain no-screenshot path.
+                    let snapshot = screenshot
+                        .as_ref()
+                        .filter(|bytes| !bytes.is_empty())
+                        .and_then(|bytes| {
+                            caps.map
+                                .get(CAP_SEND_USER_REPORT_WITH_SCREENSHOT)
+                                .cloned()
+                                .map(|url| (url, bytes.clone()))
+                        });
+                    match snapshot {
+                        Some((url, bytes)) => {
+                            let mut report = report.clone();
+                            if report.screenshot_id.is_nil() {
+                                report.screenshot_id = Uuid::new_v4();
+                            }
+                            let body = build_send_user_report(&report);
+                            std::thread::spawn(move || {
+                                run_report_screenshot_upload(&url, body, bytes);
+                            });
+                        }
+                        None => {
+                            if let Some(url) = caps.map.get(CAP_SEND_USER_REPORT).cloned() {
+                                let body = build_send_user_report(report);
+                                std::thread::spawn(move || {
+                                    run_caps_oneway(&url, body);
+                                });
+                            }
+                        }
+                    }
                 }
             }
             Command::SendPostcard(postcard) => {

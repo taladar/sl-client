@@ -21,10 +21,10 @@ use sl_proto::{
     CAP_LAND_RESOURCES, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
     CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE,
-    CAP_VOICE_SIGNALING, Llsd, RECV_BUFFER_SIZE, SelectedCostKind, Session,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
+    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
+    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Llsd, RECV_BUFFER_SIZE, SelectedCostKind,
+    Session, ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
     ais_create_category_url, ais_item_url, build_agent_preferences_request,
     build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
     build_ais_update_item_body, build_create_inventory_category_request,
@@ -102,7 +102,7 @@ use crate::http::{
 use crate::inventory::{fetch_group_members, fetch_inventory};
 use crate::materials::{fetch_render_materials, post_modify_material_params};
 use crate::media::{fetch_object_media, post_object_media};
-use crate::upload::run_caps_upload;
+use crate::upload::{run_caps_upload, run_report_screenshot_upload};
 use crate::voice::{post_voice_cap, post_voice_signaling};
 
 /// How long to sleep when the session has no scheduled timeout.
@@ -779,10 +779,34 @@ impl Client {
                         Some(Command::SendAbuseReport(report)) => {
                             self.session.send_abuse_report(&report, Instant::now())?;
                         }
-                        Some(Command::SendAbuseReportViaCaps(report)) => {
-                            if let Some(url) = caps.get(CAP_SEND_USER_REPORT).cloned() {
-                                let body = build_send_user_report(&report);
-                                tokio::spawn(post_caps_oneway(url, body, http.clone()));
+                        Some(Command::SendAbuseReportViaCaps { mut report, screenshot }) => {
+                            // With a snapshot and the screenshot cap available, upload
+                            // the snapshot over the two-step uploader (filling
+                            // `screenshot_id` with a fresh texture asset id) and POST
+                            // the report referencing it; otherwise the plain path.
+                            match caps
+                                .get(CAP_SEND_USER_REPORT_WITH_SCREENSHOT)
+                                .cloned()
+                                .zip(screenshot.filter(|bytes| !bytes.is_empty()))
+                            {
+                                Some((url, bytes)) => {
+                                    if report.screenshot_id.is_nil() {
+                                        report.screenshot_id = Uuid::new_v4();
+                                    }
+                                    let body = build_send_user_report(&report);
+                                    tokio::spawn(run_report_screenshot_upload(
+                                        url,
+                                        body,
+                                        bytes,
+                                        http.clone(),
+                                    ));
+                                }
+                                None => {
+                                    if let Some(url) = caps.get(CAP_SEND_USER_REPORT).cloned() {
+                                        let body = build_send_user_report(&report);
+                                        tokio::spawn(post_caps_oneway(url, body, http.clone()));
+                                    }
+                                }
                             }
                         }
                         Some(Command::SendPostcard(postcard)) => {
