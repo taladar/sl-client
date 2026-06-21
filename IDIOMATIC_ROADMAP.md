@@ -88,7 +88,19 @@ Caller-facing bitfields are currently raw integers. Follow the existing
       public API); wire bytes are byte-identical (`bits()`/`from_bits` are
       transparent). Unit tests cover the constant values, raw round-trip, and
       `contains`/union.
-- [ ] Extra-params type flags → typed flag newtype (`extra_params.rs:22-40`).
+- [x] Extra-params type flags → typed flag newtype (`extra_params.rs:22-40`).
+      Replaced the eight module-private `PARAMS_*` `u16` type-code consts with a
+      private `ExtraParamType(u16)` newtype carrying the same named constants
+      (`FLEXIBLE` through `REFLECTION_PROBE`) plus a transparent
+      `from_code`/`code`. Unlike `CompressedFlags` these codes are mutually
+      exclusive (one tag per container entry, not OR-able), so the newtype has
+      no `contains`/union: the decoder matches by name
+      (`ExtraParamType::SCULPT | ExtraParamType::MESH`) and the encoder writes
+      codes by name, dropping the scattered `0x10`/`0x20`/... literals. Kept
+      private to the codec (the codes
+      only appear inside the raw `ExtraParams` blob); wire bytes are
+      byte-identical. A unit test asserts every named code wraps/unwraps to its
+      exact wire value.
 - [ ] Physics flags → typed flag newtype (`extra_params.rs:364-366` →
   `types/object.rs:483-488`), replacing the three reconstructed bools.
 
