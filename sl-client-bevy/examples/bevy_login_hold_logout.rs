@@ -220,6 +220,15 @@ fn on_events(
             SlSessionEvent::ScriptTeleport(request) => {
                 info!("script teleport to {:?}", request.region_name);
             }
+            SlSessionEvent::ScriptControlChange(controls) => {
+                info!("script control change: {} change(s)", controls.len());
+            }
+            SlSessionEvent::SetFollowCamProperties { object_id, .. } => {
+                info!("follow-cam properties set by {object_id}");
+            }
+            SlSessionEvent::ClearFollowCamProperties { object_id } => {
+                info!("follow-cam properties cleared by {object_id}");
+            }
             SlSessionEvent::MuteList(entries) => {
                 info!("mute list: {} entr(ies)", entries.len());
             }

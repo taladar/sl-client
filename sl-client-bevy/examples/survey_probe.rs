@@ -173,6 +173,9 @@ fn on_events(
             | SlSessionEvent::ScriptPermissionRequest(_)
             | SlSessionEvent::LoadUrl(_)
             | SlSessionEvent::ScriptTeleport(_)
+            | SlSessionEvent::ScriptControlChange(_)
+            | SlSessionEvent::SetFollowCamProperties { .. }
+            | SlSessionEvent::ClearFollowCamProperties { .. }
             | SlSessionEvent::MuteList(_)
             | SlSessionEvent::MuteListUnchanged
             | SlSessionEvent::MoneyBalance(_)

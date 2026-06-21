@@ -1,5 +1,6 @@
 //! Scripts and notifications: dialogs, permissions, alerts, mutes.
 
+use sl_wire::ControlFlags;
 use uuid::Uuid;
 
 /// A scripted-object dialog (`llDialog`/`llTextBox`), parsed from a
@@ -155,6 +156,156 @@ pub struct AlertInfo {
     /// raw string the simulator sent (a `key=value`/`|`-separated blob the viewer
     /// parses per-alert). Empty when the alert takes no parameters.
     pub extra_params: String,
+}
+
+/// One control-grant change requested by a scripted object (`llTakeControls` /
+/// `llReleaseControls`), parsed from one `ScriptControlChange.Data` block. The
+/// sim sends this after the agent granted a script
+/// [`ScriptPermissions::TAKE_CONTROLS`]; the client should route the named
+/// control inputs to the script (and, when [`take`](Self::take) is `false`,
+/// stop doing so).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScriptControl {
+    /// Whether the script is *taking* the named controls (`true`) or releasing
+    /// them (`false`).
+    pub take: bool,
+    /// The movement-control bits the script is taking or releasing.
+    pub controls: ControlFlags,
+    /// Whether the named control inputs should still drive the agent in addition
+    /// to being passed to the script (`PassToAgent`). When `false`, the script
+    /// consumes them and the avatar does not move from them.
+    pub pass_to_agent: bool,
+}
+
+/// One follow-camera parameter a scripted object sets via `llSetCameraParams`,
+/// the `Type` field of a `SetFollowCamProperties.CameraProperty` block. The
+/// numeric values match the viewer's `EFollowCamAttributes`
+/// (`llfollowcamparams.h`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FollowCamProperty {
+    /// `FOLLOWCAM_PITCH` — camera pitch angle (degrees).
+    Pitch,
+    /// `FOLLOWCAM_FOCUS_OFFSET` — focus offset (sent as the X/Y/Z trio below).
+    FocusOffset,
+    /// `FOLLOWCAM_FOCUS_OFFSET_X` — focus offset X component.
+    FocusOffsetX,
+    /// `FOLLOWCAM_FOCUS_OFFSET_Y` — focus offset Y component.
+    FocusOffsetY,
+    /// `FOLLOWCAM_FOCUS_OFFSET_Z` — focus offset Z component.
+    FocusOffsetZ,
+    /// `FOLLOWCAM_POSITION_LAG` — camera position lag (seconds).
+    PositionLag,
+    /// `FOLLOWCAM_FOCUS_LAG` — camera focus lag (seconds).
+    FocusLag,
+    /// `FOLLOWCAM_DISTANCE` — camera distance from the focus (metres).
+    Distance,
+    /// `FOLLOWCAM_BEHINDNESS_ANGLE` — behindness angle (degrees).
+    BehindnessAngle,
+    /// `FOLLOWCAM_BEHINDNESS_LAG` — behindness lag (seconds).
+    BehindnessLag,
+    /// `FOLLOWCAM_POSITION_THRESHOLD` — position movement threshold (metres).
+    PositionThreshold,
+    /// `FOLLOWCAM_FOCUS_THRESHOLD` — focus movement threshold (metres).
+    FocusThreshold,
+    /// `FOLLOWCAM_ACTIVE` — whether the follow-camera is active (non-zero = on).
+    Active,
+    /// `FOLLOWCAM_POSITION` — camera position (sent as the X/Y/Z trio below).
+    Position,
+    /// `FOLLOWCAM_POSITION_X` — camera position X component.
+    PositionX,
+    /// `FOLLOWCAM_POSITION_Y` — camera position Y component.
+    PositionY,
+    /// `FOLLOWCAM_POSITION_Z` — camera position Z component.
+    PositionZ,
+    /// `FOLLOWCAM_FOCUS` — camera focus point (sent as the X/Y/Z trio below).
+    Focus,
+    /// `FOLLOWCAM_FOCUS_X` — camera focus X component.
+    FocusX,
+    /// `FOLLOWCAM_FOCUS_Y` — camera focus Y component.
+    FocusY,
+    /// `FOLLOWCAM_FOCUS_Z` — camera focus Z component.
+    FocusZ,
+    /// `FOLLOWCAM_POSITION_LOCKED` — whether the position is locked (non-zero).
+    PositionLocked,
+    /// `FOLLOWCAM_FOCUS_LOCKED` — whether the focus is locked (non-zero).
+    FocusLocked,
+    /// An unrecognised property type, preserved verbatim.
+    Unknown(i32),
+}
+
+impl FollowCamProperty {
+    /// Classifies a `CameraProperty.Type` wire value.
+    #[must_use]
+    pub const fn from_i32(value: i32) -> Self {
+        match value {
+            0 => Self::Pitch,
+            1 => Self::FocusOffset,
+            2 => Self::FocusOffsetX,
+            3 => Self::FocusOffsetY,
+            4 => Self::FocusOffsetZ,
+            5 => Self::PositionLag,
+            6 => Self::FocusLag,
+            7 => Self::Distance,
+            8 => Self::BehindnessAngle,
+            9 => Self::BehindnessLag,
+            10 => Self::PositionThreshold,
+            11 => Self::FocusThreshold,
+            12 => Self::Active,
+            13 => Self::Position,
+            14 => Self::PositionX,
+            15 => Self::PositionY,
+            16 => Self::PositionZ,
+            17 => Self::Focus,
+            18 => Self::FocusX,
+            19 => Self::FocusY,
+            20 => Self::FocusZ,
+            21 => Self::PositionLocked,
+            22 => Self::FocusLocked,
+            other => Self::Unknown(other),
+        }
+    }
+
+    /// The wire value for this property type.
+    #[must_use]
+    pub const fn to_i32(self) -> i32 {
+        match self {
+            Self::Pitch => 0,
+            Self::FocusOffset => 1,
+            Self::FocusOffsetX => 2,
+            Self::FocusOffsetY => 3,
+            Self::FocusOffsetZ => 4,
+            Self::PositionLag => 5,
+            Self::FocusLag => 6,
+            Self::Distance => 7,
+            Self::BehindnessAngle => 8,
+            Self::BehindnessLag => 9,
+            Self::PositionThreshold => 10,
+            Self::FocusThreshold => 11,
+            Self::Active => 12,
+            Self::Position => 13,
+            Self::PositionX => 14,
+            Self::PositionY => 15,
+            Self::PositionZ => 16,
+            Self::Focus => 17,
+            Self::FocusX => 18,
+            Self::FocusY => 19,
+            Self::FocusZ => 20,
+            Self::PositionLocked => 21,
+            Self::FocusLocked => 22,
+            Self::Unknown(other) => other,
+        }
+    }
+}
+
+/// One follow-camera parameter and its value, from a
+/// `SetFollowCamProperties.CameraProperty` block (`llSetCameraParams`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FollowCamPropertyValue {
+    /// Which camera parameter this sets.
+    pub property: FollowCamProperty,
+    /// The parameter's value (interpretation depends on
+    /// [`property`](Self::property) — angle, distance, lag, boolean flag, …).
+    pub value: f32,
 }
 
 /// The kind of thing a mute-list entry blocks, from the `MuteType` field.

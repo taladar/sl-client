@@ -1326,6 +1326,40 @@ pub enum Command {
         /// The inventory item ids of the gestures to deactivate.
         item_ids: Vec<Uuid>,
     },
+    /// Choose whether the avatar runs or walks for ground movement
+    /// (`SetAlwaysRun`). Fire-and-forget; there is no reply.
+    SetAlwaysRun {
+        /// `true` to always run, `false` to walk.
+        always_run: bool,
+    },
+    /// Tell the simulator the viewer has stalled and is not reading the network
+    /// (`AgentPause`), so it stops streaming updates until a
+    /// [`Command::ResumeAgent`]. Fire-and-forget; there is no reply.
+    PauseAgent,
+    /// Tell the simulator the viewer has resumed reading the network
+    /// (`AgentResume`) after a [`Command::PauseAgent`]. Fire-and-forget; there is
+    /// no reply.
+    ResumeAgent,
+    /// Update the agent's vertical field of view (`AgentFOV`), in radians. The
+    /// simulator uses it for interest-list culling. Fire-and-forget; there is no
+    /// reply.
+    SetAgentFov {
+        /// The vertical field of view, in radians.
+        vertical_angle: f32,
+    },
+    /// Update the agent's viewport size in pixels (`AgentHeightWidth`), sent when
+    /// the viewer window is created or resized. Fire-and-forget; there is no
+    /// reply.
+    SetAgentSize {
+        /// The viewport height in pixels.
+        height: u16,
+        /// The viewport width in pixels.
+        width: u16,
+    },
+    /// Forcibly release any agent movement controls a script has taken
+    /// (`ForceScriptControlRelease`), reversing a `ScriptControlChange`.
+    /// Fire-and-forget; there is no reply.
+    ReleaseScriptControls,
     /// Attach an in-world object (selected by its region-local id) to the avatar
     /// (`ObjectAttach`). The object is worn at `attachment_point`; when `add` is
     /// `true` it is added alongside anything already on that point rather than

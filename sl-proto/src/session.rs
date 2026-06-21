@@ -576,6 +576,9 @@ struct Circuit {
     code: u32,
     /// The next outgoing sequence number.
     next_sequence: u32,
+    /// The monotonically increasing serial number shared by `AgentPause` and
+    /// `AgentResume`; the simulator ignores non-increasing values.
+    pause_serial_num: u32,
     /// Inbound reliable sequence numbers we still owe acknowledgements for.
     pending_acks: Vec<u32>,
     /// Outgoing reliable packets awaiting acknowledgement, keyed by sequence.

@@ -48,6 +48,11 @@ use sl_wire::messages::{
     ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
 };
 use sl_wire::messages::{
+    ClearFollowCamProperties, ClearFollowCamPropertiesObjectDataBlock, ScriptControlChange,
+    ScriptControlChangeDataBlock, SetFollowCamProperties,
+    SetFollowCamPropertiesCameraPropertyBlock, SetFollowCamPropertiesObjectDataBlock,
+};
+use sl_wire::messages::{
     GroupAccountDetailsReply, GroupAccountDetailsReplyAgentDataBlock,
     GroupAccountDetailsReplyHistoryDataBlock, GroupAccountDetailsReplyMoneyDataBlock,
     GroupAccountSummaryReply, GroupAccountSummaryReplyAgentDataBlock,
@@ -82,13 +87,13 @@ use crate::types::directory::category_from_wire;
 use crate::types::{
     AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatType, CoarseLocation,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, EstateCovenant, EventInfo, GestureActivation,
-    GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem,
-    GroupName, GroupVoteHistoryItem, InstantMessage, LandSearchType, MapItem, MapItemType,
-    MapRegionInfo, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory,
-    ParcelDetails, ParcelObjectOwner, PlacesResult, RegionIdentity, Reliability, RestoreItem,
-    RezAttachment, SaleType, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
-    ViewerEffectType,
+    DirPeopleResult, DirPlaceResult, EstateCovenant, EventInfo, FollowCamPropertyValue,
+    GestureActivation, GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions,
+    GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, InstantMessage, LandSearchType,
+    MapItem, MapItemType, MapRegionInfo, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily,
+    ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult, RegionIdentity, Reliability,
+    RestoreItem, RezAttachment, SaleType, ScriptControl, TelehubInfo, Throttle, Transmit,
+    ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 
 /// How long to batch owed acknowledgements before flushing them as a `PacketAck`
@@ -318,6 +323,44 @@ pub enum ServerEvent {
         /// The inventory item ids of the gestures to deactivate.
         item_ids: Vec<Uuid>,
     },
+    /// The client chose whether the avatar runs or walks (`SetAlwaysRun`).
+    SetAlwaysRun {
+        /// `true` to always run, `false` to walk.
+        always_run: bool,
+    },
+    /// The client reported it has stalled and is not reading the network
+    /// (`AgentPause`); the simulator should stop streaming updates until a
+    /// matching [`ServerEvent::AgentResume`]. `serial_num` is a monotonic counter
+    /// shared with resume — ignore non-increasing values.
+    AgentPause {
+        /// The pause/resume serial number; ignore if not greater than the last.
+        serial_num: u32,
+    },
+    /// The client reported it has resumed reading the network (`AgentResume`)
+    /// after an [`ServerEvent::AgentPause`]. `serial_num` is the same monotonic
+    /// counter shared with pause.
+    AgentResume {
+        /// The pause/resume serial number; ignore if not greater than the last.
+        serial_num: u32,
+    },
+    /// The client updated its vertical field of view (`AgentFOV`), in radians;
+    /// the simulator uses it for interest-list culling.
+    AgentFov {
+        /// The vertical field of view, in radians.
+        vertical_angle: f32,
+    },
+    /// The client updated its viewport size in pixels (`AgentHeightWidth`), sent
+    /// when the viewer window is created or resized.
+    AgentHeightWidth {
+        /// The viewport height in pixels.
+        height: u16,
+        /// The viewport width in pixels.
+        width: u16,
+    },
+    /// The client forcibly released any agent movement controls a script had
+    /// taken (`ForceScriptControlRelease`); the simulator should drop all
+    /// script-held controls for this agent.
+    ForceScriptControlRelease,
     /// The client asked to track an agent's position (`TrackAgent`); the
     /// simulator would stream the tracked agent's coarse location back via
     /// [`SimSession::send_coarse_location_update`].
@@ -1138,6 +1181,95 @@ impl SimSession {
                     type_data: effect.data.to_wire(),
                 })
                 .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `ScriptControlChange` telling the client a scripted object took or
+    /// released some of the agent's movement controls (after the agent granted
+    /// the script [`ScriptPermissions::TAKE_CONTROLS`](crate::ScriptPermissions::TAKE_CONTROLS)).
+    /// Surfaces on the client as [`Event::ScriptControlChange`](crate::Event::ScriptControlChange).
+    /// Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_script_control_change(
+        &mut self,
+        controls: &[ScriptControl],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ScriptControlChange(ScriptControlChange {
+            data: controls
+                .iter()
+                .map(|control| ScriptControlChangeDataBlock {
+                    take_controls: control.take,
+                    controls: control.controls.bits(),
+                    pass_to_agent: control.pass_to_agent,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `SetFollowCamProperties` telling the client a scripted object set
+    /// follow-camera parameters (`llSetCameraParams`). Surfaces on the client as
+    /// [`Event::SetFollowCamProperties`](crate::Event::SetFollowCamProperties).
+    /// Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_set_follow_cam_properties(
+        &mut self,
+        object_id: Uuid,
+        properties: &[FollowCamPropertyValue],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::SetFollowCamProperties(SetFollowCamProperties {
+            object_data: SetFollowCamPropertiesObjectDataBlock { object_id },
+            camera_property: properties
+                .iter()
+                .map(|property| SetFollowCamPropertiesCameraPropertyBlock {
+                    r#type: property.property.to_i32(),
+                    value: property.value,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `ClearFollowCamProperties` telling the client a scripted object
+    /// released control of the agent's camera (`llClearCameraParams`). Surfaces
+    /// on the client as
+    /// [`Event::ClearFollowCamProperties`](crate::Event::ClearFollowCamProperties).
+    /// Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_clear_follow_cam_properties(
+        &mut self,
+        object_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ClearFollowCamProperties(ClearFollowCamProperties {
+            object_data: ClearFollowCamPropertiesObjectDataBlock { object_id },
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
@@ -2376,6 +2508,36 @@ impl SimSession {
                 let item_ids = deactivate.data.iter().map(|block| block.item_id).collect();
                 self.events
                     .push_back(ServerEvent::DeactivateGestures { item_ids });
+            }
+            AnyMessage::SetAlwaysRun(set) => {
+                self.events.push_back(ServerEvent::SetAlwaysRun {
+                    always_run: set.agent_data.always_run,
+                });
+            }
+            AnyMessage::AgentPause(pause) => {
+                self.events.push_back(ServerEvent::AgentPause {
+                    serial_num: pause.agent_data.serial_num,
+                });
+            }
+            AnyMessage::AgentResume(resume) => {
+                self.events.push_back(ServerEvent::AgentResume {
+                    serial_num: resume.agent_data.serial_num,
+                });
+            }
+            AnyMessage::AgentFOV(fov) => {
+                self.events.push_back(ServerEvent::AgentFov {
+                    vertical_angle: fov.fov_block.vertical_angle,
+                });
+            }
+            AnyMessage::AgentHeightWidth(size) => {
+                self.events.push_back(ServerEvent::AgentHeightWidth {
+                    height: size.height_width_block.height,
+                    width: size.height_width_block.width,
+                });
+            }
+            AnyMessage::ForceScriptControlRelease(_release) => {
+                self.events
+                    .push_back(ServerEvent::ForceScriptControlRelease);
             }
             AnyMessage::TrackAgent(track) => {
                 self.events.push_back(ServerEvent::TrackAgent {
