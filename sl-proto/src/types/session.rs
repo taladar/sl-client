@@ -37,6 +37,39 @@ pub enum Reliability {
     Reliable,
 }
 
+/// Whether the avatar runs or walks for ground movement, carried by
+/// [`Command::SetAlwaysRun`](crate::Command::SetAlwaysRun) and its matching
+/// [`ServerEvent::SetAlwaysRun`](crate::ServerEvent::SetAlwaysRun). A named
+/// intent enum in place of the bare `always_run: bool` of the `SetAlwaysRun`
+/// message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MovementMode {
+    /// Walk for ground movement (the `always_run` wire flag is clear).
+    Walk,
+    /// Always run for ground movement (the `always_run` wire flag is set).
+    AlwaysRun,
+}
+
+impl MovementMode {
+    /// Whether this mode sets the `always_run` wire flag: `true` for
+    /// [`AlwaysRun`](Self::AlwaysRun), `false` for [`Walk`](Self::Walk).
+    #[must_use]
+    pub const fn is_always_run(self) -> bool {
+        matches!(self, Self::AlwaysRun)
+    }
+
+    /// The mode for an `always_run` flag: [`AlwaysRun`](Self::AlwaysRun) when
+    /// set, [`Walk`](Self::Walk) when clear.
+    #[must_use]
+    pub const fn from_always_run_flag(always_run: bool) -> Self {
+        if always_run {
+            Self::AlwaysRun
+        } else {
+            Self::Walk
+        }
+    }
+}
+
 /// A non-negative, finite bandwidth rate in **kilobits per second**, used for
 /// the seven per-category rates of a [`Throttle`].
 ///
@@ -984,5 +1017,27 @@ mod tests {
             Throttle::new(1.0, 2.0, 3.0, -4.0, 5.0, 6.0, 7.0),
             Err(ThrottleError::Negative)
         );
+    }
+
+    #[test]
+    fn movement_mode_maps_to_always_run_flag() {
+        use super::MovementMode;
+        assert!(MovementMode::AlwaysRun.is_always_run());
+        assert!(!MovementMode::Walk.is_always_run());
+        assert_eq!(
+            MovementMode::from_always_run_flag(true),
+            MovementMode::AlwaysRun
+        );
+        assert_eq!(
+            MovementMode::from_always_run_flag(false),
+            MovementMode::Walk
+        );
+        // Round-trips bit-identically to the raw flag in both directions.
+        for mode in [MovementMode::Walk, MovementMode::AlwaysRun] {
+            assert_eq!(
+                MovementMode::from_always_run_flag(mode.is_always_run()),
+                mode
+            );
+        }
     }
 }

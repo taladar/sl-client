@@ -101,10 +101,10 @@ use crate::types::{
     FollowCamPropertyValue, GestureActivation, GroupAccountDetails, GroupAccountSummary,
     GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem,
     InstantMessage, LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType,
-    MapLayer, MapRegionInfo, MeanCollision, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily,
-    ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult, Postcard, RegionIdentity,
-    Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl, TelehubInfo, Throttle,
-    Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    MapLayer, MapRegionInfo, MeanCollision, MovementMode, NotecardRez, ObjectBuyItem,
+    ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult,
+    Postcard, RegionIdentity, Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl,
+    TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
 
@@ -337,8 +337,8 @@ pub enum ServerEvent {
     },
     /// The client chose whether the avatar runs or walks (`SetAlwaysRun`).
     SetAlwaysRun {
-        /// `true` to always run, `false` to walk.
-        always_run: bool,
+        /// Whether the avatar always runs or walks.
+        mode: MovementMode,
     },
     /// The client reported it has stalled and is not reading the network
     /// (`AgentPause`); the simulator should stop streaming updates until a
@@ -2803,7 +2803,7 @@ impl SimSession {
             }
             AnyMessage::SetAlwaysRun(set) => {
                 self.events.push_back(ServerEvent::SetAlwaysRun {
-                    always_run: set.agent_data.always_run,
+                    mode: MovementMode::from_always_run_flag(set.agent_data.always_run),
                 });
             }
             AnyMessage::AgentPause(pause) => {

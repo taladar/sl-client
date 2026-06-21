@@ -61,8 +61,9 @@ Beyond appearance, the viewer keeps the simulator informed about the agent's
 movement mode and the physical viewport it is rendering into. None of these
 have replies:
 
-- **Run vs. walk** — `Command::SetAlwaysRun { always_run }` chooses whether
-  ground movement runs or walks (`SetAlwaysRun`).
+- **Run vs. walk** — `Command::SetAlwaysRun { mode }` chooses whether ground
+  movement runs (`MovementMode::AlwaysRun`) or walks (`MovementMode::Walk`)
+  (`SetAlwaysRun`).
 - **Pause / resume** — when the viewer stalls (a modal dialog, a long file
   operation) it sends `Command::PauseAgent` so the simulator stops streaming
   updates, then `Command::ResumeAgent` when it is reading the network again.

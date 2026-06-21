@@ -17,8 +17,8 @@ mod test {
         GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog,
         ImageCodec, InterestsUpdate, InventoryItem, LandingType, LindenAmount, LoginAccount,
         LoginParams, LookAtType, MapItemType, Material, Maturity, MeanCollisionType,
-        MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem,
-        ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+        MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
+        ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
         ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelMediaCommand, ParcelRequestResult,
         ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5,
         PickUpdate, PointAtType, Postcard, PrimShape, ProductType, ProfileUpdate,
@@ -2716,7 +2716,7 @@ mod test {
         let mut session = established(now)?;
         drain(&mut session)?;
 
-        session.set_always_run(true, now)?;
+        session.set_always_run(MovementMode::AlwaysRun, now)?;
         let sent = drain(&mut session)?;
         let set = sent
             .iter()

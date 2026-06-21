@@ -18,12 +18,12 @@ mod test {
         GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
         GroupActiveProposalItem, GroupName, GroupVote, GroupVoteHistoryItem, ImDialog,
         LandSearchType, LandStatItem, LandStatReportType, LoginParams, MapItem, MapItemType,
-        MapLayer, MapRegionInfo, Maturity, MeanCollision, MeanCollisionType, NotecardRez,
-        ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner,
-        ParcelReturnType, Permissions5, PlacesResult, PointAtType, Postcard, ProductType,
-        RegionIdentity, RestoreItem, RezAttachment, SaleType, ScriptControl, ServerEvent, Session,
-        SimSession, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, enable_simulator_to_caps_llsd, grid_to_handle,
+        MapLayer, MapRegionInfo, Maturity, MeanCollision, MeanCollisionType, MovementMode,
+        NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails,
+        ParcelObjectOwner, ParcelReturnType, Permissions5, PlacesResult, PointAtType, Postcard,
+        ProductType, RegionIdentity, RestoreItem, RezAttachment, SaleType, ScriptControl,
+        ServerEvent, Session, SimSession, TelehubInfo, Throttle, Transmit, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd, grid_to_handle,
         parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
@@ -1656,7 +1656,7 @@ mod test {
         drain_client(&mut client);
 
         // Client -> sim: each agent-state message surfaces a matching server event.
-        client.set_always_run(true, now)?;
+        client.set_always_run(MovementMode::AlwaysRun, now)?;
         client.pause_agent(now)?;
         client.resume_agent(now)?;
         client.set_agent_fov(1.5, now)?;
@@ -1666,9 +1666,12 @@ mod test {
 
         let server_events = drain_server(&mut sim);
         assert!(
-            server_events
-                .iter()
-                .any(|e| matches!(e, ServerEvent::SetAlwaysRun { always_run: true })),
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::SetAlwaysRun {
+                    mode: MovementMode::AlwaysRun
+                }
+            )),
             "expected a SetAlwaysRun server event"
         );
         let pause_serial = server_events

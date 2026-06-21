@@ -46,16 +46,16 @@ use crate::types::{
     GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem,
     InventoryOffer, LandSearchType, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
     LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MeanCollision,
-    MeanCollisionType, MoneyTransactionType, MuteFlags, MuteType, NeighborInfo, NewInventoryItem,
-    NotecardRez, Object, ObjectBuyItem, ObjectFlagSettings, ObjectPropertiesFamily,
-    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PlacesResult, Postcard, PrimShape,
-    ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType,
-    ScriptControl, ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload, TelehubInfo,
-    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType, global_to_handle,
-    handle_to_grid,
+    MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NeighborInfo,
+    NewInventoryItem, NotecardRez, Object, ObjectBuyItem, ObjectFlagSettings,
+    ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
+    PickUpdate, PlacesResult, Postcard, PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability,
+    RestoreItem, RezAttachment, SaleType, ScriptControl, ScriptPermissions, ScriptTeleportRequest,
+    SoundFlags, SoundPreload, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
+    Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
+    WearableType, global_to_handle, handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
@@ -3861,9 +3861,9 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn set_always_run(&mut self, always_run: bool, now: Instant) -> Result<(), Error> {
+    pub fn set_always_run(&mut self, mode: MovementMode, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_set_always_run(always_run, now)?;
+        circuit.send_set_always_run(mode, now)?;
         Ok(())
     }
 

@@ -24,8 +24,8 @@ use sl_proto::{
     GestureActivation, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit,
     GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType,
     LandSearchType, LandStatReportType, LindenAmount, LookAtType, MapItemType, Material,
-    MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MuteFlags, MuteType,
-    NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectPermMasks,
+    MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MovementMode, MuteFlags,
+    MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectPermMasks,
     ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
     ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, Permissions, Permissions5,
     PickUpdate, PointAtType, Postcard, PrimShape, ProfileUpdate, RegionInfoUpdate, RestoreItem,
@@ -606,6 +606,17 @@ fn parse_attachment_mode(field: &str, value: &str) -> Result<AttachmentMode, Rep
         "add" | "true" | "yes" | "1" => AttachmentMode::Add,
         "replace" | "false" | "no" | "0" => AttachmentMode::Replace,
         _ => return Err(invalid(field, value, "add|replace")),
+    })
+}
+
+/// Parse a [`MovementMode`] from `run`/`walk` (or the legacy boolean spelling:
+/// `true`/`yes`/`1` = [`MovementMode::AlwaysRun`],
+/// `false`/`no`/`0` = [`MovementMode::Walk`]).
+fn parse_movement_mode(field: &str, value: &str) -> Result<MovementMode, ReplError> {
+    Ok(match norm(value).as_str() {
+        "run" | "alwaysrun" | "always_run" | "true" | "yes" | "1" => MovementMode::AlwaysRun,
+        "walk" | "false" | "no" | "0" => MovementMode::Walk,
+        _ => return Err(invalid(field, value, "run|walk")),
     })
 }
 
@@ -3622,10 +3633,10 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "set_always_run",
-            usage: "<always_run:bool>",
+            usage: "<mode:run|walk>",
             build: |args, ctx| {
                 Ok(Command::SetAlwaysRun {
-                    always_run: args.req_bool(ctx, "always_run", 0)?,
+                    mode: enum_arg(args, ctx, "mode", 0, parse_movement_mode)?,
                 })
             },
         },
@@ -4124,7 +4135,7 @@ mod tests {
 
     use sl_proto::{
         AbuseReportType, AgentPreferences, AssetType, ChatType, Command, ControlFlags,
-        FriendRights, LandStatReportType, MapItemType, ObjectBuyItem, SaleType, Uuid,
+        FriendRights, LandStatReportType, MapItemType, MovementMode, ObjectBuyItem, SaleType, Uuid,
     };
 
     use super::Registry;
@@ -4439,10 +4450,25 @@ mod tests {
     }
 
     #[test]
-    fn set_always_run_bool() {
+    fn set_always_run_mode() {
+        assert!(matches!(
+            build("set_always_run run"),
+            Ok(Command::SetAlwaysRun {
+                mode: MovementMode::AlwaysRun
+            })
+        ));
+        assert!(matches!(
+            build("set_always_run walk"),
+            Ok(Command::SetAlwaysRun {
+                mode: MovementMode::Walk
+            })
+        ));
+        // The legacy boolean spelling still parses.
         assert!(matches!(
             build("set_always_run true"),
-            Ok(Command::SetAlwaysRun { always_run: true })
+            Ok(Command::SetAlwaysRun {
+                mode: MovementMode::AlwaysRun
+            })
         ));
     }
 

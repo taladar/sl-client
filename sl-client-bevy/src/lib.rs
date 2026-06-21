@@ -61,8 +61,8 @@ pub use sl_proto::{
     LindenAmount, LoadUrlRequest, LoginAccount, LoginParams, LoginRequest, MEDIA_PERM_ALL,
     MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
     MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge,
-    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings,
+    MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags,
+    MuteType, NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings,
     ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties, ObjectTransform,
     OpenSimExtras, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
     ParcelFlags, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo,
@@ -960,8 +960,8 @@ fn advance_running(
             Command::DeactivateGestures { item_ids } => {
                 session.deactivate_gestures(item_ids, now).ok();
             }
-            Command::SetAlwaysRun { always_run } => {
-                session.set_always_run(*always_run, now).ok();
+            Command::SetAlwaysRun { mode } => {
+                session.set_always_run(*mode, now).ok();
             }
             Command::PauseAgent => {
                 session.pause_agent(now).ok();
