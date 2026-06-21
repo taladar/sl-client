@@ -18,16 +18,16 @@
 use std::collections::BTreeMap;
 
 use sl_proto::{
-    AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, Command, ControlFlags,
-    CreateGroupParams, DeRezDestination, DirFindFlags, EstateAccessDelta, ExperiencePermission,
-    ExperienceUpdate, FriendRights, GestureActivation, GroupNoticeAttachment, GroupRoleChange,
-    GroupRoleEdit, GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer,
-    InventoryType, LandSearchType, LindenAmount, LookAtType, MapItemType, Material,
+    AgentPreferences, AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, Command,
+    ControlFlags, CreateGroupParams, DeRezDestination, DirFindFlags, EstateAccessDelta,
+    ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation, GroupNoticeAttachment,
+    GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange, InterestsUpdate, InventoryItem,
+    InventoryOffer, InventoryType, LandSearchType, LindenAmount, LookAtType, MapItemType, Material,
     MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MuteFlags, MuteType,
-    NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform,
-    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
-    ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PointAtType, PrimShape,
-    ProfileUpdate, RegionInfoUpdate, RestoreItem, RezAttachment, Rotation, SaleType,
+    NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectPermMasks,
+    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+    ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PointAtType,
+    PrimShape, ProfileUpdate, RegionInfoUpdate, RestoreItem, RezAttachment, Rotation, SaleType,
     ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
     VoiceProvisionRequest, Wearable, WearableType,
 };
@@ -901,6 +901,38 @@ fn build_parcel_update(args: &Args, ctx: &dyn ReplContext) -> Result<ParcelUpdat
             z: 0.0,
         }),
         landing_type: args.parse_or(ctx, "landing_type", 17, "u8", 0)?,
+    })
+}
+
+/// Build an [`AgentPreferences`] from optional keyword fields. Only the fields
+/// present on the line are set ([`Some`]); the rest stay [`None`] so the update
+/// changes only what was named. The three permission masks
+/// (`perm_group`/`perm_everyone`/`perm_next_owner`) collapse into one
+/// [`ObjectPermMasks`] when any is present (absent masks default to `0`).
+fn build_agent_preferences(
+    args: &Args,
+    ctx: &dyn ReplContext,
+) -> Result<AgentPreferences, ReplError> {
+    let perm_group = args.opt_parse::<i32>(ctx, "perm_group", 1, "i32")?;
+    let perm_everyone = args.opt_parse::<i32>(ctx, "perm_everyone", 2, "i32")?;
+    let perm_next_owner = args.opt_parse::<i32>(ctx, "perm_next_owner", 3, "i32")?;
+    let default_object_perm_masks =
+        if perm_group.is_some() || perm_everyone.is_some() || perm_next_owner.is_some() {
+            Some(ObjectPermMasks {
+                group: perm_group.unwrap_or(0),
+                everyone: perm_everyone.unwrap_or(0),
+                next_owner: perm_next_owner.unwrap_or(0),
+            })
+        } else {
+            None
+        };
+    Ok(AgentPreferences {
+        hover_height: args.opt_parse::<f64>(ctx, "hover_height", 0, "f64")?,
+        default_object_perm_masks,
+        max_access_pref: args.opt_str(ctx, "max_access", 4)?,
+        language: args.opt_str(ctx, "language", 5)?,
+        language_is_public: args.opt_parse::<bool>(ctx, "language_is_public", 6, "bool")?,
+        god_level: None,
     })
 }
 
@@ -2242,6 +2274,26 @@ fn all_specs() -> Vec<CommandSpec> {
                     region_id: args.uuid_or_nil(ctx, "region_id", 1)?,
                     region_handle: args.parse_or(ctx, "region_handle", 2, "u64", 0_u64)?,
                 })
+            },
+        },
+        CommandSpec {
+            name: "request_simulator_features",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::RequestSimulatorFeatures),
+        },
+        CommandSpec {
+            name: "request_agent_preferences",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::RequestAgentPreferences),
+        },
+        CommandSpec {
+            name: "set_agent_preferences",
+            usage: "[hover_height=] [perm_group=] [perm_everyone=] [perm_next_owner=] \
+                    [max_access=PG|M|A] [language=] [language_is_public=]",
+            build: |args, ctx| {
+                Ok(Command::SetAgentPreferences(Box::new(
+                    build_agent_preferences(args, ctx)?,
+                )))
             },
         },
         CommandSpec {
@@ -3824,8 +3876,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use sl_proto::{
-        AssetType, ChatType, Command, ControlFlags, FriendRights, MapItemType, ObjectBuyItem,
-        SaleType, Uuid,
+        AgentPreferences, AssetType, ChatType, Command, ControlFlags, FriendRights, MapItemType,
+        ObjectBuyItem, SaleType, Uuid,
     };
 
     use super::Registry;
@@ -4246,6 +4298,47 @@ mod tests {
                 if location.x.to_bits() == 128.0_f32.to_bits()
                     && region_id == Uuid::nil()
                     && region_handle == 281_483_566_841_976
+        ));
+    }
+
+    #[test]
+    fn request_simulator_features_parses() {
+        assert!(matches!(
+            build("request_simulator_features"),
+            Ok(Command::RequestSimulatorFeatures)
+        ));
+    }
+
+    #[test]
+    fn request_agent_preferences_parses() {
+        assert!(matches!(
+            build("request_agent_preferences"),
+            Ok(Command::RequestAgentPreferences)
+        ));
+    }
+
+    #[test]
+    fn set_agent_preferences_parses_keyword_fields() {
+        assert!(matches!(
+            build(
+                "set_agent_preferences hover_height=0.5 perm_next_owner=532480 \
+                 max_access=M language=en-us language_is_public=true",
+            ),
+            Ok(Command::SetAgentPreferences(prefs))
+                if prefs.hover_height.map(f64::to_bits) == Some(0.5_f64.to_bits())
+                    && prefs.default_object_perm_masks.map(|masks| masks.next_owner)
+                        == Some(532_480)
+                    && prefs.max_access_pref.as_deref() == Some("M")
+                    && prefs.language.as_deref() == Some("en-us")
+                    && prefs.language_is_public == Some(true)
+        ));
+    }
+
+    #[test]
+    fn set_agent_preferences_empty_is_a_get() {
+        assert!(matches!(
+            build("set_agent_preferences"),
+            Ok(Command::SetAgentPreferences(prefs)) if *prefs == AgentPreferences::default()
         ));
     }
 

@@ -562,7 +562,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::AgentAlertMessage { .. }
             | Event::MeanCollisionAlert(_)
             | Event::HealthMessage { .. }
-            | Event::CameraConstraint { .. } => {}
+            | Event::CameraConstraint { .. }
+            | Event::SimulatorFeatures(_)
+            | Event::AgentPreferences(_) => {}
         }
     }
 

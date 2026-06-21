@@ -14,61 +14,65 @@ use reqwest::blocking::Client as ReqwestBlockingClient;
 use std::collections::HashMap;
 
 use sl_proto::{
-    CAP_AGENT_EXPERIENCES, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
-    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
-    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE,
-    CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
+    CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_CREATE_INVENTORY_CATEGORY,
+    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
+    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET,
+    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
+    CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES,
+    CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
     CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
     CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE,
-    CAP_VOICE_SIGNALING, Event as SessionEvent, Llsd, LoginResponse, RECV_BUFFER_SIZE, Session,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, build_ais_create_category_body, build_ais_move_body,
-    build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request, build_modify_material_params_request,
-    build_object_media_navigate_request, build_object_media_update_request,
-    build_parcel_voice_info_request, build_provision_voice_account_request,
-    build_region_experiences_request, build_remote_parcel_request,
-    build_set_experience_permission_request, build_update_experience_request,
-    build_update_item_asset_request, build_upload_baked_texture_request,
-    build_voice_signaling_request, display_names_query, experience_id_query, experience_info_query,
-    find_experience_query, forget_experience_query, group_experiences_query, parse_login_response,
+    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
+    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Event as SessionEvent, Llsd, LoginResponse,
+    RECV_BUFFER_SIZE, Session, ais_category_children_fetch_url, ais_category_children_url,
+    ais_category_url, ais_create_category_url, ais_item_url, build_agent_preferences_request,
+    build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
+    build_ais_update_item_body, build_create_inventory_category_request,
+    build_modify_material_params_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_parcel_voice_info_request,
+    build_provision_voice_account_request, build_region_experiences_request,
+    build_remote_parcel_request, build_set_experience_permission_request,
+    build_update_experience_request, build_update_item_asset_request,
+    build_upload_baked_texture_request, build_voice_signaling_request, display_names_query,
+    experience_id_query, experience_info_query, find_experience_query, forget_experience_query,
+    group_experiences_query, parse_login_response,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
 // survey commands, and read events. `Event` is aliased to avoid clashing with
 // Bevy's `Event` derive.
 pub use sl_proto::{
-    ActiveGroup, AnyMessage, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick,
-    AvatarProperties, Camera, ChatAudible, ChatMessage, ChatSourceType, ChatType, ClassifiedInfo,
-    ClassifiedUpdate, ClickAction, Command, ControlFlags, CreateGroupParams, DeRezDestination,
-    Diagnostic, DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo,
-    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh,
-    FlexibleData, Friend, FriendRights, GltfMaterialOverride, GroupMember, GroupMembership,
-    GroupNotice, GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit,
-    GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation,
-    IceCandidate, ImDialog, InstantMessage, InterestsUpdate, InventoryFolder, InventoryItem,
-    InventoryOffer, InventoryType, LandingType, LegacyMaterial, LightData, LightImage,
-    LindenAmount, LoadUrlRequest, LoginAccount, LoginParams, LoginRequest, MEDIA_PERM_ALL,
-    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
-    MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge,
-    MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings,
-    ObjectMediaResponse, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
-    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
-    PickInfo, PickUpdate, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
+    ActiveGroup, AgentPreferences, AnimatedObjects, AnyMessage, AvatarClassified,
+    AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, Camera, ChatAudible,
+    ChatMessage, ChatSourceType, ChatType, ClassifiedInfo, ClassifiedUpdate, ClickAction, Command,
+    ControlFlags, CreateGroupParams, DeRezDestination, Diagnostic, DisconnectReason, EconomyData,
+    EstateAccessDelta, EstateAccessKind, EstateInfo, ExperienceInfo, ExperiencePermission,
+    ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights,
+    GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
+    GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleMember,
+    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
+    InstantMessage, InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer, InventoryType,
+    LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LoadUrlRequest, LoginAccount,
+    LoginParams, LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
+    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
+    MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction,
+    MoneyTransactionType, MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, Object,
+    ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks,
+    ObjectProperties, ObjectTransform, OpenSimExtras, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus,
+    ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, PhysicsShapeTypes, PickInfo,
+    PickUpdate, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
     ReflectionProbe, RegionChatSettings, RegionCombatSettings, RegionFlags, RegionIdentity,
     RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation,
     SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    SculptData, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, TextureAnimation,
-    TextureEntry, TextureFace, Throttle, Transmit, Uuid, Vector, VoiceAccountInfo,
-    VoiceProvisionRequest, Wearable, WearableType, avatar_texture, decode_particle_system,
-    decode_texture_anim, decode_texture_entry, grid_to_handle, group_powers, handle_to_global,
-    handle_to_grid, particle_pattern, pcode, sim_access, texture_anim_mode,
+    SculptData, SimulatorFeatures, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch,
+    TextureAnimation, TextureEntry, TextureFace, Throttle, Transmit, Uuid, Vector,
+    VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, avatar_texture,
+    decode_particle_system, decode_texture_anim, decode_texture_entry, grid_to_handle,
+    group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode, sim_access,
+    texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -434,6 +438,15 @@ fn advance_running(
     // payloads (event-queue events plus inventory responses).
     if let Some(caps) = caps.as_mut() {
         while let Ok(map) = caps.map_rx.try_recv() {
+            // The viewer fetches `SimulatorFeatures` on arriving in a region, so
+            // GET it once the capability map is known (at login and on each region
+            // change), surfacing the flags as `Event::SimulatorFeatures`.
+            if let Some(url) = map.get(CAP_SIMULATOR_FEATURES).cloned() {
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_get_caps_llsd(&url, CAP_SIMULATOR_FEATURES, &events_tx);
+                });
+            }
             capabilities.write(SlCapabilities(map.clone()));
             caps.map = map;
         }
@@ -2021,6 +2034,38 @@ fn advance_running(
                     let events_tx = caps.events_tx.clone();
                     std::thread::spawn(move || {
                         run_voice_cap(&url, body, CAP_REMOTE_PARCEL_REQUEST, &events_tx);
+                    });
+                }
+            }
+            Command::RequestSimulatorFeatures => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_SIMULATOR_FEATURES).cloned()
+                {
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_get_caps_llsd(&url, CAP_SIMULATOR_FEATURES, &events_tx);
+                    });
+                }
+            }
+            Command::RequestAgentPreferences => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_AGENT_PREFERENCES).cloned()
+                {
+                    let body = build_agent_preferences_request(&AgentPreferences::default());
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_voice_cap(&url, body, CAP_AGENT_PREFERENCES, &events_tx);
+                    });
+                }
+            }
+            Command::SetAgentPreferences(prefs) => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_AGENT_PREFERENCES).cloned()
+                {
+                    let body = build_agent_preferences_request(prefs);
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_voice_cap(&url, body, CAP_AGENT_PREFERENCES, &events_tx);
                     });
                 }
             }

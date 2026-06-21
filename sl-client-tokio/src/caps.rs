@@ -3,8 +3,8 @@
 use crate::IDLE_SLEEP;
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
-    Llsd, REQUESTED_CAPABILITIES, build_event_queue_request, build_seed_request,
-    parse_event_queue_response, parse_seed_response,
+    CAP_SIMULATOR_FEATURES, Llsd, REQUESTED_CAPABILITIES, build_event_queue_request,
+    build_seed_request, parse_event_queue_response, parse_seed_response,
 };
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -60,6 +60,27 @@ pub(crate) async fn fetch_capabilities(
         return HashMap::new();
     };
     parse_seed_response(&text).unwrap_or_default()
+}
+
+/// GETs the `SimulatorFeatures` capability (when the region advertises it),
+/// forwarding the region's feature flags to `caps_tx` for decoding into
+/// [`Event::SimulatorFeatures`](sl_proto::Event::SimulatorFeatures). The viewer
+/// fetches this automatically on arriving in a region, so the runtime fires it
+/// once the capability map is known (at login and on each region change), with
+/// no command needed.
+pub(crate) fn spawn_simulator_features(
+    caps: &HashMap<String, String>,
+    http: &ReqwestClient,
+    caps_tx: &mpsc::Sender<(String, Llsd)>,
+) {
+    if let Some(url) = caps.get(CAP_SIMULATOR_FEATURES).cloned() {
+        tokio::spawn(crate::http::get_caps_llsd(
+            url,
+            CAP_SIMULATOR_FEATURES,
+            http.clone(),
+            caps_tx.clone(),
+        ));
+    }
 }
 
 /// Spawns the event-queue long-poll task for the `EventQueueGet` capability in

@@ -5,12 +5,12 @@
 //! copies.
 
 use crate::{
-    AnyMessage, AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction,
-    ControlFlags, CreateGroupParams, DeRezDestination, DirFindFlags, EstateAccessDelta,
-    ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation, GroupNoticeAttachment,
-    GroupRoleEdit, GroupRoleMemberChange, IceCandidate, InterestsUpdate, InventoryItem,
-    InventoryOffer, InventoryType, LandSearchType, LindenAmount, MapItemType, Material,
-    MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MuteFlags, MuteType,
+    AgentPreferences, AnyMessage, AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate,
+    ClickAction, ControlFlags, CreateGroupParams, DeRezDestination, DirFindFlags,
+    EstateAccessDelta, ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation,
+    GroupNoticeAttachment, GroupRoleEdit, GroupRoleMemberChange, IceCandidate, InterestsUpdate,
+    InventoryItem, InventoryOffer, InventoryType, LandSearchType, LindenAmount, MapItemType,
+    Material, MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MuteFlags, MuteType,
     NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform,
     ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelReturnType, ParcelUpdate,
     PermissionField, PickUpdate, PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability,
@@ -614,6 +614,26 @@ pub enum Command {
     /// with its user-management component present), so the command is a no-op when
     /// the region seed omits the capability.
     RequestDisplayNames(Vec<Uuid>),
+    /// Request the region's **feature flags** via the `SimulatorFeatures`
+    /// capability; the reply arrives as
+    /// [`Event::SimulatorFeatures`](crate::Event::SimulatorFeatures). The runtimes
+    /// already GET this automatically once the capability map is known (at login
+    /// and on each region change), so this is for an explicit re-fetch. A no-op
+    /// when the region seed omits the capability.
+    RequestSimulatorFeatures,
+    /// Request the agent's **server-stored preferences** via the
+    /// `AgentPreferences` capability without changing them (a POST with an empty
+    /// body); the reply arrives as
+    /// [`Event::AgentPreferences`](crate::Event::AgentPreferences) carrying the
+    /// full stored set. A no-op when the region seed omits the capability.
+    RequestAgentPreferences,
+    /// Update the agent's **server-stored preferences** via the `AgentPreferences`
+    /// capability. Only the present ([`Some`]) fields are changed (hover height,
+    /// default object permission masks, maturity-access ceiling, UI language); the
+    /// reply arrives as [`Event::AgentPreferences`](crate::Event::AgentPreferences)
+    /// carrying the full stored set after the update. A no-op when the region seed
+    /// omits the capability.
+    SetAgentPreferences(Box<AgentPreferences>),
     /// Request the extended-environment (EEP) settings via the `ExtEnvironment`
     /// capability; the reply arrives as
     /// [`Event::Environment`](crate::Event::Environment). `parcel_id` selects a

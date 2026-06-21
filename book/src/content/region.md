@@ -178,6 +178,46 @@ parsed; every other documented sky/water parameter is.
 > on a default OpenSim grid. The handshake identity, `RegionInfo` limits, and
 > name resolution work on both grids.
 
+## Simulator features (`SimulatorFeatures`)
+
+On arriving in a region the viewer learns what the simulator supports — mesh
+upload/rez, the physics-shape types it accepts, attachment and group limits, the
+GLTF/PBR-terrain switches — from the `SimulatorFeatures`
+[capability](../comms/caps.md), an HTTP `GET` with no UDP equivalent. Both
+runtimes fetch it **automatically** once the capability map is known (at login
+and on each region change), surfacing the result as
+`Event::SimulatorFeatures(Box<SimulatorFeatures>)`;
+`Command::RequestSimulatorFeatures` forces an explicit re-fetch.
+
+`SimulatorFeatures` carries the flat flag map (`mesh_upload_enabled`,
+`physics_materials_enabled`, `physics_shape_types`, `animated_objects`,
+`max_agent_attachments`, `pbr_terrain_enabled`, `gltf_enabled`, …). OpenSim
+grids add a nested `OpenSimExtras` subtree — chat ranges
+(`say-range`/`shout-range`/ `whisper-range`), the currency symbol, the
+map/search/destination-guide URLs, and the prim-scale limits — surfaced in
+`open_sim_extras` (it is `None` on Second Life, which omits the map).
+
+## Agent preferences (`AgentPreferences`)
+
+A few preferences live on the grid rather than in the viewer: the avatar's
+**hover height**, the **default object permission masks** new objects are
+created with, the agent's **maturity-access ceiling**, and the **UI language**
+(with a flag for whether it is public in the profile). They are read and written
+through the `AgentPreferences` capability, a single HTTP `POST` whose body
+carries the fields to change and whose reply echoes the full stored set.
+
+`Command::SetAgentPreferences(Box<AgentPreferences>)` changes only the present
+(`Some`) fields; `Command::RequestAgentPreferences` performs a pure "get" (a
+`POST` with an empty body). Either way the reply is
+`Event::AgentPreferences(Box<AgentPreferences>)`, with every field filled in.
+
+> **Testing note.** OpenSim advertises a subset of `SimulatorFeatures` (with the
+> `OpenSimExtras` subtree) and serves `AgentPreferences` through its agent-prefs
+> service; Second Life advertises the richer Second-Life-only flags
+> (`PBRTerrainEnabled`, `GLTFEnabled`, …) and omits `OpenSimExtras`. Both
+> capabilities are guarded on presence in the seed, so the commands are no-ops
+> when a grid omits them.
+
 ---
 
 > **In this codebase**
@@ -189,16 +229,20 @@ parsed; every other documented sky/water parameter is.
 >   name types (`AvatarName`, `GroupName`) in `sl-proto/src/types/name.rs`; the
 >   CAPS `DisplayName` in `sl-wire/src/display_name.rs`; environment types
 >   (`EnvironmentSettings`, `DayCycle`, `DayCycleFrame`, `SkySettings`,
->   `WaterSettings`) in `sl-proto/src/types/environment.rs`.
+>   `WaterSettings`) in `sl-proto/src/types/environment.rs`; the CAPS
+>   `SimulatorFeatures` (with `OpenSimExtras`, `PhysicsShapeTypes`,
+>   `AnimatedObjects`) in `sl-wire/src/sim_features.rs` and `AgentPreferences`
+>   (with `ObjectPermMasks`) in `sl-wire/src/agent_preferences.rs`.
 > - Commands `RequestRegionInfo`, `RequestEstateInfo`, `RequestEstateCovenant`,
 >   `RequestTelehubInfo`, `ConnectTelehub`, `DisconnectTelehub`,
 >   `AddTelehubSpawnPoint`, `RemoveTelehubSpawnPoint`, `RequestAvatarNames`,
->   `RequestGroupNames`, `RequestDisplayNames`, `RequestEnvironment` are in
->   `sl-proto/src/command.rs`; the matching events (`RegionInfoHandshake`,
->   `RegionLimits`, `EstateInfo`, `EstateAccessList`, `EstateCovenant`,
->   `TelehubInfo`, `AvatarNames`,
->   `GroupNames`, `DisplayNames`, `Environment`) are in
->   `sl-proto/src/types/event.rs`.
+>   `RequestGroupNames`, `RequestDisplayNames`, `RequestEnvironment`,
+>   `RequestSimulatorFeatures`, `RequestAgentPreferences`, `SetAgentPreferences`
+>   are in `sl-proto/src/command.rs`; the matching events
+>   (`RegionInfoHandshake`, `RegionLimits`, `EstateInfo`, `EstateAccessList`,
+>   `EstateCovenant`, `TelehubInfo`, `AvatarNames`, `GroupNames`,
+>   `DisplayNames`, `Environment`, `SimulatorFeatures`, `AgentPreferences`) are
+>   in `sl-proto/src/types/event.rs`.
 > - The handshake handle and grid coordinates are seeded from the login
 >   response (`sl-wire/src/login.rs` `region_x` / `region_y`); a region handle
 >   splits into grid coordinates with `handle_to_grid` (and back with
@@ -208,8 +252,11 @@ parsed; every other documented sky/water parameter is.
 >   `connect_telehub <object_local_id>`, `disconnect_telehub`,
 >   `add_telehub_spawn_point <object_local_id>`,
 >   `remove_telehub_spawn_point <spawn_index>`, `request_avatar_names <id…>`,
->   `request_group_names <id…>`, `request_display_names <id…>`, and
->   `request_environment [parcel_id]`.
+>   `request_group_names <id…>`, `request_display_names <id…>`,
+>   `request_environment [parcel_id]`, `request_simulator_features`,
+>   `request_agent_preferences`, and `set_agent_preferences [hover_height=]
+>   [perm_group=] [perm_everyone=] [perm_next_owner=] [max_access=PG|M|A]
+>   [language=] [language_is_public=]`.
 > - The **server** side mirrors the decoders:
 >   `SimSession::send_region_handshake` builds the greeting from a
 >   `RegionIdentity`; `send_avatar_names` / `send_group_names` answer the
@@ -222,4 +269,7 @@ parsed; every other documented sky/water parameter is.
 >   telehub `info ui`/management commands (`ServerEvent::RequestTelehubInfo`,
 >   `ConnectTelehub`, `DisconnectTelehub`, `AddTelehubSpawnPoint`,
 >   `RemoveTelehubSpawnPoint`); and `environment_to_llsd` builds the
->   `ExtEnvironment` reply body.
+>   `ExtEnvironment` reply body. `build_simulator_features_response` and
+>   `build_agent_preferences_response` (with `parse_agent_preferences`) build
+>   the `SimulatorFeatures` / `AgentPreferences` cap reply bodies a grid
+>   returns.

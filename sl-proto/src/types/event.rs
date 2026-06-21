@@ -22,11 +22,13 @@ use super::{
 };
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
+use sl_wire::AgentPreferences;
 use sl_wire::DisplayName;
 use sl_wire::ExperienceInfo;
 use sl_wire::MediaEntry;
 use sl_wire::ParcelVoiceInfo;
 use sl_wire::RenderMaterialEntry;
+use sl_wire::SimulatorFeatures;
 use sl_wire::VoiceAccountInfo;
 use uuid::Uuid;
 
@@ -137,6 +139,21 @@ pub enum Event {
     /// [`Command::RequestRemoteParcelId`](crate::Command::RequestRemoteParcelId).
     /// Feed it to [`Session::request_parcel_info`](crate::Session::request_parcel_info).
     RemoteParcelId(Uuid),
+    /// The region's feature flags and limits, from a `SimulatorFeatures`
+    /// capability GET. The runtimes fetch this automatically once the capability
+    /// map is known (at login and on each region change), and on demand via
+    /// [`Command::RequestSimulatorFeatures`](crate::Command::RequestSimulatorFeatures).
+    /// On OpenSim the grid-specific extras arrive in
+    /// [`open_sim_extras`](sl_wire::SimulatorFeatures::open_sim_extras); Second
+    /// Life leaves that [`None`].
+    SimulatorFeatures(Box<SimulatorFeatures>),
+    /// The agent's server-stored preferences (hover height, default object
+    /// permission masks, maturity-access ceiling, UI language), from an
+    /// `AgentPreferences` capability POST — the reply to
+    /// [`Command::SetAgentPreferences`](crate::Command::SetAgentPreferences) or
+    /// [`Command::RequestAgentPreferences`](crate::Command::RequestAgentPreferences).
+    /// The grid echoes the full stored set, so every field is `Some`.
+    AgentPreferences(Box<AgentPreferences>),
     /// An estate's configuration, from an `EstateOwnerMessage` `estateupdateinfo`
     /// reply to [`Session::request_estate_info`](crate::Session::request_estate_info).
     EstateInfo(Box<EstateInfo>),
