@@ -2177,21 +2177,12 @@ mod test {
         let (_client, mut sim) = setup(now)?;
         drain_server(&mut sim);
 
-        // A MapBlockRequest is a client message with no dedicated ServerEvent
+        // A RequestRegionInfo is a client message with no dedicated ServerEvent
         // variant; it must be surfaced verbatim as ClientMessage.
-        let request = AnyMessage::MapBlockRequest(sl_wire::messages::MapBlockRequest {
-            agent_data: sl_wire::messages::MapBlockRequestAgentDataBlock {
+        let request = AnyMessage::RequestRegionInfo(sl_wire::messages::RequestRegionInfo {
+            agent_data: sl_wire::messages::RequestRegionInfoAgentDataBlock {
                 agent_id: uuid::Uuid::from_u128(1),
                 session_id: uuid::Uuid::from_u128(2),
-                flags: 0,
-                estate_id: 0,
-                godlike: false,
-            },
-            position_data: sl_wire::messages::MapBlockRequestPositionDataBlock {
-                min_x: 1000,
-                max_x: 1001,
-                min_y: 1000,
-                max_y: 1001,
             },
         });
         let datagram = client_datagram(&request, 600, false)?;
@@ -2201,9 +2192,65 @@ mod test {
         assert!(
             events.iter().any(|e| matches!(
                 e,
-                ServerEvent::ClientMessage(message) if matches!(**message, AnyMessage::MapBlockRequest(_))
+                ServerEvent::ClientMessage(message) if matches!(**message, AnyMessage::RequestRegionInfo(_))
             )),
-            "expected a ClientMessage(MapBlockRequest), got {events:?}"
+            "expected a ClientMessage(RequestRegionInfo), got {events:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn world_map_requests_surface_server_events() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        // Drive each world-map request from the real client paths so the wire
+        // encoding matches a viewer; the simulator must decode each into its
+        // dedicated ServerEvent rather than the ClientMessage catch-all.
+        client.request_map_blocks(1000, 1002, 1000, 1002, now)?;
+        client.request_map_by_name("Foo", now)?;
+        client.request_map_items(MapItemType::Telehub, grid_to_handle(1000, 1000), now)?;
+        client.request_map_layer(now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                ServerEvent::MapBlockRequested {
+                    min_x: 1000,
+                    max_x: 1002,
+                    min_y: 1000,
+                    max_y: 1002,
+                    ..
+                }
+            )),
+            "expected a MapBlockRequested, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                ServerEvent::MapNameRequested { name, .. } if name == "Foo"
+            )),
+            "expected a MapNameRequested(Foo), got {events:?}"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                ServerEvent::MapItemRequested {
+                    item_type: MapItemType::Telehub,
+                    region_handle,
+                    ..
+                } if *region_handle == grid_to_handle(1000, 1000)
+            )),
+            "expected a MapItemRequested(Telehub), got {events:?}"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::MapLayerRequested { .. })),
+            "expected a MapLayerRequested, got {events:?}"
         );
         Ok(())
     }

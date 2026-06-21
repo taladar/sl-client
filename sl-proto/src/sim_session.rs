@@ -770,6 +770,48 @@ pub enum ServerEvent {
     /// The client emailed a snapshot postcard (`SendPostcard`). The simulator
     /// renders and sends the email; fire-and-forget.
     PostcardReceived(Box<Postcard>),
+    /// The client requested world-map blocks for a grid-coordinate rectangle
+    /// (`MapBlockRequest`); the simulator answers with one or more
+    /// [`SimSession::send_map_block_reply`] for the regions in range.
+    MapBlockRequested {
+        /// Minimum grid x in region-widths (inclusive).
+        min_x: u16,
+        /// Maximum grid x in region-widths (inclusive).
+        max_x: u16,
+        /// Minimum grid y in region-widths (inclusive).
+        min_y: u16,
+        /// Maximum grid y in region-widths (inclusive).
+        max_y: u16,
+        /// The request's map-layer flags.
+        flags: u32,
+    },
+    /// The client searched the world map for regions by name
+    /// (`MapNameRequest`); the simulator answers with the matching regions via
+    /// [`SimSession::send_map_block_reply`].
+    MapNameRequested {
+        /// The region name (or prefix) to search for.
+        name: String,
+        /// The request's map-layer flags.
+        flags: u32,
+    },
+    /// The client requested world-map overlay items of a given type
+    /// (`MapItemRequest`); the simulator answers with
+    /// [`SimSession::send_map_item_reply`].
+    MapItemRequested {
+        /// The kind of item requested (avatars, telehubs, land for sale, …).
+        item_type: MapItemType,
+        /// The target region handle (0 = the client's current region).
+        region_handle: u64,
+        /// The request's map-layer flags.
+        flags: u32,
+    },
+    /// The client requested the world-map image-tile layers
+    /// (`MapLayerRequest`); the simulator answers with
+    /// [`SimSession::send_map_layer_reply`].
+    MapLayerRequested {
+        /// The request's map-layer flags.
+        flags: u32,
+    },
     /// The client requested a clean logout (`LogoutRequest`); the simulator has
     /// replied with a `LogoutReply` and closed the session.
     LoggedOut,
@@ -3152,6 +3194,34 @@ impl SimSession {
                         allow_publish: data.allow_publish,
                         mature_publish: data.mature_publish,
                     })));
+            }
+            AnyMessage::MapBlockRequest(request) => {
+                let position = &request.position_data;
+                self.events.push_back(ServerEvent::MapBlockRequested {
+                    min_x: position.min_x,
+                    max_x: position.max_x,
+                    min_y: position.min_y,
+                    max_y: position.max_y,
+                    flags: request.agent_data.flags,
+                });
+            }
+            AnyMessage::MapNameRequest(request) => {
+                self.events.push_back(ServerEvent::MapNameRequested {
+                    name: trimmed_string(&request.name_data.name),
+                    flags: request.agent_data.flags,
+                });
+            }
+            AnyMessage::MapItemRequest(request) => {
+                self.events.push_back(ServerEvent::MapItemRequested {
+                    item_type: MapItemType::from_u32(request.request_data.item_type),
+                    region_handle: request.request_data.region_handle,
+                    flags: request.agent_data.flags,
+                });
+            }
+            AnyMessage::MapLayerRequest(request) => {
+                self.events.push_back(ServerEvent::MapLayerRequested {
+                    flags: request.agent_data.flags,
+                });
             }
             AnyMessage::LogoutRequest(_) => {
                 self.send_logout_reply(now)?;

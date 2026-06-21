@@ -222,9 +222,12 @@ None of these has a reply; the client just acts on them.
 >   `RequestMapItems` (→ `Event::MapItems`, `MapItem`/`MapItemType`), and
 >   `RequestMapLayer` (→ `Event::MapLayers`, `MapLayer`) — types in
 >   `sl-proto/src/types/map.rs`, UDP encoders in
->   `sl-proto/src/session/circuit.rs`. The simulator side answers with
->   `SimSession::send_map_block_reply` / `send_map_item_reply` /
->   `send_map_layer_reply`.
+>   `sl-proto/src/session/circuit.rs`. The simulator side decodes the four
+>   request messages into `ServerEvent::MapBlockRequested` /
+>   `MapNameRequested` / `MapItemRequested` / `MapLayerRequested` (carrying the
+>   requested rectangle / name / item type / region handle, plus the map-layer
+>   flags) and answers with `SimSession::send_map_block_reply` /
+>   `send_map_item_reply` / `send_map_layer_reply`.
 > - Abuse reports use `sl-wire/src/abuse_report.rs` (`AbuseReport`,
 >   `AbuseReportType`): `Command::SendAbuseReport` encodes the `UserReport` UDP
 >   message; `Command::SendAbuseReportViaCaps { report, screenshot }` posts the
