@@ -18,26 +18,48 @@ use crate::types::{
     RenderMaterialRef, SculptData,
 };
 
-/// `ExtraParams` type code for flexible-path data (`PARAMS_FLEXIBLE`).
-const PARAMS_FLEXIBLE: u16 = 0x10;
-/// `ExtraParams` type code for light data (`PARAMS_LIGHT`).
-const PARAMS_LIGHT: u16 = 0x20;
-/// `ExtraParams` type code for sculpt data (`PARAMS_SCULPT`).
-const PARAMS_SCULPT: u16 = 0x30;
-/// `ExtraParams` type code for projected-light texture data
-/// (`PARAMS_LIGHT_IMAGE`).
-const PARAMS_LIGHT_IMAGE: u16 = 0x40;
-/// `ExtraParams` type code for a mesh prim (`PARAMS_MESH`); carried in the same
-/// block as sculpt data.
-const PARAMS_MESH: u16 = 0x60;
-/// `ExtraParams` type code for extended-mesh flags (`PARAMS_EXTENDED_MESH`).
-const PARAMS_EXTENDED_MESH: u16 = 0x70;
-/// `ExtraParams` type code for per-face GLTF render materials
-/// (`PARAMS_RENDER_MATERIAL`).
-const PARAMS_RENDER_MATERIAL: u16 = 0x80;
-/// `ExtraParams` type code for reflection-probe data
-/// (`PARAMS_REFLECTION_PROBE`).
-const PARAMS_REFLECTION_PROBE: u16 = 0x90;
+/// A single `ExtraParams` parameter's `u16` type code (Linden's `LLNetworkData`
+/// subtype tag, the leading `u16` of each container entry). Unlike a bitfield
+/// these codes are mutually exclusive — one per entry — so this is a plain
+/// newtype with named constants rather than a flag set: it lets the decoder
+/// match by name (`ExtraParamType::FLEXIBLE`) and the encoder write codes by name
+/// instead of scattering magic `0x10`/`0x20`/… literals.
+///
+/// Like the other protocol type wrappers it stays private to this codec: the
+/// codes only ever appear inside the raw `ExtraParams` blob this module walks.
+/// `code()`/`from_code` are transparent, so wire bytes are byte-identical to the
+/// previous bare-`u16` form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ExtraParamType(u16);
+
+impl ExtraParamType {
+    /// Flexible-path ("flexi") data (`PARAMS_FLEXIBLE`).
+    const FLEXIBLE: Self = Self(0x10);
+    /// Point/spot-light data (`PARAMS_LIGHT`).
+    const LIGHT: Self = Self(0x20);
+    /// Sculpt data (`PARAMS_SCULPT`).
+    const SCULPT: Self = Self(0x30);
+    /// Projected-light texture data (`PARAMS_LIGHT_IMAGE`).
+    const LIGHT_IMAGE: Self = Self(0x40);
+    /// A mesh prim (`PARAMS_MESH`); carried in the same block as sculpt data.
+    const MESH: Self = Self(0x60);
+    /// Extended-mesh flags (`PARAMS_EXTENDED_MESH`).
+    const EXTENDED_MESH: Self = Self(0x70);
+    /// Per-face GLTF render materials (`PARAMS_RENDER_MATERIAL`).
+    const RENDER_MATERIAL: Self = Self(0x80);
+    /// Reflection-probe data (`PARAMS_REFLECTION_PROBE`).
+    const REFLECTION_PROBE: Self = Self(0x90);
+
+    /// Wraps a raw wire type code.
+    const fn from_code(code: u16) -> Self {
+        Self(code)
+    }
+
+    /// Returns the raw wire type code.
+    const fn code(self) -> u16 {
+        self.0
+    }
+}
 
 /// Walks an object's raw `ExtraParams` blob and decodes each known parameter
 /// into [`ObjectExtraParams`]. Best-effort: unknown parameters are skipped and a
@@ -63,14 +85,20 @@ pub(crate) fn decode_extra_params(blob: &[u8]) -> ObjectExtraParams {
             break;
         };
         let mut param = Reader::new(payload);
-        match param_type {
-            PARAMS_FLEXIBLE => out.flexible = decode_flexible(&mut param),
-            PARAMS_LIGHT => out.light = decode_light(&mut param),
-            PARAMS_SCULPT | PARAMS_MESH => out.sculpt = decode_sculpt(&mut param),
-            PARAMS_LIGHT_IMAGE => out.light_image = decode_light_image(&mut param),
-            PARAMS_EXTENDED_MESH => out.extended_mesh = decode_extended_mesh(&mut param),
-            PARAMS_RENDER_MATERIAL => out.render_material = decode_render_material(&mut param),
-            PARAMS_REFLECTION_PROBE => out.reflection_probe = decode_reflection_probe(&mut param),
+        match ExtraParamType::from_code(param_type) {
+            ExtraParamType::FLEXIBLE => out.flexible = decode_flexible(&mut param),
+            ExtraParamType::LIGHT => out.light = decode_light(&mut param),
+            ExtraParamType::SCULPT | ExtraParamType::MESH => {
+                out.sculpt = decode_sculpt(&mut param);
+            }
+            ExtraParamType::LIGHT_IMAGE => out.light_image = decode_light_image(&mut param),
+            ExtraParamType::EXTENDED_MESH => out.extended_mesh = decode_extended_mesh(&mut param),
+            ExtraParamType::RENDER_MATERIAL => {
+                out.render_material = decode_render_material(&mut param);
+            }
+            ExtraParamType::REFLECTION_PROBE => {
+                out.reflection_probe = decode_reflection_probe(&mut param);
+            }
             _ => {}
         }
     }
@@ -127,31 +155,34 @@ pub(crate) fn extra_params_len(blob: &[u8]) -> usize {
 pub fn encode_extra_params(params: &ObjectExtraParams) -> Vec<u8> {
     // Collect each present parameter as a (type code, payload) pair, in
     // ascending type-code order.
-    let mut entries: Vec<(u16, Vec<u8>)> = Vec::new();
+    let mut entries: Vec<(ExtraParamType, Vec<u8>)> = Vec::new();
     if let Some(flexible) = &params.flexible {
-        entries.push((PARAMS_FLEXIBLE, encode_flexible(flexible)));
+        entries.push((ExtraParamType::FLEXIBLE, encode_flexible(flexible)));
     }
     if let Some(light) = &params.light {
-        entries.push((PARAMS_LIGHT, encode_light(light)));
+        entries.push((ExtraParamType::LIGHT, encode_light(light)));
     }
     if let Some(sculpt) = &params.sculpt {
-        entries.push((PARAMS_SCULPT, encode_sculpt(sculpt)));
+        entries.push((ExtraParamType::SCULPT, encode_sculpt(sculpt)));
     }
     if let Some(light_image) = &params.light_image {
-        entries.push((PARAMS_LIGHT_IMAGE, encode_light_image(light_image)));
+        entries.push((ExtraParamType::LIGHT_IMAGE, encode_light_image(light_image)));
     }
     if let Some(extended_mesh) = &params.extended_mesh {
-        entries.push((PARAMS_EXTENDED_MESH, encode_extended_mesh(extended_mesh)));
+        entries.push((
+            ExtraParamType::EXTENDED_MESH,
+            encode_extended_mesh(extended_mesh),
+        ));
     }
     if !params.render_material.is_empty() {
         entries.push((
-            PARAMS_RENDER_MATERIAL,
+            ExtraParamType::RENDER_MATERIAL,
             encode_render_material(&params.render_material),
         ));
     }
     if let Some(reflection_probe) = &params.reflection_probe {
         entries.push((
-            PARAMS_REFLECTION_PROBE,
+            ExtraParamType::REFLECTION_PROBE,
             encode_reflection_probe(reflection_probe),
         ));
     }
@@ -161,7 +192,7 @@ pub fn encode_extra_params(params: &ObjectExtraParams) -> Vec<u8> {
     // each of the seven subtypes, so it never overflows.
     writer.put_u8(u8::try_from(entries.len()).unwrap_or(u8::MAX));
     for (param_type, payload) in entries {
-        writer.put_u16(param_type);
+        writer.put_u16(param_type.code());
         writer.put_u32(u32::try_from(payload.len()).unwrap_or(u32::MAX));
         writer.bytes(&payload);
     }
@@ -457,6 +488,26 @@ mod encode_tests {
         // The encoder is deterministic and the exact inverse of the decoder, so
         // re-encoding the decoded form reproduces the identical blob.
         assert_eq!(encode_extra_params(&decoded), blob);
+    }
+
+    #[test]
+    fn extra_param_type_codes_round_trip() {
+        use super::ExtraParamType;
+        // Each named code wraps and unwraps to the exact wire value the bare
+        // `PARAMS_*` consts carried, so the framing is byte-identical.
+        for (ty, code) in [
+            (ExtraParamType::FLEXIBLE, 0x10_u16),
+            (ExtraParamType::LIGHT, 0x20),
+            (ExtraParamType::SCULPT, 0x30),
+            (ExtraParamType::LIGHT_IMAGE, 0x40),
+            (ExtraParamType::MESH, 0x60),
+            (ExtraParamType::EXTENDED_MESH, 0x70),
+            (ExtraParamType::RENDER_MATERIAL, 0x80),
+            (ExtraParamType::REFLECTION_PROBE, 0x90),
+        ] {
+            assert_eq!(ty.code(), code);
+            assert_eq!(ExtraParamType::from_code(code), ty);
+        }
     }
 
     #[test]
