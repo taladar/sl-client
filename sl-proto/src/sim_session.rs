@@ -95,16 +95,16 @@ use crate::session::{
 };
 use crate::types::directory::category_from_wire;
 use crate::types::{
-    AlertInfo, AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatType, CoarseLocation,
-    DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, EstateCovenant, EventInfo, FollowCamPropertyValue,
-    GestureActivation, GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions,
-    GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, InstantMessage, LandSearchType,
-    LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer, MapRegionInfo, MeanCollision,
-    NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails,
-    ParcelObjectOwner, PlacesResult, Postcard, RegionIdentity, Reliability, RestoreItem,
-    RezAttachment, SaleType, ScriptControl, TelehubInfo, Throttle, Transmit, ViewerEffect,
-    ViewerEffectData, ViewerEffectType,
+    AlertInfo, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatType,
+    CoarseLocation, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
+    DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant, EventInfo,
+    FollowCamPropertyValue, GestureActivation, GroupAccountDetails, GroupAccountSummary,
+    GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem,
+    InstantMessage, LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType,
+    MapLayer, MapRegionInfo, MeanCollision, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily,
+    ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult, Postcard, RegionIdentity,
+    Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl, TelehubInfo, Throttle,
+    Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
 
@@ -287,9 +287,9 @@ pub enum ServerEvent {
         local_id: u32,
         /// The point the object is attached to.
         attachment_point: AttachmentPoint,
-        /// Whether the object was added to the point (`true`) rather than
-        /// replacing what was there.
-        add: bool,
+        /// Whether the object was added to the point rather than replacing what
+        /// was there.
+        mode: AttachmentMode,
         /// The rotation the object is worn at.
         rotation: Rotation,
     },
@@ -2695,13 +2695,13 @@ impl SimSession {
                 self.events.push_back(ServerEvent::GroupNamesRequested(ids));
             }
             AnyMessage::ObjectAttach(attach) => {
-                let (attachment_point, add) =
+                let (attachment_point, mode) =
                     AttachmentPoint::split_code(attach.agent_data.attachment_point);
                 for object in &attach.object_data {
                     self.events.push_back(ServerEvent::AttachObject {
                         local_id: object.object_local_id,
                         attachment_point,
-                        add,
+                        mode,
                         rotation: object.rotation.clone(),
                     });
                 }
@@ -2732,13 +2732,13 @@ impl SimSession {
             }
             AnyMessage::RezSingleAttachmentFromInv(rez) => {
                 let object = &rez.object_data;
-                let (attachment_point, add) = AttachmentPoint::split_code(object.attachment_pt);
+                let (attachment_point, mode) = AttachmentPoint::split_code(object.attachment_pt);
                 self.events
                     .push_back(ServerEvent::RezAttachment(Box::new(RezAttachment {
                         item_id: object.item_id,
                         owner_id: object.owner_id,
                         attachment_point,
-                        add,
+                        mode,
                         name: trimmed_string(&object.name),
                         description: trimmed_string(&object.description),
                     })));
@@ -2748,13 +2748,13 @@ impl SimSession {
                     .object_data
                     .iter()
                     .map(|object| {
-                        let (attachment_point, add) =
+                        let (attachment_point, mode) =
                             AttachmentPoint::split_code(object.attachment_pt);
                         RezAttachment {
                             item_id: object.item_id,
                             owner_id: object.owner_id,
                             attachment_point,
-                            add,
+                            mode,
                             name: trimmed_string(&object.name),
                             description: trimmed_string(&object.description),
                         }

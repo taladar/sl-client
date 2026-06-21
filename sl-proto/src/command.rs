@@ -5,17 +5,17 @@
 //! copies.
 
 use crate::{
-    AbuseReport, AgentPreferences, AnyMessage, AssetType, AttachmentPoint, Camera, ChatType,
-    ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, DeRezDestination, DirFindFlags,
-    EstateAccessDelta, ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation,
-    GroupNoticeAttachment, GroupRoleEdit, GroupRoleMemberChange, IceCandidate, InterestsUpdate,
-    InventoryItem, InventoryOffer, InventoryType, LandSearchType, LandStatReportType, LindenAmount,
-    MapItemType, Material, MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MuteFlags,
-    MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform,
-    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelReturnType, ParcelUpdate,
-    PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability,
-    RestoreItem, RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
-    ViewerEffect, VoiceProvisionRequest, Wearable,
+    AbuseReport, AgentPreferences, AnyMessage, AssetType, AttachmentMode, AttachmentPoint, Camera,
+    ChatType, ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, DeRezDestination,
+    DirFindFlags, EstateAccessDelta, ExperiencePermission, ExperienceUpdate, FriendRights,
+    GestureActivation, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMemberChange, IceCandidate,
+    InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LandSearchType,
+    LandStatReportType, LindenAmount, MapItemType, Material, MaterialOverrideUpdate, MediaEntry,
+    MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem,
+    ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
+    ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, Postcard, PrimShape,
+    ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, Rotation, SaleType,
+    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1478,18 +1478,18 @@ pub enum Command {
     /// Fire-and-forget; there is no reply.
     ReleaseScriptControls,
     /// Attach an in-world object (selected by its region-local id) to the avatar
-    /// (`ObjectAttach`). The object is worn at `attachment_point`; when `add` is
-    /// `true` it is added alongside anything already on that point rather than
-    /// replacing it ([`AttachmentPoint::Default`] lets the simulator pick the
-    /// object's saved/scripted slot). To wear an item straight from inventory
-    /// instead, use [`Command::RezAttachment`].
+    /// (`ObjectAttach`). The object is worn at `attachment_point`; `mode` chooses
+    /// whether it is added alongside anything already on that point or replaces
+    /// it ([`AttachmentPoint::Default`] lets the simulator pick the object's
+    /// saved/scripted slot). To wear an item straight from inventory instead, use
+    /// [`Command::RezAttachment`].
     AttachObject {
         /// The in-world object's region-local id.
         local_id: u32,
         /// The point to attach the object to.
         attachment_point: AttachmentPoint,
-        /// Add the attachment (`true`) rather than replace what is on the point.
-        add: bool,
+        /// Whether to add the attachment or replace what is on the point.
+        mode: AttachmentMode,
         /// The rotation to wear the object at, relative to the attachment point.
         rotation: Rotation,
     },

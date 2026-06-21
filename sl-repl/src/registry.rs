@@ -18,19 +18,19 @@
 use std::collections::BTreeMap;
 
 use sl_proto::{
-    AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentPoint, Camera, ChatType,
-    ClassifiedUpdate, Command, ControlFlags, CreateGroupParams, DeRezDestination, DirFindFlags,
-    EstateAccessDelta, ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation,
-    GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange, InterestsUpdate,
-    InventoryItem, InventoryOffer, InventoryType, LandSearchType, LandStatReportType, LindenAmount,
-    LookAtType, MapItemType, Material, MaterialOverrideUpdate, Maturity, MediaEntry,
-    MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem,
-    ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate,
-    PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
-    ProfileUpdate, RegionInfoUpdate, RestoreItem, RezAttachment, Rotation, SaleType,
-    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    VoiceProvisionRequest, Wearable, WearableType,
+    AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentMode, AttachmentPoint,
+    Camera, ChatType, ClassifiedUpdate, Command, ControlFlags, CreateGroupParams, DeRezDestination,
+    DirFindFlags, EstateAccessDelta, ExperiencePermission, ExperienceUpdate, FriendRights,
+    GestureActivation, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit,
+    GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType,
+    LandSearchType, LandStatReportType, LindenAmount, LookAtType, MapItemType, Material,
+    MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MuteFlags, MuteType,
+    NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectPermMasks,
+    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+    ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, Permissions, Permissions5,
+    PickUpdate, PointAtType, Postcard, PrimShape, ProfileUpdate, RegionInfoUpdate, RestoreItem,
+    RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect,
+    ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -595,6 +595,17 @@ fn parse_attachment_point(field: &str, value: &str) -> Result<AttachmentPoint, R
                 .ok()
                 .ok_or_else(|| invalid(field, value, "attachment point"))?,
         ),
+    })
+}
+
+/// Parse an [`AttachmentMode`] from `add`/`replace` (or the legacy boolean
+/// spelling: `true`/`yes`/`1` = [`AttachmentMode::Add`],
+/// `false`/`no`/`0` = [`AttachmentMode::Replace`]).
+fn parse_attachment_mode(field: &str, value: &str) -> Result<AttachmentMode, ReplError> {
+    Ok(match norm(value).as_str() {
+        "add" | "true" | "yes" | "1" => AttachmentMode::Add,
+        "replace" | "false" | "no" | "0" => AttachmentMode::Replace,
+        _ => return Err(invalid(field, value, "add|replace")),
     })
 }
 
@@ -3251,7 +3262,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "attach_object",
-            usage: "<local_id> <attachment_point> [add=] [rotation=<r>]",
+            usage: "<local_id> <attachment_point> [mode=add|replace] [rotation=<r>]",
             build: |args, ctx| {
                 Ok(Command::AttachObject {
                     local_id: args.req_parse(ctx, "local_id", 0, "u32")?,
@@ -3262,7 +3273,14 @@ fn all_specs() -> Vec<CommandSpec> {
                         1,
                         parse_attachment_point,
                     )?,
-                    add: args.bool_or(ctx, "add", 2, false)?,
+                    mode: enum_arg_or(
+                        args,
+                        ctx,
+                        "mode",
+                        2,
+                        parse_attachment_mode,
+                        AttachmentMode::Replace,
+                    )?,
                     rotation: args.opt_rotation(ctx, "rotation", 3)?.unwrap_or(Rotation {
                         x: 0.0,
                         y: 0.0,
@@ -3308,7 +3326,8 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "rez_attachment",
-            usage: "<item_id> <attachment_point> [owner_id=] [add=] [name=] [description=]",
+            usage: "<item_id> <attachment_point> [owner_id=] [mode=add|replace] [name=] \
+                    [description=]",
             build: |args, ctx| {
                 Ok(Command::RezAttachment(RezAttachment {
                     item_id: args.req_uuid(ctx, "item_id", 0)?,
@@ -3320,7 +3339,14 @@ fn all_specs() -> Vec<CommandSpec> {
                         parse_attachment_point,
                     )?,
                     owner_id: args.uuid_or_nil(ctx, "owner_id", 2)?,
-                    add: args.bool_or(ctx, "add", 3, false)?,
+                    mode: enum_arg_or(
+                        args,
+                        ctx,
+                        "mode",
+                        3,
+                        parse_attachment_mode,
+                        AttachmentMode::Replace,
+                    )?,
                     name: args.opt_str(ctx, "name", 4)?.unwrap_or_default(),
                     description: args.opt_str(ctx, "description", 5)?.unwrap_or_default(),
                 }))
@@ -3328,15 +3354,16 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "rez_attachments",
-            usage: "<compound_id> <item_id:owner_id:attachment_point[:add],…> [first_detach_all=]",
+            usage: "<compound_id> <item_id:owner_id:attachment_point[:add|replace],…> \
+                    [first_detach_all=]",
             build: |args, ctx| {
                 let compound_id = args.uuid_or_nil(ctx, "compound_id", 0)?;
                 let first_detach_all = args.bool_or(ctx, "first_detach_all", 100, false)?;
                 let mut attachments = Vec::new();
                 for record in args.vec_records(ctx, "attachments", 1)? {
-                    let add = match record.get(3) {
-                        Some(value) => args::parse_bool("attachments", value)?,
-                        None => false,
+                    let mode = match record.get(3) {
+                        Some(value) => parse_attachment_mode("attachments", value)?,
+                        None => AttachmentMode::Replace,
                     };
                     attachments.push(RezAttachment {
                         item_id: args::literal_uuid(
@@ -3351,7 +3378,7 @@ fn all_specs() -> Vec<CommandSpec> {
                             "attachments",
                             record_field("attachments", &record, 2)?,
                         )?,
-                        add,
+                        mode,
                         name: String::new(),
                         description: String::new(),
                     });

@@ -10,20 +10,21 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        AbuseReport, AbuseReportType, AlertInfo, AttachmentPoint, AvatarName, AvatarPickerResult,
-        ChatType, CoarseLocation, ControlFlags, DirClassifiedResult, DirEventResult, DirFindFlags,
-        DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant, Event,
-        EventInfo, FollowCamProperty, FollowCamPropertyValue, GestureActivation,
-        GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
-        GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
-        GroupVote, GroupVoteHistoryItem, ImDialog, LandSearchType, LandStatItem,
-        LandStatReportType, LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo, Maturity,
-        MeanCollision, MeanCollisionType, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily,
-        ParcelCategory, ParcelDetails, ParcelObjectOwner, ParcelReturnType, Permissions5,
-        PlacesResult, PointAtType, Postcard, ProductType, RegionIdentity, RestoreItem,
-        RezAttachment, SaleType, ScriptControl, ServerEvent, Session, SimSession, TelehubInfo,
-        Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        enable_simulator_to_caps_llsd, grid_to_handle, parse_event_queue_response,
+        AbuseReport, AbuseReportType, AlertInfo, AttachmentMode, AttachmentPoint, AvatarName,
+        AvatarPickerResult, ChatType, CoarseLocation, ControlFlags, DirClassifiedResult,
+        DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult,
+        DirPlaceResult, EstateCovenant, Event, EventInfo, FollowCamProperty,
+        FollowCamPropertyValue, GestureActivation, GroupAccountDetails, GroupAccountDetailsEntry,
+        GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
+        GroupActiveProposalItem, GroupName, GroupVote, GroupVoteHistoryItem, ImDialog,
+        LandSearchType, LandStatItem, LandStatReportType, LoginParams, MapItem, MapItemType,
+        MapLayer, MapRegionInfo, Maturity, MeanCollision, MeanCollisionType, NotecardRez,
+        ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner,
+        ParcelReturnType, Permissions5, PlacesResult, PointAtType, Postcard, ProductType,
+        RegionIdentity, RestoreItem, RezAttachment, SaleType, ScriptControl, ServerEvent, Session,
+        SimSession, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, enable_simulator_to_caps_llsd, grid_to_handle,
+        parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -244,7 +245,7 @@ mod test {
         client.attach_object(
             55,
             AttachmentPoint::RightHand,
-            true,
+            AttachmentMode::Add,
             &sl_types::lsl::Rotation {
                 x: 0.0,
                 y: 0.0,
@@ -262,13 +263,16 @@ mod test {
                 ServerEvent::AttachObject {
                     local_id,
                     attachment_point,
-                    add,
+                    mode,
                     ..
-                } => Some((*local_id, *attachment_point, *add)),
+                } => Some((*local_id, *attachment_point, *mode)),
                 _ => None,
             })
             .ok_or("expected an AttachObject server event")?;
-        assert_eq!(attach, (55, AttachmentPoint::RightHand, true));
+        assert_eq!(
+            attach,
+            (55, AttachmentPoint::RightHand, AttachmentMode::Add)
+        );
         Ok(())
     }
 
@@ -329,7 +333,7 @@ mod test {
             item_id: uuid::Uuid::from_u128(0x9002),
             owner_id: uuid::Uuid::from_u128(0x9000),
             attachment_point: AttachmentPoint::LeftHand,
-            add: true,
+            mode: AttachmentMode::Add,
             name: String::new(),
             description: String::new(),
         }];
@@ -352,7 +356,7 @@ mod test {
         assert!(!rez.1);
         let first = rez.2.first().ok_or("first attachment")?;
         assert_eq!(first.attachment_point, AttachmentPoint::LeftHand);
-        assert!(first.add);
+        assert_eq!(first.mode, AttachmentMode::Add);
         assert_eq!(first.item_id, uuid::Uuid::from_u128(0x9002));
         Ok(())
     }

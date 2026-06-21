@@ -1648,11 +1648,11 @@ fn advance_running(
             Command::AttachObject {
                 local_id,
                 attachment_point,
-                add,
+                mode,
                 rotation,
             } => {
                 session
-                    .attach_object(*local_id, *attachment_point, *add, rotation, now)
+                    .attach_object(*local_id, *attachment_point, *mode, rotation, now)
                     .ok();
             }
             Command::DetachObjects { local_ids } => {

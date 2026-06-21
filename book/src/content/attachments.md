@@ -20,8 +20,9 @@ recognised by `AttachmentPoint::is_hud`). Unknown/future codes round-trip as
 On the wire the point shares a byte with an **add** flag (`ATTACHMENT_ADD`,
 `0x80`): with it set the object is *added* to the point alongside anything
 already there; without it, the new object *replaces* what is worn there. The
-flag is modelled separately from the point — every attaching command carries an
-`add: bool` — and `AttachmentPoint::with_add` / `split_code` combine and
+flag is modelled separately from the point as an `AttachmentMode` enum
+(`Add` / `Replace`) — every attaching command carries a `mode:
+AttachmentMode` — and `AttachmentPoint::with_mode` / `split_code` combine and
 separate the two.
 
 ## Attaching and detaching
@@ -34,7 +35,7 @@ The client can:
   `RezSingleAttachmentFromInv`) or several at once
   (`Command::RezAttachments`, `RezMultipleAttachmentsFromInv`, which can first
   detach everything currently worn). Both take a `RezAttachment` describing the
-  item, owner, point and add flag.
+  item, owner, point and attachment mode.
 - **Detach back to inventory** by region-local id (`Command::DetachObjects`,
   `ObjectDetach`) or by inventory item id (`Command::RemoveAttachment`,
   `RemoveAttachment`).
@@ -57,9 +58,9 @@ observes exactly what a client wears.
 > **In this codebase**
 >
 > - Types are in `sl-proto/src/types/appearance.rs`: `AttachmentPoint` (with
->   `to_code` / `from_code` / `with_add` / `split_code` / `is_hud`) and
->   `RezAttachment`. The attachment list on `AvatarAppearance` uses
->   `AvatarAttachment`.
+>   `to_code` / `from_code` / `with_mode` / `split_code` / `is_hud`),
+>   `AttachmentMode` (`Add` / `Replace`), and `RezAttachment`. The attachment
+>   list on `AvatarAppearance` uses `AvatarAttachment`.
 > - Commands `AttachObject`, `DetachObjects`, `DropAttachments`,
 >   `RemoveAttachment`, `RezAttachment`, `RezAttachments`; the `Session` methods
 >   are `attach_object`, `detach_objects`, `drop_attachments`,
