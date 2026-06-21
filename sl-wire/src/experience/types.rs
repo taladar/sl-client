@@ -78,6 +78,7 @@ impl ExperienceProperties {
 /// `Allow`/`Block` are sent as a PUT body; `Forget` clears any prior preference
 /// (sent as a DELETE — see [`build_set_experience_permission_request`](crate::build_set_experience_permission_request)).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ExperiencePermission {
     /// Admit the experience for this agent.
     Allow,

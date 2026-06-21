@@ -376,7 +376,8 @@ const fn maturity_str(maturity: Maturity) -> &'static str {
         Maturity::Pg => "PG",
         Maturity::Mature => "Mature",
         Maturity::Adult => "Adult",
-        Maturity::Unknown => "Unknown",
+        // `Maturity::Unknown` plus any future (`#[non_exhaustive]`) rating.
+        _ => "Unknown",
     }
 }
 
@@ -386,7 +387,8 @@ const fn product_str(product: ProductType) -> &'static str {
         ProductType::FullRegion => "FullRegion",
         ProductType::Homestead => "Homestead",
         ProductType::Openspace => "Openspace",
-        ProductType::Unknown => "Unknown",
+        // `ProductType::Unknown` plus any future (`#[non_exhaustive]`) type.
+        _ => "Unknown",
     }
 }
 

@@ -4,6 +4,7 @@ use thiserror::Error;
 
 /// An error returned by a [`Session`](crate::Session) input method.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     /// A wire-level (de)serialization error.
     #[error("wire error: {0}")]

@@ -11,6 +11,7 @@ use uuid::Uuid;
 /// [`Session::update_estate_access`](crate::Session::update_estate_access)
 /// (`EstateOwnerMessage` method `estateaccessdelta`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EstateAccessDelta {
     /// Add an agent to the allowed-access list.
     AllowedAgentAdd,
@@ -50,6 +51,7 @@ impl EstateAccessDelta {
 
 /// Which estate access list a [`Event::EstateAccessList`](crate::Event::EstateAccessList) carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EstateAccessKind {
     /// The allowed-agents list.
     AllowedAgents,
@@ -201,6 +203,7 @@ pub struct MapRegionInfo {
 /// `GridItemType`). [`MapItemType::AgentLocations`] gives the avatar "green
 /// dots"; the land-for-sale and event types give the corresponding map overlays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MapItemType {
     /// The region's telehub, if any (`1`).
     Telehub,

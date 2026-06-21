@@ -18,6 +18,7 @@ use sl_wire::{MessageId, WireError};
 /// raw-byte capture and bookkeeping cost nothing on the normal path. Drain them
 /// with [`Session::poll_diagnostic`](crate::Session::poll_diagnostic).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Diagnostic {
     /// An inbound datagram carried a message whose id was recognised (or at
     /// least frequency-decodable) but whose body failed to decode. The session

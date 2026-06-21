@@ -13,6 +13,7 @@ use uuid::Uuid;
 /// The left-click behaviour of an object (`ClickAction` / `CLICK_ACTION_*`), as
 /// set by [`Session::set_object_click_action`](crate::Session::set_object_click_action).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum ClickAction {
     /// The default: clicking touches the object (`CLICK_ACTION_TOUCH`, also
     /// `CLICK_ACTION_NONE`).
@@ -78,6 +79,7 @@ impl ClickAction {
 /// [`Session::set_object_material`](crate::Session::set_object_material). The
 /// material governs the object's collision sound and default friction/density.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum Material {
     /// Stone (`LL_MCODE_STONE`).
     Stone,
@@ -134,6 +136,7 @@ impl Material {
 /// [`Session::set_object_for_sale`](crate::Session::set_object_for_sale) and
 /// reported in [`ObjectProperties::sale_type`](crate::ObjectProperties::sale_type).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum SaleType {
     /// Not for sale (`FS_NOT`).
     #[default]
@@ -174,6 +177,7 @@ impl SaleType {
 /// `EDeRezDestination` / `DRD_*`), as passed to
 /// [`Session::derez_objects`](crate::Session::derez_objects).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DeRezDestination {
     /// Save into agent inventory, leaving a copy in world (`DRD_SAVE_INTO_AGENT_INVENTORY`).
     SaveIntoAgentInventory,
@@ -225,6 +229,7 @@ impl DeRezDestination {
 /// byte; LL's `PERM_BASE`/`PERM_OWNER`/…), passed to
 /// [`Session::set_object_permissions`](crate::Session::set_object_permissions).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PermissionField {
     /// The base permissions mask (`PERM_BASE`).
     Base,
@@ -429,6 +434,7 @@ impl ObjectTransform {
 
 /// A region maturity / content rating, from the `SimAccess` byte.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Maturity {
     /// General ("PG") content.
     Pg,
@@ -541,6 +547,7 @@ impl TeleportFlags {
 /// A region product type, inferred from the `ProductSKU`/`ProductName` strings.
 /// OpenSim grids usually leave these empty, yielding [`ProductType::Unknown`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ProductType {
     /// A full ("Estate" / "Standalone") region.
     FullRegion,

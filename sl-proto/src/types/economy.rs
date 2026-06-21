@@ -60,6 +60,7 @@ pub struct MoneyTransaction {
 /// subset of the Second Life transaction codes (`lltransactiontypes.h`); any
 /// other code round-trips through [`MoneyTransactionType::Other`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MoneyTransactionType {
     /// A direct L$ gift to another avatar (`5001`).
     Gift,

@@ -185,6 +185,7 @@ pub struct GroupNotice {
 /// `UpdateType`). The wire bytes match the viewer's `LLRoleChangeType`
 /// (`roles_constants.h`) and OpenSim's `OpenMetaverse.GroupRoleUpdate` enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum GroupRoleUpdateType {
     /// No change (a no-op `RoleData` block).
     NoUpdate,

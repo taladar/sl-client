@@ -59,6 +59,7 @@ pub struct SelectedResourceCost {
 /// *roots* (`selected_roots`, summing each whole linkset) or individual *prims*
 /// (`selected_prims`). The viewer normally sends roots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SelectedCostKind {
     /// Sum each selected linkset by its root id (`selected_roots`).
     Roots,

@@ -125,6 +125,7 @@ impl Kilobits {
 /// per-category bandwidth must be a finite, non-negative number of kilobits per
 /// second.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum ThrottleError {
     /// The rate was NaN or infinite.
     #[error("bandwidth rate is not finite (NaN or infinite)")]
@@ -511,6 +512,7 @@ pub struct Camera {
 /// orthonormal frame in the SL convention (`at × left = up`). The axes arrive as
 /// `f32`, so every check allows a small tolerance rather than an exact match.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum CameraError {
     /// One of the three axes is not unit-length (within tolerance).
     #[error("camera axis is not unit-length")]
@@ -719,6 +721,7 @@ pub struct Transmit {
 
 /// Why a session became disconnected.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DisconnectReason {
     /// The login server rejected the credentials.
     LoginFailed {

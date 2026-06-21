@@ -9,6 +9,7 @@ use uuid::Uuid;
 /// and must be distinguished from a normal parcel (mirrors the viewer's
 /// `PARCEL_RESULT_*` constants).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum ParcelRequestResult {
     /// No parcel data (the query found nothing, or access was denied)
     /// (`PARCEL_RESULT_NO_DATA`, `-1`).
@@ -57,6 +58,7 @@ impl ParcelRequestResult {
 /// A parcel's ownership status, the `Status` field of `ParcelProperties` (the
 /// viewer's `LLParcel::EOwnershipStatus`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum ParcelStatus {
     /// The parcel is leased (owned) (`OS_LEASED`, `0`).
     #[default]
@@ -102,6 +104,7 @@ impl ParcelStatus {
 /// How an avatar arrives on a parcel, the `LandingType` field of
 /// `ParcelProperties` (the viewer's `LLParcel::ELandingType`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum LandingType {
     /// Teleport routing is blocked (`L_NONE`, `0`).
     #[default]
@@ -328,6 +331,7 @@ pub struct ParcelOverlayInfo {
 /// the viewer's `PARCEL_MEDIA_COMMAND_*` constants and the LSL
 /// `PARCEL_MEDIA_COMMAND_*` flags fed to `llParcelMediaCommandList`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ParcelMediaCommand {
     /// Stop the media and unload it (`PARCEL_MEDIA_COMMAND_STOP`).
     Stop,
@@ -416,6 +420,7 @@ pub struct ParcelMediaUpdateInfo {
 /// A parcel category, the `Category` of a [`ParcelUpdate`] (the parcel's search
 /// classification).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum ParcelCategory {
     /// No category set.
     #[default]
@@ -690,6 +695,7 @@ pub struct ParcelObjectOwner {
 /// [`Event::LandStatReply`](crate::Event::LandStatReply). This is the data behind
 /// the estate-tools "Top Scripts" / "Top Colliders" panels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum LandStatReportType {
     /// The top objects by script resource use (`0`).
     #[default]

@@ -28,6 +28,7 @@ use crate::object_cost::{object_ids_request, parse_object_ids};
 /// The physics-shape type of a prim (`PhysicsShapeType`): the collision shape the
 /// simulator uses for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum PhysicsShapeType {
     /// The exact prim shape (`0`) — the default.
     #[default]
