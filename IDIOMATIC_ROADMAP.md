@@ -77,9 +77,17 @@ Caller-facing bitfields are currently raw integers. Follow the existing
   `Command::UploadAsset`'s three masks, and the `i32` `ObjectPermMasks`
   preferences block — were intentionally left raw (a different concept; not
   five-mask blocks).
-- [ ] Compressed object-update flags → typed flag newtype
+- [x] Compressed object-update flags → typed flag newtype
       (`object_update/compressed.rs:10-40`), `.contains()` in place of
-      `& MASK != 0`.
+      `& MASK != 0`. Added a private `CompressedFlags` newtype (named
+      `SCRATCHPAD`…`HAS_PARTICLES_NEW` consts,
+      `from_bits`/`bits`/`contains`/`BitOrAssign`, following the
+      `parcel_flags`/`permissions` pattern) replacing the eleven module-private
+      `COMPRESSED_*` masks; every `& MASK != 0` is now `.contains()` and the
+      flags word builds via `|=`. Kept private to the codec (never part of the
+      public API); wire bytes are byte-identical (`bits()`/`from_bits` are
+      transparent). Unit tests cover the constant values, raw round-trip, and
+      `contains`/union.
 - [ ] Extra-params type flags → typed flag newtype (`extra_params.rs:22-40`).
 - [ ] Physics flags → typed flag newtype (`extra_params.rs:364-366` →
   `types/object.rs:483-488`), replacing the three reconstructed bools.
