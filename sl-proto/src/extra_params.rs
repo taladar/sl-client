@@ -11,7 +11,7 @@
 //! viewer's `llprimitive.cpp`.
 
 use sl_types::lsl::Vector;
-use sl_wire::{Reader, Writer};
+use sl_wire::{Reader, ReflectionProbeFlags, Writer};
 
 use crate::types::{
     ExtendedMesh, FlexibleData, LightData, LightImage, ObjectExtraParams, ReflectionProbe,
@@ -286,18 +286,14 @@ fn encode_render_material(entries: &[RenderMaterialRef]) -> Vec<u8> {
 }
 
 /// Encodes `LLReflectionProbeParams`: ambiance, clip distance, and a flags byte
-/// — the inverse of [`decode_reflection_probe`]. The three decoded booleans are
-/// recombined into the flags byte (box `0x01`, dynamic `0x02`, mirror `0x04`);
-/// any other bits the wire byte may have carried are not preserved, since the
-/// decoded form keeps only these three.
+/// — the inverse of [`decode_reflection_probe`]. The flag byte is written back
+/// verbatim from the typed [`ReflectionProbeFlags`] set, so a decode/encode round
+/// trip is byte-identical even for bits the viewer does not yet name.
 fn encode_reflection_probe(data: &ReflectionProbe) -> Vec<u8> {
     let mut writer = Writer::new();
     writer.put_f32(data.ambiance);
     writer.put_f32(data.clip_distance);
-    let flags = u8::from(data.is_box)
-        | (u8::from(data.is_dynamic).wrapping_shl(1))
-        | (u8::from(data.is_mirror).wrapping_shl(2));
-    writer.put_u8(flags);
+    writer.put_u8(data.flags.bits());
     writer.into_bytes()
 }
 
@@ -392,9 +388,7 @@ fn decode_reflection_probe(reader: &mut Reader<'_>) -> Option<ReflectionProbe> {
     Some(ReflectionProbe {
         ambiance,
         clip_distance,
-        is_box: flags & 0x01 != 0,
-        is_dynamic: flags & 0x02 != 0,
-        is_mirror: flags & 0x04 != 0,
+        flags: ReflectionProbeFlags::from_bits(flags),
     })
 }
 
@@ -403,6 +397,8 @@ mod encode_tests {
     use pretty_assertions::assert_eq;
     use sl_types::lsl::Vector;
     use uuid::Uuid;
+
+    use sl_wire::ReflectionProbeFlags;
 
     use super::{decode_extra_params, encode_extra_params};
     use crate::types::{
@@ -462,9 +458,7 @@ mod encode_tests {
             reflection_probe: Some(ReflectionProbe {
                 ambiance: 0.5,
                 clip_distance: 2.0,
-                is_box: true,
-                is_dynamic: false,
-                is_mirror: true,
+                flags: ReflectionProbeFlags::BOX_VOLUME | ReflectionProbeFlags::MIRROR,
             }),
         }
     }
