@@ -27,10 +27,10 @@ use sl_proto::{
     MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem,
     ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
     ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate,
-    PermissionField, PickUpdate, PointAtType, Postcard, PrimShape, ProfileUpdate, RegionInfoUpdate,
-    RestoreItem, RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable,
-    WearableType,
+    PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
+    ProfileUpdate, RegionInfoUpdate, RestoreItem, RezAttachment, Rotation, SaleType,
+    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -926,11 +926,19 @@ fn build_inventory_item(args: &Args, ctx: &dyn ReplContext) -> Result<InventoryI
         creator_id: args.uuid_or_nil(ctx, "creator_id", 13)?,
         group_id: args.uuid_or_nil(ctx, "group_id", 14)?,
         group_owned: args.bool_or(ctx, "group_owned", 15, false)?,
-        base_mask: args.parse_or(ctx, "base_mask", 16, "u32", 0)?,
-        owner_mask: args.parse_or(ctx, "owner_mask", 17, "u32", 0)?,
-        group_mask: args.parse_or(ctx, "group_mask", 18, "u32", 0)?,
-        everyone_mask: args.parse_or(ctx, "everyone_mask", 19, "u32", 0)?,
-        next_owner_mask: args.parse_or(ctx, "next_owner_mask", 20, "u32", 0)?,
+        permissions: Permissions5 {
+            base: Permissions::from_bits(args.parse_or(ctx, "base_mask", 16, "u32", 0)?),
+            owner: Permissions::from_bits(args.parse_or(ctx, "owner_mask", 17, "u32", 0)?),
+            group: Permissions::from_bits(args.parse_or(ctx, "group_mask", 18, "u32", 0)?),
+            everyone: Permissions::from_bits(args.parse_or(ctx, "everyone_mask", 19, "u32", 0)?),
+            next_owner: Permissions::from_bits(args.parse_or(
+                ctx,
+                "next_owner_mask",
+                20,
+                "u32",
+                0,
+            )?),
+        },
     })
 }
 
@@ -3027,11 +3035,43 @@ fn all_specs() -> Vec<CommandSpec> {
                         creator_id: args.uuid_or_nil(ctx, "creator_id", 101)?,
                         owner_id: args.uuid_or_nil(ctx, "owner_id", 102)?,
                         group_id: args.uuid_or_nil(ctx, "group_id", 103)?,
-                        base_mask: args.parse_or(ctx, "base_mask", 104, "u32", 0)?,
-                        owner_mask: args.parse_or(ctx, "owner_mask", 105, "u32", 0)?,
-                        group_mask: args.parse_or(ctx, "group_mask", 106, "u32", 0)?,
-                        everyone_mask: args.parse_or(ctx, "everyone_mask", 107, "u32", 0)?,
-                        next_owner_mask: args.parse_or(ctx, "next_owner_mask", 108, "u32", 0)?,
+                        permissions: Permissions5 {
+                            base: Permissions::from_bits(args.parse_or(
+                                ctx,
+                                "base_mask",
+                                104,
+                                "u32",
+                                0,
+                            )?),
+                            owner: Permissions::from_bits(args.parse_or(
+                                ctx,
+                                "owner_mask",
+                                105,
+                                "u32",
+                                0,
+                            )?),
+                            group: Permissions::from_bits(args.parse_or(
+                                ctx,
+                                "group_mask",
+                                106,
+                                "u32",
+                                0,
+                            )?),
+                            everyone: Permissions::from_bits(args.parse_or(
+                                ctx,
+                                "everyone_mask",
+                                107,
+                                "u32",
+                                0,
+                            )?),
+                            next_owner: Permissions::from_bits(args.parse_or(
+                                ctx,
+                                "next_owner_mask",
+                                108,
+                                "u32",
+                                0,
+                            )?),
+                        },
                         group_owned: args.bool_or(ctx, "group_owned", 109, false)?,
                         transaction_id: args.uuid_or_nil(ctx, "transaction_id", 110)?,
                         asset_type: args.parse_or(ctx, "asset_type", 111, "i8", -1)?,
