@@ -5,7 +5,7 @@ use std::io::Write as _;
 
 use sl_client_tokio::{
     Client, Command, Event, LoginParams, LoginRequest, Maturity, ParcelInfo, ProductType,
-    RegionIdentity, RegionLimits, Vector, grid_to_handle, handle_to_grid,
+    RegionIdentity, RegionLimits, StartLocation, Vector, grid_to_handle, handle_to_grid,
 };
 use tokio::sync::mpsc;
 use tracing::{instrument, warn};
@@ -107,7 +107,7 @@ pub struct SurveyParameters {
     password: String,
     /// The login start location (`last`, `home`, or `uri:Region&x&y&z`).
     #[clap(long, default_value = "last")]
-    start: String,
+    start: StartLocation,
     /// The viewer channel reported to the grid.
     #[clap(long, default_value = "sl-survey")]
     channel: String,
@@ -995,7 +995,7 @@ async fn survey_command(parameters: SurveyParameters) -> Result<(), Error> {
             SessionOutcome::RelogAt { handle, name } => {
                 tracing::info!("re-logging in at {name} to continue the survey");
                 survey.start_handle = handle;
-                start_location = format!("uri:{name}&128&128&30");
+                start_location = StartLocation::region(name, [128.0, 128.0, 30.0]);
             }
         }
     }

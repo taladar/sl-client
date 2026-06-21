@@ -28,7 +28,7 @@ mod test {
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
         AnyMessage, LoginRequest, LoginResponse, LoginSuccess, MessageId, PacketFlags, Reader,
-        Writer, encode_datagram, parse_datagram,
+        StartLocation, Writer, encode_datagram, parse_datagram,
     };
 
     /// A boxed test error.
@@ -57,7 +57,14 @@ mod test {
     fn new_client() -> Session {
         Session::new(LoginParams {
             login_uri: "http://127.0.0.1:9000/".to_owned(),
-            request: LoginRequest::new("Test", "User", "secret", "last", "MyViewer", "1.2.3"),
+            request: LoginRequest::new(
+                "Test",
+                "User",
+                "secret",
+                StartLocation::Last,
+                "MyViewer",
+                "1.2.3",
+            ),
         })
     }
 

@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, ExternalPrinter};
-use sl_client_tokio::{Client, Command, Event, LoginParams, LoginRequest};
+use sl_client_tokio::{Client, Command, Event, LoginParams, LoginRequest, StartLocation};
 use sl_proto::Diagnostic;
 use sl_repl::{
     Avatar, Credentials, MetaCommand, ReplAction, ScriptRecorder, SessionContext, format_command,
@@ -105,7 +105,7 @@ pub struct RunArgs {
     login_uri: Option<String>,
     /// The login start location (`last`, `home`, or `uri:Region&x&y&z`).
     #[clap(long, default_value = "last")]
-    start: String,
+    start: StartLocation,
     /// The viewer channel reported to the grid.
     #[clap(long, default_value = "sl-repl-tokio")]
     channel: String,

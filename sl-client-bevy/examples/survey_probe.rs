@@ -49,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let first = std::env::var("SL_FIRST")?;
     let last = std::env::var("SL_LAST")?;
     let password = std::env::var("SL_PASSWORD")?;
-    let start = env_or("SL_START", "last");
+    let start = env_or("SL_START", "last").parse::<sl_client_bevy::StartLocation>()?;
     let channel = env_or("SL_CHANNEL", "sl-client-bevy-probe");
     let version = env_or("SL_VERSION", env!("CARGO_PKG_VERSION"));
     let collect_secs: u64 = env_or("SL_COLLECT_SECS", "20").parse()?;

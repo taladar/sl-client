@@ -6,7 +6,7 @@ use sl_types::lsl::Vector;
 use sl_wire::LoginRequest;
 
 /// The parameters needed to start a session: where to log in and with what.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LoginParams {
     /// The XML-RPC login endpoint URL (e.g. `http://127.0.0.1:9000/`).
     pub login_uri: String,

@@ -68,12 +68,13 @@ pub use sl_proto::{
     ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionFlags, RegionIdentity,
     RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation,
     SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    SculptData, SimulatorFeatures, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch,
-    Texture, TextureAnimation, TextureEntry, TextureFace, Throttle, ThrottleBuilder, ThrottleError,
-    TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable,
-    WearableType, avatar_texture, decode_particle_system, decode_texture_anim,
-    decode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
-    particle_pattern, pcode, sim_access, texture_anim_mode,
+    SculptData, SimulatorFeatures, SoundFlags, SoundPreload, StartLocation,
+    StartLocationParseError, TerrainLayerType, TerrainPatch, Texture, TextureAnimation,
+    TextureEntry, TextureFace, Throttle, ThrottleBuilder, ThrottleError, TransferStatus, Transmit,
+    Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, avatar_texture,
+    decode_particle_system, decode_texture_anim, decode_texture_entry, grid_to_handle,
+    group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode, sim_access,
+    texture_anim_mode,
 };
 
 mod appearance;
