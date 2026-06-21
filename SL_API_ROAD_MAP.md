@@ -597,3 +597,46 @@ Mirror each tier into `book/src/content/`, updating `book/src/SUMMARY.md`:
   alongside the existing name resolution); `groups.md` (G10); `appearance.md`
   (G11, G12); `friends.md` (G2 tracking/coarse-location); `world.md` (G13, G16,
   G17); `inventory.md`/`materials.md` (G15 where relevant).
+
+## Deferred follow-ups
+
+Smaller items that were intentionally left out of the tiers above (each noted in
+the relevant tier's scope note), collected here so they are not lost. None is a
+user-facing API gap on its own; pick them up when the supporting machinery
+lands.
+
+### DF1 — `SendUserReportWithScreenshot` capability (G16 follow-up)
+
+Second Life's abuse-report floater prefers `SendUserReportWithScreenshot` over
+plain `SendUserReport` when a snapshot is attached: it first uploads the
+snapshot as an asset, then POSTs the same report body referencing the new
+`screenshot_id`. G16 implemented only the no-screenshot path (plain
+`SendUserReport` cap + the `UserReport` UDP message), because the screenshot
+variant needs the HTTP asset-upload pipeline (`LLViewerAssetUpload` /
+`NewFileAgentInventory`-style two-step uploader) wired into the report POST.
+Once that plumbing is reused, add the cap
+(`CAP_SEND_USER_REPORT_WITH_SCREENSHOT`), a `screenshot` argument/flow that
+uploads then fills `AbuseReport::screenshot_id`, and route
+`SendAbuseReportViaCaps` through it when a screenshot is present. SL-only
+(OpenSim has no abuse-report cap at all). Cross-check against Firestorm
+`llfloaterreporter.cpp` `sendReportViaCaps` / `LLARScreenShotUploader`.
+
+- [ ] DF1 abuse report with screenshot upload.
+
+### DF2 — `SimSession` decode-side for world-map requests
+
+The world-map messages are asymmetric on the server side: `SimSession` has the
+reply *encoders* (`send_map_block_reply` / `send_map_item_reply` /
+`send_map_layer_reply`) but does **not** decode the incoming `MapBlockRequest` /
+`MapNameRequest` / `MapItemRequest` / `MapLayerRequest` into a `ServerEvent`
+(they fall through to `ServerEvent::ClientMessage`). This predates G16 — G16
+mirrored the existing `RequestMapBlocks` / `RequestMapItems` pattern exactly
+rather than adding a one-off. A real map service would want the request surfaced
+(the requested rectangle / item type / layer flags) to know what to reply with.
+Add the four `ServerEvent` variants + decode arms (e.g.
+`ServerEvent::MapBlockRequested { min_x, max_x, min_y, max_y }`,
+`MapItemRequested { item_type, region_handle }`, `MapLayerRequested`), keeping
+the existing reply encoders. Low priority — only matters for a server
+implementation that actually serves the map.
+
+- [ ] DF2 world-map request `ServerEvent`s.
