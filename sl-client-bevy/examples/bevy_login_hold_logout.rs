@@ -342,7 +342,12 @@ fn on_events(
             | SlSessionEvent::ConferenceSessionParticipant { .. }
             | SlSessionEvent::ConferenceInvited { .. }
             | SlSessionEvent::EstateCovenant(_)
-            | SlSessionEvent::TelehubInfo(_) => {}
+            | SlSessionEvent::TelehubInfo(_)
+            | SlSessionEvent::AlertMessage { .. }
+            | SlSessionEvent::AgentAlertMessage { .. }
+            | SlSessionEvent::MeanCollisionAlert(_)
+            | SlSessionEvent::HealthMessage { .. }
+            | SlSessionEvent::CameraConstraint { .. } => {}
         }
     }
 }

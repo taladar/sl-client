@@ -557,7 +557,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::ExperienceUpdated(_)
             | Event::RegionExperiences { .. }
             | Event::EstateCovenant(_)
-            | Event::TelehubInfo(_) => {}
+            | Event::TelehubInfo(_)
+            | Event::AlertMessage { .. }
+            | Event::AgentAlertMessage { .. }
+            | Event::MeanCollisionAlert(_)
+            | Event::HealthMessage { .. }
+            | Event::CameraConstraint { .. } => {}
         }
     }
 

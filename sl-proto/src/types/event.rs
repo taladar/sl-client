@@ -12,8 +12,8 @@ use super::{
     GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupMember,
     GroupMembership, GroupName, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle,
     GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem, LoadUrlRequest,
-    LoginAccount, MapItem, MapItemType, MapRegionInfo, Maturity, MoneyBalance, MuteEntry,
-    NeighborInfo, Object, ObjectProperties, ObjectPropertiesFamily, ParcelAccessEntry,
+    LoginAccount, MapItem, MapItemType, MapRegionInfo, Maturity, MeanCollision, MoneyBalance,
+    MuteEntry, NeighborInfo, Object, ObjectProperties, ObjectPropertiesFamily, ParcelAccessEntry,
     ParcelAccessScope, ParcelDetails, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
     ParcelObjectOwner, ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation, RegionIdentity,
     RegionLimits, ScriptControl, ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest,
@@ -1232,6 +1232,51 @@ pub enum Event {
     PreloadSound {
         /// The sounds to pre-fetch (each with its owning object and owner).
         sounds: Vec<SoundPreload>,
+    },
+    /// A general notification from the simulator (`AlertMessage`): a plain,
+    /// already-localized message string to show the user, optionally accompanied
+    /// by structured [`AlertInfo`] keys (which the viewer would look up in its
+    /// `alerts.xml` for a localized rendering) and the agent ids the alert is
+    /// directed at (usually empty — a region-wide alert).
+    AlertMessage {
+        /// The human-readable message text (`AlertData.Message`). Empty if the
+        /// simulator sent only a keyed [`AlertInfo`].
+        message: String,
+        /// Structured, localizable alert keys and their substitution parameters
+        /// (`AlertInfo`). Empty when the simulator sent only a plain string.
+        alert_info: Vec<AlertInfo>,
+        /// The agents this alert is directed at (`AgentInfo`). Usually empty.
+        agents: Vec<Uuid>,
+    },
+    /// A notification directed at a specific agent (`AgentAlertMessage`): like
+    /// [`AlertMessage`](Self::AlertMessage) but addressed to one agent and with a
+    /// `modal` flag saying whether the viewer should block on a dialog.
+    AgentAlertMessage {
+        /// The agent the alert is addressed to.
+        agent_id: Uuid,
+        /// Whether the alert should be shown as a modal (blocking) dialog rather
+        /// than a transient notification.
+        modal: bool,
+        /// The message text.
+        message: String,
+    },
+    /// The simulator reported one or more "mean collisions" (`MeanCollisionAlert`):
+    /// the data behind the viewer's "Bumps, Pushes & Hits" panel — avatars
+    /// bumped, pushed, or hit with objects.
+    MeanCollisionAlert(Vec<MeanCollision>),
+    /// The agent's health changed (`HealthMessage`), e.g. in a damage-enabled
+    /// region. `100.0` is full health; `0.0` triggers the home teleport.
+    HealthMessage {
+        /// The agent's current health.
+        health: f32,
+    },
+    /// The simulator constrained the camera distance because of an obstruction
+    /// (`CameraConstraint`): a collision plane `[nx, ny, nz, d]` (a unit normal
+    /// and a distance) the viewer uses to keep the camera from clipping into
+    /// objects.
+    CameraConstraint {
+        /// The camera collision plane as `[nx, ny, nz, d]`.
+        plane: [f32; 4],
     },
     /// The session logged out cleanly (a `LogoutReply` was received).
     LoggedOut,

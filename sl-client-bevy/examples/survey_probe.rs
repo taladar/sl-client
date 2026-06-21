@@ -263,6 +263,11 @@ fn on_events(
             | SlSessionEvent::RemoteParcelId(_)
             | SlSessionEvent::EstateCovenant(_)
             | SlSessionEvent::TelehubInfo(_)
+            | SlSessionEvent::AlertMessage { .. }
+            | SlSessionEvent::AgentAlertMessage { .. }
+            | SlSessionEvent::MeanCollisionAlert(_)
+            | SlSessionEvent::HealthMessage { .. }
+            | SlSessionEvent::CameraConstraint { .. }
             | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged { region_handle, sim } => {

@@ -4,6 +4,7 @@
 //! re-exported here, so the crate's public surface (`crate::types::*`, re-exported
 //! again from `lib.rs`) is unchanged by that internal split.
 
+mod alert;
 mod appearance;
 mod asset;
 mod avatar_profile;
@@ -26,6 +27,7 @@ mod script;
 mod session;
 mod terrain;
 
+pub use alert::{MeanCollision, MeanCollisionType};
 pub use appearance::{
     AttachmentPoint, AvatarAppearance, AvatarAttachment, PlayingAnimation, RezAttachment,
     SoundFlags, SoundPreload, TextureEntry, TextureFace, Wearable, WearableType, avatar_texture,

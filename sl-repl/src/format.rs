@@ -429,6 +429,11 @@ const fn event_name(event: &Event) -> &'static str {
         Event::AttachedSound { .. } => "attached_sound",
         Event::AttachedSoundGainChange { .. } => "attached_sound_gain_change",
         Event::PreloadSound { .. } => "preload_sound",
+        Event::AlertMessage { .. } => "alert_message",
+        Event::AgentAlertMessage { .. } => "agent_alert_message",
+        Event::MeanCollisionAlert(..) => "mean_collision_alert",
+        Event::HealthMessage { .. } => "health_message",
+        Event::CameraConstraint { .. } => "camera_constraint",
         Event::LoggedOut => "logged_out",
         Event::Disconnected(..) => "disconnected",
     }

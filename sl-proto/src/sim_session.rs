@@ -25,6 +25,13 @@ use std::time::{Duration, Instant};
 
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
+    AgentAlertMessage, AgentAlertMessageAgentDataBlock, AgentAlertMessageAlertDataBlock,
+    AlertMessage, AlertMessageAgentInfoBlock, AlertMessageAlertDataBlock,
+    AlertMessageAlertInfoBlock, CameraConstraint, CameraConstraintCameraCollidePlaneBlock,
+    HealthMessage, HealthMessageHealthDataBlock, MeanCollisionAlert,
+    MeanCollisionAlertMeanCollisionBlock,
+};
+use sl_wire::messages::{
     AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
     AgentMovementCompleteSimDataBlock, AvatarPickerReply, AvatarPickerReplyAgentDataBlock,
     AvatarPickerReplyDataBlock, ChatFromSimulator, ChatFromSimulatorChatDataBlock,
@@ -85,15 +92,15 @@ use crate::session::{
 };
 use crate::types::directory::category_from_wire;
 use crate::types::{
-    AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatType, CoarseLocation,
+    AlertInfo, AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatType, CoarseLocation,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
     DirPeopleResult, DirPlaceResult, EstateCovenant, EventInfo, FollowCamPropertyValue,
     GestureActivation, GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions,
     GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, InstantMessage, LandSearchType,
-    MapItem, MapItemType, MapRegionInfo, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily,
-    ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult, RegionIdentity, Reliability,
-    RestoreItem, RezAttachment, SaleType, ScriptControl, TelehubInfo, Throttle, Transmit,
-    ViewerEffect, ViewerEffectData, ViewerEffectType,
+    MapItem, MapItemType, MapRegionInfo, MeanCollision, NotecardRez, ObjectBuyItem,
+    ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult,
+    RegionIdentity, Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl, TelehubInfo,
+    Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 
 /// How long to batch owed acknowledgements before flushing them as a `PacketAck`
@@ -1270,6 +1277,148 @@ impl SimSession {
         }
         let message = AnyMessage::ClearFollowCamProperties(ClearFollowCamProperties {
             object_data: ClearFollowCamPropertiesObjectDataBlock { object_id },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a general `AlertMessage` notification to the client: a plain
+    /// (already-localized) `message` string, optionally accompanied by structured
+    /// localizable `alert_info` keys and the `agents` the alert is directed at.
+    /// Surfaces on the client as [`Event::AlertMessage`](crate::Event::AlertMessage).
+    /// Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_alert_message(
+        &mut self,
+        message: &str,
+        alert_info: &[AlertInfo],
+        agents: &[Uuid],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::AlertMessage(AlertMessage {
+            alert_data: AlertMessageAlertDataBlock {
+                message: message.as_bytes().to_vec(),
+            },
+            alert_info: alert_info
+                .iter()
+                .map(|info| AlertMessageAlertInfoBlock {
+                    message: info.message.as_bytes().to_vec(),
+                    extra_params: info.extra_params.as_bytes().to_vec(),
+                })
+                .collect(),
+            agent_info: agents
+                .iter()
+                .map(|&agent_id| AlertMessageAgentInfoBlock { agent_id })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `AgentAlertMessage` notification directed at a specific agent: a
+    /// `message` string and a `modal` flag saying whether the viewer should block
+    /// on a dialog. Surfaces on the client as
+    /// [`Event::AgentAlertMessage`](crate::Event::AgentAlertMessage). Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_agent_alert_message(
+        &mut self,
+        agent_id: Uuid,
+        modal: bool,
+        message: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::AgentAlertMessage(AgentAlertMessage {
+            agent_data: AgentAlertMessageAgentDataBlock { agent_id },
+            alert_data: AgentAlertMessageAlertDataBlock {
+                modal,
+                message: message.as_bytes().to_vec(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `MeanCollisionAlert` reporting one or more "mean collisions" (the
+    /// data behind the viewer's "Bumps, Pushes & Hits" panel). Surfaces on the
+    /// client as [`Event::MeanCollisionAlert`](crate::Event::MeanCollisionAlert).
+    /// Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_mean_collision_alert(
+        &mut self,
+        collisions: &[MeanCollision],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::MeanCollisionAlert(MeanCollisionAlert {
+            mean_collision: collisions
+                .iter()
+                .map(|collision| MeanCollisionAlertMeanCollisionBlock {
+                    victim: collision.victim,
+                    perp: collision.perp,
+                    time: collision.time,
+                    mag: collision.magnitude,
+                    r#type: collision.collision_type.to_u8(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `HealthMessage` telling the client the agent's current health
+    /// (e.g. in a damage-enabled region; `100.0` is full health). Surfaces on the
+    /// client as [`Event::HealthMessage`](crate::Event::HealthMessage). Sent
+    /// reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_health_message(&mut self, health: f32, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::HealthMessage(HealthMessage {
+            health_data: HealthMessageHealthDataBlock { health },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `CameraConstraint` telling the client to constrain the camera to
+    /// the given collision `plane` (`[nx, ny, nz, d]`). Surfaces on the client as
+    /// [`Event::CameraConstraint`](crate::Event::CameraConstraint). Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_camera_constraint(&mut self, plane: [f32; 4], now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::CameraConstraint(CameraConstraint {
+            camera_collide_plane: CameraConstraintCameraCollidePlaneBlock { plane },
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())

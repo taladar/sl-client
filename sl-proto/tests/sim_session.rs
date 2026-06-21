@@ -10,18 +10,19 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        AttachmentPoint, AvatarName, AvatarPickerResult, ChatType, CoarseLocation, ControlFlags,
-        DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-        DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventInfo, FollowCamProperty,
-        FollowCamPropertyValue, GestureActivation, GroupAccountDetails, GroupAccountDetailsEntry,
-        GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
-        GroupActiveProposalItem, GroupName, GroupVote, GroupVoteHistoryItem, ImDialog,
-        LandSearchType, LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity, NotecardRez,
-        ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner,
-        ParcelReturnType, PlacesResult, PointAtType, ProductType, RegionIdentity, RestoreItem,
-        RezAttachment, SaleType, ScriptControl, ServerEvent, Session, SimSession, TelehubInfo,
-        Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        enable_simulator_to_caps_llsd, grid_to_handle, parse_event_queue_response,
+        AlertInfo, AttachmentPoint, AvatarName, AvatarPickerResult, ChatType, CoarseLocation,
+        ControlFlags, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
+        DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventInfo,
+        FollowCamProperty, FollowCamPropertyValue, GestureActivation, GroupAccountDetails,
+        GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
+        GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVote,
+        GroupVoteHistoryItem, ImDialog, LandSearchType, LoginParams, MapItem, MapItemType,
+        MapRegionInfo, Maturity, MeanCollision, MeanCollisionType, NotecardRez, ObjectBuyItem,
+        ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner, ParcelReturnType,
+        PlacesResult, PointAtType, ProductType, RegionIdentity, RestoreItem, RezAttachment,
+        SaleType, ScriptControl, ServerEvent, Session, SimSession, TelehubInfo, Throttle, Transmit,
+        ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
+        grid_to_handle, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -1771,6 +1772,108 @@ mod test {
             )),
             "expected a ClearFollowCamProperties client event"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn alerts_collisions_health_camera_reach_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let agent = uuid::Uuid::from_u128(0xA1E_2001);
+        let victim = uuid::Uuid::from_u128(0xC011_DE11);
+        let perp = uuid::Uuid::from_u128(0xC011_DE12);
+        let plane = [0.0_f32, 1.0, 0.0, 3.25];
+
+        // Sim -> client: the five receive-only notifications G13 wraps.
+        sim.send_alert_message(
+            "region restarting",
+            &[AlertInfo {
+                message: "RegionRestartMinutes".to_owned(),
+                extra_params: "MINUTES=2".to_owned(),
+            }],
+            &[agent],
+            now,
+        )?;
+        sim.send_agent_alert_message(agent, true, "you were teleported home", now)?;
+        sim.send_mean_collision_alert(
+            &[MeanCollision {
+                victim,
+                perp,
+                time: 1_700_000_500,
+                magnitude: 4.0,
+                collision_type: MeanCollisionType::PushObject,
+            }],
+            now,
+        )?;
+        sim.send_health_message(42.0, now)?;
+        sim.send_camera_constraint(plane, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_client(&mut client);
+
+        let (message, alert_info, agents) = events
+            .iter()
+            .find_map(|e| match e {
+                Event::AlertMessage {
+                    message,
+                    alert_info,
+                    agents,
+                } => Some((message.clone(), alert_info.clone(), agents.clone())),
+                _ => None,
+            })
+            .ok_or("expected an AlertMessage client event")?;
+        assert_eq!(message, "region restarting");
+        assert_eq!(
+            alert_info.first().map(|i| i.message.as_str()),
+            Some("RegionRestartMinutes")
+        );
+        assert_eq!(agents.first().copied(), Some(agent));
+
+        let (alert_agent, modal, alert_message) = events
+            .iter()
+            .find_map(|e| match e {
+                Event::AgentAlertMessage {
+                    agent_id,
+                    modal,
+                    message,
+                } => Some((*agent_id, *modal, message.clone())),
+                _ => None,
+            })
+            .ok_or("expected an AgentAlertMessage client event")?;
+        assert_eq!(alert_agent, agent);
+        assert!(modal);
+        assert_eq!(alert_message, "you were teleported home");
+
+        let collision = events
+            .iter()
+            .find_map(|e| match e {
+                Event::MeanCollisionAlert(collisions) => collisions.first().copied(),
+                _ => None,
+            })
+            .ok_or("expected a MeanCollisionAlert client event")?;
+        assert_eq!(collision.victim, victim);
+        assert_eq!(collision.perp, perp);
+        assert_eq!(collision.collision_type, MeanCollisionType::PushObject);
+
+        let health = events
+            .iter()
+            .find_map(|e| match e {
+                Event::HealthMessage { health } => Some(*health),
+                _ => None,
+            })
+            .ok_or("expected a HealthMessage client event")?;
+        assert_eq!(health.to_bits(), 42.0_f32.to_bits());
+
+        let got_plane = events
+            .iter()
+            .find_map(|e| match e {
+                Event::CameraConstraint { plane } => Some(*plane),
+                _ => None,
+            })
+            .ok_or("expected a CameraConstraint client event")?;
+        assert_eq!(got_plane.map(f32::to_bits), plane.map(f32::to_bits));
         Ok(())
     }
 
