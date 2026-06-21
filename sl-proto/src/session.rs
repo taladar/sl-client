@@ -305,6 +305,23 @@ pub const CAP_GET_DISPLAY_NAMES: &str = "GetDisplayNames";
 /// ([`Session::request_parcel_info`]) for the parcel's listing.
 pub const CAP_REMOTE_PARCEL_REQUEST: &str = "RemoteParcelRequest";
 
+/// The HTTP capability for the region's **feature flags** (`SimulatorFeatures`):
+/// a GET returning the simulator's mesh/physics/attachment/GLTF switches and
+/// limits (plus, on OpenSim, a nested `OpenSimExtras` map). The runtimes GET it
+/// automatically once the capability map is known (at login and on each region
+/// change) and also on demand via the `RequestSimulatorFeatures` command; the
+/// reply is decoded by [`Session::handle_caps_event`] into
+/// [`Event::SimulatorFeatures`].
+pub const CAP_SIMULATOR_FEATURES: &str = "SimulatorFeatures";
+
+/// The HTTP capability for the agent's **server-stored preferences**
+/// (`AgentPreferences`): a POST of the fields to change (hover height, default
+/// object permission masks, maturity-access ceiling, UI language) returning the
+/// full stored set. Driven by the runtimes' `SetAgentPreferences` /
+/// `RequestAgentPreferences` commands; the reply is decoded by
+/// [`Session::handle_caps_event`] into [`Event::AgentPreferences`].
+pub const CAP_AGENT_PREFERENCES: &str = "AgentPreferences";
+
 /// The viewer's `TELEPORT_FLAGS_VIA_LURE` (`1 << 2`), sent in a
 /// `TeleportLureRequest` when accepting a teleport lure (#28).
 const TELEPORT_FLAGS_VIA_LURE: u32 = 4;
@@ -359,6 +376,8 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_EXT_ENVIRONMENT,
     CAP_GET_DISPLAY_NAMES,
     CAP_REMOTE_PARCEL_REQUEST,
+    CAP_SIMULATOR_FEATURES,
+    CAP_AGENT_PREFERENCES,
 ];
 
 /// The maximum UDP datagram size an I/O driver should be prepared to receive.

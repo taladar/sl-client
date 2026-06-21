@@ -10540,6 +10540,94 @@ mod test {
         Ok(())
     }
 
+    /// A `SimulatorFeatures` GET reply surfaces the region's feature flags,
+    /// including the OpenSim-only grid extras when present.
+    #[test]
+    fn simulator_features_surfaces_flags() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let features = sl_proto::SimulatorFeatures {
+            mesh_upload_enabled: true,
+            physics_materials_enabled: true,
+            max_agent_attachments: 38,
+            open_sim_extras: Some(sl_proto::OpenSimExtras {
+                say_range: 20,
+                currency: "OS$".to_owned(),
+                ..sl_proto::OpenSimExtras::default()
+            }),
+            ..sl_proto::SimulatorFeatures::default()
+        };
+        let xml = sl_proto::build_simulator_features_response(&features);
+        let body = sl_proto::parse_llsd_xml(&xml)?;
+        session.handle_caps_event(sl_proto::CAP_SIMULATOR_FEATURES, &body, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::SimulatorFeatures(_)))
+            .ok_or("expected a SimulatorFeatures event")?;
+        let Event::SimulatorFeatures(decoded) = event else {
+            return Err("expected SimulatorFeatures".into());
+        };
+        assert!(decoded.mesh_upload_enabled);
+        assert!(decoded.physics_materials_enabled);
+        assert_eq!(decoded.max_agent_attachments, 38);
+        let extras = decoded.open_sim_extras.ok_or("expected OpenSim extras")?;
+        assert_eq!(extras.say_range, 20);
+        assert_eq!(extras.currency, "OS$");
+        Ok(())
+    }
+
+    /// An `AgentPreferences` POST reply surfaces the agent's full stored
+    /// preferences (echoed by the grid after the update).
+    #[test]
+    fn agent_preferences_surfaces_stored_set() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let prefs = sl_proto::AgentPreferences {
+            hover_height: Some(0.5),
+            default_object_perm_masks: Some(sl_proto::ObjectPermMasks {
+                group: 0,
+                everyone: 0,
+                next_owner: 0x0008_2000,
+            }),
+            max_access_pref: Some("M".to_owned()),
+            language: Some("en-us".to_owned()),
+            language_is_public: Some(true),
+            god_level: Some(0),
+        };
+        let xml = sl_proto::build_agent_preferences_response(&prefs);
+        let body = sl_proto::parse_llsd_xml(&xml)?;
+        session.handle_caps_event(sl_proto::CAP_AGENT_PREFERENCES, &body, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::AgentPreferences(_)))
+            .ok_or("expected an AgentPreferences event")?;
+        let Event::AgentPreferences(decoded) = event else {
+            return Err("expected AgentPreferences".into());
+        };
+        assert_eq!(
+            decoded.hover_height.map(f64::to_bits),
+            Some(0.5_f64.to_bits())
+        );
+        assert_eq!(
+            decoded
+                .default_object_perm_masks
+                .map(|masks| masks.next_owner),
+            Some(0x0008_2000)
+        );
+        assert_eq!(decoded.max_access_pref.as_deref(), Some("M"));
+        assert_eq!(decoded.language.as_deref(), Some("en-us"));
+        assert_eq!(decoded.language_is_public, Some(true));
+        Ok(())
+    }
+
     /// A `GetExperiences` reply surfaces the agent's allowed/blocked experiences.
     #[test]
     fn get_experiences_surfaces_permissions() -> Result<(), TestError> {

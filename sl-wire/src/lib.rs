@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+mod agent_preferences;
 mod control_flags;
 mod display_name;
 mod endian;
@@ -17,9 +18,14 @@ mod message;
 pub mod messages;
 mod parcel_flags;
 mod remote_parcel;
+mod sim_features;
 mod voice;
 mod zerocode;
 
+pub use agent_preferences::{
+    AgentPreferences, ObjectPermMasks, build_agent_preferences_request,
+    build_agent_preferences_response, parse_agent_preferences,
+};
 pub use control_flags::ControlFlags;
 pub use display_name::{
     DisplayName, build_display_names_response, display_names_query, parse_display_names,
@@ -84,6 +90,10 @@ pub use parcel_flags::{ParcelFlags, RegionFlags, sim_access};
 pub use remote_parcel::{
     RemoteParcelRequest, build_remote_parcel_request, build_remote_parcel_response,
     parse_remote_parcel_reply, parse_remote_parcel_request,
+};
+pub use sim_features::{
+    AnimatedObjects, OpenSimExtras, PhysicsShapeTypes, SimulatorFeatures,
+    build_simulator_features_response, parse_simulator_features,
 };
 pub use voice::{
     IceCandidate, ParcelVoiceInfo, VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC,

@@ -347,7 +347,9 @@ fn on_events(
             | SlSessionEvent::AgentAlertMessage { .. }
             | SlSessionEvent::MeanCollisionAlert(_)
             | SlSessionEvent::HealthMessage { .. }
-            | SlSessionEvent::CameraConstraint { .. } => {}
+            | SlSessionEvent::CameraConstraint { .. }
+            | SlSessionEvent::SimulatorFeatures(_)
+            | SlSessionEvent::AgentPreferences(_) => {}
         }
     }
 }

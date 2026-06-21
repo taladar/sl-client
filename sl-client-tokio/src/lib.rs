@@ -11,18 +11,20 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
 use sl_proto::{
-    CAP_AGENT_EXPERIENCES, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
-    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
-    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE,
-    CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
+    CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_CREATE_INVENTORY_CATEGORY,
+    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
+    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET,
+    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
+    CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES,
+    CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
     CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
     CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_UPDATE_AVATAR_APPEARANCE,
-    CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Llsd, RECV_BUFFER_SIZE,
-    Session, ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, build_ais_create_category_body, build_ais_move_body,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE,
+    CAP_VOICE_SIGNALING, Llsd, RECV_BUFFER_SIZE, Session, ais_category_children_fetch_url,
+    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
+    build_agent_preferences_request, build_ais_create_category_body, build_ais_move_body,
     build_ais_rename_category_body, build_ais_update_item_body,
     build_create_inventory_category_request, build_modify_material_params_request,
     build_new_file_agent_inventory_request, build_object_media_navigate_request,
@@ -38,10 +40,10 @@ use sl_proto::{
 // Re-export the core types a consumer needs so they can depend on this crate
 // alone.
 pub use sl_proto::{
-    ActiveGroup, AnyMessage, Asset, AssetType, AvatarClassified, AvatarGroupMembership,
-    AvatarInterests, AvatarPick, AvatarProperties, Camera, ChatAudible, ChatMessage,
-    ChatSourceType, ChatType, ClassifiedInfo, ClassifiedUpdate, ClickAction, Command, ControlFlags,
-    CreateGroupParams, DeRezDestination, Diagnostic, DisconnectReason, EconomyData,
+    ActiveGroup, AgentPreferences, AnimatedObjects, AnyMessage, Asset, AssetType, AvatarClassified,
+    AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, Camera, ChatAudible,
+    ChatMessage, ChatSourceType, ChatType, ClassifiedInfo, ClassifiedUpdate, ClickAction, Command,
+    ControlFlags, CreateGroupParams, DeRezDestination, Diagnostic, DisconnectReason, EconomyData,
     EstateAccessDelta, EstateAccessKind, EstateInfo, Event, ExperienceInfo, ExperiencePermission,
     ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights,
     GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
@@ -54,15 +56,16 @@ pub use sl_proto::{
     MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge,
     MoneyBalance, MoneyTransaction, MoneyTransactionType, MuteEntry, MuteFlags, MuteType,
     NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings,
-    ObjectMediaResponse, ObjectMotion, ObjectProperties, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
-    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
-    PickInfo, PickUpdate, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
-    ReflectionProbe, RegionChatSettings, RegionCombatSettings, RegionFlags, RegionIdentity,
-    RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation,
-    SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
-    SculptData, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture,
+    ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties, ObjectTransform,
+    OpenSimExtras, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+    ParcelFlags, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo,
+    ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo,
+    ParticleSystem, PermissionField, PhysicsShapeTypes, PickInfo, PickUpdate, PlayingAnimation,
+    PrimShape, PrimShapeParams, ProductType, ProfileUpdate, ReflectionProbe, RegionChatSettings,
+    RegionCombatSettings, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, Reliability,
+    RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData,
+    SimulatorFeatures, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, Texture,
     TextureAnimation, TextureEntry, TextureFace, Throttle, TransferStatus, Transmit, Uuid, Vector,
     VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, avatar_texture,
     decode_particle_system, decode_texture_anim, decode_texture_entry, grid_to_handle,
@@ -83,6 +86,7 @@ mod voice;
 use crate::appearance::request_server_appearance_update;
 use crate::caps::{
     CAPS_FAILURE_PREFIX, abort_task, fetch_capabilities, make_sleep, spawn_event_queue,
+    spawn_simulator_features,
 };
 use crate::experiences::{
     fetch_experience_admin, fetch_experience_contributor, fetch_group_experiences,
@@ -265,6 +269,7 @@ impl Client {
         if let Some(reporter) = &self.caps_reporter {
             reporter.send(caps.clone()).await.ok();
         }
+        spawn_simulator_features(&caps, &http, &caps_tx);
         let mut caps_task = spawn_event_queue(&caps, &http, &caps_tx);
 
         loop {
@@ -304,6 +309,7 @@ impl Client {
                     if let Some(reporter) = &self.caps_reporter {
                         reporter.send(caps.clone()).await.ok();
                     }
+                    spawn_simulator_features(&caps, &http, &caps_tx);
                     caps_task = spawn_event_queue(&caps, &http, &caps_tx);
                 }
                 if terminal {
@@ -1202,6 +1208,23 @@ impl Client {
                                     region_handle,
                                 );
                                 tokio::spawn(post_voice_cap(url, body, CAP_REMOTE_PARCEL_REQUEST, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::RequestSimulatorFeatures) => {
+                            if let Some(url) = caps.get(CAP_SIMULATOR_FEATURES).cloned() {
+                                tokio::spawn(get_caps_llsd(url, CAP_SIMULATOR_FEATURES, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::RequestAgentPreferences) => {
+                            if let Some(url) = caps.get(CAP_AGENT_PREFERENCES).cloned() {
+                                let body = build_agent_preferences_request(&AgentPreferences::default());
+                                tokio::spawn(post_voice_cap(url, body, CAP_AGENT_PREFERENCES, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::SetAgentPreferences(prefs)) => {
+                            if let Some(url) = caps.get(CAP_AGENT_PREFERENCES).cloned() {
+                                let body = build_agent_preferences_request(&prefs);
+                                tokio::spawn(post_voice_cap(url, body, CAP_AGENT_PREFERENCES, http.clone(), caps_tx.clone()));
                             }
                         }
                         Some(Command::RequestExperienceInfo { experience_ids }) => {

@@ -21,16 +21,16 @@ use super::conversions::{
 };
 use super::{
     AGENT_UPDATE_INTERVAL, AssetTransfer, AssetUpload, CAP_AGENT_EXPERIENCES,
-    CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT,
-    CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
-    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
-    CAP_GET_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LIBRARY_API_V3,
-    CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
+    CAP_AGENT_PREFERENCES, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
+    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME,
+    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
+    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3,
+    CAP_LIBRARY_API_V3, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REMOTE_PARCEL_REQUEST, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, Circuit,
-    DEFAULT_DRAW_DISTANCE, HandoverPending, IDENTITY_ROTATION, LOGOUT_TIMEOUT, MAX_INLINE_ASSET,
-    SIT_TIMEOUT, Session, SessionState, TELEPORT_FLAGS_VIA_LURE, TELEPORT_TIMEOUT, TextureDownload,
-    deadline, merge_deadline,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_UPDATE_EXPERIENCE, Circuit, DEFAULT_DRAW_DISTANCE, HandoverPending, IDENTITY_ROTATION,
+    LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, Session, SessionState, TELEPORT_FLAGS_VIA_LURE,
+    TELEPORT_TIMEOUT, TextureDownload, deadline, merge_deadline,
 };
 use crate::error::Error;
 use crate::terrain;
@@ -59,9 +59,10 @@ use sl_types::money::LindenAmount;
 use sl_wire::{
     AnyMessage, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd, MessageId, ObjectMediaResponse,
     PacketFlags, ParcelVoiceInfo, Reader, VoiceAccountInfo, build_group_notice_bucket,
-    build_login_request, message_name, parse_datagram, parse_display_names, parse_experience_ids,
-    parse_experience_infos, parse_experience_permissions, parse_gltf_material_override,
-    parse_region_experiences, parse_remote_parcel_reply, zero_decode,
+    build_login_request, message_name, parse_agent_preferences, parse_datagram,
+    parse_display_names, parse_experience_ids, parse_experience_infos,
+    parse_experience_permissions, parse_gltf_material_override, parse_region_experiences,
+    parse_remote_parcel_reply, parse_simulator_features, zero_decode,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -419,6 +420,21 @@ impl Session {
                 } else {
                     self.caps_decode_failed(message);
                 }
+            }
+            // The reply to a `SimulatorFeatures` GET: the region's feature flags
+            // and limits (with the OpenSim-only grid extras folded in when present).
+            CAP_SIMULATOR_FEATURES => {
+                self.events.push_back(Event::SimulatorFeatures(Box::new(
+                    parse_simulator_features(body),
+                )));
+            }
+            // The reply to an `AgentPreferences` POST: the agent's full stored
+            // preferences after the (possibly empty) update.
+            CAP_AGENT_PREFERENCES => {
+                self.events
+                    .push_back(Event::AgentPreferences(Box::new(parse_agent_preferences(
+                        body,
+                    ))));
             }
             // The reply to a `GetExperienceInfo` GET: the requested experiences'
             // metadata (with unresolved ids folded in as `missing` placeholders).

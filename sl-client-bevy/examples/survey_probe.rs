@@ -268,6 +268,8 @@ fn on_events(
             | SlSessionEvent::MeanCollisionAlert(_)
             | SlSessionEvent::HealthMessage { .. }
             | SlSessionEvent::CameraConstraint { .. }
+            | SlSessionEvent::SimulatorFeatures(_)
+            | SlSessionEvent::AgentPreferences(_)
             | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged { region_handle, sim } => {

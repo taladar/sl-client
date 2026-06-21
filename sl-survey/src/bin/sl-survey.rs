@@ -732,6 +732,8 @@ impl Survey {
             | Event::MeanCollisionAlert(_)
             | Event::HealthMessage { .. }
             | Event::CameraConstraint { .. }
+            | Event::SimulatorFeatures(_)
+            | Event::AgentPreferences(_)
             | Event::Environment(_) => {}
         }
         Ok(false)
