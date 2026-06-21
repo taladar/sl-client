@@ -43,16 +43,16 @@ use crate::types::{
     FriendRights, GestureActivation, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMember,
     GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem,
     InventoryOffer, LandSearchType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams,
-    MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType, NeighborInfo,
-    NewInventoryItem, NotecardRez, Object, ObjectBuyItem, ObjectFlagSettings,
-    ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
-    PickUpdate, PlacesResult, PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem,
-    RezAttachment, SaleType, ScriptControl, ScriptPermissions, ScriptTeleportRequest, SoundFlags,
-    SoundPreload, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle,
-    TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
-    WearableType, global_to_handle, handle_to_grid,
+    MapItemType, Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType,
+    MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NotecardRez, Object, ObjectBuyItem,
+    ObjectFlagSettings, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
+    PermissionField, PickUpdate, PlacesResult, PrimShape, ProfileUpdate, RegionInfoUpdate,
+    Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl, ScriptPermissions,
+    ScriptTeleportRequest, SoundFlags, SoundPreload, TelehubInfo, TeleportFlags, TerrainLayerType,
+    TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, Wearable, WearableType, global_to_handle, handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
@@ -2310,6 +2310,55 @@ impl Session {
             AnyMessage::ClearFollowCamProperties(clear) => {
                 self.events.push_back(Event::ClearFollowCamProperties {
                     object_id: clear.object_data.object_id,
+                });
+            }
+            AnyMessage::AlertMessage(alert) => {
+                self.events.push_back(Event::AlertMessage {
+                    message: trimmed_string(&alert.alert_data.message),
+                    alert_info: alert
+                        .alert_info
+                        .iter()
+                        .map(|block| AlertInfo {
+                            message: trimmed_string(&block.message),
+                            extra_params: trimmed_string(&block.extra_params),
+                        })
+                        .collect(),
+                    agents: alert
+                        .agent_info
+                        .iter()
+                        .map(|block| block.agent_id)
+                        .collect(),
+                });
+            }
+            AnyMessage::AgentAlertMessage(alert) => {
+                self.events.push_back(Event::AgentAlertMessage {
+                    agent_id: alert.agent_data.agent_id,
+                    modal: alert.alert_data.modal,
+                    message: trimmed_string(&alert.alert_data.message),
+                });
+            }
+            AnyMessage::MeanCollisionAlert(alert) => {
+                let collisions = alert
+                    .mean_collision
+                    .iter()
+                    .map(|block| MeanCollision {
+                        victim: block.victim,
+                        perp: block.perp,
+                        time: block.time,
+                        magnitude: block.mag,
+                        collision_type: MeanCollisionType::from_u8(block.r#type),
+                    })
+                    .collect();
+                self.events.push_back(Event::MeanCollisionAlert(collisions));
+            }
+            AnyMessage::HealthMessage(health) => {
+                self.events.push_back(Event::HealthMessage {
+                    health: health.health_data.health,
+                });
+            }
+            AnyMessage::CameraConstraint(constraint) => {
+                self.events.push_back(Event::CameraConstraint {
+                    plane: constraint.camera_collide_plane.plane,
                 });
             }
             AnyMessage::LoadURL(load) => {

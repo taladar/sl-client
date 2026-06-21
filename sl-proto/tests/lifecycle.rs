@@ -16,15 +16,15 @@ mod test {
         FriendRights, GestureActivation, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit,
         GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate,
         InventoryItem, LandingType, LindenAmount, LoginAccount, LoginParams, LookAtType,
-        MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType,
-        NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform,
-        ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
-        ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
-        PermissionField, PickUpdate, PointAtType, PrimShape, ProductType, ProfileUpdate,
-        RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType, ScriptPermissions,
-        Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType, Throttle,
-        TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings,
-        WearableType, avatar_texture, group_powers, pcode,
+        MapItemType, Material, Maturity, MeanCollisionType, MoneyTransactionType, MuteFlags,
+        MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
+        ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+        ParcelFlags, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
+        ParcelUpdate, PermissionField, PickUpdate, PointAtType, PrimShape, ProductType,
+        ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType,
+        ScriptPermissions, Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType,
+        Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        WaterSettings, WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -2882,6 +2882,143 @@ mod test {
             })
             .ok_or("expected a ClearFollowCamProperties event")?;
         assert_eq!(cleared, object);
+        Ok(())
+    }
+
+    #[test]
+    fn alert_messages_surface_events() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A general AlertMessage with both a plain string and a keyed AlertInfo.
+        let agent = uuid::Uuid::from_u128(0xA1E_0001);
+        let alert = AnyMessage::AlertMessage(sl_wire::messages::AlertMessage {
+            alert_data: sl_wire::messages::AlertMessageAlertDataBlock {
+                message: b"You have been warned".to_vec(),
+            },
+            alert_info: vec![sl_wire::messages::AlertMessageAlertInfoBlock {
+                message: b"RegionEntryAccessBlocked".to_vec(),
+                extra_params: b"REGION=Foo".to_vec(),
+            }],
+            agent_info: vec![sl_wire::messages::AlertMessageAgentInfoBlock { agent_id: agent }],
+        });
+        let datagram = server_message(&alert, 9101, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        let (message, alert_info, agents) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::AlertMessage {
+                    message,
+                    alert_info,
+                    agents,
+                } => Some((message, alert_info, agents)),
+                _ => None,
+            })
+            .ok_or("expected an AlertMessage event")?;
+        assert_eq!(message, "You have been warned");
+        let info = alert_info.first().ok_or("first alert info")?;
+        assert_eq!(info.message, "RegionEntryAccessBlocked");
+        assert_eq!(info.extra_params, "REGION=Foo");
+        assert_eq!(agents.first().copied(), Some(agent));
+
+        // An AgentAlertMessage directed at a specific agent.
+        let agent_alert = AnyMessage::AgentAlertMessage(sl_wire::messages::AgentAlertMessage {
+            agent_data: sl_wire::messages::AgentAlertMessageAgentDataBlock { agent_id: agent },
+            alert_data: sl_wire::messages::AgentAlertMessageAlertDataBlock {
+                modal: true,
+                message: b"Please confirm".to_vec(),
+            },
+        });
+        let datagram = server_message(&agent_alert, 9102, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        let (agent_id, modal, message) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::AgentAlertMessage {
+                    agent_id,
+                    modal,
+                    message,
+                } => Some((agent_id, modal, message)),
+                _ => None,
+            })
+            .ok_or("expected an AgentAlertMessage event")?;
+        assert_eq!(agent_id, agent);
+        assert!(modal);
+        assert_eq!(message, "Please confirm");
+        Ok(())
+    }
+
+    #[test]
+    fn mean_collision_alert_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let victim = uuid::Uuid::from_u128(0xC011_DE01);
+        let perp = uuid::Uuid::from_u128(0xC011_DE02);
+        let message = AnyMessage::MeanCollisionAlert(sl_wire::messages::MeanCollisionAlert {
+            mean_collision: vec![sl_wire::messages::MeanCollisionAlertMeanCollisionBlock {
+                victim,
+                perp,
+                time: 1_700_000_000,
+                mag: 12.5,
+                r#type: MeanCollisionType::Bump.to_u8(),
+            }],
+        });
+        let datagram = server_message(&message, 9103, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        let collision = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::MeanCollisionAlert(collisions) => collisions.into_iter().next(),
+                _ => None,
+            })
+            .ok_or("expected a MeanCollisionAlert event")?;
+        assert_eq!(collision.victim, victim);
+        assert_eq!(collision.perp, perp);
+        assert_eq!(collision.time, 1_700_000_000);
+        assert_eq!(collision.magnitude.to_bits(), 12.5_f32.to_bits());
+        assert_eq!(collision.collision_type, MeanCollisionType::Bump);
+        Ok(())
+    }
+
+    #[test]
+    fn health_and_camera_constraint_surface_events() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let health = AnyMessage::HealthMessage(sl_wire::messages::HealthMessage {
+            health_data: sl_wire::messages::HealthMessageHealthDataBlock { health: 87.5 },
+        });
+        let datagram = server_message(&health, 9104, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        let value = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::HealthMessage { health } => Some(health),
+                _ => None,
+            })
+            .ok_or("expected a HealthMessage event")?;
+        assert_eq!(value.to_bits(), 87.5_f32.to_bits());
+
+        let plane = [0.0_f32, 0.0, 1.0, 5.0];
+        let constraint = AnyMessage::CameraConstraint(sl_wire::messages::CameraConstraint {
+            camera_collide_plane: sl_wire::messages::CameraConstraintCameraCollidePlaneBlock {
+                plane,
+            },
+        });
+        let datagram = server_message(&constraint, 9105, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        let got = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::CameraConstraint { plane } => Some(plane),
+                _ => None,
+            })
+            .ok_or("expected a CameraConstraint event")?;
+        assert_eq!(got.map(f32::to_bits), plane.map(f32::to_bits));
         Ok(())
     }
 

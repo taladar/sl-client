@@ -111,6 +111,29 @@ top:
   (`Event::AvatarAnimation`),
 - and the usual name/identity data.
 
+## Simulator notifications
+
+Beyond world geometry, the simulator pushes a handful of receive-only
+notifications a viewer surfaces directly to the user or its HUD:
+
+- **Alerts** — a general `AlertMessage` carries an already-localized string to
+  show the user, optionally with structured `AlertInfo` keys (a message key the
+  viewer looks up in its `alerts.xml` for localization, plus substitution
+  parameters) and the agents the alert targets. An `AgentAlertMessage` is the
+  same thing addressed to one specific agent, with a `modal` flag asking the
+  viewer to block on a dialog.
+- **Mean collisions** — a `MeanCollisionAlert` reports avatar-on-avatar
+  collisions (the data behind the viewer's "Bumps, Pushes & Hits" panel): for
+  each, the victim, the perpetrator, when it happened, the magnitude, and how it
+  occurred (a bump, an `llPushObject`, or a dragged/scripted/physical object).
+- **Health** — a `HealthMessage` reports the agent's current health in a
+  damage-enabled region (`100.0` is full; `0.0` sends the agent home).
+- **Camera constraint** — a `CameraConstraint` hands the viewer a collision
+  plane `[nx, ny, nz, d]` so it can keep the third-person camera from clipping
+  into an obstruction.
+
+None of these has a reply; the client just acts on them.
+
 ---
 
 > **In this codebase**
@@ -142,3 +165,11 @@ top:
 >   `send_parcel_info_reply`.
 > - `RequestRemoteParcelId` posts the `RemoteParcelRequest` capability
 >   (`sl-wire/src/remote_parcel.rs`), decoded into `Event::RemoteParcelId`.
+> - Simulator notifications are receive-only: `AlertMessage`,
+>   `AgentAlertMessage`, `MeanCollisionAlert`, `HealthMessage`, and
+>   `CameraConstraint` decode into the same-named `Event`s (the `AlertInfo` type
+>   is in `sl-proto/src/types/script.rs`; `MeanCollision` /
+>   `MeanCollisionType` in `sl-proto/src/types/alert.rs`). The simulator side
+>   emits them with `SimSession::send_alert_message`,
+>   `send_agent_alert_message`, `send_mean_collision_alert`,
+>   `send_health_message`, and `send_camera_constraint`.

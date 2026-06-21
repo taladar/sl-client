@@ -727,6 +727,11 @@ impl Survey {
             | Event::RemoteParcelId(_)
             | Event::EstateCovenant(_)
             | Event::TelehubInfo(_)
+            | Event::AlertMessage { .. }
+            | Event::AgentAlertMessage { .. }
+            | Event::MeanCollisionAlert(_)
+            | Event::HealthMessage { .. }
+            | Event::CameraConstraint { .. }
             | Event::Environment(_) => {}
         }
         Ok(false)
