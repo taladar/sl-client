@@ -196,13 +196,83 @@ pub struct Camera {
     pub up_axis: Vector,
 }
 
+/// Why [`Camera::new`] rejected a set of axes: they do not form a right-handed
+/// orthonormal frame in the SL convention (`at × left = up`). The axes arrive as
+/// `f32`, so every check allows a small tolerance rather than an exact match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum CameraError {
+    /// One of the three axes is not unit-length (within tolerance).
+    #[error("camera axis is not unit-length")]
+    NotUnitLength,
+    /// Two of the axes are not mutually orthogonal (within tolerance).
+    #[error("camera axes are not mutually orthogonal")]
+    NotOrthogonal,
+    /// The axes are orthonormal but not right-handed in the SL convention
+    /// (`at × left` does not equal `up`).
+    #[error("camera axes are not right-handed (at × left ≠ up)")]
+    NotRightHanded,
+}
+
+/// Tolerance for the unit-length, orthogonality and right-handedness checks in
+/// [`Camera::new`]; the axes are `f32`, so an exact comparison is never apt.
+const AXIS_TOLERANCE: f32 = 1e-3;
+
 impl Camera {
-    /// Builds a camera from an explicit position and orthonormal basis. The
-    /// caller is responsible for the axes being unit-length and mutually
-    /// orthogonal in the SL convention (`at × left = up`); use
-    /// [`Camera::looking_at`] to derive them from a target point instead.
+    /// Builds a camera from an explicit position and basis, validating that the
+    /// three axes form a **right-handed orthonormal frame** in the SL convention
+    /// (`at × left = up`): each axis unit-length, the three mutually orthogonal,
+    /// and `at × left` equal to `up` — all within a small `f32` tolerance.
+    ///
+    /// Returns [`CameraError`] if the basis is degenerate. Use
+    /// [`Camera::looking_at`] to derive a valid basis from a target point, or
+    /// [`Camera::new_unchecked`] when the axes are already known-good (for
+    /// example reconstructed from the wire).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CameraError::NotUnitLength`], [`CameraError::NotOrthogonal`] or
+    /// [`CameraError::NotRightHanded`] for a basis that is not a right-handed
+    /// orthonormal frame.
+    pub fn new(
+        center: Vector,
+        at_axis: Vector,
+        left_axis: Vector,
+        up_axis: Vector,
+    ) -> Result<Self, CameraError> {
+        for axis in [&at_axis, &left_axis, &up_axis] {
+            if (length(axis) - 1.0).abs() > AXIS_TOLERANCE {
+                return Err(CameraError::NotUnitLength);
+            }
+        }
+        if dot(&at_axis, &left_axis).abs() > AXIS_TOLERANCE
+            || dot(&at_axis, &up_axis).abs() > AXIS_TOLERANCE
+            || dot(&left_axis, &up_axis).abs() > AXIS_TOLERANCE
+        {
+            return Err(CameraError::NotOrthogonal);
+        }
+        let expected_up = cross(&at_axis, &left_axis);
+        if length(&sub(&expected_up, &up_axis)) > AXIS_TOLERANCE {
+            return Err(CameraError::NotRightHanded);
+        }
+        Ok(Self::new_unchecked(center, at_axis, left_axis, up_axis))
+    }
+
+    /// Builds a camera from an explicit position and basis **without validating**
+    /// that the axes are orthonormal. The caller is responsible for the axes
+    /// being unit-length and mutually orthogonal in the SL convention
+    /// (`at × left = up`).
+    ///
+    /// This is the codec-boundary constructor: an inbound `AgentUpdate` carries
+    /// whatever basis the peer sent, which must be reconstructed verbatim rather
+    /// than rejected. For caller-supplied axes prefer the validating
+    /// [`Camera::new`], or [`Camera::looking_at`] to derive the basis.
     #[must_use]
-    pub const fn new(center: Vector, at_axis: Vector, left_axis: Vector, up_axis: Vector) -> Self {
+    pub const fn new_unchecked(
+        center: Vector,
+        at_axis: Vector,
+        left_axis: Vector,
+        up_axis: Vector,
+    ) -> Self {
         Self {
             center,
             at_axis,
@@ -219,7 +289,7 @@ impl Camera {
     /// supplied.
     #[must_use]
     pub const fn region_center() -> Self {
-        Self::new(
+        Self::new_unchecked(
             Vector {
                 x: 128.0,
                 y: 128.0,
@@ -273,7 +343,7 @@ impl Camera {
         // `at` and `left` are unit and orthogonal, so their cross product is
         // already unit-length — no further normalisation needed.
         let up = cross(&at, &left);
-        Self::new(eye, at, left, up)
+        Self::new_unchecked(eye, at, left, up)
     }
 }
 
@@ -301,6 +371,16 @@ fn cross(a: &Vector, b: &Vector) -> Vector {
         y: a.z * b.x - a.x * b.z,
         z: a.x * b.y - a.y * b.x,
     }
+}
+
+/// The dot product `a · b`.
+fn dot(a: &Vector, b: &Vector) -> f32 {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+/// The Euclidean length of `v`.
+fn length(v: &Vector) -> f32 {
+    dot(v, v).sqrt()
 }
 
 /// Normalises `v` to unit length, returning `None` if it is too short to give a
@@ -346,13 +426,8 @@ pub enum DisconnectReason {
 
 #[cfg(test)]
 mod tests {
-    use super::{Camera, Vector, cross};
+    use super::{Camera, CameraError, Vector, cross, dot};
     use pretty_assertions::assert_eq;
-
-    /// The dot product `a · b`.
-    fn dot(a: &Vector, b: &Vector) -> f32 {
-        a.x * b.x + a.y * b.y + a.z * b.z
-    }
 
     fn is_unit(v: &Vector) -> bool {
         (dot(v, v) - 1.0).abs() < 1e-5
@@ -449,5 +524,117 @@ mod tests {
         assert!(approx_eq(&looked.at_axis, &camera.at_axis));
         assert!(approx_eq(&looked.left_axis, &camera.left_axis));
         assert!(approx_eq(&looked.up_axis, &camera.up_axis));
+    }
+
+    #[test]
+    fn new_accepts_a_valid_orthonormal_basis() {
+        // The basis `looking_at` derives must pass the validating constructor.
+        let eye = Vector {
+            x: 10.0,
+            y: 20.0,
+            z: 5.0,
+        };
+        let derived = Camera::looking_at(
+            eye.clone(),
+            Vector {
+                x: 13.0,
+                y: 24.0,
+                z: 7.0,
+            },
+        );
+        let built = Camera::new(
+            eye,
+            derived.at_axis.clone(),
+            derived.left_axis.clone(),
+            derived.up_axis.clone(),
+        );
+        assert_eq!(built, Ok(derived));
+    }
+
+    #[test]
+    fn new_rejects_a_non_unit_axis() {
+        let center = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        // `at` is twice unit length.
+        let result = Camera::new(
+            center,
+            Vector {
+                x: 2.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Vector {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+        );
+        assert_eq!(result, Err(CameraError::NotUnitLength));
+    }
+
+    #[test]
+    fn new_rejects_non_orthogonal_axes() {
+        let center = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        // `at` and `left` are both unit but point the same way.
+        let result = Camera::new(
+            center,
+            Vector {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Vector {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+        );
+        assert_eq!(result, Err(CameraError::NotOrthogonal));
+    }
+
+    #[test]
+    fn new_rejects_a_left_handed_basis() {
+        let center = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        // Orthonormal but left-handed: at × left = -up, not up.
+        let result = Camera::new(
+            center,
+            Vector {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Vector {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            Vector {
+                x: 0.0,
+                y: 0.0,
+                z: -1.0,
+            },
+        );
+        assert_eq!(result, Err(CameraError::NotRightHanded));
     }
 }

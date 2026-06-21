@@ -2652,7 +2652,7 @@ impl SimSession {
                         body_rotation: data.body_rotation.clone(),
                         head_rotation: data.head_rotation.clone(),
                         controls: ControlFlags::from_bits(data.control_flags),
-                        camera: Camera::new(
+                        camera: Camera::new_unchecked(
                             data.camera_center.clone(),
                             data.camera_at_axis.clone(),
                             data.camera_left_axis.clone(),
