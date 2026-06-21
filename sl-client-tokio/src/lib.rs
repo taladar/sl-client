@@ -1036,8 +1036,8 @@ impl Client {
                         Some(Command::StopAnimation(anim_id)) => {
                             self.session.stop_animation(anim_id, Instant::now())?;
                         }
-                        Some(Command::AttachObject { local_id, attachment_point, add, rotation }) => {
-                            self.session.attach_object(local_id, attachment_point, add, &rotation, Instant::now())?;
+                        Some(Command::AttachObject { local_id, attachment_point, mode, rotation }) => {
+                            self.session.attach_object(local_id, attachment_point, mode, &rotation, Instant::now())?;
                         }
                         Some(Command::DetachObjects { local_ids }) => {
                             self.session.detach_objects(&local_ids, Instant::now())?;

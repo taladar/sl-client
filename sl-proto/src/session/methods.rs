@@ -37,10 +37,10 @@ use super::{
 use crate::error::Error;
 use crate::terrain;
 use crate::types::{
-    AlertInfo, Asset, AssetType, AttachmentPoint, AvatarClassified, AvatarPick, AvatarPickerResult,
-    Camera, ChatType, ClassifiedUpdate, ClickAction, CoarseLocation, CreateGroupParams,
-    DeRezDestination, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags,
-    DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DisconnectReason,
+    AlertInfo, Asset, AssetType, AttachmentMode, AttachmentPoint, AvatarClassified, AvatarPick,
+    AvatarPickerResult, Camera, ChatType, ClassifiedUpdate, ClickAction, CoarseLocation,
+    CreateGroupParams, DeRezDestination, Diagnostic, DirClassifiedResult, DirEventResult,
+    DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DisconnectReason,
     EstateAccessDelta, EstateCovenant, Event, EventInfo, FollowCamProperty, FollowCamPropertyValue,
     FriendRights, GestureActivation, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMember,
     GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem,
@@ -4794,9 +4794,9 @@ impl Session {
     }
 
     /// Attaches the in-world object `local_id` to the avatar via `ObjectAttach`,
-    /// worn at `attachment_point` and rotated by `rotation`. When `add` is `true`
-    /// the object is added to the point alongside anything already there rather
-    /// than replacing it. To wear an item straight from inventory instead, use
+    /// worn at `attachment_point` and rotated by `rotation`. `mode` chooses
+    /// whether the object is added to the point alongside anything already there
+    /// or replaces it. To wear an item straight from inventory instead, use
     /// [`Session::rez_attachment`].
     ///
     /// # Errors
@@ -4807,12 +4807,12 @@ impl Session {
         &mut self,
         local_id: u32,
         attachment_point: AttachmentPoint,
-        add: bool,
+        mode: AttachmentMode,
         rotation: &Rotation,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_object_attach(local_id, attachment_point, add, rotation, now)?;
+        circuit.send_object_attach(local_id, attachment_point, mode, rotation, now)?;
         Ok(())
     }
 

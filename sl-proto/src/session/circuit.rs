@@ -9,12 +9,13 @@ use super::{
 };
 use crate::types::directory::category_to_wire;
 use crate::types::{
-    AssetType, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction, CreateGroupParams,
-    DeRezDestination, DirFindFlags, GestureActivation, GroupRoleEdit, GroupRoleMemberChange,
-    ImDialog, InterestsUpdate, InventoryItem, LandSearchType, Material, NewInventoryItem,
-    NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
-    ParcelCategory, ParcelUpdate, PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate,
-    Reliability, RestoreItem, RezAttachment, SaleType, Throttle, ViewerEffect, Wearable,
+    AssetType, AttachmentMode, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction,
+    CreateGroupParams, DeRezDestination, DirFindFlags, GestureActivation, GroupRoleEdit,
+    GroupRoleMemberChange, ImDialog, InterestsUpdate, InventoryItem, LandSearchType, Material,
+    NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform,
+    ParcelAccessEntry, ParcelCategory, ParcelUpdate, PermissionField, PickUpdate, Postcard,
+    PrimShape, ProfileUpdate, Reliability, RestoreItem, RezAttachment, SaleType, Throttle,
+    ViewerEffect, Wearable,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::AbuseReport;
@@ -1992,13 +1993,13 @@ impl Circuit {
     }
 
     /// Queues an `ObjectAttach` reliably, attaching the in-world object
-    /// `local_id` to `attachment_point` at `rotation` (the `add` flag adds the
-    /// attachment rather than replacing what is on the point).
+    /// `local_id` to `attachment_point` at `rotation` (`mode` chooses whether the
+    /// attachment is added alongside or replaces what is on the point).
     pub(crate) fn send_object_attach(
         &mut self,
         local_id: u32,
         attachment_point: AttachmentPoint,
-        add: bool,
+        mode: AttachmentMode,
         rotation: &Rotation,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -2006,7 +2007,7 @@ impl Circuit {
             agent_data: ObjectAttachAgentDataBlock {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
-                attachment_point: attachment_point.with_add(add),
+                attachment_point: attachment_point.with_mode(mode),
             },
             object_data: vec![ObjectAttachObjectDataBlock {
                 object_local_id: local_id,
@@ -2094,7 +2095,7 @@ impl Circuit {
             object_data: RezSingleAttachmentFromInvObjectDataBlock {
                 item_id: rez.item_id,
                 owner_id: rez.owner_id,
-                attachment_pt: rez.attachment_point.with_add(rez.add),
+                attachment_pt: rez.attachment_point.with_mode(rez.mode),
                 item_flags: 0,
                 group_mask: 0,
                 everyone_mask: 0,
@@ -2138,7 +2139,7 @@ impl Circuit {
                 .map(|rez| RezMultipleAttachmentsFromInvObjectDataBlock {
                     item_id: rez.item_id,
                     owner_id: rez.owner_id,
-                    attachment_pt: rez.attachment_point.with_add(rez.add),
+                    attachment_pt: rez.attachment_point.with_mode(rez.mode),
                     item_flags: 0,
                     group_mask: 0,
                     everyone_mask: 0,

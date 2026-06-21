@@ -404,11 +404,11 @@ pub struct AvatarAttachment {
 ///
 /// On the wire the point shares a byte with an "add" flag (`ATTACHMENT_ADD`,
 /// `0x80`): when set, the object is *added* to the point alongside anything
-/// already there rather than *replacing* it. The flag is modelled separately
-/// (the `add` field on the commands), so [`to_code`](Self::to_code) /
-/// [`from_code`](Self::from_code) carry only the point itself (the low 7 bits);
-/// use [`split_code`](Self::split_code) / [`with_add`](Self::with_add) to combine
-/// or separate the two.
+/// already there rather than *replacing* it. The flag is modelled separately as
+/// an [`AttachmentMode`] (the `mode` field on the commands), so
+/// [`to_code`](Self::to_code) / [`from_code`](Self::from_code) carry only the
+/// point itself (the low 7 bits); use [`split_code`](Self::split_code) /
+/// [`with_mode`](Self::with_mode) to combine or separate the two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttachmentPoint {
     /// The item's default attachment point (`0`); the simulator picks the slot
@@ -535,7 +535,7 @@ impl AttachmentPoint {
     pub const ADD_FLAG: u8 = 0x80;
 
     /// The attachment-point wire byte for this slot (the point only, without the
-    /// [`ADD_FLAG`](Self::ADD_FLAG); combine with [`with_add`](Self::with_add)).
+    /// [`ADD_FLAG`](Self::ADD_FLAG); combine with [`with_mode`](Self::with_mode)).
     #[must_use]
     pub const fn to_code(self) -> u8 {
         match self {
@@ -665,24 +665,23 @@ impl AttachmentPoint {
         }
     }
 
-    /// The full wire byte combining this point with the `add` flag: sets the
-    /// [`ADD_FLAG`](Self::ADD_FLAG) bit when `add` is `true`.
+    /// The full wire byte combining this point with the attachment `mode`: sets
+    /// the [`ADD_FLAG`](Self::ADD_FLAG) bit for [`AttachmentMode::Add`].
     #[must_use]
-    pub const fn with_add(self, add: bool) -> u8 {
-        if add {
-            self.to_code() | Self::ADD_FLAG
-        } else {
-            self.to_code()
+    pub const fn with_mode(self, mode: AttachmentMode) -> u8 {
+        match mode {
+            AttachmentMode::Add => self.to_code() | Self::ADD_FLAG,
+            AttachmentMode::Replace => self.to_code(),
         }
     }
 
-    /// Splits a raw attachment-point wire byte into its point and `add` flag (the
-    /// inverse of [`with_add`](Self::with_add)).
+    /// Splits a raw attachment-point wire byte into its point and
+    /// [`AttachmentMode`] (the inverse of [`with_mode`](Self::with_mode)).
     #[must_use]
-    pub const fn split_code(byte: u8) -> (Self, bool) {
+    pub const fn split_code(byte: u8) -> (Self, AttachmentMode) {
         (
             Self::from_code(byte & !Self::ADD_FLAG),
-            byte & Self::ADD_FLAG != 0,
+            AttachmentMode::from_add_flag(byte & Self::ADD_FLAG != 0),
         )
     }
 
@@ -692,6 +691,40 @@ impl AttachmentPoint {
     #[must_use]
     pub const fn is_hud(self) -> bool {
         matches!(self.to_code(), 31..=38)
+    }
+}
+
+/// Whether an attachment is *added* to its point alongside whatever is already
+/// worn there, or *replaces* it. This is the `ATTACHMENT_ADD` wire flag
+/// ([`AttachmentPoint::ADD_FLAG`], `0x80`) modelled as a named intent rather
+/// than a bare `bool`, carried by the attachment commands
+/// ([`Command::AttachObject`](crate::Command::AttachObject),
+/// [`Command::RezAttachment`](crate::Command::RezAttachment)) and their matching
+/// server events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttachmentMode {
+    /// Add the object to the point *alongside* anything already worn there (the
+    /// `ATTACHMENT_ADD` flag is set).
+    Add,
+    /// Replace whatever is currently on the point (the `ATTACHMENT_ADD` flag is
+    /// clear). The simulator's historical default for a single attachment.
+    Replace,
+}
+
+impl AttachmentMode {
+    /// Whether this mode sets the `ATTACHMENT_ADD` wire flag
+    /// ([`AttachmentPoint::ADD_FLAG`]): `true` for [`Add`](Self::Add), `false`
+    /// for [`Replace`](Self::Replace).
+    #[must_use]
+    pub const fn is_add(self) -> bool {
+        matches!(self, Self::Add)
+    }
+
+    /// The mode for an `ATTACHMENT_ADD` flag bit: [`Add`](Self::Add) when set,
+    /// [`Replace`](Self::Replace) when clear.
+    #[must_use]
+    pub const fn from_add_flag(add: bool) -> Self {
+        if add { Self::Add } else { Self::Replace }
     }
 }
 
@@ -709,8 +742,8 @@ pub struct RezAttachment {
     /// simulator pick the item's saved/scripted slot).
     pub attachment_point: AttachmentPoint,
     /// Whether to *add* the attachment alongside anything already on the point
-    /// (`true`) rather than *replace* it (`false`); the `ATTACHMENT_ADD` flag.
-    pub add: bool,
+    /// or *replace* it; the `ATTACHMENT_ADD` flag.
+    pub mode: AttachmentMode,
     /// The item's name (sent verbatim; the simulator ignores it).
     pub name: String,
     /// The item's description (sent verbatim; the simulator ignores it).
@@ -762,5 +795,45 @@ mod tests {
         let plain = face(0, 0);
         assert!(!plain.media_enabled());
         assert_eq!(plain.tex_gen(), 0);
+    }
+
+    #[test]
+    fn attachment_mode_maps_to_add_flag() {
+        use super::AttachmentMode;
+        assert!(AttachmentMode::Add.is_add());
+        assert!(!AttachmentMode::Replace.is_add());
+        assert_eq!(AttachmentMode::from_add_flag(true), AttachmentMode::Add);
+        assert_eq!(
+            AttachmentMode::from_add_flag(false),
+            AttachmentMode::Replace
+        );
+    }
+
+    #[test]
+    fn with_mode_and_split_code_round_trip_bit_identically() {
+        use super::{AttachmentMode, AttachmentPoint};
+        // `with_mode(Add)` must set bit 0x80, `Replace` must leave it clear —
+        // byte-identical to the historical `with_add(true/false)` behaviour.
+        assert_eq!(
+            AttachmentPoint::RightHand.with_mode(AttachmentMode::Add),
+            0x80 | 6
+        );
+        assert_eq!(
+            AttachmentPoint::RightHand.with_mode(AttachmentMode::Replace),
+            6
+        );
+        // `split_code` is the exact inverse for every point/mode pair.
+        for point in [
+            AttachmentPoint::Default,
+            AttachmentPoint::Chest,
+            AttachmentPoint::LeftHand,
+            AttachmentPoint::RightHindFoot,
+            AttachmentPoint::Other(99),
+        ] {
+            for mode in [AttachmentMode::Add, AttachmentMode::Replace] {
+                let byte = point.with_mode(mode);
+                assert_eq!(super::AttachmentPoint::split_code(byte), (point, mode));
+            }
+        }
     }
 }

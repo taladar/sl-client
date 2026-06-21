@@ -30,8 +30,9 @@ mod terrain;
 
 pub use alert::{MeanCollision, MeanCollisionType};
 pub use appearance::{
-    AttachmentPoint, AvatarAppearance, AvatarAttachment, PlayingAnimation, RezAttachment,
-    SoundFlags, SoundPreload, TextureEntry, TextureFace, Wearable, WearableType, avatar_texture,
+    AttachmentMode, AttachmentPoint, AvatarAppearance, AvatarAttachment, PlayingAnimation,
+    RezAttachment, SoundFlags, SoundPreload, TextureEntry, TextureFace, Wearable, WearableType,
+    avatar_texture,
 };
 pub use asset::{Asset, AssetType, ImageCodec, InventoryType, Texture, TransferStatus};
 pub use avatar_profile::{
