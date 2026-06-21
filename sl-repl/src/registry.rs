@@ -3322,6 +3322,49 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "set_always_run",
+            usage: "<always_run:bool>",
+            build: |args, ctx| {
+                Ok(Command::SetAlwaysRun {
+                    always_run: args.req_bool(ctx, "always_run", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "pause_agent",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::PauseAgent),
+        },
+        CommandSpec {
+            name: "resume_agent",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::ResumeAgent),
+        },
+        CommandSpec {
+            name: "set_agent_fov",
+            usage: "<vertical_angle:radians>",
+            build: |args, ctx| {
+                Ok(Command::SetAgentFov {
+                    vertical_angle: args.req_parse(ctx, "vertical_angle", 0, "f32")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "set_agent_size",
+            usage: "<height:px> <width:px>",
+            build: |args, ctx| {
+                Ok(Command::SetAgentSize {
+                    height: args.req_parse(ctx, "height", 0, "u16")?,
+                    width: args.req_parse(ctx, "width", 1, "u16")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "release_script_controls",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::ReleaseScriptControls),
+        },
+        CommandSpec {
             name: "upload_asset_udp",
             usage: "<asset_type-code> data=<hex> [temp_file=] [store_local=]",
             build: |args, ctx| {
@@ -4043,6 +4086,47 @@ mod tests {
         assert!(matches!(
             build(&format!("deactivate_gestures {ONE},{TWO}")),
             Ok(Command::DeactivateGestures { item_ids }) if item_ids.len() == 2
+        ));
+    }
+
+    #[test]
+    fn set_always_run_bool() {
+        assert!(matches!(
+            build("set_always_run true"),
+            Ok(Command::SetAlwaysRun { always_run: true })
+        ));
+    }
+
+    #[test]
+    fn pause_resume_agent_no_args() {
+        assert!(matches!(build("pause_agent"), Ok(Command::PauseAgent)));
+        assert!(matches!(build("resume_agent"), Ok(Command::ResumeAgent)));
+    }
+
+    #[test]
+    fn release_script_controls_no_args() {
+        assert!(matches!(
+            build("release_script_controls"),
+            Ok(Command::ReleaseScriptControls)
+        ));
+    }
+
+    #[test]
+    fn set_agent_fov_radians() {
+        assert!(matches!(
+            build("set_agent_fov 1.25"),
+            Ok(Command::SetAgentFov { vertical_angle }) if vertical_angle.to_bits() == 1.25_f32.to_bits()
+        ));
+    }
+
+    #[test]
+    fn set_agent_size_dimensions() {
+        assert!(matches!(
+            build("set_agent_size 768 1024"),
+            Ok(Command::SetAgentSize {
+                height: 768,
+                width: 1024
+            })
         ));
     }
 

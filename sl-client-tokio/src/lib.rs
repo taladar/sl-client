@@ -653,6 +653,24 @@ impl Client {
                         Some(Command::DeactivateGestures { item_ids }) => {
                             self.session.deactivate_gestures(&item_ids, Instant::now())?;
                         }
+                        Some(Command::SetAlwaysRun { always_run }) => {
+                            self.session.set_always_run(always_run, Instant::now())?;
+                        }
+                        Some(Command::PauseAgent) => {
+                            self.session.pause_agent(Instant::now())?;
+                        }
+                        Some(Command::ResumeAgent) => {
+                            self.session.resume_agent(Instant::now())?;
+                        }
+                        Some(Command::SetAgentFov { vertical_angle }) => {
+                            self.session.set_agent_fov(vertical_angle, Instant::now())?;
+                        }
+                        Some(Command::SetAgentSize { height, width }) => {
+                            self.session.set_agent_size(height, width, Instant::now())?;
+                        }
+                        Some(Command::ReleaseScriptControls) => {
+                            self.session.release_script_controls(Instant::now())?;
+                        }
                         Some(Command::SendGroupNotice { group_id, subject, message, attachment }) => {
                             self.session.send_group_notice(group_id, &subject, &message, attachment, Instant::now())?;
                         }

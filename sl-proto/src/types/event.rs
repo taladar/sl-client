@@ -8,16 +8,17 @@ use super::{
     AvatarProperties, ChatMessage, ClassifiedInfo, CoarseLocation, DirClassifiedResult,
     DirEventResult, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
     DisconnectReason, EconomyData, EnvironmentSettings, EstateAccessKind, EstateCovenant,
-    EstateInfo, EventInfo, Friend, FriendRights, GroupAccountDetails, GroupAccountSummary,
-    GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
-    GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, GroupVoteHistoryItem,
-    ImDialog, InstantMessage, InventoryFolder, InventoryItem, LoadUrlRequest, LoginAccount,
-    MapItem, MapItemType, MapRegionInfo, Maturity, MoneyBalance, MuteEntry, NeighborInfo, Object,
-    ObjectProperties, ObjectPropertiesFamily, ParcelAccessEntry, ParcelAccessScope, ParcelDetails,
-    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
-    PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, ScriptDialog,
-    ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload, TelehubInfo,
-    TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
+    EstateInfo, EventInfo, FollowCamPropertyValue, Friend, FriendRights, GroupAccountDetails,
+    GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupMember,
+    GroupMembership, GroupName, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle,
+    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem, LoadUrlRequest,
+    LoginAccount, MapItem, MapItemType, MapRegionInfo, Maturity, MoneyBalance, MuteEntry,
+    NeighborInfo, Object, ObjectProperties, ObjectPropertiesFamily, ParcelAccessEntry,
+    ParcelAccessScope, ParcelDetails, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelObjectOwner, ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation, RegionIdentity,
+    RegionLimits, ScriptControl, ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest,
+    SoundFlags, SoundPreload, TelehubInfo, TeleportFlags, TerrainPatch, Texture, TransferStatus,
+    ViewerEffect, Wearable,
 };
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
@@ -653,6 +654,31 @@ pub enum Event {
     /// A scripted object asked to teleport the agent (`ScriptTeleportRequest`,
     /// i.e. `llMapDestination`). The client may initiate the teleport itself.
     ScriptTeleport(Box<ScriptTeleportRequest>),
+    /// A scripted object took or released some of the agent's movement controls
+    /// (`ScriptControlChange`, i.e. `llTakeControls`/`llReleaseControls`), after
+    /// the agent granted it
+    /// [`ScriptPermissions::TAKE_CONTROLS`](crate::ScriptPermissions::TAKE_CONTROLS).
+    /// Each entry says which controls and whether they still drive the avatar.
+    /// Forcibly release all of them with
+    /// [`Session::release_script_controls`](crate::Session::release_script_controls).
+    ScriptControlChange(Vec<ScriptControl>),
+    /// A scripted object set follow-camera parameters (`SetFollowCamProperties`,
+    /// i.e. `llSetCameraParams`), after the agent granted it
+    /// [`ScriptPermissions::CONTROL_CAMERA`](crate::ScriptPermissions::CONTROL_CAMERA).
+    /// Carries the object id and the list of parameter/value pairs.
+    SetFollowCamProperties {
+        /// The scripted object that set the camera parameters.
+        object_id: Uuid,
+        /// The follow-camera parameters and their values.
+        properties: Vec<FollowCamPropertyValue>,
+    },
+    /// A scripted object cleared its follow-camera parameters
+    /// (`ClearFollowCamProperties`, i.e. `llClearCameraParams`), releasing
+    /// control of the agent's camera.
+    ClearFollowCamProperties {
+        /// The scripted object that cleared the camera parameters.
+        object_id: Uuid,
+    },
     /// The agent's mute (block) list, in response to
     /// [`Session::request_mute_list`](crate::Session::request_mute_list): the
     /// list was downloaded (via the file-transfer `Xfer` path) and parsed, or is

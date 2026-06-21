@@ -39,18 +39,19 @@ use crate::types::{
     Camera, ChatType, ClassifiedUpdate, ClickAction, CoarseLocation, CreateGroupParams,
     DeRezDestination, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags,
     DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DisconnectReason,
-    EstateAccessDelta, EstateCovenant, Event, EventInfo, FriendRights, GestureActivation,
-    GroupNoticeAttachment, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog,
-    ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer, LandSearchType,
-    LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType, Material, Maturity,
-    MoneyTransactionType, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NotecardRez, Object,
-    ObjectBuyItem, ObjectFlagSettings, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
-    PermissionField, PickUpdate, PlacesResult, PrimShape, ProfileUpdate, RegionInfoUpdate,
-    Reliability, RestoreItem, RezAttachment, SaleType, ScriptPermissions, ScriptTeleportRequest,
-    SoundFlags, SoundPreload, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
-    Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
+    EstateAccessDelta, EstateCovenant, Event, EventInfo, FollowCamProperty, FollowCamPropertyValue,
+    FriendRights, GestureActivation, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMember,
+    GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem,
+    InventoryOffer, LandSearchType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams,
+    MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType, NeighborInfo,
+    NewInventoryItem, NotecardRez, Object, ObjectBuyItem, ObjectFlagSettings,
+    ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
+    PickUpdate, PlacesResult, PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem,
+    RezAttachment, SaleType, ScriptControl, ScriptPermissions, ScriptTeleportRequest, SoundFlags,
+    SoundPreload, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle,
+    TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
     WearableType, global_to_handle, handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
@@ -2279,6 +2280,38 @@ impl Session {
                         script_permission_request(question),
                     )));
             }
+            AnyMessage::ScriptControlChange(change) => {
+                let controls = change
+                    .data
+                    .iter()
+                    .map(|block| ScriptControl {
+                        take: block.take_controls,
+                        controls: ControlFlags::from_bits(block.controls),
+                        pass_to_agent: block.pass_to_agent,
+                    })
+                    .collect();
+                self.events.push_back(Event::ScriptControlChange(controls));
+            }
+            AnyMessage::SetFollowCamProperties(properties) => {
+                let object_id = properties.object_data.object_id;
+                let properties = properties
+                    .camera_property
+                    .iter()
+                    .map(|block| FollowCamPropertyValue {
+                        property: FollowCamProperty::from_i32(block.r#type),
+                        value: block.value,
+                    })
+                    .collect();
+                self.events.push_back(Event::SetFollowCamProperties {
+                    object_id,
+                    properties,
+                });
+            }
+            AnyMessage::ClearFollowCamProperties(clear) => {
+                self.events.push_back(Event::ClearFollowCamProperties {
+                    object_id: clear.object_data.object_id,
+                });
+            }
             AnyMessage::LoadURL(load) => {
                 let data = &load.data;
                 self.events
@@ -3660,6 +3693,87 @@ impl Session {
     pub fn deactivate_gestures(&mut self, item_ids: &[Uuid], now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_deactivate_gestures(item_ids, now)?;
+        Ok(())
+    }
+
+    /// Chooses whether the avatar runs or walks for ground movement
+    /// (`SetAlwaysRun`). There is no reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_always_run(&mut self, always_run: bool, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_set_always_run(always_run, now)?;
+        Ok(())
+    }
+
+    /// Tells the simulator the viewer has stalled and is not reading the network
+    /// (`AgentPause`), so it stops streaming updates until [`Session::resume_agent`].
+    /// There is no reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn pause_agent(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_agent_pause(now)?;
+        Ok(())
+    }
+
+    /// Tells the simulator the viewer has resumed reading the network
+    /// (`AgentResume`) after a [`Session::pause_agent`]. There is no reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn resume_agent(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_agent_resume(now)?;
+        Ok(())
+    }
+
+    /// Updates the agent's vertical field of view (`AgentFOV`), in radians; the
+    /// simulator uses it for interest-list culling. There is no reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_agent_fov(&mut self, vertical_angle: f32, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_agent_fov(vertical_angle, now)?;
+        Ok(())
+    }
+
+    /// Updates the agent's viewport size in pixels (`AgentHeightWidth`), sent
+    /// when the viewer window is created or resized. There is no reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_agent_size(&mut self, height: u16, width: u16, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_agent_height_width(height, width, now)?;
+        Ok(())
+    }
+
+    /// Forcibly releases any agent movement controls a script has taken
+    /// (`ForceScriptControlRelease`), reversing a
+    /// [`Event::ScriptControlChange`](crate::Event::ScriptControlChange). There
+    /// is no reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn release_script_controls(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_force_script_control_release(now)?;
         Ok(())
     }
 

@@ -10,18 +10,18 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        AttachmentPoint, AvatarName, AvatarPickerResult, ChatType, CoarseLocation,
+        AttachmentPoint, AvatarName, AvatarPickerResult, ChatType, CoarseLocation, ControlFlags,
         DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-        DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventInfo, GestureActivation,
-        GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
-        GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
-        GroupVote, GroupVoteHistoryItem, ImDialog, LandSearchType, LoginParams, MapItem,
-        MapItemType, MapRegionInfo, Maturity, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily,
-        ParcelCategory, ParcelDetails, ParcelObjectOwner, ParcelReturnType, PlacesResult,
-        PointAtType, ProductType, RegionIdentity, RestoreItem, RezAttachment, SaleType,
-        ServerEvent, Session, SimSession, TelehubInfo, Throttle, Transmit, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd, grid_to_handle,
-        parse_event_queue_response,
+        DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventInfo, FollowCamProperty,
+        FollowCamPropertyValue, GestureActivation, GroupAccountDetails, GroupAccountDetailsEntry,
+        GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
+        GroupActiveProposalItem, GroupName, GroupVote, GroupVoteHistoryItem, ImDialog,
+        LandSearchType, LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity, NotecardRez,
+        ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner,
+        ParcelReturnType, PlacesResult, PointAtType, ProductType, RegionIdentity, RestoreItem,
+        RezAttachment, SaleType, ScriptControl, ServerEvent, Session, SimSession, TelehubInfo,
+        Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        enable_simulator_to_caps_llsd, grid_to_handle, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -1639,6 +1639,137 @@ mod test {
                     if item_ids.first() == Some(&item_b)
             )),
             "expected a DeactivateGestures server event"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn agent_state_messages_round_trip() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        // Client -> sim: each agent-state message surfaces a matching server event.
+        client.set_always_run(true, now)?;
+        client.pause_agent(now)?;
+        client.resume_agent(now)?;
+        client.set_agent_fov(1.5, now)?;
+        client.set_agent_size(600, 800, now)?;
+        client.release_script_controls(now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::SetAlwaysRun { always_run: true })),
+            "expected a SetAlwaysRun server event"
+        );
+        let pause_serial = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::AgentPause { serial_num } => Some(*serial_num),
+                _ => None,
+            })
+            .ok_or("expected an AgentPause server event")?;
+        let resume_serial = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::AgentResume { serial_num } => Some(*serial_num),
+                _ => None,
+            })
+            .ok_or("expected an AgentResume server event")?;
+        assert!(resume_serial > pause_serial);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::AgentFov { vertical_angle } if vertical_angle.to_bits() == 1.5_f32.to_bits())),
+            "expected an AgentFov server event"
+        );
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::AgentHeightWidth {
+                    height: 600,
+                    width: 800
+                }
+            )),
+            "expected an AgentHeightWidth server event"
+        );
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::ForceScriptControlRelease)),
+            "expected a ForceScriptControlRelease server event"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn script_camera_and_controls_reach_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let object = uuid::Uuid::from_u128(0xCA3_1001);
+        // Sim -> client: a script takes controls, sets follow-cam, then clears it.
+        sim.send_script_control_change(
+            &[ScriptControl {
+                take: true,
+                controls: ControlFlags::AT_POS | ControlFlags::UP_POS,
+                pass_to_agent: true,
+            }],
+            now,
+        )?;
+        sim.send_set_follow_cam_properties(
+            object,
+            &[FollowCamPropertyValue {
+                property: FollowCamProperty::Distance,
+                value: 6.0,
+            }],
+            now,
+        )?;
+        sim.send_clear_follow_cam_properties(object, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_client(&mut client);
+        let control = events
+            .iter()
+            .find_map(|e| match e {
+                Event::ScriptControlChange(controls) => controls.first().copied(),
+                _ => None,
+            })
+            .ok_or("expected a ScriptControlChange client event")?;
+        assert!(control.take);
+        assert!(control.pass_to_agent);
+        assert_eq!(
+            control.controls,
+            ControlFlags::AT_POS | ControlFlags::UP_POS
+        );
+
+        let (set_object, properties) = events
+            .iter()
+            .find_map(|e| match e {
+                Event::SetFollowCamProperties {
+                    object_id,
+                    properties,
+                } => Some((*object_id, properties.clone())),
+                _ => None,
+            })
+            .ok_or("expected a SetFollowCamProperties client event")?;
+        assert_eq!(set_object, object);
+        assert_eq!(
+            properties.first().map(|p| p.property),
+            Some(FollowCamProperty::Distance)
+        );
+
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::ClearFollowCamProperties { object_id } if *object_id == object
+            )),
+            "expected a ClearFollowCamProperties client event"
         );
         Ok(())
     }

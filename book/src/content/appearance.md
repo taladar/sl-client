@@ -55,6 +55,38 @@ pairs the gesture's inventory item id with its asset id) and
 `Command::DeactivateGestures` (by item id). Both are fire-and-forget — there is
 no reply.
 
+## Agent state and viewport
+
+Beyond appearance, the viewer keeps the simulator informed about the agent's
+movement mode and the physical viewport it is rendering into. None of these
+have replies:
+
+- **Run vs. walk** — `Command::SetAlwaysRun { always_run }` chooses whether
+  ground movement runs or walks (`SetAlwaysRun`).
+- **Pause / resume** — when the viewer stalls (a modal dialog, a long file
+  operation) it sends `Command::PauseAgent` so the simulator stops streaming
+  updates, then `Command::ResumeAgent` when it is reading the network again.
+  Both carry a single monotonic serial number (shared between the two messages);
+  the simulator ignores non-increasing values, so the session bumps it on every
+  pause *and* resume.
+- **Field of view** — `Command::SetAgentFov { vertical_angle }` reports the
+  camera's vertical FOV in radians (`AgentFOV`); the simulator uses it for
+  interest-list culling.
+- **Window size** — `Command::SetAgentSize { height, width }` reports the
+  viewport size in pixels (`AgentHeightWidth`), sent when the window is created
+  or resized.
+
+The opposite direction carries scripted control of the agent. After the agent
+grants a script `PERMISSION_TAKE_CONTROLS` (see
+[scripts](world.md) / the permission events), the simulator sends
+`ScriptControlChange` — surfaced as `Event::ScriptControlChange` — telling the
+client which movement controls the script is taking or releasing and whether
+they still drive the avatar. The client can forcibly hand them all back with
+`Command::ReleaseScriptControls` (`ForceScriptControlRelease`). Similarly, a
+script granted `PERMISSION_CONTROL_CAMERA` drives the follow-camera via
+`Event::SetFollowCamProperties` (a list of `llSetCameraParams`
+parameter/value pairs) and releases it with `Event::ClearFollowCamProperties`.
+
 ---
 
 > **In this codebase**
@@ -77,3 +109,17 @@ no reply.
 >   item-id/asset-id pairs) and `Command::DeactivateGestures`
 >   (`Session::activate_gestures` / `deactivate_gestures`). A simulator sees
 >   them as `ServerEvent::ActivateGestures` / `DeactivateGestures`.
+> - Agent state: commands `SetAlwaysRun`, `PauseAgent`, `ResumeAgent`,
+>   `SetAgentFov`, `SetAgentSize` (`Session::set_always_run` / `pause_agent` /
+>   `resume_agent` / `set_agent_fov` / `set_agent_size`). The pause/resume
+>   serial is the circuit's `pause_serial_num`. A simulator sees these as
+>   `ServerEvent::SetAlwaysRun` / `AgentPause` / `AgentResume` / `AgentFov` /
+>   `AgentHeightWidth`.
+> - Scripted controls and camera: `Command::ReleaseScriptControls`
+>   (`ForceScriptControlRelease`); events `Event::ScriptControlChange`
+>   (`Vec<ScriptControl>`), `Event::SetFollowCamProperties` /
+>   `ClearFollowCamProperties`. The `ScriptControl`, `FollowCamProperty` and
+>   `FollowCamPropertyValue` types live in `sl-proto/src/types/script.rs`; a
+>   simulator emits them with `SimSession::send_script_control_change` /
+>   `send_set_follow_cam_properties` / `send_clear_follow_cam_properties` and
+>   sees `ServerEvent::ForceScriptControlRelease`.

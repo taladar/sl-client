@@ -295,6 +295,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::ScriptTeleport(request) => {
                 info!("script teleport to {:?}", request.region_name);
             }
+            Event::ScriptControlChange(controls) => {
+                info!("script control change: {} change(s)", controls.len());
+            }
+            Event::SetFollowCamProperties { object_id, .. } => {
+                info!("follow-cam properties set by {object_id}");
+            }
+            Event::ClearFollowCamProperties { object_id } => {
+                info!("follow-cam properties cleared by {object_id}");
+            }
             Event::MuteList(entries) => info!("mute list: {} entr(ies)", entries.len()),
             Event::MuteListUnchanged => info!("mute list unchanged (cached)"),
             Event::ObjectAdded(object) => {

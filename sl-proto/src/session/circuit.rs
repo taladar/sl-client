@@ -177,6 +177,12 @@ use sl_wire::messages::{
     ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
 };
 use sl_wire::messages::{
+    AgentFOV, AgentFOVAgentDataBlock, AgentFOVFOVBlockBlock, AgentHeightWidth,
+    AgentHeightWidthAgentDataBlock, AgentHeightWidthHeightWidthBlockBlock, AgentPause,
+    AgentPauseAgentDataBlock, AgentResume, AgentResumeAgentDataBlock, ForceScriptControlRelease,
+    ForceScriptControlReleaseAgentDataBlock, SetAlwaysRun, SetAlwaysRunAgentDataBlock,
+};
+use sl_wire::messages::{
     BuyObjectInventory, BuyObjectInventoryAgentDataBlock, BuyObjectInventoryDataBlock, ObjectBuy,
     ObjectBuyAgentDataBlock, ObjectBuyObjectDataBlock, ObjectDuplicateOnRay,
     ObjectDuplicateOnRayAgentDataBlock, ObjectDuplicateOnRayObjectDataBlock, ObjectSpinStart,
@@ -229,6 +235,7 @@ impl Circuit {
             session_id,
             code: circuit_code,
             next_sequence: 1,
+            pause_serial_num: 0,
             pending_acks: Vec::new(),
             unacked: BTreeMap::new(),
             seen: SeenWindow::default(),
@@ -1378,6 +1385,118 @@ impl Circuit {
                     gesture_flags: 0,
                 })
                 .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Allocates the next `AgentPause`/`AgentResume` serial number (a single
+    /// monotonic counter shared by both, as the simulator ignores non-increasing
+    /// values).
+    pub(crate) const fn next_pause_serial(&mut self) -> u32 {
+        self.pause_serial_num = self.pause_serial_num.wrapping_add(1);
+        self.pause_serial_num
+    }
+
+    /// Queues a `SetAlwaysRun` reliably, choosing whether the avatar runs
+    /// (`always_run`) or walks for ground movement.
+    pub(crate) fn send_set_always_run(
+        &mut self,
+        always_run: bool,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::SetAlwaysRun(SetAlwaysRun {
+            agent_data: SetAlwaysRunAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                always_run,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AgentPause` reliably, telling the simulator the viewer has
+    /// stalled so it stops streaming updates until a resume.
+    pub(crate) fn send_agent_pause(&mut self, now: Instant) -> Result<(), WireError> {
+        let serial_num = self.next_pause_serial();
+        let message = AnyMessage::AgentPause(AgentPause {
+            agent_data: AgentPauseAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                serial_num,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AgentResume` reliably, telling the simulator the viewer has
+    /// resumed reading the network after a pause.
+    pub(crate) fn send_agent_resume(&mut self, now: Instant) -> Result<(), WireError> {
+        let serial_num = self.next_pause_serial();
+        let message = AnyMessage::AgentResume(AgentResume {
+            agent_data: AgentResumeAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                serial_num,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AgentFOV` reliably, updating the agent's vertical field of view
+    /// (radians). The `GenCounter` is fixed at 0, matching the real viewer.
+    pub(crate) fn send_agent_fov(
+        &mut self,
+        vertical_angle: f32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AgentFOV(AgentFOV {
+            agent_data: AgentFOVAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                circuit_code: self.code,
+            },
+            fov_block: AgentFOVFOVBlockBlock {
+                gen_counter: 0,
+                vertical_angle,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AgentHeightWidth` reliably, updating the agent's viewport size
+    /// (pixels). The `GenCounter` is fixed at 0, matching the real viewer.
+    pub(crate) fn send_agent_height_width(
+        &mut self,
+        height: u16,
+        width: u16,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AgentHeightWidth(AgentHeightWidth {
+            agent_data: AgentHeightWidthAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+                circuit_code: self.code,
+            },
+            height_width_block: AgentHeightWidthHeightWidthBlockBlock {
+                gen_counter: 0,
+                height,
+                width,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ForceScriptControlRelease` reliably, forcibly releasing any
+    /// agent movement controls a script has taken.
+    pub(crate) fn send_force_script_control_release(
+        &mut self,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ForceScriptControlRelease(ForceScriptControlRelease {
+            agent_data: ForceScriptControlReleaseAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }

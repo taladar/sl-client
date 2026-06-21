@@ -12,8 +12,8 @@ mod test {
         AssetType, AttachmentPoint, Camera, ChatAudible, ChatSourceType, ChatType,
         ClassifiedUpdate, ClickAction, CoarseLocation, ControlFlags, CreateGroupParams, DayCycle,
         DayCycleFrame, DeRezDestination, Diagnostic, DirFindFlags, DisconnectReason,
-        EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, FriendRights,
-        GestureActivation, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit,
+        EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, FollowCamProperty,
+        FriendRights, GestureActivation, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit,
         GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate,
         InventoryItem, LandingType, LindenAmount, LoginAccount, LoginParams, LookAtType,
         MapItemType, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType,
@@ -2698,6 +2698,190 @@ mod test {
             })
             .ok_or("expected a DeactivateGestures")?;
         assert_eq!(deactivate.data.first().map(|d| d.item_id), Some(item));
+        Ok(())
+    }
+
+    #[test]
+    fn set_always_run_packs_request() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.set_always_run(true, now)?;
+        let sent = drain(&mut session)?;
+        let set = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::SetAlwaysRun(s) => Some(s),
+                _ => None,
+            })
+            .ok_or("expected a SetAlwaysRun")?;
+        assert!(set.agent_data.always_run);
+        Ok(())
+    }
+
+    #[test]
+    fn agent_pause_resume_increment_serial() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.pause_agent(now)?;
+        session.resume_agent(now)?;
+        let sent = drain(&mut session)?;
+        let pause_serial = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AgentPause(p) => Some(p.agent_data.serial_num),
+                _ => None,
+            })
+            .ok_or("expected an AgentPause")?;
+        let resume_serial = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AgentResume(r) => Some(r.agent_data.serial_num),
+                _ => None,
+            })
+            .ok_or("expected an AgentResume")?;
+        // The serial is monotonic and shared by both messages.
+        assert!(resume_serial > pause_serial);
+        Ok(())
+    }
+
+    #[test]
+    fn agent_fov_packs_request() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.set_agent_fov(1.25, now)?;
+        let sent = drain(&mut session)?;
+        let fov = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AgentFOV(f) => Some(f),
+                _ => None,
+            })
+            .ok_or("expected an AgentFOV")?;
+        assert_eq!(fov.fov_block.vertical_angle.to_bits(), 1.25_f32.to_bits());
+        assert_eq!(fov.fov_block.gen_counter, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn agent_height_width_packs_request() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.set_agent_size(768, 1024, now)?;
+        let sent = drain(&mut session)?;
+        let size = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AgentHeightWidth(s) => Some(s),
+                _ => None,
+            })
+            .ok_or("expected an AgentHeightWidth")?;
+        assert_eq!(size.height_width_block.height, 768);
+        assert_eq!(size.height_width_block.width, 1024);
+        Ok(())
+    }
+
+    #[test]
+    fn force_script_control_release_packs_request() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.release_script_controls(now)?;
+        let sent = drain(&mut session)?;
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::ForceScriptControlRelease(_)))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn script_control_change_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let message = AnyMessage::ScriptControlChange(sl_wire::messages::ScriptControlChange {
+            data: vec![sl_wire::messages::ScriptControlChangeDataBlock {
+                take_controls: true,
+                controls: ControlFlags::AT_POS.bits() | ControlFlags::FLY.bits(),
+                pass_to_agent: false,
+            }],
+        });
+        let datagram = server_message(&message, 9001, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        let control = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ScriptControlChange(controls) => controls.into_iter().next(),
+                _ => None,
+            })
+            .ok_or("expected a ScriptControlChange event")?;
+        assert!(control.take);
+        assert!(!control.pass_to_agent);
+        assert_eq!(control.controls, ControlFlags::AT_POS | ControlFlags::FLY);
+        Ok(())
+    }
+
+    #[test]
+    fn follow_cam_properties_surface_events() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let object = uuid::Uuid::from_u128(0xCA3_0001);
+        let set = AnyMessage::SetFollowCamProperties(sl_wire::messages::SetFollowCamProperties {
+            object_data: sl_wire::messages::SetFollowCamPropertiesObjectDataBlock {
+                object_id: object,
+            },
+            camera_property: vec![
+                sl_wire::messages::SetFollowCamPropertiesCameraPropertyBlock {
+                    r#type: FollowCamProperty::Distance.to_i32(),
+                    value: 4.5,
+                },
+            ],
+        });
+        let set_datagram = server_message(&set, 9002, true)?;
+        session.handle_datagram(sim_addr(), &set_datagram, now)?;
+        let (set_object, properties) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::SetFollowCamProperties {
+                    object_id,
+                    properties,
+                } => Some((object_id, properties)),
+                _ => None,
+            })
+            .ok_or("expected a SetFollowCamProperties event")?;
+        assert_eq!(set_object, object);
+        let first = properties.first().ok_or("first property")?;
+        assert_eq!(first.property, FollowCamProperty::Distance);
+        assert_eq!(first.value.to_bits(), 4.5_f32.to_bits());
+
+        let clear =
+            AnyMessage::ClearFollowCamProperties(sl_wire::messages::ClearFollowCamProperties {
+                object_data: sl_wire::messages::ClearFollowCamPropertiesObjectDataBlock {
+                    object_id: object,
+                },
+            });
+        let clear_datagram = server_message(&clear, 9003, true)?;
+        session.handle_datagram(sim_addr(), &clear_datagram, now)?;
+        let cleared = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ClearFollowCamProperties { object_id } => Some(object_id),
+                _ => None,
+            })
+            .ok_or("expected a ClearFollowCamProperties event")?;
+        assert_eq!(cleared, object);
         Ok(())
     }
 

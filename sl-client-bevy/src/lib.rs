@@ -940,6 +940,24 @@ fn advance_running(
             Command::DeactivateGestures { item_ids } => {
                 session.deactivate_gestures(item_ids, now).ok();
             }
+            Command::SetAlwaysRun { always_run } => {
+                session.set_always_run(*always_run, now).ok();
+            }
+            Command::PauseAgent => {
+                session.pause_agent(now).ok();
+            }
+            Command::ResumeAgent => {
+                session.resume_agent(now).ok();
+            }
+            Command::SetAgentFov { vertical_angle } => {
+                session.set_agent_fov(*vertical_angle, now).ok();
+            }
+            Command::SetAgentSize { height, width } => {
+                session.set_agent_size(*height, *width, now).ok();
+            }
+            Command::ReleaseScriptControls => {
+                session.release_script_controls(now).ok();
+            }
             Command::SendGroupNotice {
                 group_id,
                 subject,

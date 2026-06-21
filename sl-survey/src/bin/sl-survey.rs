@@ -635,6 +635,9 @@ impl Survey {
             | Event::ScriptPermissionRequest(_)
             | Event::LoadUrl(_)
             | Event::ScriptTeleport(_)
+            | Event::ScriptControlChange(_)
+            | Event::SetFollowCamProperties { .. }
+            | Event::ClearFollowCamProperties { .. }
             | Event::MuteList(_)
             | Event::MuteListUnchanged
             | Event::MoneyBalance(_)

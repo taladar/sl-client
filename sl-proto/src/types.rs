@@ -85,8 +85,9 @@ pub use parcel::{
 };
 pub use region::{RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits};
 pub use script::{
-    AlertInfo, LoadUrlRequest, MuteEntry, MuteFlags, MuteType, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
+    AlertInfo, FollowCamProperty, FollowCamPropertyValue, LoadUrlRequest, MuteEntry, MuteFlags,
+    MuteType, ScriptControl, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest,
 };
 pub use session::{
     Camera, DisconnectReason, LoginHttpRequest, LoginParams, Reliability, Throttle, Transmit,
