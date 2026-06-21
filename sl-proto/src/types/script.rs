@@ -158,17 +158,50 @@ pub struct AlertInfo {
     pub extra_params: String,
 }
 
+/// Whether a scripted object is *taking* the named movement controls or
+/// *releasing* them — the `TakeControls` wire flag on a `ScriptControlChange.Data`
+/// block (`llTakeControls` vs `llReleaseControls`), modelled as a named intent
+/// rather than a bare `bool`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptControlAction {
+    /// The script is *taking* the named controls (the `TakeControls` flag is
+    /// set): route the control inputs to the script.
+    Take,
+    /// The script is *releasing* the named controls (the `TakeControls` flag is
+    /// clear): stop routing them to the script.
+    Release,
+}
+
+impl ScriptControlAction {
+    /// Whether this action sets the `TakeControls` wire flag: `true` for
+    /// [`Take`](Self::Take), `false` for [`Release`](Self::Release).
+    #[must_use]
+    pub const fn takes_controls(self) -> bool {
+        matches!(self, Self::Take)
+    }
+
+    /// The action for a `TakeControls` flag bit: [`Take`](Self::Take) when set,
+    /// [`Release`](Self::Release) when clear.
+    #[must_use]
+    pub const fn from_take_controls(take_controls: bool) -> Self {
+        if take_controls {
+            Self::Take
+        } else {
+            Self::Release
+        }
+    }
+}
+
 /// One control-grant change requested by a scripted object (`llTakeControls` /
 /// `llReleaseControls`), parsed from one `ScriptControlChange.Data` block. The
 /// sim sends this after the agent granted a script
 /// [`ScriptPermissions::TAKE_CONTROLS`]; the client should route the named
-/// control inputs to the script (and, when [`take`](Self::take) is `false`,
-/// stop doing so).
+/// control inputs to the script (and, when [`action`](Self::action) is
+/// [`ScriptControlAction::Release`], stop doing so).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScriptControl {
-    /// Whether the script is *taking* the named controls (`true`) or releasing
-    /// them (`false`).
-    pub take: bool,
+    /// Whether the script is *taking* the named controls or releasing them.
+    pub action: ScriptControlAction,
     /// The movement-control bits the script is taking or releasing.
     pub controls: ControlFlags,
     /// Whether the named control inputs should still drive the agent in addition
@@ -388,4 +421,31 @@ pub struct MuteEntry {
     pub mute_type: MuteType,
     /// The per-entry exception flags.
     pub flags: MuteFlags,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ScriptControlAction;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn script_control_action_maps_to_take_controls_flag() {
+        assert!(ScriptControlAction::Take.takes_controls());
+        assert!(!ScriptControlAction::Release.takes_controls());
+        assert_eq!(
+            ScriptControlAction::from_take_controls(true),
+            ScriptControlAction::Take
+        );
+        assert_eq!(
+            ScriptControlAction::from_take_controls(false),
+            ScriptControlAction::Release
+        );
+        // The action round-trips bit-identically to the historical `bool`.
+        for action in [ScriptControlAction::Take, ScriptControlAction::Release] {
+            assert_eq!(
+                ScriptControlAction::from_take_controls(action.takes_controls()),
+                action
+            );
+        }
+    }
 }

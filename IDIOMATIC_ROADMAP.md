@@ -237,8 +237,27 @@ Replace ambiguous `bool`s and magic ints with named enums.
   `content/attachments.md` updated. +1 unit test (mode↔first-detach-all-flag
   mapping + round-trip) and the lifecycle + `sim_session` round-trip suites
   updated. NO sl-types touched (a client wire-protocol concept).
-- [ ] script `take: bool` → `ScriptPermissionResponse { Granted, Denied }`
-  (`types/script.rs:171`).
+- [x] script-control `take: bool` → `ScriptControlAction { Take, Release }`
+  (`types/script.rs:171`). The roadmap's proposed name
+  (`ScriptPermissionResponse { Granted, Denied }`) was a misnomer — the cited
+  field is `ScriptControl.take`, the `TakeControls` flag on a
+  `ScriptControlChange.Data` block (`llTakeControls`/`llReleaseControls`), which
+  is take/release of movement controls, *not* a permission grant/deny (the real
+  permission answer, `ScriptAnswerYes`, carries a granted-subset *mask*, no
+  bool). Renamed (user-approved) to a public `ScriptControlAction` enum in
+  `sl-proto/src/types/script.rs` (`Take`/`Release`,
+  `takes_controls`/`from_take_controls`) replacing the `take: bool` field on
+  `ScriptControl` (renamed `take` → `action`). Codec wraps at the boundary
+  (decode `from_take_controls`, encode `action.takes_controls()`) so the
+  `ScriptControlChange` `TakeControls` wire bool is byte-identical. Re-exported
+  through `sl-proto`/`sl-client-tokio`/`sl-client-bevy` (added `ScriptControl`
+  itself to the tokio/bevy re-exports too — it was previously absent there yet
+  is needed to name the enum). The REPL only renders
+  `Event::ScriptControlChange` as a label (never touches the field), so no REPL
+  change. Book `content/appearance.md` updated. +1 unit test
+  (action↔take-controls-flag mapping + round-trip); lifecycle + `sim_session`
+  round-trip suites updated. NO sl-types touched (a client wire-protocol
+  concept).
 - [ ] magic ints → enums: map-layer constant (`session.rs:43`); consolidate the
   `TELEPORT_FLAGS_*` constants into the existing `TeleportFlags` newtype
   (`types/editing.rs:490`).

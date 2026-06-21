@@ -52,10 +52,10 @@ use crate::types::{
     ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo,
     ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField,
     PickUpdate, PlacesResult, Postcard, PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability,
-    RestoreItem, RezAttachment, SaleType, ScriptControl, ScriptPermissions, ScriptTeleportRequest,
-    SoundFlags, SoundPreload, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
-    Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
-    WearableType, global_to_handle, handle_to_grid,
+    RestoreItem, RezAttachment, SaleType, ScriptControl, ScriptControlAction, ScriptPermissions,
+    ScriptTeleportRequest, SoundFlags, SoundPreload, TelehubInfo, TeleportFlags, TerrainLayerType,
+    TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, Wearable, WearableType, global_to_handle, handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
@@ -2389,7 +2389,7 @@ impl Session {
                     .data
                     .iter()
                     .map(|block| ScriptControl {
-                        take: block.take_controls,
+                        action: ScriptControlAction::from_take_controls(block.take_controls),
                         controls: ControlFlags::from_bits(block.controls),
                         pass_to_agent: block.pass_to_agent,
                     })

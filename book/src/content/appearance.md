@@ -119,7 +119,9 @@ parameter/value pairs) and releases it with `Event::ClearFollowCamProperties`.
 > - Scripted controls and camera: `Command::ReleaseScriptControls`
 >   (`ForceScriptControlRelease`); events `Event::ScriptControlChange`
 >   (`Vec<ScriptControl>`), `Event::SetFollowCamProperties` /
->   `ClearFollowCamProperties`. The `ScriptControl`, `FollowCamProperty` and
+>   `ClearFollowCamProperties`. Each `ScriptControl` carries a
+>   `ScriptControlAction` (`Take` / `Release`) rather than a bare `bool`. The
+>   `ScriptControl`, `ScriptControlAction`, `FollowCamProperty` and
 >   `FollowCamPropertyValue` types live in `sl-proto/src/types/script.rs`; a
 >   simulator emits them with `SimSession::send_script_control_change` /
 >   `send_set_follow_cam_properties` / `send_clear_follow_cam_properties` and
