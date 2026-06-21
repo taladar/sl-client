@@ -33,9 +33,10 @@ The client can:
   `ObjectAttach` message): by region-local id, to a point, at a rotation.
 - **Wear from inventory** a single item (`Command::RezAttachment`,
   `RezSingleAttachmentFromInv`) or several at once
-  (`Command::RezAttachments`, `RezMultipleAttachmentsFromInv`, which can first
-  detach everything currently worn). Both take a `RezAttachment` describing the
-  item, owner, point and attachment mode.
+  (`Command::RezAttachments`, `RezMultipleAttachmentsFromInv`, whose
+  `DetachOrder` says whether to first detach everything currently worn or keep
+  it). Both take a `RezAttachment` describing the item, owner, point and
+  attachment mode.
 - **Detach back to inventory** by region-local id (`Command::DetachObjects`,
   `ObjectDetach`) or by inventory item id (`Command::RemoveAttachment`,
   `RemoveAttachment`).
@@ -59,8 +60,9 @@ observes exactly what a client wears.
 >
 > - Types are in `sl-proto/src/types/appearance.rs`: `AttachmentPoint` (with
 >   `to_code` / `from_code` / `with_mode` / `split_code` / `is_hud`),
->   `AttachmentMode` (`Add` / `Replace`), and `RezAttachment`. The attachment
->   list on `AvatarAppearance` uses `AvatarAttachment`.
+>   `AttachmentMode` (`Add` / `Replace`), `DetachOrder` (`DetachAllFirst` /
+>   `Keep`, the `RezAttachments` `FirstDetachAll` flag), and `RezAttachment`.
+>   The attachment list on `AvatarAppearance` uses `AvatarAttachment`.
 > - Commands `AttachObject`, `DetachObjects`, `DropAttachments`,
 >   `RemoveAttachment`, `RezAttachment`, `RezAttachments`; the `Session` methods
 >   are `attach_object`, `detach_objects`, `drop_attachments`,

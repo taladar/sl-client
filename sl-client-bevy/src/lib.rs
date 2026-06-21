@@ -50,11 +50,11 @@ pub use sl_proto::{
     ActiveGroup, AgentPreferences, AnimatedObjects, AnyMessage, AvatarClassified,
     AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, Camera, CameraError,
     ChatAudible, ChatMessage, ChatSourceType, ChatType, ClassifiedInfo, ClassifiedUpdate,
-    ClickAction, Command, ControlFlags, CreateGroupParams, DeRezDestination, Diagnostic,
-    DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, ExperienceInfo,
-    ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData,
-    Friend, FriendRights, GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice,
-    GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit,
+    ClickAction, Command, ControlFlags, CreateGroupParams, DeRezDestination, DetachOrder,
+    Diagnostic, DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo,
+    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh,
+    FlexibleData, Friend, FriendRights, GltfMaterialOverride, GroupMember, GroupMembership,
+    GroupNotice, GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit,
     GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation,
     IceCandidate, ImDialog, InstantMessage, InterestsUpdate, InventoryFolder, InventoryItem,
     InventoryOffer, InventoryType, Kilobits, LandingType, LegacyMaterial, LightData, LightImage,
@@ -1674,11 +1674,11 @@ fn advance_running(
             }
             Command::RezAttachments {
                 compound_id,
-                first_detach_all,
+                detach,
                 attachments,
             } => {
                 session
-                    .rez_attachments(*compound_id, *first_detach_all, attachments, now)
+                    .rez_attachments(*compound_id, *detach, attachments, now)
                     .ok();
             }
             Command::ViewerEffect(effects) => {
