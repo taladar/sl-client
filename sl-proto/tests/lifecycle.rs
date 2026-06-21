@@ -20,11 +20,12 @@ mod test {
         MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
         ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
         ParcelFlags, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-        ParcelUpdate, PermissionField, PickUpdate, PointAtType, Postcard, PrimShape, ProductType,
-        ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType,
-        ScriptPermissions, Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType,
-        Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        WaterSettings, WearableType, avatar_texture, group_powers, pcode,
+        ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate, PointAtType,
+        Postcard, PrimShape, ProductType, ProfileUpdate, RegionInfoUpdate, Reliability,
+        RestoreItem, RezAttachment, SaleType, ScriptPermissions, Session, SkySettings, SoundFlags,
+        TeleportFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
+        group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -4713,11 +4714,13 @@ mod test {
                 creator_id: uuid::Uuid::nil(),
                 owner_id: uuid::Uuid::nil(),
                 group_id: uuid::Uuid::nil(),
-                base_mask: 0x0008_e000,
-                owner_mask: 0x0008_e000,
-                group_mask: 0,
-                everyone_mask: 0,
-                next_owner_mask: 0x0008_e000,
+                permissions: Permissions5 {
+                    base: Permissions::from_bits(0x0008_e000),
+                    owner: Permissions::from_bits(0x0008_e000),
+                    group: Permissions::NONE,
+                    everyone: Permissions::NONE,
+                    next_owner: Permissions::from_bits(0x0008_e000),
+                },
                 group_owned: false,
                 transaction_id: uuid::Uuid::nil(),
                 asset_type: 6,
@@ -5950,8 +5953,8 @@ mod test {
         assert_eq!(item.asset_id, uuid::Uuid::from_u128(0xA1));
         assert_eq!(item.creator_id, uuid::Uuid::from_u128(0xC1));
         assert_eq!(item.inv_type, 7);
-        assert_eq!(item.base_mask, 0x7FFF_FFFF);
-        assert_eq!(item.next_owner_mask, 532_480);
+        assert_eq!(item.permissions.base, Permissions::from_bits(0x7FFF_FFFF));
+        assert_eq!(item.permissions.next_owner, Permissions::from_bits(532_480));
         Ok(())
     }
 
@@ -11511,11 +11514,7 @@ mod test {
             creator_id: uuid::Uuid::nil(),
             group_id: uuid::Uuid::nil(),
             group_owned: false,
-            base_mask: 0,
-            owner_mask: 0,
-            group_mask: 0,
-            everyone_mask: 0,
-            next_owner_mask: 0,
+            permissions: Permissions5::empty(),
         }
     }
 

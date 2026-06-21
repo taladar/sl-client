@@ -61,14 +61,14 @@ use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::{
     AbuseReport, AnyMessage, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd, MessageId,
-    ObjectMediaResponse, PacketFlags, ParcelVoiceInfo, Reader, VoiceAccountInfo,
-    build_group_notice_bucket, build_login_request, message_name, parse_agent_preferences,
-    parse_attachment_resources, parse_datagram, parse_display_names, parse_experience_ids,
-    parse_experience_infos, parse_experience_permissions, parse_get_object_cost,
-    parse_get_object_physics_data, parse_gltf_material_override, parse_land_resource_detail,
-    parse_land_resource_summary, parse_land_resources_reply, parse_object_physics_properties,
-    parse_region_experiences, parse_remote_parcel_reply, parse_resource_cost_selected,
-    parse_simulator_features, zero_decode,
+    ObjectMediaResponse, PacketFlags, ParcelVoiceInfo, Permissions, Permissions5, Reader,
+    VoiceAccountInfo, build_group_notice_bucket, build_login_request, message_name,
+    parse_agent_preferences, parse_attachment_resources, parse_datagram, parse_display_names,
+    parse_experience_ids, parse_experience_infos, parse_experience_permissions,
+    parse_get_object_cost, parse_get_object_physics_data, parse_gltf_material_override,
+    parse_land_resource_detail, parse_land_resource_summary, parse_land_resources_reply,
+    parse_object_physics_properties, parse_region_experiences, parse_remote_parcel_reply,
+    parse_resource_cost_selected, parse_simulator_features, zero_decode,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -2343,11 +2343,13 @@ impl Session {
                         object_id: data.object_id,
                         owner_id: data.owner_id,
                         group_id: data.group_id,
-                        base_mask: data.base_mask,
-                        owner_mask: data.owner_mask,
-                        group_mask: data.group_mask,
-                        everyone_mask: data.everyone_mask,
-                        next_owner_mask: data.next_owner_mask,
+                        permissions: Permissions5 {
+                            base: Permissions::from_bits(data.base_mask),
+                            owner: Permissions::from_bits(data.owner_mask),
+                            group: Permissions::from_bits(data.group_mask),
+                            everyone: Permissions::from_bits(data.everyone_mask),
+                            next_owner: Permissions::from_bits(data.next_owner_mask),
+                        },
                         ownership_cost: data.ownership_cost,
                         sale_type: data.sale_type,
                         sale_price: data.sale_price,

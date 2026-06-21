@@ -38,6 +38,7 @@ use sl_wire::messages::{
     UUIDNameReply, UpdateCreateInventoryItemInventoryDataBlock,
 };
 use sl_wire::{Llsd, SkeletonFolder};
+use sl_wire::{Permissions, Permissions5};
 use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use uuid::Uuid;
@@ -1146,10 +1147,12 @@ pub(crate) fn inventory_item_crc(item: &InventoryItem) -> u32 {
         .wrapping_add(uuid_crc(item.last_owner_id))
         .wrapping_add(uuid_crc(item.group_id))
         .wrapping_add(
-            item.base_mask
-                .wrapping_add(item.owner_mask)
-                .wrapping_add(item.everyone_mask)
-                .wrapping_add(item.group_mask),
+            item.permissions
+                .base
+                .bits()
+                .wrapping_add(item.permissions.owner.bits())
+                .wrapping_add(item.permissions.everyone.bits())
+                .wrapping_add(item.permissions.group.bits()),
         );
     let sale_info_crc = item
         .sale_price
@@ -1187,11 +1190,13 @@ pub(crate) fn inventory_item(data: &InventoryDescendentsItemDataBlock) -> Invent
         creator_id: data.creator_id,
         group_id: data.group_id,
         group_owned: data.group_owned,
-        base_mask: data.base_mask,
-        owner_mask: data.owner_mask,
-        group_mask: data.group_mask,
-        everyone_mask: data.everyone_mask,
-        next_owner_mask: data.next_owner_mask,
+        permissions: Permissions5 {
+            base: Permissions::from_bits(data.base_mask),
+            owner: Permissions::from_bits(data.owner_mask),
+            group: Permissions::from_bits(data.group_mask),
+            everyone: Permissions::from_bits(data.everyone_mask),
+            next_owner: Permissions::from_bits(data.next_owner_mask),
+        },
     }
 }
 
@@ -1217,11 +1222,13 @@ pub(crate) fn inventory_item_from_create(
         creator_id: data.creator_id,
         group_id: data.group_id,
         group_owned: data.group_owned,
-        base_mask: data.base_mask,
-        owner_mask: data.owner_mask,
-        group_mask: data.group_mask,
-        everyone_mask: data.everyone_mask,
-        next_owner_mask: data.next_owner_mask,
+        permissions: Permissions5 {
+            base: Permissions::from_bits(data.base_mask),
+            owner: Permissions::from_bits(data.owner_mask),
+            group: Permissions::from_bits(data.group_mask),
+            everyone: Permissions::from_bits(data.everyone_mask),
+            next_owner: Permissions::from_bits(data.next_owner_mask),
+        },
     }
 }
 
@@ -1255,11 +1262,13 @@ pub(crate) fn bulk_update_item(data: &BulkUpdateInventoryItemDataBlock) -> Inven
         creator_id: data.creator_id,
         group_id: data.group_id,
         group_owned: data.group_owned,
-        base_mask: data.base_mask,
-        owner_mask: data.owner_mask,
-        group_mask: data.group_mask,
-        everyone_mask: data.everyone_mask,
-        next_owner_mask: data.next_owner_mask,
+        permissions: Permissions5 {
+            base: Permissions::from_bits(data.base_mask),
+            owner: Permissions::from_bits(data.owner_mask),
+            group: Permissions::from_bits(data.group_mask),
+            everyone: Permissions::from_bits(data.everyone_mask),
+            next_owner: Permissions::from_bits(data.next_owner_mask),
+        },
     }
 }
 
@@ -2274,11 +2283,13 @@ pub(crate) fn bulk_update_item_from_llsd(item: &Llsd) -> InventoryItem {
             .get("GroupOwned")
             .and_then(Llsd::as_bool)
             .unwrap_or(false),
-        base_mask: i32_member(item, "BaseMask").cast_unsigned(),
-        owner_mask: i32_member(item, "OwnerMask").cast_unsigned(),
-        group_mask: i32_member(item, "GroupMask").cast_unsigned(),
-        everyone_mask: i32_member(item, "EveryoneMask").cast_unsigned(),
-        next_owner_mask: i32_member(item, "NextOwnerMask").cast_unsigned(),
+        permissions: Permissions5 {
+            base: Permissions::from_bits(i32_member(item, "BaseMask").cast_unsigned()),
+            owner: Permissions::from_bits(i32_member(item, "OwnerMask").cast_unsigned()),
+            group: Permissions::from_bits(i32_member(item, "GroupMask").cast_unsigned()),
+            everyone: Permissions::from_bits(i32_member(item, "EveryoneMask").cast_unsigned()),
+            next_owner: Permissions::from_bits(i32_member(item, "NextOwnerMask").cast_unsigned()),
+        },
     }
 }
 
@@ -2374,11 +2385,13 @@ pub(crate) fn inventory_item_from_llsd(item: &Llsd) -> InventoryItem {
             .and_then(|p| p.get("is_owner_group"))
             .and_then(Llsd::as_bool)
             .unwrap_or(false),
-        base_mask: perm("base_mask"),
-        owner_mask: perm("owner_mask"),
-        group_mask: perm("group_mask"),
-        everyone_mask: perm("everyone_mask"),
-        next_owner_mask: perm("next_owner_mask"),
+        permissions: Permissions5 {
+            base: Permissions::from_bits(perm("base_mask")),
+            owner: Permissions::from_bits(perm("owner_mask")),
+            group: Permissions::from_bits(perm("group_mask")),
+            everyone: Permissions::from_bits(perm("everyone_mask")),
+            next_owner: Permissions::from_bits(perm("next_owner_mask")),
+        },
     }
 }
 
@@ -3056,16 +3069,25 @@ pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Llsd {
         ("CreatorID", Llsd::Uuid(item.creator_id)),
         ("GroupID", Llsd::Uuid(item.group_id)),
         ("GroupOwned", Llsd::Boolean(item.group_owned)),
-        ("BaseMask", Llsd::Integer(item.base_mask.cast_signed())),
-        ("OwnerMask", Llsd::Integer(item.owner_mask.cast_signed())),
-        ("GroupMask", Llsd::Integer(item.group_mask.cast_signed())),
+        (
+            "BaseMask",
+            Llsd::Integer(item.permissions.base.bits().cast_signed()),
+        ),
+        (
+            "OwnerMask",
+            Llsd::Integer(item.permissions.owner.bits().cast_signed()),
+        ),
+        (
+            "GroupMask",
+            Llsd::Integer(item.permissions.group.bits().cast_signed()),
+        ),
         (
             "EveryoneMask",
-            Llsd::Integer(item.everyone_mask.cast_signed()),
+            Llsd::Integer(item.permissions.everyone.bits().cast_signed()),
         ),
         (
             "NextOwnerMask",
-            Llsd::Integer(item.next_owner_mask.cast_signed()),
+            Llsd::Integer(item.permissions.next_owner.bits().cast_signed()),
         ),
     ])
 }
@@ -3126,16 +3148,25 @@ pub(crate) fn inventory_folder_to_llsd(folder: &InventoryFolder) -> Llsd {
 /// `permissions` and `sale_info` maps (inverse of [`inventory_item_from_llsd`]).
 pub(crate) fn inventory_item_to_llsd(item: &InventoryItem) -> Llsd {
     let permissions = llsd_map(vec![
-        ("base_mask", Llsd::Integer(item.base_mask.cast_signed())),
-        ("owner_mask", Llsd::Integer(item.owner_mask.cast_signed())),
-        ("group_mask", Llsd::Integer(item.group_mask.cast_signed())),
+        (
+            "base_mask",
+            Llsd::Integer(item.permissions.base.bits().cast_signed()),
+        ),
+        (
+            "owner_mask",
+            Llsd::Integer(item.permissions.owner.bits().cast_signed()),
+        ),
+        (
+            "group_mask",
+            Llsd::Integer(item.permissions.group.bits().cast_signed()),
+        ),
         (
             "everyone_mask",
-            Llsd::Integer(item.everyone_mask.cast_signed()),
+            Llsd::Integer(item.permissions.everyone.bits().cast_signed()),
         ),
         (
             "next_owner_mask",
-            Llsd::Integer(item.next_owner_mask.cast_signed()),
+            Llsd::Integer(item.permissions.next_owner.bits().cast_signed()),
         ),
         ("owner_id", Llsd::Uuid(item.owner_id)),
         ("last_owner_id", Llsd::Uuid(item.last_owner_id)),
@@ -3274,11 +3305,13 @@ pub(crate) fn object_properties(block: &ObjectPropertiesObjectDataBlock) -> Obje
         group_id: block.group_id,
         last_owner_id: block.last_owner_id,
         creation_date: block.creation_date,
-        base_mask: block.base_mask,
-        owner_mask: block.owner_mask,
-        group_mask: block.group_mask,
-        everyone_mask: block.everyone_mask,
-        next_owner_mask: block.next_owner_mask,
+        permissions: Permissions5 {
+            base: Permissions::from_bits(block.base_mask),
+            owner: Permissions::from_bits(block.owner_mask),
+            group: Permissions::from_bits(block.group_mask),
+            everyone: Permissions::from_bits(block.everyone_mask),
+            next_owner: Permissions::from_bits(block.next_owner_mask),
+        },
         ownership_cost: block.ownership_cost,
         sale_type: block.sale_type,
         sale_price: block.sale_price,
@@ -3331,6 +3364,7 @@ mod caps_serializer_tests {
         Event, GroupMember, GroupMembership, ImDialog, InstantMessage, InventoryFolder,
         InventoryItem, LandingType, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus,
     };
+    use sl_wire::{Permissions, Permissions5};
 
     /// A V4 socket address for the given octets and port.
     fn addr(a: u8, b: u8, c: u8, d: u8, port: u16) -> SocketAddr {
@@ -3583,11 +3617,13 @@ mod caps_serializer_tests {
             creator_id: Uuid::from_u128(seed.wrapping_add(0x500)),
             group_id: Uuid::from_u128(seed.wrapping_add(0x600)),
             group_owned: true,
-            base_mask: 0x7fff_ffff,
-            owner_mask: 0x0008_0000,
-            group_mask: 0,
-            everyone_mask: 0x0002_0000,
-            next_owner_mask: 0x0008_2000,
+            permissions: Permissions5 {
+                base: Permissions::from_bits(0x7fff_ffff),
+                owner: Permissions::from_bits(0x0008_0000),
+                group: Permissions::NONE,
+                everyone: Permissions::from_bits(0x0002_0000),
+                next_owner: Permissions::from_bits(0x0008_2000),
+            },
         }
     }
 

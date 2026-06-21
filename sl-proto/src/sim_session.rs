@@ -82,8 +82,9 @@ use sl_wire::messages::{
     TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock,
 };
 use sl_wire::{
-    AnyMessage, ControlFlags, EventQueueEvent, Llsd, MessageId, PacketFlags, Reader, WireError,
-    Writer, build_event_queue_response, encode_datagram, parse_datagram, zero_decode,
+    AnyMessage, ControlFlags, EventQueueEvent, Llsd, MessageId, PacketFlags, Permissions,
+    Permissions5, Reader, WireError, Writer, build_event_queue_response, encode_datagram,
+    parse_datagram, zero_decode,
 };
 use uuid::Uuid;
 
@@ -2264,11 +2265,11 @@ impl SimSession {
                 object_id: properties.object_id,
                 owner_id: properties.owner_id,
                 group_id: properties.group_id,
-                base_mask: properties.base_mask,
-                owner_mask: properties.owner_mask,
-                group_mask: properties.group_mask,
-                everyone_mask: properties.everyone_mask,
-                next_owner_mask: properties.next_owner_mask,
+                base_mask: properties.permissions.base.bits(),
+                owner_mask: properties.permissions.owner.bits(),
+                group_mask: properties.permissions.group.bits(),
+                everyone_mask: properties.permissions.everyone.bits(),
+                next_owner_mask: properties.permissions.next_owner.bits(),
                 ownership_cost: properties.ownership_cost,
                 sale_type: properties.sale_type,
                 sale_price: properties.sale_price,
@@ -2989,11 +2990,13 @@ impl SimSession {
                         creator_id: data.creator_id,
                         owner_id: data.owner_id,
                         group_id: data.group_id,
-                        base_mask: data.base_mask,
-                        owner_mask: data.owner_mask,
-                        group_mask: data.group_mask,
-                        everyone_mask: data.everyone_mask,
-                        next_owner_mask: data.next_owner_mask,
+                        permissions: Permissions5 {
+                            base: Permissions::from_bits(data.base_mask),
+                            owner: Permissions::from_bits(data.owner_mask),
+                            group: Permissions::from_bits(data.group_mask),
+                            everyone: Permissions::from_bits(data.everyone_mask),
+                            next_owner: Permissions::from_bits(data.next_owner_mask),
+                        },
                         group_owned: data.group_owned,
                         transaction_id: data.transaction_id,
                         asset_type: data.r#type,

@@ -3,6 +3,7 @@
 use sl_types::attachment::AttachmentPoint;
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
+use sl_wire::Permissions5;
 use uuid::Uuid;
 
 /// Linden `PCode` constants: the object-class byte (`p_code`) in an object
@@ -637,16 +638,8 @@ pub struct ObjectProperties {
     pub last_owner_id: Uuid,
     /// The creation timestamp (seconds since the Unix epoch).
     pub creation_date: u64,
-    /// The base permissions mask.
-    pub base_mask: u32,
-    /// The owner permissions mask.
-    pub owner_mask: u32,
-    /// The group permissions mask.
-    pub group_mask: u32,
-    /// The everyone permissions mask.
-    pub everyone_mask: u32,
-    /// The next-owner permissions mask.
-    pub next_owner_mask: u32,
+    /// The base / owner / group / everyone / next-owner permission masks.
+    pub permissions: Permissions5,
     /// The ownership cost, in L$.
     pub ownership_cost: i32,
     /// The sale type (`SALE_TYPE_*`).
@@ -704,16 +697,8 @@ pub struct ObjectPropertiesFamily {
     pub owner_id: Uuid,
     /// The group the object is set to.
     pub group_id: Uuid,
-    /// The base permissions mask.
-    pub base_mask: u32,
-    /// The owner permissions mask.
-    pub owner_mask: u32,
-    /// The group permissions mask.
-    pub group_mask: u32,
-    /// The everyone permissions mask.
-    pub everyone_mask: u32,
-    /// The next-owner permissions mask.
-    pub next_owner_mask: u32,
+    /// The base / owner / group / everyone / next-owner permission masks.
+    pub permissions: Permissions5,
     /// The ownership cost, in L$.
     pub ownership_cost: i32,
     /// The sale type (`SALE_TYPE_*`).
