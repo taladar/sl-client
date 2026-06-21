@@ -124,8 +124,8 @@ mod test {
     };
     use sl_wire::{
         AnyMessage, HomeLocation, Llsd, LoginFailure, LoginRequest, LoginResponse, LoginSuccess,
-        MessageId, PacketFlags, Reader, SkeletonFolder, WireError, Writer, encode_datagram,
-        parse_datagram, parse_llsd_xml,
+        MessageId, PacketFlags, Reader, SkeletonFolder, StartLocation, WireError, Writer,
+        encode_datagram, parse_datagram, parse_llsd_xml,
     };
 
     /// A boxed test error.
@@ -153,7 +153,14 @@ mod test {
     fn new_session() -> Session {
         Session::new(LoginParams {
             login_uri: "http://127.0.0.1:9000/".to_owned(),
-            request: LoginRequest::new("Test", "User", "secret", "last", "MyViewer", "1.2.3"),
+            request: LoginRequest::new(
+                "Test",
+                "User",
+                "secret",
+                StartLocation::Last,
+                "MyViewer",
+                "1.2.3",
+            ),
         })
     }
 

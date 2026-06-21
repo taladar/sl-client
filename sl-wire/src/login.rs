@@ -6,12 +6,116 @@
 
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
+use std::str::FromStr;
 
 use thiserror::Error;
 use uuid::Uuid;
 
+/// Where a login should place the avatar — the `start` member of a
+/// [`LoginRequest`].
+///
+/// The XML-RPC `start` field is a tiny string grammar: `"last"` (resume at the
+/// last logout location), `"home"` (the avatar's home), or `"uri:Region&x&y&z"`
+/// (a named region plus an in-region position). Modelling it as an enum makes
+/// the three forms explicit and an out-of-grammar value unrepresentable, instead
+/// of a free-form `String` that any typo silently slips through. Build one
+/// directly or [parse](StartLocation::from_str) a wire string into one, and
+/// render it back with [`to_wire_string`](StartLocation::to_wire_string).
+#[derive(Debug, Clone, PartialEq)]
+pub enum StartLocation {
+    /// Resume at the avatar's last logout location (`"last"`).
+    Last,
+    /// Start at the avatar's home location (`"home"`).
+    Home,
+    /// Start at a named region and position (`"uri:Region&x&y&z"`).
+    Region {
+        /// The destination region's name.
+        region: String,
+        /// The position within the region, in metres `[x, y, z]`.
+        position: [f32; 3],
+    },
+}
+
+impl StartLocation {
+    /// A [`StartLocation::Region`] for the named region at the given in-region
+    /// position.
+    #[must_use]
+    pub fn region(name: impl Into<String>, position: [f32; 3]) -> Self {
+        Self::Region {
+            region: name.into(),
+            position,
+        }
+    }
+
+    /// Renders this start location as the `start` wire string a grid expects:
+    /// `"last"`, `"home"`, or `"uri:Region&x&y&z"`. The inverse of
+    /// [`from_str`](StartLocation::from_str).
+    #[must_use]
+    pub fn to_wire_string(&self) -> String {
+        match self {
+            Self::Last => "last".to_owned(),
+            Self::Home => "home".to_owned(),
+            Self::Region {
+                region,
+                position: [x, y, z],
+            } => format!("uri:{region}&{x}&{y}&{z}"),
+        }
+    }
+}
+
+impl FromStr for StartLocation {
+    type Err = StartLocationParseError;
+
+    /// Parses a `start` wire string: `"last"`, `"home"`, or
+    /// `"uri:Region&x&y&z"` (the three coordinates parsed as `f32`). Any other
+    /// form is a [`StartLocationParseError`].
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "last" => Ok(Self::Last),
+            "home" => Ok(Self::Home),
+            other => {
+                let rest = other
+                    .strip_prefix("uri:")
+                    .ok_or_else(|| StartLocationParseError::Unrecognized(other.to_owned()))?;
+                // Split off the three trailing `&`-separated coordinates from the
+                // right, so a (legal) region name is taken as everything before
+                // them rather than choking on a stray `&`.
+                let mut parts = rest.rsplitn(4, '&');
+                let malformed = || StartLocationParseError::MalformedUri(other.to_owned());
+                let z = parts.next().ok_or_else(malformed)?;
+                let y = parts.next().ok_or_else(malformed)?;
+                let x = parts.next().ok_or_else(malformed)?;
+                let region = parts
+                    .next()
+                    .filter(|r| !r.is_empty())
+                    .ok_or_else(malformed)?;
+                let coord =
+                    |value: &str| value.trim().parse::<f32>().map_err(|_ignored| malformed());
+                Ok(Self::Region {
+                    region: region.to_owned(),
+                    position: [coord(x)?, coord(y)?, coord(z)?],
+                })
+            }
+        }
+    }
+}
+
+/// An error parsing a [`StartLocation`] from its `start` wire string.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum StartLocationParseError {
+    /// The value matched none of `"last"`, `"home"`, or a `"uri:"` location.
+    #[error(
+        "unrecognised start location {0:?} (expected \"last\", \"home\", or \"uri:Region&x&y&z\")"
+    )]
+    Unrecognized(String),
+    /// A `"uri:"` value was missing the region name or its three coordinates,
+    /// or a coordinate was not a number.
+    #[error("malformed start location {0:?} (expected \"uri:Region&x&y&z\")")]
+    MalformedUri(String),
+}
+
 /// The parameters of an XML-RPC `login_to_simulator` request.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LoginRequest {
     /// The avatar's first name.
     pub first_name: String,
@@ -19,8 +123,8 @@ pub struct LoginRequest {
     pub last_name: String,
     /// The plaintext password (hashed when the request is built).
     pub password: String,
-    /// The start location: `"last"`, `"home"`, or `"uri:Region&x&y&z"`.
-    pub start: String,
+    /// The start location: last location, home, or a region and position.
+    pub start: StartLocation,
     /// The viewer channel name.
     pub channel: String,
     /// The viewer version string.
@@ -54,7 +158,7 @@ impl LoginRequest {
         first_name: impl Into<String>,
         last_name: impl Into<String>,
         password: impl Into<String>,
-        start: impl Into<String>,
+        start: StartLocation,
         channel: impl Into<String>,
         version: impl Into<String>,
     ) -> Self {
@@ -62,7 +166,7 @@ impl LoginRequest {
             first_name: first_name.into(),
             last_name: last_name.into(),
             password: password.into(),
-            start: start.into(),
+            start,
             channel: channel.into(),
             version: version.into(),
             platform: "lin".to_owned(),
@@ -127,7 +231,7 @@ pub fn build_login_request(request: &LoginRequest) -> String {
     push_string_member(&mut out, "first", &request.first_name);
     push_string_member(&mut out, "last", &request.last_name);
     push_string_member(&mut out, "passwd", &password_hash(&request.password));
-    push_string_member(&mut out, "start", &request.start);
+    push_string_member(&mut out, "start", &request.start.to_wire_string());
     push_string_member(&mut out, "channel", &request.channel);
     push_string_member(&mut out, "version", &request.version);
     push_string_member(&mut out, "platform", &request.platform);
@@ -700,7 +804,7 @@ where
 /// never sees the plaintext) and the three boolean acknowledgement flags
 /// (`agree_to_tos`/`read_critical`/`extended_errors`) are surfaced so the
 /// endpoint can enforce them. Produced by [`parse_login_request`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ParsedLoginRequest {
     /// The avatar's first name (`first`).
     pub first_name: String,
@@ -709,8 +813,12 @@ pub struct ParsedLoginRequest {
     /// The hashed password as sent in `passwd` (`$1$<md5>`; see
     /// [`password_hash`]). Compared against the stored hash, never reversed.
     pub password_hash: String,
-    /// The start location (`start`): `"last"`, `"home"`, or `"uri:Region&x&y&z"`.
-    pub start: String,
+    /// The start location (`start`) the client requested. Parsed into a typed
+    /// [`StartLocation`] when it matches the grammar (`Ok`); otherwise the raw
+    /// string the client sent is preserved verbatim (`Err`), since this is
+    /// untrusted input that need not be well-formed — so no value is ever lost
+    /// and a malformed `start` cannot masquerade as a valid location.
+    pub start: Result<StartLocation, String>,
     /// The viewer channel name (`channel`).
     pub channel: String,
     /// The viewer version string (`version`).
@@ -761,7 +869,7 @@ pub fn parse_login_request(xml: &str) -> Result<ParsedLoginRequest, LoginParseEr
         first_name: member_string(&members, "first"),
         last_name: member_string(&members, "last"),
         password_hash: member_string(&members, "passwd"),
-        start: member_string(&members, "start"),
+        start: parse_start_member(member_string(&members, "start")),
         channel: member_string(&members, "channel"),
         version: member_string(&members, "version"),
         platform: member_string(&members, "platform"),
@@ -779,6 +887,13 @@ pub fn parse_login_request(xml: &str) -> Result<ParsedLoginRequest, LoginParseEr
 /// Returns the named scalar member, or the empty string if absent.
 fn member_string(members: &HashMap<String, String>, name: &str) -> String {
     members.get(name).cloned().unwrap_or_default()
+}
+
+/// Parses the request's raw `start` member into a typed [`StartLocation`],
+/// preserving the original string (`Err`) when it does not match the grammar —
+/// the client could send anything, and nothing is discarded.
+fn parse_start_member(raw: String) -> Result<StartLocation, String> {
+    raw.parse::<StartLocation>().map_err(|_ignored| raw)
 }
 
 /// Reads a boolean struct member, accepting the XML-RPC `1`/`0` and the textual

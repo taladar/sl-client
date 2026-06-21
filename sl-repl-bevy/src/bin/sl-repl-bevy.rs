@@ -13,7 +13,7 @@ use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, ExternalPrinter};
 use sl_client_bevy::{
     Command, LoginParams, LoginRequest, MfaChallenge, SlCapabilities, SlClientPlugin, SlCommand,
-    SlDiagnostic, SlEvent, SlIdentity, SlMfaChallenge, SlSessionEvent, Uuid,
+    SlDiagnostic, SlEvent, SlIdentity, SlMfaChallenge, SlSessionEvent, StartLocation, Uuid,
 };
 use sl_repl::{
     Avatar, Credentials, MetaCommand, ReplAction, ScriptRecorder, SessionContext, format_command,
@@ -98,7 +98,7 @@ pub struct RunArgs {
     login_uri: Option<String>,
     /// The login start location (`last`, `home`, or `uri:Region&x&y&z`).
     #[clap(long, default_value = "last")]
-    start: String,
+    start: StartLocation,
     /// The viewer channel reported to the grid.
     #[clap(long, default_value = "sl-repl-bevy")]
     channel: String,

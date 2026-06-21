@@ -6,7 +6,8 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_wire::{
-        LoginRequest, LoginResponse, build_login_request, parse_login_response, password_hash,
+        LoginRequest, LoginResponse, StartLocation, build_login_request, parse_login_response,
+        password_hash,
     };
 
     /// Asserts two three-component vectors are equal within a small tolerance
@@ -35,7 +36,14 @@ mod test {
 
     #[test]
     fn request_contains_method_and_escaped_fields() {
-        let mut request = LoginRequest::new("Test", "User", "secret", "last", "MyViewer", "1.2.3");
+        let mut request = LoginRequest::new(
+            "Test",
+            "User",
+            "secret",
+            StartLocation::Last,
+            "MyViewer",
+            "1.2.3",
+        );
         request.options = vec!["inventory-root".to_owned()];
         let body = build_login_request(&request);
 
@@ -49,13 +57,21 @@ mod test {
 
     #[test]
     fn user_agent_joins_channel_and_version() {
-        let request = LoginRequest::new("Test", "User", "secret", "last", "MyViewer", "1.2.3");
+        let request = LoginRequest::new(
+            "Test",
+            "User",
+            "secret",
+            StartLocation::Last,
+            "MyViewer",
+            "1.2.3",
+        );
         assert_eq!(request.user_agent(), "MyViewer 1.2.3");
     }
 
     #[test]
     fn request_escapes_xml_metacharacters() {
-        let request = LoginRequest::new("A&B", "C<D", "p", "last", "MyViewer", "1.2.3");
+        let request =
+            LoginRequest::new("A&B", "C<D", "p", StartLocation::Last, "MyViewer", "1.2.3");
         let body = build_login_request(&request);
         assert!(body.contains("<string>A&amp;B</string>"));
         assert!(body.contains("<string>C&lt;D</string>"));
@@ -182,14 +198,28 @@ mod test {
 
     #[test]
     fn request_carries_buddy_list_option() {
-        let request = LoginRequest::new("Test", "User", "secret", "last", "MyViewer", "1.2.3");
+        let request = LoginRequest::new(
+            "Test",
+            "User",
+            "secret",
+            StartLocation::Last,
+            "MyViewer",
+            "1.2.3",
+        );
         let body = build_login_request(&request);
         assert!(body.contains("<value><string>buddy-list</string></value>"));
     }
 
     #[test]
     fn request_carries_library_options() {
-        let request = LoginRequest::new("Test", "User", "secret", "last", "MyViewer", "1.2.3");
+        let request = LoginRequest::new(
+            "Test",
+            "User",
+            "secret",
+            StartLocation::Last,
+            "MyViewer",
+            "1.2.3",
+        );
         let body = build_login_request(&request);
         for option in [
             "inventory-lib-root",
@@ -332,8 +362,15 @@ mod test {
 
     #[test]
     fn request_carries_mfa_fields() {
-        let request = LoginRequest::new("Test", "User", "secret", "last", "MyViewer", "1.2.3")
-            .with_mfa("123456", Some("storedhash".to_owned()));
+        let request = LoginRequest::new(
+            "Test",
+            "User",
+            "secret",
+            StartLocation::Last,
+            "MyViewer",
+            "1.2.3",
+        )
+        .with_mfa("123456", Some("storedhash".to_owned()));
         let body = build_login_request(&request);
         assert!(body.contains("<name>token</name><value><string>123456</string>"));
         assert!(body.contains("<name>mfa_hash</name><value><string>storedhash</string>"));
@@ -380,8 +417,15 @@ mod test {
     fn parse_login_request_round_trips_the_builder() -> Result<(), Box<dyn std::error::Error>> {
         use sl_wire::{parse_login_request, password_hash};
 
-        let mut request = LoginRequest::new("Test", "User", "secret", "last", "MyViewer", "1.2.3")
-            .with_mfa("123456", Some("storedhash".to_owned()));
+        let mut request = LoginRequest::new(
+            "Test",
+            "User",
+            "secret",
+            StartLocation::Last,
+            "MyViewer",
+            "1.2.3",
+        )
+        .with_mfa("123456", Some("storedhash".to_owned()));
         request.options = vec!["inventory-root".to_owned(), "buddy-list".to_owned()];
         let body = build_login_request(&request);
 
@@ -390,7 +434,7 @@ mod test {
         assert_eq!(parsed.last_name, "User");
         // The server only ever sees the hashed password, never the plaintext.
         assert_eq!(parsed.password_hash, password_hash("secret"));
-        assert_eq!(parsed.start, "last");
+        assert_eq!(parsed.start, Ok(StartLocation::Last));
         assert_eq!(parsed.channel, "MyViewer");
         assert_eq!(parsed.version, "1.2.3");
         assert_eq!(parsed.platform, "lin");
@@ -400,6 +444,42 @@ mod test {
         assert!(parsed.read_critical);
         assert!(parsed.extended_errors);
         assert_eq!(parsed.options, vec!["inventory-root", "buddy-list"]);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_login_request_keeps_a_uri_start_typed_and_an_unparsable_one_raw()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use sl_wire::parse_login_request;
+
+        // A well-formed `uri:` start (the `&`s are XML-escaped by the builder and
+        // unescaped on parse) round-trips into a typed `StartLocation`.
+        let start = StartLocation::region("Sandbox", [128.0, 128.0, 30.0]);
+        let request =
+            LoginRequest::new("Test", "User", "secret", start.clone(), "MyViewer", "1.2.3");
+        assert_eq!(
+            parse_login_request(&build_login_request(&request))?.start,
+            Ok(start)
+        );
+
+        // An out-of-grammar value the client sent is preserved verbatim as `Err`,
+        // never coerced into a (wrong) typed location.
+        let home = LoginRequest::new(
+            "Test",
+            "User",
+            "secret",
+            StartLocation::Home,
+            "MyViewer",
+            "1.2.3",
+        );
+        let garbled = build_login_request(&home).replace(
+            "<name>start</name><value><string>home</string>",
+            "<name>start</name><value><string>somewhere</string>",
+        );
+        assert_eq!(
+            parse_login_request(&garbled)?.start,
+            Err("somewhere".to_owned())
+        );
         Ok(())
     }
 
@@ -553,8 +633,15 @@ mod test {
         use sl_wire::{Credential, LoginServer, MfaPolicy, parse_login_request, password_hash};
 
         let make_request = |password: &str, token: &str, mfa_hash: Option<String>| {
-            let request = LoginRequest::new("Test", "User", password, "last", "MyViewer", "1.2.3")
-                .with_mfa(token, mfa_hash);
+            let request = LoginRequest::new(
+                "Test",
+                "User",
+                password,
+                StartLocation::Last,
+                "MyViewer",
+                "1.2.3",
+            )
+            .with_mfa(token, mfa_hash);
             parse_login_request(&build_login_request(&request))
         };
 
@@ -615,7 +702,14 @@ mod test {
     #[test]
     fn round_trips_through_the_builder_field_names() -> Result<(), Box<dyn std::error::Error>> {
         // The fields the builder writes must match the names OpenSim expects.
-        let request = LoginRequest::new("First", "Last", "pw", "home", "MyViewer", "1.2.3");
+        let request = LoginRequest::new(
+            "First",
+            "Last",
+            "pw",
+            StartLocation::Home,
+            "MyViewer",
+            "1.2.3",
+        );
         let body = build_login_request(&request);
         for name in [
             "first", "last", "passwd", "start", "channel", "version", "mac", "id0",
@@ -629,5 +723,63 @@ mod test {
         assert!(body.contains("<name>channel</name><value><string>MyViewer</string>"));
         assert!(body.contains("<name>version</name><value><string>1.2.3</string>"));
         Ok(())
+    }
+
+    #[test]
+    fn start_location_renders_the_three_wire_forms() {
+        assert_eq!(StartLocation::Last.to_wire_string(), "last");
+        assert_eq!(StartLocation::Home.to_wire_string(), "home");
+        assert_eq!(
+            StartLocation::region("Hello World", [128.0, 64.5, 30.0]).to_wire_string(),
+            "uri:Hello World&128&64.5&30"
+        );
+    }
+
+    #[test]
+    fn start_location_round_trips_through_its_wire_string() -> Result<(), Box<dyn std::error::Error>>
+    {
+        for location in [
+            StartLocation::Last,
+            StartLocation::Home,
+            StartLocation::region("Sandbox", [128.0, 128.0, 30.0]),
+        ] {
+            let wire = location.to_wire_string();
+            assert_eq!(wire.parse::<StartLocation>()?, location, "for {wire:?}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn start_location_parses_a_uri_with_an_ampersand_in_the_region_name() {
+        // The region name is taken as everything before the trailing three
+        // `&`-separated coordinates, so a stray `&` in the name still parses.
+        assert_eq!(
+            "uri:A&B&1&2&3".parse::<StartLocation>(),
+            Ok(StartLocation::region("A&B", [1.0, 2.0, 3.0]))
+        );
+    }
+
+    #[test]
+    fn start_location_rejects_out_of_grammar_values() {
+        // A bare keyword that is neither "last"/"home" nor a "uri:".
+        assert!(matches!(
+            "nowhere".parse::<StartLocation>(),
+            Err(sl_wire::StartLocationParseError::Unrecognized(_))
+        ));
+        // A "uri:" missing a coordinate.
+        assert!(matches!(
+            "uri:Sandbox&128&30".parse::<StartLocation>(),
+            Err(sl_wire::StartLocationParseError::MalformedUri(_))
+        ));
+        // A "uri:" with a non-numeric coordinate.
+        assert!(matches!(
+            "uri:Sandbox&128&128&up".parse::<StartLocation>(),
+            Err(sl_wire::StartLocationParseError::MalformedUri(_))
+        ));
+        // A "uri:" with an empty region name.
+        assert!(matches!(
+            "uri:&1&2&3".parse::<StartLocation>(),
+            Err(sl_wire::StartLocationParseError::MalformedUri(_))
+        ));
     }
 }
