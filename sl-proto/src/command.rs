@@ -1006,7 +1006,23 @@ pub enum Command {
     /// (a POST). Falls back to nothing if the cap is absent; prefer
     /// [`Command::SendAbuseReport`] on grids without the cap (e.g. OpenSim).
     /// Fire-and-forget; the simulator returns only an HTTP status.
-    SendAbuseReportViaCaps(Box<AbuseReport>),
+    ///
+    /// When `screenshot` carries snapshot bytes and the region offers the
+    /// `SendUserReportWithScreenshot` capability
+    /// ([`CAP_SEND_USER_REPORT_WITH_SCREENSHOT`](crate::CAP_SEND_USER_REPORT_WITH_SCREENSHOT)),
+    /// the runtime first uploads the snapshot as a texture asset over that cap's
+    /// two-step uploader — filling [`AbuseReport::screenshot_id`] with the new
+    /// asset id — then completes the report referencing it (mirroring the
+    /// viewer's `sendReportViaCaps`). With no screenshot, or on a grid without
+    /// the screenshot cap, the plain `SendUserReport` path is used.
+    SendAbuseReportViaCaps {
+        /// The report to file.
+        report: Box<AbuseReport>,
+        /// Optional snapshot image bytes (a JPEG-2000 codestream) to upload and
+        /// attach via the `SendUserReportWithScreenshot` cap; `None` for the
+        /// plain no-screenshot path.
+        screenshot: Option<Vec<u8>>,
+    },
     /// Email a snapshot postcard over the `SendPostcard` UDP message (the
     /// snapshot must already be uploaded as the referenced asset).
     /// Fire-and-forget; there is no reply.

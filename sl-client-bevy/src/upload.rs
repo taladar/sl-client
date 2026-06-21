@@ -120,6 +120,28 @@ pub(crate) fn run_caps_upload(cap_url: &str, metadata: String, data: Vec<u8>) ->
     }
 }
 
+/// Files an abuse report bearing a snapshot over the
+/// `SendUserReportWithScreenshot` capability (blocking, on the calling
+/// background thread): a two-step upload that POSTs the report's LLSD body
+/// (`report_body`) to `cap_url` for an `uploader` URL, then POSTs the snapshot's
+/// JPEG-2000 bytes (`screenshot`) there. Fire-and-forget like the no-screenshot
+/// `SendUserReport` path — the report's outcome is not surfaced as an event
+/// (mirroring the viewer, which discards the result in
+/// `LLARScreenShotUploader::finishUpload`).
+pub(crate) fn run_report_screenshot_upload(
+    cap_url: &str,
+    report_body: String,
+    screenshot: Vec<u8>,
+) {
+    let Ok(response) = caps_upload_step(cap_url, "application/llsd+xml", report_body.into_bytes())
+    else {
+        return;
+    };
+    if let Some(uploader) = response.uploader {
+        caps_upload_step(&uploader, "application/octet-stream", screenshot).ok();
+    }
+}
+
 /// POSTs one step of a CAPS upload (blocking) and parses the LLSD response,
 /// returning the parsed [`AssetUploadResponse`] or a failure reason.
 pub(crate) fn caps_upload_step(

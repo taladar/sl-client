@@ -134,13 +134,20 @@ region's circuit and answered over UDP:
 
 Two outbound, fire-and-forget viewer actions reach the grid here:
 
-- **Abuse / bug reports** — the "Report Abuse" floater gathers a complaint (the
-  abuser, the offending object, a summary and free-text details, a snapshot, and
-  the region the abuse happened in) and sends it. Second Life prefers the
-  `SendUserReport` capability (`Command::SendAbuseReportViaCaps`, an LLSD POST),
-  falling back to the legacy `UserReport` UDP message
+- **Abuse / bug reports** — the "Report Abuse" floater gathers a complaint
+  (the abuser, the offending object, a summary and free-text details, a
+  snapshot, and the region the abuse happened in) and sends it. Second Life
+  prefers the `SendUserReport` capability (`Command::SendAbuseReportViaCaps`, an
+  LLSD POST), falling back to the legacy `UserReport` UDP message
   (`Command::SendAbuseReport`); OpenSim implements only the UDP path. Either way
-  there is no reply.
+  there is no reply. When `SendAbuseReportViaCaps` carries a `screenshot` and
+  the region offers the `SendUserReportWithScreenshot` capability, the runtime
+  first uploads the snapshot over that cap's two-step uploader (the same
+  `{ state, uploader, … }` flow as `NewFileAgentInventory`), fills the report's
+  `screenshot_id` with the new texture asset id, and completes the report
+  referencing it — mirroring the viewer's `sendReportViaCaps`. With no
+  screenshot (or on a grid without the cap) the plain `SendUserReport` POST is
+  used.
 - **Postcards** — `Command::SendPostcard` emails a snapshot (already uploaded as
   an asset) to one or more addresses with a subject and message, optionally
   asking the grid to publish it on its web gallery. Fire-and-forget.
@@ -220,9 +227,12 @@ None of these has a reply; the client just acts on them.
 >   `send_map_layer_reply`.
 > - Abuse reports use `sl-wire/src/abuse_report.rs` (`AbuseReport`,
 >   `AbuseReportType`): `Command::SendAbuseReport` encodes the `UserReport` UDP
->   message; `Command::SendAbuseReportViaCaps` posts the `SendUserReport`
->   capability (`build_send_user_report`). The simulator decodes the UDP form
->   into `ServerEvent::AbuseReportReceived`.
+>   message; `Command::SendAbuseReportViaCaps { report, screenshot }` posts the
+>   `SendUserReport` capability (`build_send_user_report`), or — when
+>   `screenshot` is present and the region offers `SendUserReportWithScreenshot`
+>   (`CAP_SEND_USER_REPORT_WITH_SCREENSHOT`) — runs that cap's two-step uploader
+>   (`run_report_screenshot_upload`) to attach the snapshot first. The simulator
+>   decodes the UDP form into `ServerEvent::AbuseReportReceived`.
 > - Postcards are `sl-proto/src/types/report.rs` (`Postcard`):
 >   `Command::SendPostcard` encodes the `SendPostcard` UDP message, decoded on
 >   the simulator side into `ServerEvent::PostcardReceived`.

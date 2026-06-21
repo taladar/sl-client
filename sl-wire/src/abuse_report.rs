@@ -9,9 +9,13 @@
 //! builds/parses the capability's LLSD body.
 //!
 //! The LLSD keys are cross-checked against the Firestorm viewer's
-//! `indra/newview/llfloaterreporter.cpp` (`gatherReport`). The
-//! `SendUserReportWithScreenshot` variant (which first uploads a snapshot asset)
-//! is out of scope; this is the no-screenshot path (a nil `screenshot_id`).
+//! `indra/newview/llfloaterreporter.cpp` (`gatherReport`). The same body also
+//! serves the `SendUserReportWithScreenshot` variant: there the runtime first
+//! uploads the snapshot over that cap's two-step uploader, fills
+//! [`screenshot_id`](AbuseReport::screenshot_id) with the new texture asset id,
+//! and POSTs this body referencing it (driven by the runtimes'
+//! `SendAbuseReportViaCaps` command). With no snapshot the `screenshot_id` is
+//! nil.
 
 use std::collections::HashMap;
 

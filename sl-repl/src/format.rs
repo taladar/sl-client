@@ -605,7 +605,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::RequestMapItems { .. } => "request_map_items",
         Command::RequestMapLayer => "request_map_layer",
         Command::SendAbuseReport(..) => "send_abuse_report",
-        Command::SendAbuseReportViaCaps(..) => "send_abuse_report_caps",
+        Command::SendAbuseReportViaCaps { .. } => "send_abuse_report_caps",
         Command::SendPostcard(..) => "send_postcard",
         Command::RequestObjects { .. } => "request_objects",
         Command::RequestObjectProperties { .. } => "request_object_properties",

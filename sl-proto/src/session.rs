@@ -378,9 +378,24 @@ pub const LAND_RESOURCE_DETAIL_TAG: &str = "ScriptResourceDetails";
 /// equivalent of the legacy `UserReport` UDP message. Driven by the runtimes'
 /// `SendAbuseReportViaCaps` command; the simulator returns only an HTTP status,
 /// so there is no reply event. Second Life serves it (the
-/// `SendUserReportWithScreenshot` snapshot-upload variant is out of scope);
-/// OpenSim implements only the UDP path.
+/// `SendUserReportWithScreenshot` variant adds a snapshot —
+/// [`CAP_SEND_USER_REPORT_WITH_SCREENSHOT`]); OpenSim implements only the UDP
+/// path.
 pub const CAP_SEND_USER_REPORT: &str = "SendUserReport";
+
+/// The HTTP capability for filing an **abuse / bug report with a snapshot**
+/// (`SendUserReportWithScreenshot`): the screenshot-bearing sibling of
+/// [`CAP_SEND_USER_REPORT`]. It is the modern two-step asset uploader (the same
+/// `{ state, uploader, … }` flow as [`CAP_NEW_FILE_AGENT_INVENTORY`]) — the
+/// runtimes POST the report's LLSD body (with
+/// [`screenshot_id`](sl_wire::AbuseReport::screenshot_id) set to a fresh texture
+/// asset id) to obtain an `uploader` URL, then PUT the snapshot's JPEG-2000
+/// bytes there. Driven by the runtimes' `SendAbuseReportViaCaps` command when a
+/// screenshot is supplied; like the no-screenshot path the simulator returns
+/// only an HTTP status, so there is no reply event. Second Life only; OpenSim
+/// has no abuse-report cap at all. Cross-checked against the Firestorm viewer's
+/// `llfloaterreporter.cpp` `sendReportViaCaps` / `LLARScreenShotUploader`.
+pub const CAP_SEND_USER_REPORT_WITH_SCREENSHOT: &str = "SendUserReportWithScreenshot";
 
 /// The viewer's `TELEPORT_FLAGS_VIA_LURE` (`1 << 2`), sent in a
 /// `TeleportLureRequest` when accepting a teleport lure (#28).
@@ -444,6 +459,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_ATTACHMENT_RESOURCES,
     CAP_LAND_RESOURCES,
     CAP_SEND_USER_REPORT,
+    CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
 ];
 
 /// The maximum UDP datagram size an I/O driver should be prepared to receive.
