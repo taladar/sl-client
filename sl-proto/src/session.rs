@@ -38,9 +38,6 @@ const SIT_TIMEOUT: Duration = Duration::from_secs(15);
 /// The default draw distance (metres) advertised in keep-alive `AgentUpdate`s,
 /// large enough that the simulator enables the neighbouring regions.
 const DEFAULT_DRAW_DISTANCE: f32 = 256.0;
-/// The world-map layer flag the viewer sends on map name/item requests (the
-/// terrain layer; `LAYER_FLAG` in the reference viewer).
-const MAP_LAYER_FLAG: u32 = 2;
 /// The identity (no-op) rotation: the default body/head facing.
 pub(crate) const IDENTITY_ROTATION: Rotation = Rotation {
     x: 0.0,
@@ -396,10 +393,6 @@ pub const CAP_SEND_USER_REPORT: &str = "SendUserReport";
 /// has no abuse-report cap at all. Cross-checked against the Firestorm viewer's
 /// `llfloaterreporter.cpp` `sendReportViaCaps` / `LLARScreenShotUploader`.
 pub const CAP_SEND_USER_REPORT_WITH_SCREENSHOT: &str = "SendUserReportWithScreenshot";
-
-/// The viewer's `TELEPORT_FLAGS_VIA_LURE` (`1 << 2`), sent in a
-/// `TeleportLureRequest` when accepting a teleport lure (#28).
-const TELEPORT_FLAGS_VIA_LURE: u32 = 4;
 
 /// The capability names the client requests from the region seed. A driver POSTs
 /// these to the seed URL to obtain the capability map, then uses `EventQueueGet`

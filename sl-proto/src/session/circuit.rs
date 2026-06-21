@@ -4,18 +4,18 @@ use super::conversions::{
     OutgoingIm, compute_im_session_id, inventory_item_crc, pack_quaternion_to_vec3, with_nul,
 };
 use super::{
-    ACK_FLUSH_DELAY, Circuit, INACTIVITY_TIMEOUT, MAP_LAYER_FLAG, MAX_ACKS_PER_PACKET,
-    MAX_RESEND_ATTEMPTS, RESEND_TIMEOUT, SeenWindow, Timers, UnackedPacket, deadline,
+    ACK_FLUSH_DELAY, Circuit, INACTIVITY_TIMEOUT, MAX_ACKS_PER_PACKET, MAX_RESEND_ATTEMPTS,
+    RESEND_TIMEOUT, SeenWindow, Timers, UnackedPacket, deadline,
 };
 use crate::types::directory::category_to_wire;
 use crate::types::{
     AssetType, AttachmentMode, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction,
     CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, GestureActivation,
     GroupRoleEdit, GroupRoleMemberChange, ImDialog, InterestsUpdate, InventoryItem, LandSearchType,
-    Material, MovementMode, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
-    ObjectTransform, ParcelAccessEntry, ParcelCategory, ParcelUpdate, PermissionField, PickUpdate,
-    Postcard, PrimShape, ProfileUpdate, Reliability, RestoreItem, RezAttachment, SaleType,
-    Throttle, ViewerEffect, Wearable,
+    MapRequestFlags, Material, MovementMode, NewInventoryItem, NotecardRez, ObjectBuyItem,
+    ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelCategory, ParcelUpdate,
+    PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate, Reliability, RestoreItem,
+    RezAttachment, SaleType, TeleportFlags, Throttle, ViewerEffect, Wearable,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::AbuseReport;
@@ -565,11 +565,12 @@ impl Circuit {
 
     /// Queues a `TeleportLureRequest` reliably: accepts a teleport lure,
     /// requesting the teleport the offer's `lure_id` (the `IM_LURE_USER` IM's
-    /// `id`) describes. `teleport_flags` is the viewer's `TELEPORT_FLAGS_VIA_LURE`.
+    /// `id`) describes. `teleport_flags` is the viewer's
+    /// [`TeleportFlags::VIA_LURE`].
     pub(crate) fn send_teleport_lure_request(
         &mut self,
         lure_id: Uuid,
-        teleport_flags: u32,
+        teleport_flags: TeleportFlags,
         now: Instant,
     ) -> Result<(), WireError> {
         let request = AnyMessage::TeleportLureRequest(TeleportLureRequest {
@@ -577,7 +578,7 @@ impl Circuit {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
                 lure_id,
-                teleport_flags,
+                teleport_flags: teleport_flags.0,
             },
         });
         self.send(&request, Reliability::Reliable, now)
@@ -3530,7 +3531,7 @@ impl Circuit {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
                 // The viewer's map-layer flag (2); estate/godlike filled by the sim.
-                flags: MAP_LAYER_FLAG,
+                flags: MapRequestFlags::LAYER,
                 estate_id: 0,
                 godlike: false,
             },
@@ -3553,7 +3554,7 @@ impl Circuit {
             agent_data: MapItemRequestAgentDataBlock {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
-                flags: MAP_LAYER_FLAG,
+                flags: MapRequestFlags::LAYER,
                 estate_id: 0,
                 godlike: false,
             },
@@ -3574,7 +3575,7 @@ impl Circuit {
             agent_data: MapLayerRequestAgentDataBlock {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
-                flags: MAP_LAYER_FLAG,
+                flags: MapRequestFlags::LAYER,
                 estate_id: 0,
                 godlike: false,
             },

@@ -31,8 +31,8 @@ use super::{
     CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, Circuit, DEFAULT_DRAW_DISTANCE,
     HandoverPending, IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG,
-    LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, Session, SessionState, TELEPORT_FLAGS_VIA_LURE,
-    TELEPORT_TIMEOUT, TextureDownload, deadline, merge_deadline,
+    LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, Session, SessionState, TELEPORT_TIMEOUT,
+    TextureDownload, deadline, merge_deadline,
 };
 use crate::error::Error;
 use crate::terrain;
@@ -4188,7 +4188,7 @@ impl Session {
             return Err(Error::NotActive);
         }
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_teleport_lure_request(lure_id, TELEPORT_FLAGS_VIA_LURE, now)?;
+        circuit.send_teleport_lure_request(lure_id, TeleportFlags(TeleportFlags::VIA_LURE), now)?;
         circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
         // Best-effort destination hint; a cross-region lure's TeleportFinish
         // carries the authoritative handle, so a non-fake-parcel id is harmless.
