@@ -53,7 +53,7 @@ pub use sl_proto::{
     GroupNotice, GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit,
     GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation,
     IceCandidate, ImDialog, ImageCodec, InstantMessage, InterestsUpdate, InventoryFolder,
-    InventoryItem, InventoryOffer, InventoryType, LandingType, LegacyMaterial, LightData,
+    InventoryItem, InventoryOffer, InventoryType, Kilobits, LandingType, LegacyMaterial, LightData,
     LightImage, LindenAmount, LoadUrlRequest, LoginAccount, LoginParams, LoginRequest,
     LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
     MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate,
@@ -69,11 +69,11 @@ pub use sl_proto::{
     RegionInfoUpdate, RegionLimits, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation,
     SaleType, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
     SculptData, SimulatorFeatures, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch,
-    Texture, TextureAnimation, TextureEntry, TextureFace, Throttle, TransferStatus, Transmit, Uuid,
-    Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, avatar_texture,
-    decode_particle_system, decode_texture_anim, decode_texture_entry, grid_to_handle,
-    group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode, sim_access,
-    texture_anim_mode,
+    Texture, TextureAnimation, TextureEntry, TextureFace, Throttle, ThrottleBuilder, ThrottleError,
+    TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable,
+    WearableType, avatar_texture, decode_particle_system, decode_texture_anim,
+    decode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
+    particle_pattern, pcode, sim_access, texture_anim_mode,
 };
 
 mod appearance;

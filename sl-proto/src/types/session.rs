@@ -37,6 +37,70 @@ pub enum Reliability {
     Reliable,
 }
 
+/// A non-negative, finite bandwidth rate in **kilobits per second**, used for
+/// the seven per-category rates of a [`Throttle`].
+///
+/// Constructing one through [`Kilobits::new`] guarantees the value is a real
+/// number — not NaN, not infinite, and not negative — so a [`Throttle`] built
+/// from `Kilobits` can never advertise a nonsensical bandwidth, and the
+/// invariant holds for the life of the value (there is no way to mutate it into
+/// an invalid state). Use [`Kilobits::new_unchecked`] only at the codec
+/// boundary, where an inbound `AgentThrottle` must be reconstructed verbatim
+/// from whatever the peer sent.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct Kilobits(f32);
+
+impl Kilobits {
+    /// A zero bandwidth rate.
+    pub const ZERO: Self = Self(0.0);
+
+    /// Validates `rate` (kilobits per second) and wraps it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ThrottleError::NotFinite`] for a NaN or infinite `rate`, or
+    /// [`ThrottleError::Negative`] for a `rate` below zero.
+    pub fn new(rate: f32) -> Result<Self, ThrottleError> {
+        if !rate.is_finite() {
+            return Err(ThrottleError::NotFinite);
+        }
+        if rate < 0.0 {
+            return Err(ThrottleError::Negative);
+        }
+        Ok(Self(rate))
+    }
+
+    /// Wraps `rate` (kilobits per second) **without validation**.
+    ///
+    /// This is the codec-boundary constructor: an inbound `AgentThrottle` carries
+    /// whatever per-category rates the peer sent, which must be reconstructed
+    /// verbatim rather than rejected. For caller-supplied rates prefer the
+    /// validating [`Kilobits::new`].
+    #[must_use]
+    pub const fn new_unchecked(rate: f32) -> Self {
+        Self(rate)
+    }
+
+    /// The wrapped rate, in kilobits per second.
+    #[must_use]
+    pub const fn get(self) -> f32 {
+        self.0
+    }
+}
+
+/// Why a [`Kilobits`] rate (and therefore a [`Throttle`]) was rejected: a
+/// per-category bandwidth must be a finite, non-negative number of kilobits per
+/// second.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ThrottleError {
+    /// The rate was NaN or infinite.
+    #[error("bandwidth rate is not finite (NaN or infinite)")]
+    NotFinite,
+    /// The rate was negative.
+    #[error("bandwidth rate is negative")]
+    Negative,
+}
+
 /// Per-category bandwidth throttle, in **kilobits per second**, advertised to
 /// the simulator with `AgentThrottle`. The seven categories partition the
 /// simulator's UDP send budget; the simulator uses these caps to allocate
@@ -54,29 +118,73 @@ pub enum Reliability {
 /// and the [`Throttle::preset_300`] / [`Throttle::preset_500`] /
 /// [`Throttle::preset_1000`] presets (named for their total kbps) as starting
 /// points; they mirror the reference viewer's bandwidth tables.
+///
+/// The seven fields are private and validated on construction, so a throttle
+/// can never hold a NaN, infinite, or negative rate. Build a custom split with
+/// [`Throttle::builder`] (named per-category setters, which avoid the
+/// transposition hazard of [`Throttle::new`]'s seven positional rates) and read
+/// the categories back with the [`Throttle::resend`] … [`Throttle::asset`]
+/// accessors.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Throttle {
     /// Resent (reliable retransmit) traffic.
-    pub resend: f32,
+    resend: Kilobits,
     /// Land/terrain layer (`LayerData`) traffic.
-    pub land: f32,
+    land: Kilobits,
     /// Wind layer traffic.
-    pub wind: f32,
+    wind: Kilobits,
     /// Cloud layer traffic.
-    pub cloud: f32,
+    cloud: Kilobits,
     /// Task traffic: object updates (the scene graph).
-    pub task: f32,
+    task: Kilobits,
     /// Texture (image) traffic.
-    pub texture: f32,
+    texture: Kilobits,
     /// Other asset traffic (sounds, animations, notecards, …).
-    pub asset: f32,
+    asset: Kilobits,
 }
 
 impl Throttle {
     /// Builds a throttle from the seven per-category rates (kilobits per second),
     /// in wire order: resend, land, wind, cloud, task, texture, asset.
+    ///
+    /// Because the seven positional arguments share one type and a fixed order
+    /// they are easy to transpose; prefer [`Throttle::builder`] (named setters)
+    /// or a preset ([`Throttle::preset_1000`] …) when the call is not obviously
+    /// correct.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ThrottleError`] if any rate is NaN, infinite, or negative (see
+    /// [`Kilobits::new`]).
+    pub fn new(
+        resend: f32,
+        land: f32,
+        wind: f32,
+        cloud: f32,
+        task: f32,
+        texture: f32,
+        asset: f32,
+    ) -> Result<Self, ThrottleError> {
+        Ok(Self {
+            resend: Kilobits::new(resend)?,
+            land: Kilobits::new(land)?,
+            wind: Kilobits::new(wind)?,
+            cloud: Kilobits::new(cloud)?,
+            task: Kilobits::new(task)?,
+            texture: Kilobits::new(texture)?,
+            asset: Kilobits::new(asset)?,
+        })
+    }
+
+    /// Builds a throttle from the seven per-category rates (kilobits per second,
+    /// wire order) **without validation**.
+    ///
+    /// This is the codec-boundary / preset constructor: it wraps each rate with
+    /// [`Kilobits::new_unchecked`], so an inbound `AgentThrottle` is
+    /// reconstructed verbatim. For caller-supplied rates prefer the validating
+    /// [`Throttle::new`] or [`Throttle::builder`].
     #[must_use]
-    pub const fn new(
+    pub const fn new_unchecked(
         resend: f32,
         land: f32,
         wind: f32,
@@ -86,39 +194,94 @@ impl Throttle {
         asset: f32,
     ) -> Self {
         Self {
-            resend,
-            land,
-            wind,
-            cloud,
-            task,
-            texture,
-            asset,
+            resend: Kilobits::new_unchecked(resend),
+            land: Kilobits::new_unchecked(land),
+            wind: Kilobits::new_unchecked(wind),
+            cloud: Kilobits::new_unchecked(cloud),
+            task: Kilobits::new_unchecked(task),
+            texture: Kilobits::new_unchecked(texture),
+            asset: Kilobits::new_unchecked(asset),
         }
+    }
+
+    /// A [`ThrottleBuilder`] with every category at [`Kilobits::ZERO`]; set the
+    /// categories you need by name and call [`ThrottleBuilder::build`].
+    #[must_use]
+    pub const fn builder() -> ThrottleBuilder {
+        ThrottleBuilder::new()
+    }
+
+    /// The resend (reliable retransmit) rate.
+    #[must_use]
+    pub const fn resend(&self) -> Kilobits {
+        self.resend
+    }
+
+    /// The land/terrain layer (`LayerData`) rate.
+    #[must_use]
+    pub const fn land(&self) -> Kilobits {
+        self.land
+    }
+
+    /// The wind layer rate.
+    #[must_use]
+    pub const fn wind(&self) -> Kilobits {
+        self.wind
+    }
+
+    /// The cloud layer rate.
+    #[must_use]
+    pub const fn cloud(&self) -> Kilobits {
+        self.cloud
+    }
+
+    /// The task (object-update / scene-graph) rate.
+    #[must_use]
+    pub const fn task(&self) -> Kilobits {
+        self.task
+    }
+
+    /// The texture (image) rate.
+    #[must_use]
+    pub const fn texture(&self) -> Kilobits {
+        self.texture
+    }
+
+    /// The other-asset (sounds, animations, notecards, …) rate.
+    #[must_use]
+    pub const fn asset(&self) -> Kilobits {
+        self.asset
     }
 
     /// The reference viewer's preset for a 300 kbps total bandwidth.
     #[must_use]
     pub const fn preset_300() -> Self {
-        Self::new(30.0, 40.0, 9.0, 9.0, 86.0, 86.0, 40.0)
+        Self::new_unchecked(30.0, 40.0, 9.0, 9.0, 86.0, 86.0, 40.0)
     }
 
     /// The reference viewer's preset for a 500 kbps total bandwidth.
     #[must_use]
     pub const fn preset_500() -> Self {
-        Self::new(50.0, 70.0, 14.0, 14.0, 136.0, 136.0, 80.0)
+        Self::new_unchecked(50.0, 70.0, 14.0, 14.0, 136.0, 136.0, 80.0)
     }
 
     /// The reference viewer's preset for a 1000 kbps total bandwidth.
     #[must_use]
     pub const fn preset_1000() -> Self {
-        Self::new(100.0, 100.0, 20.0, 20.0, 310.0, 310.0, 140.0)
+        Self::new_unchecked(100.0, 100.0, 20.0, 20.0, 310.0, 310.0, 140.0)
     }
 
     /// The total requested bandwidth (kilobits per second), the sum of all seven
     /// categories.
     #[must_use]
     pub fn total(&self) -> f32 {
-        self.resend + self.land + self.wind + self.cloud + self.task + self.texture + self.asset
+        self.resend.get()
+            + self.land.get()
+            + self.wind.get()
+            + self.cloud.get()
+            + self.task.get()
+            + self.texture.get()
+            + self.asset.get()
     }
 
     /// Rebuilds a throttle from the seven wire **bits per second** rates (in
@@ -126,19 +289,22 @@ impl Throttle {
     /// inverse of [`Throttle::bits_per_second`]. Used by the simulator side to
     /// recover the client's requested per-category split from an inbound
     /// `AgentThrottle`.
+    ///
+    /// The peer's rates are accepted verbatim (via [`Kilobits::new_unchecked`]),
+    /// not validated — this is the wire-decode boundary.
     #[must_use]
     pub fn from_bits_per_second(rates: [f32; 7]) -> Self {
         // 1 kilobit = 1024 bits, matching the reference viewer's conversion.
         const KILOBIT: f32 = 1024.0;
         let [resend, land, wind, cloud, task, texture, asset] = rates;
         Self {
-            resend: resend / KILOBIT,
-            land: land / KILOBIT,
-            wind: wind / KILOBIT,
-            cloud: cloud / KILOBIT,
-            task: task / KILOBIT,
-            texture: texture / KILOBIT,
-            asset: asset / KILOBIT,
+            resend: Kilobits::new_unchecked(resend / KILOBIT),
+            land: Kilobits::new_unchecked(land / KILOBIT),
+            wind: Kilobits::new_unchecked(wind / KILOBIT),
+            cloud: Kilobits::new_unchecked(cloud / KILOBIT),
+            task: Kilobits::new_unchecked(task / KILOBIT),
+            texture: Kilobits::new_unchecked(texture / KILOBIT),
+            asset: Kilobits::new_unchecked(asset / KILOBIT),
         }
     }
 
@@ -150,13 +316,13 @@ impl Throttle {
         // 1 kilobit = 1024 bits, matching the reference viewer's conversion.
         const KILOBIT: f32 = 1024.0;
         [
-            self.resend * KILOBIT,
-            self.land * KILOBIT,
-            self.wind * KILOBIT,
-            self.cloud * KILOBIT,
-            self.task * KILOBIT,
-            self.texture * KILOBIT,
-            self.asset * KILOBIT,
+            self.resend.get() * KILOBIT,
+            self.land.get() * KILOBIT,
+            self.wind.get() * KILOBIT,
+            self.cloud.get() * KILOBIT,
+            self.task.get() * KILOBIT,
+            self.texture.get() * KILOBIT,
+            self.asset.get() * KILOBIT,
         ]
     }
 }
@@ -166,6 +332,118 @@ impl Default for Throttle {
     /// full object/terrain/texture firehose.
     fn default() -> Self {
         Self::preset_1000()
+    }
+}
+
+/// A builder for [`Throttle`] with named per-category setters, avoiding the
+/// transposition hazard of [`Throttle::new`]'s seven positional rates. Every
+/// category defaults to [`Kilobits::ZERO`]; set the ones you need and call
+/// [`ThrottleBuilder::build`].
+///
+/// Each setter takes an already-validated [`Kilobits`], so the build is
+/// infallible and `const`-friendly; validate caller input once with
+/// [`Kilobits::new`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ThrottleBuilder {
+    /// Resent (reliable retransmit) traffic.
+    resend: Kilobits,
+    /// Land/terrain layer (`LayerData`) traffic.
+    land: Kilobits,
+    /// Wind layer traffic.
+    wind: Kilobits,
+    /// Cloud layer traffic.
+    cloud: Kilobits,
+    /// Task traffic: object updates (the scene graph).
+    task: Kilobits,
+    /// Texture (image) traffic.
+    texture: Kilobits,
+    /// Other asset traffic (sounds, animations, notecards, …).
+    asset: Kilobits,
+}
+
+impl ThrottleBuilder {
+    /// A builder with every category at [`Kilobits::ZERO`].
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            resend: Kilobits::ZERO,
+            land: Kilobits::ZERO,
+            wind: Kilobits::ZERO,
+            cloud: Kilobits::ZERO,
+            task: Kilobits::ZERO,
+            texture: Kilobits::ZERO,
+            asset: Kilobits::ZERO,
+        }
+    }
+
+    /// Sets the resend (reliable retransmit) rate.
+    #[must_use]
+    pub const fn resend(mut self, rate: Kilobits) -> Self {
+        self.resend = rate;
+        self
+    }
+
+    /// Sets the land/terrain layer (`LayerData`) rate.
+    #[must_use]
+    pub const fn land(mut self, rate: Kilobits) -> Self {
+        self.land = rate;
+        self
+    }
+
+    /// Sets the wind layer rate.
+    #[must_use]
+    pub const fn wind(mut self, rate: Kilobits) -> Self {
+        self.wind = rate;
+        self
+    }
+
+    /// Sets the cloud layer rate.
+    #[must_use]
+    pub const fn cloud(mut self, rate: Kilobits) -> Self {
+        self.cloud = rate;
+        self
+    }
+
+    /// Sets the task (object-update / scene-graph) rate.
+    #[must_use]
+    pub const fn task(mut self, rate: Kilobits) -> Self {
+        self.task = rate;
+        self
+    }
+
+    /// Sets the texture (image) rate.
+    #[must_use]
+    pub const fn texture(mut self, rate: Kilobits) -> Self {
+        self.texture = rate;
+        self
+    }
+
+    /// Sets the other-asset (sounds, animations, notecards, …) rate.
+    #[must_use]
+    pub const fn asset(mut self, rate: Kilobits) -> Self {
+        self.asset = rate;
+        self
+    }
+
+    /// Builds the [`Throttle`] from the configured per-category rates.
+    #[must_use]
+    pub const fn build(self) -> Throttle {
+        Throttle {
+            resend: self.resend,
+            land: self.land,
+            wind: self.wind,
+            cloud: self.cloud,
+            task: self.task,
+            texture: self.texture,
+            asset: self.asset,
+        }
+    }
+}
+
+impl Default for ThrottleBuilder {
+    /// A builder with every category at [`Kilobits::ZERO`].
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -426,7 +704,7 @@ pub enum DisconnectReason {
 
 #[cfg(test)]
 mod tests {
-    use super::{Camera, CameraError, Vector, cross, dot};
+    use super::{Camera, CameraError, Kilobits, Throttle, ThrottleError, Vector, cross, dot};
     use pretty_assertions::assert_eq;
 
     fn is_unit(v: &Vector) -> bool {
@@ -636,5 +914,75 @@ mod tests {
             },
         );
         assert_eq!(result, Err(CameraError::NotRightHanded));
+    }
+
+    #[test]
+    fn throttle_new_matches_the_raw_field_layout() -> Result<(), ThrottleError> {
+        // The validating `new` keeps the seven rates in wire order, readable back
+        // through the accessors bit-identically to the values passed in.
+        let throttle = Throttle::new(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0)?;
+        assert_eq!(throttle.resend(), Kilobits::new_unchecked(1.0));
+        assert_eq!(throttle.land(), Kilobits::new_unchecked(2.0));
+        assert_eq!(throttle.wind(), Kilobits::new_unchecked(3.0));
+        assert_eq!(throttle.cloud(), Kilobits::new_unchecked(4.0));
+        assert_eq!(throttle.task(), Kilobits::new_unchecked(5.0));
+        assert_eq!(throttle.texture(), Kilobits::new_unchecked(6.0));
+        assert_eq!(throttle.asset(), Kilobits::new_unchecked(7.0));
+        // total() sums the seven categories (wrapped so the float comparison
+        // runs through `Kilobits`' derived equality rather than a bare `==`).
+        assert_eq!(
+            Kilobits::new_unchecked(throttle.total()),
+            Kilobits::new_unchecked(28.0)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn throttle_builder_matches_positional_new() {
+        // The named-setter builder produces the same throttle as the positional
+        // constructor — the whole point is to avoid transposing the order.
+        let built = Throttle::builder()
+            .resend(Kilobits::new_unchecked(30.0))
+            .land(Kilobits::new_unchecked(40.0))
+            .wind(Kilobits::new_unchecked(9.0))
+            .cloud(Kilobits::new_unchecked(9.0))
+            .task(Kilobits::new_unchecked(86.0))
+            .texture(Kilobits::new_unchecked(86.0))
+            .asset(Kilobits::new_unchecked(40.0))
+            .build();
+        assert_eq!(built, Throttle::preset_300());
+        // An unset builder category defaults to zero.
+        let partial = Throttle::builder()
+            .task(Kilobits::new_unchecked(100.0))
+            .build();
+        assert_eq!(partial.resend(), Kilobits::ZERO);
+        assert_eq!(partial.task(), Kilobits::new_unchecked(100.0));
+    }
+
+    #[test]
+    fn throttle_bits_per_second_round_trips() {
+        // bits_per_second and from_bits_per_second are exact inverses, so a
+        // throttle survives an encode/decode round trip bit-identically.
+        let throttle = Throttle::preset_500();
+        let restored = Throttle::from_bits_per_second(throttle.bits_per_second());
+        assert_eq!(restored, throttle);
+    }
+
+    #[test]
+    fn kilobits_new_rejects_invalid_rates() {
+        assert_eq!(Kilobits::new(-1.0), Err(ThrottleError::Negative));
+        assert_eq!(Kilobits::new(f32::NAN), Err(ThrottleError::NotFinite));
+        assert_eq!(Kilobits::new(f32::INFINITY), Err(ThrottleError::NotFinite));
+        assert_eq!(Kilobits::new(0.0), Ok(Kilobits::ZERO));
+        assert_eq!(Kilobits::new(42.0), Ok(Kilobits::new_unchecked(42.0)));
+    }
+
+    #[test]
+    fn throttle_new_rejects_a_negative_category() {
+        // A single bad rate fails the whole construction.
+        assert_eq!(
+            Throttle::new(1.0, 2.0, 3.0, -4.0, 5.0, 6.0, 7.0),
+            Err(ThrottleError::Negative)
+        );
     }
 }

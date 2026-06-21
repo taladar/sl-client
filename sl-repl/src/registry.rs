@@ -786,14 +786,19 @@ fn parse_maturity(field: &str, value: &str) -> Result<Maturity, ReplError> {
 
 /// Build a [`Throttle`] from seven optional kbps fields (default `0.0`).
 fn build_throttle(args: &Args, ctx: &dyn ReplContext) -> Result<Throttle, ReplError> {
-    Ok(Throttle {
-        resend: args.parse_or(ctx, "resend", 0, "kbps", 0.0)?,
-        land: args.parse_or(ctx, "land", 1, "kbps", 0.0)?,
-        wind: args.parse_or(ctx, "wind", 2, "kbps", 0.0)?,
-        cloud: args.parse_or(ctx, "cloud", 3, "kbps", 0.0)?,
-        task: args.parse_or(ctx, "task", 4, "kbps", 0.0)?,
-        texture: args.parse_or(ctx, "texture", 5, "kbps", 0.0)?,
-        asset: args.parse_or(ctx, "asset", 6, "kbps", 0.0)?,
+    let resend = args.parse_or(ctx, "resend", 0, "kbps", 0.0)?;
+    let land = args.parse_or(ctx, "land", 1, "kbps", 0.0)?;
+    let wind = args.parse_or(ctx, "wind", 2, "kbps", 0.0)?;
+    let cloud = args.parse_or(ctx, "cloud", 3, "kbps", 0.0)?;
+    let task = args.parse_or(ctx, "task", 4, "kbps", 0.0)?;
+    let texture = args.parse_or(ctx, "texture", 5, "kbps", 0.0)?;
+    let asset = args.parse_or(ctx, "asset", 6, "kbps", 0.0)?;
+    Throttle::new(resend, land, wind, cloud, task, texture, asset).map_err(|err| {
+        ReplError::InvalidArg {
+            field: "resend,land,wind,cloud,task,texture,asset".to_owned(),
+            value: err.to_string(),
+            expected: "finite, non-negative kbps rates".to_owned(),
+        }
     })
 }
 
