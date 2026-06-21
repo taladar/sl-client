@@ -57,7 +57,7 @@ pub use sl_proto::{
     GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit,
     GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation,
     IceCandidate, ImDialog, InstantMessage, InterestsUpdate, InventoryFolder, InventoryItem,
-    InventoryOffer, InventoryType, LandingType, LegacyMaterial, LightData, LightImage,
+    InventoryOffer, InventoryType, Kilobits, LandingType, LegacyMaterial, LightData, LightImage,
     LindenAmount, LoadUrlRequest, LoginAccount, LoginParams, LoginRequest, MEDIA_PERM_ALL,
     MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
     MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge,
@@ -73,10 +73,11 @@ pub use sl_proto::{
     RegionLimits, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType,
     ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData,
     SimulatorFeatures, SoundFlags, SoundPreload, TerrainLayerType, TerrainPatch, TextureAnimation,
-    TextureEntry, TextureFace, Throttle, Transmit, Uuid, Vector, VoiceAccountInfo,
-    VoiceProvisionRequest, Wearable, WearableType, avatar_texture, decode_particle_system,
-    decode_texture_anim, decode_texture_entry, grid_to_handle, group_powers, handle_to_global,
-    handle_to_grid, particle_pattern, pcode, sim_access, texture_anim_mode,
+    TextureEntry, TextureFace, Throttle, ThrottleBuilder, ThrottleError, Transmit, Uuid, Vector,
+    VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, avatar_texture,
+    decode_particle_system, decode_texture_anim, decode_texture_entry, grid_to_handle,
+    group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode, sim_access,
+    texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};

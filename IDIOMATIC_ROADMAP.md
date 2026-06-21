@@ -137,10 +137,26 @@ Caller-facing bitfields are currently raw integers. Follow the existing
       `dot`/`length` helpers (dedup'd with the test module). +4 unit tests
       (accepts a valid basis; rejects non-unit / non-orthogonal / left-handed).
       Wire bytes unchanged (decode path still uses the unchecked constructor).
-- [ ] `Throttle::new` (`types/session.rs:79`): seven positional `f32`s in a
-      fixed wire order — easy to transpose. Add a builder or named presets;
-      optionally a `Kilobits(f32)` newtype. Make the seven fields private with
-      accessors so a negative/NaN bandwidth can't be set post-construction.
+- [x] `Throttle::new` (`types/session.rs`): seven positional `f32`s in a
+      fixed wire order — easy to transpose. Did the maximal version of every
+      option. New public `Kilobits(f32)` newtype (validating `new` →
+      `Result<_, ThrottleError>` rejecting NaN/infinite/negative, `const
+      new_unchecked` codec-boundary ctor, `ZERO`, `get`). The seven `Throttle`
+      fields are now **private** `Kilobits` with `resend()`…`asset()` accessors,
+      so a negative/NaN bandwidth can't be set post-construction. The old `new`
+      became validating (`Result<_, ThrottleError>`, mirroring the `Camera`
+      pattern); a new `const new_unchecked` (used by the presets and the
+      `from_bits_per_second` wire-decode) reconstructs verbatim. Added a
+      `ThrottleBuilder` (named per-category setters taking already-validated
+      `Kilobits`, infallible `const build`) reachable via `Throttle::builder` —
+      this is what fixes the transposition hazard. New `ThrottleError`
+      (`NotFinite`/`Negative`, `thiserror`). All re-exported through
+      `sl-proto`/`sl-client-tokio`/`sl-client-bevy`. REPL `build_throttle`
+      (`sl-repl/src/registry.rs`) uses validating `Throttle::new`, mapping a
+      `ThrottleError` to `ReplError::InvalidArg`. Wire bytes byte-identical
+      (`bits_per_second`/`from_bits_per_second` unchanged in value). +5 unit
+      tests (accessor layout, builder == positional `new`, bps round-trip,
+      `Kilobits::new` rejects NaN/inf/negative, `new` rejects a bad category).
 - [ ] `LoginRequest.start` (`sl-wire/src/login.rs`): a `String` constrained to
   `"last" | "home" | "uri:Region&x&y&z"`. Introduce a `StartLocation` enum
   (parse-don't-validate) with `to_wire_string()`.
