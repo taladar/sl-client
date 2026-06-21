@@ -5,7 +5,8 @@ use std::io::Write as _;
 
 use sl_client_tokio::{
     Client, Command, Event, LoginParams, LoginRequest, Maturity, ParcelInfo, ProductType,
-    RegionIdentity, RegionLimits, StartLocation, Vector, grid_to_handle, handle_to_grid,
+    RegionHandle, RegionIdentity, RegionLimits, StartLocation, Vector, grid_to_handle,
+    handle_to_grid,
 };
 use tokio::sync::mpsc;
 use tracing::{instrument, warn};
@@ -549,7 +550,7 @@ impl Survey {
             }
             Event::RegionChanged { region_handle, .. } => {
                 self.pending_teleport = None;
-                self.arrive(region_handle, commands).await;
+                self.arrive(region_handle.0, commands).await;
             }
             Event::RegionLimits(limits) => {
                 if let Some(current) = self.current.as_mut() {
@@ -560,16 +561,17 @@ impl Survey {
                 self.on_parcel(&parcel, commands).await;
             }
             Event::NeighborDiscovered(neighbor) => {
-                self.queue_region(neighbor.region_handle, neighbor.grid_x, neighbor.grid_y);
+                self.queue_region(neighbor.region_handle.0, neighbor.grid_x, neighbor.grid_y);
                 if let Some(current) = self.current.as_mut()
-                    && !current.neighbors.contains(&neighbor.region_handle)
+                    && !current.neighbors.contains(&neighbor.region_handle.0)
                 {
-                    current.neighbors.push(neighbor.region_handle);
+                    current.neighbors.push(neighbor.region_handle.0);
                 }
             }
             Event::MapBlock(region) => {
-                self.names.insert(region.region_handle, region.name.clone());
-                self.queue_region(region.region_handle, region.grid_x, region.grid_y);
+                self.names
+                    .insert(region.region_handle.0, region.name.clone());
+                self.queue_region(region.region_handle.0, region.grid_x, region.grid_y);
             }
             Event::TeleportFailed { reason, .. } => {
                 // Ignore stray/duplicate failures (a teleport that times out also
@@ -923,7 +925,7 @@ impl Survey {
             self.pending_teleport = Some(handle);
             commands
                 .send(Command::Teleport {
-                    region_handle: handle,
+                    region_handle: RegionHandle(handle),
                     position: ARRIVAL_POSITION,
                     look_at: ARRIVAL_LOOK_AT,
                 })

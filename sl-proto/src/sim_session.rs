@@ -83,8 +83,8 @@ use sl_wire::messages::{
 };
 use sl_wire::{
     AnyMessage, ControlFlags, EventQueueEvent, Llsd, MessageId, PacketFlags, Permissions,
-    Permissions5, Reader, WireError, Writer, build_event_queue_response, encode_datagram,
-    parse_datagram, zero_decode,
+    Permissions5, Reader, RegionHandle, WireError, Writer, build_event_queue_response,
+    encode_datagram, parse_datagram, zero_decode,
 };
 use uuid::Uuid;
 
@@ -803,7 +803,7 @@ pub enum ServerEvent {
         /// The kind of item requested (avatars, telehubs, land for sale, …).
         item_type: MapItemType,
         /// The target region handle (0 = the client's current region).
-        region_handle: u64,
+        region_handle: RegionHandle,
         /// The request's map-layer flags.
         flags: MapRequestFlags,
     },
@@ -841,7 +841,7 @@ pub struct SimSession {
     /// The current lifecycle state.
     state: SimState,
     /// The region handle this simulator serves (echoed in `AgentMovementComplete`).
-    region_handle: u64,
+    region_handle: RegionHandle,
     /// The channel/version string reported in `AgentMovementComplete`.
     channel_version: Vec<u8>,
     /// The client's UDP address, learned from the first inbound datagram.
@@ -885,7 +885,7 @@ impl SimSession {
     /// inactivity timer at `now`. The session awaits the circuit until the
     /// client sends `UseCircuitCode`.
     #[must_use]
-    pub fn new(region_handle: u64, now: Instant) -> Self {
+    pub fn new(region_handle: RegionHandle, now: Instant) -> Self {
         Self {
             state: SimState::AwaitingCircuit,
             region_handle,
@@ -3218,7 +3218,7 @@ impl SimSession {
             AnyMessage::MapItemRequest(request) => {
                 self.events.push_back(ServerEvent::MapItemRequested {
                     item_type: MapItemType::from_u32(request.request_data.item_type),
-                    region_handle: request.request_data.region_handle,
+                    region_handle: RegionHandle(request.request_data.region_handle),
                     flags: MapRequestFlags(request.agent_data.flags),
                 });
             }
@@ -3254,7 +3254,7 @@ impl SimSession {
                     y: 0.0,
                     z: 0.0,
                 },
-                region_handle: self.region_handle,
+                region_handle: self.region_handle.0,
                 timestamp: 0,
             },
             sim_data: AgentMovementCompleteSimDataBlock {

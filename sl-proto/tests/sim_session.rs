@@ -21,10 +21,10 @@ mod test {
         MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
         MovementMode, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory,
         ParcelDetails, ParcelObjectOwner, ParcelReturnType, Permissions5, PlacesResult,
-        PointAtType, Postcard, ProductType, RegionIdentity, RestoreItem, RezAttachment, SaleType,
-        ScriptControl, ScriptControlAction, ServerEvent, Session, SimSession, TelehubInfo,
-        Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        enable_simulator_to_caps_llsd, grid_to_handle, parse_event_queue_response,
+        PointAtType, Postcard, ProductType, RegionHandle, RegionIdentity, RestoreItem,
+        RezAttachment, SaleType, ScriptControl, ScriptControlAction, ServerEvent, Session,
+        SimSession, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -165,7 +165,7 @@ mod test {
     fn setup(now: Instant) -> Result<(Session, SimSession), TestError> {
         let mut client = new_client();
         client.handle_login_response(success(), now)?;
-        let mut sim = SimSession::new(REGION_HANDLE, now);
+        let mut sim = SimSession::new(RegionHandle(REGION_HANDLE), now);
         pump(&mut client, &mut sim, now)?;
         Ok((client, sim))
     }
@@ -2138,7 +2138,7 @@ mod test {
     #[test]
     fn inactivity_times_out() -> Result<(), TestError> {
         let now = Instant::now();
-        let mut sim = SimSession::new(REGION_HANDLE, now);
+        let mut sim = SimSession::new(RegionHandle(REGION_HANDLE), now);
         sim.handle_timeout(after(now, 60_000)?);
         assert!(sim.is_closed());
         assert!(
@@ -2216,7 +2216,11 @@ mod test {
         // dedicated ServerEvent rather than the ClientMessage catch-all.
         client.request_map_blocks(1000, 1002, 1000, 1002, now)?;
         client.request_map_by_name("Foo", now)?;
-        client.request_map_items(MapItemType::Telehub, grid_to_handle(1000, 1000), now)?;
+        client.request_map_items(
+            MapItemType::Telehub,
+            RegionHandle::from_grid(1000, 1000),
+            now,
+        )?;
         client.request_map_layer(now)?;
         pump(&mut client, &mut sim, now)?;
 
@@ -2248,7 +2252,7 @@ mod test {
                     item_type: MapItemType::Telehub,
                     region_handle,
                     ..
-                } if *region_handle == grid_to_handle(1000, 1000)
+                } if *region_handle == RegionHandle::from_grid(1000, 1000)
             )),
             "expected a MapItemRequested(Telehub), got {events:?}"
         );
@@ -2274,7 +2278,7 @@ mod test {
                 name: "Standard".to_owned(),
                 grid_x: 1000,
                 grid_y: 1000,
-                region_handle: grid_to_handle(1000, 1000),
+                region_handle: RegionHandle::from_grid(1000, 1000),
                 maturity: Maturity::Mature,
                 region_flags: 0x0000_0345,
                 size_x: 256,
@@ -2287,7 +2291,7 @@ mod test {
                 name: "Variable".to_owned(),
                 grid_x: 1100,
                 grid_y: 1200,
-                region_handle: grid_to_handle(1100, 1200),
+                region_handle: RegionHandle::from_grid(1100, 1200),
                 maturity: Maturity::Adult,
                 region_flags: 0x0000_0007,
                 size_x: 512,
@@ -2470,7 +2474,7 @@ mod test {
             sim_name: "Server Region".to_owned(),
             region_id: uuid::Uuid::from_u128(0xBEEF),
             // Grid coordinates / handle are not wire fields of the handshake.
-            region_handle: 0,
+            region_handle: RegionHandle(0),
             grid_x: 0,
             grid_y: 0,
             region_flags: 0x40,

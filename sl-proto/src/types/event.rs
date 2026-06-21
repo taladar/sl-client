@@ -32,6 +32,7 @@ use sl_wire::ObjectCost;
 use sl_wire::ObjectPhysicsData;
 use sl_wire::ParcelScriptResources;
 use sl_wire::ParcelVoiceInfo;
+use sl_wire::RegionHandle;
 use sl_wire::RenderMaterialEntry;
 use sl_wire::ResourceSummary;
 use sl_wire::SelectedResourceCost;
@@ -300,7 +301,7 @@ pub enum Event {
     /// destination handshake completes an [`Event::RegionChanged`] follows.
     TeleportFinished {
         /// The destination region handle.
-        region_handle: u64,
+        region_handle: RegionHandle,
         /// The destination simulator's UDP address.
         sim: SocketAddr,
         /// The destination region's maturity / content rating (`SimAccess`).
@@ -313,7 +314,7 @@ pub enum Event {
     /// arrived and the circuit is now active there.
     RegionChanged {
         /// The destination region handle.
-        region_handle: u64,
+        region_handle: RegionHandle,
         /// The destination simulator's UDP address.
         sim: SocketAddr,
     },
@@ -818,7 +819,7 @@ pub enum Event {
     /// object update.
     TimeDilation {
         /// The region whose time dilation this is.
-        region_handle: u64,
+        region_handle: RegionHandle,
         /// The time dilation, `0.0`..=`1.0` (the raw `u16` divided by `65535`).
         dilation: f32,
     },
@@ -826,7 +827,7 @@ pub enum Event {
     /// cache.
     ObjectRemoved {
         /// The region the object was in (0 if it was never fully cached).
-        region_handle: u64,
+        region_handle: RegionHandle,
         /// The object's region-local id.
         local_id: u32,
     },
@@ -892,7 +893,7 @@ pub enum Event {
     GltfMaterialOverride {
         /// The region the override applies in (the source simulator's handle, or
         /// `0` if not yet known).
-        region_handle: u64,
+        region_handle: RegionHandle,
         /// The region-local id of the overridden object.
         local_id: u32,
         /// The face indices carrying an override, in order.
@@ -1272,7 +1273,7 @@ pub enum Event {
         /// The handle of the region the sound plays in. Because a `SoundTrigger`
         /// can originate in a neighbouring region, this need not be the agent's
         /// current region.
-        region_handle: u64,
+        region_handle: RegionHandle,
         /// The sound's position, region-local to `region_handle`.
         position: Vector,
         /// The linear gain (volume), `0.0`..=`1.0`.

@@ -4,7 +4,7 @@ use super::{read_nul_string, write_nul_string};
 use crate::session::ZERO_VECTOR;
 use crate::types::{Object, ObjectExtraParams, ObjectMotion, PrimShapeParams};
 use core::ops::BitOrAssign;
-use sl_wire::{Reader, Writer};
+use sl_wire::{Reader, RegionHandle, Writer};
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -172,7 +172,7 @@ fn write_compressed_shape(writer: &mut Writer, shape: &PrimShapeParams) {
 /// a malformed tail simply leaves the later fields at their defaults.
 pub(crate) fn compressed_object(
     blob: &[u8],
-    region_handle: u64,
+    region_handle: RegionHandle,
     update_flags: u32,
 ) -> Option<Object> {
     let mut reader = Reader::new(blob);

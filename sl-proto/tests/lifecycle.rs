@@ -22,11 +22,11 @@ mod test {
         ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
         ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
         PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
-        ProductType, ProfileUpdate, ReflectionProbeFlags, RegionInfoUpdate, Reliability,
-        RestoreItem, RezAttachment, SaleType, ScriptControlAction, ScriptPermissions, Session,
-        SkySettings, SoundFlags, TeleportFlags, TerrainLayerType, Throttle, TransferStatus,
-        Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
-        avatar_texture, group_powers, pcode,
+        ProductType, ProfileUpdate, ReflectionProbeFlags, RegionHandle, RegionInfoUpdate,
+        Reliability, RestoreItem, RezAttachment, SaleType, ScriptControlAction, ScriptPermissions,
+        Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType, Throttle,
+        TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings,
+        WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -1103,7 +1103,12 @@ mod test {
 
         // Begin a teleport so the session is awaiting a `TeleportFinish`.
         let handle = 0x0003_E900_0003_E800;
-        session.teleport_to(handle, vec3(128.0, 128.0, 30.0), vec3(1.0, 0.0, 0.0), now)?;
+        session.teleport_to(
+            RegionHandle(handle),
+            vec3(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
         drain(&mut session)?;
         drain_events(&mut session);
 
@@ -1138,7 +1143,7 @@ mod test {
             .ok_or("expected a TeleportFinished event")?;
 
         let (region_handle, sim, maturity, flags) = finished;
-        assert_eq!(region_handle, handle);
+        assert_eq!(region_handle, RegionHandle(handle));
         assert_eq!(
             sim,
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9100)
@@ -5261,7 +5266,7 @@ mod test {
         assert_eq!(owner_id, owner);
         assert_eq!(object_id, object);
         assert_eq!(parent_id, None);
-        assert_eq!(region_handle, 0x0000_03E8_0000_03E8);
+        assert_eq!(region_handle, RegionHandle(0x0000_03E8_0000_03E8));
         assert_eq!(position, vec3(128.0, 64.0, 25.0));
         assert!((gain - 0.5).abs() < f32::EPSILON);
         Ok(())
@@ -6260,7 +6265,7 @@ mod test {
             .ok_or("expected a RegionInfoHandshake event")?;
         assert_eq!(
             identity.region_handle,
-            sl_proto::global_to_handle(256_000, 256_512)
+            RegionHandle(sl_proto::global_to_handle(256_000, 256_512))
         );
         assert_eq!(identity.grid_x, 1000);
         assert_eq!(identity.grid_y, 1002);
@@ -6969,7 +6974,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a NeighborDiscovered event")?;
-        assert_eq!(neighbor.region_handle, 0x0003_E800_0003_E900);
+        assert_eq!(neighbor.region_handle, RegionHandle(0x0003_E800_0003_E900));
         assert_eq!(neighbor.grid_x, 1000);
         assert_eq!(neighbor.grid_y, 1001);
         assert_eq!(neighbor.sim.port(), 13000);
@@ -7112,7 +7117,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a RegionChanged event")?;
-        assert_eq!(changed.0, handle);
+        assert_eq!(changed.0, RegionHandle(handle));
         assert_eq!(changed.1, sim_b());
         Ok(())
     }
@@ -7167,7 +7172,7 @@ mod test {
             })
             .ok_or("expected a NeighborDiscovered event")?;
         assert_eq!(neighbour.sim, sim_b());
-        assert_eq!(neighbour.region_handle, 0x0003_E900_0003_E800);
+        assert_eq!(neighbour.region_handle, RegionHandle(0x0003_E900_0003_E800));
         let msg =
             take_transmit_to(&mut session, sim_b()).ok_or("expected a child UseCircuitCode")?;
         assert!(matches!(msg, AnyMessage::UseCircuitCode(_)));
@@ -7236,7 +7241,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a RegionChanged event")?;
-        assert_eq!(changed.0, handle);
+        assert_eq!(changed.0, RegionHandle(handle));
         assert_eq!(changed.1, sim_b());
         Ok(())
     }
@@ -7471,7 +7476,7 @@ mod test {
         drain(&mut session)?;
 
         session.request_map_by_name("East Region", now)?;
-        session.request_map_items(MapItemType::AgentLocations, 0, now)?;
+        session.request_map_items(MapItemType::AgentLocations, RegionHandle(0), now)?;
         let sent = drain(&mut session)?;
 
         let name = sent
@@ -7549,7 +7554,7 @@ mod test {
         assert_eq!(first.global_x, 256_128);
         assert_eq!(first.global_y, 256_064);
         // The region handle masks off the in-region offset; the locals recover it.
-        assert_eq!(first.region_handle(), 0x0003_E800_0003_E800);
+        assert_eq!(first.region_handle(), RegionHandle(0x0003_E800_0003_E800));
         assert_eq!(first.local_x(), 128);
         assert_eq!(first.local_y(), 64);
         assert_eq!(first.extra, 1);
@@ -8349,7 +8354,12 @@ mod test {
         drain_events(&mut session);
 
         let handle = 0x0003_E800_0003_E900;
-        session.teleport_to(handle, vec3(128.0, 128.0, 30.0), vec3(1.0, 0.0, 0.0), now)?;
+        session.teleport_to(
+            RegionHandle(handle),
+            vec3(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
         let sent = drain(&mut session)?;
         assert!(
             sent.iter()
@@ -8380,7 +8390,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a RegionChanged event")?;
-        assert_eq!(changed.0, handle);
+        assert_eq!(changed.0, RegionHandle(handle));
         assert_eq!(changed.1, sim_b());
 
         // Stray traffic from the old simulator is now ignored.
@@ -8398,7 +8408,12 @@ mod test {
         drain_events(&mut session);
 
         let handle = 0x0003_E800_0003_E900;
-        session.teleport_to(handle, vec3(128.0, 128.0, 30.0), vec3(1.0, 0.0, 0.0), now)?;
+        session.teleport_to(
+            RegionHandle(handle),
+            vec3(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
         drain(&mut session)?;
 
         let failed = server_message(
@@ -8432,7 +8447,12 @@ mod test {
         assert_eq!(info.extra_params, "[REGION_NAME]=Foo");
 
         // Back in the active state, a second teleport is accepted.
-        session.teleport_to(handle, vec3(128.0, 128.0, 30.0), vec3(1.0, 0.0, 0.0), now)?;
+        session.teleport_to(
+            RegionHandle(handle),
+            vec3(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
         Ok(())
     }
 
@@ -8444,7 +8464,7 @@ mod test {
         drain_events(&mut session);
 
         session.teleport_to(
-            0x0003_E800_0003_E900,
+            RegionHandle(0x0003_E800_0003_E900),
             vec3(128.0, 128.0, 30.0),
             vec3(1.0, 0.0, 0.0),
             now,
@@ -8643,7 +8663,7 @@ mod test {
         assert_eq!(region.maturity, Maturity::Mature);
         assert_eq!(region.water_height, 20);
         assert_eq!(region.agents, 3);
-        assert_eq!(region.region_handle, sl_proto::grid_to_handle(1000, 1001));
+        assert_eq!(region.region_handle, RegionHandle::from_grid(1000, 1001));
         Ok(())
     }
 
@@ -8796,7 +8816,12 @@ mod test {
         drain_events(&mut session);
 
         let handle = 0x0003_E800_0003_E900;
-        session.teleport_to(handle, vec3(128.0, 128.0, 30.0), vec3(1.0, 0.0, 0.0), now)?;
+        session.teleport_to(
+            RegionHandle(handle),
+            vec3(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
         let sent = drain(&mut session)?;
         assert!(
             sent.iter()
@@ -8821,7 +8846,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a TeleportFinished event from the CAPS path")?;
-        assert_eq!(finished.0, handle);
+        assert_eq!(finished.0, RegionHandle(handle));
         assert_eq!(finished.1, sim_b());
         assert_eq!(finished.2, Maturity::Mature);
         assert!(finished.3.contains(TeleportFlags::VIA_LURE));
@@ -8861,7 +8886,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a RegionChanged event")?;
-        assert_eq!(changed.0, handle);
+        assert_eq!(changed.0, RegionHandle(handle));
         assert_eq!(changed.1, sim_b());
         Ok(())
     }
@@ -8874,7 +8899,12 @@ mod test {
         drain_events(&mut session);
 
         let handle = 0x0003_E800_0003_E900;
-        session.teleport_to(handle, vec3(128.0, 128.0, 30.0), vec3(1.0, 0.0, 0.0), now)?;
+        session.teleport_to(
+            RegionHandle(handle),
+            vec3(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
         drain(&mut session)?;
         let body = sl_proto::parse_llsd_xml(caps_teleport_finish_xml())?;
         session.handle_caps_event("TeleportFinish", &body, now)?;
@@ -9047,7 +9077,7 @@ mod test {
         assert_eq!(object.local_id, 100);
         assert_eq!(object.full_id, uuid::Uuid::from_u128(0xABCD));
         assert_eq!(object.pcode, pcode::PRIMITIVE);
-        assert_eq!(object.region_handle, OBJ_REGION);
+        assert_eq!(object.region_handle, RegionHandle(OBJ_REGION));
         assert_eq!(object.motion.position, position);
         assert_eq!(object.material, 3);
         // The path/profile shape is decoded from the full update's fields.
@@ -9404,7 +9434,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a TimeDilation event")?;
-        assert_eq!(dilation.0, OBJ_REGION);
+        assert_eq!(dilation.0, RegionHandle(OBJ_REGION));
         // 0x8000 / 0xFFFF ≈ 0.5.
         assert!(
             (dilation.1 - 0.5).abs() < 1e-4,
@@ -9681,7 +9711,7 @@ mod test {
             } => Some((*local_id, *region_handle)),
             _ => None,
         });
-        assert_eq!(removed, Some((400, OBJ_REGION)));
+        assert_eq!(removed, Some((400, RegionHandle(OBJ_REGION))));
         assert!(session.object(400).is_none());
         Ok(())
     }
@@ -10008,11 +10038,14 @@ mod test {
             return Err(format!("expected neighbour ObjectAdded, got {events:?}").into());
         };
         assert_eq!(object.local_id, 700);
-        assert_eq!(object.region_handle, NB_REGION);
+        assert_eq!(object.region_handle, RegionHandle(NB_REGION));
 
         // It lives in the neighbour region's set; the root-region `object()`
         // lookup does not see it (local ids share a numeric space across regions).
-        assert_eq!(session.objects_in_region(NB_REGION).count(), 1);
+        assert_eq!(
+            session.objects_in_region(RegionHandle(NB_REGION)).count(),
+            1
+        );
         assert!(session.object(700).is_none());
         assert_eq!(session.objects().count(), 1);
 
@@ -10053,7 +10086,7 @@ mod test {
                 Event::ObjectRemoved {
                     local_id: 700,
                     region_handle,
-                } if *region_handle == NB_REGION
+                } if *region_handle == RegionHandle(NB_REGION)
             )),
             "disabling the neighbour must remove its objects, got {events:?}"
         );
@@ -10516,7 +10549,7 @@ mod test {
         assert_eq!(patch.patch_x, 1);
         assert_eq!(patch.patch_y, 2);
         assert_eq!(patch.size, 16);
-        assert_eq!(patch.region_handle, OBJ_REGION);
+        assert_eq!(patch.region_handle, RegionHandle(OBJ_REGION));
         assert!((patch.value(0, 0).ok_or("cell 0,0")? - 26.0).abs() < 1e-3);
 
         // It is in the public cache, addressable by region-local cell. Patch
@@ -10524,7 +10557,12 @@ mod test {
         let height = session.terrain_height(20, 40).ok_or("height at (20,40)")?;
         assert!((height - 26.0).abs() < 1e-3, "height {height} != 26.0");
         assert_eq!(session.terrain_patches().count(), 1);
-        assert_eq!(session.terrain_patches_in_region(OBJ_REGION).count(), 1);
+        assert_eq!(
+            session
+                .terrain_patches_in_region(RegionHandle(OBJ_REGION))
+                .count(),
+            1
+        );
         Ok(())
     }
 

@@ -14,6 +14,8 @@
 //! size (≤ 32), so no wrap can actually occur. Floating-point arithmetic (the
 //! DCT itself) is unrestricted.
 
+use sl_wire::RegionHandle;
+
 use crate::types::{TerrainLayerType, TerrainPatch};
 
 /// The per-patch quant/wbits byte value that marks the end of the patch stream.
@@ -448,7 +450,7 @@ fn build_decopy_matrix(patch_size: u32, total: usize) -> Option<Vec<u32>> {
 pub(crate) fn into_terrain_patch(
     decoded: DecodedPatch,
     layer: TerrainLayerType,
-    region_handle: u64,
+    region_handle: RegionHandle,
 ) -> TerrainPatch {
     TerrainPatch {
         region_handle,
@@ -778,7 +780,7 @@ fn forward_dct(spatial: &[f32], icosines: &[f32], size: usize) -> Vec<f32> {
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use super::{BitReader, decode_layer, encode_layer};
+    use super::{BitReader, RegionHandle, decode_layer, encode_layer};
     use crate::types::{TerrainLayerType, TerrainPatch};
 
     /// A boxed error so tests can use `?` instead of disallowed `unwrap`/`expect`.
@@ -936,7 +938,7 @@ mod tests {
             }
         }
         TerrainPatch {
-            region_handle: 0,
+            region_handle: RegionHandle(0),
             layer,
             patch_x,
             patch_y,

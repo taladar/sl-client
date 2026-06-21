@@ -1,5 +1,7 @@
 //! Terrain layer kinds and patch headers.
 
+use sl_wire::RegionHandle;
+
 /// The kind of layer carried in a `LayerData` message, identified by the
 /// single-byte type code in the layer's group header. LAND is the terrain
 /// heightmap (the one a renderer needs for the ground); WIND/CLOUD/WATER carry
@@ -89,9 +91,9 @@ impl TerrainLayerType {
 /// [`Land`]: TerrainLayerType::Land
 #[derive(Debug, Clone, PartialEq)]
 pub struct TerrainPatch {
-    /// The region this patch belongs to (its `RegionHandle`), or 0 if not yet
+    /// The region this patch belongs to (its [`RegionHandle`]), or `0` if not yet
     /// known for the originating simulator.
-    pub region_handle: u64,
+    pub region_handle: RegionHandle,
     /// The layer this patch belongs to.
     pub layer: TerrainLayerType,
     /// The patch column (grid X) within the region.

@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use sl_proto::{Event, Uuid};
+use sl_proto::{Event, RegionHandle, Uuid};
 
 /// Resolves the `$placeholder` argument tokens a REPL line may use, and the
 /// reverse mapping from a literal back to the placeholder that stands for it.
@@ -86,7 +86,7 @@ pub struct SessionContext {
     /// The circuit code (`$circuit`), once login has completed.
     circuit_code: Option<u32>,
     /// The current region's handle (`$region`).
-    region_handle: Option<u64>,
+    region_handle: Option<RegionHandle>,
     /// The current region's name (tracked for symbolizing, not a placeholder).
     region_name: Option<String>,
     /// The region-local id of the most recently seen parcel (`$parcel`).
@@ -128,7 +128,7 @@ impl SessionContext {
 
     /// Set the current region's handle (`$region`) and name. Called for the
     /// login region and refreshed from the event stream on a region change.
-    pub fn set_region(&mut self, handle: u64, name: &str) {
+    pub fn set_region(&mut self, handle: RegionHandle, name: &str) {
         bind(&mut self.region_handle, handle, "region");
         if self.region_name.as_deref() != Some(name) {
             self.region_name = Some(name.to_owned());
@@ -262,7 +262,7 @@ impl ReplContext for SessionContext {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use sl_proto::Uuid;
+    use sl_proto::{RegionHandle, Uuid};
 
     use super::{ReplContext as _, SessionContext};
 
@@ -324,7 +324,7 @@ mod tests {
     #[test]
     fn region_binding_set_and_resolved() {
         let mut ctx = SessionContext::new();
-        ctx.set_region(1_099_511_628_032, "Da Boom");
+        ctx.set_region(RegionHandle(1_099_511_628_032), "Da Boom");
         assert_eq!(
             ctx.resolve_placeholder("region"),
             Some("1099511628032".to_owned())
@@ -335,7 +335,7 @@ mod tests {
     fn symbolize_inverts_resolution() {
         let mut ctx = SessionContext::new();
         ctx.set_identity(uuid('1'), uuid('2'), 12345);
-        ctx.set_region(1_099_511_628_032, "Da Boom");
+        ctx.set_region(RegionHandle(1_099_511_628_032), "Da Boom");
         ctx.set_cap("GetTexture", "https://sim/cap/abc");
         ctx.set_var("dest", "Da Boom Plaza");
         assert_eq!(

@@ -5,6 +5,7 @@ use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::Permissions5;
 use sl_wire::ReflectionProbeFlags;
+use sl_wire::RegionHandle;
 use uuid::Uuid;
 
 /// Linden `PCode` constants: the object-class byte (`p_code`) in an object
@@ -55,8 +56,8 @@ pub struct ObjectMotion {
 /// removed via [`Event::ObjectRemoved`](crate::Event::ObjectRemoved).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Object {
-    /// The region the object lives in (its `RegionHandle`).
-    pub region_handle: u64,
+    /// The region the object lives in (its [`RegionHandle`]).
+    pub region_handle: RegionHandle,
     /// The region-local id (the transient handle the simulator uses; not stable
     /// across region crossings or relogins).
     pub local_id: u32,
@@ -730,7 +731,7 @@ mod tests {
 
     fn test_object(pcode: u8, state: u8, name_value: &str) -> super::Object {
         super::Object {
-            region_handle: 0,
+            region_handle: RegionHandle(0),
             local_id: 0,
             full_id: super::Uuid::nil(),
             parent_id: 0,

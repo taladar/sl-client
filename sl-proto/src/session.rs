@@ -7,6 +7,7 @@ use crate::types::{
 };
 use sl_types::lsl::Rotation;
 use sl_wire::ControlFlags;
+use sl_wire::RegionHandle;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -709,7 +710,7 @@ enum SessionState {
 #[derive(Debug)]
 struct HandoverPending {
     /// The destination region handle reported by `TeleportFinish`.
-    region_handle: u64,
+    region_handle: RegionHandle,
 }
 
 /// A single agent session: login bookkeeping plus one simulator circuit.
@@ -760,7 +761,7 @@ pub struct Session {
     handover: Option<HandoverPending>,
     /// The destination region handle of an in-flight teleport (between sending
     /// `TeleportLocationRequest` and receiving `TeleportFinish`/failure).
-    teleport_target: Option<u64>,
+    teleport_target: Option<RegionHandle>,
     /// The current region's capability-seed URL (from login or a teleport), for
     /// the driver to fetch the CAPS map and event queue.
     seed_capability: Option<String>,
@@ -819,7 +820,7 @@ pub struct Session {
     /// updates, which carry it, and from `EnableSimulator`). Used to label
     /// terrain patches, which the `LayerData` message does not itself tag with a
     /// region handle.
-    regions: BTreeMap<SocketAddr, u64>,
+    regions: BTreeMap<SocketAddr, RegionHandle>,
     /// The most recent raw `RegionData.TimeDilation` (a `u16`) seen for each
     /// simulator, used to de-duplicate [`Event::TimeDilation`] so it is emitted
     /// only when the region's frame time-dilation actually changes (every

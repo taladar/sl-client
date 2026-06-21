@@ -1,6 +1,6 @@
 //! Inventory structure and region-handle coordinate helpers.
 
-use sl_wire::Permissions5;
+use sl_wire::{Permissions5, RegionHandle};
 use uuid::Uuid;
 
 /// An inventory folder (category): from the login skeleton
@@ -102,41 +102,34 @@ pub struct GestureActivation {
 }
 
 /// Splits a region handle into its global south-west corner in metres,
-/// `(global_x, global_y)`.
+/// `(global_x, global_y)`. Thin `u64` wrapper around
+/// [`RegionHandle::global_coordinates`] for raw-wire contexts.
 #[must_use]
 pub fn handle_to_global(handle: u64) -> (u32, u32) {
-    let high = handle.checked_shr(32).unwrap_or(0);
-    let low = handle & 0xFFFF_FFFF;
-    (
-        u32::try_from(high).unwrap_or(u32::MAX),
-        u32::try_from(low).unwrap_or(u32::MAX),
-    )
+    RegionHandle(handle).global_coordinates()
 }
 
 /// Splits a region handle into its grid coordinates (region indices), i.e. the
-/// global south-west corner in metres divided by 256.
+/// global south-west corner in metres divided by 256. Thin `u64` wrapper around
+/// [`RegionHandle::grid_coordinates`] for raw-wire contexts.
 #[must_use]
 pub fn handle_to_grid(handle: u64) -> (u32, u32) {
-    let (global_x, global_y) = handle_to_global(handle);
-    (
-        global_x.checked_div(256).unwrap_or(0),
-        global_y.checked_div(256).unwrap_or(0),
-    )
+    RegionHandle(handle).grid_coordinates()
 }
 
 /// Builds a region handle from its global south-west corner in metres,
 /// `(global_x, global_y)` — the inverse of [`handle_to_global`]. Unlike
 /// [`grid_to_handle`], the inputs are already in metres (not region indices),
-/// e.g. the `region_x` / `region_y` fields of the login response.
+/// e.g. the `region_x` / `region_y` fields of the login response. Thin `u64`
+/// wrapper around [`RegionHandle::from_global`].
 #[must_use]
 pub fn global_to_handle(global_x: u32, global_y: u32) -> u64 {
-    u64::from(global_x).checked_shl(32).unwrap_or(0) | u64::from(global_y)
+    RegionHandle::from_global(global_x, global_y).0
 }
 
-/// Builds a region handle from grid coordinates (region indices).
+/// Builds a region handle from grid coordinates (region indices). Thin `u64`
+/// wrapper around [`RegionHandle::from_grid`].
 #[must_use]
 pub fn grid_to_handle(grid_x: u32, grid_y: u32) -> u64 {
-    let global_x = u64::from(grid_x).checked_mul(256).unwrap_or(0);
-    let global_y = u64::from(grid_y).checked_mul(256).unwrap_or(0);
-    global_x.checked_shl(32).unwrap_or(0) | global_y
+    RegionHandle::from_grid(grid_x, grid_y).0
 }

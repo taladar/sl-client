@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 use super::Maturity;
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
+use sl_wire::RegionHandle;
 use uuid::Uuid;
 
 /// A change to one of an estate's access lists, applied via
@@ -180,7 +181,7 @@ pub struct MapRegionInfo {
     /// The region's grid y coordinate (region index).
     pub grid_y: u32,
     /// The region handle (derived from the grid coordinates).
-    pub region_handle: u64,
+    pub region_handle: RegionHandle,
     /// The maturity rating, from the map's access byte.
     pub maturity: Maturity,
     /// The raw region flags bitfield.
@@ -288,10 +289,8 @@ impl MapItem {
     /// The handle of the region this item sits in, derived from its global
     /// coordinates (the global position with the in-region offset masked off).
     #[must_use]
-    pub fn region_handle(&self) -> u64 {
-        let region_x = u64::from(self.global_x & !0xFF);
-        let region_y = u64::from(self.global_y & !0xFF);
-        (region_x << 32) | region_y
+    pub fn region_handle(&self) -> RegionHandle {
+        RegionHandle::from_global(self.global_x & !0xFF, self.global_y & !0xFF)
     }
 
     /// The item's x offset within its region (0–255 metres).
@@ -365,7 +364,7 @@ impl MapRequestFlags {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NeighborInfo {
     /// The neighbour's region handle.
-    pub region_handle: u64,
+    pub region_handle: RegionHandle,
     /// The neighbour's UDP address.
     pub sim: SocketAddr,
     /// The neighbour's grid x coordinate (region index, i.e. global metres / 256).
