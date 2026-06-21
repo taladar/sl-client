@@ -3024,6 +3024,30 @@ mod test {
     }
 
     #[test]
+    fn viewer_frozen_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        for (data, seq) in [(true, 9106), (false, 9107)] {
+            let frozen = AnyMessage::ViewerFrozenMessage(sl_wire::messages::ViewerFrozenMessage {
+                frozen_data: sl_wire::messages::ViewerFrozenMessageFrozenDataBlock { data },
+            });
+            let datagram = server_message(&frozen, seq, true)?;
+            session.handle_datagram(sim_addr(), &datagram, now)?;
+            let value = drain_events(&mut session)
+                .into_iter()
+                .find_map(|e| match e {
+                    Event::ViewerFrozen { frozen } => Some(frozen),
+                    _ => None,
+                })
+                .ok_or("expected a ViewerFrozen event")?;
+            assert_eq!(value, data);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn eject_group_member_reply_surfaces_event() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;

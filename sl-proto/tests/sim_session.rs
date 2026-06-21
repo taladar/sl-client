@@ -1777,7 +1777,7 @@ mod test {
     }
 
     #[test]
-    fn alerts_collisions_health_camera_reach_client() -> Result<(), TestError> {
+    fn alerts_collisions_health_camera_frozen_reach_client() -> Result<(), TestError> {
         let now = Instant::now();
         let (mut client, mut sim) = setup(now)?;
         drain_client(&mut client);
@@ -1787,7 +1787,8 @@ mod test {
         let perp = uuid::Uuid::from_u128(0xC011_DE12);
         let plane = [0.0_f32, 1.0, 0.0, 3.25];
 
-        // Sim -> client: the five receive-only notifications G13 wraps.
+        // Sim -> client: the five receive-only notifications G13 wraps plus the
+        // G17 viewer-freeze toggle.
         sim.send_alert_message(
             "region restarting",
             &[AlertInfo {
@@ -1810,6 +1811,7 @@ mod test {
         )?;
         sim.send_health_message(42.0, now)?;
         sim.send_camera_constraint(plane, now)?;
+        sim.send_viewer_frozen(true, now)?;
         pump(&mut client, &mut sim, now)?;
 
         let events = drain_client(&mut client);
@@ -1875,6 +1877,15 @@ mod test {
             })
             .ok_or("expected a CameraConstraint client event")?;
         assert_eq!(got_plane.map(f32::to_bits), plane.map(f32::to_bits));
+
+        let frozen = events
+            .iter()
+            .find_map(|e| match e {
+                Event::ViewerFrozen { frozen } => Some(*frozen),
+                _ => None,
+            })
+            .ok_or("expected a ViewerFrozen client event")?;
+        assert!(frozen);
         Ok(())
     }
 

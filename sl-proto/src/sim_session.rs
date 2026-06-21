@@ -30,6 +30,7 @@ use sl_wire::messages::{
     AlertMessageAlertInfoBlock, CameraConstraint, CameraConstraintCameraCollidePlaneBlock,
     HealthMessage, HealthMessageHealthDataBlock, LandStatReply, LandStatReplyReportDataBlock,
     LandStatReplyRequestDataBlock, MeanCollisionAlert, MeanCollisionAlertMeanCollisionBlock,
+    ViewerFrozenMessage, ViewerFrozenMessageFrozenDataBlock,
 };
 use sl_wire::messages::{
     AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
@@ -1498,6 +1499,26 @@ impl SimSession {
         }
         let message = AnyMessage::CameraConstraint(CameraConstraint {
             camera_collide_plane: CameraConstraintCameraCollidePlaneBlock { plane },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `ViewerFrozenMessage` telling the client it has been frozen
+    /// (`frozen` = `true`) or thawed (`frozen` = `false`) by an estate manager.
+    /// Surfaces on the client as
+    /// [`Event::ViewerFrozen`](crate::Event::ViewerFrozen). Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_viewer_frozen(&mut self, frozen: bool, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ViewerFrozenMessage(ViewerFrozenMessage {
+            frozen_data: ViewerFrozenMessageFrozenDataBlock { data: frozen },
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())

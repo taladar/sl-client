@@ -2463,6 +2463,11 @@ impl Session {
                     plane: constraint.camera_collide_plane.plane,
                 });
             }
+            AnyMessage::ViewerFrozenMessage(frozen) => {
+                self.events.push_back(Event::ViewerFrozen {
+                    frozen: frozen.frozen_data.data,
+                });
+            }
             AnyMessage::LoadURL(load) => {
                 let data = &load.data;
                 self.events
