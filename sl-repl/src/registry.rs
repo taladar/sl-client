@@ -806,12 +806,15 @@ fn build_camera(args: &Args, ctx: &dyn ReplContext) -> Result<Camera, ReplError>
     ) {
         return Ok(Camera::looking_at(eye, target));
     }
-    Ok(Camera::new(
-        args.req_vector(ctx, "center", 0)?,
-        args.req_vector(ctx, "at_axis", 1)?,
-        args.req_vector(ctx, "left_axis", 2)?,
-        args.req_vector(ctx, "up_axis", 3)?,
-    ))
+    let center = args.req_vector(ctx, "center", 0)?;
+    let at_axis = args.req_vector(ctx, "at_axis", 1)?;
+    let left_axis = args.req_vector(ctx, "left_axis", 2)?;
+    let up_axis = args.req_vector(ctx, "up_axis", 3)?;
+    Camera::new(center, at_axis, left_axis, up_axis).map_err(|err| ReplError::InvalidArg {
+        field: "at_axis,left_axis,up_axis".to_owned(),
+        value: err.to_string(),
+        expected: "right-handed orthonormal camera basis (at × left = up)".to_owned(),
+    })
 }
 
 /// Build a [`ProfileUpdate`] from keyword fields (all optional).
