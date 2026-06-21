@@ -11,23 +11,30 @@ use super::{
     EstateInfo, EventInfo, FollowCamPropertyValue, Friend, FriendRights, GroupAccountDetails,
     GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupMember,
     GroupMembership, GroupName, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle,
-    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem, LoadUrlRequest,
-    LoginAccount, MapItem, MapItemType, MapRegionInfo, Maturity, MeanCollision, MoneyBalance,
-    MuteEntry, NeighborInfo, Object, ObjectProperties, ObjectPropertiesFamily, ParcelAccessEntry,
-    ParcelAccessScope, ParcelDetails, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelObjectOwner, ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation, RegionIdentity,
-    RegionLimits, ScriptControl, ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest,
-    SoundFlags, SoundPreload, TelehubInfo, TeleportFlags, TerrainPatch, Texture, TransferStatus,
-    ViewerEffect, Wearable,
+    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem, LandStatItem,
+    LandStatReportType, LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapRegionInfo,
+    Maturity, MeanCollision, MoneyBalance, MuteEntry, NeighborInfo, Object, ObjectProperties,
+    ObjectPropertiesFamily, ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, PickInfo,
+    PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, ScriptControl, ScriptDialog,
+    ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload, TelehubInfo,
+    TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
 };
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::AgentPreferences;
+use sl_wire::AttachmentResourcesReport;
 use sl_wire::DisplayName;
 use sl_wire::ExperienceInfo;
+use sl_wire::LandResourcesUrls;
 use sl_wire::MediaEntry;
+use sl_wire::ObjectCost;
+use sl_wire::ObjectPhysicsData;
+use sl_wire::ParcelScriptResources;
 use sl_wire::ParcelVoiceInfo;
 use sl_wire::RenderMaterialEntry;
+use sl_wire::ResourceSummary;
+use sl_wire::SelectedResourceCost;
 use sl_wire::SimulatorFeatures;
 use sl_wire::VoiceAccountInfo;
 use uuid::Uuid;
@@ -154,6 +161,56 @@ pub enum Event {
     /// [`Command::RequestAgentPreferences`](crate::Command::RequestAgentPreferences).
     /// The grid echoes the full stored set, so every field is `Some`.
     AgentPreferences(Box<AgentPreferences>),
+    /// The land-impact / physics costs of one or more objects, from a
+    /// `GetObjectCost` capability reply to
+    /// [`Command::RequestObjectCost`](crate::Command::RequestObjectCost). One
+    /// entry per object, keyed by object id (sorted by id).
+    ObjectCosts(Vec<(Uuid, ObjectCost)>),
+    /// The summed physics/streaming/simulation cost of the current selection,
+    /// from a `ResourceCostSelected` capability reply to
+    /// [`Command::RequestSelectedCost`](crate::Command::RequestSelectedCost).
+    SelectedResourceCost(SelectedResourceCost),
+    /// The physics-material parameters of one or more objects, from a
+    /// `GetObjectPhysicsData` capability reply to
+    /// [`Command::RequestObjectPhysicsData`](crate::Command::RequestObjectPhysicsData).
+    /// One entry per object, keyed by object id (sorted by id).
+    ObjectPhysicsData(Vec<(Uuid, ObjectPhysicsData)>),
+    /// Updated physics-material parameters pushed unsolicited over the event
+    /// queue (`ObjectPhysicsProperties`), sent when a prim's physics material
+    /// changes. One entry per object, keyed by region-local id.
+    ObjectPhysicsProperties(Vec<(u32, ObjectPhysicsData)>),
+    /// The agent's attachment resource report, from an `AttachmentResources`
+    /// capability reply to
+    /// [`Command::RequestAttachmentResources`](crate::Command::RequestAttachmentResources):
+    /// the scripted attachments grouped by attachment point, with a summary.
+    AttachmentResources(Box<AttachmentResourcesReport>),
+    /// The follow-up capability URLs from a `LandResources` capability reply to
+    /// [`Command::RequestLandResources`](crate::Command::RequestLandResources).
+    /// The runtimes GET these URLs and then surface [`Event::LandResourceSummary`]
+    /// and (when present) [`Event::LandResourceDetail`].
+    LandResourcesUrls(LandResourcesUrls),
+    /// A parcel's script-resource totals, from the `ScriptResourceSummary`
+    /// follow-up cap of a [`Command::RequestLandResources`](crate::Command::RequestLandResources).
+    LandResourceSummary(ResourceSummary),
+    /// A parcel's per-object script-resource breakdown, from the
+    /// `ScriptResourceDetails` follow-up cap of a
+    /// [`Command::RequestLandResources`](crate::Command::RequestLandResources)
+    /// (only sent when the agent may see detail). One entry per parcel.
+    LandResourceDetail(Vec<ParcelScriptResources>),
+    /// A region's top-scripts / top-colliders report, from a `LandStatReply` in
+    /// response to [`Command::RequestLandStat`](crate::Command::RequestLandStat)
+    /// (the estate-tools "Top Scripts" / "Top Colliders" panels).
+    LandStatReply {
+        /// Which report this is (top scripts or top colliders).
+        report_type: LandStatReportType,
+        /// The request flags echoed from the request.
+        request_flags: u32,
+        /// The total number of objects in the report (the report itself may carry
+        /// only the top rows).
+        total_object_count: u32,
+        /// The reported objects, highest-scoring first.
+        items: Vec<LandStatItem>,
+    },
     /// An estate's configuration, from an `EstateOwnerMessage` `estateupdateinfo`
     /// reply to [`Session::request_estate_info`](crate::Session::request_estate_info).
     EstateInfo(Box<EstateInfo>),

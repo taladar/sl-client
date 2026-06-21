@@ -322,6 +322,56 @@ pub const CAP_SIMULATOR_FEATURES: &str = "SimulatorFeatures";
 /// [`Session::handle_caps_event`] into [`Event::AgentPreferences`].
 pub const CAP_AGENT_PREFERENCES: &str = "AgentPreferences";
 
+/// The HTTP capability for an object's **land-impact / physics costs**
+/// (`GetObjectCost`): a POST of `{ object_ids }` returning the per-object resource
+/// and physics costs. Driven by the runtimes' `RequestObjectCost` command; the
+/// reply is decoded by [`Session::handle_caps_event`] into [`Event::ObjectCosts`].
+pub const CAP_GET_OBJECT_COST: &str = "GetObjectCost";
+
+/// The HTTP capability for the **current selection's summed costs**
+/// (`ResourceCostSelected`): a POST of `{ selected_roots | selected_prims }`
+/// returning `{ selected: { physics, streaming, simulation } }`. Driven by the
+/// runtimes' `RequestSelectedCost` command; the reply is decoded by
+/// [`Session::handle_caps_event`] into [`Event::SelectedResourceCost`].
+pub const CAP_RESOURCE_COST_SELECTED: &str = "ResourceCostSelected";
+
+/// The HTTP capability for an object's **physics-material parameters**
+/// (`GetObjectPhysicsData`): a POST of `{ object_ids }` returning each object's
+/// physics shape type, density, friction, restitution, and gravity multiplier.
+/// Driven by the runtimes' `RequestObjectPhysicsData` command; the reply is
+/// decoded by [`Session::handle_caps_event`] into [`Event::ObjectPhysicsData`].
+/// The simulator also pushes the same data unsolicited via the `ObjectPhysicsProperties`
+/// event-queue event ([`Event::ObjectPhysicsProperties`]).
+pub const CAP_GET_OBJECT_PHYSICS_DATA: &str = "GetObjectPhysicsData";
+
+/// The HTTP capability for the agent's **attachment resource report**
+/// (`AttachmentResources`): a GET returning the agent's scripted attachments
+/// grouped by attachment point, with a resource summary. Driven by the runtimes'
+/// `RequestAttachmentResources` command; the reply is decoded by
+/// [`Session::handle_caps_event`] into [`Event::AttachmentResources`].
+pub const CAP_ATTACHMENT_RESOURCES: &str = "AttachmentResources";
+
+/// The HTTP capability for a parcel's **script resource report** (`LandResources`):
+/// a POST of `{ parcel_id }` returning follow-up `ScriptResourceSummary` /
+/// `ScriptResourceDetails` capability URLs. Driven by the runtimes'
+/// `RequestLandResources` command; the URL hand-off is decoded by
+/// [`Session::handle_caps_event`] into [`Event::LandResourcesUrls`], and the
+/// runtimes then GET the follow-up URLs, surfacing
+/// [`Event::LandResourceSummary`] / [`Event::LandResourceDetail`].
+pub const CAP_LAND_RESOURCES: &str = "LandResources";
+
+/// The tag the runtimes attach to a `LandResources` *summary* follow-up GET when
+/// forwarding its body to [`Session::handle_caps_event`]. It is the LLSD key the
+/// `LandResources` POST returns the follow-up URL under (`ScriptResourceSummary`),
+/// not a seed capability — the URL is transient, minted per request.
+pub const LAND_RESOURCE_SUMMARY_TAG: &str = "ScriptResourceSummary";
+
+/// The tag the runtimes attach to a `LandResources` *detail* follow-up GET when
+/// forwarding its body to [`Session::handle_caps_event`] (`ScriptResourceDetails`).
+/// Like [`LAND_RESOURCE_SUMMARY_TAG`], this is a transient per-request URL key,
+/// not a seed capability.
+pub const LAND_RESOURCE_DETAIL_TAG: &str = "ScriptResourceDetails";
+
 /// The viewer's `TELEPORT_FLAGS_VIA_LURE` (`1 << 2`), sent in a
 /// `TeleportLureRequest` when accepting a teleport lure (#28).
 const TELEPORT_FLAGS_VIA_LURE: u32 = 4;
@@ -378,6 +428,11 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_REMOTE_PARCEL_REQUEST,
     CAP_SIMULATOR_FEATURES,
     CAP_AGENT_PREFERENCES,
+    CAP_GET_OBJECT_COST,
+    CAP_RESOURCE_COST_SELECTED,
+    CAP_GET_OBJECT_PHYSICS_DATA,
+    CAP_ATTACHMENT_RESOURCES,
+    CAP_LAND_RESOURCES,
 ];
 
 /// The maximum UDP datagram size an I/O driver should be prepared to receive.

@@ -28,8 +28,8 @@ use sl_wire::messages::{
     AgentAlertMessage, AgentAlertMessageAgentDataBlock, AgentAlertMessageAlertDataBlock,
     AlertMessage, AlertMessageAgentInfoBlock, AlertMessageAlertDataBlock,
     AlertMessageAlertInfoBlock, CameraConstraint, CameraConstraintCameraCollidePlaneBlock,
-    HealthMessage, HealthMessageHealthDataBlock, MeanCollisionAlert,
-    MeanCollisionAlertMeanCollisionBlock,
+    HealthMessage, HealthMessageHealthDataBlock, LandStatReply, LandStatReplyReportDataBlock,
+    LandStatReplyRequestDataBlock, MeanCollisionAlert, MeanCollisionAlertMeanCollisionBlock,
 };
 use sl_wire::messages::{
     AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
@@ -97,10 +97,11 @@ use crate::types::{
     DirPeopleResult, DirPlaceResult, EstateCovenant, EventInfo, FollowCamPropertyValue,
     GestureActivation, GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions,
     GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, InstantMessage, LandSearchType,
-    MapItem, MapItemType, MapRegionInfo, MeanCollision, NotecardRez, ObjectBuyItem,
-    ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult,
-    RegionIdentity, Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl, TelehubInfo,
-    Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    LandStatItem, LandStatReportType, MapItem, MapItemType, MapRegionInfo, MeanCollision,
+    NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails,
+    ParcelObjectOwner, PlacesResult, RegionIdentity, Reliability, RestoreItem, RezAttachment,
+    SaleType, ScriptControl, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
+    ViewerEffectType,
 };
 
 /// How long to batch owed acknowledgements before flushing them as a `PacketAck`
@@ -1378,6 +1379,51 @@ impl SimSession {
                     time: collision.time,
                     mag: collision.magnitude,
                     r#type: collision.collision_type.to_u8(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `LandStatReply` carrying the region's (or a parcel's) top scripts
+    /// or top colliders, in reply to a client `LandStatRequest`. Surfaces on the
+    /// client as [`Event::LandStatReply`](crate::Event::LandStatReply).
+    /// `total_object_count` is the full count the report draws from (the `items`
+    /// themselves may be only the top rows). Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_land_stat_reply(
+        &mut self,
+        report_type: LandStatReportType,
+        request_flags: u32,
+        total_object_count: u32,
+        items: &[LandStatItem],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::LandStatReply(LandStatReply {
+            request_data: LandStatReplyRequestDataBlock {
+                report_type: report_type.to_u32(),
+                request_flags,
+                total_object_count,
+            },
+            report_data: items
+                .iter()
+                .map(|item| LandStatReplyReportDataBlock {
+                    task_local_id: item.task_local_id,
+                    task_id: item.task_id,
+                    location_x: item.location[0],
+                    location_y: item.location[1],
+                    location_z: item.location[2],
+                    score: item.score,
+                    task_name: with_nul(&item.task_name),
+                    owner_name: with_nul(&item.owner_name),
                 })
                 .collect(),
         });

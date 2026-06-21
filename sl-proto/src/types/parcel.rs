@@ -684,6 +684,64 @@ pub struct ParcelObjectOwner {
     pub online_status: bool,
 }
 
+/// Which top-objects report a `LandStatReply` carries (`ReportType`): a parcel's
+/// or region's top script-using objects, or its top colliding objects. Selected
+/// in [`Command::RequestLandStat`](crate::Command::RequestLandStat) and echoed in
+/// [`Event::LandStatReply`](crate::Event::LandStatReply). This is the data behind
+/// the estate-tools "Top Scripts" / "Top Colliders" panels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LandStatReportType {
+    /// The top objects by script resource use (`0`).
+    #[default]
+    TopScripts,
+    /// The top objects by collisions (`1`).
+    TopColliders,
+    /// An unrecognised report-type value, preserved verbatim.
+    Other(u32),
+}
+
+impl LandStatReportType {
+    /// The raw `ReportType` value for this report.
+    #[must_use]
+    pub const fn to_u32(self) -> u32 {
+        match self {
+            Self::TopScripts => 0,
+            Self::TopColliders => 1,
+            Self::Other(value) => value,
+        }
+    }
+
+    /// Decodes a raw `ReportType` value.
+    #[must_use]
+    pub const fn from_u32(value: u32) -> Self {
+        match value {
+            0 => Self::TopScripts,
+            1 => Self::TopColliders,
+            other => Self::Other(other),
+        }
+    }
+}
+
+/// One row of a `LandStatReply` — a single top-scripts / top-colliders object,
+/// from a `LandStatReply` `ReportData` block. Surfaced (with the others) as
+/// [`Event::LandStatReply`](crate::Event::LandStatReply).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LandStatItem {
+    /// The object's region-local id (`TaskLocalID`).
+    pub task_local_id: u32,
+    /// The object's id (`TaskID`).
+    pub task_id: Uuid,
+    /// The object's region position (`LocationX`/`Y`/`Z`), as `[x, y, z]` metres.
+    pub location: [f32; 3],
+    /// The object's score for this report (`Score`): script time for top-scripts,
+    /// collision count for top-colliders.
+    pub score: f32,
+    /// The object's name (`TaskName`).
+    pub task_name: String,
+    /// The object owner's name (`OwnerName`).
+    pub owner_name: String,
+}
+
 /// Basic parcel information from a `ParcelInfoReply` — the condensed listing the
 /// places/search panels show for a parcel id (distinct from the full geometry
 /// and flags of [`ParcelInfo`], which a `ParcelProperties` carries). Requested by

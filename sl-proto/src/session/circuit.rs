@@ -84,7 +84,8 @@ use sl_wire::messages::{
     ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
     InviteGroupRequest, InviteGroupRequestAgentDataBlock, InviteGroupRequestGroupDataBlock,
     InviteGroupRequestInviteDataBlock, JoinGroupRequest, JoinGroupRequestAgentDataBlock,
-    JoinGroupRequestGroupDataBlock, LeaveGroupRequest, LeaveGroupRequestAgentDataBlock,
+    JoinGroupRequestGroupDataBlock, LandStatRequest, LandStatRequestAgentDataBlock,
+    LandStatRequestRequestDataBlock, LeaveGroupRequest, LeaveGroupRequestAgentDataBlock,
     LeaveGroupRequestGroupDataBlock, LogoutRequest, LogoutRequestAgentDataBlock, MapBlockRequest,
     MapBlockRequestAgentDataBlock, MapBlockRequestPositionDataBlock, MapItemRequest,
     MapItemRequestAgentDataBlock, MapItemRequestRequestDataBlock, MapNameRequest,
@@ -3354,6 +3355,33 @@ impl Circuit {
                 session_id: self.session_id,
             },
             data: ParcelInfoRequestDataBlock { parcel_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `LandStatRequest` reliably: a request for the region's (or a
+    /// parcel's) top scripts or top colliders. `report_type`/`request_flags` are
+    /// raw values; `filter` narrows the report by object/owner name (empty for
+    /// none) and `parcel_local_id` scopes it to a parcel (`0` for the region).
+    pub(crate) fn send_land_stat_request(
+        &mut self,
+        report_type: u32,
+        request_flags: u32,
+        filter: &str,
+        parcel_local_id: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::LandStatRequest(LandStatRequest {
+            agent_data: LandStatRequestAgentDataBlock {
+                agent_id: self.agent_id,
+                session_id: self.session_id,
+            },
+            request_data: LandStatRequestRequestDataBlock {
+                report_type,
+                request_flags,
+                filter: with_nul(filter),
+                parcel_local_id,
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }

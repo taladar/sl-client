@@ -16,13 +16,14 @@ mod test {
         FollowCamProperty, FollowCamPropertyValue, GestureActivation, GroupAccountDetails,
         GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
         GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVote,
-        GroupVoteHistoryItem, ImDialog, LandSearchType, LoginParams, MapItem, MapItemType,
-        MapRegionInfo, Maturity, MeanCollision, MeanCollisionType, NotecardRez, ObjectBuyItem,
-        ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner, ParcelReturnType,
-        PlacesResult, PointAtType, ProductType, RegionIdentity, RestoreItem, RezAttachment,
-        SaleType, ScriptControl, ServerEvent, Session, SimSession, TelehubInfo, Throttle, Transmit,
-        ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
-        grid_to_handle, parse_event_queue_response,
+        GroupVoteHistoryItem, ImDialog, LandSearchType, LandStatItem, LandStatReportType,
+        LoginParams, MapItem, MapItemType, MapRegionInfo, Maturity, MeanCollision,
+        MeanCollisionType, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory,
+        ParcelDetails, ParcelObjectOwner, ParcelReturnType, PlacesResult, PointAtType, ProductType,
+        RegionIdentity, RestoreItem, RezAttachment, SaleType, ScriptControl, ServerEvent, Session,
+        SimSession, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, enable_simulator_to_caps_llsd, grid_to_handle,
+        parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -1874,6 +1875,52 @@ mod test {
             })
             .ok_or("expected a CameraConstraint client event")?;
         assert_eq!(got_plane.map(f32::to_bits), plane.map(f32::to_bits));
+        Ok(())
+    }
+
+    #[test]
+    fn land_stat_reply_reaches_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let task = uuid::Uuid::from_u128(0x70B_5C0E);
+        sim.send_land_stat_reply(
+            LandStatReportType::TopScripts,
+            0,
+            7,
+            &[LandStatItem {
+                task_local_id: 4_294_967_000,
+                task_id: task,
+                location: [128.0, 64.5, 25.0],
+                score: 0.85,
+                task_name: "busy script".to_owned(),
+                owner_name: "Test Resident".to_owned(),
+            }],
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let (report_type, total, items) = drain_client(&mut client)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::LandStatReply {
+                    report_type,
+                    total_object_count,
+                    items,
+                    ..
+                } => Some((report_type, total_object_count, items)),
+                _ => None,
+            })
+            .ok_or("expected a LandStatReply client event")?;
+        assert_eq!(report_type, LandStatReportType::TopScripts);
+        assert_eq!(total, 7);
+        let item = items.first().ok_or("expected one report item")?;
+        assert_eq!(item.task_local_id, 4_294_967_000);
+        assert_eq!(item.task_id, task);
+        assert_eq!(item.task_name, "busy script");
+        assert_eq!(item.owner_name, "Test Resident");
+        assert_eq!(item.score.to_bits(), 0.85_f32.to_bits());
         Ok(())
     }
 

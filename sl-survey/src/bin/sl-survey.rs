@@ -734,6 +734,15 @@ impl Survey {
             | Event::CameraConstraint { .. }
             | Event::SimulatorFeatures(_)
             | Event::AgentPreferences(_)
+            | Event::ObjectCosts(_)
+            | Event::SelectedResourceCost(_)
+            | Event::ObjectPhysicsData(_)
+            | Event::ObjectPhysicsProperties(_)
+            | Event::AttachmentResources(_)
+            | Event::LandResourcesUrls(_)
+            | Event::LandResourceSummary(_)
+            | Event::LandResourceDetail(_)
+            | Event::LandStatReply { .. }
             | Event::Environment(_) => {}
         }
         Ok(false)

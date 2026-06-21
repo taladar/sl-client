@@ -11,26 +11,28 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
 use sl_proto::{
-    CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_CREATE_INVENTORY_CATEGORY,
-    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
-    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET,
+    CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
+    CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT,
+    CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
-    CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES,
-    CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
-    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
-    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO,
-    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE,
-    CAP_VOICE_SIGNALING, Llsd, RECV_BUFFER_SIZE, Session, ais_category_children_fetch_url,
-    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
-    build_agent_preferences_request, build_ais_create_category_body, build_ais_move_body,
-    build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request, build_modify_material_params_request,
-    build_new_file_agent_inventory_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_parcel_voice_info_request,
-    build_provision_voice_account_request, build_region_experiences_request,
-    build_remote_parcel_request, build_set_experience_permission_request,
+    CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_OBJECT_COST,
+    CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
+    CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
+    CAP_LAND_RESOURCES, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
+    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Llsd, RECV_BUFFER_SIZE,
+    SelectedCostKind, Session, ais_category_children_fetch_url, ais_category_children_url,
+    ais_category_url, ais_create_category_url, ais_item_url, build_agent_preferences_request,
+    build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
+    build_ais_update_item_body, build_create_inventory_category_request,
+    build_get_object_cost_request, build_get_object_physics_data_request,
+    build_modify_material_params_request, build_new_file_agent_inventory_request,
+    build_object_media_navigate_request, build_object_media_update_request,
+    build_parcel_voice_info_request, build_provision_voice_account_request,
+    build_region_experiences_request, build_remote_parcel_request,
+    build_resource_cost_selected_request, build_set_experience_permission_request,
     build_update_experience_request, build_update_item_asset_request,
     build_upload_baked_texture_request, build_voice_signaling_request, display_names_query,
     experience_id_query, experience_info_query, find_experience_query, forget_experience_query,
@@ -92,7 +94,9 @@ use crate::experiences::{
     fetch_experience_admin, fetch_experience_contributor, fetch_group_experiences,
 };
 use crate::fetch::{fetch_asset_http, fetch_mesh_http, fetch_texture_http};
-use crate::http::{delete_caps_llsd, get_caps_llsd, patch_caps_llsd, put_caps_llsd};
+use crate::http::{
+    delete_caps_llsd, fetch_land_resources, get_caps_llsd, patch_caps_llsd, put_caps_llsd,
+};
 use crate::inventory::{fetch_group_members, fetch_inventory};
 use crate::materials::{fetch_render_materials, post_modify_material_params};
 use crate::media::{fetch_object_media, post_object_media};
@@ -1226,6 +1230,38 @@ impl Client {
                                 let body = build_agent_preferences_request(&prefs);
                                 tokio::spawn(post_voice_cap(url, body, CAP_AGENT_PREFERENCES, http.clone(), caps_tx.clone()));
                             }
+                        }
+                        Some(Command::RequestObjectCost { object_ids }) => {
+                            if let Some(url) = caps.get(CAP_GET_OBJECT_COST).cloned() {
+                                let body = build_get_object_cost_request(&object_ids);
+                                tokio::spawn(post_voice_cap(url, body, CAP_GET_OBJECT_COST, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::RequestSelectedCost { object_ids, roots }) => {
+                            if let Some(url) = caps.get(CAP_RESOURCE_COST_SELECTED).cloned() {
+                                let kind = if roots { SelectedCostKind::Roots } else { SelectedCostKind::Prims };
+                                let body = build_resource_cost_selected_request(kind, &object_ids);
+                                tokio::spawn(post_voice_cap(url, body, CAP_RESOURCE_COST_SELECTED, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::RequestObjectPhysicsData { object_ids }) => {
+                            if let Some(url) = caps.get(CAP_GET_OBJECT_PHYSICS_DATA).cloned() {
+                                let body = build_get_object_physics_data_request(&object_ids);
+                                tokio::spawn(post_voice_cap(url, body, CAP_GET_OBJECT_PHYSICS_DATA, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::RequestAttachmentResources) => {
+                            if let Some(url) = caps.get(CAP_ATTACHMENT_RESOURCES).cloned() {
+                                tokio::spawn(get_caps_llsd(url, CAP_ATTACHMENT_RESOURCES, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::RequestLandResources { parcel_id }) => {
+                            if let Some(url) = caps.get(CAP_LAND_RESOURCES).cloned() {
+                                tokio::spawn(fetch_land_resources(url, parcel_id, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::RequestLandStat { report_type, request_flags, filter, parcel_local_id }) => {
+                            self.session.request_land_stat(report_type, request_flags, &filter, parcel_local_id, Instant::now())?;
                         }
                         Some(Command::RequestExperienceInfo { experience_ids }) => {
                             if let Some(base) = caps.get(CAP_GET_EXPERIENCE_INFO).cloned() {

@@ -10628,6 +10628,223 @@ mod test {
         Ok(())
     }
 
+    /// A `GetObjectCost` reply surfaces the per-object land-impact / physics
+    /// costs, keyed and sorted by object id.
+    #[test]
+    fn object_cost_surfaces_costs() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let id = uuid::Uuid::from_u128(0x000B_7EC0);
+        let costs = vec![(
+            id,
+            sl_proto::ObjectCost {
+                linked_set_resource_cost: 12.5,
+                resource_cost: 3.5,
+                physics_cost: 1.0,
+                linked_set_physics_cost: 4.0,
+                resource_limiting_type: "legacy".to_owned(),
+            },
+        )];
+        let xml = sl_proto::build_get_object_cost_response(&costs);
+        let body = sl_proto::parse_llsd_xml(&xml)?;
+        session.handle_caps_event(sl_proto::CAP_GET_OBJECT_COST, &body, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::ObjectCosts(_)))
+            .ok_or("expected an ObjectCosts event")?;
+        let Event::ObjectCosts(decoded) = event else {
+            return Err("expected ObjectCosts".into());
+        };
+        assert_eq!(decoded.len(), 1);
+        assert_eq!(decoded.first().map(|entry| entry.0), Some(id));
+        assert_eq!(
+            decoded
+                .first()
+                .map(|entry| entry.1.linked_set_resource_cost.to_bits()),
+            Some(12.5_f32.to_bits())
+        );
+        Ok(())
+    }
+
+    /// A `GetObjectPhysicsData` reply surfaces the per-object physics material
+    /// parameters, and an `ObjectPhysicsProperties` event-queue push surfaces the
+    /// same data keyed by region-local id.
+    #[test]
+    fn object_physics_surfaces_data() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let id = uuid::Uuid::from_u128(0x0B7E_DA7A);
+        let data = sl_proto::ObjectPhysicsData {
+            physics_shape_type: sl_proto::PhysicsShapeType::ConvexHull,
+            density: 1000.0,
+            friction: 0.6,
+            restitution: 0.5,
+            gravity_multiplier: 1.0,
+        };
+        let xml = sl_proto::build_get_object_physics_data_response(&[(id, data)]);
+        let body = sl_proto::parse_llsd_xml(&xml)?;
+        session.handle_caps_event(sl_proto::CAP_GET_OBJECT_PHYSICS_DATA, &body, now)?;
+
+        let decoded = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ObjectPhysicsData(data) => Some(data),
+                _ => None,
+            })
+            .ok_or("expected an ObjectPhysicsData event")?;
+        assert_eq!(decoded.first().map(|entry| entry.0), Some(id));
+        assert_eq!(
+            decoded.first().map(|entry| entry.1.physics_shape_type),
+            Some(sl_proto::PhysicsShapeType::ConvexHull)
+        );
+
+        let eq_body = sl_proto::build_object_physics_properties(&[(42, data)]).to_llsd_xml();
+        let eq = sl_proto::parse_llsd_xml(&eq_body)?;
+        session.handle_caps_event("ObjectPhysicsProperties", &eq, now)?;
+        let pushed = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ObjectPhysicsProperties(data) => Some(data),
+                _ => None,
+            })
+            .ok_or("expected an ObjectPhysicsProperties event")?;
+        assert_eq!(pushed.first().map(|entry| entry.0), Some(42));
+        Ok(())
+    }
+
+    /// An `AttachmentResources` reply surfaces the agent's scripted attachments
+    /// and the resource summary.
+    #[test]
+    fn attachment_resources_surfaces_report() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let report = sl_proto::AttachmentResourcesReport {
+            attachments: vec![sl_proto::AttachmentLocation {
+                location: "Right Hand".to_owned(),
+                objects: vec![sl_proto::ScriptedObjectInfo {
+                    id: uuid::Uuid::from_u128(0xA77),
+                    is_group_owned: false,
+                    location: [1.0, 2.0, 3.0],
+                    name: "HUD".to_owned(),
+                    owner_id: uuid::Uuid::from_u128(0x0411),
+                    resources: sl_proto::ScriptedObjectResources {
+                        memory: Some(0x1_0000),
+                        urls: Some(1),
+                    },
+                }],
+            }],
+            summary: sl_proto::ResourceSummary {
+                available: vec![sl_proto::ResourceAmount {
+                    resource_type: "urls".to_owned(),
+                    amount: 38,
+                }],
+                used: vec![sl_proto::ResourceAmount {
+                    resource_type: "memory".to_owned(),
+                    amount: 0x1_0000,
+                }],
+            },
+        };
+        let xml = sl_proto::build_attachment_resources_response(&report);
+        let body = sl_proto::parse_llsd_xml(&xml)?;
+        session.handle_caps_event(sl_proto::CAP_ATTACHMENT_RESOURCES, &body, now)?;
+
+        let decoded = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AttachmentResources(report) => Some(report),
+                _ => None,
+            })
+            .ok_or("expected an AttachmentResources event")?;
+        assert_eq!(
+            decoded.attachments.first().map(|a| a.location.as_str()),
+            Some("Right Hand")
+        );
+        assert_eq!(
+            decoded.summary.available.first().map(|a| a.amount),
+            Some(38)
+        );
+        Ok(())
+    }
+
+    /// A `LandResources` POST reply hands back the follow-up cap URLs, and the
+    /// follow-up summary / detail reports surface their respective events.
+    #[test]
+    fn land_resources_surfaces_reports() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let urls = sl_proto::LandResourcesUrls {
+            script_resource_summary: "http://sim/cap/srs".to_owned(),
+            script_resource_details: Some("http://sim/cap/srd".to_owned()),
+        };
+        let body = sl_proto::parse_llsd_xml(&sl_proto::build_land_resources_response(&urls))?;
+        session.handle_caps_event(sl_proto::CAP_LAND_RESOURCES, &body, now)?;
+        let decoded = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::LandResourcesUrls(urls) => Some(urls),
+                _ => None,
+            })
+            .ok_or("expected a LandResourcesUrls event")?;
+        assert_eq!(
+            decoded.script_resource_details.as_deref(),
+            Some("http://sim/cap/srd")
+        );
+
+        let summary = sl_proto::ResourceSummary {
+            available: vec![sl_proto::ResourceAmount {
+                resource_type: "memory".to_owned(),
+                amount: -1,
+            }],
+            used: vec![sl_proto::ResourceAmount {
+                resource_type: "memory".to_owned(),
+                amount: 0x2_0000,
+            }],
+        };
+        let body =
+            sl_proto::parse_llsd_xml(&sl_proto::build_land_resource_summary_response(&summary))?;
+        session.handle_caps_event(sl_proto::LAND_RESOURCE_SUMMARY_TAG, &body, now)?;
+        let decoded = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::LandResourceSummary(summary) => Some(summary),
+                _ => None,
+            })
+            .ok_or("expected a LandResourceSummary event")?;
+        assert_eq!(decoded.used.first().map(|a| a.amount), Some(0x2_0000));
+
+        let parcels = vec![sl_proto::ParcelScriptResources {
+            name: "Home".to_owned(),
+            id: uuid::Uuid::from_u128(0x55),
+            local_id: 3,
+            objects: Vec::new(),
+        }];
+        let body =
+            sl_proto::parse_llsd_xml(&sl_proto::build_land_resource_detail_response(&parcels))?;
+        session.handle_caps_event(sl_proto::LAND_RESOURCE_DETAIL_TAG, &body, now)?;
+        let decoded = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::LandResourceDetail(parcels) => Some(parcels),
+                _ => None,
+            })
+            .ok_or("expected a LandResourceDetail event")?;
+        assert_eq!(decoded.first().map(|p| p.local_id), Some(3));
+        Ok(())
+    }
+
     /// A `GetExperiences` reply surfaces the agent's allowed/blocked experiences.
     #[test]
     fn get_experiences_surfaces_permissions() -> Result<(), TestError> {

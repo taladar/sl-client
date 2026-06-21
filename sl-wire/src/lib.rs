@@ -16,8 +16,11 @@ mod message;
 /// Generated LLUDP message types and their (de)serialization, produced at build
 /// time from the vendored `message_template.msg`.
 pub mod messages;
+mod object_cost;
+mod object_physics;
 mod parcel_flags;
 mod remote_parcel;
+mod resource_report;
 mod sim_features;
 mod voice;
 mod zerocode;
@@ -86,10 +89,30 @@ pub use material::{
 };
 pub use message::{Message, MessageId};
 pub use messages::{AnyMessage, message_name};
+pub use object_cost::{
+    ObjectCost, SelectedCostKind, SelectedResourceCost, build_get_object_cost_request,
+    build_get_object_cost_response, build_resource_cost_selected_request,
+    build_resource_cost_selected_response, parse_get_object_cost, parse_resource_cost_selected,
+    parse_resource_cost_selected_request,
+};
+pub use object_physics::{
+    ObjectPhysicsData, PhysicsShapeType, build_get_object_physics_data_request,
+    build_get_object_physics_data_response, build_object_physics_properties,
+    parse_get_object_physics_data, parse_get_object_physics_data_request,
+    parse_object_physics_properties,
+};
 pub use parcel_flags::{ParcelFlags, RegionFlags, sim_access};
 pub use remote_parcel::{
     RemoteParcelRequest, build_remote_parcel_request, build_remote_parcel_response,
     parse_remote_parcel_reply, parse_remote_parcel_request,
+};
+pub use resource_report::{
+    AttachmentLocation, AttachmentResourcesReport, LandResourcesUrls, ParcelScriptResources,
+    ResourceAmount, ResourceSummary, ScriptedObjectInfo, ScriptedObjectResources,
+    build_attachment_resources_response, build_land_resource_detail_response,
+    build_land_resource_summary_response, build_land_resources_request,
+    build_land_resources_response, parse_attachment_resources, parse_land_resource_detail,
+    parse_land_resource_summary, parse_land_resources_reply, parse_land_resources_request,
 };
 pub use sim_features::{
     AnimatedObjects, OpenSimExtras, PhysicsShapeTypes, SimulatorFeatures,

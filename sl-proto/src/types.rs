@@ -81,9 +81,10 @@ pub use object::{
     texture_anim_mode,
 };
 pub use parcel::{
-    LandingType, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelDetails, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner,
-    ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
+    LandStatItem, LandStatReportType, LandingType, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelRequestResult,
+    ParcelReturnType, ParcelStatus, ParcelUpdate,
 };
 pub use region::{RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits};
 pub use script::{

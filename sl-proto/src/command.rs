@@ -9,9 +9,9 @@ use crate::{
     ClickAction, ControlFlags, CreateGroupParams, DeRezDestination, DirFindFlags,
     EstateAccessDelta, ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation,
     GroupNoticeAttachment, GroupRoleEdit, GroupRoleMemberChange, IceCandidate, InterestsUpdate,
-    InventoryItem, InventoryOffer, InventoryType, LandSearchType, LindenAmount, MapItemType,
-    Material, MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MuteFlags, MuteType,
-    NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform,
+    InventoryItem, InventoryOffer, InventoryType, LandSearchType, LandStatReportType, LindenAmount,
+    MapItemType, Material, MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MuteFlags,
+    MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform,
     ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelReturnType, ParcelUpdate,
     PermissionField, PickUpdate, PrimShape, ProfileUpdate, RegionInfoUpdate, Reliability,
     RestoreItem, RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
@@ -634,6 +634,72 @@ pub enum Command {
     /// carrying the full stored set after the update. A no-op when the region seed
     /// omits the capability.
     SetAgentPreferences(Box<AgentPreferences>),
+    /// Request the **land-impact / physics costs** of one or more objects via the
+    /// `GetObjectCost` capability; the reply arrives as
+    /// [`Event::ObjectCosts`](crate::Event::ObjectCosts). A no-op when the region
+    /// seed omits the capability.
+    RequestObjectCost {
+        /// The objects to price (the root prim of each linkset, normally).
+        object_ids: Vec<Uuid>,
+    },
+    /// Request the summed **physics/streaming/simulation cost of a selection** via
+    /// the `ResourceCostSelected` capability; the reply arrives as
+    /// [`Event::SelectedResourceCost`](crate::Event::SelectedResourceCost). Pass
+    /// the linkset root ids (the usual viewer behaviour) with `roots = true`, or
+    /// individual prim ids with `roots = false`. A no-op when the region seed omits
+    /// the capability.
+    RequestSelectedCost {
+        /// The selected object ids.
+        object_ids: Vec<Uuid>,
+        /// Whether the ids are linkset roots (`selected_roots`) rather than
+        /// individual prims (`selected_prims`).
+        roots: bool,
+    },
+    /// Request the **physics-material parameters** of one or more objects via the
+    /// `GetObjectPhysicsData` capability; the reply arrives as
+    /// [`Event::ObjectPhysicsData`](crate::Event::ObjectPhysicsData). The simulator
+    /// also pushes the same data unsolicited as
+    /// [`Event::ObjectPhysicsProperties`](crate::Event::ObjectPhysicsProperties). A
+    /// no-op when the region seed omits the capability.
+    RequestObjectPhysicsData {
+        /// The objects whose physics parameters to fetch.
+        object_ids: Vec<Uuid>,
+    },
+    /// Request the agent's **attachment resource report** via the
+    /// `AttachmentResources` capability; the reply arrives as
+    /// [`Event::AttachmentResources`](crate::Event::AttachmentResources). A no-op
+    /// when the region seed omits the capability.
+    RequestAttachmentResources,
+    /// Request a parcel's **script resource report** via the `LandResources`
+    /// capability. The runtimes POST the parcel id, surface the follow-up cap URLs
+    /// as [`Event::LandResourcesUrls`](crate::Event::LandResourcesUrls), then GET
+    /// those URLs and surface
+    /// [`Event::LandResourceSummary`](crate::Event::LandResourceSummary) and (when
+    /// permitted) [`Event::LandResourceDetail`](crate::Event::LandResourceDetail).
+    /// `parcel_id` is the region's "fake" parcel id (from a `RemoteParcelRequest`
+    /// lookup, [`RequestRemoteParcelId`](Self::RequestRemoteParcelId)). A no-op when
+    /// the region seed omits the capability.
+    RequestLandResources {
+        /// The grid-wide ("fake") parcel id to report on.
+        parcel_id: Uuid,
+    },
+    /// Request a region's **top-scripts / top-colliders report** via a UDP
+    /// `LandStatRequest`; the reply arrives as
+    /// [`Event::LandStatReply`](crate::Event::LandStatReply). Requires
+    /// estate-manager rights. `parcel_local_id` scopes the report to a parcel
+    /// (`0` for the whole region); `filter` narrows it to objects/owners whose
+    /// name contains the string (empty for no filter).
+    RequestLandStat {
+        /// Which report to fetch (top scripts or top colliders).
+        report_type: LandStatReportType,
+        /// Request flags (`0` for the default; the estate panel uses these for its
+        /// filter/return options).
+        request_flags: u32,
+        /// A name filter, or empty for none.
+        filter: String,
+        /// The parcel to scope the report to, or `0` for the whole region.
+        parcel_local_id: i32,
+    },
     /// Request the extended-environment (EEP) settings via the `ExtEnvironment`
     /// capability; the reply arrives as
     /// [`Event::Environment`](crate::Event::Environment). `parcel_id` selects a

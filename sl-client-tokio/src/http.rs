@@ -1,8 +1,12 @@
 //! Generic LLSD-over-HTTP capability helpers (GET/PUT/PATCH/DELETE).
 
 use reqwest::Client as ReqwestClient;
-use sl_proto::{Llsd, parse_llsd_xml};
+use sl_proto::{
+    CAP_LAND_RESOURCES, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, Llsd,
+    build_land_resources_request, parse_land_resources_reply, parse_llsd_xml,
+};
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 use crate::caps::report_caps_failure;
 
@@ -34,6 +38,59 @@ pub(crate) async fn get_caps_llsd(
             caps_tx.send((cap.to_owned(), llsd)).await.ok();
         }
         None => report_caps_failure(&caps_tx, cap).await,
+    }
+}
+
+/// Drives the two-step `LandResources` flow: POSTs `{ parcel_id }` to the
+/// `LandResources` capability, forwards the follow-up-URL reply tagged
+/// [`CAP_LAND_RESOURCES`], then GETs the `ScriptResourceSummary` and (when
+/// present) `ScriptResourceDetails` follow-up URLs, forwarding each tagged
+/// [`LAND_RESOURCE_SUMMARY_TAG`] / [`LAND_RESOURCE_DETAIL_TAG`] for the session to
+/// decode into [`Event::LandResourcesUrls`](sl_proto::Event::LandResourcesUrls),
+/// [`Event::LandResourceSummary`](sl_proto::Event::LandResourceSummary), and
+/// [`Event::LandResourceDetail`](sl_proto::Event::LandResourceDetail).
+pub(crate) async fn fetch_land_resources(
+    cap_url: String,
+    parcel_id: Uuid,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let body = build_land_resources_request(parcel_id);
+    let Ok(response) = http
+        .post(&cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+    else {
+        report_caps_failure(&caps_tx, CAP_LAND_RESOURCES).await;
+        return;
+    };
+    let Ok(text) = response.text().await else {
+        report_caps_failure(&caps_tx, CAP_LAND_RESOURCES).await;
+        return;
+    };
+    let Ok(reply) = parse_llsd_xml(&text) else {
+        report_caps_failure(&caps_tx, CAP_LAND_RESOURCES).await;
+        return;
+    };
+    let urls = parse_land_resources_reply(&reply);
+    caps_tx
+        .send((CAP_LAND_RESOURCES.to_owned(), reply))
+        .await
+        .ok();
+
+    if !urls.script_resource_summary.is_empty() {
+        get_caps_llsd(
+            urls.script_resource_summary,
+            LAND_RESOURCE_SUMMARY_TAG,
+            http.clone(),
+            caps_tx.clone(),
+        )
+        .await;
+    }
+    if let Some(detail_url) = urls.script_resource_details {
+        get_caps_llsd(detail_url, LAND_RESOURCE_DETAIL_TAG, http, caps_tx).await;
     }
 }
 

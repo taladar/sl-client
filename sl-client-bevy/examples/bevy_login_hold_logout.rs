@@ -349,7 +349,16 @@ fn on_events(
             | SlSessionEvent::HealthMessage { .. }
             | SlSessionEvent::CameraConstraint { .. }
             | SlSessionEvent::SimulatorFeatures(_)
-            | SlSessionEvent::AgentPreferences(_) => {}
+            | SlSessionEvent::AgentPreferences(_)
+            | SlSessionEvent::ObjectCosts(_)
+            | SlSessionEvent::SelectedResourceCost(_)
+            | SlSessionEvent::ObjectPhysicsData(_)
+            | SlSessionEvent::ObjectPhysicsProperties(_)
+            | SlSessionEvent::AttachmentResources(_)
+            | SlSessionEvent::LandResourcesUrls(_)
+            | SlSessionEvent::LandResourceSummary(_)
+            | SlSessionEvent::LandResourceDetail(_)
+            | SlSessionEvent::LandStatReply { .. } => {}
         }
     }
 }

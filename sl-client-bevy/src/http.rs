@@ -5,7 +5,11 @@ use crate::caps::report_caps_failure;
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use reqwest::blocking::Client as ReqwestBlockingClient;
-use sl_proto::{Llsd, parse_llsd_xml};
+use sl_proto::{
+    CAP_LAND_RESOURCES, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, Llsd,
+    build_land_resources_request, parse_land_resources_reply, parse_llsd_xml,
+};
+use uuid::Uuid;
 
 /// GETs `url` and parses the LLSD-XML reply, returning `None` on any
 /// transport/parse failure. Shared by the experience capability fetches.
@@ -32,6 +36,55 @@ pub(crate) fn run_get_caps_llsd(url: &str, cap: &'static str, caps_tx: &Sender<(
             caps_tx.send((cap.to_owned(), llsd)).ok();
         }
         None => report_caps_failure(caps_tx, cap),
+    }
+}
+
+/// Drives the two-step `LandResources` flow (blocking): POSTs `{ parcel_id }` to
+/// the `LandResources` capability, forwards the follow-up-URL reply tagged
+/// [`CAP_LAND_RESOURCES`], then GETs the `ScriptResourceSummary` and (when
+/// present) `ScriptResourceDetails` follow-up URLs, forwarding each tagged
+/// [`LAND_RESOURCE_SUMMARY_TAG`] / [`LAND_RESOURCE_DETAIL_TAG`] for the session to
+/// decode into [`SlSessionEvent::LandResourcesUrls`](sl_proto::Event::LandResourcesUrls),
+/// [`SlSessionEvent::LandResourceSummary`](sl_proto::Event::LandResourceSummary), and
+/// [`SlSessionEvent::LandResourceDetail`](sl_proto::Event::LandResourceDetail).
+pub(crate) fn run_land_resources(cap_url: &str, parcel_id: Uuid, caps_tx: &Sender<(String, Llsd)>) {
+    let Ok(http) = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    else {
+        report_caps_failure(caps_tx, CAP_LAND_RESOURCES);
+        return;
+    };
+    let body = build_land_resources_request(parcel_id);
+    let Ok(response) = http
+        .post(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+    else {
+        report_caps_failure(caps_tx, CAP_LAND_RESOURCES);
+        return;
+    };
+    let Ok(text) = response.text() else {
+        report_caps_failure(caps_tx, CAP_LAND_RESOURCES);
+        return;
+    };
+    let Ok(reply) = parse_llsd_xml(&text) else {
+        report_caps_failure(caps_tx, CAP_LAND_RESOURCES);
+        return;
+    };
+    let urls = parse_land_resources_reply(&reply);
+    caps_tx.send((CAP_LAND_RESOURCES.to_owned(), reply)).ok();
+
+    if !urls.script_resource_summary.is_empty() {
+        run_get_caps_llsd(
+            &urls.script_resource_summary,
+            LAND_RESOURCE_SUMMARY_TAG,
+            caps_tx,
+        );
+    }
+    if let Some(detail_url) = urls.script_resource_details {
+        run_get_caps_llsd(&detail_url, LAND_RESOURCE_DETAIL_TAG, caps_tx);
     }
 }
 
