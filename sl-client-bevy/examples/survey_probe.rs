@@ -270,6 +270,15 @@ fn on_events(
             | SlSessionEvent::CameraConstraint { .. }
             | SlSessionEvent::SimulatorFeatures(_)
             | SlSessionEvent::AgentPreferences(_)
+            | SlSessionEvent::ObjectCosts(_)
+            | SlSessionEvent::SelectedResourceCost(_)
+            | SlSessionEvent::ObjectPhysicsData(_)
+            | SlSessionEvent::ObjectPhysicsProperties(_)
+            | SlSessionEvent::AttachmentResources(_)
+            | SlSessionEvent::LandResourcesUrls(_)
+            | SlSessionEvent::LandResourceSummary(_)
+            | SlSessionEvent::LandResourceDetail(_)
+            | SlSessionEvent::LandStatReply { .. }
             | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged { region_handle, sim } => {

@@ -564,7 +564,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::HealthMessage { .. }
             | Event::CameraConstraint { .. }
             | Event::SimulatorFeatures(_)
-            | Event::AgentPreferences(_) => {}
+            | Event::AgentPreferences(_)
+            | Event::ObjectCosts(_)
+            | Event::SelectedResourceCost(_)
+            | Event::ObjectPhysicsData(_)
+            | Event::ObjectPhysicsProperties(_)
+            | Event::AttachmentResources(_)
+            | Event::LandResourcesUrls(_)
+            | Event::LandResourceSummary(_)
+            | Event::LandResourceDetail(_)
+            | Event::LandStatReply { .. } => {}
         }
     }
 

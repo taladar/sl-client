@@ -218,6 +218,49 @@ carries the fields to change and whose reply echoes the full stored set.
 > capabilities are guarded on presence in the seed, so the commands are no-ops
 > when a grid omits them.
 
+## Resource & physics costs
+
+Several capabilities report how much of a region's budget objects consume — the
+numbers behind the build tools' "land impact" readout and the estate-tools "Top
+Scripts / Top Colliders" panels. All are guarded on capability presence (so the
+commands are no-ops when a grid omits them) and are mostly Second-Life-centric,
+though OpenSim serves them too.
+
+- **`GetObjectCost`** — `Command::RequestObjectCost { object_ids }` `POST`s a
+  list of object ids; the reply is
+  `Event::ObjectCosts(Vec<(Uuid, ObjectCost)>)`, each `ObjectCost` carrying the
+  per-part and whole-linkset *resource* (land-impact) and *physics* costs.
+- **`ResourceCostSelected`** — `Command::RequestSelectedCost { object_ids, roots
+  }` sums a selection's `physics`/`streaming`/`simulation` cost into one
+  `Event::SelectedResourceCost`. `roots` chooses the `selected_roots` (whole
+  linksets) vs. `selected_prims` request shape.
+- **`GetObjectPhysicsData`** —
+  `Command::RequestObjectPhysicsData { object_ids }` fetches each object's
+  physics-material parameters (shape type, density, friction, restitution,
+  gravity multiplier) as
+  `Event::ObjectPhysicsData(Vec<(Uuid, ObjectPhysicsData)>)`. The simulator also
+  **pushes** the same data unsolicited over the [event queue](../comms/caps.md)
+  as `ObjectPhysicsProperties` — surfaced as
+  `Event::ObjectPhysicsProperties(Vec<(u32, ObjectPhysicsData)>)`, keyed by
+  region-local id — when a prim's physics material changes.
+- **`AttachmentResources`** — `Command::RequestAttachmentResources` (a `GET`)
+  returns `Event::AttachmentResources(Box<AttachmentResourcesReport>)`: the
+  agent's scripted attachments grouped by attachment point, plus a
+  `ResourceSummary` of available/used memory and URLs.
+- **`LandResources`** — `Command::RequestLandResources { parcel_id }` is a
+  two-step flow: the `POST` returns follow-up cap URLs
+  (`Event::LandResourcesUrls`), which the runtimes then `GET`, surfacing the
+  parcel's totals as `Event::LandResourceSummary(ResourceSummary)` and (when the
+  agent may see detail) the per-object breakdown as
+  `Event::LandResourceDetail(Vec<ParcelScriptResources>)`. The `parcel_id` is
+  the region's "fake" parcel id (from a `RemoteParcelRequest` lookup).
+- **`LandStatRequest` / `LandStatReply`** — unlike the others this is a UDP
+  exchange (estate-manager rights required). `Command::RequestLandStat {
+  report_type, request_flags, filter, parcel_local_id }` selects top scripts
+  (`LandStatReportType::TopScripts`) or top colliders; the reply is
+  `Event::LandStatReply { report_type, request_flags, total_object_count, items
+  }`, each `LandStatItem` naming an object, its position, score, and owner.
+
 ---
 
 > **In this codebase**
@@ -225,24 +268,39 @@ carries the fields to change and whose reply echoes the full stored set.
 > - Region types are in `sl-proto/src/types/region.rs` (`RegionIdentity`,
 >   `RegionLimits`, `RegionChatSettings`, `RegionCombatSettings`); estate types
 >   (`EstateInfo`, `EstateAccessKind`, `EstateCovenant`, `TelehubInfo`) in
->   `sl-proto/src/types/map.rs`; legacy
->   name types (`AvatarName`, `GroupName`) in `sl-proto/src/types/name.rs`; the
->   CAPS `DisplayName` in `sl-wire/src/display_name.rs`; environment types
->   (`EnvironmentSettings`, `DayCycle`, `DayCycleFrame`, `SkySettings`,
->   `WaterSettings`) in `sl-proto/src/types/environment.rs`; the CAPS
->   `SimulatorFeatures` (with `OpenSimExtras`, `PhysicsShapeTypes`,
->   `AnimatedObjects`) in `sl-wire/src/sim_features.rs` and `AgentPreferences`
->   (with `ObjectPermMasks`) in `sl-wire/src/agent_preferences.rs`.
+>   `sl-proto/src/types/map.rs`; legacy name types (`AvatarName`, `GroupName`)
+>   in `sl-proto/src/types/name.rs`; the CAPS `DisplayName` in
+>   `sl-wire/src/display_name.rs`; environment types (`EnvironmentSettings`,
+>   `DayCycle`, `DayCycleFrame`, `SkySettings`, `WaterSettings`) in
+>   `sl-proto/src/types/environment.rs`; the CAPS `SimulatorFeatures` (with
+>   `OpenSimExtras`, `PhysicsShapeTypes`, `AnimatedObjects`) in
+>   `sl-wire/src/sim_features.rs` and `AgentPreferences` (with
+>   `ObjectPermMasks`) in `sl-wire/src/agent_preferences.rs`. The resource-cost
+>   CAPS codecs are in `sl-wire/src/object_cost.rs` (`ObjectCost`,
+>   `SelectedResourceCost`), `sl-wire/src/object_physics.rs`
+>   (`ObjectPhysicsData`, `PhysicsShapeType`), and
+>   `sl-wire/src/resource_report.rs` (`AttachmentResourcesReport`,
+>   `ResourceSummary`, `ScriptedObjectInfo`, `LandResourcesUrls`,
+>   `ParcelScriptResources`); the UDP `LandStatItem` / `LandStatReportType` are
+>   in `sl-proto/src/types/parcel.rs`.
 > - Commands `RequestRegionInfo`, `RequestEstateInfo`, `RequestEstateCovenant`,
 >   `RequestTelehubInfo`, `ConnectTelehub`, `DisconnectTelehub`,
 >   `AddTelehubSpawnPoint`, `RemoveTelehubSpawnPoint`, `RequestAvatarNames`,
 >   `RequestGroupNames`, `RequestDisplayNames`, `RequestEnvironment`,
->   `RequestSimulatorFeatures`, `RequestAgentPreferences`, `SetAgentPreferences`
->   are in `sl-proto/src/command.rs`; the matching events
->   (`RegionInfoHandshake`, `RegionLimits`, `EstateInfo`, `EstateAccessList`,
->   `EstateCovenant`, `TelehubInfo`, `AvatarNames`, `GroupNames`,
->   `DisplayNames`, `Environment`, `SimulatorFeatures`, `AgentPreferences`) are
->   in `sl-proto/src/types/event.rs`.
+>   `RequestSimulatorFeatures`, `RequestAgentPreferences`,
+>   `SetAgentPreferences`, `RequestObjectCost`, `RequestSelectedCost`,
+>   `RequestObjectPhysicsData`, `RequestAttachmentResources`,
+>   `RequestLandResources`, `RequestLandStat` are in `sl-proto/src/command.rs`;
+>   the matching events (`RegionInfoHandshake`, `RegionLimits`, `EstateInfo`,
+>   `EstateAccessList`, `EstateCovenant`, `TelehubInfo`, `AvatarNames`,
+>   `GroupNames`, `DisplayNames`, `Environment`, `SimulatorFeatures`,
+>   `AgentPreferences`, `ObjectCosts`, `SelectedResourceCost`,
+>   `ObjectPhysicsData`, `ObjectPhysicsProperties`, `AttachmentResources`,
+>   `LandResourcesUrls`, `LandResourceSummary`, `LandResourceDetail`,
+>   `LandStatReply`) are in `sl-proto/src/types/event.rs`. The two-step
+>   `LandResources` flow lives in the runtimes (`fetch_land_resources` /
+>   `run_land_resources`), which `GET` the follow-up URLs and forward them under
+>   the `LAND_RESOURCE_SUMMARY_TAG` / `LAND_RESOURCE_DETAIL_TAG` tags.
 > - The handshake handle and grid coordinates are seeded from the login
 >   response (`sl-wire/src/login.rs` `region_x` / `region_y`); a region handle
 >   splits into grid coordinates with `handle_to_grid` (and back with
@@ -254,9 +312,13 @@ carries the fields to change and whose reply echoes the full stored set.
 >   `remove_telehub_spawn_point <spawn_index>`, `request_avatar_names <id…>`,
 >   `request_group_names <id…>`, `request_display_names <id…>`,
 >   `request_environment [parcel_id]`, `request_simulator_features`,
->   `request_agent_preferences`, and `set_agent_preferences [hover_height=]
+>   `request_agent_preferences`, `set_agent_preferences [hover_height=]
 >   [perm_group=] [perm_everyone=] [perm_next_owner=] [max_access=PG|M|A]
->   [language=] [language_is_public=]`.
+>   [language=] [language_is_public=]`, `request_object_cost <id…>`,
+>   `request_selected_cost <id…> [roots=true]`,
+>   `request_object_physics_data <id…>`, `request_attachment_resources`,
+>   `request_land_resources <parcel_id>`, and `request_land_stat
+>   [report_type=scripts|colliders] [request_flags] [filter] [parcel_local_id]`.
 > - The **server** side mirrors the decoders:
 >   `SimSession::send_region_handshake` builds the greeting from a
 >   `RegionIdentity`; `send_avatar_names` / `send_group_names` answer the
@@ -272,4 +334,10 @@ carries the fields to change and whose reply echoes the full stored set.
 >   `ExtEnvironment` reply body. `build_simulator_features_response` and
 >   `build_agent_preferences_response` (with `parse_agent_preferences`) build
 >   the `SimulatorFeatures` / `AgentPreferences` cap reply bodies a grid
->   returns.
+>   returns. The resource-cost CAPS expose matching reply builders
+>   (`build_get_object_cost_response`, `build_resource_cost_selected_response`,
+>   `build_get_object_physics_data_response`, `build_object_physics_properties`,
+>   `build_attachment_resources_response`, `build_land_resources_response`,
+>   `build_land_resource_summary_response`,
+>   `build_land_resource_detail_response`), and
+>   `SimSession::send_land_stat_reply` answers a `LandStatRequest`.

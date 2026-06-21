@@ -22,14 +22,14 @@ use sl_proto::{
     ControlFlags, CreateGroupParams, DeRezDestination, DirFindFlags, EstateAccessDelta,
     ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation, GroupNoticeAttachment,
     GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange, InterestsUpdate, InventoryItem,
-    InventoryOffer, InventoryType, LandSearchType, LindenAmount, LookAtType, MapItemType, Material,
-    MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MuteFlags, MuteType,
-    NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectPermMasks,
-    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PointAtType,
-    PrimShape, ProfileUpdate, RegionInfoUpdate, RestoreItem, RezAttachment, Rotation, SaleType,
-    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    VoiceProvisionRequest, Wearable, WearableType,
+    InventoryOffer, InventoryType, LandSearchType, LandStatReportType, LindenAmount, LookAtType,
+    MapItemType, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType,
+    MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
+    ObjectPermMasks, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+    ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate,
+    PointAtType, PrimShape, ProfileUpdate, RegionInfoUpdate, RestoreItem, RezAttachment, Rotation,
+    SaleType, ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -370,6 +370,21 @@ fn parse_sale_type(field: &str, value: &str) -> Result<SaleType, ReplError> {
                 .parse::<u8>()
                 .ok()
                 .ok_or_else(|| invalid(field, value, "sale type"))?,
+        ),
+    })
+}
+
+/// Parse a [`LandStatReportType`] from its name or wire code (`0` = scripts,
+/// `1` = colliders).
+fn parse_land_stat_report_type(field: &str, value: &str) -> Result<LandStatReportType, ReplError> {
+    Ok(match norm(value).as_str() {
+        "scripts" | "topscripts" | "0" => LandStatReportType::TopScripts,
+        "colliders" | "topcolliders" | "1" => LandStatReportType::TopColliders,
+        _ => LandStatReportType::from_u32(
+            value
+                .parse::<u32>()
+                .ok()
+                .ok_or_else(|| invalid(field, value, "land stat report type"))?,
         ),
     })
 }
@@ -2297,6 +2312,68 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "request_object_cost",
+            usage: "<object_ids-comma-separated>",
+            build: |args, ctx| {
+                Ok(Command::RequestObjectCost {
+                    object_ids: args.vec_uuid(ctx, "object_ids", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_selected_cost",
+            usage: "<object_ids-comma-separated> [roots=true]",
+            build: |args, ctx| {
+                Ok(Command::RequestSelectedCost {
+                    object_ids: args.vec_uuid(ctx, "object_ids", 0)?,
+                    roots: args.bool_or(ctx, "roots", 1, true)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_object_physics_data",
+            usage: "<object_ids-comma-separated>",
+            build: |args, ctx| {
+                Ok(Command::RequestObjectPhysicsData {
+                    object_ids: args.vec_uuid(ctx, "object_ids", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_attachment_resources",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::RequestAttachmentResources),
+        },
+        CommandSpec {
+            name: "request_land_resources",
+            usage: "<parcel_id>",
+            build: |args, ctx| {
+                Ok(Command::RequestLandResources {
+                    parcel_id: args.req_uuid(ctx, "parcel_id", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_land_stat",
+            usage: "[report_type=scripts|colliders] [request_flags-u32] [filter] \
+                    [parcel_local_id-i32]",
+            build: |args, ctx| {
+                Ok(Command::RequestLandStat {
+                    report_type: enum_arg_or(
+                        args,
+                        ctx,
+                        "report_type",
+                        0,
+                        parse_land_stat_report_type,
+                        LandStatReportType::TopScripts,
+                    )?,
+                    request_flags: args.parse_or(ctx, "request_flags", 1, "u32", 0_u32)?,
+                    filter: args.opt_str(ctx, "filter", 2)?.unwrap_or_default(),
+                    parcel_local_id: args.parse_or(ctx, "parcel_local_id", 3, "i32", 0_i32)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "request_estate_info",
             usage: "",
             build: |_args, _ctx| Ok(Command::RequestEstateInfo),
@@ -3876,8 +3953,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use sl_proto::{
-        AgentPreferences, AssetType, ChatType, Command, ControlFlags, FriendRights, MapItemType,
-        ObjectBuyItem, SaleType, Uuid,
+        AgentPreferences, AssetType, ChatType, Command, ControlFlags, FriendRights,
+        LandStatReportType, MapItemType, ObjectBuyItem, SaleType, Uuid,
     };
 
     use super::Registry;
@@ -4339,6 +4416,75 @@ mod tests {
         assert!(matches!(
             build("set_agent_preferences"),
             Ok(Command::SetAgentPreferences(prefs)) if *prefs == AgentPreferences::default()
+        ));
+    }
+
+    #[test]
+    fn request_object_cost_parses_ids() {
+        assert!(matches!(
+            build(&format!("request_object_cost {ONE}")),
+            Ok(Command::RequestObjectCost { object_ids }) if object_ids == vec![uuid(ONE)]
+        ));
+    }
+
+    #[test]
+    fn request_selected_cost_parses_ids_and_roots() {
+        assert!(matches!(
+            build(&format!("request_selected_cost {ONE} false")),
+            Ok(Command::RequestSelectedCost { object_ids, roots })
+                if object_ids == vec![uuid(ONE)] && !roots
+        ));
+    }
+
+    #[test]
+    fn request_selected_cost_defaults_to_roots() {
+        assert!(matches!(
+            build(&format!("request_selected_cost {ONE}")),
+            Ok(Command::RequestSelectedCost { roots, .. }) if roots
+        ));
+    }
+
+    #[test]
+    fn request_object_physics_data_parses_ids() {
+        assert!(matches!(
+            build(&format!("request_object_physics_data {ONE}")),
+            Ok(Command::RequestObjectPhysicsData { object_ids }) if object_ids == vec![uuid(ONE)]
+        ));
+    }
+
+    #[test]
+    fn request_attachment_resources_parses() {
+        assert!(matches!(
+            build("request_attachment_resources"),
+            Ok(Command::RequestAttachmentResources)
+        ));
+    }
+
+    #[test]
+    fn request_land_resources_parses_parcel_id() {
+        assert!(matches!(
+            build(&format!("request_land_resources {ONE}")),
+            Ok(Command::RequestLandResources { parcel_id }) if parcel_id == uuid(ONE)
+        ));
+    }
+
+    #[test]
+    fn request_land_stat_parses_report_type_and_scope() {
+        assert!(matches!(
+            build("request_land_stat colliders 0 spammer 3"),
+            Ok(Command::RequestLandStat { report_type, filter, parcel_local_id, .. })
+                if report_type == LandStatReportType::TopColliders
+                    && filter == "spammer"
+                    && parcel_local_id == 3
+        ));
+    }
+
+    #[test]
+    fn request_land_stat_defaults_to_top_scripts() {
+        assert!(matches!(
+            build("request_land_stat"),
+            Ok(Command::RequestLandStat { report_type, parcel_local_id, .. })
+                if report_type == LandStatReportType::TopScripts && parcel_local_id == 0
         ));
     }
 

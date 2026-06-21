@@ -21,14 +21,16 @@ use super::conversions::{
 };
 use super::{
     AGENT_UPDATE_INTERVAL, AssetTransfer, AssetUpload, CAP_AGENT_EXPERIENCES,
-    CAP_AGENT_PREFERENCES, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
-    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
-    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3,
+    CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES, CAP_CREATE_INVENTORY_CATEGORY,
+    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
+    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
+    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST,
+    CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES,
     CAP_LIBRARY_API_V3, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REMOTE_PARCEL_REQUEST, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
-    CAP_UPDATE_EXPERIENCE, Circuit, DEFAULT_DRAW_DISTANCE, HandoverPending, IDENTITY_ROTATION,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, Circuit, DEFAULT_DRAW_DISTANCE,
+    HandoverPending, IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG,
     LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, Session, SessionState, TELEPORT_FLAGS_VIA_LURE,
     TELEPORT_TIMEOUT, TextureDownload, deadline, merge_deadline,
 };
@@ -42,27 +44,30 @@ use crate::types::{
     EstateAccessDelta, EstateCovenant, Event, EventInfo, FollowCamProperty, FollowCamPropertyValue,
     FriendRights, GestureActivation, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMember,
     GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem,
-    InventoryOffer, LandSearchType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams,
-    MapItemType, Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType,
-    MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NotecardRez, Object, ObjectBuyItem,
-    ObjectFlagSettings, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
-    PermissionField, PickUpdate, PlacesResult, PrimShape, ProfileUpdate, RegionInfoUpdate,
-    Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl, ScriptPermissions,
-    ScriptTeleportRequest, SoundFlags, SoundPreload, TelehubInfo, TeleportFlags, TerrainLayerType,
-    TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, Wearable, WearableType, global_to_handle, handle_to_grid,
+    InventoryOffer, LandSearchType, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
+    LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MeanCollision,
+    MeanCollisionType, MoneyTransactionType, MuteFlags, MuteType, NeighborInfo, NewInventoryItem,
+    NotecardRez, Object, ObjectBuyItem, ObjectFlagSettings, ObjectPropertiesFamily,
+    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+    ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
+    ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, PlacesResult, PrimShape,
+    ProfileUpdate, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType,
+    ScriptControl, ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload, TelehubInfo,
+    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType, global_to_handle,
+    handle_to_grid,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::{
     AnyMessage, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd, MessageId, ObjectMediaResponse,
     PacketFlags, ParcelVoiceInfo, Reader, VoiceAccountInfo, build_group_notice_bucket,
-    build_login_request, message_name, parse_agent_preferences, parse_datagram,
-    parse_display_names, parse_experience_ids, parse_experience_infos,
-    parse_experience_permissions, parse_gltf_material_override, parse_region_experiences,
-    parse_remote_parcel_reply, parse_simulator_features, zero_decode,
+    build_login_request, message_name, parse_agent_preferences, parse_attachment_resources,
+    parse_datagram, parse_display_names, parse_experience_ids, parse_experience_infos,
+    parse_experience_permissions, parse_get_object_cost, parse_get_object_physics_data,
+    parse_gltf_material_override, parse_land_resource_detail, parse_land_resource_summary,
+    parse_land_resources_reply, parse_object_physics_properties, parse_region_experiences,
+    parse_remote_parcel_reply, parse_resource_cost_selected, parse_simulator_features, zero_decode,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -435,6 +440,62 @@ impl Session {
                     .push_back(Event::AgentPreferences(Box::new(parse_agent_preferences(
                         body,
                     ))));
+            }
+            // The reply to a `GetObjectCost` POST: the per-object land-impact and
+            // physics costs, keyed by object id.
+            CAP_GET_OBJECT_COST => {
+                self.events
+                    .push_back(Event::ObjectCosts(parse_get_object_cost(body)));
+            }
+            // The reply to a `ResourceCostSelected` POST: the summed selection
+            // costs.
+            CAP_RESOURCE_COST_SELECTED => {
+                self.events
+                    .push_back(Event::SelectedResourceCost(parse_resource_cost_selected(
+                        body,
+                    )));
+            }
+            // The reply to a `GetObjectPhysicsData` POST: the per-object physics
+            // material parameters, keyed by object id.
+            CAP_GET_OBJECT_PHYSICS_DATA => {
+                self.events
+                    .push_back(Event::ObjectPhysicsData(parse_get_object_physics_data(
+                        body,
+                    )));
+            }
+            // An `ObjectPhysicsProperties` event-queue push: updated physics
+            // material parameters for a batch of objects, keyed by region-local id.
+            "ObjectPhysicsProperties" => {
+                self.events.push_back(Event::ObjectPhysicsProperties(
+                    parse_object_physics_properties(body),
+                ));
+            }
+            // The reply to an `AttachmentResources` GET: the agent's scripted
+            // attachments grouped by attachment point, with a resource summary.
+            CAP_ATTACHMENT_RESOURCES => {
+                self.events.push_back(Event::AttachmentResources(Box::new(
+                    parse_attachment_resources(body),
+                )));
+            }
+            // The reply to a `LandResources` POST: the follow-up cap URLs the
+            // runtimes then GET (surfacing the summary/detail reports below).
+            CAP_LAND_RESOURCES => {
+                self.events
+                    .push_back(Event::LandResourcesUrls(parse_land_resources_reply(body)));
+            }
+            // A `LandResources` `ScriptResourceSummary` follow-up GET: the parcel's
+            // resource totals (forwarded by the runtimes under this tag).
+            LAND_RESOURCE_SUMMARY_TAG => {
+                self.events
+                    .push_back(Event::LandResourceSummary(parse_land_resource_summary(
+                        body,
+                    )));
+            }
+            // A `LandResources` `ScriptResourceDetails` follow-up GET: the parcel's
+            // per-object resource breakdown.
+            LAND_RESOURCE_DETAIL_TAG => {
+                self.events
+                    .push_back(Event::LandResourceDetail(parse_land_resource_detail(body)));
             }
             // The reply to a `GetExperienceInfo` GET: the requested experiences'
             // metadata (with unresolved ids folded in as `missing` placeholders).
@@ -1328,6 +1389,25 @@ impl Session {
                             is_group_owned: owner.is_group_owned,
                             count: owner.count,
                             online_status: owner.online_status,
+                        })
+                        .collect(),
+                });
+            }
+            AnyMessage::LandStatReply(reply) => {
+                self.events.push_back(Event::LandStatReply {
+                    report_type: LandStatReportType::from_u32(reply.request_data.report_type),
+                    request_flags: reply.request_data.request_flags,
+                    total_object_count: reply.request_data.total_object_count,
+                    items: reply
+                        .report_data
+                        .iter()
+                        .map(|item| LandStatItem {
+                            task_local_id: item.task_local_id,
+                            task_id: item.task_id,
+                            location: [item.location_x, item.location_y, item.location_z],
+                            score: item.score,
+                            task_name: trimmed_string(&item.task_name),
+                            owner_name: trimmed_string(&item.owner_name),
                         })
                         .collect(),
                 });
@@ -6299,6 +6379,37 @@ impl Session {
     pub fn request_parcel_info(&mut self, parcel_id: Uuid, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_parcel_info_request(parcel_id, now)?;
+        Ok(())
+    }
+
+    /// Requests the region's (or a parcel's) **top scripts / top colliders**
+    /// report via a UDP `LandStatRequest`. The reply arrives as
+    /// [`Event::LandStatReply`]. `report_type` selects the report;
+    /// `parcel_local_id` scopes it to a parcel (`0` for the whole region);
+    /// `filter` narrows it to objects/owners whose name contains the string (empty
+    /// for none); `request_flags` is passed through verbatim. Requires
+    /// estate-manager rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_land_stat(
+        &mut self,
+        report_type: LandStatReportType,
+        request_flags: u32,
+        filter: &str,
+        parcel_local_id: i32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_land_stat_request(
+            report_type.to_u32(),
+            request_flags,
+            filter,
+            parcel_local_id,
+            now,
+        )?;
         Ok(())
     }
 
