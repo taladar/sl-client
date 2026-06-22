@@ -73,7 +73,7 @@ fn on_events(
 ) {
     for event in events.read() {
         match &event.0 {
-            SlSessionEvent::CircuitEstablished { sim } => info!("circuit established to {sim}"),
+            SlSessionEvent::CircuitEstablished { sim, .. } => info!("circuit established to {sim}"),
             SlSessionEvent::RegionHandshakeComplete => {
                 info!("region handshake complete; holding for {:?}", hold.hold);
                 hold.logout_at = Instant::now().checked_add(hold.hold);

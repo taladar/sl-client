@@ -1,6 +1,7 @@
 //! The sans-I/O session state machine: login, circuit establishment,
 //! keep-alive, and clean logout, driven entirely by passed-in time.
 
+use crate::scoped_id::CircuitId;
 use crate::types::{
     AssetType, Camera, Diagnostic, Event, ImageCodec, InventoryFolder, InventoryItem, LoginAccount,
     LoginParams, Object, TerrainPatch, Throttle,
@@ -662,6 +663,10 @@ impl AssetUpload {
 /// The UDP circuit to a single simulator.
 #[derive(Debug)]
 struct Circuit {
+    /// This circuit instance's client-side identity, minted when the circuit is
+    /// established (and preserved when a child is promoted to root). Used to
+    /// scope region-local ids ([`CircuitId`]) so a stale id fails to resolve.
+    id: CircuitId,
     /// The simulator's UDP address.
     sim_addr: SocketAddr,
     /// The agent/avatar id.
@@ -736,6 +741,9 @@ pub struct Session {
     /// `EstablishAgentCommunication` event), keyed by simulator address; used as
     /// the new seed when a child is promoted to root.
     child_seeds: BTreeMap<SocketAddr, String>,
+    /// A monotonic counter for minting a fresh [`CircuitId`] each time a circuit
+    /// instance is established (never zero — zero is the "no circuit" sentinel).
+    next_circuit_id: u64,
     /// The draw distance (metres) advertised in keep-alive `AgentUpdate`s.
     draw_distance: f32,
     /// The agent control flags advertised in keep-alive `AgentUpdate`s; the
@@ -805,28 +813,32 @@ pub struct Session {
     /// A monotonic counter for generating upload transaction ids (each packed
     /// into a fresh transaction UUID; never zero).
     next_upload_id: u128,
-    /// The scene-graph object cache, keyed by the simulator the objects belong
-    /// to (the root region *and* every child/neighbour circuit), then by
-    /// region-local id. Region-local ids are only unique within a simulator, so
-    /// the cache is partitioned per sim. A sim's objects are dropped when its
-    /// circuit goes away (`DisableSimulator`, teleport handover, relogin).
-    objects: BTreeMap<SocketAddr, BTreeMap<RegionLocalObjectId, Object>>,
-    /// The decoded terrain cache, keyed by the simulator the patches belong to
-    /// (the root region *and* every neighbour streamed over a child circuit),
-    /// then by `(layer code, patch x, patch y)` so each layer's patches are kept
-    /// side by side. Dropped with the rest of a sim's state when its circuit
-    /// goes away. See [`Session::terrain_patches`] and [`Session::terrain_height`].
-    terrain: BTreeMap<SocketAddr, BTreeMap<(u8, u32, u32), TerrainPatch>>,
-    /// The region handle most recently learned for each simulator (from object
-    /// updates, which carry it, and from `EnableSimulator`). Used to label
-    /// terrain patches, which the `LayerData` message does not itself tag with a
-    /// region handle.
-    regions: BTreeMap<SocketAddr, RegionHandle>,
+    /// The scene-graph object cache, keyed by the circuit instance the objects
+    /// belong to (the root region *and* every child/neighbour circuit), then by
+    /// region-local id. Region-local ids are only unique within a circuit, so
+    /// the cache is partitioned per [`CircuitId`] — a reconnect to the same
+    /// address mints a fresh circuit, so its objects never alias the old ones. A
+    /// circuit's objects are dropped when it goes away (`DisableSimulator`,
+    /// teleport handover, relogin).
+    objects: BTreeMap<CircuitId, BTreeMap<RegionLocalObjectId, Object>>,
+    /// The decoded terrain cache, keyed by the circuit instance the patches
+    /// belong to (the root region *and* every neighbour streamed over a child
+    /// circuit), then by `(layer code, patch x, patch y)` so each layer's
+    /// patches are kept side by side. Dropped with the rest of a circuit's state
+    /// when it goes away. See [`Session::terrain_patches`] and
+    /// [`Session::terrain_height`].
+    terrain: BTreeMap<CircuitId, BTreeMap<(u8, u32, u32), TerrainPatch>>,
+    /// The region handle most recently learned for each circuit instance (from
+    /// object updates, which carry it, and from `EnableSimulator`). Used to
+    /// label terrain patches, which the `LayerData` message does not itself tag
+    /// with a region handle.
+    regions: BTreeMap<CircuitId, RegionHandle>,
     /// The most recent raw `RegionData.TimeDilation` (a `u16`) seen for each
-    /// simulator, used to de-duplicate [`Event::TimeDilation`] so it is emitted
-    /// only when the region's frame time-dilation actually changes (every
-    /// object-update message carries the field). See [`Session::note_time_dilation`].
-    time_dilation: BTreeMap<SocketAddr, u16>,
+    /// circuit instance, used to de-duplicate [`Event::TimeDilation`] so it is
+    /// emitted only when the region's frame time-dilation actually changes
+    /// (every object-update message carries the field). See
+    /// [`Session::note_time_dilation`].
+    time_dilation: BTreeMap<CircuitId, u16>,
     /// The live inventory-folder cache, keyed by folder id. Seeded from the
     /// login skeleton ([`Event::InventorySkeleton`]), grown by folder-contents
     /// fetches ([`Event::InventoryDescendents`], both UDP and CAPS) and the

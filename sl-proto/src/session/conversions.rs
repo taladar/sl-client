@@ -3250,6 +3250,8 @@ pub(crate) fn object_from_full_update(
     Object {
         region_handle,
         local_id: RegionLocalObjectId(block.id),
+        // Stamped by the session when the object is cached (`upsert_object`).
+        circuit: crate::scoped_id::CircuitId::default(),
         full_id: block.full_id,
         parent_id: RegionLocalObjectId(block.parent_id),
         pcode: block.p_code,

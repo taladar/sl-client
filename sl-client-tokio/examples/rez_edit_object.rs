@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use sl_client_tokio::{
     Client, Command, DeRezDestination, DisconnectReason, Event, LoginParams, LoginRequest,
-    ObjectTransform, PrimShape, RegionLocalObjectId, SaleType, Throttle, Uuid, Vector, pcode,
+    ObjectTransform, PrimShape, SaleType, ScopedObjectId, Throttle, Uuid, Vector, pcode,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -63,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
 
     // The local id of our freshly-rezzed prim, once we recognise it.
-    let mut target: Option<RegionLocalObjectId> = None;
+    let mut target: Option<ScopedObjectId> = None;
     // The agent's Trash folder id, learned from the login inventory skeleton.
     let mut trash_folder: Option<Uuid> = None;
     let mut deleted = false;
@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     && object.pcode == pcode::PRIMITIVE
                     && near_rez(&object.motion.position)
                 {
-                    let local_id = object.local_id;
+                    let local_id = object.scoped_id();
                     target = Some(local_id);
                     info!(
                         "rezzed prim recognised: local id {local_id} at {:?}",
@@ -162,7 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Event::ObjectUpdated(object) => {
-                if Some(object.local_id) == target {
+                if Some(object.scoped_id()) == target {
                     info!(
                         "test prim updated: name={:?} pos={:?}",
                         object.properties.as_ref().map(|p| &p.name),

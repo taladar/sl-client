@@ -35,6 +35,7 @@ use super::{
     TextureDownload, deadline, merge_deadline,
 };
 use crate::error::Error;
+use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::terrain;
 use crate::types::{
     AlertInfo, Asset, AssetType, AttachmentMode, AttachmentPoint, AvatarClassified, AvatarPick,
@@ -81,6 +82,27 @@ use uuid::Uuid;
 /// header and block count) comfortably within a typical UDP MTU.
 const UUID_NAMES_PER_REQUEST: usize = 80;
 
+/// Splits a slice of [`ScopedObjectId`]s into the single [`CircuitId`] they all
+/// belong to and the bare region-local ids, ready for a batch request (which
+/// targets one simulator). Returns `Ok(None)` for an empty slice (a no-op), or
+/// [`Error::MixedCircuits`] if the ids are not all scoped to the same circuit.
+fn split_scoped_object_ids(
+    scoped: &[ScopedObjectId],
+) -> Result<Option<(CircuitId, Vec<RegionLocalObjectId>)>, Error> {
+    let Some(first) = scoped.first() else {
+        return Ok(None);
+    };
+    let circuit = first.circuit;
+    let mut ids = Vec::with_capacity(scoped.len());
+    for entry in scoped {
+        if entry.circuit != circuit {
+            return Err(Error::MixedCircuits);
+        }
+        ids.push(entry.id);
+    }
+    Ok(Some((circuit, ids)))
+}
+
 impl Session {
     /// Creates a new session for the given login parameters.
     #[must_use]
@@ -91,6 +113,7 @@ impl Session {
             circuit: None,
             children: BTreeMap::new(),
             child_seeds: BTreeMap::new(),
+            next_circuit_id: 1,
             draw_distance: DEFAULT_DRAW_DISTANCE,
             controls: ControlFlags::empty(),
             throttle: None,
@@ -246,7 +269,9 @@ impl Session {
                 if let Some((handle, sim)) = enable_simulator_from_caps_llsd(body) {
                     let handle = RegionHandle(handle);
                     self.open_child_circuit(sim, now)?;
-                    self.regions.insert(sim, handle);
+                    if let Some(circuit_id) = self.circuit_id_for(sim) {
+                        self.regions.insert(circuit_id, handle);
+                    }
                     let (grid_x, grid_y) = handle.grid_coordinates();
                     self.events
                         .push_back(Event::NeighborDiscovered(NeighborInfo {
@@ -469,9 +494,15 @@ impl Session {
             // An `ObjectPhysicsProperties` event-queue push: updated physics
             // material parameters for a batch of objects, keyed by region-local id.
             "ObjectPhysicsProperties" => {
-                self.events.push_back(Event::ObjectPhysicsProperties(
-                    parse_object_physics_properties(body),
-                ));
+                // An event-queue push for the current region: scope each id to
+                // the root circuit.
+                let circuit = self.root_circuit_id().unwrap_or_default();
+                let entries = parse_object_physics_properties(body)
+                    .into_iter()
+                    .map(|(id, data)| (ScopedObjectId::new(circuit, id), data))
+                    .collect();
+                self.events
+                    .push_back(Event::ObjectPhysicsProperties(entries));
             }
             // The reply to an `AttachmentResources` GET: the agent's scripted
             // attachments grouped by attachment point, with a resource summary.
@@ -604,8 +635,13 @@ impl Session {
         }
         // Retarget synchronously: it resets the circuit's sequence/ack/seen/timer
         // state to the new simulator, after which the source check accepts only
-        // the destination.
+        // the destination. A retarget is a fresh connection to a different region
+        // (the destination had no pre-opened child), so mint a new circuit id —
+        // the destination's region-local ids are a new space, and any scoped id
+        // captured at the source must now fail to resolve.
+        let circuit_id = self.mint_circuit_id();
         if let Some(circuit) = self.circuit.as_mut() {
+            circuit.id = circuit_id;
             circuit.retarget(dest, now);
             circuit.send_use_circuit_code(now)?;
             circuit.send_complete_agent_movement(now)?;
@@ -651,10 +687,11 @@ impl Session {
         self.state = SessionState::Active;
         match self.handover.take() {
             Some(handover) => {
-                if let Some(sim) = self.circuit.as_ref().map(|c| c.sim_addr) {
+                if let Some((sim, circuit)) = self.circuit.as_ref().map(|c| (c.sim_addr, c.id)) {
                     self.events.push_back(Event::RegionChanged {
                         region_handle: handover.region_handle,
                         sim,
+                        circuit,
                     });
                 }
             }
@@ -676,11 +713,14 @@ impl Session {
         let Some(root) = self.circuit.as_ref() else {
             return Ok(());
         };
+        let (agent_id, session_id, code) = (root.agent_id, root.session_id, root.code);
+        let circuit_id = self.mint_circuit_id();
         let mut child = Circuit::new(
+            circuit_id,
             sim,
-            root.agent_id,
-            root.session_id,
-            root.code,
+            agent_id,
+            session_id,
+            code,
             self.draw_distance,
             now,
         );
@@ -727,8 +767,19 @@ impl Session {
         let seed = seed
             .filter(|s| !s.is_empty())
             .or_else(|| self.child_seeds.get(&dest).cloned());
+        // A pre-opened child keeps its own circuit id (same connection instance);
+        // only the fresh fallback circuit needs a newly minted one.
+        let fallback_id = self.mint_circuit_id();
         let mut new_root = self.children.remove(&dest).unwrap_or_else(|| {
-            Circuit::new(dest, agent_id, session_id, code, self.draw_distance, now)
+            Circuit::new(
+                fallback_id,
+                dest,
+                agent_id,
+                session_id,
+                code,
+                self.draw_distance,
+                now,
+            )
         });
         self.child_seeds.remove(&dest);
         new_root.send_complete_agent_movement(now)?;
@@ -795,7 +846,9 @@ impl Session {
             }
             sl_wire::LoginResponse::Success(success) => {
                 let sim_addr = SocketAddr::new(IpAddr::V4(success.sim_ip), success.sim_port);
+                let circuit_id = self.mint_circuit_id();
                 let mut circuit = Circuit::new(
+                    circuit_id,
                     sim_addr,
                     success.agent_id,
                     success.session_id,
@@ -818,14 +871,16 @@ impl Session {
                 // not itself carry the handle.
                 if let (Some(region_x), Some(region_y)) = (success.region_x, success.region_y) {
                     self.regions
-                        .insert(sim_addr, RegionHandle::from_global(region_x, region_y));
+                        .insert(circuit_id, RegionHandle::from_global(region_x, region_y));
                 }
                 self.seed_capability = Some(success.seed_capability.clone());
                 self.inventory_root = success.inventory_root;
                 self.secure_session_id = success.secure_session_id;
                 self.state = SessionState::AwaitingHandshake;
-                self.events
-                    .push_back(Event::CircuitEstablished { sim: sim_addr });
+                self.events.push_back(Event::CircuitEstablished {
+                    sim: sim_addr,
+                    circuit: circuit_id,
+                });
                 let account = LoginAccount {
                     home: success.home,
                     look_at: success.look_at,
@@ -990,10 +1045,15 @@ impl Session {
                 }
             }
             AnyMessage::DisableSimulator(_) => {
-                // The simulator is retiring this child circuit.
+                // The simulator is retiring this child circuit. Resolve its
+                // circuit id before removing it so the per-circuit caches can be
+                // dropped.
+                let circuit_id = self.circuit_id_for(from);
                 self.children.remove(&from);
                 self.child_seeds.remove(&from);
-                self.forget_sim_objects(from);
+                if let Some(circuit_id) = circuit_id {
+                    self.forget_sim_objects(circuit_id);
+                }
             }
             _ => {
                 self.push_diagnostic(Diagnostic::UnhandledMessage {
@@ -1046,7 +1106,9 @@ impl Session {
                 // We keep no persistent object cache across sessions, so any entry
                 // not already held with a matching CRC is a miss; fetch the full
                 // update for the misses (a full `ObjectUpdate` follows).
-                let cached = self.objects.get(&from);
+                let cached = self
+                    .circuit_id_for(from)
+                    .and_then(|circuit_id| self.objects.get(&circuit_id));
                 let misses: Vec<RegionLocalObjectId> = update
                     .object_data
                     .iter()
@@ -1082,25 +1144,32 @@ impl Session {
                 self.request_object_ids(from, &misses, now);
             }
             AnyMessage::KillObject(kill) => {
+                let Some(circuit_id) = self.circuit_id_for(from) else {
+                    return true;
+                };
                 for block in &kill.object_data {
                     let region_handle = self
                         .objects
-                        .get_mut(&from)
+                        .get_mut(&circuit_id)
                         .and_then(|sim| sim.remove(&RegionLocalObjectId(block.id)))
                         .map_or(RegionHandle(0), |object| object.region_handle);
                     self.events.push_back(Event::ObjectRemoved {
                         region_handle,
-                        local_id: RegionLocalObjectId(block.id),
+                        local_id: ScopedObjectId::new(circuit_id, RegionLocalObjectId(block.id)),
                     });
                 }
             }
             AnyMessage::ObjectProperties(props) => {
+                let circuit_id = self.circuit_id_for(from);
                 for block in &props.object_data {
                     let properties = object_properties(block);
-                    if let Some(object) = self.objects.get_mut(&from).and_then(|sim| {
-                        sim.values_mut()
-                            .find(|object| object.full_id == properties.object_id)
-                    }) {
+                    if let Some(object) = circuit_id
+                        .and_then(|circuit_id| self.objects.get_mut(&circuit_id))
+                        .and_then(|sim| {
+                            sim.values_mut()
+                                .find(|object| object.full_id == properties.object_id)
+                        })
+                    {
                         object.properties = Some(properties.clone());
                     }
                     self.events
@@ -1117,10 +1186,15 @@ impl Session {
                 if message.method_data.method == GLTF_MATERIAL_OVERRIDE_METHOD =>
             {
                 if let Some(decoded) = parse_gltf_material_override(&message.data_block.data) {
-                    let region_handle = self.regions.get(&from).copied().unwrap_or(RegionHandle(0));
+                    let circuit_id = self.circuit_id_for(from).unwrap_or_default();
+                    let region_handle = self
+                        .regions
+                        .get(&circuit_id)
+                        .copied()
+                        .unwrap_or(RegionHandle(0));
                     self.events.push_back(Event::GltfMaterialOverride {
                         region_handle,
-                        local_id: decoded.local_id,
+                        local_id: ScopedObjectId::new(circuit_id, decoded.local_id),
                         faces: decoded.faces,
                         overrides: decoded.overrides,
                     });
@@ -1138,8 +1212,15 @@ impl Session {
         let Some((layer, patches)) = terrain::decode_layer(data) else {
             return;
         };
-        let region_handle = self.regions.get(&from).copied().unwrap_or(RegionHandle(0));
-        let cache = self.terrain.entry(from).or_default();
+        let Some(circuit_id) = self.circuit_id_for(from) else {
+            return;
+        };
+        let region_handle = self
+            .regions
+            .get(&circuit_id)
+            .copied()
+            .unwrap_or(RegionHandle(0));
+        let cache = self.terrain.entry(circuit_id).or_default();
         let mut emit = Vec::with_capacity(patches.len());
         for decoded in patches {
             let patch = terrain::into_terrain_patch(decoded, layer, region_handle);
@@ -1157,7 +1238,10 @@ impl Session {
     /// re-emit on every update). `raw` is the 16-bit wire value; the event carries
     /// the `0.0`..=`1.0` fraction.
     fn note_time_dilation(&mut self, from: SocketAddr, region_handle: RegionHandle, raw: u16) {
-        if self.time_dilation.insert(from, raw) == Some(raw) {
+        let Some(circuit_id) = self.circuit_id_for(from) else {
+            return;
+        };
+        if self.time_dilation.insert(circuit_id, raw) == Some(raw) {
             return;
         }
         self.events.push_back(Event::TimeDilation {
@@ -1172,12 +1256,18 @@ impl Session {
     /// [`properties`](Object::properties) are preserved across a refresh that
     /// does not carry its own.
     fn upsert_object(&mut self, from: SocketAddr, mut object: Object) {
-        // Remember this sim's region handle so terrain patches (whose `LayerData`
-        // message carries no handle) can be labelled with it.
+        let Some(circuit_id) = self.circuit_id_for(from) else {
+            return;
+        };
+        // Stamp the object with the circuit it was learned on so a caller can
+        // build a [`ScopedObjectId`] from it (via [`Object::scoped_id`]).
+        object.circuit = circuit_id;
+        // Remember this circuit's region handle so terrain patches (whose
+        // `LayerData` message carries no handle) can be labelled with it.
         if object.region_handle != RegionHandle(0) {
-            self.regions.insert(from, object.region_handle);
+            self.regions.insert(circuit_id, object.region_handle);
         }
-        let sim = self.objects.entry(from).or_default();
+        let sim = self.objects.entry(circuit_id).or_default();
         match sim.get(&object.local_id) {
             Some(existing) => {
                 if object.properties.is_none() {
@@ -1206,9 +1296,12 @@ impl Session {
         update: crate::object_update::TerseUpdate,
         texture_entry: Option<Vec<u8>>,
     ) -> bool {
+        let Some(circuit_id) = self.circuit_id_for(from) else {
+            return false;
+        };
         let Some(object) = self
             .objects
-            .get_mut(&from)
+            .get_mut(&circuit_id)
             .and_then(|sim| sim.get_mut(&update.local_id))
         else {
             return false;
@@ -1252,21 +1345,76 @@ impl Session {
         }
     }
 
-    /// Drops every cached object for simulator `addr` (its circuit has gone away),
-    /// emitting an [`Event::ObjectRemoved`] for each so consumers can prune.
-    fn forget_sim_objects(&mut self, addr: SocketAddr) {
-        // The terrain, region-handle, and time-dilation caches for this sim go
-        // stale too.
-        self.terrain.remove(&addr);
-        self.regions.remove(&addr);
-        self.time_dilation.remove(&addr);
-        let Some(sim) = self.objects.remove(&addr) else {
+    /// Mints a fresh [`CircuitId`] for a newly established circuit instance,
+    /// advancing the monotonic counter (skipping the zero sentinel on the
+    /// astronomically unlikely wrap).
+    fn mint_circuit_id(&mut self) -> CircuitId {
+        let id = self.next_circuit_id;
+        self.next_circuit_id = self.next_circuit_id.checked_add(1).unwrap_or(1);
+        CircuitId(id)
+    }
+
+    /// The [`CircuitId`] of the circuit at `addr` (root or child), if one is
+    /// live. Used to key the per-circuit caches from an inbound message's
+    /// source address.
+    fn circuit_id_for(&self, addr: SocketAddr) -> Option<CircuitId> {
+        if let Some(root) = self.circuit.as_ref()
+            && root.sim_addr == addr
+        {
+            return Some(root.id);
+        }
+        self.children.get(&addr).map(|child| child.id)
+    }
+
+    /// A mutable reference to the live circuit (root or child) with the given
+    /// [`CircuitId`], or `None` if no such circuit is established (a stale id
+    /// from a torn-down circuit).
+    fn circuit_by_id_mut(&mut self, id: CircuitId) -> Option<&mut Circuit> {
+        if let Some(root) = self.circuit.as_mut()
+            && root.id == id
+        {
+            return Some(root);
+        }
+        self.children.values_mut().find(|child| child.id == id)
+    }
+
+    /// Resolves the circuit a [`ScopedObjectId`] / [`ScopedParcelId`] is scoped
+    /// to, for a send. Returns [`Error::NoCircuit`] when no circuit is
+    /// established at all (not logged in — so the existing `# Errors` docs hold),
+    /// or [`Error::UnknownCircuit`] when a circuit exists but none matches the
+    /// scoped id — i.e. the id is stale (captured on a circuit since torn down by
+    /// a teleport, region crossing, relogin, or `DisableSimulator`).
+    fn circuit_for_scope(&mut self, circuit: CircuitId) -> Result<&mut Circuit, Error> {
+        if self.circuit.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        self.circuit_by_id_mut(circuit).ok_or(Error::UnknownCircuit)
+    }
+
+    /// The [`CircuitId`] of the current root circuit, if login has established
+    /// one. A driver pairs it with a region-local id to build a
+    /// [`ScopedObjectId`] / [`ScopedParcelId`] for the region the agent is in.
+    #[must_use]
+    pub fn root_circuit_id(&self) -> Option<CircuitId> {
+        self.circuit.as_ref().map(|circuit| circuit.id)
+    }
+
+    /// Drops every cached object for the circuit instance `circuit_id` (it has
+    /// gone away), emitting an [`Event::ObjectRemoved`] for each so consumers
+    /// can prune.
+    fn forget_sim_objects(&mut self, circuit_id: CircuitId) {
+        // The terrain, region-handle, and time-dilation caches for this circuit
+        // go stale too.
+        self.terrain.remove(&circuit_id);
+        self.regions.remove(&circuit_id);
+        self.time_dilation.remove(&circuit_id);
+        let Some(sim) = self.objects.remove(&circuit_id) else {
             return;
         };
         for object in sim.into_values() {
             self.events.push_back(Event::ObjectRemoved {
                 region_handle: object.region_handle,
-                local_id: object.local_id,
+                local_id: ScopedObjectId::new(circuit_id, object.local_id),
             });
         }
     }
@@ -1289,7 +1437,10 @@ impl Session {
                     if let Some(circuit) = self.circuit.as_mut() {
                         circuit.send_region_handshake_reply(now)?;
                     }
-                    let region_handle = self.regions.get(&from).copied().unwrap_or(RegionHandle(0));
+                    let region_handle = self
+                        .circuit_id_for(from)
+                        .and_then(|circuit_id| self.regions.get(&circuit_id).copied())
+                        .unwrap_or(RegionHandle(0));
                     self.events
                         .push_back(Event::RegionInfoHandshake(Box::new(region_identity(
                             handshake,
@@ -1366,15 +1517,23 @@ impl Session {
                     }));
             }
             AnyMessage::ParcelDwellReply(reply) => {
+                let circuit = self.circuit_id_for(from).unwrap_or_default();
                 self.events.push_back(Event::ParcelDwell {
-                    local_id: RegionLocalParcelId(reply.data.local_id),
+                    local_id: ScopedParcelId::new(
+                        circuit,
+                        RegionLocalParcelId(reply.data.local_id),
+                    ),
                     parcel_id: reply.data.parcel_id,
                     dwell: reply.data.dwell,
                 });
             }
             AnyMessage::ParcelAccessListReply(reply) => {
+                let circuit = self.circuit_id_for(from).unwrap_or_default();
                 self.events.push_back(Event::ParcelAccessList {
-                    local_id: RegionLocalParcelId(reply.data.local_id),
+                    local_id: ScopedParcelId::new(
+                        circuit,
+                        RegionLocalParcelId(reply.data.local_id),
+                    ),
                     scope: ParcelAccessScope::from_u32(reply.data.flags),
                     entries: reply
                         .list
@@ -1696,7 +1855,9 @@ impl Session {
                 // Pre-open a child-agent circuit to the neighbour so it holds the
                 // agent's presence before the avatar crosses the border.
                 self.open_child_circuit(info.sim, now)?;
-                self.regions.insert(info.sim, info.region_handle);
+                if let Some(circuit_id) = self.circuit_id_for(info.sim) {
+                    self.regions.insert(circuit_id, info.region_handle);
+                }
                 self.events.push_back(Event::NeighborDiscovered(info));
             }
             AnyMessage::MapBlockReply(reply) => {
@@ -2848,9 +3009,12 @@ impl Session {
             });
         }
         for addr in dead {
+            let circuit_id = self.circuit_id_for(addr);
             self.children.remove(&addr);
             self.child_seeds.remove(&addr);
-            self.forget_sim_objects(addr);
+            if let Some(circuit_id) = circuit_id {
+                self.forget_sim_objects(circuit_id);
+            }
         }
 
         Ok(())
@@ -4812,13 +4976,14 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn attach_object(
         &mut self,
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         attachment_point: AttachmentPoint,
         mode: AttachmentMode,
         rotation: &Rotation,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_object_attach(local_id, attachment_point, mode, rotation, now)?;
         Ok(())
     }
@@ -4831,11 +4996,14 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn detach_objects(
         &mut self,
-        local_ids: &[RegionLocalObjectId],
+        local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_object_detach(local_ids, now)?;
+        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
+            return Ok(());
+        };
+        let circuit = self.circuit_for_scope(scope)?;
+        circuit.send_object_detach(&local_ids, now)?;
         Ok(())
     }
 
@@ -4848,11 +5016,14 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn drop_attachments(
         &mut self,
-        local_ids: &[RegionLocalObjectId],
+        local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_object_drop(local_ids, now)?;
+        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
+            return Ok(());
+        };
+        let circuit = self.circuit_for_scope(scope)?;
+        circuit.send_object_drop(&local_ids, now)?;
         Ok(())
     }
 
@@ -5292,7 +5463,7 @@ impl Session {
     )]
     pub fn duplicate_objects_on_ray(
         &mut self,
-        local_ids: &[RegionLocalObjectId],
+        local_ids: &[ScopedObjectId],
         group_id: Uuid,
         ray_start: Vector,
         ray_end: Vector,
@@ -5304,9 +5475,12 @@ impl Session {
         duplicate_flags: u32,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
+            return Ok(());
+        };
+        let circuit = self.circuit_for_scope(scope)?;
         circuit.send_object_duplicate_on_ray(
-            local_ids,
+            &local_ids,
             group_id,
             ray_start,
             ray_end,
@@ -6149,11 +6323,12 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_parcel_access_list(
         &mut self,
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
         scope: ParcelAccessScope,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_parcel_access_list_request(local_id, scope.to_u32(), now)?;
         Ok(())
     }
@@ -6168,12 +6343,13 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn update_parcel_access_list(
         &mut self,
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
         scope: ParcelAccessScope,
         entries: &[ParcelAccessEntry],
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_parcel_access_list_update(local_id, scope.to_u32(), entries, now)?;
         Ok(())
     }
@@ -6188,10 +6364,11 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_parcel_dwell(
         &mut self,
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_parcel_dwell_request(local_id, now)?;
         Ok(())
     }
@@ -6206,14 +6383,15 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn buy_parcel(
         &mut self,
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
         price: i32,
         area: i32,
         group_id: Uuid,
         is_group_owned: bool,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_parcel_buy(local_id, price, area, group_id, is_group_owned, now)?;
         Ok(())
     }
@@ -6230,13 +6408,14 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn return_parcel_objects(
         &mut self,
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
         return_type: ParcelReturnType,
         owner_ids: &[Uuid],
         task_ids: &[Uuid],
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_parcel_return_objects(local_id, return_type.0, owner_ids, task_ids, now)?;
         Ok(())
     }
@@ -6251,12 +6430,13 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn select_parcel_objects(
         &mut self,
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
         return_type: ParcelReturnType,
         object_ids: &[Uuid],
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_parcel_select_objects(local_id, return_type.0, object_ids, now)?;
         Ok(())
     }
@@ -6270,11 +6450,12 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn deed_parcel_to_group(
         &mut self,
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
         group_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_parcel_deed_to_group(local_id, group_id, now)?;
         Ok(())
     }
@@ -6286,12 +6467,9 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn reclaim_parcel(
-        &mut self,
-        local_id: RegionLocalParcelId,
-        now: Instant,
-    ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+    pub fn reclaim_parcel(&mut self, local_id: ScopedParcelId, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_parcel_reclaim(local_id, now)?;
         Ok(())
     }
@@ -6303,12 +6481,9 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn release_parcel(
-        &mut self,
-        local_id: RegionLocalParcelId,
-        now: Instant,
-    ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+    pub fn release_parcel(&mut self, local_id: ScopedParcelId, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_parcel_release(local_id, now)?;
         Ok(())
     }
@@ -6364,10 +6539,11 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_parcel_object_owners(
         &mut self,
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_parcel_object_owners_request(local_id, now)?;
         Ok(())
     }
@@ -6379,12 +6555,9 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn buy_parcel_pass(
-        &mut self,
-        local_id: RegionLocalParcelId,
-        now: Instant,
-    ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+    pub fn buy_parcel_pass(&mut self, local_id: ScopedParcelId, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_parcel_buy_pass(local_id, now)?;
         Ok(())
     }
@@ -6400,13 +6573,14 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn disable_parcel_objects(
         &mut self,
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
         return_type: ParcelReturnType,
         owner_ids: &[Uuid],
         task_ids: &[Uuid],
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_parcel_disable_objects(local_id, return_type.0, owner_ids, task_ids, now)?;
         Ok(())
     }
@@ -6443,10 +6617,11 @@ impl Session {
         report_type: LandStatReportType,
         request_flags: u32,
         filter: &str,
-        parcel_local_id: RegionLocalParcelId,
+        parcel_local_id: ScopedParcelId,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(parcel_local_id.circuit)?;
+        let parcel_local_id = parcel_local_id.id;
         circuit.send_land_stat_request(
             report_type.to_u32(),
             request_flags,
@@ -6639,10 +6814,11 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn connect_telehub(
         &mut self,
-        object_local_id: RegionLocalObjectId,
+        object_local_id: ScopedObjectId,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(object_local_id.circuit)?;
+        let object_local_id = object_local_id.id;
         let params = ["connect".to_owned(), object_local_id.to_string()];
         circuit.send_estate_owner_message("telehub", &params, now)?;
         Ok(())
@@ -6673,10 +6849,11 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn add_telehub_spawn_point(
         &mut self,
-        object_local_id: RegionLocalObjectId,
+        object_local_id: ScopedObjectId,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(object_local_id.circuit)?;
+        let object_local_id = object_local_id.id;
         let params = ["spawnpoint add".to_owned(), object_local_id.to_string()];
         circuit.send_estate_owner_message("telehub", &params, now)?;
         Ok(())
@@ -6858,14 +7035,17 @@ impl Session {
             .filter(move |object| object.region_handle == region_handle)
     }
 
-    /// Looks up a cached scene object by its region-local id in the region the
-    /// agent is currently in (the root circuit). Use [`Session::objects`] /
-    /// [`Session::objects_in_region`] to reach neighbour-region objects, whose
-    /// local ids share the same numeric space.
+    /// Looks up a cached scene object by its [`ScopedObjectId`] — the
+    /// region-local id paired with the circuit it belongs to. Resolves against
+    /// that exact circuit instance (the current region *or* any neighbour a
+    /// child circuit is streaming), so an id captured on a now-torn-down circuit
+    /// returns `None` rather than aliasing whatever shares its numeric id on the
+    /// current circuit. Build one from an [`Object`] via
+    /// [`Object::scoped_id`](crate::Object::scoped_id), or from
+    /// [`Session::root_circuit_id`] plus a raw id.
     #[must_use]
-    pub fn object(&self, local_id: RegionLocalObjectId) -> Option<&Object> {
-        let root = self.circuit.as_ref().map(|circuit| circuit.sim_addr)?;
-        self.objects.get(&root)?.get(&local_id)
+    pub fn object(&self, id: ScopedObjectId) -> Option<&Object> {
+        self.objects.get(&id.circuit)?.get(&id.id)
     }
 
     /// All cached terrain patches across the current region *and* every
@@ -6894,7 +7074,7 @@ impl Session {
     /// [`Session::terrain_patches`] and each patch's own [`TerrainPatch::size`].
     #[must_use]
     pub fn terrain_height(&self, x: u32, y: u32) -> Option<f32> {
-        let root = self.circuit.as_ref().map(|circuit| circuit.sim_addr)?;
+        let root = self.circuit.as_ref().map(|circuit| circuit.id)?;
         let cache = self.terrain.get(&root)?;
         // LAND patches on a standard region are 16×16; locate the patch by its
         // grid position then the cell within it (16 is a non-zero literal).
@@ -6912,11 +7092,14 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_objects(
         &mut self,
-        local_ids: &[RegionLocalObjectId],
+        local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_request_multiple_objects(local_ids, now)?;
+        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
+            return Ok(());
+        };
+        let circuit = self.circuit_for_scope(scope)?;
+        circuit.send_request_multiple_objects(&local_ids, now)?;
         Ok(())
     }
 
@@ -6931,11 +7114,14 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_object_properties(
         &mut self,
-        local_ids: &[RegionLocalObjectId],
+        local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_object_select(local_ids, now)?;
+        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
+            return Ok(());
+        };
+        let circuit = self.circuit_for_scope(scope)?;
+        circuit.send_object_select(&local_ids, now)?;
         Ok(())
     }
 
@@ -6948,11 +7134,14 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn deselect_objects(
         &mut self,
-        local_ids: &[RegionLocalObjectId],
+        local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_object_deselect(local_ids, now)?;
+        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
+            return Ok(());
+        };
+        let circuit = self.circuit_for_scope(scope)?;
+        circuit.send_object_deselect(&local_ids, now)?;
         Ok(())
     }
 
@@ -6974,12 +7163,9 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if a request fails to encode.
-    pub fn touch_object(
-        &mut self,
-        local_id: RegionLocalObjectId,
-        now: Instant,
-    ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+    pub fn touch_object(&mut self, local_id: ScopedObjectId, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_object_grab(local_id, ZERO_VECTOR, now)?;
         circuit.send_object_degrab(local_id, now)?;
         Ok(())
@@ -6996,11 +7182,12 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn grab_object(
         &mut self,
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         grab_offset: Vector,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_object_grab(local_id, grab_offset, now)?;
         Ok(())
     }
@@ -7039,12 +7226,9 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn degrab_object(
-        &mut self,
-        local_id: RegionLocalObjectId,
-        now: Instant,
-    ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+    pub fn degrab_object(&mut self, local_id: ScopedObjectId, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_object_degrab(local_id, now)?;
         Ok(())
     }
@@ -7078,13 +7262,16 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn duplicate_objects(
         &mut self,
-        local_ids: &[RegionLocalObjectId],
+        local_ids: &[ScopedObjectId],
         offset: Vector,
         group_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_object_duplicate(local_ids, offset, group_id, now)?;
+        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
+            return Ok(());
+        };
+        let circuit = self.circuit_for_scope(scope)?;
+        circuit.send_object_duplicate(&local_ids, offset, group_id, now)?;
         Ok(())
     }
 
@@ -7103,11 +7290,14 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn delete_objects(
         &mut self,
-        local_ids: &[RegionLocalObjectId],
+        local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_object_delete(local_ids, now)?;
+        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
+            return Ok(());
+        };
+        let circuit = self.circuit_for_scope(scope)?;
+        circuit.send_object_delete(&local_ids, now)?;
         Ok(())
     }
 
@@ -7123,16 +7313,19 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn derez_objects(
         &mut self,
-        local_ids: &[RegionLocalObjectId],
+        local_ids: &[ScopedObjectId],
         destination: DeRezDestination,
         destination_id: Uuid,
         transaction_id: Uuid,
         group_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
+            return Ok(());
+        };
+        let circuit = self.circuit_for_scope(scope)?;
         circuit.send_derez_object(
-            local_ids,
+            &local_ids,
             destination,
             destination_id,
             transaction_id,
@@ -7153,11 +7346,12 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn update_object(
         &mut self,
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         transform: &ObjectTransform,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_multiple_object_update(local_id, transform, now)?;
         Ok(())
     }
@@ -7171,7 +7365,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_position(
         &mut self,
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         position: Vector,
         group: bool,
         now: Instant,
@@ -7196,7 +7390,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_rotation(
         &mut self,
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         rotation: Rotation,
         group: bool,
         now: Instant,
@@ -7222,7 +7416,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_scale(
         &mut self,
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         scale: Vector,
         group: bool,
         uniform: bool,
@@ -7248,11 +7442,12 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_name(
         &mut self,
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         name: &str,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_object_name(local_id, name, now)?;
         Ok(())
     }
@@ -7265,11 +7460,12 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_description(
         &mut self,
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         description: &str,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_object_description(local_id, description, now)?;
         Ok(())
     }
@@ -7283,11 +7479,12 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_click_action(
         &mut self,
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         action: ClickAction,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_object_click_action(local_id, action, now)?;
         Ok(())
     }
@@ -7300,11 +7497,12 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_material(
         &mut self,
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         material: Material,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_object_material(local_id, material, now)?;
         Ok(())
     }
@@ -7318,11 +7516,12 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_flags(
         &mut self,
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         flags: &ObjectFlagSettings,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_object_flag_update(local_id, flags, now)?;
         Ok(())
     }
@@ -7335,12 +7534,15 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_group(
         &mut self,
-        local_ids: &[RegionLocalObjectId],
+        local_ids: &[ScopedObjectId],
         group_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_object_group(local_ids, group_id, now)?;
+        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
+            return Ok(());
+        };
+        let circuit = self.circuit_for_scope(scope)?;
+        circuit.send_object_group(&local_ids, group_id, now)?;
         Ok(())
     }
 
@@ -7355,14 +7557,17 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_permissions(
         &mut self,
-        local_ids: &[RegionLocalObjectId],
+        local_ids: &[ScopedObjectId],
         field: PermissionField,
         set: bool,
         mask: u32,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_object_permissions(local_ids, field, set, mask, now)?;
+        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
+            return Ok(());
+        };
+        let circuit = self.circuit_for_scope(scope)?;
+        circuit.send_object_permissions(&local_ids, field, set, mask, now)?;
         Ok(())
     }
 
@@ -7376,12 +7581,13 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_for_sale(
         &mut self,
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         sale_type: SaleType,
         sale_price: i32,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_object_sale_info(local_id, sale_type, sale_price, now)?;
         Ok(())
     }
@@ -7395,11 +7601,12 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_category(
         &mut self,
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         category: u32,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_object_category(local_id, category, now)?;
         Ok(())
     }
@@ -7413,11 +7620,12 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_include_in_search(
         &mut self,
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         include: bool,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
         circuit.send_object_include_in_search(local_id, include, now)?;
         Ok(())
     }
@@ -7431,11 +7639,14 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn link_objects(
         &mut self,
-        local_ids: &[RegionLocalObjectId],
+        local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_object_link(local_ids, now)?;
+        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
+            return Ok(());
+        };
+        let circuit = self.circuit_for_scope(scope)?;
+        circuit.send_object_link(&local_ids, now)?;
         Ok(())
     }
 
@@ -7447,11 +7658,14 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn delink_objects(
         &mut self,
-        local_ids: &[RegionLocalObjectId],
+        local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_object_delink(local_ids, now)?;
+        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
+            return Ok(());
+        };
+        let circuit = self.circuit_for_scope(scope)?;
+        circuit.send_object_delink(&local_ids, now)?;
         Ok(())
     }
 

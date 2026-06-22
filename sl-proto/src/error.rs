@@ -17,4 +17,13 @@ pub enum Error {
     /// (for example before the region handshake, or during another teleport).
     #[error("the session is not active")]
     NotActive,
+    /// A scoped object/parcel id named a circuit that is no longer established
+    /// (its circuit was torn down by a teleport, region crossing, relogin, or
+    /// `DisableSimulator`). The id is stale and cannot be acted upon.
+    #[error("the scoped id refers to a circuit that is no longer established")]
+    UnknownCircuit,
+    /// A batch object operation was given scoped ids belonging to more than one
+    /// circuit; a single request targets exactly one simulator.
+    #[error("the scoped ids belong to more than one circuit")]
+    MixedCircuits,
 }

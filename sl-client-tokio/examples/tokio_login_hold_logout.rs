@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     while let Some(event) = event_rx.recv().await {
         match event {
-            Event::CircuitEstablished { sim } => info!("circuit established to {sim}"),
+            Event::CircuitEstablished { sim, .. } => info!("circuit established to {sim}"),
             Event::RegionHandshakeComplete => {
                 info!("region handshake complete; holding for {hold_secs}s");
                 // Advertise a bandwidth throttle so the simulator opens up the

@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use sl_client_tokio::{
     Client, Command, DeRezDestination, DisconnectReason, Event, LoginParams, LoginRequest,
-    MediaEntry, PrimShape, RegionLocalObjectId, Throttle, Uuid, Vector, pcode,
+    MediaEntry, PrimShape, ScopedObjectId, Throttle, Uuid, Vector, pcode,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -71,7 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
 
     // The local id + full id of our freshly-rezzed prim, once we recognise it.
-    let mut target_local: Option<RegionLocalObjectId> = None;
+    let mut target_local: Option<ScopedObjectId> = None;
     let mut target_full: Option<Uuid> = None;
     let mut trash_folder: Option<Uuid> = None;
     let mut saw_media = false;
@@ -103,7 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     && object.pcode == pcode::PRIMITIVE
                     && near_rez(&object.motion.position)
                 {
-                    target_local = Some(object.local_id);
+                    target_local = Some(object.scoped_id());
                     target_full = Some(object.full_id);
                     info!(
                         "rezzed prim recognised: local id {} full id {}",

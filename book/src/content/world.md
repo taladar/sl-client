@@ -27,6 +27,19 @@ Each update carries a **local id** (a per-region handle, compact and reused) as
 well as the object's **full id** (its global UUID). Real-time traffic refers to
 objects by local id; persistent references use the full id.
 
+A local id is only meaningful *within the one circuit* it was learned on: the
+scene cache is partitioned per circuit, the simulator recycles ids as objects
+come and go, and a reconnect (even to the same region) starts a fresh id space.
+The caller-facing API therefore hands back and accepts a **`ScopedObjectId`** (a
+`ScopedParcelId` for parcels) — the local id paired with a `CircuitId`, the
+client-minted identity of that circuit instance. Build one from a cached
+`Object::scoped_id()`, or from `Session::root_circuit_id()` plus a raw id; the
+object/parcel `Session` methods resolve it back to the live circuit and return
+`Error::UnknownCircuit` for a stale one, so an id captured in one region (or
+before a reconnect) can never silently act on another. The wire codec still
+carries only the bare local id — the circuit scope is a client-side concern and
+is never serialized.
+
 Extended, less-frequently-changing data — creator, full permissions, name,
 description, sale info — comes separately as **object properties**, requested on
 demand.

@@ -88,7 +88,7 @@ fn on_events(
 ) {
     for event in events.read() {
         match &event.0 {
-            SlSessionEvent::CircuitEstablished { sim } => info!("circuit established to {sim}"),
+            SlSessionEvent::CircuitEstablished { sim, .. } => info!("circuit established to {sim}"),
             SlSessionEvent::RegionHandshakeComplete => {
                 info!("region handshake complete; firing survey commands");
                 state.logout_at = Instant::now().checked_add(state.collect);
@@ -283,7 +283,9 @@ fn on_events(
             | SlSessionEvent::LandStatReply { .. }
             | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
-            SlSessionEvent::RegionChanged { region_handle, sim } => {
+            SlSessionEvent::RegionChanged {
+                region_handle, sim, ..
+            } => {
                 info!("region changed: handle={region_handle} sim={sim}");
             }
             SlSessionEvent::LoggedOut => {
