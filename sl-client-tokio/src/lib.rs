@@ -45,7 +45,7 @@ use sl_proto::{
 pub use sl_proto::{
     ActiveGroup, AgentPreferences, AnimatedObjects, AnyMessage, Asset, AssetType, AvatarClassified,
     AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, Camera, CameraError,
-    ChatAudible, ChatMessage, ChatSourceType, ChatType, CircuitId, ClassifiedInfo,
+    ChatAudible, ChatMessage, ChatSourceType, ChatType, CircuitCode, CircuitId, ClassifiedInfo,
     ClassifiedUpdate, ClickAction, Command, ControlFlags, CreateGroupParams, DeRezDestination,
     DetachOrder, Diagnostic, DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind,
     EstateInfo, Event, ExperienceInfo, ExperiencePermission, ExperienceProperties,
@@ -53,9 +53,9 @@ pub use sl_proto::{
     GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupProfile, GroupRole,
     GroupRoleChange, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType,
     GroupTitle, HomeLocation, IceCandidate, ImDialog, ImageCodec, InstantMessage, InterestsUpdate,
-    InventoryFolder, InventoryItem, InventoryOffer, InventoryType, Kilobits, LandingType,
-    LegacyMaterial, LightData, LightImage, LindenAmount, LoadUrlRequest, LoginAccount, LoginParams,
-    LoginRequest, LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
+    InventoryCallbackId, InventoryFolder, InventoryItem, InventoryOffer, InventoryType, Kilobits,
+    LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LoadUrlRequest, LoginAccount,
+    LoginParams, LoginRequest, LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
     MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
     MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction,
     MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType, NeighborInfo,
@@ -64,19 +64,19 @@ pub use sl_proto::{
     ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
     ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
     ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
-    PhysicsShapeTypes, PickInfo, PickUpdate, PlayingAnimation, PrimShape, PrimShapeParams,
+    PhysicsShapeTypes, PickInfo, PickUpdate, PingId, PlayingAnimation, PrimShape, PrimShapeParams,
     ProductType, ProfileUpdate, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
     RegionCombatSettings, RegionFlags, RegionHandle, RegionHandleError, RegionIdentity,
     RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, Reliability,
     RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
     ScriptControl, ScriptControlAction, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, SculptData, SimulatorFeatures, SoundFlags, SoundPreload, StartLocation,
-    StartLocationParseError, TerrainLayerType, TerrainPatch, Texture, TextureAnimation,
-    TextureEntry, TextureFace, Throttle, ThrottleBuilder, ThrottleError, TransferStatus, Transmit,
-    Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, avatar_texture,
-    decode_particle_system, decode_texture_anim, decode_texture_entry, grid_to_handle,
-    group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode, sim_access,
-    texture_anim_mode,
+    ScriptTeleportRequest, SculptData, SequenceNumber, SimulatorFeatures, SoundFlags, SoundPreload,
+    StartLocation, StartLocationParseError, TerrainLayerType, TerrainPatch, Texture,
+    TextureAnimation, TextureEntry, TextureFace, Throttle, ThrottleBuilder, ThrottleError,
+    TransferId, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest,
+    Wearable, WearableType, XferId, avatar_texture, decode_particle_system, decode_texture_anim,
+    decode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
+    particle_pattern, pcode, sim_access, texture_anim_mode,
 };
 
 mod appearance;
@@ -222,7 +222,7 @@ impl Client {
     /// circuit in a REPL/diagnostic log before [`Client::run`] consumes the
     /// client.
     #[must_use]
-    pub const fn circuit_code(&self) -> Option<u32> {
+    pub const fn circuit_code(&self) -> Option<CircuitCode> {
         self.session.circuit_code()
     }
 

@@ -7,6 +7,7 @@ use super::{
     ACK_FLUSH_DELAY, Circuit, INACTIVITY_TIMEOUT, MAX_ACKS_PER_PACKET, MAX_RESEND_ATTEMPTS,
     RESEND_TIMEOUT, SeenWindow, Timers, UnackedPacket, deadline,
 };
+use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
 use crate::scoped_id::CircuitId;
 use crate::types::directory::category_to_wire;
 use crate::types::{
@@ -219,8 +220,8 @@ use sl_wire::messages::{
     StartGroupProposal, StartGroupProposalAgentDataBlock, StartGroupProposalProposalDataBlock,
 };
 use sl_wire::{
-    AnyMessage, PacketFlags, RegionLocalObjectId, RegionLocalParcelId, WireError, Writer,
-    encode_datagram,
+    AnyMessage, CircuitCode, PacketFlags, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber,
+    WireError, Writer, encode_datagram,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
@@ -236,7 +237,7 @@ impl Circuit {
         sim_addr: SocketAddr,
         agent_id: Uuid,
         session_id: Uuid,
-        circuit_code: u32,
+        circuit_code: CircuitCode,
         draw_distance: f32,
         now: Instant,
     ) -> Self {
@@ -246,7 +247,7 @@ impl Circuit {
             agent_id,
             session_id,
             code: circuit_code,
-            next_sequence: 1,
+            next_sequence: SequenceNumber::FIRST,
             pause_serial_num: 0,
             pending_acks: Vec::new(),
             unacked: BTreeMap::new(),
@@ -269,7 +270,7 @@ impl Circuit {
     /// identity and circuit code (both reused across regions).
     pub(crate) fn retarget(&mut self, sim_addr: SocketAddr, now: Instant) {
         self.sim_addr = sim_addr;
-        self.next_sequence = 1;
+        self.next_sequence = SequenceNumber::FIRST;
         self.pending_acks.clear();
         self.unacked.clear();
         self.seen = SeenWindow::default();
@@ -285,9 +286,9 @@ impl Circuit {
     }
 
     /// Allocates the next outgoing sequence number.
-    pub(crate) const fn next_sequence(&mut self) -> u32 {
+    pub(crate) const fn next_sequence(&mut self) -> SequenceNumber {
         let sequence = self.next_sequence;
-        self.next_sequence = self.next_sequence.wrapping_add(1);
+        self.next_sequence = self.next_sequence.wrapping_next();
         sequence
     }
 
@@ -329,7 +330,7 @@ impl Circuit {
     pub(crate) fn send_use_circuit_code(&mut self, now: Instant) -> Result<(), WireError> {
         let message = AnyMessage::UseCircuitCode(UseCircuitCode {
             circuit_code: UseCircuitCodeCircuitCodeBlock {
-                code: self.code,
+                code: self.code.get(),
                 session_id: self.session_id,
                 id: self.agent_id,
             },
@@ -355,7 +356,7 @@ impl Circuit {
             agent_data: AgentThrottleAgentDataBlock {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
-                circuit_code: self.code,
+                circuit_code: self.code.get(),
             },
             throttle: AgentThrottleThrottleBlock {
                 gen_counter: 0,
@@ -371,7 +372,7 @@ impl Circuit {
             agent_data: CompleteAgentMovementAgentDataBlock {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
-                circuit_code: self.code,
+                circuit_code: self.code.get(),
             },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -392,11 +393,13 @@ impl Circuit {
     /// Queues a `CompletePingCheck` reply unreliably.
     pub(crate) fn send_complete_ping_check(
         &mut self,
-        ping_id: u8,
+        ping_id: PingId,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::CompletePingCheck(CompletePingCheck {
-            ping_id: CompletePingCheckPingIDBlock { ping_id },
+            ping_id: CompletePingCheckPingIDBlock {
+                ping_id: ping_id.get(),
+            },
         });
         self.send(&message, Reliability::Unreliable, now)
     }
@@ -1466,7 +1469,7 @@ impl Circuit {
             agent_data: AgentFOVAgentDataBlock {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
-                circuit_code: self.code,
+                circuit_code: self.code.get(),
             },
             fov_block: AgentFOVFOVBlockBlock {
                 gen_counter: 0,
@@ -1488,7 +1491,7 @@ impl Circuit {
             agent_data: AgentHeightWidthAgentDataBlock {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
-                circuit_code: self.code,
+                circuit_code: self.code.get(),
             },
             height_width_block: AgentHeightWidthHeightWidthBlockBlock {
                 gen_counter: 0,
@@ -1826,13 +1829,13 @@ impl Circuit {
     /// transfer id `xfer_id`.
     pub(crate) fn send_request_xfer(
         &mut self,
-        xfer_id: u64,
+        xfer_id: XferId,
         filename: &str,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::RequestXfer(RequestXfer {
             xfer_id: RequestXferXferIDBlock {
-                id: xfer_id,
+                id: xfer_id.get(),
                 filename: with_nul(filename),
                 file_path: 0,
                 delete_on_completion: true,
@@ -1847,13 +1850,13 @@ impl Circuit {
     /// Queues a `ConfirmXferPacket` reliably acknowledging `packet` of `xfer_id`.
     pub(crate) fn send_confirm_xfer_packet(
         &mut self,
-        xfer_id: u64,
+        xfer_id: XferId,
         packet: u32,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ConfirmXferPacket(ConfirmXferPacket {
             xfer_id: ConfirmXferPacketXferIDBlock {
-                id: xfer_id,
+                id: xfer_id.get(),
                 packet,
             },
         });
@@ -1890,14 +1893,14 @@ impl Circuit {
     /// last-packet flag for the final chunk.
     pub(crate) fn send_send_xfer_packet(
         &mut self,
-        xfer_id: u64,
+        xfer_id: XferId,
         packet: u32,
         data: Vec<u8>,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::SendXferPacket(SendXferPacket {
             xfer_id: SendXferPacketXferIDBlock {
-                id: xfer_id,
+                id: xfer_id.get(),
                 packet,
             },
             data_packet: SendXferPacketDataPacketBlock { data },
@@ -1940,7 +1943,7 @@ impl Circuit {
     /// code (a little-endian `i32`), matching the viewer's `LLTransferSourceAsset`.
     pub(crate) fn send_transfer_request(
         &mut self,
-        transfer_id: Uuid,
+        transfer_id: TransferId,
         asset_id: Uuid,
         asset_type: AssetType,
         priority: f32,
@@ -1956,7 +1959,7 @@ impl Circuit {
         writer.put_i32(asset_type.to_code());
         let message = AnyMessage::TransferRequest(TransferRequest {
             transfer_info: TransferRequestTransferInfoBlock {
-                transfer_id,
+                transfer_id: transfer_id.get(),
                 channel_type: CHANNEL_ASSET,
                 source_type: SOURCE_ASSET,
                 priority,
@@ -2663,7 +2666,7 @@ impl Circuit {
     pub(crate) fn send_create_inventory_item(
         &mut self,
         new: &NewInventoryItem,
-        callback_id: u32,
+        callback_id: InventoryCallbackId,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::CreateInventoryItem(CreateInventoryItem {
@@ -2672,7 +2675,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             inventory_block: CreateInventoryItemInventoryBlockBlock {
-                callback_id,
+                callback_id: callback_id.get(),
                 folder_id: new.folder_id,
                 transaction_id: new.transaction_id,
                 next_owner_mask: new.next_owner_mask,
@@ -2693,7 +2696,7 @@ impl Circuit {
         &mut self,
         item: &InventoryItem,
         transaction_id: Uuid,
-        callback_id: u32,
+        callback_id: InventoryCallbackId,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::UpdateInventoryItem(UpdateInventoryItem {
@@ -2705,7 +2708,7 @@ impl Circuit {
             inventory_data: vec![UpdateInventoryItemInventoryDataBlock {
                 item_id: item.item_id,
                 folder_id: item.folder_id,
-                callback_id,
+                callback_id: callback_id.get(),
                 creator_id: item.creator_id,
                 owner_id: item.owner_id,
                 group_id: item.group_id,
@@ -2768,7 +2771,7 @@ impl Circuit {
         old_item_id: Uuid,
         new_folder_id: Uuid,
         new_name: &str,
-        callback_id: u32,
+        callback_id: InventoryCallbackId,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::CopyInventoryItem(CopyInventoryItem {
@@ -2777,7 +2780,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             inventory_data: vec![CopyInventoryItemInventoryDataBlock {
-                callback_id,
+                callback_id: callback_id.get(),
                 old_agent_id,
                 old_item_id,
                 new_folder_id,
@@ -4544,7 +4547,7 @@ impl Circuit {
     }
 
     /// Records that we owe an acknowledgement for `sequence`, arming the flush.
-    pub(crate) fn queue_ack(&mut self, sequence: u32, now: Instant) {
+    pub(crate) fn queue_ack(&mut self, sequence: SequenceNumber, now: Instant) {
         self.pending_acks.push(sequence);
         if self.timers.ack_flush.is_none() {
             self.timers.ack_flush = Some(deadline(now, ACK_FLUSH_DELAY));
@@ -4552,14 +4555,14 @@ impl Circuit {
     }
 
     /// Removes the given outgoing sequence numbers from the unacked set.
-    pub(crate) fn record_acks(&mut self, ids: &[u32]) {
+    pub(crate) fn record_acks(&mut self, ids: &[SequenceNumber]) {
         for id in ids {
             self.unacked.remove(id);
         }
     }
 
     /// Records an inbound reliable `sequence`; returns `true` if it is new.
-    pub(crate) fn mark_seen(&mut self, sequence: u32) -> bool {
+    pub(crate) fn mark_seen(&mut self, sequence: SequenceNumber) -> bool {
         self.seen.insert(sequence)
     }
 
@@ -4573,7 +4576,7 @@ impl Circuit {
         for chunk in acks.chunks(MAX_ACKS_PER_PACKET) {
             let packets = chunk
                 .iter()
-                .map(|id| PacketAckPacketsBlock { id: *id })
+                .map(|id| PacketAckPacketsBlock { id: id.get() })
                 .collect();
             let message = AnyMessage::PacketAck(PacketAck { packets });
             self.send(&message, Reliability::Unreliable, now)?;
@@ -4587,7 +4590,10 @@ impl Circuit {
     /// exhausted its retransmission budget; such packets are dropped from the
     /// unacked set (so they are reported only once and stop driving the resend
     /// deadline). An empty result means nothing exhausted this tick.
-    pub(crate) fn process_resends(&mut self, now: Instant) -> Vec<(u32, Option<&'static str>)> {
+    pub(crate) fn process_resends(
+        &mut self,
+        now: Instant,
+    ) -> Vec<(SequenceNumber, Option<&'static str>)> {
         let mut exhausted = Vec::new();
         let mut to_send = Vec::new();
         for (sequence, packet) in &mut self.unacked {

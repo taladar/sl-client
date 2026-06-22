@@ -20,7 +20,7 @@ mod test {
         LandSearchType, LandStatItem, LandStatReportType, LoginParams, MapItem, MapItemType,
         MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
         MovementMode, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory,
-        ParcelDetails, ParcelObjectOwner, ParcelReturnType, Permissions5, PlacesResult,
+        ParcelDetails, ParcelObjectOwner, ParcelReturnType, Permissions5, PingId, PlacesResult,
         PointAtType, Postcard, ProductType, RegionHandle, RegionIdentity, RegionLocalObjectId,
         RegionLocalParcelId, RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId,
         ScriptControl, ScriptControlAction, ServerEvent, Session, SimSession, TelehubInfo,
@@ -29,8 +29,8 @@ mod test {
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
-        AnyMessage, LoginRequest, LoginResponse, LoginSuccess, MessageId, PacketFlags, Reader,
-        StartLocation, Writer, encode_datagram, parse_datagram,
+        AnyMessage, CircuitCode, LoginRequest, LoginResponse, LoginSuccess, MessageId, PacketFlags,
+        Reader, SequenceNumber, StartLocation, Writer, encode_datagram, parse_datagram,
     };
 
     /// A boxed test error.
@@ -76,7 +76,7 @@ mod test {
             agent_id: uuid::Uuid::from_u128(1),
             session_id: uuid::Uuid::from_u128(2),
             secure_session_id: uuid::Uuid::from_u128(3),
-            circuit_code: 0x0011_2233,
+            circuit_code: CircuitCode(0x0011_2233),
             sim_ip: Ipv4Addr::new(127, 0, 0, 1),
             sim_port: 9000,
             seed_capability: "http://127.0.0.1:9000/seed".to_owned(),
@@ -112,7 +112,11 @@ mod test {
         } else {
             PacketFlags::EMPTY
         };
-        Ok(encode_datagram(flags, sequence, &writer.into_bytes()))
+        Ok(encode_datagram(
+            flags,
+            SequenceNumber(sequence),
+            &writer.into_bytes(),
+        ))
     }
 
     /// Decodes the message carried by a transmitted datagram.
@@ -186,7 +190,7 @@ mod test {
                     circuit_code,
                 } if *agent_id == uuid::Uuid::from_u128(1)
                     && *session_id == uuid::Uuid::from_u128(2)
-                    && *circuit_code == 0x0011_2233
+                    && *circuit_code == CircuitCode(0x0011_2233)
             )),
             "expected CircuitOpened, got {server_events:?}"
         );
@@ -2075,9 +2079,12 @@ mod test {
 
         let events = drain_server(&mut sim);
         assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, ServerEvent::PingRequested { ping_id: 0x2A })),
+            events.iter().any(|e| matches!(
+                e,
+                ServerEvent::PingRequested {
+                    ping_id: PingId(0x2A)
+                }
+            )),
             "expected PingRequested, got {events:?}"
         );
         Ok(())
