@@ -187,7 +187,9 @@ pub fn build_get_object_physics_data_response(data: &[(Uuid, ObjectPhysicsData)]
 /// Decodes an `ObjectPhysicsProperties` event-queue body: the per-object physics
 /// data keyed by region-local id (`ObjectData[].LocalID`).
 #[must_use]
-pub fn parse_object_physics_properties(body: &Llsd) -> Vec<(u32, ObjectPhysicsData)> {
+pub fn parse_object_physics_properties(
+    body: &Llsd,
+) -> Vec<(crate::RegionLocalObjectId, ObjectPhysicsData)> {
     body.get("ObjectData")
         .and_then(Llsd::as_array)
         .map(|entries| {
@@ -195,7 +197,10 @@ pub fn parse_object_physics_properties(body: &Llsd) -> Vec<(u32, ObjectPhysicsDa
                 .iter()
                 .filter_map(|entry| {
                     let local_id = entry.get("LocalID").and_then(Llsd::as_i32)?.cast_unsigned();
-                    Some((local_id, object_physics_data_from_llsd(entry)))
+                    Some((
+                        crate::RegionLocalObjectId(local_id),
+                        object_physics_data_from_llsd(entry),
+                    ))
                 })
                 .collect()
         })
@@ -206,15 +211,19 @@ pub fn parse_object_physics_properties(body: &Llsd) -> Vec<(u32, ObjectPhysicsDa
 /// physics data keyed by region-local id (server side) — the inverse of
 /// [`parse_object_physics_properties`].
 #[must_use]
-pub fn build_object_physics_properties(data: &[(u32, ObjectPhysicsData)]) -> Llsd {
+pub fn build_object_physics_properties(
+    data: &[(crate::RegionLocalObjectId, ObjectPhysicsData)],
+) -> Llsd {
     Llsd::Map(HashMap::from([(
         "ObjectData".to_owned(),
         Llsd::Array(
             data.iter()
                 .map(|(local_id, value)| {
                     let mut map = object_physics_data_to_llsd(value);
-                    let _previous =
-                        map.insert("LocalID".to_owned(), Llsd::Integer(local_id.cast_signed()));
+                    let _previous = map.insert(
+                        "LocalID".to_owned(),
+                        Llsd::Integer(local_id.0.cast_signed()),
+                    );
                     Llsd::Map(map)
                 })
                 .collect(),
@@ -276,7 +285,7 @@ mod tests {
     fn physics_event_round_trips() -> Result<(), String> {
         let data = vec![
             (
-                7_u32,
+                crate::RegionLocalObjectId(7),
                 ObjectPhysicsData {
                     physics_shape_type: PhysicsShapeType::None,
                     density: 1.0,
@@ -285,7 +294,10 @@ mod tests {
                     gravity_multiplier: 0.5,
                 },
             ),
-            (0xFFFF_FF00_u32, ObjectPhysicsData::default()),
+            (
+                crate::RegionLocalObjectId(0xFFFF_FF00),
+                ObjectPhysicsData::default(),
+            ),
         ];
         let xml = build_object_physics_properties(&data).to_llsd_xml();
         let parsed = parse_object_physics_properties(

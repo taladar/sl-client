@@ -15,7 +15,7 @@ pub const GLTF_MATERIAL_OVERRIDE_METHOD: u16 = 0x4175;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GltfMaterialOverride {
     /// The region-local id of the object whose material is overridden.
-    pub local_id: u32,
+    pub local_id: crate::RegionLocalObjectId,
     /// The face indices carrying an override, in order.
     pub faces: Vec<u8>,
     /// The raw per-face override LLSD (notation-encoded), one entry per face in

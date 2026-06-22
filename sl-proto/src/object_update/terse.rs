@@ -3,7 +3,7 @@
 use super::{f32_to_u16, read_quantized_vector, u16_to_f32, write_quantized_vector};
 use crate::types::ObjectMotion;
 use sl_types::lsl::Rotation;
-use sl_wire::{Reader, Writer};
+use sl_wire::{Reader, RegionLocalObjectId, Writer};
 
 // ---------------------------------------------------------------------------
 // `ImprovedTerseObjectUpdate` motion (`Data`) + wrapped `TextureEntry`
@@ -14,7 +14,7 @@ use sl_wire::{Reader, Writer};
 #[derive(Debug, Clone, PartialEq)]
 pub struct TerseUpdate {
     /// The object's region-local id.
-    pub local_id: u32,
+    pub local_id: RegionLocalObjectId,
     /// The object/attachment state byte.
     pub state: u8,
     /// The object's new kinematic state (position full precision; velocity,
@@ -51,7 +51,7 @@ pub(crate) fn terse_update(blob: &[u8]) -> Option<TerseUpdate> {
     };
     let angular_velocity = read_quantized_vector(&mut reader, 64.0).ok()?;
     Some(TerseUpdate {
-        local_id,
+        local_id: RegionLocalObjectId(local_id),
         state,
         motion: ObjectMotion {
             position,
@@ -77,7 +77,7 @@ pub(crate) fn terse_update(blob: &[u8]) -> Option<TerseUpdate> {
 pub fn encode_terse_object_data(update: &TerseUpdate) -> Vec<u8> {
     let mut writer = Writer::new();
     let motion = &update.motion;
-    writer.put_u32(update.local_id);
+    writer.put_u32(update.local_id.0);
     writer.put_u8(update.state);
     writer.put_u8(u8::from(motion.collision_plane.is_some()));
     if let Some(plane) = motion.collision_plane {

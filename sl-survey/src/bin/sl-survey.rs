@@ -253,7 +253,7 @@ impl ParcelRecord {
     /// Builds a record from a [`ParcelInfo`].
     fn from_info(info: &ParcelInfo) -> Self {
         Self {
-            local_id: info.local_id,
+            local_id: info.local_id.0,
             name: info.name.clone(),
             description: info.description.clone(),
             owner_id: info.owner_id.to_string(),
@@ -825,7 +825,7 @@ impl Survey {
             if !current
                 .parcels
                 .iter()
-                .any(|recorded| recorded.local_id == parcel.local_id)
+                .any(|recorded| recorded.local_id == parcel.local_id.0)
             {
                 current.parcels.push(ParcelRecord::from_info(parcel));
             }

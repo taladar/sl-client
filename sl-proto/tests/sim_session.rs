@@ -21,10 +21,11 @@ mod test {
         MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
         MovementMode, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory,
         ParcelDetails, ParcelObjectOwner, ParcelReturnType, Permissions5, PlacesResult,
-        PointAtType, Postcard, ProductType, RegionHandle, RegionIdentity, RestoreItem,
-        RezAttachment, SaleType, ScriptControl, ScriptControlAction, ServerEvent, Session,
-        SimSession, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
+        PointAtType, Postcard, ProductType, RegionHandle, RegionIdentity, RegionLocalObjectId,
+        RegionLocalParcelId, RestoreItem, RezAttachment, SaleType, ScriptControl,
+        ScriptControlAction, ServerEvent, Session, SimSession, TelehubInfo, Throttle, Transmit,
+        ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
+        parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -243,7 +244,7 @@ mod test {
         drain_server(&mut sim);
 
         client.attach_object(
-            55,
+            RegionLocalObjectId(55),
             AttachmentPoint::RightHand,
             AttachmentMode::Add,
             &sl_types::lsl::Rotation {
@@ -271,7 +272,11 @@ mod test {
             .ok_or("expected an AttachObject server event")?;
         assert_eq!(
             attach,
-            (55, AttachmentPoint::RightHand, AttachmentMode::Add)
+            (
+                RegionLocalObjectId(55),
+                AttachmentPoint::RightHand,
+                AttachmentMode::Add
+            )
         );
         Ok(())
     }
@@ -282,7 +287,7 @@ mod test {
         let (mut client, mut sim) = setup(now)?;
         drain_server(&mut sim);
 
-        client.detach_objects(&[3, 4], now)?;
+        client.detach_objects(&[RegionLocalObjectId(3), RegionLocalObjectId(4)], now)?;
         pump(&mut client, &mut sim, now)?;
 
         let events = drain_server(&mut sim);
@@ -293,7 +298,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a DetachObjects server event")?;
-        assert_eq!(ids, vec![3, 4]);
+        assert_eq!(ids, vec![RegionLocalObjectId(3), RegionLocalObjectId(4)]);
         Ok(())
     }
 
@@ -905,7 +910,7 @@ mod test {
             uuid::Uuid::nil(),
             uuid::Uuid::from_u128(0xCA7),
             &[ObjectBuyItem {
-                local_id: 99,
+                local_id: RegionLocalObjectId(99),
                 sale_type: SaleType::Copy,
                 sale_price: 250,
             }],
@@ -982,7 +987,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a BuyObject server event")?;
-        assert_eq!(buy.first().ok_or("expected one buy item")?.local_id, 99);
+        assert_eq!(
+            buy.first().ok_or("expected one buy item")?.local_id,
+            RegionLocalObjectId(99)
+        );
         assert_eq!(
             buy.first().ok_or("expected one buy item")?.sale_type,
             SaleType::Copy
@@ -1095,10 +1103,10 @@ mod test {
         // Client -> sim: the G7 parcel command surface.
         client.join_parcels(16.0, 32.0, 48.0, 64.0, now)?;
         client.divide_parcel(1.0, 2.0, 3.0, 4.0, now)?;
-        client.request_parcel_object_owners(7, now)?;
-        client.buy_parcel_pass(7, now)?;
+        client.request_parcel_object_owners(RegionLocalParcelId(7), now)?;
+        client.buy_parcel_pass(RegionLocalParcelId(7), now)?;
         client.disable_parcel_objects(
-            7,
+            RegionLocalParcelId(7),
             ParcelReturnType::OTHER,
             &[uuid::Uuid::from_u128(0x99)],
             &[uuid::Uuid::from_u128(0xAB)],
@@ -1130,11 +1138,14 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a RequestParcelObjectOwners server event")?;
-        assert_eq!(owners, 7);
+        assert_eq!(owners, RegionLocalParcelId(7));
         assert!(
-            server_events
-                .iter()
-                .any(|e| matches!(e, ServerEvent::BuyParcelPass { local_id: 7 })),
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::BuyParcelPass {
+                    local_id: RegionLocalParcelId(7)
+                }
+            )),
             "expected a BuyParcelPass server event"
         );
         let disable = server_events
@@ -1223,9 +1234,9 @@ mod test {
         // Client -> sim: the covenant request and the telehub command surface.
         client.request_estate_covenant(now)?;
         client.request_telehub_info(now)?;
-        client.connect_telehub(42, now)?;
+        client.connect_telehub(RegionLocalObjectId(42), now)?;
         client.disconnect_telehub(now)?;
-        client.add_telehub_spawn_point(43, now)?;
+        client.add_telehub_spawn_point(RegionLocalObjectId(43), now)?;
         client.remove_telehub_spawn_point(2, now)?;
         pump(&mut client, &mut sim, now)?;
 
@@ -1249,7 +1260,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a ConnectTelehub server event")?;
-        assert_eq!(connect, 42);
+        assert_eq!(connect, RegionLocalObjectId(42));
         assert!(
             server_events
                 .iter()
@@ -1263,7 +1274,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an AddTelehubSpawnPoint server event")?;
-        assert_eq!(add, 43);
+        assert_eq!(add, RegionLocalObjectId(43));
         let remove = server_events
             .iter()
             .find_map(|e| match e {
@@ -1907,7 +1918,7 @@ mod test {
             0,
             7,
             &[LandStatItem {
-                task_local_id: 4_294_967_000,
+                task_local_id: RegionLocalObjectId(4_294_967_000),
                 task_id: task,
                 location: [128.0, 64.5, 25.0],
                 score: 0.85,
@@ -1933,7 +1944,7 @@ mod test {
         assert_eq!(report_type, LandStatReportType::TopScripts);
         assert_eq!(total, 7);
         let item = items.first().ok_or("expected one report item")?;
-        assert_eq!(item.task_local_id, 4_294_967_000);
+        assert_eq!(item.task_local_id, RegionLocalObjectId(4_294_967_000));
         assert_eq!(item.task_id, task);
         assert_eq!(item.task_name, "busy script");
         assert_eq!(item.owner_name, "Test Resident");

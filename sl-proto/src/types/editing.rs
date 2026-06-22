@@ -4,6 +4,7 @@ use super::pcode;
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::Permissions5;
+use sl_wire::RegionLocalObjectId;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -592,7 +593,7 @@ impl ProductType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObjectBuyItem {
     /// The object's region-local id (the root prim).
-    pub local_id: u32,
+    pub local_id: RegionLocalObjectId,
     /// How the object is offered for sale.
     pub sale_type: SaleType,
     /// The advertised sale price, in L$.

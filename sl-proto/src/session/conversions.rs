@@ -41,6 +41,7 @@ use sl_wire::messages::{
 };
 use sl_wire::{Llsd, SkeletonFolder};
 use sl_wire::{Permissions, Permissions5};
+use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
 use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use uuid::Uuid;
@@ -635,7 +636,7 @@ pub(crate) fn parcel_info(msg: &ParcelProperties) -> ParcelInfo {
         self_count: data.self_count,
         other_count: data.other_count,
         public_count: data.public_count,
-        local_id: data.local_id,
+        local_id: RegionLocalParcelId(data.local_id),
         owner_id: data.owner_id,
         is_group_owned: data.is_group_owned,
         group_id: data.group_id,
@@ -1689,7 +1690,7 @@ pub(crate) fn parcel_info_from_llsd(body: &Llsd) -> Option<ParcelInfo> {
         self_count: i32_field("SelfCount"),
         other_count: i32_field("OtherCount"),
         public_count: i32_field("PublicCount"),
-        local_id: i32_field("LocalID"),
+        local_id: RegionLocalParcelId(i32_field("LocalID")),
         owner_id: uuid_field("OwnerID"),
         is_group_owned: bool_field("IsGroupOwned"),
         group_id: uuid_field("GroupID"),
@@ -2759,7 +2760,7 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Llsd {
         ("SelfCount", Llsd::Integer(info.self_count)),
         ("OtherCount", Llsd::Integer(info.other_count)),
         ("PublicCount", Llsd::Integer(info.public_count)),
-        ("LocalID", Llsd::Integer(info.local_id)),
+        ("LocalID", Llsd::Integer(info.local_id.0)),
         ("OwnerID", Llsd::Uuid(info.owner_id)),
         ("IsGroupOwned", Llsd::Boolean(info.is_group_owned)),
         ("GroupID", Llsd::Uuid(info.group_id)),
@@ -3248,9 +3249,9 @@ pub(crate) fn object_from_full_update(
 ) -> Object {
     Object {
         region_handle,
-        local_id: block.id,
+        local_id: RegionLocalObjectId(block.id),
         full_id: block.full_id,
-        parent_id: block.parent_id,
+        parent_id: RegionLocalObjectId(block.parent_id),
         pcode: block.p_code,
         state: block.state,
         crc: block.crc,
@@ -3461,7 +3462,7 @@ mod caps_serializer_tests {
             self_count: 1,
             other_count: 2,
             public_count: 3,
-            local_id: 42,
+            local_id: sl_wire::RegionLocalParcelId(42),
             owner_id: Uuid::from_u128(0x11),
             is_group_owned: false,
             group_id: Uuid::from_u128(0x22),

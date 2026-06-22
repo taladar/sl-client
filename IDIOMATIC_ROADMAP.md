@@ -359,9 +359,61 @@ New newtypes in `sl-proto`/`sl-wire` (derive `Copy,Clone,Debug,Eq,Hash`; mirror
   `sim_session` round-trip suites updated. NO sl-types touched (consumed
   `GridCoordinates` only; `RegionHandle` is a client wire concept living in
   `sl-wire`).
-- [ ] `LocalId(u32)` — public in `types/object.rs:60`, `types/editing.rs:587`;
+- [x] `LocalId(u32)` — public in `types/object.rs:60`, `types/editing.rs:587`;
   re-key `objects: BTreeMap<_, BTreeMap<u32, Object>>` (`session.rs:818`);
   reconcile the parcel `local_id: i32` inconsistency (`types/parcel.rs:170`).
+  **Renamed (user-approved) for a self-describing, symmetric pair** — the bare
+  `LocalId` was under-descriptive, so two public newtypes live in
+  `sl-wire/src/region_local_id.rs` (mirroring `RegionHandle`/`sl-types` key
+  ergonomics: `Copy`/`Eq`/`Hash`/`Ord`/`Default`, `new`/`get`, `Display`):
+  `RegionLocalObjectId(pub u32)` (the object id, `LLViewerObject::mLocalID`) and
+  `RegionLocalParcelId(pub i32)` (the parcel id, `LLParcel::mLocalID`). Keeping
+  them as **distinct types with the wire's own signedness** (`u32` vs `i32`) is
+  what reconciles the historical `local_id: u32` / `local_id: i32`
+  inconsistency, and makes "passed a parcel id where an object id was expected"
+  (and vice-versa) a compile error. Maximal scope: replaced **every** object
+  region-local id with `RegionLocalObjectId` — `Object.local_id`/`parent_id`,
+  `TerseUpdate`, `ObjectBuyItem`, `GltfMaterialOverride` (sl-wire), the object
+  cache's inner `BTreeMap` key, `task_local_id`, the `object_local_id` telehub
+  fields, `parse_object_physics_properties`'s `(RegionLocalObjectId, _)` pairs,
+  the `Event`/`ServerEvent`/`Command` object-id fields **including the plural
+  `Vec<u32>`/`&[u32]` lists** (delete/link/delink/select/deselect/duplicate/
+  detach/drop/derez/…), and the public `Session`/`SimSession` methods that take
+  them — and **every** parcel region-local id with `RegionLocalParcelId`
+  (`ParcelInfo`, `ParcelVoiceInfo` + `VoiceProvisionRequest` (sl-wire),
+  `ParcelScriptResources` (sl-wire), the parcel-management `Command`/`Event`/
+  `ServerEvent` fields, and all the `request_parcel_*`/`reclaim_parcel`/
+  `release_parcel`/`buy_parcel_pass`/… method params). Codec wraps at the
+  boundary (decode `RegionLocal*Id(raw)`, encode `.0`) so wire bytes are
+  byte-identical; the *sequence-number* ack arrays (`record_acks`) and the
+  terrain DCT `decopy: &[u32]` were left raw (not ids). Re-exported through
+  `sl-proto`/`sl-client-tokio`/`sl-client-bevy` (both runtimes at parity); REPL
+  arg parsers parse the raw int then wrap, survey unwraps `.0` for its raw-int
+  JSON record. +4 unit tests on the newtypes (raw round-trip incl. the negative
+  parcel sentinel, `Display`, the `0` object sentinel); lifecycle +
+  `sim_session` round-trip suites updated. NO sl-types touched (client concepts
+  in `sl-wire`).
+- [ ] **Circuit-scoped id wrappers for the user-facing API.** A bare
+  `RegionLocalObjectId`/`RegionLocalParcelId` is only meaningful *within one
+  simulator/circuit* — the object cache is partitioned per `SocketAddr`, and a
+  region crossing or relogin invalidates the id. Today the public `Session`
+  methods take the bare region-local id and implicitly resolve it against the
+  *current* circuit, so a caller can hand an id captured in region A to a call
+  that now targets region B and get a silent mismatch the type system can't
+  catch. Add scoped id *structs* (two-field structs pairing the circuit with the
+  id — not newtypes) that carry the circuit identity alongside the id — e.g.
+  `ScopedObjectId { circuit: <circuit key>, id: RegionLocalObjectId }` and
+  `ScopedParcelId { circuit, id: RegionLocalParcelId }` (decide the circuit key:
+  the `SocketAddr` the cache is keyed by, or the `RegionHandle`/a `CircuitId`
+  newtype once that exists — see the bookkeeping-ID item below) — and switch the
+  **user-facing** `Session`/runtime APIs and the `Event`s that hand an id back
+  to the caller to the scoped form, so an id is always paired with the region it
+  belongs to and can't be used against the wrong circuit. The wire codec keeps
+  using the bare `RegionLocalObjectId`/`RegionLocalParcelId` (the scope is a
+  client-side, caller-ergonomics concern, never serialized); wrap into the
+  scoped form when surfacing an id to the caller and unwrap to the bare id (plus
+  the resolved circuit) at the send boundary. Both are client wire-protocol
+  concepts → live in `sl-proto`/`sl-wire`, NOT `sl-types`.
 
 Then internal bookkeeping IDs (lower misuse surface, do last):
 

@@ -185,7 +185,7 @@ impl SessionContext {
                 }
             }
             Event::ParcelProperties(parcel) => {
-                bind(&mut self.parcel_local_id, parcel.local_id, "parcel");
+                bind(&mut self.parcel_local_id, parcel.local_id.0, "parcel");
             }
             Event::ObjectAdded(object) | Event::ObjectUpdated(object) => {
                 bind(&mut self.last_object, object.full_id, "lastobj");

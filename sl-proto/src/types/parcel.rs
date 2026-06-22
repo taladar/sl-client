@@ -2,6 +2,7 @@
 
 use sl_types::lsl::Vector;
 use sl_wire::ParcelFlags;
+use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
 use uuid::Uuid;
 
 /// How many parcels a `ParcelProperties` reply describes, the `RequestResult`
@@ -170,7 +171,7 @@ pub struct ParcelInfo {
     /// The number of public/anonymous agents on the parcel.
     pub public_count: i32,
     /// The parcel's region-local id.
-    pub local_id: i32,
+    pub local_id: RegionLocalParcelId,
     /// The parcel owner's id (an agent, or a group when [`is_group_owned`](Self::is_group_owned)).
     pub owner_id: Uuid,
     /// Whether [`owner_id`](Self::owner_id) names a group rather than an agent.
@@ -602,7 +603,7 @@ impl ParcelReturnType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParcelUpdate {
     /// The parcel's region-local id (from [`ParcelInfo::local_id`]).
-    pub local_id: i32,
+    pub local_id: RegionLocalParcelId,
     /// The parcel flags bitfield to set.
     pub parcel_flags: ParcelFlags,
     /// The sale price in L$ (when [`ParcelFlags::FOR_SALE`] is set).
@@ -642,7 +643,7 @@ pub struct ParcelUpdate {
 impl Default for ParcelUpdate {
     fn default() -> Self {
         Self {
-            local_id: 0,
+            local_id: RegionLocalParcelId(0),
             parcel_flags: ParcelFlags::from_bits(0),
             sale_price: 0,
             name: String::new(),
@@ -734,7 +735,7 @@ impl LandStatReportType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LandStatItem {
     /// The object's region-local id (`TaskLocalID`).
-    pub task_local_id: u32,
+    pub task_local_id: RegionLocalObjectId,
     /// The object's id (`TaskID`).
     pub task_id: Uuid,
     /// The object's region position (`LocationX`/`Y`/`Z`), as `[x, y, z]` metres.

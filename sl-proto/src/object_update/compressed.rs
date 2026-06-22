@@ -4,7 +4,7 @@ use super::{read_nul_string, write_nul_string};
 use crate::session::ZERO_VECTOR;
 use crate::types::{Object, ObjectExtraParams, ObjectMotion, PrimShapeParams};
 use core::ops::BitOrAssign;
-use sl_wire::{Reader, RegionHandle, Writer};
+use sl_wire::{Reader, RegionHandle, RegionLocalObjectId, Writer};
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -224,9 +224,9 @@ pub(crate) fn compressed_object(
     };
     let mut object = Object {
         region_handle,
-        local_id,
+        local_id: RegionLocalObjectId(local_id),
         full_id,
-        parent_id,
+        parent_id: RegionLocalObjectId(parent_id),
         pcode,
         state,
         crc,
@@ -348,7 +348,7 @@ fn compressed_flags(object: &Object) -> CompressedFlags {
     if object.sound != Uuid::nil() {
         flags |= CompressedFlags::HAS_SOUND;
     }
-    if object.parent_id != 0 {
+    if object.parent_id != RegionLocalObjectId(0) {
         flags |= CompressedFlags::HAS_PARENT;
     }
     if !object.texture_anim.is_empty() {
@@ -391,7 +391,7 @@ pub fn encode_compressed_object(object: &Object) -> Vec<u8> {
     let mut writer = Writer::new();
     let cflags = compressed_flags(object);
     writer.put_uuid(object.full_id);
-    writer.put_u32(object.local_id);
+    writer.put_u32(object.local_id.0);
     writer.put_u8(object.pcode);
     writer.put_u8(object.state);
     writer.put_u32(object.crc);
@@ -406,7 +406,7 @@ pub fn encode_compressed_object(object: &Object) -> Vec<u8> {
         writer.put_vector3(&object.motion.angular_velocity);
     }
     if cflags.contains(CompressedFlags::HAS_PARENT) {
-        writer.put_u32(object.parent_id);
+        writer.put_u32(object.parent_id.0);
     }
     // Generic data: the scratchpad form (a u32 length then the bytes).
     if cflags.contains(CompressedFlags::SCRATCHPAD) {

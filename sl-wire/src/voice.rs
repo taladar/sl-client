@@ -56,7 +56,7 @@ pub struct VoiceProvisionRequest {
     pub channel_type: Option<String>,
     /// The parcel's local id to bind the channel to, or `None` to omit it (the
     /// grid then uses the agent's current parcel / the region channel).
-    pub parcel_local_id: Option<i32>,
+    pub parcel_local_id: Option<crate::RegionLocalParcelId>,
     /// The WebRTC JSEP **offer** SDP, produced by an out-of-scope WebRTC peer
     /// connection and passed through verbatim; `None` for Vivox.
     pub jsep_offer_sdp: Option<String>,
@@ -84,7 +84,7 @@ impl VoiceProvisionRequest {
     pub fn webrtc(
         offer_sdp: impl Into<String>,
         channel_type: impl Into<String>,
-        parcel_local_id: Option<i32>,
+        parcel_local_id: Option<crate::RegionLocalParcelId>,
     ) -> Self {
         Self {
             voice_server_type: Some(VOICE_SERVER_TYPE_WEBRTC.to_owned()),
@@ -237,7 +237,10 @@ pub fn parse_provision_voice_account_request(
     Ok(VoiceProvisionRequest {
         voice_server_type: string("voice_server_type"),
         channel_type: string("channel_type"),
-        parcel_local_id: root.get("parcel_local_id").and_then(Llsd::as_i32),
+        parcel_local_id: root
+            .get("parcel_local_id")
+            .and_then(Llsd::as_i32)
+            .map(crate::RegionLocalParcelId),
         jsep_offer_sdp,
         logout: root.get("logout").and_then(Llsd::as_bool).unwrap_or(false),
         viewer_session: string("viewer_session"),
@@ -405,7 +408,7 @@ pub fn build_provision_voice_account_response(info: &VoiceAccountInfo) -> String
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ParcelVoiceInfo {
     /// The parcel the channel belongs to (`-1` if the reply omitted it).
-    pub parcel_local_id: i32,
+    pub parcel_local_id: crate::RegionLocalParcelId,
     /// The region's name.
     pub region_name: String,
     /// The channel URI to connect to (a `sip:` URI for Vivox/FreeSWITCH), or
@@ -438,10 +441,11 @@ impl ParcelVoiceInfo {
             .filter(|value| !value.is_empty())
             .map(str::to_owned);
         Some(Self {
-            parcel_local_id: body
-                .get("parcel_local_id")
-                .and_then(Llsd::as_i32)
-                .unwrap_or(-1),
+            parcel_local_id: crate::RegionLocalParcelId(
+                body.get("parcel_local_id")
+                    .and_then(Llsd::as_i32)
+                    .unwrap_or(-1),
+            ),
             region_name: body
                 .get("region_name")
                 .and_then(Llsd::as_str)
@@ -475,7 +479,7 @@ impl ParcelVoiceInfo {
         Llsd::Map(HashMap::from([
             (
                 "parcel_local_id".to_owned(),
-                Llsd::Integer(self.parcel_local_id),
+                Llsd::Integer(self.parcel_local_id.0),
             ),
             (
                 "region_name".to_owned(),
@@ -542,7 +546,11 @@ mod tests {
     /// A WebRTC provision body nests the JSEP offer and decodes the JSEP answer.
     #[test]
     fn webrtc_provision_round_trip() -> Result<(), String> {
-        let request = VoiceProvisionRequest::webrtc("v=0 offer", "local", Some(7));
+        let request = VoiceProvisionRequest::webrtc(
+            "v=0 offer",
+            "local",
+            Some(crate::RegionLocalParcelId(7)),
+        );
         let body = build_provision_voice_account_request(&request);
         // The offer SDP, channel type, parcel id and server type are all present.
         assert!(body.contains("<key>jsep</key><map><key>type</key><string>offer</string>"));
@@ -583,7 +591,7 @@ mod tests {
         ))
         .map_err(|error| format!("{error:?}"))?;
         let info = ParcelVoiceInfo::from_llsd(&reply).ok_or("expected a parcel voice info")?;
-        assert_eq!(info.parcel_local_id, 42);
+        assert_eq!(info.parcel_local_id, crate::RegionLocalParcelId(42));
         assert_eq!(info.region_name, "Default Region");
         assert_eq!(
             info.channel_uri.as_deref(),
@@ -639,7 +647,11 @@ mod tests {
     fn provision_request_parse_round_trip() -> Result<(), String> {
         for request in [
             VoiceProvisionRequest::vivox(),
-            VoiceProvisionRequest::webrtc("v=0 offer", "local", Some(7)),
+            VoiceProvisionRequest::webrtc(
+                "v=0 offer",
+                "local",
+                Some(crate::RegionLocalParcelId(7)),
+            ),
             VoiceProvisionRequest::webrtc("v=0 offer", "local", None),
             VoiceProvisionRequest::webrtc_logout("sess-9"),
         ] {
@@ -719,7 +731,7 @@ mod tests {
     #[test]
     fn parcel_voice_response_round_trip() -> Result<(), String> {
         let info = ParcelVoiceInfo {
-            parcel_local_id: 42,
+            parcel_local_id: crate::RegionLocalParcelId(42),
             region_name: "Default Region".to_owned(),
             channel_uri: Some("sip:Region@sip.example.com".to_owned()),
             channel_credentials: Some("creds".to_owned()),
@@ -732,7 +744,7 @@ mod tests {
         );
 
         let no_voice = ParcelVoiceInfo {
-            parcel_local_id: 1,
+            parcel_local_id: crate::RegionLocalParcelId(1),
             region_name: "Quiet".to_owned(),
             channel_uri: None,
             channel_credentials: None,
