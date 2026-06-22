@@ -1,7 +1,7 @@
 //! Object interaction and editing value types: clicks, materials, transforms.
 
 use super::pcode;
-use sl_types::key::{AgentKey, GroupKey, ObjectKey, OwnerKey};
+use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::Permissions5;
@@ -641,12 +641,12 @@ pub struct NotecardRez {
     /// The next-owner permissions mask for the rezzed object.
     pub next_owner_mask: u32,
     /// The notecard inventory item the object asset is embedded in.
-    pub notecard_item_id: Uuid,
+    pub notecard_item_id: InventoryKey,
     /// The object that holds the notecard ([`Uuid::nil`] when the notecard is in
     /// the agent's own inventory).
     pub object_id: ObjectKey,
     /// The embedded inventory item ids to rez out of the notecard.
-    pub item_ids: Vec<Uuid>,
+    pub item_ids: Vec<InventoryKey>,
 }
 
 /// A full inventory item to restore to the world at its last in-world position
@@ -659,9 +659,9 @@ pub struct NotecardRez {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RestoreItem {
     /// The inventory item id to restore.
-    pub item_id: Uuid,
+    pub item_id: InventoryKey,
     /// The folder the item lives in.
-    pub folder_id: Uuid,
+    pub folder_id: InventoryFolderKey,
     /// The item's creator (for the rezzed object's permissions).
     pub creator_id: AgentKey,
     /// The item's owner (for the rezzed object's permissions) — an agent, or a

@@ -25,6 +25,7 @@
 
 use std::collections::HashMap;
 
+use sl_types::key::{InventoryFolderKey, InventoryKey};
 use uuid::Uuid;
 
 use crate::llsd::{Llsd, parse_llsd_xml, push_escaped};
@@ -37,28 +38,28 @@ pub const AIS_MAX_FOLDER_DEPTH: i32 = 50;
 /// (`POST /category/<parent>?tid=<tid>`). `tid` is a fresh transaction id the
 /// reply echoes.
 #[must_use]
-pub fn ais_create_category_url(parent_id: Uuid, tid: Uuid) -> String {
+pub fn ais_create_category_url(parent_id: InventoryFolderKey, tid: Uuid) -> String {
     format!("/category/{parent_id}?tid={tid}")
 }
 
 /// The URL suffix for a folder by id (`/category/<id>`), used by `PATCH`
 /// (update / move) and `DELETE` (remove).
 #[must_use]
-pub fn ais_category_url(category_id: Uuid) -> String {
+pub fn ais_category_url(category_id: InventoryFolderKey) -> String {
     format!("/category/{category_id}")
 }
 
 /// The URL suffix for a folder's children (`/category/<id>/children`), used by
 /// `GET ?depth=<n>` (fetch) and `DELETE` (purge / empty the folder).
 #[must_use]
-pub fn ais_category_children_url(category_id: Uuid) -> String {
+pub fn ais_category_children_url(category_id: InventoryFolderKey) -> String {
     format!("/category/{category_id}/children")
 }
 
 /// The URL suffix for fetching a folder's children to `depth`
 /// (`GET /category/<id>/children?depth=<n>`).
 #[must_use]
-pub fn ais_category_children_fetch_url(category_id: Uuid, depth: i32) -> String {
+pub fn ais_category_children_fetch_url(category_id: InventoryFolderKey, depth: i32) -> String {
     let depth = depth.clamp(0, AIS_MAX_FOLDER_DEPTH);
     format!("/category/{category_id}/children?depth={depth}")
 }
@@ -66,7 +67,7 @@ pub fn ais_category_children_fetch_url(category_id: Uuid, depth: i32) -> String 
 /// The URL suffix for an item by id (`/item/<id>`), used by `PATCH` (update /
 /// move), `DELETE` (remove), and `GET` (fetch).
 #[must_use]
-pub fn ais_item_url(item_id: Uuid) -> String {
+pub fn ais_item_url(item_id: InventoryKey) -> String {
     format!("/item/{item_id}")
 }
 
@@ -93,7 +94,7 @@ pub fn build_ais_rename_category_body(name: &str) -> String {
 
 /// The AIS3 `PATCH` body re-parenting a folder or item: `{ parent_id }`.
 #[must_use]
-pub fn build_ais_move_body(parent_id: Uuid) -> String {
+pub fn build_ais_move_body(parent_id: InventoryFolderKey) -> String {
     format!("<llsd><map><key>parent_id</key><uuid>{parent_id}</uuid></map></llsd>")
 }
 
@@ -115,8 +116,8 @@ pub fn build_ais_update_item_body(name: &str, description: &str) -> String {
 /// both OpenSim and Second Life.
 #[must_use]
 pub fn build_create_inventory_category_request(
-    folder_id: Uuid,
-    parent_id: Uuid,
+    folder_id: InventoryFolderKey,
+    parent_id: InventoryFolderKey,
     folder_type: i32,
     name: &str,
 ) -> String {
@@ -156,10 +157,10 @@ fn query_param<'query>(query: &'query str, name: &str) -> Option<&'query str> {
 /// Parses the [`ais_create_category_url`] suffix back into its `(parent_id, tid)`
 /// pair (`POST /category/<parent>?tid=<tid>`), or `None` if it does not match.
 #[must_use]
-pub fn parse_ais_create_category_url(suffix: &str) -> Option<(Uuid, Uuid)> {
+pub fn parse_ais_create_category_url(suffix: &str) -> Option<(InventoryFolderKey, Uuid)> {
     let (path, query) = split_url_suffix(suffix);
     let parent = path.strip_prefix("category/")?;
-    let parent = Uuid::parse_str(parent).ok()?;
+    let parent = InventoryFolderKey::from(Uuid::parse_str(parent).ok()?);
     let tid = query_param(query?, "tid")?;
     let tid = Uuid::parse_str(tid).ok()?;
     Some((parent, tid))
@@ -170,23 +171,23 @@ pub fn parse_ais_create_category_url(suffix: &str) -> Option<(Uuid, Uuid)> {
 /// match. Rejects the `/children` sub-path so it is not confused with
 /// [`parse_ais_category_children_url`].
 #[must_use]
-pub fn parse_ais_category_url(suffix: &str) -> Option<Uuid> {
+pub fn parse_ais_category_url(suffix: &str) -> Option<InventoryFolderKey> {
     let (path, _query) = split_url_suffix(suffix);
     let id = path.strip_prefix("category/")?;
     if id.contains('/') {
         return None;
     }
-    Uuid::parse_str(id).ok()
+    Uuid::parse_str(id).ok().map(InventoryFolderKey::from)
 }
 
 /// Parses the [`ais_category_children_url`] suffix back into its folder id
 /// (`/category/<id>/children`, the `GET`/`DELETE` children target), or `None`
 /// if it does not match.
 #[must_use]
-pub fn parse_ais_category_children_url(suffix: &str) -> Option<Uuid> {
+pub fn parse_ais_category_children_url(suffix: &str) -> Option<InventoryFolderKey> {
     let (path, _query) = split_url_suffix(suffix);
     let id = path.strip_prefix("category/")?.strip_suffix("/children")?;
-    Uuid::parse_str(id).ok()
+    Uuid::parse_str(id).ok().map(InventoryFolderKey::from)
 }
 
 /// Parses the [`ais_category_children_fetch_url`] suffix back into its
@@ -194,7 +195,7 @@ pub fn parse_ais_category_children_url(suffix: &str) -> Option<Uuid> {
 /// `None` if it does not match. The depth is clamped to the AIS maximum, exactly
 /// as the builder clamps it.
 #[must_use]
-pub fn parse_ais_category_children_fetch_url(suffix: &str) -> Option<(Uuid, i32)> {
+pub fn parse_ais_category_children_fetch_url(suffix: &str) -> Option<(InventoryFolderKey, i32)> {
     let category = parse_ais_category_children_url(suffix)?;
     let (_path, query) = split_url_suffix(suffix);
     let depth = query_param(query?, "depth")?.parse::<i32>().ok()?;
@@ -204,13 +205,13 @@ pub fn parse_ais_category_children_fetch_url(suffix: &str) -> Option<(Uuid, i32)
 /// Parses the [`ais_item_url`] suffix back into its item id (`/item/<id>`, the
 /// `PATCH`/`DELETE`/`GET` target), or `None` if it does not match.
 #[must_use]
-pub fn parse_ais_item_url(suffix: &str) -> Option<Uuid> {
+pub fn parse_ais_item_url(suffix: &str) -> Option<InventoryKey> {
     let (path, _query) = split_url_suffix(suffix);
     let id = path.strip_prefix("item/")?;
     if id.contains('/') {
         return None;
     }
-    Uuid::parse_str(id).ok()
+    Uuid::parse_str(id).ok().map(InventoryKey::from)
 }
 
 /// A parsed AIS3 create-folder body (`{ name, type }`): the inverse of
@@ -256,12 +257,13 @@ pub fn parse_ais_rename_category_body(xml: &str) -> Result<String, roxmltree::Er
 /// # Errors
 ///
 /// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
-pub fn parse_ais_move_body(xml: &str) -> Result<Uuid, roxmltree::Error> {
+pub fn parse_ais_move_body(xml: &str) -> Result<InventoryFolderKey, roxmltree::Error> {
     let root = parse_llsd_xml(xml)?;
-    Ok(root
-        .get("parent_id")
-        .and_then(Llsd::as_uuid)
-        .unwrap_or_else(Uuid::nil))
+    Ok(InventoryFolderKey::from(
+        root.get("parent_id")
+            .and_then(Llsd::as_uuid)
+            .unwrap_or_else(Uuid::nil),
+    ))
 }
 
 /// A parsed AIS3 item-update body (`{ name, desc }`): the inverse of
@@ -294,9 +296,9 @@ pub fn parse_ais_update_item_body(xml: &str) -> Result<AisItemUpdate, roxmltree:
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateInventoryCategoryRequest {
     /// The desired (client-chosen) id for the new folder.
-    pub folder_id: Uuid,
+    pub folder_id: InventoryFolderKey,
     /// The id of the folder to create it under.
-    pub parent_id: Uuid,
+    pub parent_id: InventoryFolderKey,
     /// The new folder's preferred `FolderType` (`-1` for none).
     pub folder_type: i32,
     /// The new folder's name.
@@ -315,8 +317,8 @@ pub fn parse_create_inventory_category_request(
 ) -> Result<CreateInventoryCategoryRequest, roxmltree::Error> {
     let root = parse_llsd_xml(xml)?;
     Ok(CreateInventoryCategoryRequest {
-        folder_id: llsd_uuid(&root, "folder_id"),
-        parent_id: llsd_uuid(&root, "parent_id"),
+        folder_id: InventoryFolderKey::from(llsd_uuid(&root, "folder_id")),
+        parent_id: InventoryFolderKey::from(llsd_uuid(&root, "parent_id")),
         folder_type: root.get("type").and_then(Llsd::as_i32).unwrap_or(-1),
         name: llsd_string(&root, "name"),
     })
@@ -347,21 +349,21 @@ fn llsd_uuid(root: &Llsd, key: &str) -> Uuid {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AisUpdate {
     /// `_created_categories`: folders created by the operation.
-    pub created_categories: Vec<Uuid>,
+    pub created_categories: Vec<InventoryFolderKey>,
     /// `_created_items`: items created by the operation.
-    pub created_items: Vec<Uuid>,
+    pub created_items: Vec<InventoryKey>,
     /// `_updated_categories`: folders whose fields changed.
-    pub updated_categories: Vec<Uuid>,
+    pub updated_categories: Vec<InventoryFolderKey>,
     /// `_updated_category_versions`: new descendant-version per folder id.
-    pub updated_category_versions: Vec<(Uuid, i32)>,
+    pub updated_category_versions: Vec<(InventoryFolderKey, i32)>,
     /// `_categories_removed`: folders deleted by the operation.
-    pub categories_removed: Vec<Uuid>,
+    pub categories_removed: Vec<InventoryFolderKey>,
     /// `_category_items_removed`: items removed when emptying a folder.
-    pub category_items_removed: Vec<Uuid>,
+    pub category_items_removed: Vec<InventoryKey>,
     /// `_removed_items`: items deleted by the operation.
-    pub removed_items: Vec<Uuid>,
+    pub removed_items: Vec<InventoryKey>,
     /// `_broken_links_removed`: broken inventory links the grid pruned.
-    pub broken_links_removed: Vec<Uuid>,
+    pub broken_links_removed: Vec<InventoryKey>,
 }
 
 /// Builds an AIS3 mutation-reply body from an [`AisUpdate`], the response a
@@ -373,20 +375,40 @@ pub struct AisUpdate {
 #[must_use]
 pub fn build_ais_update_response(update: &AisUpdate) -> String {
     let mut map: HashMap<String, Llsd> = HashMap::new();
-    insert_uuid_array(&mut map, "_created_categories", &update.created_categories);
-    insert_uuid_array(&mut map, "_created_items", &update.created_items);
-    insert_uuid_array(&mut map, "_updated_categories", &update.updated_categories);
-    insert_uuid_array(&mut map, "_categories_removed", &update.categories_removed);
+    insert_uuid_array(
+        &mut map,
+        "_created_categories",
+        update.created_categories.iter().map(|id| id.uuid()),
+    );
+    insert_uuid_array(
+        &mut map,
+        "_created_items",
+        update.created_items.iter().map(|id| id.uuid()),
+    );
+    insert_uuid_array(
+        &mut map,
+        "_updated_categories",
+        update.updated_categories.iter().map(|id| id.uuid()),
+    );
+    insert_uuid_array(
+        &mut map,
+        "_categories_removed",
+        update.categories_removed.iter().map(|id| id.uuid()),
+    );
     insert_uuid_array(
         &mut map,
         "_category_items_removed",
-        &update.category_items_removed,
+        update.category_items_removed.iter().map(|id| id.uuid()),
     );
-    insert_uuid_array(&mut map, "_removed_items", &update.removed_items);
+    insert_uuid_array(
+        &mut map,
+        "_removed_items",
+        update.removed_items.iter().map(|id| id.uuid()),
+    );
     insert_uuid_array(
         &mut map,
         "_broken_links_removed",
-        &update.broken_links_removed,
+        update.broken_links_removed.iter().map(|id| id.uuid()),
     );
     if !update.updated_category_versions.is_empty() {
         let versions = update
@@ -401,11 +423,11 @@ pub fn build_ais_update_response(update: &AisUpdate) -> String {
 
 /// Inserts `ids` under `key` as an LLSD array of UUIDs, skipping the key
 /// entirely when the list is empty.
-fn insert_uuid_array(map: &mut HashMap<String, Llsd>, key: &str, ids: &[Uuid]) {
-    if ids.is_empty() {
+fn insert_uuid_array(map: &mut HashMap<String, Llsd>, key: &str, ids: impl Iterator<Item = Uuid>) {
+    let array: Vec<Llsd> = ids.map(Llsd::Uuid).collect();
+    if array.is_empty() {
         return;
     }
-    let array = ids.iter().copied().map(Llsd::Uuid).collect();
     let _previous = map.insert(key.to_owned(), Llsd::Array(array));
 }
 
@@ -416,15 +438,15 @@ fn insert_uuid_array(map: &mut HashMap<String, Llsd>, key: &str, ids: &[Uuid]) {
 /// Second Life.
 #[must_use]
 pub fn build_create_inventory_category_response(
-    folder_id: Uuid,
-    parent_id: Uuid,
+    folder_id: InventoryFolderKey,
+    parent_id: InventoryFolderKey,
     folder_type: i32,
     name: &str,
 ) -> String {
     Llsd::Map(HashMap::from([
-        ("folder_id".to_owned(), Llsd::Uuid(folder_id)),
+        ("folder_id".to_owned(), Llsd::Uuid(folder_id.uuid())),
         ("name".to_owned(), Llsd::String(name.to_owned())),
-        ("parent_id".to_owned(), Llsd::Uuid(parent_id)),
+        ("parent_id".to_owned(), Llsd::Uuid(parent_id.uuid())),
         ("type".to_owned(), Llsd::Integer(folder_type)),
     ]))
     .to_llsd_xml()
@@ -441,7 +463,7 @@ mod test {
         let parent = uuid!("11111111-1111-1111-1111-111111111111");
         let tid = uuid!("22222222-2222-2222-2222-222222222222");
         assert_eq!(
-            ais_create_category_url(parent, tid),
+            ais_create_category_url(InventoryFolderKey::from(parent), tid),
             "/category/11111111-1111-1111-1111-111111111111?tid=22222222-2222-2222-2222-222222222222"
         );
     }
@@ -450,11 +472,11 @@ mod test {
     fn children_fetch_url_clamps_depth() {
         let id = uuid!("33333333-3333-3333-3333-333333333333");
         assert_eq!(
-            ais_category_children_fetch_url(id, 999),
+            ais_category_children_fetch_url(InventoryFolderKey::from(id), 999),
             "/category/33333333-3333-3333-3333-333333333333/children?depth=50"
         );
         assert_eq!(
-            ais_category_children_fetch_url(id, -5),
+            ais_category_children_fetch_url(InventoryFolderKey::from(id), -5),
             "/category/33333333-3333-3333-3333-333333333333/children?depth=0"
         );
     }
@@ -471,7 +493,7 @@ mod test {
     fn move_body_carries_parent() {
         let parent = uuid!("44444444-4444-4444-4444-444444444444");
         assert_eq!(
-            build_ais_move_body(parent),
+            build_ais_move_body(InventoryFolderKey::from(parent)),
             "<llsd><map><key>parent_id</key><uuid>44444444-4444-4444-4444-444444444444</uuid></map></llsd>"
         );
     }
@@ -481,7 +503,12 @@ mod test {
         let folder = uuid!("55555555-5555-5555-5555-555555555555");
         let parent = uuid!("66666666-6666-6666-6666-666666666666");
         assert_eq!(
-            build_create_inventory_category_request(folder, parent, 8, "Toys"),
+            build_create_inventory_category_request(
+                InventoryFolderKey::from(folder),
+                InventoryFolderKey::from(parent),
+                8,
+                "Toys"
+            ),
             "<llsd><map><key>folder_id</key><uuid>55555555-5555-5555-5555-555555555555</uuid>\
 <key>parent_id</key><uuid>66666666-6666-6666-6666-666666666666</uuid>\
 <key>type</key><integer>8</integer><key>name</key><string>Toys</string></map></llsd>"
@@ -492,6 +519,7 @@ mod test {
     fn create_category_url_round_trips() {
         let parent = uuid!("11111111-1111-1111-1111-111111111111");
         let tid = uuid!("22222222-2222-2222-2222-222222222222");
+        let parent = InventoryFolderKey::from(parent);
         let url = ais_create_category_url(parent, tid);
         assert_eq!(parse_ais_create_category_url(&url), Some((parent, tid)));
         // A bare category URL is not a create URL (no tid).
@@ -504,21 +532,32 @@ mod test {
     #[test]
     fn category_and_item_urls_round_trip_and_stay_distinct() {
         let id = uuid!("33333333-3333-3333-3333-333333333333");
-        assert_eq!(parse_ais_category_url(&ais_category_url(id)), Some(id));
-        assert_eq!(parse_ais_item_url(&ais_item_url(id)), Some(id));
-        // The children sub-path must not parse as a plain category URL.
-        assert_eq!(parse_ais_category_url(&ais_category_children_url(id)), None);
+        let folder_id = InventoryFolderKey::from(id);
+        let item_id = InventoryKey::from(id);
         assert_eq!(
-            parse_ais_category_children_url(&ais_category_children_url(id)),
-            Some(id)
+            parse_ais_category_url(&ais_category_url(folder_id)),
+            Some(folder_id)
+        );
+        assert_eq!(parse_ais_item_url(&ais_item_url(item_id)), Some(item_id));
+        // The children sub-path must not parse as a plain category URL.
+        assert_eq!(
+            parse_ais_category_url(&ais_category_children_url(folder_id)),
+            None
+        );
+        assert_eq!(
+            parse_ais_category_children_url(&ais_category_children_url(folder_id)),
+            Some(folder_id)
         );
         // …nor a plain category URL as a children URL.
-        assert_eq!(parse_ais_category_children_url(&ais_category_url(id)), None);
+        assert_eq!(
+            parse_ais_category_children_url(&ais_category_url(folder_id)),
+            None
+        );
     }
 
     #[test]
     fn children_fetch_url_round_trips_clamped() {
-        let id = uuid!("33333333-3333-3333-3333-333333333333");
+        let id = InventoryFolderKey::from(uuid!("33333333-3333-3333-3333-333333333333"));
         let url = ais_category_children_fetch_url(id, 7);
         assert_eq!(parse_ais_category_children_fetch_url(&url), Some((id, 7)));
         // The builder clamps, so the parser sees (and re-clamps) the clamped value.
@@ -549,7 +588,7 @@ mod test {
             parse_ais_rename_category_body(&renamed).map_err(|error| format!("{error:?}"))?,
             "New <name>"
         );
-        let parent = uuid!("44444444-4444-4444-4444-444444444444");
+        let parent = InventoryFolderKey::from(uuid!("44444444-4444-4444-4444-444444444444"));
         assert_eq!(
             parse_ais_move_body(&build_ais_move_body(parent))
                 .map_err(|error| format!("{error:?}"))?,
@@ -573,8 +612,8 @@ mod test {
 
     #[test]
     fn create_inventory_category_round_trips() -> Result<(), String> {
-        let folder = uuid!("55555555-5555-5555-5555-555555555555");
-        let parent = uuid!("66666666-6666-6666-6666-666666666666");
+        let folder = InventoryFolderKey::from(uuid!("55555555-5555-5555-5555-555555555555"));
+        let parent = InventoryFolderKey::from(uuid!("66666666-6666-6666-6666-666666666666"));
         let request = build_create_inventory_category_request(folder, parent, 8, "Toys");
         assert_eq!(
             parse_create_inventory_category_request(&request)
@@ -589,8 +628,14 @@ mod test {
         // The reply echoes the same fields.
         let response = build_create_inventory_category_response(folder, parent, 8, "Toys");
         let tree = parse_llsd_xml(&response).map_err(|error| format!("{error:?}"))?;
-        assert_eq!(tree.get("folder_id").and_then(Llsd::as_uuid), Some(folder));
-        assert_eq!(tree.get("parent_id").and_then(Llsd::as_uuid), Some(parent));
+        assert_eq!(
+            tree.get("folder_id").and_then(Llsd::as_uuid),
+            Some(folder.uuid())
+        );
+        assert_eq!(
+            tree.get("parent_id").and_then(Llsd::as_uuid),
+            Some(parent.uuid())
+        );
         assert_eq!(tree.get("type").and_then(Llsd::as_i32), Some(8));
         assert_eq!(tree.get("name").and_then(Llsd::as_str), Some("Toys"));
         Ok(())
@@ -598,8 +643,8 @@ mod test {
 
     #[test]
     fn ais_update_response_emits_only_nonempty_fields() -> Result<(), String> {
-        let created = uuid!("77777777-7777-7777-7777-777777777777");
-        let removed = uuid!("88888888-8888-8888-8888-888888888888");
+        let created = InventoryFolderKey::from(uuid!("77777777-7777-7777-7777-777777777777"));
+        let removed = InventoryKey::from(uuid!("88888888-8888-8888-8888-888888888888"));
         let update = AisUpdate {
             created_categories: vec![created],
             removed_items: vec![removed],
@@ -613,14 +658,14 @@ mod test {
                 .and_then(Llsd::as_array)
                 .and_then(|array| array.first())
                 .and_then(Llsd::as_uuid),
-            Some(created)
+            Some(created.uuid())
         );
         assert_eq!(
             tree.get("_removed_items")
                 .and_then(Llsd::as_array)
                 .and_then(|array| array.first())
                 .and_then(Llsd::as_uuid),
-            Some(removed)
+            Some(removed.uuid())
         );
         assert_eq!(
             tree.get("_updated_category_versions")

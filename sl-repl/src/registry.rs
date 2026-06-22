@@ -21,6 +21,8 @@ use sl_proto::AgentKey;
 use sl_proto::CircuitId;
 use sl_proto::GroupKey;
 use sl_proto::GroupRoleKey;
+use sl_proto::InventoryFolderKey;
+use sl_proto::InventoryKey;
 use sl_proto::OwnerKey;
 use sl_proto::{
     AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentMode, AttachmentPoint,
@@ -977,7 +979,7 @@ fn build_new_inventory_item(
     ctx: &dyn ReplContext,
 ) -> Result<NewInventoryItem, ReplError> {
     Ok(NewInventoryItem {
-        folder_id: args.uuid_or_nil(ctx, "folder_id", 0)?,
+        folder_id: InventoryFolderKey::from(args.uuid_or_nil(ctx, "folder_id", 0)?),
         transaction_id: args.uuid_or_nil(ctx, "transaction_id", 1)?,
         next_owner_mask: args.parse_or(ctx, "next_owner_mask", 2, "u32", 0)?,
         asset_type: args.parse_or(ctx, "asset_type", 3, "i8", 0)?,
@@ -1004,8 +1006,8 @@ fn build_inventory_item(args: &Args, ctx: &dyn ReplContext) -> Result<InventoryI
         Some(GroupKey::from(group_id))
     };
     Ok(InventoryItem {
-        item_id: args.req_uuid(ctx, "item_id", 0)?,
-        folder_id: args.uuid_or_nil(ctx, "folder_id", 1)?,
+        item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
+        folder_id: InventoryFolderKey::from(args.uuid_or_nil(ctx, "folder_id", 1)?),
         name: args.str_or(ctx, "name", 2, "")?,
         description: args.str_or(ctx, "description", 3, "")?,
         asset_id: args.uuid_or_nil(ctx, "asset_id", 4)?,
@@ -1504,22 +1506,21 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "request_folder_contents",
             usage: "<folder_id>",
             build: |args, ctx| {
-                Ok(Command::RequestFolderContents(args.req_uuid(
-                    ctx,
-                    "folder_id",
-                    0,
-                )?))
+                Ok(Command::RequestFolderContents(InventoryFolderKey::from(
+                    args.req_uuid(ctx, "folder_id", 0)?,
+                )))
             },
         },
         CommandSpec {
             name: "fetch_inventory_folders",
             usage: "<folder_id,folder_id,…>",
             build: |args, ctx| {
-                Ok(Command::FetchInventoryFolders(args.vec_uuid(
-                    ctx,
-                    "folder_ids",
-                    0,
-                )?))
+                Ok(Command::FetchInventoryFolders(
+                    args.vec_uuid(ctx, "folder_ids", 0)?
+                        .into_iter()
+                        .map(InventoryFolderKey::from)
+                        .collect(),
+                ))
             },
         },
         CommandSpec {
@@ -1527,8 +1528,8 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<folder_id> <parent_id> <folder_type> <name>",
             build: |args, ctx| {
                 Ok(Command::CreateInventoryFolder {
-                    folder_id: args.req_uuid(ctx, "folder_id", 0)?,
-                    parent_id: args.req_uuid(ctx, "parent_id", 1)?,
+                    folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 0)?),
+                    parent_id: InventoryFolderKey::from(args.req_uuid(ctx, "parent_id", 1)?),
                     folder_type: args.parse_or(ctx, "folder_type", 2, "i8", -1)?,
                     name: args.req_str(ctx, "name", 3)?,
                 })
@@ -1539,8 +1540,8 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<folder_id> <parent_id> <folder_type> <name>",
             build: |args, ctx| {
                 Ok(Command::UpdateInventoryFolder {
-                    folder_id: args.req_uuid(ctx, "folder_id", 0)?,
-                    parent_id: args.req_uuid(ctx, "parent_id", 1)?,
+                    folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 0)?),
+                    parent_id: InventoryFolderKey::from(args.req_uuid(ctx, "parent_id", 1)?),
                     folder_type: args.parse_or(ctx, "folder_type", 2, "i8", -1)?,
                     name: args.req_str(ctx, "name", 3)?,
                 })
@@ -1551,8 +1552,8 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<folder_id> <parent_id>",
             build: |args, ctx| {
                 Ok(Command::MoveInventoryFolder {
-                    folder_id: args.req_uuid(ctx, "folder_id", 0)?,
-                    parent_id: args.req_uuid(ctx, "parent_id", 1)?,
+                    folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 0)?),
+                    parent_id: InventoryFolderKey::from(args.req_uuid(ctx, "parent_id", 1)?),
                 })
             },
         },
@@ -1560,11 +1561,12 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "remove_inventory_folders",
             usage: "<folder_id,folder_id,…>",
             build: |args, ctx| {
-                Ok(Command::RemoveInventoryFolders(args.vec_uuid(
-                    ctx,
-                    "folder_ids",
-                    0,
-                )?))
+                Ok(Command::RemoveInventoryFolders(
+                    args.vec_uuid(ctx, "folder_ids", 0)?
+                        .into_iter()
+                        .map(InventoryFolderKey::from)
+                        .collect(),
+                ))
             },
         },
         CommandSpec {
@@ -1591,8 +1593,8 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<item_id> <folder_id> [new_name]",
             build: |args, ctx| {
                 Ok(Command::MoveInventoryItem {
-                    item_id: args.req_uuid(ctx, "item_id", 0)?,
-                    folder_id: args.req_uuid(ctx, "folder_id", 1)?,
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
+                    folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 1)?),
                     new_name: args.str_or(ctx, "new_name", 2, "")?,
                 })
             },
@@ -1603,8 +1605,12 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::CopyInventoryItem {
                     old_agent_id: AgentKey::from(args.req_uuid(ctx, "old_agent_id", 0)?),
-                    old_item_id: args.req_uuid(ctx, "old_item_id", 1)?,
-                    new_folder_id: args.req_uuid(ctx, "new_folder_id", 2)?,
+                    old_item_id: InventoryKey::from(args.req_uuid(ctx, "old_item_id", 1)?),
+                    new_folder_id: InventoryFolderKey::from(args.req_uuid(
+                        ctx,
+                        "new_folder_id",
+                        2,
+                    )?),
                     new_name: args.req_str(ctx, "new_name", 3)?,
                 })
             },
@@ -1614,7 +1620,10 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<item_id,item_id,…>",
             build: |args, ctx| {
                 Ok(Command::RemoveInventoryItems(
-                    args.vec_uuid(ctx, "item_ids", 0)?,
+                    args.vec_uuid(ctx, "item_ids", 0)?
+                        .into_iter()
+                        .map(InventoryKey::from)
+                        .collect(),
                 ))
             },
         },
@@ -1623,7 +1632,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<item_id> <flags-u32>",
             build: |args, ctx| {
                 Ok(Command::ChangeInventoryItemFlags {
-                    item_id: args.req_uuid(ctx, "item_id", 0)?,
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
                     flags: args.req_parse(ctx, "flags", 1, "u32")?,
                 })
             },
@@ -1632,11 +1641,9 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "purge_inventory_descendents",
             usage: "<folder_id>",
             build: |args, ctx| {
-                Ok(Command::PurgeInventoryDescendents(args.req_uuid(
-                    ctx,
-                    "folder_id",
-                    0,
-                )?))
+                Ok(Command::PurgeInventoryDescendents(
+                    InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 0)?),
+                ))
             },
         },
         CommandSpec {
@@ -1644,8 +1651,16 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "folder_ids=<…> item_ids=<…>",
             build: |args, ctx| {
                 Ok(Command::RemoveInventoryObjects {
-                    folder_ids: args.vec_uuid(ctx, "folder_ids", 0)?,
-                    item_ids: args.vec_uuid(ctx, "item_ids", 1)?,
+                    folder_ids: args
+                        .vec_uuid(ctx, "folder_ids", 0)?
+                        .into_iter()
+                        .map(InventoryFolderKey::from)
+                        .collect(),
+                    item_ids: args
+                        .vec_uuid(ctx, "item_ids", 1)?
+                        .into_iter()
+                        .map(InventoryKey::from)
+                        .collect(),
                 })
             },
         },
@@ -1654,7 +1669,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<parent_id> <folder_type> <name>",
             build: |args, ctx| {
                 Ok(Command::CreateInventoryCategory {
-                    parent_id: args.req_uuid(ctx, "parent_id", 0)?,
+                    parent_id: InventoryFolderKey::from(args.req_uuid(ctx, "parent_id", 0)?),
                     folder_type: args.parse_or(ctx, "folder_type", 1, "i32", -1)?,
                     name: args.req_str(ctx, "name", 2)?,
                 })
@@ -1665,7 +1680,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<parent_id> <folder_type> <name>",
             build: |args, ctx| {
                 Ok(Command::Ais3CreateFolder {
-                    parent_id: args.req_uuid(ctx, "parent_id", 0)?,
+                    parent_id: InventoryFolderKey::from(args.req_uuid(ctx, "parent_id", 0)?),
                     folder_type: args.parse_or(ctx, "folder_type", 1, "i32", -1)?,
                     name: args.req_str(ctx, "name", 2)?,
                 })
@@ -1676,7 +1691,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<folder_id> <name>",
             build: |args, ctx| {
                 Ok(Command::Ais3RenameFolder {
-                    folder_id: args.req_uuid(ctx, "folder_id", 0)?,
+                    folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 0)?),
                     name: args.req_str(ctx, "name", 1)?,
                 })
             },
@@ -1686,8 +1701,8 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<folder_id> <parent_id>",
             build: |args, ctx| {
                 Ok(Command::Ais3MoveFolder {
-                    folder_id: args.req_uuid(ctx, "folder_id", 0)?,
-                    parent_id: args.req_uuid(ctx, "parent_id", 1)?,
+                    folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 0)?),
+                    parent_id: InventoryFolderKey::from(args.req_uuid(ctx, "parent_id", 1)?),
                 })
             },
         },
@@ -1695,22 +1710,18 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "ais3_remove_folder",
             usage: "<folder_id>",
             build: |args, ctx| {
-                Ok(Command::Ais3RemoveFolder(args.req_uuid(
-                    ctx,
-                    "folder_id",
-                    0,
-                )?))
+                Ok(Command::Ais3RemoveFolder(InventoryFolderKey::from(
+                    args.req_uuid(ctx, "folder_id", 0)?,
+                )))
             },
         },
         CommandSpec {
             name: "ais3_purge_folder",
             usage: "<folder_id>",
             build: |args, ctx| {
-                Ok(Command::Ais3PurgeFolder(args.req_uuid(
-                    ctx,
-                    "folder_id",
-                    0,
-                )?))
+                Ok(Command::Ais3PurgeFolder(InventoryFolderKey::from(
+                    args.req_uuid(ctx, "folder_id", 0)?,
+                )))
             },
         },
         CommandSpec {
@@ -1718,7 +1729,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<folder_id> <depth>",
             build: |args, ctx| {
                 Ok(Command::Ais3FetchFolderChildren {
-                    folder_id: args.req_uuid(ctx, "folder_id", 0)?,
+                    folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 0)?),
                     depth: args.parse_or(ctx, "depth", 1, "i32", 0)?,
                 })
             },
@@ -1728,7 +1739,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<item_id> <name> <description>",
             build: |args, ctx| {
                 Ok(Command::Ais3UpdateItem {
-                    item_id: args.req_uuid(ctx, "item_id", 0)?,
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
                     name: args.req_str(ctx, "name", 1)?,
                     description: args.str_or(ctx, "description", 2, "")?,
                 })
@@ -1739,20 +1750,28 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<item_id> <parent_id>",
             build: |args, ctx| {
                 Ok(Command::Ais3MoveItem {
-                    item_id: args.req_uuid(ctx, "item_id", 0)?,
-                    parent_id: args.req_uuid(ctx, "parent_id", 1)?,
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
+                    parent_id: InventoryFolderKey::from(args.req_uuid(ctx, "parent_id", 1)?),
                 })
             },
         },
         CommandSpec {
             name: "ais3_remove_item",
             usage: "<item_id>",
-            build: |args, ctx| Ok(Command::Ais3RemoveItem(args.req_uuid(ctx, "item_id", 0)?)),
+            build: |args, ctx| {
+                Ok(Command::Ais3RemoveItem(InventoryKey::from(
+                    args.req_uuid(ctx, "item_id", 0)?,
+                )))
+            },
         },
         CommandSpec {
             name: "ais3_fetch_item",
             usage: "<item_id>",
-            build: |args, ctx| Ok(Command::Ais3FetchItem(args.req_uuid(ctx, "item_id", 0)?)),
+            build: |args, ctx| {
+                Ok(Command::Ais3FetchItem(InventoryKey::from(
+                    args.req_uuid(ctx, "item_id", 0)?,
+                )))
+            },
         },
         CommandSpec {
             name: "grant_user_rights",
@@ -1789,7 +1808,11 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::AcceptFriendship {
                     transaction_id: args.req_uuid(ctx, "transaction_id", 0)?,
-                    calling_card_folder: args.req_uuid(ctx, "calling_card_folder", 1)?,
+                    calling_card_folder: InventoryFolderKey::from(args.req_uuid(
+                        ctx,
+                        "calling_card_folder",
+                        1,
+                    )?),
                 })
             },
         },
@@ -2048,7 +2071,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 let attachment = match args.opt_str(ctx, "attachment_item", 100)? {
                     Some(item) => Some(GroupNoticeAttachment {
-                        item_id: args::literal_uuid("attachment_item", &item)?,
+                        item_id: InventoryKey::from(args::literal_uuid("attachment_item", &item)?),
                         owner_id: args.uuid_or_nil(ctx, "attachment_owner", 101)?,
                     }),
                     None => None,
@@ -2159,7 +2182,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::AnswerScriptPermissions {
                     task_id: args.req_object(ctx, "task_id", 0)?,
-                    item_id: args.req_uuid(ctx, "item_id", 1)?,
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?),
                     permissions: ScriptPermissions(args.parse_or(
                         ctx,
                         "permissions",
@@ -3104,8 +3127,8 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::BuyObjectInventory {
                     object_id: args.req_object(ctx, "object_id", 0)?,
-                    item_id: args.req_uuid(ctx, "item_id", 1)?,
-                    folder_id: args.uuid_or_nil(ctx, "folder_id", 2)?,
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?),
+                    folder_id: InventoryFolderKey::from(args.uuid_or_nil(ctx, "folder_id", 2)?),
                 })
             },
         },
@@ -3206,8 +3229,12 @@ fn all_specs() -> Vec<CommandSpec> {
                 };
                 Ok(Command::RezRestoreToWorld {
                     item: RestoreItem {
-                        item_id: args.req_uuid(ctx, "item_id", 0)?,
-                        folder_id: args.uuid_or_nil(ctx, "folder_id", 100)?,
+                        item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
+                        folder_id: InventoryFolderKey::from(args.uuid_or_nil(
+                            ctx,
+                            "folder_id",
+                            100,
+                        )?),
                         creator_id: AgentKey::from(args.uuid_or_nil(ctx, "creator_id", 101)?),
                         owner,
                         group,
@@ -3278,10 +3305,18 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::RezObjectFromNotecard {
                     rez: NotecardRez {
-                        notecard_item_id: args.req_uuid(ctx, "notecard_item_id", 0)?,
+                        notecard_item_id: InventoryKey::from(args.req_uuid(
+                            ctx,
+                            "notecard_item_id",
+                            0,
+                        )?),
                         ray_start: args.req_vector(ctx, "ray_start", 1)?,
                         ray_end: args.req_vector(ctx, "ray_end", 2)?,
-                        item_ids: args.vec_uuid(ctx, "item_ids", 3)?,
+                        item_ids: args
+                            .vec_uuid(ctx, "item_ids", 3)?
+                            .into_iter()
+                            .map(InventoryKey::from)
+                            .collect(),
                         group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 100)?),
                         from_task_id: args.object_or_nil(ctx, "from_task_id", 101)?,
                         object_id: args.object_or_nil(ctx, "object_id", 102)?,
@@ -3309,7 +3344,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::RequestScriptRunning {
                     object_id: args.req_object(ctx, "object_id", 0)?,
-                    item_id: args.req_uuid(ctx, "item_id", 1)?,
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?),
                 })
             },
         },
@@ -3319,7 +3354,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::SetScriptRunning {
                     object_id: args.req_object(ctx, "object_id", 0)?,
-                    item_id: args.req_uuid(ctx, "item_id", 1)?,
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?),
                     running: args.req_bool(ctx, "running", 2)?,
                 })
             },
@@ -3330,7 +3365,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::ResetScript {
                     object_id: args.req_object(ctx, "object_id", 0)?,
-                    item_id: args.req_uuid(ctx, "item_id", 1)?,
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?),
                 })
             },
         },
@@ -3399,10 +3434,10 @@ fn all_specs() -> Vec<CommandSpec> {
                 let mut wearables = Vec::new();
                 for record in args.vec_records(ctx, "wearables", 0)? {
                     wearables.push(Wearable {
-                        item_id: args::literal_uuid(
+                        item_id: InventoryKey::from(args::literal_uuid(
                             "wearables",
                             record_field("wearables", &record, 0)?,
-                        )?,
+                        )?),
                         asset_id: args::literal_uuid(
                             "wearables",
                             record_field("wearables", &record, 1)?,
@@ -3482,7 +3517,7 @@ fn all_specs() -> Vec<CommandSpec> {
                         0,
                         parse_attachment_point,
                     )?,
-                    item_id: args.req_uuid(ctx, "item_id", 1)?,
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?),
                 })
             },
         },
@@ -3492,7 +3527,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     [description=]",
             build: |args, ctx| {
                 Ok(Command::RezAttachment(RezAttachment {
-                    item_id: args.req_uuid(ctx, "item_id", 0)?,
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
                     attachment_point: enum_arg(
                         args,
                         ctx,
@@ -3535,10 +3570,10 @@ fn all_specs() -> Vec<CommandSpec> {
                         None => AttachmentMode::Replace,
                     };
                     attachments.push(RezAttachment {
-                        item_id: args::literal_uuid(
+                        item_id: InventoryKey::from(args::literal_uuid(
                             "attachments",
                             record_field("attachments", &record, 0)?,
-                        )?,
+                        )?),
                         owner_id: args::literal_uuid(
                             "attachments",
                             record_field("attachments", &record, 1)?,
@@ -3767,10 +3802,10 @@ fn all_specs() -> Vec<CommandSpec> {
                 let mut gestures = Vec::new();
                 for record in args.vec_records(ctx, "gestures", 0)? {
                     gestures.push(GestureActivation {
-                        item_id: args::literal_uuid(
+                        item_id: InventoryKey::from(args::literal_uuid(
                             "gestures",
                             record_field("gestures", &record, 0)?,
-                        )?,
+                        )?),
                         asset_id: args::literal_uuid(
                             "gestures",
                             record_field("gestures", &record, 1)?,
@@ -3785,7 +3820,11 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<item_id,item_id,…>",
             build: |args, ctx| {
                 Ok(Command::DeactivateGestures {
-                    item_ids: args.vec_uuid(ctx, "item_ids", 0)?,
+                    item_ids: args
+                        .vec_uuid(ctx, "item_ids", 0)?
+                        .into_iter()
+                        .map(InventoryKey::from)
+                        .collect(),
                 })
             },
         },
@@ -3849,7 +3888,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "folder_id=<id> asset_type=<code> inventory_type=<code> name=<n> data=<hex> …",
             build: |args, ctx| {
                 Ok(Command::UploadAsset {
-                    folder_id: args.req_uuid(ctx, "folder_id", 100)?,
+                    folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 100)?),
                     asset_type: enum_arg(args, ctx, "asset_type", 101, parse_asset_type)?,
                     inventory_type: enum_arg(
                         args,
@@ -3888,7 +3927,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<item_id> <asset_type-code> data=<hex>",
             build: |args, ctx| {
                 Ok(Command::UpdateInventoryAsset {
-                    item_id: args.req_uuid(ctx, "item_id", 0)?,
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
                     asset_type: enum_arg(args, ctx, "asset_type", 1, parse_asset_type)?,
                     data: args.bytes_or_empty(ctx, "data", 100)?,
                 })
@@ -4145,7 +4184,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::GiveInventory {
                     to_agent_id: AgentKey::from(args.req_uuid(ctx, "to_agent_id", 0)?),
-                    item_id: args.req_uuid(ctx, "item_id", 1)?,
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?),
                     asset_type: enum_arg(args, ctx, "asset_type", 2, parse_asset_type)?,
                     item_name: args.str_or(ctx, "item_name", 3, "")?,
                     transaction_id: args.uuid_or_nil(ctx, "transaction_id", 4)?,
@@ -4158,7 +4197,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::GiveInventoryFolder {
                     to_agent_id: AgentKey::from(args.req_uuid(ctx, "to_agent_id", 0)?),
-                    folder_id: args.req_uuid(ctx, "folder_id", 1)?,
+                    folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 1)?),
                     folder_name: args.str_or(ctx, "folder_name", 2, "")?,
                     transaction_id: args.uuid_or_nil(ctx, "transaction_id", 3)?,
                 })
@@ -4170,7 +4209,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::AcceptInventoryOffer {
                     offer: build_inventory_offer(args, ctx)?,
-                    folder_id: args.req_uuid(ctx, "folder_id", 100)?,
+                    folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 100)?),
                 })
             },
         },
@@ -4180,7 +4219,11 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::DeclineInventoryOffer {
                     offer: build_inventory_offer(args, ctx)?,
-                    trash_folder_id: args.req_uuid(ctx, "trash_folder_id", 100)?,
+                    trash_folder_id: InventoryFolderKey::from(args.req_uuid(
+                        ctx,
+                        "trash_folder_id",
+                        100,
+                    )?),
                 })
             },
         },
@@ -4297,8 +4340,8 @@ mod tests {
 
     use sl_proto::{
         AbuseReportType, AgentPreferences, AssetType, ChatType, CircuitId, Command, ControlFlags,
-        FriendRights, GroupKey, LandStatReportType, MapItemType, MovementMode, ObjectBuyItem,
-        ObjectKey, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SaleType,
+        FriendRights, GroupKey, InventoryKey, LandStatReportType, MapItemType, MovementMode,
+        ObjectBuyItem, ObjectKey, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SaleType,
         ScopedObjectId, ScopedParcelId, Uuid,
     };
 
@@ -4627,7 +4670,7 @@ mod tests {
         assert!(matches!(
             build(&format!("activate_gestures {ONE}:{TWO}")),
             Ok(Command::ActivateGestures { gestures })
-                if gestures.first().map(|g| g.item_id) == one
+                if gestures.first().map(|g| g.item_id) == one.map(InventoryKey::from)
                     && gestures.first().map(|g| g.asset_id) == two
         ));
     }
@@ -4771,7 +4814,8 @@ mod tests {
         assert!(matches!(
             build(&format!("rez_object_from_notecard {ONE} <1,2,3> <4,5,6> {TWO}")),
             Ok(Command::RezObjectFromNotecard { rez })
-                if rez.notecard_item_id == uuid(ONE) && rez.item_ids == vec![uuid(TWO)]
+                if rez.notecard_item_id == InventoryKey::from(uuid(ONE))
+                    && rez.item_ids == vec![InventoryKey::from(uuid(TWO))]
         ));
     }
 
@@ -4973,7 +5017,7 @@ mod tests {
             ),
             Ok(Command::RequestScriptRunning { object_id, item_id })
                 if object_id == ObjectKey::from(Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111))
-                    && item_id == Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222)
+                    && item_id == InventoryKey::from(Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222))
         ));
     }
 
@@ -4999,7 +5043,7 @@ mod tests {
             ),
             Ok(Command::ResetScript { object_id, item_id })
                 if object_id == ObjectKey::from(Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111))
-                    && item_id == Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222)
+                    && item_id == InventoryKey::from(Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222))
         ));
     }
 

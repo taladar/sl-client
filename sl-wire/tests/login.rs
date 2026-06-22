@@ -5,6 +5,7 @@ mod test {
     use std::net::Ipv4Addr;
 
     use pretty_assertions::assert_eq;
+    use sl_types::key::InventoryFolderKey;
     use sl_wire::{
         LoginRequest, LoginResponse, StartLocation, build_login_request, parse_login_response,
         password_hash,
@@ -143,7 +144,9 @@ mod test {
         };
         assert_eq!(
             success.inventory_root,
-            Some("aaaaaaaa-0000-0000-0000-000000000000".parse::<uuid::Uuid>()?)
+            Some(InventoryFolderKey::from(
+                "aaaaaaaa-0000-0000-0000-000000000000".parse::<uuid::Uuid>()?
+            ))
         );
         assert_eq!(success.inventory_skeleton.len(), 2);
         let root = success.inventory_skeleton.first().ok_or("root folder")?;
@@ -154,7 +157,7 @@ mod test {
         assert_eq!(objects.name, "Objects");
         assert_eq!(
             objects.parent_id,
-            "aaaaaaaa-0000-0000-0000-000000000000".parse::<uuid::Uuid>()?
+            InventoryFolderKey::from("aaaaaaaa-0000-0000-0000-000000000000".parse::<uuid::Uuid>()?)
         );
         Ok(())
     }
@@ -303,7 +306,9 @@ mod test {
         };
         assert_eq!(
             success.library_root,
-            Some("00000112-000f-0000-0000-000100bba000".parse::<uuid::Uuid>()?)
+            Some(InventoryFolderKey::from(
+                "00000112-000f-0000-0000-000100bba000".parse::<uuid::Uuid>()?
+            ))
         );
         assert_eq!(
             success.library_owner,
@@ -494,8 +499,8 @@ mod test {
                       version|
          -> Result<SkeletonFolder, Box<dyn std::error::Error>> {
             Ok(SkeletonFolder {
-                folder_id: id.parse()?,
-                parent_id: parent.parse()?,
+                folder_id: InventoryFolderKey::from(id.parse::<uuid::Uuid>()?),
+                parent_id: InventoryFolderKey::from(parent.parse::<uuid::Uuid>()?),
                 name: name.to_owned(),
                 type_default,
                 version,
@@ -513,7 +518,9 @@ mod test {
             seed_capability: "http://127.0.0.1:9000/CAPS/seed".to_owned(),
             message: Some("Welcome <home> & enjoy".to_owned()),
             mfa_hash: Some("rememberme".to_owned()),
-            inventory_root: Some("aaaaaaaa-0000-0000-0000-000000000000".parse()?),
+            inventory_root: Some(InventoryFolderKey::from(
+                "aaaaaaaa-0000-0000-0000-000000000000".parse::<uuid::Uuid>()?,
+            )),
             inventory_skeleton: vec![
                 folder(
                     "aaaaaaaa-0000-0000-0000-000000000000",
@@ -546,7 +553,9 @@ mod test {
             agent_access: Some("M".to_owned()),
             agent_access_max: Some("A".to_owned()),
             max_agent_groups: Some(42),
-            library_root: Some("00000112-000f-0000-0000-000100bba000".parse()?),
+            library_root: Some(InventoryFolderKey::from(
+                "00000112-000f-0000-0000-000100bba000".parse::<uuid::Uuid>()?,
+            )),
             library_owner: Some("11111111-1111-0000-0000-000000000000".parse()?),
             library_skeleton: vec![folder(
                 "00000112-000f-0000-0000-000100bba000",

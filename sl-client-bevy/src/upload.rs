@@ -5,8 +5,8 @@ use bevy::prelude::*;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::Event as SessionEvent;
 use sl_proto::{
-    AssetType, AssetUploadResponse, CAP_NEW_FILE_AGENT_INVENTORY, InventoryType, Uuid,
-    build_new_file_agent_inventory_request, parse_asset_upload_response,
+    AssetType, AssetUploadResponse, CAP_NEW_FILE_AGENT_INVENTORY, InventoryFolderKey,
+    InventoryType, build_new_file_agent_inventory_request, parse_asset_upload_response,
 };
 
 /// Spawns the modern `NewFileAgentInventory` two-step CAPS upload on a background
@@ -20,7 +20,7 @@ use sl_proto::{
 )]
 pub(crate) fn spawn_new_file_upload(
     caps: Option<&Caps>,
-    folder_id: Uuid,
+    folder_id: InventoryFolderKey,
     asset_type: AssetType,
     inventory_type: InventoryType,
     name: &str,

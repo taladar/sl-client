@@ -54,16 +54,16 @@ pub use sl_proto::{
     GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleMember,
     GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
     ImageCodec, InstantMessage, InterestsUpdate, InventoryCallbackId, InventoryFolder,
-    InventoryItem, InventoryOffer, InventoryType, Key, Kilobits, LandingType, LegacyMaterial,
-    LightData, LightImage, LindenAmount, LoadUrlRequest, LoginAccount, LoginParams, LoginRequest,
-    LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
-    MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate,
-    Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
-    MovementMode, MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, Object,
-    ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks,
-    ObjectProperties, ObjectTransform, OpenSimExtras, OwnerKey, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
+    InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, Key, Kilobits,
+    LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LoadUrlRequest, LoginAccount,
+    LoginParams, LoginRequest, LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
+    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
+    MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction,
+    MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType, NeighborInfo,
+    NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse,
+    ObjectMotion, ObjectPermMasks, ObjectProperties, ObjectTransform, OpenSimExtras, OwnerKey,
+    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
+    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
     ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
     PhysicsShapeTypes, PickInfo, PickUpdate, PingId, PlayingAnimation, PrimShape, PrimShapeParams,
     ProductType, ProfileUpdate, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
@@ -469,7 +469,7 @@ impl Client {
                             )?;
                         }
                         Some(Command::RequestFolderContents(folder_id)) => {
-                            self.session.request_folder_contents(folder_id, Instant::now())?;
+                            self.session.request_folder_contents(folder_id.uuid(), Instant::now())?;
                         }
                         Some(Command::FetchInventoryFolders(folder_ids)) => {
                             if let (Some(url), Some(owner)) =
@@ -485,15 +485,16 @@ impl Client {
                             }
                         }
                         Some(Command::CreateInventoryFolder { folder_id, parent_id, folder_type, name }) => {
-                            self.session.create_inventory_folder(folder_id, parent_id, folder_type, &name, Instant::now())?;
+                            self.session.create_inventory_folder(folder_id.uuid(), parent_id.uuid(), folder_type, &name, Instant::now())?;
                         }
                         Some(Command::UpdateInventoryFolder { folder_id, parent_id, folder_type, name }) => {
-                            self.session.update_inventory_folder(folder_id, parent_id, folder_type, &name, Instant::now())?;
+                            self.session.update_inventory_folder(folder_id.uuid(), parent_id.uuid(), folder_type, &name, Instant::now())?;
                         }
                         Some(Command::MoveInventoryFolder { folder_id, parent_id }) => {
-                            self.session.move_inventory_folder(folder_id, parent_id, Instant::now())?;
+                            self.session.move_inventory_folder(folder_id.uuid(), parent_id.uuid(), Instant::now())?;
                         }
                         Some(Command::RemoveInventoryFolders(folder_ids)) => {
+                            let folder_ids: Vec<Uuid> = folder_ids.iter().map(|id| id.uuid()).collect();
                             self.session.remove_inventory_folders(&folder_ids, Instant::now())?;
                         }
                         Some(Command::CreateInventoryItem(new)) => {
@@ -503,26 +504,29 @@ impl Client {
                             self.session.update_inventory_item(&item, transaction_id, Instant::now())?;
                         }
                         Some(Command::MoveInventoryItem { item_id, folder_id, new_name }) => {
-                            self.session.move_inventory_item(item_id, folder_id, &new_name, Instant::now())?;
+                            self.session.move_inventory_item(item_id.uuid(), folder_id.uuid(), &new_name, Instant::now())?;
                         }
                         Some(Command::CopyInventoryItem { old_agent_id, old_item_id, new_folder_id, new_name }) => {
-                            self.session.copy_inventory_item(old_agent_id, old_item_id, new_folder_id, &new_name, Instant::now())?;
+                            self.session.copy_inventory_item(old_agent_id, old_item_id.uuid(), new_folder_id.uuid(), &new_name, Instant::now())?;
                         }
                         Some(Command::RemoveInventoryItems(item_ids)) => {
+                            let item_ids: Vec<Uuid> = item_ids.iter().map(|id| id.uuid()).collect();
                             self.session.remove_inventory_items(&item_ids, Instant::now())?;
                         }
                         Some(Command::ChangeInventoryItemFlags { item_id, flags }) => {
-                            self.session.change_inventory_item_flags(item_id, flags, Instant::now())?;
+                            self.session.change_inventory_item_flags(item_id.uuid(), flags, Instant::now())?;
                         }
                         Some(Command::PurgeInventoryDescendents(folder_id)) => {
-                            self.session.purge_inventory_descendents(folder_id, Instant::now())?;
+                            self.session.purge_inventory_descendents(folder_id.uuid(), Instant::now())?;
                         }
                         Some(Command::RemoveInventoryObjects { folder_ids, item_ids }) => {
+                            let folder_ids: Vec<Uuid> = folder_ids.iter().map(|id| id.uuid()).collect();
+                            let item_ids: Vec<Uuid> = item_ids.iter().map(|id| id.uuid()).collect();
                             self.session.remove_inventory_objects(&folder_ids, &item_ids, Instant::now())?;
                         }
                         Some(Command::CreateInventoryCategory { parent_id, folder_type, name }) => {
                             if let Some(url) = caps.get(CAP_CREATE_INVENTORY_CATEGORY).cloned() {
-                                let body = build_create_inventory_category_request(Uuid::new_v4(), parent_id, folder_type, &name);
+                                let body = build_create_inventory_category_request(InventoryFolderKey::from(Uuid::new_v4()), parent_id, folder_type, &name);
                                 tokio::spawn(post_voice_cap(url, body, CAP_CREATE_INVENTORY_CATEGORY, http.clone(), caps_tx.clone()));
                             }
                         }
@@ -602,7 +606,7 @@ impl Client {
                             self.session.terminate_friendship(other, Instant::now())?;
                         }
                         Some(Command::AcceptFriendship { transaction_id, calling_card_folder }) => {
-                            self.session.accept_friendship(transaction_id, calling_card_folder, Instant::now())?;
+                            self.session.accept_friendship(transaction_id, calling_card_folder.uuid(), Instant::now())?;
                         }
                         Some(Command::DeclineFriendship(transaction_id)) => {
                             self.session.decline_friendship(transaction_id, Instant::now())?;
@@ -671,6 +675,7 @@ impl Client {
                             self.session.activate_gestures(&gestures, Instant::now())?;
                         }
                         Some(Command::DeactivateGestures { item_ids }) => {
+                            let item_ids: Vec<Uuid> = item_ids.iter().map(|id| id.uuid()).collect();
                             self.session.deactivate_gestures(&item_ids, Instant::now())?;
                         }
                         Some(Command::SetAlwaysRun { mode }) => {
@@ -719,7 +724,7 @@ impl Client {
                             self.session.reply_script_dialog(object_id, chat_channel, button_index, &button_label, Instant::now())?;
                         }
                         Some(Command::AnswerScriptPermissions { task_id, item_id, permissions }) => {
-                            self.session.answer_script_permissions(task_id, item_id, permissions, Instant::now())?;
+                            self.session.answer_script_permissions(task_id, item_id.uuid(), permissions, Instant::now())?;
                         }
                         Some(Command::RequestMuteList) => {
                             self.session.request_mute_list(Instant::now())?;
@@ -1053,7 +1058,7 @@ impl Client {
                             self.session.drop_attachments(&local_ids, Instant::now())?;
                         }
                         Some(Command::RemoveAttachment { attachment_point, item_id }) => {
-                            self.session.remove_attachment(attachment_point, item_id, Instant::now())?;
+                            self.session.remove_attachment(attachment_point, item_id.uuid(), Instant::now())?;
                         }
                         Some(Command::RezAttachment(rez)) => {
                             self.session.rez_attachment(&rez, Instant::now())?;
@@ -1101,7 +1106,7 @@ impl Client {
                             self.session.buy_object(group_id, category_id, &objects, Instant::now())?;
                         }
                         Some(Command::BuyObjectInventory { object_id, item_id, folder_id }) => {
-                            self.session.buy_object_inventory(object_id, item_id, folder_id, Instant::now())?;
+                            self.session.buy_object_inventory(object_id, item_id.uuid(), folder_id.uuid(), Instant::now())?;
                         }
                         Some(Command::RequestPayPrice { object_id }) => {
                             self.session.request_pay_price(object_id, Instant::now())?;
@@ -1136,13 +1141,13 @@ impl Client {
                             self.session.rez_object_from_notecard(&rez, Instant::now())?;
                         }
                         Some(Command::RequestScriptRunning { object_id, item_id }) => {
-                            self.session.request_script_running(object_id, item_id, Instant::now())?;
+                            self.session.request_script_running(object_id, item_id.uuid(), Instant::now())?;
                         }
                         Some(Command::SetScriptRunning { object_id, item_id, running }) => {
-                            self.session.set_script_running(object_id, item_id, running, Instant::now())?;
+                            self.session.set_script_running(object_id, item_id.uuid(), running, Instant::now())?;
                         }
                         Some(Command::ResetScript { object_id, item_id }) => {
-                            self.session.reset_script(object_id, item_id, Instant::now())?;
+                            self.session.reset_script(object_id, item_id.uuid(), Instant::now())?;
                         }
                         Some(Command::UploadAssetUdp { asset_type, data, temp_file, store_local }) => {
                             self.session.upload_asset_udp(asset_type, data, temp_file, store_local, Instant::now())?;
@@ -1403,16 +1408,16 @@ impl Client {
                             self.session.request_teleport(to_agent_id, &message, Instant::now())?;
                         }
                         Some(Command::GiveInventory { to_agent_id, item_id, asset_type, item_name, transaction_id }) => {
-                            self.session.give_inventory(to_agent_id, item_id, asset_type, &item_name, transaction_id, Instant::now())?;
+                            self.session.give_inventory(to_agent_id, item_id.uuid(), asset_type, &item_name, transaction_id, Instant::now())?;
                         }
                         Some(Command::GiveInventoryFolder { to_agent_id, folder_id, folder_name, transaction_id }) => {
-                            self.session.give_inventory_folder(to_agent_id, folder_id, &folder_name, transaction_id, Instant::now())?;
+                            self.session.give_inventory_folder(to_agent_id, folder_id.uuid(), &folder_name, transaction_id, Instant::now())?;
                         }
                         Some(Command::AcceptInventoryOffer { offer, folder_id }) => {
-                            self.session.accept_inventory_offer(&offer, folder_id, Instant::now())?;
+                            self.session.accept_inventory_offer(&offer, folder_id.uuid(), Instant::now())?;
                         }
                         Some(Command::DeclineInventoryOffer { offer, trash_folder_id }) => {
-                            self.session.decline_inventory_offer(&offer, trash_folder_id, Instant::now())?;
+                            self.session.decline_inventory_offer(&offer, trash_folder_id.uuid(), Instant::now())?;
                         }
                         Some(Command::StartConference { session_id, invitees, message }) => {
                             self.session.start_conference(session_id, &invitees, &message, Instant::now())?;

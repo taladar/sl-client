@@ -74,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 trash_folder = folders
                     .iter()
                     .find(|f| f.folder_type == TRASH_FOLDER_TYPE)
-                    .map(|f| f.folder_id);
+                    .map(|f| f.folder_id.uuid());
                 info!("trash folder: {trash_folder:?}");
             }
             Event::RegionHandshakeComplete => {

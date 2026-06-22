@@ -17,14 +17,14 @@ mod test {
         FollowCamPropertyValue, GestureActivation, GroupAccountDetails, GroupAccountDetailsEntry,
         GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
         GroupActiveProposalItem, GroupKey, GroupName, GroupVote, GroupVoteHistoryItem, ImDialog,
-        LandSearchType, LandStatItem, LandStatReportType, LoginParams, MapItem, MapItemType,
-        MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
-        MovementMode, NotecardRez, ObjectBuyItem, ObjectKey, ObjectPropertiesFamily,
-        ParcelCategory, ParcelDetails, ParcelObjectOwner, ParcelReturnType, Permissions5, PingId,
-        PlacesResult, PointAtType, Postcard, ProductType, RegionHandle, RegionIdentity,
-        RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment, SaleType,
-        ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ServerEvent, Session,
-        SimSession, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
+        InventoryFolderKey, InventoryKey, LandSearchType, LandStatItem, LandStatReportType,
+        LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
+        MeanCollision, MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem, ObjectKey,
+        ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner, ParcelReturnType,
+        Permissions5, PingId, PlacesResult, PointAtType, Postcard, ProductType, RegionHandle,
+        RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment,
+        SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ServerEvent,
+        Session, SimSession, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
         ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
@@ -350,7 +350,7 @@ mod test {
 
         let compound = uuid::Uuid::from_u128(0x9001);
         let attachments = vec![RezAttachment {
-            item_id: uuid::Uuid::from_u128(0x9002),
+            item_id: InventoryKey::from(uuid::Uuid::from_u128(0x9002)),
             owner_id: uuid::Uuid::from_u128(0x9000),
             attachment_point: AttachmentPoint::LeftHand,
             mode: AttachmentMode::Add,
@@ -377,7 +377,10 @@ mod test {
         let first = rez.2.first().ok_or("first attachment")?;
         assert_eq!(first.attachment_point, AttachmentPoint::LeftHand);
         assert_eq!(first.mode, AttachmentMode::Add);
-        assert_eq!(first.item_id, uuid::Uuid::from_u128(0x9002));
+        assert_eq!(
+            first.item_id,
+            InventoryKey::from(uuid::Uuid::from_u128(0x9002))
+        );
         Ok(())
     }
 
@@ -943,8 +946,8 @@ mod test {
         client.spin_object_stop(object, now)?;
         client.rez_restore_to_world(
             &RestoreItem {
-                item_id: uuid::Uuid::from_u128(0x17E),
-                folder_id: uuid::Uuid::nil(),
+                item_id: InventoryKey::from(uuid::Uuid::from_u128(0x17E)),
+                folder_id: InventoryFolderKey::from(uuid::Uuid::nil()),
                 creator_id: AgentKey::from(uuid::Uuid::nil()),
                 owner: sl_proto::OwnerKey::Agent(sl_proto::AgentKey::from(uuid::Uuid::nil())),
                 group: None,
@@ -985,9 +988,9 @@ mod test {
                 group_mask: 0,
                 everyone_mask: 0,
                 next_owner_mask: 0,
-                notecard_item_id: uuid::Uuid::from_u128(0xCA5E),
+                notecard_item_id: InventoryKey::from(uuid::Uuid::from_u128(0xCA5E)),
                 object_id: ObjectKey::from(uuid::Uuid::nil()),
-                item_ids: vec![uuid::Uuid::from_u128(0x1)],
+                item_ids: vec![InventoryKey::from(uuid::Uuid::from_u128(0x1))],
             },
             now,
         )?;
@@ -1047,7 +1050,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a RezRestoreToWorld server event")?;
-        assert_eq!(restore.item_id, uuid::Uuid::from_u128(0x17E));
+        assert_eq!(
+            restore.item_id,
+            InventoryKey::from(uuid::Uuid::from_u128(0x17E))
+        );
         assert_eq!(restore.asset_type, 6);
         let rez = server_events
             .iter()
@@ -1056,7 +1062,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a RezObjectFromNotecard server event")?;
-        assert_eq!(rez.notecard_item_id, uuid::Uuid::from_u128(0xCA5E));
+        assert_eq!(
+            rez.notecard_item_id,
+            InventoryKey::from(uuid::Uuid::from_u128(0xCA5E))
+        );
         assert_eq!(rez.item_ids.len(), 1);
 
         // Sim -> client: the two reply encoders.
@@ -1433,7 +1442,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a ScriptRunning client event")?;
-        assert_eq!(running, (object_id, item_id, true));
+        assert_eq!(running, (object_id, InventoryKey::from(item_id), true));
         Ok(())
     }
 
@@ -1676,7 +1685,7 @@ mod test {
         drain_server(&mut sim);
         drain_client(&mut client);
 
-        let item_a = uuid::Uuid::from_u128(0x6E5_A001);
+        let item_a = InventoryKey::from(uuid::Uuid::from_u128(0x6E5_A001));
         let asset_a = uuid::Uuid::from_u128(0x6E5_A002);
         let item_b = uuid::Uuid::from_u128(0x6E5_A003);
 

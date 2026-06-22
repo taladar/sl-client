@@ -1,6 +1,6 @@
 //! Inventory structure and region-handle coordinate helpers.
 
-use sl_types::key::{AgentKey, GroupKey, OwnerKey};
+use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, OwnerKey};
 use sl_wire::{Permissions5, RegionHandle};
 use uuid::Uuid;
 
@@ -9,9 +9,9 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InventoryFolder {
     /// The folder's id.
-    pub folder_id: Uuid,
+    pub folder_id: InventoryFolderKey,
     /// The parent folder's id (nil for the root).
-    pub parent_id: Uuid,
+    pub parent_id: InventoryFolderKey,
     /// The folder name.
     pub name: String,
     /// The folder's default asset/folder type (`FolderType`; `-1` for none).
@@ -25,9 +25,9 @@ pub struct InventoryFolder {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InventoryItem {
     /// The item's id.
-    pub item_id: Uuid,
+    pub item_id: InventoryKey,
     /// The containing folder's id.
-    pub folder_id: Uuid,
+    pub folder_id: InventoryFolderKey,
     /// The item name.
     pub name: String,
     /// The item description.
@@ -67,10 +67,10 @@ pub struct InventoryItem {
 /// [`Session::create_inventory_item`](crate::Session::create_inventory_item)
 /// (`CreateInventoryItem`). The simulator allocates the item's id and replies
 /// with an [`Event::InventoryItemCreated`](crate::Event::InventoryItemCreated).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewInventoryItem {
     /// The folder the new item is created in.
-    pub folder_id: Uuid,
+    pub folder_id: InventoryFolderKey,
     /// The transaction id associating a freshly uploaded asset with the item
     /// (nil for an item with no backing asset, e.g. a fresh notecard the sim
     /// fills in).
@@ -89,6 +89,23 @@ pub struct NewInventoryItem {
     pub description: String,
 }
 
+impl Default for NewInventoryItem {
+    /// All-nil/zero defaults; [`folder_id`](Self::folder_id) is the nil inventory
+    /// folder key ([`InventoryFolderKey`] is not itself [`Default`]).
+    fn default() -> Self {
+        Self {
+            folder_id: InventoryFolderKey::from(Uuid::nil()),
+            transaction_id: Uuid::nil(),
+            next_owner_mask: 0,
+            asset_type: 0,
+            inv_type: 0,
+            wearable_type: 0,
+            name: String::new(),
+            description: String::new(),
+        }
+    }
+}
+
 /// A gesture to activate via
 /// [`Session::activate_gestures`](crate::Session::activate_gestures)
 /// (`ActivateGestures`), pairing the gesture's inventory item id with the asset
@@ -98,7 +115,7 @@ pub struct NewInventoryItem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GestureActivation {
     /// The gesture's inventory item id.
-    pub item_id: Uuid,
+    pub item_id: InventoryKey,
     /// The gesture asset id backing that item.
     pub asset_id: Uuid,
 }
@@ -134,4 +151,52 @@ pub fn global_to_handle(global_x: u32, global_y: u32) -> u64 {
 #[must_use]
 pub fn grid_to_handle(grid_x: u32, grid_y: u32) -> u64 {
     RegionHandle::from_grid(grid_x, grid_y).0
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+    use uuid::Uuid;
+
+    use super::{InventoryFolder, InventoryFolderKey, InventoryKey};
+
+    /// [`InventoryKey`] and [`InventoryFolderKey`] are transparent wrappers over
+    /// their [`Uuid`]: wrapping a raw id and unwrapping it again yields the
+    /// identical bytes, so the on-wire representation is unchanged by the
+    /// newtypes — and an item key and a folder key built from the same raw id are
+    /// distinct types (the mix-up guard) yet carry the same underlying uuid.
+    #[test]
+    fn inventory_keys_round_trip_uuid_bit_identically() {
+        for raw in [
+            Uuid::nil(),
+            Uuid::from_u128(1),
+            Uuid::from_u128(0xdead_beef_dead_beef_dead_beef_dead_beef),
+        ] {
+            assert_eq!(InventoryKey::from(raw).uuid(), raw);
+            assert_eq!(InventoryFolderKey::from(raw).uuid(), raw);
+            // Same raw id, distinct typed views, same uuid underneath.
+            assert_eq!(
+                InventoryKey::from(raw).uuid(),
+                InventoryFolderKey::from(raw).uuid()
+            );
+        }
+    }
+
+    /// The folder/parent ids on an [`InventoryFolder`] survive a wrap/unwrap
+    /// round trip unchanged — the typed keys hold exactly the wire uuids, and the
+    /// nil-parent root convention is preserved.
+    #[test]
+    fn inventory_folder_ids_survive_round_trip() {
+        let folder_raw = Uuid::from_u128(0xb22);
+
+        let folder = InventoryFolder {
+            folder_id: InventoryFolderKey::from(folder_raw),
+            parent_id: InventoryFolderKey::from(Uuid::nil()),
+            name: "Objects".to_owned(),
+            folder_type: -1,
+            version: 1,
+        };
+        assert_eq!(folder.folder_id.uuid(), folder_raw);
+        assert!(folder.parent_id.uuid().is_nil());
+    }
 }

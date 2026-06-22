@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, InventoryFolderKey};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -343,7 +343,7 @@ pub struct LoginSuccess {
     pub mfa_hash: Option<String>,
     /// The agent's inventory root ("My Inventory") folder id, from the
     /// `inventory-root` response field (if requested and provided).
-    pub inventory_root: Option<Uuid>,
+    pub inventory_root: Option<InventoryFolderKey>,
     /// The agent's inventory folder skeleton (every folder's id, parent, name,
     /// type, and version), from the `inventory-skeleton` response field. Empty if
     /// not requested/provided.
@@ -383,7 +383,7 @@ pub struct LoginSuccess {
     pub max_agent_groups: Option<u32>,
     /// The shared Library inventory's root folder id, from the
     /// `inventory-lib-root` response field (if requested and provided).
-    pub library_root: Option<Uuid>,
+    pub library_root: Option<InventoryFolderKey>,
     /// The agent id that owns the shared Library inventory, from the
     /// `inventory-lib-owner` response field (if requested and provided). The
     /// library's folder contents are fetched as that owner's inventory.
@@ -412,9 +412,9 @@ pub struct HomeLocation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkeletonFolder {
     /// The folder's id.
-    pub folder_id: Uuid,
+    pub folder_id: InventoryFolderKey,
     /// The parent folder's id (nil for the root).
-    pub parent_id: Uuid,
+    pub parent_id: InventoryFolderKey,
     /// The folder name.
     pub name: String,
     /// The default asset/folder type (the `FolderType`; `-1` for none).
@@ -529,7 +529,8 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
         seed_capability: required(&members, "seed_capability")?.clone(),
         message: members.get("message").cloned(),
         mfa_hash: members.get("mfa_hash").cloned(),
-        inventory_root: parse_array_struct_uuid(response_struct, "inventory-root", "folder_id"),
+        inventory_root: parse_array_struct_uuid(response_struct, "inventory-root", "folder_id")
+            .map(InventoryFolderKey::from),
         inventory_skeleton: parse_skeleton(response_struct, "inventory-skeleton"),
         buddy_list: parse_buddy_list(response_struct),
         home: members.get("home").and_then(|h| parse_home(h)),
@@ -541,7 +542,8 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
         max_agent_groups: members
             .get("max-agent-groups")
             .and_then(|g| g.trim().parse().ok()),
-        library_root: parse_array_struct_uuid(response_struct, "inventory-lib-root", "folder_id"),
+        library_root: parse_array_struct_uuid(response_struct, "inventory-lib-root", "folder_id")
+            .map(InventoryFolderKey::from),
         library_owner: parse_array_struct_uuid(response_struct, "inventory-lib-owner", "agent_id"),
         library_skeleton: parse_skeleton(response_struct, "inventory-skel-lib"),
     })))
@@ -650,11 +652,15 @@ fn parse_skeleton(response_struct: roxmltree::Node<'_, '_>, member: &str) -> Vec
         .filter_map(|folder_struct| {
             let members = collect_members(folder_struct);
             Some(SkeletonFolder {
-                folder_id: Uuid::parse_str(members.get("folder_id")?).ok()?,
-                parent_id: members
-                    .get("parent_id")
-                    .and_then(|id| Uuid::parse_str(id).ok())
-                    .unwrap_or_else(Uuid::nil),
+                folder_id: InventoryFolderKey::from(
+                    Uuid::parse_str(members.get("folder_id")?).ok()?,
+                ),
+                parent_id: InventoryFolderKey::from(
+                    members
+                        .get("parent_id")
+                        .and_then(|id| Uuid::parse_str(id).ok())
+                        .unwrap_or_else(Uuid::nil),
+                ),
                 name: members.get("name").cloned().unwrap_or_default(),
                 type_default: members
                     .get("type_default")
@@ -970,7 +976,7 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
     push_opt_string_member(out, "message", success.message.as_deref());
     push_opt_string_member(out, "mfa_hash", success.mfa_hash.as_deref());
     if let Some(root) = success.inventory_root {
-        push_id_array_member(out, "inventory-root", "folder_id", root);
+        push_id_array_member(out, "inventory-root", "folder_id", root.uuid());
     }
     push_skeleton_member(out, "inventory-skeleton", &success.inventory_skeleton);
     push_buddy_list_member(out, &success.buddy_list);
@@ -992,7 +998,7 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
         push_int_member(out, "max-agent-groups", i64::from(groups));
     }
     if let Some(root) = success.library_root {
-        push_id_array_member(out, "inventory-lib-root", "folder_id", root);
+        push_id_array_member(out, "inventory-lib-root", "folder_id", root.uuid());
     }
     if let Some(owner) = success.library_owner {
         push_id_array_member(out, "inventory-lib-owner", "agent_id", owner);

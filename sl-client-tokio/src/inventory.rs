@@ -2,7 +2,7 @@
 
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
-    CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA, GroupKey, Llsd, Uuid,
+    CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA, GroupKey, InventoryFolderKey, Llsd, Uuid,
     build_fetch_inventory_request, build_group_member_data_request, parse_llsd_xml,
 };
 use tokio::sync::mpsc;
@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 pub(crate) async fn fetch_inventory(
     cap_url: String,
     owner_id: Uuid,
-    folder_ids: Vec<Uuid>,
+    folder_ids: Vec<InventoryFolderKey>,
     http: ReqwestClient,
     caps_tx: mpsc::Sender<(String, Llsd)>,
 ) {

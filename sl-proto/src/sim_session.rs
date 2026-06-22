@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
-use sl_types::key::{AgentKey, GroupKey, ObjectKey};
+use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey};
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
     AgentAlertMessage, AgentAlertMessageAgentDataBlock, AgentAlertMessageAlertDataBlock,
@@ -2758,7 +2758,7 @@ impl SimSession {
                 let (attachment_point, mode) = AttachmentPoint::split_code(object.attachment_pt);
                 self.events
                     .push_back(ServerEvent::RezAttachment(Box::new(RezAttachment {
-                        item_id: object.item_id,
+                        item_id: InventoryKey::from(object.item_id),
                         owner_id: object.owner_id,
                         attachment_point,
                         mode,
@@ -2774,7 +2774,7 @@ impl SimSession {
                         let (attachment_point, mode) =
                             AttachmentPoint::split_code(object.attachment_pt);
                         RezAttachment {
-                            item_id: object.item_id,
+                            item_id: InventoryKey::from(object.item_id),
                             owner_id: object.owner_id,
                             attachment_point,
                             mode,
@@ -2812,7 +2812,7 @@ impl SimSession {
                     .data
                     .iter()
                     .map(|block| GestureActivation {
-                        item_id: block.item_id,
+                        item_id: InventoryKey::from(block.item_id),
                         asset_id: block.asset_id,
                     })
                     .collect();
@@ -3008,8 +3008,8 @@ impl SimSession {
                 let data = &restore.inventory_data;
                 self.events.push_back(ServerEvent::RezRestoreToWorld {
                     item: RestoreItem {
-                        item_id: data.item_id,
-                        folder_id: data.folder_id,
+                        item_id: InventoryKey::from(data.item_id),
+                        folder_id: InventoryFolderKey::from(data.folder_id),
                         creator_id: AgentKey::from(data.creator_id),
                         owner: crate::types::inventory_owner_from_wire(
                             data.owner_id,
@@ -3054,9 +3054,13 @@ impl SimSession {
                         group_mask: rez_data.group_mask,
                         everyone_mask: rez_data.everyone_mask,
                         next_owner_mask: rez_data.next_owner_mask,
-                        notecard_item_id: rez.notecard_data.notecard_item_id,
+                        notecard_item_id: InventoryKey::from(rez.notecard_data.notecard_item_id),
                         object_id: ObjectKey::from(rez.notecard_data.object_id),
-                        item_ids: rez.inventory_data.iter().map(|item| item.item_id).collect(),
+                        item_ids: rez
+                            .inventory_data
+                            .iter()
+                            .map(|item| InventoryKey::from(item.item_id))
+                            .collect(),
                     },
                 });
             }

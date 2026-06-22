@@ -1,7 +1,7 @@
 //! Avatar profile and relationships: properties, picks, classifieds, friends.
 
 use super::Maturity;
-use sl_types::key::{AgentKey, GroupKey};
+use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey};
 use uuid::Uuid;
 
 /// An avatar's profile properties, parsed from `AvatarPropertiesReply`.
@@ -349,7 +349,7 @@ pub struct LoginAccount {
     pub max_agent_groups: Option<u32>,
     /// The shared Library inventory's root folder id (`inventory-lib-root`), if
     /// provided. The folder tree is delivered as [`Event::LibraryInventory`](crate::Event::LibraryInventory).
-    pub library_root: Option<Uuid>,
+    pub library_root: Option<InventoryFolderKey>,
     /// The agent id owning the shared Library (`inventory-lib-owner`), if
     /// provided. Library folder contents are fetched as this owner's inventory.
     pub library_owner: Option<Uuid>,

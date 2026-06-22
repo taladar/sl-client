@@ -1,6 +1,6 @@
 //! Scripts and notifications: dialogs, permissions, alerts, mutes.
 
-use sl_types::key::{ObjectKey, OwnerKey};
+use sl_types::key::{InventoryKey, ObjectKey, OwnerKey};
 use sl_wire::ControlFlags;
 use uuid::Uuid;
 
@@ -95,7 +95,7 @@ pub struct ScriptPermissionRequest {
     /// The task (object) id holding the script.
     pub task_id: ObjectKey,
     /// The script item id within the object.
-    pub item_id: Uuid,
+    pub item_id: InventoryKey,
     /// The object's name.
     pub object_name: String,
     /// The object owner's name.
