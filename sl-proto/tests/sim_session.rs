@@ -946,10 +946,9 @@ mod test {
                 item_id: uuid::Uuid::from_u128(0x17E),
                 folder_id: uuid::Uuid::nil(),
                 creator_id: AgentKey::from(uuid::Uuid::nil()),
-                owner_id: uuid::Uuid::nil(),
-                group_id: GroupKey::from(uuid::Uuid::nil()),
+                owner: sl_proto::OwnerKey::Agent(sl_proto::AgentKey::from(uuid::Uuid::nil())),
+                group: None,
                 permissions: Permissions5::empty(),
-                group_owned: false,
                 transaction_id: uuid::Uuid::nil(),
                 asset_type: 6,
                 inv_type: 6,
@@ -1066,8 +1065,10 @@ mod test {
             &ObjectPropertiesFamily {
                 request_flags: 0x04,
                 object_id: object,
-                owner_id: uuid::Uuid::from_u128(0x0E),
-                group_id: GroupKey::from(uuid::Uuid::nil()),
+                owner: sl_proto::OwnerKey::Agent(sl_proto::AgentKey::from(uuid::Uuid::from_u128(
+                    0x0E,
+                ))),
+                group: None,
                 permissions: Permissions5::empty(),
                 ownership_cost: 0,
                 sale_type: SaleType::Copy.to_code(),
@@ -1103,6 +1104,11 @@ mod test {
             })
             .ok_or("expected an ObjectPropertiesFamily client event")?;
         assert_eq!(properties.object_id, object);
+        assert_eq!(
+            properties.owner,
+            sl_proto::OwnerKey::Agent(sl_proto::AgentKey::from(uuid::Uuid::from_u128(0x0E)))
+        );
+        assert_eq!(properties.group, None);
         assert_eq!(properties.sale_price, 250);
         assert_eq!(properties.name, "Vendor");
         Ok(())
@@ -1192,8 +1198,9 @@ mod test {
         // Sim -> client: the two reply encoders.
         sim.send_parcel_object_owners_reply(
             &[ParcelObjectOwner {
-                owner_id: uuid::Uuid::from_u128(0x21),
-                is_group_owned: false,
+                owner: sl_proto::OwnerKey::Agent(sl_proto::AgentKey::from(uuid::Uuid::from_u128(
+                    0x21,
+                ))),
                 count: 9,
                 online_status: true,
             }],

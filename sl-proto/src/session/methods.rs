@@ -1555,8 +1555,10 @@ impl Session {
                         .data
                         .iter()
                         .map(|owner| ParcelObjectOwner {
-                            owner_id: owner.owner_id,
-                            is_group_owned: owner.is_group_owned,
+                            owner: crate::types::owner_key_from_wire(
+                                owner.owner_id,
+                                owner.is_group_owned,
+                            ),
                             count: owner.count,
                             online_status: owner.online_status,
                         })
@@ -2512,8 +2514,8 @@ impl Session {
                     properties: ObjectPropertiesFamily {
                         request_flags: data.request_flags,
                         object_id: data.object_id,
-                        owner_id: data.owner_id,
-                        group_id: GroupKey::from(data.group_id),
+                        owner: crate::types::object_owner_from_wire(data.owner_id, data.group_id),
+                        group: crate::types::group_from_wire(data.group_id),
                         permissions: Permissions5 {
                             base: Permissions::from_bits(data.base_mask),
                             owner: Permissions::from_bits(data.owner_mask),
@@ -2647,8 +2649,10 @@ impl Session {
                     .push_back(Event::LoadUrl(Box::new(LoadUrlRequest {
                         object_name: trimmed_string(&data.object_name),
                         object_id: data.object_id,
-                        owner_id: data.owner_id,
-                        owner_is_group: data.owner_is_group,
+                        owner: crate::types::owner_key_from_wire(
+                            data.owner_id,
+                            data.owner_is_group,
+                        ),
                         message: trimmed_string(&data.message),
                         url: trimmed_string(&data.url),
                     })));

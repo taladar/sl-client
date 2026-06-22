@@ -1,6 +1,6 @@
 //! Parcels and land management: properties, access lists, media, overlays.
 
-use sl_types::key::GroupKey;
+use sl_types::key::{GroupKey, OwnerKey};
 use sl_types::lsl::Vector;
 use sl_wire::ParcelFlags;
 use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
@@ -173,12 +173,11 @@ pub struct ParcelInfo {
     pub public_count: i32,
     /// The parcel's region-local id.
     pub local_id: RegionLocalParcelId,
-    /// The parcel owner's id (an agent, or a group when [`is_group_owned`](Self::is_group_owned)).
-    pub owner_id: Uuid,
-    /// Whether [`owner_id`](Self::owner_id) names a group rather than an agent.
-    pub is_group_owned: bool,
-    /// The group the parcel is set to (nil if none).
-    pub group_id: GroupKey,
+    /// The parcel's owner — an agent or a group.
+    pub owner: OwnerKey,
+    /// The group the parcel is set to, or `None` when no group is set (distinct
+    /// from a group-*owned* parcel, which is signalled by [`owner`](Self::owner)).
+    pub group: Option<GroupKey>,
     /// The auction id, if the parcel is being auctioned (`0` if not).
     pub auction_id: u32,
     /// When the parcel was claimed, as a Unix timestamp (`time_t`).
@@ -678,12 +677,10 @@ impl Default for ParcelUpdate {
 /// (the per-owner rows the "Returnable objects" land panel shows). Requested via
 /// [`Command::RequestParcelObjectOwners`](crate::Command::RequestParcelObjectOwners)
 /// and surfaced as [`Event::ParcelObjectOwners`](crate::Event::ParcelObjectOwners).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParcelObjectOwner {
-    /// The owner's agent id (or group id when [`is_group_owned`](Self::is_group_owned)).
-    pub owner_id: Uuid,
-    /// Whether the objects are group-owned (so `owner_id` is a group id).
-    pub is_group_owned: bool,
+    /// The owner of the objects — an agent or a group.
+    pub owner: OwnerKey,
     /// How many of this owner's objects sit on the parcel.
     pub count: i32,
     /// Whether the owner is currently online (the grid only fills this for the

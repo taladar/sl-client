@@ -4771,8 +4771,8 @@ mod test {
                 item_id: uuid::Uuid::from_u128(0x17E),
                 folder_id: uuid::Uuid::nil(),
                 creator_id: AgentKey::from(uuid::Uuid::nil()),
-                owner_id: uuid::Uuid::nil(),
-                group_id: GroupKey::from(uuid::Uuid::nil()),
+                owner: sl_proto::OwnerKey::Agent(AgentKey::from(uuid::Uuid::nil())),
+                group: None,
                 permissions: Permissions5 {
                     base: Permissions::from_bits(0x0008_e000),
                     owner: Permissions::from_bits(0x0008_e000),
@@ -4780,7 +4780,6 @@ mod test {
                     everyone: Permissions::NONE,
                     next_owner: Permissions::from_bits(0x0008_e000),
                 },
-                group_owned: false,
                 transaction_id: uuid::Uuid::nil(),
                 asset_type: 6,
                 inv_type: 6,
@@ -5202,7 +5201,11 @@ mod test {
             .ok_or("expected an ObjectPropertiesFamily event")?;
         assert_eq!(properties.request_flags, 0x04);
         assert_eq!(properties.object_id, object);
-        assert_eq!(properties.owner_id, owner);
+        assert_eq!(
+            properties.owner,
+            sl_proto::OwnerKey::Agent(sl_proto::AgentKey::from(owner))
+        );
+        assert_eq!(properties.group, None);
         assert_eq!(properties.sale_type, SaleType::Copy.to_code());
         assert_eq!(properties.sale_price, 250);
         assert_eq!(properties.name, "Vendor");
@@ -6863,9 +6866,11 @@ mod test {
         assert!(parcel.request_result.has_data());
         assert_eq!(parcel.name, "Sunset Cove");
         assert_eq!(parcel.description, "A quiet beach parcel");
-        assert_eq!(parcel.owner_id, owner);
-        assert!(parcel.is_group_owned);
-        assert_eq!(parcel.group_id, GroupKey::from(group));
+        assert_eq!(
+            parcel.owner,
+            sl_proto::OwnerKey::Group(GroupKey::from(owner))
+        );
+        assert_eq!(parcel.group, Some(GroupKey::from(group)));
         assert_eq!(parcel.auction_id, 7);
         assert_eq!(parcel.claim_date, 1_700_000_000);
         assert_eq!(parcel.claim_price, 512);
@@ -6987,11 +6992,13 @@ mod test {
         assert_eq!(parcel.local_id, sl_proto::RegionLocalParcelId(11));
         assert_eq!(parcel.name, "Harbor Lot");
         assert_eq!(parcel.description, "dockside");
-        assert_eq!(parcel.owner_id, uuid::Uuid::from_u128(0x111));
-        assert!(parcel.is_group_owned);
         assert_eq!(
-            parcel.group_id,
-            GroupKey::from(uuid::Uuid::from_u128(0x222))
+            parcel.owner,
+            sl_proto::OwnerKey::Group(GroupKey::from(uuid::Uuid::from_u128(0x111)))
+        );
+        assert_eq!(
+            parcel.group,
+            Some(GroupKey::from(uuid::Uuid::from_u128(0x222)))
         );
         // 2023-11-14T22:13:20Z == 1_700_000_000 Unix seconds.
         assert_eq!(parcel.claim_date, 1_700_000_000);
@@ -7484,8 +7491,14 @@ mod test {
             MoneyTransactionType::from_i32(transaction.transaction_type),
             MoneyTransactionType::PayObject
         );
-        assert_eq!(transaction.source_id, uuid::Uuid::from_u128(1));
-        assert_eq!(transaction.dest_id, uuid::Uuid::from_u128(0xBEEF));
+        assert_eq!(
+            transaction.source,
+            sl_proto::OwnerKey::Agent(sl_proto::AgentKey::from(uuid::Uuid::from_u128(1)))
+        );
+        assert_eq!(
+            transaction.dest,
+            sl_proto::OwnerKey::Agent(sl_proto::AgentKey::from(uuid::Uuid::from_u128(0xBEEF)))
+        );
         assert_eq!(transaction.amount, LindenAmount(250));
         assert_eq!(transaction.item_description, "tip jar");
         Ok(())
@@ -7978,11 +7991,17 @@ mod test {
             .ok_or("expected a ParcelObjectOwners event")?;
         assert_eq!(owners.len(), 2);
         let first = owners.first().ok_or("expected a first owner")?;
-        assert_eq!(first.owner_id, uuid::Uuid::from_u128(0x21));
+        assert_eq!(
+            first.owner,
+            sl_proto::OwnerKey::Agent(sl_proto::AgentKey::from(uuid::Uuid::from_u128(0x21)))
+        );
         assert_eq!(first.count, 12);
         assert!(first.online_status);
         let second = owners.get(1).ok_or("expected a second owner")?;
-        assert!(second.is_group_owned);
+        assert_eq!(
+            second.owner,
+            sl_proto::OwnerKey::Group(sl_proto::GroupKey::from(uuid::Uuid::from_u128(0x22)))
+        );
         Ok(())
     }
 
@@ -11217,10 +11236,11 @@ mod test {
                 location: "Right Hand".to_owned(),
                 objects: vec![sl_proto::ScriptedObjectInfo {
                     id: uuid::Uuid::from_u128(0xA77),
-                    is_group_owned: false,
                     location: [1.0, 2.0, 3.0],
                     name: "HUD".to_owned(),
-                    owner_id: uuid::Uuid::from_u128(0x0411),
+                    owner: sl_proto::OwnerKey::Agent(sl_proto::AgentKey::from(
+                        uuid::Uuid::from_u128(0x0411),
+                    )),
                     resources: sl_proto::ScriptedObjectResources {
                         memory: Some(0x1_0000),
                         urls: Some(1),
@@ -11853,11 +11873,10 @@ mod test {
             sale_type: 0,
             sale_price: 0,
             creation_date: 0,
-            owner_id: uuid::Uuid::nil(),
+            owner: sl_proto::OwnerKey::Agent(AgentKey::from(uuid::Uuid::nil())),
             last_owner_id: uuid::Uuid::nil(),
             creator_id: AgentKey::from(uuid::Uuid::nil()),
-            group_id: GroupKey::from(uuid::Uuid::nil()),
-            group_owned: false,
+            group: None,
             permissions: Permissions5::empty(),
         }
     }

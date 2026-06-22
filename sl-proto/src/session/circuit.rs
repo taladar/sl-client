@@ -2719,6 +2719,7 @@ impl Circuit {
         callback_id: InventoryCallbackId,
         now: Instant,
     ) -> Result<(), WireError> {
+        let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
         let message = AnyMessage::UpdateInventoryItem(UpdateInventoryItem {
             agent_data: UpdateInventoryItemAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
@@ -2730,14 +2731,14 @@ impl Circuit {
                 folder_id: item.folder_id,
                 callback_id: callback_id.get(),
                 creator_id: item.creator_id.uuid(),
-                owner_id: item.owner_id,
-                group_id: item.group_id.uuid(),
+                owner_id,
+                group_id,
                 base_mask: item.permissions.base.bits(),
                 owner_mask: item.permissions.owner.bits(),
                 group_mask: item.permissions.group.bits(),
                 everyone_mask: item.permissions.everyone.bits(),
                 next_owner_mask: item.permissions.next_owner.bits(),
-                group_owned: item.group_owned,
+                group_owned: item.owner.is_group(),
                 transaction_id,
                 r#type: item.item_type,
                 inv_type: item.inv_type,
@@ -4453,6 +4454,7 @@ impl Circuit {
         item: &RestoreItem,
         now: Instant,
     ) -> Result<(), WireError> {
+        let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
         let message = AnyMessage::RezRestoreToWorld(RezRestoreToWorld {
             agent_data: RezRestoreToWorldAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
@@ -4462,14 +4464,14 @@ impl Circuit {
                 item_id: item.item_id,
                 folder_id: item.folder_id,
                 creator_id: item.creator_id.uuid(),
-                owner_id: item.owner_id,
-                group_id: item.group_id.uuid(),
+                owner_id,
+                group_id,
                 base_mask: item.permissions.base.bits(),
                 owner_mask: item.permissions.owner.bits(),
                 group_mask: item.permissions.group.bits(),
                 everyone_mask: item.permissions.everyone.bits(),
                 next_owner_mask: item.permissions.next_owner.bits(),
-                group_owned: item.group_owned,
+                group_owned: item.owner.is_group(),
                 transaction_id: item.transaction_id,
                 r#type: item.asset_type,
                 inv_type: item.inv_type,
