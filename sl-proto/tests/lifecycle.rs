@@ -23,10 +23,10 @@ mod test {
         ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
         PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
         ProductType, ProfileUpdate, ReflectionProbeFlags, RegionHandle, RegionInfoUpdate,
-        Reliability, RestoreItem, RezAttachment, SaleType, ScriptControlAction, ScriptPermissions,
-        Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType, Throttle,
-        TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings,
-        WearableType, avatar_texture, group_powers, pcode,
+        Reliability, RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId,
+        ScriptControlAction, ScriptPermissions, Session, SkySettings, SoundFlags, TeleportFlags,
+        TerrainLayerType, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, WaterSettings, WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -273,10 +273,14 @@ mod test {
         ));
         // Login always emits the account facts right after the circuit comes up;
         // the `success()` fixture carries none, so they are all empty/unknown.
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         assert_eq!(
             drain_events(&mut session),
             vec![
-                Event::CircuitEstablished { sim: sim_addr() },
+                Event::CircuitEstablished {
+                    sim: sim_addr(),
+                    circuit,
+                },
                 Event::Account(Box::new(LoginAccount {
                     home: None,
                     look_at: None,
@@ -4038,10 +4042,11 @@ mod test {
     fn attach_object_encodes_object_attach() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         session.attach_object(
-            sl_proto::RegionLocalObjectId(42),
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(42)),
             AttachmentPoint::RightHand,
             AttachmentMode::Add,
             &Rotation {
@@ -4071,16 +4076,23 @@ mod test {
     fn detach_and_drop_encode_local_ids() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         session.detach_objects(
             &[
-                sl_proto::RegionLocalObjectId(7),
-                sl_proto::RegionLocalObjectId(8),
+                ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(7)),
+                ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(8)),
             ],
             now,
         )?;
-        session.drop_attachments(&[sl_proto::RegionLocalObjectId(9)], now)?;
+        session.drop_attachments(
+            &[ScopedObjectId::new(
+                circuit,
+                sl_proto::RegionLocalObjectId(9),
+            )],
+            now,
+        )?;
         let sent = drain(&mut session)?;
         let detach = sent
             .iter()
@@ -4591,6 +4603,7 @@ mod test {
     fn object_commerce_commands_encode() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         let object = uuid::Uuid::from_u128(0xB0B);
@@ -4625,7 +4638,10 @@ mod test {
         )?;
         session.spin_object_stop(object, now)?;
         session.duplicate_objects_on_ray(
-            &[sl_proto::RegionLocalObjectId(99)],
+            &[ScopedObjectId::new(
+                circuit,
+                sl_proto::RegionLocalObjectId(99),
+            )],
             uuid::Uuid::nil(),
             Vector {
                 x: 1.0,
@@ -5309,7 +5325,7 @@ mod test {
         else {
             return Err("expected GltfMaterialOverride".into());
         };
-        assert_eq!(local_id, sl_proto::RegionLocalObjectId(7));
+        assert_eq!(local_id.id, sl_proto::RegionLocalObjectId(7));
         assert_eq!(faces, vec![0, 2]);
         assert_eq!(
             overrides,
@@ -7119,7 +7135,9 @@ mod test {
         let changed = drain_events(&mut session)
             .into_iter()
             .find_map(|e| match e {
-                Event::RegionChanged { region_handle, sim } => Some((region_handle, sim)),
+                Event::RegionChanged {
+                    region_handle, sim, ..
+                } => Some((region_handle, sim)),
                 _ => None,
             })
             .ok_or("expected a RegionChanged event")?;
@@ -7243,7 +7261,9 @@ mod test {
         let changed = drain_events(&mut session)
             .into_iter()
             .find_map(|e| match e {
-                Event::RegionChanged { region_handle, sim } => Some((region_handle, sim)),
+                Event::RegionChanged {
+                    region_handle, sim, ..
+                } => Some((region_handle, sim)),
                 _ => None,
             })
             .ok_or("expected a RegionChanged event")?;
@@ -7614,15 +7634,16 @@ mod test {
     fn parcel_access_dwell_buy_return_encode() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         session.request_parcel_access_list(
-            sl_proto::RegionLocalParcelId(7),
+            ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(7)),
             ParcelAccessScope::Ban,
             now,
         )?;
         session.update_parcel_access_list(
-            sl_proto::RegionLocalParcelId(7),
+            ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(7)),
             ParcelAccessScope::Access,
             &[ParcelAccessEntry {
                 id: uuid::Uuid::from_u128(0x55),
@@ -7632,9 +7653,12 @@ mod test {
             }],
             now,
         )?;
-        session.request_parcel_dwell(sl_proto::RegionLocalParcelId(7), now)?;
+        session.request_parcel_dwell(
+            ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(7)),
+            now,
+        )?;
         session.buy_parcel(
-            sl_proto::RegionLocalParcelId(7),
+            ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(7)),
             512,
             1024,
             uuid::Uuid::nil(),
@@ -7642,7 +7666,7 @@ mod test {
             now,
         )?;
         session.return_parcel_objects(
-            sl_proto::RegionLocalParcelId(7),
+            ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(7)),
             ParcelReturnType::OTHER,
             &[uuid::Uuid::from_u128(0x99)],
             &[],
@@ -7733,7 +7757,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a ParcelDwell event")?;
-        assert_eq!(dwell.0, sl_proto::RegionLocalParcelId(7));
+        assert_eq!(dwell.0.id, sl_proto::RegionLocalParcelId(7));
         assert_eq!(dwell.1, uuid::Uuid::from_u128(0xABC));
         assert_eq!(dwell.2.to_bits(), 42.5_f32.to_bits());
         Ok(())
@@ -7781,7 +7805,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a ParcelAccessList event")?;
-        assert_eq!(local_id, sl_proto::RegionLocalParcelId(7));
+        assert_eq!(local_id.id, sl_proto::RegionLocalParcelId(7));
         assert_eq!(scope, ParcelAccessScope::Ban);
         assert_eq!(entries.len(), 2);
         let first = entries.first().ok_or("expected a first entry")?;
@@ -7801,14 +7825,21 @@ mod test {
     fn parcel_g7_commands_encode() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         session.join_parcels(16.0, 32.0, 48.0, 64.0, now)?;
         session.divide_parcel(1.0, 2.0, 3.0, 4.0, now)?;
-        session.request_parcel_object_owners(sl_proto::RegionLocalParcelId(7), now)?;
-        session.buy_parcel_pass(sl_proto::RegionLocalParcelId(7), now)?;
+        session.request_parcel_object_owners(
+            ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(7)),
+            now,
+        )?;
+        session.buy_parcel_pass(
+            ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(7)),
+            now,
+        )?;
         session.disable_parcel_objects(
-            sl_proto::RegionLocalParcelId(7),
+            ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(7)),
             ParcelReturnType::OTHER,
             &[uuid::Uuid::from_u128(0x99)],
             &[uuid::Uuid::from_u128(0xAB)],
@@ -8206,13 +8237,20 @@ mod test {
     fn estate_g8_commands_encode() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         session.request_estate_covenant(now)?;
         session.request_telehub_info(now)?;
-        session.connect_telehub(sl_proto::RegionLocalObjectId(42), now)?;
+        session.connect_telehub(
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(42)),
+            now,
+        )?;
         session.disconnect_telehub(now)?;
-        session.add_telehub_spawn_point(sl_proto::RegionLocalObjectId(43), now)?;
+        session.add_telehub_spawn_point(
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(43)),
+            now,
+        )?;
         session.remove_telehub_spawn_point(2, now)?;
         let sent = drain(&mut session)?;
 
@@ -8403,7 +8441,9 @@ mod test {
         let changed = events
             .iter()
             .find_map(|e| match e {
-                Event::RegionChanged { region_handle, sim } => Some((*region_handle, *sim)),
+                Event::RegionChanged {
+                    region_handle, sim, ..
+                } => Some((*region_handle, *sim)),
                 _ => None,
             })
             .ok_or("expected a RegionChanged event")?;
@@ -8899,7 +8939,9 @@ mod test {
         let changed = events
             .iter()
             .find_map(|e| match e {
-                Event::RegionChanged { region_handle, sim } => Some((*region_handle, *sim)),
+                Event::RegionChanged {
+                    region_handle, sim, ..
+                } => Some((*region_handle, *sim)),
                 _ => None,
             })
             .ok_or("expected a RegionChanged event")?;
@@ -9076,6 +9118,7 @@ mod test {
     fn object_update_adds_then_updates() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         let position = Vector {
@@ -9104,7 +9147,14 @@ mod test {
         assert_eq!(object.shape.path_scale_y, 100);
 
         // The object is in the public cache.
-        assert!(session.object(sl_proto::RegionLocalObjectId(100)).is_some());
+        assert!(
+            session
+                .object(ScopedObjectId::new(
+                    circuit,
+                    sl_proto::RegionLocalObjectId(100)
+                ))
+                .is_some()
+        );
         assert_eq!(session.objects().count(), 1);
 
         // A second update for the same id updates rather than adds.
@@ -9124,6 +9174,58 @@ mod test {
             !events.iter().any(|e| matches!(e, Event::ObjectAdded(_))),
             "must not re-add a known object"
         );
+        Ok(())
+    }
+
+    /// A scoped object id is only valid against the circuit it was learned on:
+    /// the right circuit resolves the cached object and a send succeeds, while a
+    /// stale/foreign circuit resolves to nothing and a send fails with
+    /// [`Error::UnknownCircuit`] instead of silently targeting the wrong region.
+    #[test]
+    fn scoped_object_id_is_circuit_bound() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        let update = object_update(
+            100,
+            0xABCD,
+            Vector {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+        );
+        session.handle_datagram(sim_addr(), &server_message(&update, 5, true)?, now)?;
+        let events = drain_events(&mut session);
+        let Some(Event::ObjectAdded(object)) =
+            events.iter().find(|e| matches!(e, Event::ObjectAdded(_)))
+        else {
+            return Err(format!("expected ObjectAdded, got {events:?}").into());
+        };
+
+        // The cached object carries the root circuit, and its scoped id resolves.
+        let scoped = object.scoped_id();
+        assert_eq!(scoped.circuit, circuit);
+        assert_eq!(scoped.id, sl_proto::RegionLocalObjectId(100));
+        assert!(session.object(scoped).is_some());
+
+        // The same numeric id scoped to a *different* circuit instance (e.g. one
+        // captured before a reconnect) resolves to nothing.
+        let stale = ScopedObjectId::new(
+            sl_proto::CircuitId(circuit.get().wrapping_add(1)),
+            sl_proto::RegionLocalObjectId(100),
+        );
+        assert!(session.object(stale).is_none());
+
+        // A send with the right circuit succeeds; with a stale circuit it fails
+        // with `UnknownCircuit` rather than acting on the wrong region.
+        session.touch_object(scoped, now)?;
+        assert!(matches!(
+            session.touch_object(stale, now),
+            Err(sl_proto::Error::UnknownCircuit)
+        ));
         Ok(())
     }
 
@@ -9338,6 +9440,7 @@ mod test {
     fn terse_update_moves_known_object() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         // First establish the object via a full update.
@@ -9387,7 +9490,10 @@ mod test {
         // Cache reflects the new position.
         assert_eq!(
             session
-                .object(sl_proto::RegionLocalObjectId(200))
+                .object(ScopedObjectId::new(
+                    circuit,
+                    sl_proto::RegionLocalObjectId(200)
+                ))
                 .map(|o| o.motion.position.clone()),
             Some(new_pos)
         );
@@ -9530,6 +9636,7 @@ mod test {
     fn terse_update_surfaces_avatar_collision_plane() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         // Establish the object via a full update first.
@@ -9563,7 +9670,10 @@ mod test {
         drain_events(&mut session);
         assert_eq!(
             session
-                .object(sl_proto::RegionLocalObjectId(320))
+                .object(ScopedObjectId::new(
+                    circuit,
+                    sl_proto::RegionLocalObjectId(320)
+                ))
                 .and_then(|o| o.motion.collision_plane),
             Some(plane)
         );
@@ -9573,7 +9683,10 @@ mod test {
         drain_events(&mut session);
         assert_eq!(
             session
-                .object(sl_proto::RegionLocalObjectId(321))
+                .object(ScopedObjectId::new(
+                    circuit,
+                    sl_proto::RegionLocalObjectId(321)
+                ))
                 .and_then(|o| o.motion.collision_plane),
             None
         );
@@ -9584,6 +9697,7 @@ mod test {
     fn terse_update_applies_trailing_texture_entry() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         // Establish the object via a full update (no texture entry).
@@ -9592,7 +9706,10 @@ mod test {
         drain_events(&mut session);
         assert!(
             session
-                .object(sl_proto::RegionLocalObjectId(210))
+                .object(ScopedObjectId::new(
+                    circuit,
+                    sl_proto::RegionLocalObjectId(210)
+                ))
                 .is_some_and(|o| o.texture_entry.is_empty())
         );
 
@@ -9643,7 +9760,10 @@ mod test {
         assert_eq!(object.texture_entry, te_blob);
         assert_eq!(
             session
-                .object(sl_proto::RegionLocalObjectId(210))
+                .object(ScopedObjectId::new(
+                    circuit,
+                    sl_proto::RegionLocalObjectId(210)
+                ))
                 .map(|o| o.texture_entry.clone()),
             Some(te_blob)
         );
@@ -9717,12 +9837,20 @@ mod test {
     fn kill_object_removes_from_cache() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         let update = object_update(400, 0x5678, zero_vec());
         session.handle_datagram(sim_addr(), &server_message(&update, 5, true)?, now)?;
         drain_events(&mut session);
-        assert!(session.object(sl_proto::RegionLocalObjectId(400)).is_some());
+        assert!(
+            session
+                .object(ScopedObjectId::new(
+                    circuit,
+                    sl_proto::RegionLocalObjectId(400)
+                ))
+                .is_some()
+        );
 
         let kill = AnyMessage::KillObject(KillObject {
             object_data: vec![KillObjectObjectDataBlock { id: 400 }],
@@ -9733,14 +9861,21 @@ mod test {
             Event::ObjectRemoved {
                 local_id,
                 region_handle,
-            } => Some((*local_id, *region_handle)),
+            } => Some((local_id.id, *region_handle)),
             _ => None,
         });
         assert_eq!(
             removed,
             Some((sl_proto::RegionLocalObjectId(400), RegionHandle(OBJ_REGION)))
         );
-        assert!(session.object(sl_proto::RegionLocalObjectId(400)).is_none());
+        assert!(
+            session
+                .object(ScopedObjectId::new(
+                    circuit,
+                    sl_proto::RegionLocalObjectId(400)
+                ))
+                .is_none()
+        );
         Ok(())
     }
 
@@ -9748,6 +9883,7 @@ mod test {
     fn object_properties_surface_and_merge() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         // Establish the object so properties can merge into it.
@@ -9815,7 +9951,10 @@ mod test {
         // Merged into the cached object.
         assert_eq!(
             session
-                .object(sl_proto::RegionLocalObjectId(500))
+                .object(ScopedObjectId::new(
+                    circuit,
+                    sl_proto::RegionLocalObjectId(500)
+                ))
                 .and_then(|o| o.properties.as_ref())
                 .map(|p| p.name.clone()),
             Some("Test Prim".to_owned())
@@ -10043,6 +10182,7 @@ mod test {
     fn neighbour_objects_stream_on_child_circuit() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
         drain_events(&mut session);
 
@@ -10074,7 +10214,14 @@ mod test {
             session.objects_in_region(RegionHandle(NB_REGION)).count(),
             1
         );
-        assert!(session.object(sl_proto::RegionLocalObjectId(700)).is_none());
+        assert!(
+            session
+                .object(ScopedObjectId::new(
+                    circuit,
+                    sl_proto::RegionLocalObjectId(700)
+                ))
+                .is_none()
+        );
         assert_eq!(session.objects().count(), 1);
 
         // A terse update for an unknown neighbour id requests the full update on
@@ -10112,9 +10259,10 @@ mod test {
             events.iter().any(|e| matches!(
                 e,
                 Event::ObjectRemoved {
-                    local_id: sl_proto::RegionLocalObjectId(700),
+                    local_id,
                     region_handle,
-                } if *region_handle == RegionHandle(NB_REGION)
+                } if local_id.id == sl_proto::RegionLocalObjectId(700)
+                    && *region_handle == RegionHandle(NB_REGION)
             )),
             "disabling the neighbour must remove its objects, got {events:?}"
         );
@@ -10169,6 +10317,7 @@ mod test {
     fn update_object_packs_position_and_rotation() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         let position = Vector {
@@ -10186,7 +10335,7 @@ mod test {
             s: sin45,
         };
         session.update_object(
-            sl_proto::RegionLocalObjectId(42),
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(42)),
             &ObjectTransform {
                 position: Some(position.clone()),
                 rotation: Some(rotation),
@@ -10226,10 +10375,11 @@ mod test {
     fn set_object_scale_uniform_group_sets_type_byte() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         session.set_object_scale(
-            sl_proto::RegionLocalObjectId(7),
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(7)),
             Vector {
                 x: 2.0,
                 y: 2.0,
@@ -10261,9 +10411,13 @@ mod test {
     fn touch_object_sends_grab_then_degrab() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
-        session.touch_object(sl_proto::RegionLocalObjectId(55), now)?;
+        session.touch_object(
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(55)),
+            now,
+        )?;
         let sent = drain(&mut session)?;
         let grab = sent
             .iter()
@@ -10289,9 +10443,14 @@ mod test {
     fn set_object_name_sends_object_name() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
-        session.set_object_name(sl_proto::RegionLocalObjectId(9), "Vendor", now)?;
+        session.set_object_name(
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(9)),
+            "Vendor",
+            now,
+        )?;
         let sent = drain(&mut session)?;
         let name = sent
             .iter()
@@ -10310,12 +10469,13 @@ mod test {
     fn delete_objects_sends_object_delete() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         session.delete_objects(
             &[
-                sl_proto::RegionLocalObjectId(11),
-                sl_proto::RegionLocalObjectId(12),
+                ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(11)),
+                ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(12)),
             ],
             now,
         )?;
@@ -10341,11 +10501,15 @@ mod test {
     fn derez_objects_sends_derez_object() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         let folder = uuid::Uuid::from_u128(0xF0_1DE2);
         session.derez_objects(
-            &[sl_proto::RegionLocalObjectId(21)],
+            &[ScopedObjectId::new(
+                circuit,
+                sl_proto::RegionLocalObjectId(21),
+            )],
             DeRezDestination::TakeIntoAgentInventory,
             folder,
             uuid::Uuid::from_u128(0x7),
@@ -10371,11 +10535,15 @@ mod test {
     fn set_object_permissions_sends_object_permissions() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         // PERM_COPY = 0x8000 in the LSL permission flags.
         session.set_object_permissions(
-            &[sl_proto::RegionLocalObjectId(31)],
+            &[ScopedObjectId::new(
+                circuit,
+                sl_proto::RegionLocalObjectId(31),
+            )],
             PermissionField::NextOwner,
             false,
             0x8000,
@@ -10402,13 +10570,14 @@ mod test {
     fn link_objects_sends_object_link_root_first() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
         session.link_objects(
             &[
-                sl_proto::RegionLocalObjectId(100),
-                sl_proto::RegionLocalObjectId(101),
-                sl_proto::RegionLocalObjectId(102),
+                ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(100)),
+                ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(101)),
+                ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(102)),
             ],
             now,
         )?;
@@ -10429,13 +10598,27 @@ mod test {
     fn edit_helpers_send_their_messages() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
-        session.set_object_click_action(sl_proto::RegionLocalObjectId(1), ClickAction::Buy, now)?;
-        session.set_object_material(sl_proto::RegionLocalObjectId(1), Material::Metal, now)?;
-        session.set_object_for_sale(sl_proto::RegionLocalObjectId(1), SaleType::Copy, 250, now)?;
+        session.set_object_click_action(
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(1)),
+            ClickAction::Buy,
+            now,
+        )?;
+        session.set_object_material(
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(1)),
+            Material::Metal,
+            now,
+        )?;
+        session.set_object_for_sale(
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(1)),
+            SaleType::Copy,
+            250,
+            now,
+        )?;
         session.set_object_flags(
-            sl_proto::RegionLocalObjectId(1),
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(1)),
             &ObjectFlagSettings {
                 use_physics: true,
                 is_phantom: true,
@@ -10443,7 +10626,11 @@ mod test {
             },
             now,
         )?;
-        session.set_object_include_in_search(sl_proto::RegionLocalObjectId(1), true, now)?;
+        session.set_object_include_in_search(
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(1)),
+            true,
+            now,
+        )?;
         let sent = drain(&mut session)?;
 
         let click = sent
@@ -10966,7 +11153,7 @@ mod test {
             })
             .ok_or("expected an ObjectPhysicsProperties event")?;
         assert_eq!(
-            pushed.first().map(|entry| entry.0),
+            pushed.first().map(|entry| entry.0.id),
             Some(sl_proto::RegionLocalObjectId(42))
         );
         Ok(())

@@ -1,6 +1,7 @@
 //! `ObjectUpdateCompressed` (`Data`) blob codec and compressed-flag handling.
 
 use super::{read_nul_string, write_nul_string};
+use crate::scoped_id::CircuitId;
 use crate::session::ZERO_VECTOR;
 use crate::types::{Object, ObjectExtraParams, ObjectMotion, PrimShapeParams};
 use core::ops::BitOrAssign;
@@ -225,6 +226,8 @@ pub(crate) fn compressed_object(
     let mut object = Object {
         region_handle,
         local_id: RegionLocalObjectId(local_id),
+        // Stamped by the session when the object is cached (`upsert_object`).
+        circuit: CircuitId::default(),
         full_id,
         parent_id: RegionLocalObjectId(parent_id),
         pcode,

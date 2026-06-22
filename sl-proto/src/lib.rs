@@ -7,6 +7,7 @@ mod extra_params;
 pub mod j2c;
 mod object_update;
 mod particles;
+mod scoped_id;
 mod session;
 mod sim_session;
 mod terrain;
@@ -23,6 +24,7 @@ pub use object_update::{
 pub use particles::{
     decode_particle_system, decode_texture_anim, encode_particle_system, encode_texture_anim,
 };
+pub use scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 pub use session::{
     CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
     CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT,

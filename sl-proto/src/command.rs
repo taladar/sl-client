@@ -4,6 +4,7 @@
 //! lives here so the two stay in lock-step rather than maintaining parallel
 //! copies.
 
+use crate::scoped_id::{ScopedObjectId, ScopedParcelId};
 use crate::{
     AbuseReport, AgentPreferences, AnyMessage, AssetType, AttachmentMode, AttachmentPoint, Camera,
     ChatType, ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, DeRezDestination,
@@ -18,7 +19,6 @@ use crate::{
     RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect,
     VoiceProvisionRequest, Wearable,
 };
-use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
 #[derive(Debug)]
@@ -700,7 +700,7 @@ pub enum Command {
         /// A name filter, or empty for none.
         filter: String,
         /// The parcel to scope the report to, or `0` for the whole region.
-        parcel_local_id: RegionLocalParcelId,
+        parcel_local_id: ScopedParcelId,
     },
     /// Request the extended-environment (EEP) settings via the `ExtEnvironment`
     /// capability; the reply arrives as
@@ -729,7 +729,7 @@ pub enum Command {
     /// reply arrives as [`Event::ParcelAccessList`](crate::Event::ParcelAccessList).
     RequestParcelAccessList {
         /// The parcel's region-local id.
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
         /// Which list to fetch (allow or ban).
         scope: ParcelAccessScope,
     },
@@ -737,7 +737,7 @@ pub enum Command {
     /// `entries` clears it.
     UpdateParcelAccessList {
         /// The parcel's region-local id.
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
         /// Which list to set (allow or ban).
         scope: ParcelAccessScope,
         /// The new entries.
@@ -747,12 +747,12 @@ pub enum Command {
     /// arrives as [`Event::ParcelDwell`](crate::Event::ParcelDwell).
     RequestParcelDwell {
         /// The parcel's region-local id.
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
     },
     /// Buy a parcel (`ParcelBuy`).
     BuyParcel {
         /// The parcel's region-local id.
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
         /// The agreed price in L$.
         price: i32,
         /// The parcel area in m².
@@ -765,7 +765,7 @@ pub enum Command {
     /// Return objects on a parcel (`ParcelReturnObjects`).
     ReturnParcelObjects {
         /// The parcel's region-local id.
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
         /// Which objects to return (combine `ParcelReturnType` constants).
         return_type: ParcelReturnType,
         /// Optional owner-id scope.
@@ -776,7 +776,7 @@ pub enum Command {
     /// Select (highlight) objects on a parcel (`ParcelSelectObjects`).
     SelectParcelObjects {
         /// The parcel's region-local id.
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
         /// Which objects to select (combine `ParcelReturnType` constants).
         return_type: ParcelReturnType,
         /// Explicit object ids (used with `ParcelReturnType::LIST`).
@@ -785,19 +785,19 @@ pub enum Command {
     /// Deed a parcel to a group (`ParcelDeedToGroup`).
     DeedParcelToGroup {
         /// The parcel's region-local id.
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
         /// The group to deed the parcel to.
         group_id: Uuid,
     },
     /// Reclaim a parcel to the estate (`ParcelReclaim`).
     ReclaimParcel {
         /// The parcel's region-local id.
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
     },
     /// Release (abandon) a parcel back to the estate (`ParcelRelease`).
     ReleaseParcel {
         /// The parcel's region-local id.
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
     },
     /// Join all owned, leased parcels within a metre rectangle into one parcel
     /// (`ParcelJoin`). Requires land rights over every parcel in the rectangle.
@@ -829,13 +829,13 @@ pub enum Command {
     /// [`Event::ParcelObjectOwners`](crate::Event::ParcelObjectOwners).
     RequestParcelObjectOwners {
         /// The parcel's region-local id.
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
     },
     /// Buy a temporary access pass to a parcel (`ParcelBuyPass`) at its configured
     /// pass price.
     BuyParcelPass {
         /// The parcel's region-local id.
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
     },
     /// Disable (stop) scripted objects on a parcel (`ParcelDisableObjects`).
     /// `return_type` selects which objects (combine [`ParcelReturnType`]
@@ -844,7 +844,7 @@ pub enum Command {
     /// parcel ownership / land rights.
     DisableParcelObjects {
         /// The parcel's region-local id.
-        local_id: RegionLocalParcelId,
+        local_id: ScopedParcelId,
         /// Which objects to disable.
         return_type: ParcelReturnType,
         /// Optional owner-id scope.
@@ -921,7 +921,7 @@ pub enum Command {
     /// `telehub` `connect`). Needs estate-owner or god rights.
     ConnectTelehub {
         /// The local id of the (in-region) object to make the telehub.
-        object_local_id: RegionLocalObjectId,
+        object_local_id: ScopedObjectId,
     },
     /// Remove the region's telehub (`EstateOwnerMessage`/`telehub` `delete`).
     /// Needs estate-owner or god rights.
@@ -931,7 +931,7 @@ pub enum Command {
     /// god rights.
     AddTelehubSpawnPoint {
         /// The local id of the (in-region) object marking the spawn point.
-        object_local_id: RegionLocalObjectId,
+        object_local_id: ScopedObjectId,
     },
     /// Remove a telehub spawn point by index (`EstateOwnerMessage`/`telehub`
     /// `spawnpoint remove`). Needs estate-owner or god rights.
@@ -1034,28 +1034,28 @@ pub enum Command {
     /// [`Event::ObjectUpdated`](crate::Event::ObjectUpdated).
     RequestObjects {
         /// The region-local ids to (re)fetch.
-        local_ids: Vec<RegionLocalObjectId>,
+        local_ids: Vec<ScopedObjectId>,
     },
     /// Request objects' extended properties by selecting them (`ObjectSelect`);
     /// the reply arrives as [`Event::ObjectProperties`](crate::Event::ObjectProperties).
     RequestObjectProperties {
         /// The region-local ids to select.
-        local_ids: Vec<RegionLocalObjectId>,
+        local_ids: Vec<ScopedObjectId>,
     },
     /// Deselect previously selected objects (`ObjectDeselect`).
     DeselectObjects {
         /// The region-local ids to deselect.
-        local_ids: Vec<RegionLocalObjectId>,
+        local_ids: Vec<ScopedObjectId>,
     },
     /// Touch (left-click) an object (`ObjectGrab` + `ObjectDeGrab`).
     TouchObject {
         /// The object's region-local id.
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
     },
     /// Begin grabbing an object (`ObjectGrab`).
     GrabObject {
         /// The object's region-local id.
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         /// The grab offset from the object's centre.
         grab_offset: Vector,
     },
@@ -1073,7 +1073,7 @@ pub enum Command {
     /// Release a grab on an object (`ObjectDeGrab`).
     DegrabObject {
         /// The object's region-local id.
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
     },
     /// Rez (create) a new primitive (`ObjectAdd`).
     RezObject {
@@ -1085,7 +1085,7 @@ pub enum Command {
     /// Duplicate objects with an offset (`ObjectDuplicate`).
     DuplicateObjects {
         /// The region-local ids to duplicate.
-        local_ids: Vec<RegionLocalObjectId>,
+        local_ids: Vec<ScopedObjectId>,
         /// The offset to apply to the copies.
         offset: Vector,
         /// The group the copies are set to.
@@ -1094,12 +1094,12 @@ pub enum Command {
     /// Delete objects to the trash (`ObjectDelete`).
     DeleteObjects {
         /// The region-local ids to delete.
-        local_ids: Vec<RegionLocalObjectId>,
+        local_ids: Vec<ScopedObjectId>,
     },
     /// Derez objects (take/return/trash; `DeRezObject`).
     DerezObjects {
         /// The region-local ids to derez.
-        local_ids: Vec<RegionLocalObjectId>,
+        local_ids: Vec<ScopedObjectId>,
         /// Where the objects should go.
         destination: DeRezDestination,
         /// The destination folder/task id (meaning depends on `destination`).
@@ -1112,56 +1112,56 @@ pub enum Command {
     /// Move/rotate/scale an object (`MultipleObjectUpdate`).
     UpdateObject {
         /// The object's region-local id.
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         /// The transform to apply (only set components change).
         transform: ObjectTransform,
     },
     /// Rename an object (`ObjectName`).
     SetObjectName {
         /// The object's region-local id.
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         /// The new name.
         name: String,
     },
     /// Re-describe an object (`ObjectDescription`).
     SetObjectDescription {
         /// The object's region-local id.
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         /// The new description.
         description: String,
     },
     /// Set an object's left-click behaviour (`ObjectClickAction`).
     SetObjectClickAction {
         /// The object's region-local id.
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         /// The new click action.
         action: ClickAction,
     },
     /// Set an object's physical material (`ObjectMaterial`).
     SetObjectMaterial {
         /// The object's region-local id.
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         /// The new material.
         material: Material,
     },
     /// Set an object's physics/temporary/phantom flags (`ObjectFlagUpdate`).
     SetObjectFlags {
         /// The object's region-local id.
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         /// The flag settings to apply.
         flags: ObjectFlagSettings,
     },
     /// Set the group objects are set to (`ObjectGroup`).
     SetObjectGroup {
         /// The region-local ids.
-        local_ids: Vec<RegionLocalObjectId>,
+        local_ids: Vec<ScopedObjectId>,
         /// The group id.
         group_id: Uuid,
     },
     /// Set or clear permission bits on objects (`ObjectPermissions`).
     SetObjectPermissions {
         /// The region-local ids.
-        local_ids: Vec<RegionLocalObjectId>,
+        local_ids: Vec<ScopedObjectId>,
         /// Which mask to change.
         field: PermissionField,
         /// Whether to set (true) or clear (false) the bits.
@@ -1172,7 +1172,7 @@ pub enum Command {
     /// Set an object's sale type and price (`ObjectSaleInfo`).
     SetObjectForSale {
         /// The object's region-local id.
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         /// The sale type.
         sale_type: SaleType,
         /// The sale price in L$.
@@ -1181,26 +1181,26 @@ pub enum Command {
     /// Set an object's category code (`ObjectCategory`).
     SetObjectCategory {
         /// The object's region-local id.
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         /// The category code.
         category: u32,
     },
     /// Toggle whether an object is listed in search (`ObjectIncludeInSearch`).
     SetObjectIncludeInSearch {
         /// The object's region-local id.
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         /// Whether to include the object in search.
         include: bool,
     },
     /// Link objects into one linkset (`ObjectLink`); the first id is the root.
     LinkObjects {
         /// The region-local ids to link (first = root).
-        local_ids: Vec<RegionLocalObjectId>,
+        local_ids: Vec<ScopedObjectId>,
     },
     /// Unlink objects from their linksets (`ObjectDelink`).
     DelinkObjects {
         /// The region-local ids to unlink.
-        local_ids: Vec<RegionLocalObjectId>,
+        local_ids: Vec<ScopedObjectId>,
     },
     /// Buy one or more in-world objects offered for sale (`ObjectBuy`). The sale
     /// type and price in each [`ObjectBuyItem`] must match what the object
@@ -1266,7 +1266,7 @@ pub enum Command {
     /// (`ObjectDuplicateOnRay`) — the "copy and drop in place" gesture.
     DuplicateObjectsOnRay {
         /// The region-local ids to duplicate.
-        local_ids: Vec<RegionLocalObjectId>,
+        local_ids: Vec<ScopedObjectId>,
         /// The active group the copies are set to ([`Uuid::nil`] for none).
         group_id: Uuid,
         /// The ray's start point (region-local).
@@ -1487,7 +1487,7 @@ pub enum Command {
     /// [`Command::RezAttachment`].
     AttachObject {
         /// The in-world object's region-local id.
-        local_id: RegionLocalObjectId,
+        local_id: ScopedObjectId,
         /// The point to attach the object to.
         attachment_point: AttachmentPoint,
         /// Whether to add the attachment or replace what is on the point.
@@ -1499,14 +1499,14 @@ pub enum Command {
     /// (`ObjectDetach`), marking each item as no longer "(worn)".
     DetachObjects {
         /// The attachments' region-local ids.
-        local_ids: Vec<RegionLocalObjectId>,
+        local_ids: Vec<ScopedObjectId>,
     },
     /// Drop attachments from the avatar onto the ground by their region-local ids
     /// (`ObjectDrop`): they become ordinary in-world objects at the avatar's
     /// location rather than returning to inventory.
     DropAttachments {
         /// The attachments' region-local ids.
-        local_ids: Vec<RegionLocalObjectId>,
+        local_ids: Vec<ScopedObjectId>,
     },
     /// Remove (take off) an attachment by its inventory item id
     /// (`RemoveAttachment`). Unlike [`Command::DetachObjects`] this names the

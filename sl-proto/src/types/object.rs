@@ -9,6 +9,8 @@ use sl_wire::RegionHandle;
 use sl_wire::RegionLocalObjectId;
 use uuid::Uuid;
 
+use crate::scoped_id::{CircuitId, ScopedObjectId};
+
 /// Linden `PCode` constants: the object-class byte (`p_code`) in an object
 /// update, identifying what kind of entity an object is.
 pub mod pcode {
@@ -62,6 +64,12 @@ pub struct Object {
     /// The region-local id (the transient handle the simulator uses; not stable
     /// across region crossings or relogins).
     pub local_id: RegionLocalObjectId,
+    /// The circuit instance this object was learned on, paired with
+    /// [`local_id`](Self::local_id) to form its [`ScopedObjectId`]. Stamped by
+    /// the [`Session`](crate::Session) when the object is cached; the
+    /// default/zero [`CircuitId`] on a freshly decoded object that has not been
+    /// through the cache. Read it via [`scoped_id`](Self::scoped_id).
+    pub circuit: CircuitId,
     /// The object's persistent global id.
     pub full_id: Uuid,
     /// The local id of the parent object this is linked/attached to, or 0 if it
@@ -173,6 +181,25 @@ const fn attachment_point_from_state(state: u8) -> u8 {
 }
 
 impl Object {
+    /// This object's [`ScopedObjectId`] — its region-local id paired with the
+    /// circuit it was learned on. Pass it to the object
+    /// [`Session`](crate::Session) methods (or [`Session::object`](crate::Session::object))
+    /// so the id can only be acted upon against the circuit it belongs to.
+    #[must_use]
+    pub const fn scoped_id(&self) -> ScopedObjectId {
+        ScopedObjectId::new(self.circuit, self.local_id)
+    }
+
+    /// The [`ScopedObjectId`] of this object's parent (the linkset root or the
+    /// avatar it is attached to), scoped to the same circuit. The parent id is
+    /// [`RegionLocalObjectId`]`(0)` (a region-local zero) for a root/unparented
+    /// object — check [`parent_id`](Self::parent_id) against zero first if that
+    /// distinction matters.
+    #[must_use]
+    pub const fn scoped_parent_id(&self) -> ScopedObjectId {
+        ScopedObjectId::new(self.circuit, self.parent_id)
+    }
+
     /// The raw, un-swizzled attachment-point id this object is worn on, or
     /// `None` if it is not an attachment.
     ///
@@ -734,6 +761,7 @@ mod tests {
         super::Object {
             region_handle: RegionHandle(0),
             local_id: RegionLocalObjectId(0),
+            circuit: CircuitId::default(),
             full_id: super::Uuid::nil(),
             parent_id: RegionLocalObjectId(0),
             pcode,

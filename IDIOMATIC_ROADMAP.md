@@ -393,27 +393,47 @@ New newtypes in `sl-proto`/`sl-wire` (derive `Copy,Clone,Debug,Eq,Hash`; mirror
   parcel sentinel, `Display`, the `0` object sentinel); lifecycle +
   `sim_session` round-trip suites updated. NO sl-types touched (client concepts
   in `sl-wire`).
-- [ ] **Circuit-scoped id wrappers for the user-facing API.** A bare
-  `RegionLocalObjectId`/`RegionLocalParcelId` is only meaningful *within one
-  simulator/circuit* — the object cache is partitioned per `SocketAddr`, and a
-  region crossing or relogin invalidates the id. Today the public `Session`
-  methods take the bare region-local id and implicitly resolve it against the
-  *current* circuit, so a caller can hand an id captured in region A to a call
-  that now targets region B and get a silent mismatch the type system can't
-  catch. Add scoped id *structs* (two-field structs pairing the circuit with the
-  id — not newtypes) that carry the circuit identity alongside the id — e.g.
-  `ScopedObjectId { circuit: <circuit key>, id: RegionLocalObjectId }` and
-  `ScopedParcelId { circuit, id: RegionLocalParcelId }` (decide the circuit key:
-  the `SocketAddr` the cache is keyed by, or the `RegionHandle`/a `CircuitId`
-  newtype once that exists — see the bookkeeping-ID item below) — and switch the
-  **user-facing** `Session`/runtime APIs and the `Event`s that hand an id back
-  to the caller to the scoped form, so an id is always paired with the region it
-  belongs to and can't be used against the wrong circuit. The wire codec keeps
-  using the bare `RegionLocalObjectId`/`RegionLocalParcelId` (the scope is a
-  client-side, caller-ergonomics concern, never serialized); wrap into the
-  scoped form when surfacing an id to the caller and unwrap to the bare id (plus
-  the resolved circuit) at the send boundary. Both are client wire-protocol
-  concepts → live in `sl-proto`/`sl-wire`, NOT `sl-types`.
+- [x] **Circuit-scoped id wrappers for the user-facing API.** Added two public
+  scoped-id structs in `sl-proto/src/scoped_id.rs`:
+  `ScopedObjectId { circuit: CircuitId, id: RegionLocalObjectId }` and
+  `ScopedParcelId { circuit, id: RegionLocalParcelId }`, plus a new opaque
+  **`CircuitId(u64)`** that is the chosen circuit key (user-approved over
+  `SocketAddr`/`RegionHandle`). `CircuitId` is a per-establishment **instance
+  token** minted from a monotonic `Session` counter every time a circuit is
+  established (root at login, each child at `EnableSimulator`, a fresh root on a
+  teleport `retarget`); a child promoted to root across a border **keeps** its
+  id (same connection). It is deliberately *not* derived from address/region, so
+  a reconnect to the same address/region mints a *different* `CircuitId` and a
+  stale scoped id fails to resolve — capturing the session/connection scope the
+  user correctly identified (a region-local id is only reliably valid for the
+  lifetime of the one circuit it was learned on). The four per-circuit caches
+  (`objects`/`terrain`/`regions`/`time_dilation`) were **re-keyed from
+  `SocketAddr` to `CircuitId`** (user-approved), so the address-reuse-after-
+  reconnect hazard is structurally impossible. The wire codec still encodes only
+  the bare `RegionLocalObjectId`/`RegionLocalParcelId` (the scope is never
+  serialized). Surfacing: the `Object` struct gained a `circuit: CircuitId`
+  field (stamped at cache `upsert`) + `Object::scoped_id()`/`scoped_parent_id()`
+  accessors; the id-bearing `Event`s now carry the scoped form (`ObjectRemoved`/
+  `GltfMaterialOverride`/`ObjectPhysicsProperties`/`ParcelDwell`/
+  `ParcelAccessList`), and `Event::CircuitEstablished`/`RegionChanged` gained a
+  `circuit: CircuitId` so a caller can track the current circuit. Consuming: the
+  ~44 object/parcel `Session` methods and `Session::object` take the scoped form
+  and resolve it via `circuit_for_scope` (→ `Error::NoCircuit` if not logged in,
+  new `Error::UnknownCircuit` if the circuit is gone/stale; new
+  `Error::MixedCircuits` for a batch slice spanning circuits); the matching
+  `Command` enum fields are scoped too, with the runtimes forwarding verbatim.
+  New `Session::root_circuit_id()` lets a driver build a scoped id from a raw
+  id. Re-exported through `sl-proto`/`sl-client-tokio`/`sl-client-bevy`
+  (parity); the
+  REPL `SessionContext` tracks the current circuit (`$circuitid`, fed from the
+  two circuit events) and `registry.rs` scopes freshly typed ids via
+  `scoped_object`/`scoped_parcel`/`scoped_objects(ctx, …)`; examples use
+  `Object::scoped_id()`. Book `content/world.md` documents the scoping. +5
+  scoped-id unit tests and a focused lifecycle test
+  (`scoped_object_id_is_circuit_bound`: the right circuit resolves and sends, a
+  foreign/stale circuit returns `None` / `Error::UnknownCircuit`); lifecycle +
+  `sim_session` suites updated. NO sl-types touched (client concepts in
+  `sl-proto`/`sl-wire`).
 
 Then internal bookkeeping IDs (lower misuse surface, do last):
 

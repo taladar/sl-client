@@ -22,10 +22,10 @@ mod test {
         MovementMode, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory,
         ParcelDetails, ParcelObjectOwner, ParcelReturnType, Permissions5, PlacesResult,
         PointAtType, Postcard, ProductType, RegionHandle, RegionIdentity, RegionLocalObjectId,
-        RegionLocalParcelId, RestoreItem, RezAttachment, SaleType, ScriptControl,
-        ScriptControlAction, ServerEvent, Session, SimSession, TelehubInfo, Throttle, Transmit,
-        ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
-        parse_event_queue_response,
+        RegionLocalParcelId, RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId,
+        ScriptControl, ScriptControlAction, ServerEvent, Session, SimSession, TelehubInfo,
+        Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -242,9 +242,10 @@ mod test {
         let now = Instant::now();
         let (mut client, mut sim) = setup(now)?;
         drain_server(&mut sim);
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
 
         client.attach_object(
-            RegionLocalObjectId(55),
+            ScopedObjectId::new(circuit, RegionLocalObjectId(55)),
             AttachmentPoint::RightHand,
             AttachmentMode::Add,
             &sl_types::lsl::Rotation {
@@ -286,8 +287,15 @@ mod test {
         let now = Instant::now();
         let (mut client, mut sim) = setup(now)?;
         drain_server(&mut sim);
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
 
-        client.detach_objects(&[RegionLocalObjectId(3), RegionLocalObjectId(4)], now)?;
+        client.detach_objects(
+            &[
+                ScopedObjectId::new(circuit, RegionLocalObjectId(3)),
+                ScopedObjectId::new(circuit, RegionLocalObjectId(4)),
+            ],
+            now,
+        )?;
         pump(&mut client, &mut sim, now)?;
 
         let events = drain_server(&mut sim);
@@ -1099,14 +1107,18 @@ mod test {
         let (mut client, mut sim) = setup(now)?;
         drain_server(&mut sim);
         drain_client(&mut client);
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
 
         // Client -> sim: the G7 parcel command surface.
         client.join_parcels(16.0, 32.0, 48.0, 64.0, now)?;
         client.divide_parcel(1.0, 2.0, 3.0, 4.0, now)?;
-        client.request_parcel_object_owners(RegionLocalParcelId(7), now)?;
-        client.buy_parcel_pass(RegionLocalParcelId(7), now)?;
+        client.request_parcel_object_owners(
+            ScopedParcelId::new(circuit, RegionLocalParcelId(7)),
+            now,
+        )?;
+        client.buy_parcel_pass(ScopedParcelId::new(circuit, RegionLocalParcelId(7)), now)?;
         client.disable_parcel_objects(
-            RegionLocalParcelId(7),
+            ScopedParcelId::new(circuit, RegionLocalParcelId(7)),
             ParcelReturnType::OTHER,
             &[uuid::Uuid::from_u128(0x99)],
             &[uuid::Uuid::from_u128(0xAB)],
@@ -1230,13 +1242,15 @@ mod test {
         let (mut client, mut sim) = setup(now)?;
         drain_server(&mut sim);
         drain_client(&mut client);
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
 
         // Client -> sim: the covenant request and the telehub command surface.
         client.request_estate_covenant(now)?;
         client.request_telehub_info(now)?;
-        client.connect_telehub(RegionLocalObjectId(42), now)?;
+        client.connect_telehub(ScopedObjectId::new(circuit, RegionLocalObjectId(42)), now)?;
         client.disconnect_telehub(now)?;
-        client.add_telehub_spawn_point(RegionLocalObjectId(43), now)?;
+        client
+            .add_telehub_spawn_point(ScopedObjectId::new(circuit, RegionLocalObjectId(43)), now)?;
         client.remove_telehub_spawn_point(2, now)?;
         pump(&mut client, &mut sim, now)?;
 

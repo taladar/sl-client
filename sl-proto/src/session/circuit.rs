@@ -7,6 +7,7 @@ use super::{
     ACK_FLUSH_DELAY, Circuit, INACTIVITY_TIMEOUT, MAX_ACKS_PER_PACKET, MAX_RESEND_ATTEMPTS,
     RESEND_TIMEOUT, SeenWindow, Timers, UnackedPacket, deadline,
 };
+use crate::scoped_id::CircuitId;
 use crate::types::directory::category_to_wire;
 use crate::types::{
     AssetType, AttachmentMode, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction,
@@ -227,8 +228,11 @@ use std::time::Instant;
 use uuid::Uuid;
 
 impl Circuit {
-    /// Creates a circuit and arms the inactivity timer.
+    /// Creates a circuit and arms the inactivity timer. `id` is the freshly
+    /// minted [`CircuitId`] for this circuit instance, used to scope the
+    /// region-local ids of the objects it streams.
     pub(crate) fn new(
+        id: CircuitId,
         sim_addr: SocketAddr,
         agent_id: Uuid,
         session_id: Uuid,
@@ -237,6 +241,7 @@ impl Circuit {
         now: Instant,
     ) -> Self {
         Self {
+            id,
             sim_addr,
             agent_id,
             session_id,

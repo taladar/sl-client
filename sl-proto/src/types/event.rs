@@ -38,8 +38,9 @@ use sl_wire::ResourceSummary;
 use sl_wire::SelectedResourceCost;
 use sl_wire::SimulatorFeatures;
 use sl_wire::VoiceAccountInfo;
-use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
 use uuid::Uuid;
+
+use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 
 /// A high-level event surfaced to the driver/application.
 #[derive(Debug, Clone, PartialEq)]
@@ -49,6 +50,10 @@ pub enum Event {
     CircuitEstablished {
         /// The simulator's UDP address.
         sim: SocketAddr,
+        /// The new root circuit's instance identity. Pair it with a region-local
+        /// id to build a [`ScopedObjectId`] / [`ScopedParcelId`] for this region
+        /// (and track it as the current circuit for later scoped commands).
+        circuit: CircuitId,
     },
     /// The region handshake completed; the session is now fully active.
     RegionHandshakeComplete,
@@ -115,8 +120,8 @@ pub enum Event {
     /// A parcel's dwell (traffic) value, from a `ParcelDwellReply` in response to
     /// [`Session::request_parcel_dwell`](crate::Session::request_parcel_dwell).
     ParcelDwell {
-        /// The parcel's region-local id.
-        local_id: RegionLocalParcelId,
+        /// The parcel's region-local id, scoped to the circuit it belongs to.
+        local_id: ScopedParcelId,
         /// The parcel's persistent id.
         parcel_id: Uuid,
         /// The dwell (accumulated traffic) value.
@@ -126,8 +131,8 @@ pub enum Event {
     /// response to
     /// [`Session::request_parcel_access_list`](crate::Session::request_parcel_access_list).
     ParcelAccessList {
-        /// The parcel's region-local id.
-        local_id: RegionLocalParcelId,
+        /// The parcel's region-local id, scoped to the circuit it belongs to.
+        local_id: ScopedParcelId,
         /// Which list this is (allow or ban).
         scope: ParcelAccessScope,
         /// The list entries.
@@ -179,8 +184,8 @@ pub enum Event {
     ObjectPhysicsData(Vec<(Uuid, ObjectPhysicsData)>),
     /// Updated physics-material parameters pushed unsolicited over the event
     /// queue (`ObjectPhysicsProperties`), sent when a prim's physics material
-    /// changes. One entry per object, keyed by region-local id.
-    ObjectPhysicsProperties(Vec<(RegionLocalObjectId, ObjectPhysicsData)>),
+    /// changes. One entry per object, keyed by its scoped region-local id.
+    ObjectPhysicsProperties(Vec<(ScopedObjectId, ObjectPhysicsData)>),
     /// The agent's attachment resource report, from an `AttachmentResources`
     /// capability reply to
     /// [`Command::RequestAttachmentResources`](crate::Command::RequestAttachmentResources):
@@ -318,6 +323,11 @@ pub enum Event {
         region_handle: RegionHandle,
         /// The destination simulator's UDP address.
         sim: SocketAddr,
+        /// The new root circuit's instance identity (a child promoted across the
+        /// border keeps its id; a teleport handover with no pre-opened child
+        /// mints a fresh one). Track it as the current circuit for later scoped
+        /// object/parcel commands.
+        circuit: CircuitId,
     },
     /// Local chat was received (`ChatFromSimulator`): a nearby agent or object
     /// spoke, or the region/system sent a message. Sent in response to nearby
@@ -829,8 +839,8 @@ pub enum Event {
     ObjectRemoved {
         /// The region the object was in (0 if it was never fully cached).
         region_handle: RegionHandle,
-        /// The object's region-local id.
-        local_id: RegionLocalObjectId,
+        /// The object's region-local id, scoped to the circuit it belonged to.
+        local_id: ScopedObjectId,
     },
     /// An object's extended properties (`ObjectProperties`), in response to
     /// [`Session::request_object_properties`](crate::Session::request_object_properties)
@@ -895,8 +905,8 @@ pub enum Event {
         /// The region the override applies in (the source simulator's handle, or
         /// `0` if not yet known).
         region_handle: RegionHandle,
-        /// The region-local id of the overridden object.
-        local_id: RegionLocalObjectId,
+        /// The scoped region-local id of the overridden object.
+        local_id: ScopedObjectId,
         /// The face indices carrying an override, in order.
         faces: Vec<u8>,
         /// The raw per-face override LLSD (notation-encoded), one per face in

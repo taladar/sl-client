@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use sl_proto::{Event, RegionHandle, Uuid};
+use sl_proto::{CircuitId, Event, RegionHandle, Uuid};
 
 /// Resolves the `$placeholder` argument tokens a REPL line may use, and the
 /// reverse mapping from a literal back to the placeholder that stands for it.
@@ -43,6 +43,15 @@ pub trait ReplContext {
     ///
     /// The default implementation symbolizes nothing.
     fn symbolize(&self, _literal: &str) -> Option<String> {
+        None
+    }
+
+    /// The current root circuit's [`CircuitId`], if one is established, used to
+    /// scope a freshly typed region-local object/parcel id into the
+    /// [`ScopedObjectId`](sl_proto::ScopedObjectId) /
+    /// [`ScopedParcelId`](sl_proto::ScopedParcelId) the object/parcel commands
+    /// now take. `None` (the default) when no circuit is known yet.
+    fn current_circuit_id(&self) -> Option<CircuitId> {
         None
     }
 }
@@ -85,6 +94,11 @@ pub struct SessionContext {
     session_id: Option<Uuid>,
     /// The circuit code (`$circuit`), once login has completed.
     circuit_code: Option<u32>,
+    /// The current root circuit's instance id (`$circuitid`), tracked from the
+    /// [`Event::CircuitEstablished`] / [`Event::RegionChanged`] stream. Used to
+    /// scope freshly typed region-local object/parcel ids into the scoped form
+    /// the commands take.
+    circuit_id: Option<CircuitId>,
     /// The current region's handle (`$region`).
     region_handle: Option<RegionHandle>,
     /// The current region's name (tracked for symbolizing, not a placeholder).
@@ -176,8 +190,16 @@ impl SessionContext {
     /// other event is ignored. A changed binding logs an `info!` binding line.
     pub fn apply_event(&mut self, event: &Event) {
         match event {
-            Event::RegionChanged { region_handle, .. } => {
+            Event::CircuitEstablished { circuit, .. } => {
+                bind(&mut self.circuit_id, *circuit, "circuitid");
+            }
+            Event::RegionChanged {
+                region_handle,
+                circuit,
+                ..
+            } => {
                 bind(&mut self.region_handle, *region_handle, "region");
+                bind(&mut self.circuit_id, *circuit, "circuitid");
             }
             Event::RegionInfoHandshake(identity) => {
                 if self.region_name.as_deref() != Some(identity.sim_name.as_str()) {
@@ -207,11 +229,16 @@ impl ReplContext for SessionContext {
             "self" => self.agent_id.map(|id| id.to_string()),
             "session" => self.session_id.map(|id| id.to_string()),
             "circuit" => self.circuit_code.map(|code| code.to_string()),
+            "circuitid" => self.circuit_id.map(|id| id.get().to_string()),
             "region" => self.region_handle.map(|handle| handle.to_string()),
             "parcel" => self.parcel_local_id.map(|local| local.to_string()),
             "lastobj" => self.last_object.map(|id| id.to_string()),
             other => self.vars.get(other).cloned(),
         }
+    }
+
+    fn current_circuit_id(&self) -> Option<CircuitId> {
+        self.circuit_id
     }
 
     fn symbolize(&self, literal: &str) -> Option<String> {
@@ -236,6 +263,9 @@ impl ReplContext for SessionContext {
         }
         if self.circuit_code.map(|code| code.to_string()).as_deref() == Some(literal) {
             return Some("$circuit".to_owned());
+        }
+        if self.circuit_id.map(|id| id.get().to_string()).as_deref() == Some(literal) {
+            return Some("$circuitid".to_owned());
         }
         if self
             .parcel_local_id
