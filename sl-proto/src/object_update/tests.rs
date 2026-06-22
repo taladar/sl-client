@@ -2,7 +2,7 @@
 
 use pretty_assertions::assert_eq;
 use sl_types::lsl::Vector;
-use sl_wire::{RegionHandle, Writer};
+use sl_wire::{RegionHandle, RegionLocalObjectId, Writer};
 use uuid::Uuid;
 
 use super::{
@@ -92,7 +92,7 @@ fn terse_update_round_trips_byte_for_byte() -> Result<(), TestError> {
     assert_eq!(blob.len(), 44);
 
     let update = terse_update(&blob).ok_or("a 44-byte terse blob decodes")?;
-    assert_eq!(update.local_id, 987_654);
+    assert_eq!(update.local_id, RegionLocalObjectId(987_654));
     assert_eq!(update.state, 3);
     assert!(update.motion.collision_plane.is_none());
     let reencoded = encode_terse_object_data(&update);
@@ -201,8 +201,8 @@ fn compressed_object_round_trips() -> Result<(), TestError> {
     let blob = rich_compressed_blob();
     let object = compressed_object(&blob, RegionHandle(42), 0x55).ok_or("the blob decodes")?;
     // Spot-check a few decoded fields.
-    assert_eq!(object.local_id, 424_242);
-    assert_eq!(object.parent_id, 7);
+    assert_eq!(object.local_id, RegionLocalObjectId(424_242));
+    assert_eq!(object.parent_id, RegionLocalObjectId(7));
     assert_eq!(object.text, "hello");
     assert_eq!(object.media_url, "http://example.com/m");
     assert_eq!(object.data, vec![0xAB, 0xCD]);

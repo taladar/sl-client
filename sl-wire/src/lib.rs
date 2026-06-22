@@ -23,6 +23,7 @@ mod parcel_flags;
 mod permissions;
 mod reflection_probe_flags;
 mod region_handle;
+mod region_local_id;
 mod remote_parcel;
 mod resource_report;
 mod sim_features;
@@ -112,6 +113,7 @@ pub use parcel_flags::{ParcelFlags, RegionFlags, sim_access};
 pub use permissions::{Permissions, Permissions5};
 pub use reflection_probe_flags::ReflectionProbeFlags;
 pub use region_handle::{RegionHandle, RegionHandleError};
+pub use region_local_id::{RegionLocalObjectId, RegionLocalParcelId};
 pub use remote_parcel::{
     RemoteParcelRequest, build_remote_parcel_request, build_remote_parcel_response,
     parse_remote_parcel_reply, parse_remote_parcel_request,

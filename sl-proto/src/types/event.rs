@@ -38,6 +38,7 @@ use sl_wire::ResourceSummary;
 use sl_wire::SelectedResourceCost;
 use sl_wire::SimulatorFeatures;
 use sl_wire::VoiceAccountInfo;
+use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
 use uuid::Uuid;
 
 /// A high-level event surfaced to the driver/application.
@@ -115,7 +116,7 @@ pub enum Event {
     /// [`Session::request_parcel_dwell`](crate::Session::request_parcel_dwell).
     ParcelDwell {
         /// The parcel's region-local id.
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         /// The parcel's persistent id.
         parcel_id: Uuid,
         /// The dwell (accumulated traffic) value.
@@ -126,7 +127,7 @@ pub enum Event {
     /// [`Session::request_parcel_access_list`](crate::Session::request_parcel_access_list).
     ParcelAccessList {
         /// The parcel's region-local id.
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         /// Which list this is (allow or ban).
         scope: ParcelAccessScope,
         /// The list entries.
@@ -179,7 +180,7 @@ pub enum Event {
     /// Updated physics-material parameters pushed unsolicited over the event
     /// queue (`ObjectPhysicsProperties`), sent when a prim's physics material
     /// changes. One entry per object, keyed by region-local id.
-    ObjectPhysicsProperties(Vec<(u32, ObjectPhysicsData)>),
+    ObjectPhysicsProperties(Vec<(RegionLocalObjectId, ObjectPhysicsData)>),
     /// The agent's attachment resource report, from an `AttachmentResources`
     /// capability reply to
     /// [`Command::RequestAttachmentResources`](crate::Command::RequestAttachmentResources):
@@ -829,7 +830,7 @@ pub enum Event {
         /// The region the object was in (0 if it was never fully cached).
         region_handle: RegionHandle,
         /// The object's region-local id.
-        local_id: u32,
+        local_id: RegionLocalObjectId,
     },
     /// An object's extended properties (`ObjectProperties`), in response to
     /// [`Session::request_object_properties`](crate::Session::request_object_properties)
@@ -895,7 +896,7 @@ pub enum Event {
         /// `0` if not yet known).
         region_handle: RegionHandle,
         /// The region-local id of the overridden object.
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         /// The face indices carrying an override, in order.
         faces: Vec<u8>,
         /// The raw per-face override LLSD (notation-encoded), one per face in

@@ -62,13 +62,14 @@ use sl_types::money::LindenAmount;
 use sl_wire::{
     AbuseReport, AnyMessage, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd, MessageId,
     ObjectMediaResponse, PacketFlags, ParcelVoiceInfo, Permissions, Permissions5, Reader,
-    RegionHandle, VoiceAccountInfo, build_group_notice_bucket, build_login_request, message_name,
-    parse_agent_preferences, parse_attachment_resources, parse_datagram, parse_display_names,
-    parse_experience_ids, parse_experience_infos, parse_experience_permissions,
-    parse_get_object_cost, parse_get_object_physics_data, parse_gltf_material_override,
-    parse_land_resource_detail, parse_land_resource_summary, parse_land_resources_reply,
-    parse_object_physics_properties, parse_region_experiences, parse_remote_parcel_reply,
-    parse_resource_cost_selected, parse_simulator_features, zero_decode,
+    RegionHandle, RegionLocalObjectId, RegionLocalParcelId, VoiceAccountInfo,
+    build_group_notice_bucket, build_login_request, message_name, parse_agent_preferences,
+    parse_attachment_resources, parse_datagram, parse_display_names, parse_experience_ids,
+    parse_experience_infos, parse_experience_permissions, parse_get_object_cost,
+    parse_get_object_physics_data, parse_gltf_material_override, parse_land_resource_detail,
+    parse_land_resource_summary, parse_land_resources_reply, parse_object_physics_properties,
+    parse_region_experiences, parse_remote_parcel_reply, parse_resource_cost_selected,
+    parse_simulator_features, zero_decode,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -1046,15 +1047,15 @@ impl Session {
                 // not already held with a matching CRC is a miss; fetch the full
                 // update for the misses (a full `ObjectUpdate` follows).
                 let cached = self.objects.get(&from);
-                let misses: Vec<u32> = update
+                let misses: Vec<RegionLocalObjectId> = update
                     .object_data
                     .iter()
                     .filter(|block| {
                         cached
-                            .and_then(|sim| sim.get(&block.id))
+                            .and_then(|sim| sim.get(&RegionLocalObjectId(block.id)))
                             .is_none_or(|object| object.crc != block.crc)
                     })
-                    .map(|block| block.id)
+                    .map(|block| RegionLocalObjectId(block.id))
                     .collect();
                 self.request_object_ids(from, &misses, now);
             }
@@ -1085,11 +1086,11 @@ impl Session {
                     let region_handle = self
                         .objects
                         .get_mut(&from)
-                        .and_then(|sim| sim.remove(&block.id))
+                        .and_then(|sim| sim.remove(&RegionLocalObjectId(block.id)))
                         .map_or(RegionHandle(0), |object| object.region_handle);
                     self.events.push_back(Event::ObjectRemoved {
                         region_handle,
-                        local_id: block.id,
+                        local_id: RegionLocalObjectId(block.id),
                     });
                 }
             }
@@ -1227,7 +1228,12 @@ impl Session {
     /// on the circuit at `from` (root or child). Best-effort: a missing circuit or
     /// encode failure is ignored (these are speculative fetches driven by the
     /// simulator's stream).
-    fn request_object_ids(&mut self, from: SocketAddr, local_ids: &[u32], now: Instant) {
+    fn request_object_ids(
+        &mut self,
+        from: SocketAddr,
+        local_ids: &[RegionLocalObjectId],
+        now: Instant,
+    ) {
         if local_ids.is_empty() {
             return;
         }
@@ -1361,14 +1367,14 @@ impl Session {
             }
             AnyMessage::ParcelDwellReply(reply) => {
                 self.events.push_back(Event::ParcelDwell {
-                    local_id: reply.data.local_id,
+                    local_id: RegionLocalParcelId(reply.data.local_id),
                     parcel_id: reply.data.parcel_id,
                     dwell: reply.data.dwell,
                 });
             }
             AnyMessage::ParcelAccessListReply(reply) => {
                 self.events.push_back(Event::ParcelAccessList {
-                    local_id: reply.data.local_id,
+                    local_id: RegionLocalParcelId(reply.data.local_id),
                     scope: ParcelAccessScope::from_u32(reply.data.flags),
                     entries: reply
                         .list
@@ -1404,7 +1410,7 @@ impl Session {
                         .report_data
                         .iter()
                         .map(|item| LandStatItem {
-                            task_local_id: item.task_local_id,
+                            task_local_id: RegionLocalObjectId(item.task_local_id),
                             task_id: item.task_id,
                             location: [item.location_x, item.location_y, item.location_z],
                             score: item.score,
@@ -4806,7 +4812,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn attach_object(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         attachment_point: AttachmentPoint,
         mode: AttachmentMode,
         rotation: &Rotation,
@@ -4823,7 +4829,11 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn detach_objects(&mut self, local_ids: &[u32], now: Instant) -> Result<(), Error> {
+    pub fn detach_objects(
+        &mut self,
+        local_ids: &[RegionLocalObjectId],
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_object_detach(local_ids, now)?;
         Ok(())
@@ -4836,7 +4846,11 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn drop_attachments(&mut self, local_ids: &[u32], now: Instant) -> Result<(), Error> {
+    pub fn drop_attachments(
+        &mut self,
+        local_ids: &[RegionLocalObjectId],
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_object_drop(local_ids, now)?;
         Ok(())
@@ -5278,7 +5292,7 @@ impl Session {
     )]
     pub fn duplicate_objects_on_ray(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         group_id: Uuid,
         ray_start: Vector,
         ray_end: Vector,
@@ -6135,7 +6149,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_parcel_access_list(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         scope: ParcelAccessScope,
         now: Instant,
     ) -> Result<(), Error> {
@@ -6154,7 +6168,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn update_parcel_access_list(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         scope: ParcelAccessScope,
         entries: &[ParcelAccessEntry],
         now: Instant,
@@ -6172,7 +6186,11 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn request_parcel_dwell(&mut self, local_id: i32, now: Instant) -> Result<(), Error> {
+    pub fn request_parcel_dwell(
+        &mut self,
+        local_id: RegionLocalParcelId,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_parcel_dwell_request(local_id, now)?;
         Ok(())
@@ -6188,7 +6206,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn buy_parcel(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         price: i32,
         area: i32,
         group_id: Uuid,
@@ -6212,7 +6230,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn return_parcel_objects(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         return_type: ParcelReturnType,
         owner_ids: &[Uuid],
         task_ids: &[Uuid],
@@ -6233,7 +6251,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn select_parcel_objects(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         return_type: ParcelReturnType,
         object_ids: &[Uuid],
         now: Instant,
@@ -6252,7 +6270,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn deed_parcel_to_group(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         group_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
@@ -6268,7 +6286,11 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn reclaim_parcel(&mut self, local_id: i32, now: Instant) -> Result<(), Error> {
+    pub fn reclaim_parcel(
+        &mut self,
+        local_id: RegionLocalParcelId,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_parcel_reclaim(local_id, now)?;
         Ok(())
@@ -6281,7 +6303,11 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn release_parcel(&mut self, local_id: i32, now: Instant) -> Result<(), Error> {
+    pub fn release_parcel(
+        &mut self,
+        local_id: RegionLocalParcelId,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_parcel_release(local_id, now)?;
         Ok(())
@@ -6338,7 +6364,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_parcel_object_owners(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -6353,7 +6379,11 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn buy_parcel_pass(&mut self, local_id: i32, now: Instant) -> Result<(), Error> {
+    pub fn buy_parcel_pass(
+        &mut self,
+        local_id: RegionLocalParcelId,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_parcel_buy_pass(local_id, now)?;
         Ok(())
@@ -6370,7 +6400,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn disable_parcel_objects(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         return_type: ParcelReturnType,
         owner_ids: &[Uuid],
         task_ids: &[Uuid],
@@ -6413,7 +6443,7 @@ impl Session {
         report_type: LandStatReportType,
         request_flags: u32,
         filter: &str,
-        parcel_local_id: i32,
+        parcel_local_id: RegionLocalParcelId,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -6607,7 +6637,11 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn connect_telehub(&mut self, object_local_id: u32, now: Instant) -> Result<(), Error> {
+    pub fn connect_telehub(
+        &mut self,
+        object_local_id: RegionLocalObjectId,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         let params = ["connect".to_owned(), object_local_id.to_string()];
         circuit.send_estate_owner_message("telehub", &params, now)?;
@@ -6639,7 +6673,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn add_telehub_spawn_point(
         &mut self,
-        object_local_id: u32,
+        object_local_id: RegionLocalObjectId,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -6829,7 +6863,7 @@ impl Session {
     /// [`Session::objects_in_region`] to reach neighbour-region objects, whose
     /// local ids share the same numeric space.
     #[must_use]
-    pub fn object(&self, local_id: u32) -> Option<&Object> {
+    pub fn object(&self, local_id: RegionLocalObjectId) -> Option<&Object> {
         let root = self.circuit.as_ref().map(|circuit| circuit.sim_addr)?;
         self.objects.get(&root)?.get(&local_id)
     }
@@ -6876,7 +6910,11 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn request_objects(&mut self, local_ids: &[u32], now: Instant) -> Result<(), Error> {
+    pub fn request_objects(
+        &mut self,
+        local_ids: &[RegionLocalObjectId],
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_request_multiple_objects(local_ids, now)?;
         Ok(())
@@ -6893,7 +6931,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_object_properties(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -6908,7 +6946,11 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn deselect_objects(&mut self, local_ids: &[u32], now: Instant) -> Result<(), Error> {
+    pub fn deselect_objects(
+        &mut self,
+        local_ids: &[RegionLocalObjectId],
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_object_deselect(local_ids, now)?;
         Ok(())
@@ -6932,7 +6974,11 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if a request fails to encode.
-    pub fn touch_object(&mut self, local_id: u32, now: Instant) -> Result<(), Error> {
+    pub fn touch_object(
+        &mut self,
+        local_id: RegionLocalObjectId,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_object_grab(local_id, ZERO_VECTOR, now)?;
         circuit.send_object_degrab(local_id, now)?;
@@ -6950,7 +6996,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn grab_object(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         grab_offset: Vector,
         now: Instant,
     ) -> Result<(), Error> {
@@ -6993,7 +7039,11 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn degrab_object(&mut self, local_id: u32, now: Instant) -> Result<(), Error> {
+    pub fn degrab_object(
+        &mut self,
+        local_id: RegionLocalObjectId,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_object_degrab(local_id, now)?;
         Ok(())
@@ -7028,7 +7078,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn duplicate_objects(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         offset: Vector,
         group_id: Uuid,
         now: Instant,
@@ -7051,7 +7101,11 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn delete_objects(&mut self, local_ids: &[u32], now: Instant) -> Result<(), Error> {
+    pub fn delete_objects(
+        &mut self,
+        local_ids: &[RegionLocalObjectId],
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_object_delete(local_ids, now)?;
         Ok(())
@@ -7069,7 +7123,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn derez_objects(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         destination: DeRezDestination,
         destination_id: Uuid,
         transaction_id: Uuid,
@@ -7099,7 +7153,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn update_object(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         transform: &ObjectTransform,
         now: Instant,
     ) -> Result<(), Error> {
@@ -7117,7 +7171,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_position(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         position: Vector,
         group: bool,
         now: Instant,
@@ -7142,7 +7196,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_rotation(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         rotation: Rotation,
         group: bool,
         now: Instant,
@@ -7168,7 +7222,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_scale(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         scale: Vector,
         group: bool,
         uniform: bool,
@@ -7194,7 +7248,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_name(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         name: &str,
         now: Instant,
     ) -> Result<(), Error> {
@@ -7211,7 +7265,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_description(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         description: &str,
         now: Instant,
     ) -> Result<(), Error> {
@@ -7229,7 +7283,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_click_action(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         action: ClickAction,
         now: Instant,
     ) -> Result<(), Error> {
@@ -7246,7 +7300,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_material(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         material: Material,
         now: Instant,
     ) -> Result<(), Error> {
@@ -7264,7 +7318,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_flags(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         flags: &ObjectFlagSettings,
         now: Instant,
     ) -> Result<(), Error> {
@@ -7281,7 +7335,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_group(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         group_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
@@ -7301,7 +7355,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_permissions(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         field: PermissionField,
         set: bool,
         mask: u32,
@@ -7322,7 +7376,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_for_sale(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         sale_type: SaleType,
         sale_price: i32,
         now: Instant,
@@ -7341,7 +7395,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_category(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         category: u32,
         now: Instant,
     ) -> Result<(), Error> {
@@ -7359,7 +7413,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_object_include_in_search(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         include: bool,
         now: Instant,
     ) -> Result<(), Error> {
@@ -7375,7 +7429,11 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn link_objects(&mut self, local_ids: &[u32], now: Instant) -> Result<(), Error> {
+    pub fn link_objects(
+        &mut self,
+        local_ids: &[RegionLocalObjectId],
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_object_link(local_ids, now)?;
         Ok(())
@@ -7387,7 +7445,11 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn delink_objects(&mut self, local_ids: &[u32], now: Instant) -> Result<(), Error> {
+    pub fn delink_objects(
+        &mut self,
+        local_ids: &[RegionLocalObjectId],
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_object_delink(local_ids, now)?;
         Ok(())

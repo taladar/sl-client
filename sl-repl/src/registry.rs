@@ -29,9 +29,9 @@ use sl_proto::{
     ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
     ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, Permissions, Permissions5,
     PickUpdate, PointAtType, Postcard, PrimShape, ProfileUpdate, RegionHandle, RegionInfoUpdate,
-    RestoreItem, RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable,
-    WearableType,
+    RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment, Rotation, SaleType,
+    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -987,7 +987,7 @@ fn build_inventory_item(args: &Args, ctx: &dyn ReplContext) -> Result<InventoryI
 /// Build a [`ParcelUpdate`] from keyword fields (`local_id` required).
 fn build_parcel_update(args: &Args, ctx: &dyn ReplContext) -> Result<ParcelUpdate, ReplError> {
     Ok(ParcelUpdate {
-        local_id: args.req_parse(ctx, "local_id", 0, "i32")?,
+        local_id: RegionLocalParcelId(args.req_parse(ctx, "local_id", 0, "i32")?),
         parcel_flags: ParcelFlags::from_bits(args.parse_or(ctx, "parcel_flags", 1, "u32", 0)?),
         sale_price: args.parse_or(ctx, "sale_price", 2, "i32", 0)?,
         name: args.str_or(ctx, "name", 3, "")?,
@@ -1129,7 +1129,11 @@ fn build_voice_request(
         voice_server_type: args.opt_str(ctx, "voice_server_type", 0)?,
         channel_type: args.opt_str(ctx, "channel_type", 1)?,
         parcel_local_id: match args.opt_str(ctx, "parcel_local_id", 2)? {
-            Some(value) => Some(args::literal::<i32>("parcel_local_id", &value, "i32")?),
+            Some(value) => Some(RegionLocalParcelId(args::literal::<i32>(
+                "parcel_local_id",
+                &value,
+                "i32",
+            )?)),
             None => None,
         },
         jsep_offer_sdp: args.opt_str(ctx, "jsep_offer_sdp", 3)?,
@@ -2213,7 +2217,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> <access|ban>",
             build: |args, ctx| {
                 Ok(Command::RequestParcelAccessList {
-                    local_id: args.req_parse(ctx, "local_id", 0, "i32")?,
+                    local_id: RegionLocalParcelId(args.req_parse(ctx, "local_id", 0, "i32")?),
                     scope: enum_arg(args, ctx, "scope", 1, parse_parcel_access_scope)?,
                 })
             },
@@ -2237,7 +2241,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     });
                 }
                 Ok(Command::UpdateParcelAccessList {
-                    local_id: args.req_parse(ctx, "local_id", 0, "i32")?,
+                    local_id: RegionLocalParcelId(args.req_parse(ctx, "local_id", 0, "i32")?),
                     scope: enum_arg(args, ctx, "scope", 1, parse_parcel_access_scope)?,
                     entries,
                 })
@@ -2248,7 +2252,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id>",
             build: |args, ctx| {
                 Ok(Command::RequestParcelDwell {
-                    local_id: args.req_parse(ctx, "local_id", 0, "i32")?,
+                    local_id: RegionLocalParcelId(args.req_parse(ctx, "local_id", 0, "i32")?),
                 })
             },
         },
@@ -2257,7 +2261,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> <price> <area> [group_id] [is_group_owned]",
             build: |args, ctx| {
                 Ok(Command::BuyParcel {
-                    local_id: args.req_parse(ctx, "local_id", 0, "i32")?,
+                    local_id: RegionLocalParcelId(args.req_parse(ctx, "local_id", 0, "i32")?),
                     price: args.req_parse(ctx, "price", 1, "i32")?,
                     area: args.req_parse(ctx, "area", 2, "i32")?,
                     group_id: args.uuid_or_nil(ctx, "group_id", 3)?,
@@ -2270,7 +2274,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> <return_type-u32> [owner_ids=] [task_ids=]",
             build: |args, ctx| {
                 Ok(Command::ReturnParcelObjects {
-                    local_id: args.req_parse(ctx, "local_id", 0, "i32")?,
+                    local_id: RegionLocalParcelId(args.req_parse(ctx, "local_id", 0, "i32")?),
                     return_type: ParcelReturnType(args.req_parse(ctx, "return_type", 1, "u32")?),
                     owner_ids: args.vec_uuid(ctx, "owner_ids", 2)?,
                     task_ids: args.vec_uuid(ctx, "task_ids", 3)?,
@@ -2282,7 +2286,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> <return_type-u32> [object_ids=]",
             build: |args, ctx| {
                 Ok(Command::SelectParcelObjects {
-                    local_id: args.req_parse(ctx, "local_id", 0, "i32")?,
+                    local_id: RegionLocalParcelId(args.req_parse(ctx, "local_id", 0, "i32")?),
                     return_type: ParcelReturnType(args.req_parse(ctx, "return_type", 1, "u32")?),
                     object_ids: args.vec_uuid(ctx, "object_ids", 2)?,
                 })
@@ -2293,7 +2297,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> <group_id>",
             build: |args, ctx| {
                 Ok(Command::DeedParcelToGroup {
-                    local_id: args.req_parse(ctx, "local_id", 0, "i32")?,
+                    local_id: RegionLocalParcelId(args.req_parse(ctx, "local_id", 0, "i32")?),
                     group_id: args.req_uuid(ctx, "group_id", 1)?,
                 })
             },
@@ -2303,7 +2307,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id>",
             build: |args, ctx| {
                 Ok(Command::ReclaimParcel {
-                    local_id: args.req_parse(ctx, "local_id", 0, "i32")?,
+                    local_id: RegionLocalParcelId(args.req_parse(ctx, "local_id", 0, "i32")?),
                 })
             },
         },
@@ -2312,7 +2316,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id>",
             build: |args, ctx| {
                 Ok(Command::ReleaseParcel {
-                    local_id: args.req_parse(ctx, "local_id", 0, "i32")?,
+                    local_id: RegionLocalParcelId(args.req_parse(ctx, "local_id", 0, "i32")?),
                 })
             },
         },
@@ -2345,7 +2349,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id>",
             build: |args, ctx| {
                 Ok(Command::RequestParcelObjectOwners {
-                    local_id: args.req_parse(ctx, "local_id", 0, "i32")?,
+                    local_id: RegionLocalParcelId(args.req_parse(ctx, "local_id", 0, "i32")?),
                 })
             },
         },
@@ -2354,7 +2358,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id>",
             build: |args, ctx| {
                 Ok(Command::BuyParcelPass {
-                    local_id: args.req_parse(ctx, "local_id", 0, "i32")?,
+                    local_id: RegionLocalParcelId(args.req_parse(ctx, "local_id", 0, "i32")?),
                 })
             },
         },
@@ -2363,7 +2367,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> <return_type-u32> [owner_ids=] [task_ids=]",
             build: |args, ctx| {
                 Ok(Command::DisableParcelObjects {
-                    local_id: args.req_parse(ctx, "local_id", 0, "i32")?,
+                    local_id: RegionLocalParcelId(args.req_parse(ctx, "local_id", 0, "i32")?),
                     return_type: ParcelReturnType(args.req_parse(ctx, "return_type", 1, "u32")?),
                     owner_ids: args.vec_uuid(ctx, "owner_ids", 2)?,
                     task_ids: args.vec_uuid(ctx, "task_ids", 3)?,
@@ -2474,7 +2478,13 @@ fn all_specs() -> Vec<CommandSpec> {
                     )?,
                     request_flags: args.parse_or(ctx, "request_flags", 1, "u32", 0_u32)?,
                     filter: args.opt_str(ctx, "filter", 2)?.unwrap_or_default(),
-                    parcel_local_id: args.parse_or(ctx, "parcel_local_id", 3, "i32", 0_i32)?,
+                    parcel_local_id: RegionLocalParcelId(args.parse_or(
+                        ctx,
+                        "parcel_local_id",
+                        3,
+                        "i32",
+                        0_i32,
+                    )?),
                 })
             },
         },
@@ -2554,7 +2564,12 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_local_id>",
             build: |args, ctx| {
                 Ok(Command::ConnectTelehub {
-                    object_local_id: args.req_parse(ctx, "object_local_id", 0, "u32")?,
+                    object_local_id: RegionLocalObjectId(args.req_parse(
+                        ctx,
+                        "object_local_id",
+                        0,
+                        "u32",
+                    )?),
                 })
             },
         },
@@ -2568,7 +2583,12 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_local_id>",
             build: |args, ctx| {
                 Ok(Command::AddTelehubSpawnPoint {
-                    object_local_id: args.req_parse(ctx, "object_local_id", 0, "u32")?,
+                    object_local_id: RegionLocalObjectId(args.req_parse(
+                        ctx,
+                        "object_local_id",
+                        0,
+                        "u32",
+                    )?),
                 })
             },
         },
@@ -2724,7 +2744,11 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id,local_id,…>",
             build: |args, ctx| {
                 Ok(Command::RequestObjects {
-                    local_ids: args.vec_parse(ctx, "local_ids", 0, "u32")?,
+                    local_ids: args
+                        .vec_parse::<u32>(ctx, "local_ids", 0, "u32")?
+                        .into_iter()
+                        .map(RegionLocalObjectId)
+                        .collect(),
                 })
             },
         },
@@ -2733,7 +2757,11 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id,local_id,…>",
             build: |args, ctx| {
                 Ok(Command::RequestObjectProperties {
-                    local_ids: args.vec_parse(ctx, "local_ids", 0, "u32")?,
+                    local_ids: args
+                        .vec_parse::<u32>(ctx, "local_ids", 0, "u32")?
+                        .into_iter()
+                        .map(RegionLocalObjectId)
+                        .collect(),
                 })
             },
         },
@@ -2742,7 +2770,11 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id,local_id,…>",
             build: |args, ctx| {
                 Ok(Command::DeselectObjects {
-                    local_ids: args.vec_parse(ctx, "local_ids", 0, "u32")?,
+                    local_ids: args
+                        .vec_parse::<u32>(ctx, "local_ids", 0, "u32")?
+                        .into_iter()
+                        .map(RegionLocalObjectId)
+                        .collect(),
                 })
             },
         },
@@ -2751,7 +2783,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id>",
             build: |args, ctx| {
                 Ok(Command::TouchObject {
-                    local_id: args.req_parse(ctx, "local_id", 0, "u32")?,
+                    local_id: RegionLocalObjectId(args.req_parse(ctx, "local_id", 0, "u32")?),
                 })
             },
         },
@@ -2760,7 +2792,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> <grab_offset-vec>",
             build: |args, ctx| {
                 Ok(Command::GrabObject {
-                    local_id: args.req_parse(ctx, "local_id", 0, "u32")?,
+                    local_id: RegionLocalObjectId(args.req_parse(ctx, "local_id", 0, "u32")?),
                     grab_offset: args.req_vector(ctx, "grab_offset", 1)?,
                 })
             },
@@ -2782,7 +2814,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id>",
             build: |args, ctx| {
                 Ok(Command::DegrabObject {
-                    local_id: args.req_parse(ctx, "local_id", 0, "u32")?,
+                    local_id: RegionLocalObjectId(args.req_parse(ctx, "local_id", 0, "u32")?),
                 })
             },
         },
@@ -2801,7 +2833,11 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id,…> <offset-vec> [group_id]",
             build: |args, ctx| {
                 Ok(Command::DuplicateObjects {
-                    local_ids: args.vec_parse(ctx, "local_ids", 0, "u32")?,
+                    local_ids: args
+                        .vec_parse::<u32>(ctx, "local_ids", 0, "u32")?
+                        .into_iter()
+                        .map(RegionLocalObjectId)
+                        .collect(),
                     offset: args.req_vector(ctx, "offset", 1)?,
                     group_id: args.uuid_or_nil(ctx, "group_id", 2)?,
                 })
@@ -2812,7 +2848,11 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id,local_id,…>",
             build: |args, ctx| {
                 Ok(Command::DeleteObjects {
-                    local_ids: args.vec_parse(ctx, "local_ids", 0, "u32")?,
+                    local_ids: args
+                        .vec_parse::<u32>(ctx, "local_ids", 0, "u32")?
+                        .into_iter()
+                        .map(RegionLocalObjectId)
+                        .collect(),
                 })
             },
         },
@@ -2821,7 +2861,11 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id,…> <destination> <destination_id> <transaction_id> [group_id]",
             build: |args, ctx| {
                 Ok(Command::DerezObjects {
-                    local_ids: args.vec_parse(ctx, "local_ids", 0, "u32")?,
+                    local_ids: args
+                        .vec_parse::<u32>(ctx, "local_ids", 0, "u32")?
+                        .into_iter()
+                        .map(RegionLocalObjectId)
+                        .collect(),
                     destination: enum_arg(args, ctx, "destination", 1, parse_derez_destination)?,
                     destination_id: args.uuid_or_nil(ctx, "destination_id", 2)?,
                     transaction_id: args.uuid_or_nil(ctx, "transaction_id", 3)?,
@@ -2834,7 +2878,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> [position=<v>] [rotation=<r>] [scale=<v>] [uniform=]",
             build: |args, ctx| {
                 Ok(Command::UpdateObject {
-                    local_id: args.req_parse(ctx, "local_id", 0, "u32")?,
+                    local_id: RegionLocalObjectId(args.req_parse(ctx, "local_id", 0, "u32")?),
                     transform: build_object_transform(args, ctx)?,
                 })
             },
@@ -2844,7 +2888,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> <name>",
             build: |args, ctx| {
                 Ok(Command::SetObjectName {
-                    local_id: args.req_parse(ctx, "local_id", 0, "u32")?,
+                    local_id: RegionLocalObjectId(args.req_parse(ctx, "local_id", 0, "u32")?),
                     name: args.req_str(ctx, "name", 1)?,
                 })
             },
@@ -2854,7 +2898,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> <description>",
             build: |args, ctx| {
                 Ok(Command::SetObjectDescription {
-                    local_id: args.req_parse(ctx, "local_id", 0, "u32")?,
+                    local_id: RegionLocalObjectId(args.req_parse(ctx, "local_id", 0, "u32")?),
                     description: args.req_str(ctx, "description", 1)?,
                 })
             },
@@ -2864,7 +2908,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> <action>",
             build: |args, ctx| {
                 Ok(Command::SetObjectClickAction {
-                    local_id: args.req_parse(ctx, "local_id", 0, "u32")?,
+                    local_id: RegionLocalObjectId(args.req_parse(ctx, "local_id", 0, "u32")?),
                     action: enum_arg(args, ctx, "action", 1, parse_click_action)?,
                 })
             },
@@ -2874,7 +2918,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> <material>",
             build: |args, ctx| {
                 Ok(Command::SetObjectMaterial {
-                    local_id: args.req_parse(ctx, "local_id", 0, "u32")?,
+                    local_id: RegionLocalObjectId(args.req_parse(ctx, "local_id", 0, "u32")?),
                     material: enum_arg(args, ctx, "material", 1, parse_material)?,
                 })
             },
@@ -2884,7 +2928,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> [use_physics=] [is_temporary=] [is_phantom=] [casts_shadows=]",
             build: |args, ctx| {
                 Ok(Command::SetObjectFlags {
-                    local_id: args.req_parse(ctx, "local_id", 0, "u32")?,
+                    local_id: RegionLocalObjectId(args.req_parse(ctx, "local_id", 0, "u32")?),
                     flags: build_object_flag_settings(args, ctx)?,
                 })
             },
@@ -2894,7 +2938,11 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id,…> <group_id>",
             build: |args, ctx| {
                 Ok(Command::SetObjectGroup {
-                    local_ids: args.vec_parse(ctx, "local_ids", 0, "u32")?,
+                    local_ids: args
+                        .vec_parse::<u32>(ctx, "local_ids", 0, "u32")?
+                        .into_iter()
+                        .map(RegionLocalObjectId)
+                        .collect(),
                     group_id: args.req_uuid(ctx, "group_id", 1)?,
                 })
             },
@@ -2904,7 +2952,11 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id,…> <field> <set-bool> <mask-u32>",
             build: |args, ctx| {
                 Ok(Command::SetObjectPermissions {
-                    local_ids: args.vec_parse(ctx, "local_ids", 0, "u32")?,
+                    local_ids: args
+                        .vec_parse::<u32>(ctx, "local_ids", 0, "u32")?
+                        .into_iter()
+                        .map(RegionLocalObjectId)
+                        .collect(),
                     field: enum_arg(args, ctx, "field", 1, parse_permission_field)?,
                     set: args.req_bool(ctx, "set", 2)?,
                     mask: args.req_parse(ctx, "mask", 3, "u32")?,
@@ -2916,7 +2968,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> <sale_type> <sale_price>",
             build: |args, ctx| {
                 Ok(Command::SetObjectForSale {
-                    local_id: args.req_parse(ctx, "local_id", 0, "u32")?,
+                    local_id: RegionLocalObjectId(args.req_parse(ctx, "local_id", 0, "u32")?),
                     sale_type: enum_arg(args, ctx, "sale_type", 1, parse_sale_type)?,
                     sale_price: args.req_parse(ctx, "sale_price", 2, "i32")?,
                 })
@@ -2927,7 +2979,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> <category-u32>",
             build: |args, ctx| {
                 Ok(Command::SetObjectCategory {
-                    local_id: args.req_parse(ctx, "local_id", 0, "u32")?,
+                    local_id: RegionLocalObjectId(args.req_parse(ctx, "local_id", 0, "u32")?),
                     category: args.req_parse(ctx, "category", 1, "u32")?,
                 })
             },
@@ -2937,7 +2989,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> <include-bool>",
             build: |args, ctx| {
                 Ok(Command::SetObjectIncludeInSearch {
-                    local_id: args.req_parse(ctx, "local_id", 0, "u32")?,
+                    local_id: RegionLocalObjectId(args.req_parse(ctx, "local_id", 0, "u32")?),
                     include: args.req_bool(ctx, "include", 1)?,
                 })
             },
@@ -2947,7 +2999,11 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id,local_id,…>",
             build: |args, ctx| {
                 Ok(Command::LinkObjects {
-                    local_ids: args.vec_parse(ctx, "local_ids", 0, "u32")?,
+                    local_ids: args
+                        .vec_parse::<u32>(ctx, "local_ids", 0, "u32")?
+                        .into_iter()
+                        .map(RegionLocalObjectId)
+                        .collect(),
                 })
             },
         },
@@ -2956,7 +3012,11 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id,local_id,…>",
             build: |args, ctx| {
                 Ok(Command::DelinkObjects {
-                    local_ids: args.vec_parse(ctx, "local_ids", 0, "u32")?,
+                    local_ids: args
+                        .vec_parse::<u32>(ctx, "local_ids", 0, "u32")?
+                        .into_iter()
+                        .map(RegionLocalObjectId)
+                        .collect(),
                 })
             },
         },
@@ -2969,11 +3029,11 @@ fn all_specs() -> Vec<CommandSpec> {
                 let mut objects = Vec::new();
                 for record in args.vec_records(ctx, "objects", 2)? {
                     objects.push(ObjectBuyItem {
-                        local_id: args::literal(
+                        local_id: RegionLocalObjectId(args::literal(
                             "objects",
                             record_field("objects", &record, 0)?,
                             "u32",
-                        )?,
+                        )?),
                         sale_type: parse_sale_type(
                             "objects",
                             record_field("objects", &record, 1)?,
@@ -3057,7 +3117,11 @@ fn all_specs() -> Vec<CommandSpec> {
                     [duplicate_flags=]",
             build: |args, ctx| {
                 Ok(Command::DuplicateObjectsOnRay {
-                    local_ids: args.vec_parse(ctx, "local_ids", 0, "u32")?,
+                    local_ids: args
+                        .vec_parse::<u32>(ctx, "local_ids", 0, "u32")?
+                        .into_iter()
+                        .map(RegionLocalObjectId)
+                        .collect(),
                     ray_start: args.req_vector(ctx, "ray_start", 1)?,
                     ray_end: args.req_vector(ctx, "ray_end", 2)?,
                     group_id: args.uuid_or_nil(ctx, "group_id", 100)?,
@@ -3300,7 +3364,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> <attachment_point> [mode=add|replace] [rotation=<r>]",
             build: |args, ctx| {
                 Ok(Command::AttachObject {
-                    local_id: args.req_parse(ctx, "local_id", 0, "u32")?,
+                    local_id: RegionLocalObjectId(args.req_parse(ctx, "local_id", 0, "u32")?),
                     attachment_point: enum_arg(
                         args,
                         ctx,
@@ -3330,7 +3394,11 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id,…>",
             build: |args, ctx| {
                 Ok(Command::DetachObjects {
-                    local_ids: args.vec_parse(ctx, "local_ids", 0, "u32")?,
+                    local_ids: args
+                        .vec_parse::<u32>(ctx, "local_ids", 0, "u32")?
+                        .into_iter()
+                        .map(RegionLocalObjectId)
+                        .collect(),
                 })
             },
         },
@@ -3339,7 +3407,11 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id,…>",
             build: |args, ctx| {
                 Ok(Command::DropAttachments {
-                    local_ids: args.vec_parse(ctx, "local_ids", 0, "u32")?,
+                    local_ids: args
+                        .vec_parse::<u32>(ctx, "local_ids", 0, "u32")?
+                        .into_iter()
+                        .map(RegionLocalObjectId)
+                        .collect(),
                 })
             },
         },
@@ -4167,7 +4239,7 @@ mod tests {
     use sl_proto::{
         AbuseReportType, AgentPreferences, AssetType, ChatType, Command, ControlFlags,
         FriendRights, LandStatReportType, MapItemType, MovementMode, ObjectBuyItem, RegionHandle,
-        SaleType, Uuid,
+        RegionLocalObjectId, RegionLocalParcelId, SaleType, Uuid,
     };
 
     use super::Registry;
@@ -4245,7 +4317,9 @@ mod tests {
     fn unsigned_integer_argument() {
         assert!(matches!(
             build("touch_object 42"),
-            Ok(Command::TouchObject { local_id: 42 })
+            Ok(Command::TouchObject {
+                local_id: RegionLocalObjectId(42)
+            })
         ));
     }
 
@@ -4585,7 +4659,7 @@ mod tests {
             Ok(Command::BuyObject { objects, .. })
                 if matches!(
                     objects.first(),
-                    Some(ObjectBuyItem { local_id: 99, sale_type: SaleType::Copy, sale_price: 250 })
+                    Some(ObjectBuyItem { local_id: RegionLocalObjectId(99), sale_type: SaleType::Copy, sale_price: 250 })
                 )
         ));
     }
@@ -4632,7 +4706,7 @@ mod tests {
     fn disable_parcel_objects_parses_scope() {
         assert!(matches!(
             build(&format!("disable_parcel_objects 7 8 owner_ids={ONE} task_ids={TWO}")),
-            Ok(Command::DisableParcelObjects { local_id: 7, return_type, owner_ids, task_ids })
+            Ok(Command::DisableParcelObjects { local_id: RegionLocalParcelId(7), return_type, owner_ids, task_ids })
                 if return_type.0 == 8 && owner_ids == vec![uuid(ONE)] && task_ids == vec![uuid(TWO)]
         ));
     }
@@ -4753,7 +4827,7 @@ mod tests {
             Ok(Command::RequestLandStat { report_type, filter, parcel_local_id, .. })
                 if report_type == LandStatReportType::TopColliders
                     && filter == "spammer"
-                    && parcel_local_id == 3
+                    && parcel_local_id == RegionLocalParcelId(3)
         ));
     }
 
@@ -4762,7 +4836,8 @@ mod tests {
         assert!(matches!(
             build("request_land_stat"),
             Ok(Command::RequestLandStat { report_type, parcel_local_id, .. })
-                if report_type == LandStatReportType::TopScripts && parcel_local_id == 0
+                if report_type == LandStatReportType::TopScripts
+                    && parcel_local_id == RegionLocalParcelId(0)
         ));
     }
 
@@ -4787,7 +4862,7 @@ mod tests {
         assert!(matches!(
             build("connect_telehub 42"),
             Ok(Command::ConnectTelehub {
-                object_local_id: 42
+                object_local_id: RegionLocalObjectId(42)
             })
         ));
     }

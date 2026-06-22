@@ -83,8 +83,8 @@ use sl_wire::messages::{
 };
 use sl_wire::{
     AnyMessage, ControlFlags, EventQueueEvent, Llsd, MessageId, PacketFlags, Permissions,
-    Permissions5, Reader, RegionHandle, WireError, Writer, build_event_queue_response,
-    encode_datagram, parse_datagram, zero_decode,
+    Permissions5, Reader, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, WireError,
+    Writer, build_event_queue_response, encode_datagram, parse_datagram, zero_decode,
 };
 use uuid::Uuid;
 
@@ -285,7 +285,7 @@ pub enum ServerEvent {
     /// The client attached an in-world object to its avatar (`ObjectAttach`).
     AttachObject {
         /// The attached object's region-local id.
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         /// The point the object is attached to.
         attachment_point: AttachmentPoint,
         /// Whether the object was added to the point rather than replacing what
@@ -295,9 +295,9 @@ pub enum ServerEvent {
         rotation: Rotation,
     },
     /// The client detached attachments back to inventory (`ObjectDetach`).
-    DetachObjects(Vec<u32>),
+    DetachObjects(Vec<RegionLocalObjectId>),
     /// The client dropped attachments onto the ground (`ObjectDrop`).
-    DropAttachments(Vec<u32>),
+    DropAttachments(Vec<RegionLocalObjectId>),
     /// The client took off a worn item by inventory id (`RemoveAttachment`).
     RemoveAttachment {
         /// The point the item was worn on.
@@ -545,7 +545,7 @@ pub enum ServerEvent {
     /// (`ObjectDuplicateOnRay`).
     DuplicateObjectsOnRay {
         /// The region-local ids to duplicate.
-        local_ids: Vec<u32>,
+        local_ids: Vec<RegionLocalObjectId>,
         /// The active group the copies are set to ([`Uuid::nil`] for none).
         group_id: Uuid,
         /// The ray's start point (region-local).
@@ -606,19 +606,19 @@ pub enum ServerEvent {
     /// [`SimSession::send_parcel_object_owners_reply`].
     RequestParcelObjectOwners {
         /// The parcel's region-local id.
-        local_id: i32,
+        local_id: RegionLocalParcelId,
     },
     /// The client wants to buy a temporary access pass to a parcel
     /// (`ParcelBuyPass`).
     BuyParcelPass {
         /// The parcel's region-local id.
-        local_id: i32,
+        local_id: RegionLocalParcelId,
     },
     /// The client wants to disable scripted objects on a parcel
     /// (`ParcelDisableObjects`).
     DisableParcelObjects {
         /// The parcel's region-local id.
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         /// Which objects to disable (combined `ParcelReturnType` constants).
         return_type: u32,
         /// The owner-id scope (empty for none).
@@ -748,7 +748,7 @@ pub enum ServerEvent {
     /// (`EstateOwnerMessage`/`telehub` `connect`).
     ConnectTelehub {
         /// The local id of the object to make the telehub.
-        object_local_id: u32,
+        object_local_id: RegionLocalObjectId,
     },
     /// The client asked to remove the region's telehub (`EstateOwnerMessage`/
     /// `telehub` `delete`).
@@ -757,7 +757,7 @@ pub enum ServerEvent {
     /// (`EstateOwnerMessage`/`telehub` `spawnpoint add`).
     AddTelehubSpawnPoint {
         /// The local id of the object marking the spawn point.
-        object_local_id: u32,
+        object_local_id: RegionLocalObjectId,
     },
     /// The client asked to remove a telehub spawn point by index
     /// (`EstateOwnerMessage`/`telehub` `spawnpoint remove`).
@@ -1494,7 +1494,7 @@ impl SimSession {
             report_data: items
                 .iter()
                 .map(|item| LandStatReplyReportDataBlock {
-                    task_local_id: item.task_local_id,
+                    task_local_id: item.task_local_id.0,
                     task_id: item.task_id,
                     location_x: item.location[0],
                     location_y: item.location[1],
@@ -2700,7 +2700,7 @@ impl SimSession {
                     AttachmentPoint::split_code(attach.agent_data.attachment_point);
                 for object in &attach.object_data {
                     self.events.push_back(ServerEvent::AttachObject {
-                        local_id: object.object_local_id,
+                        local_id: RegionLocalObjectId(object.object_local_id),
                         attachment_point,
                         mode,
                         rotation: object.rotation.clone(),
@@ -2711,7 +2711,7 @@ impl SimSession {
                 let ids = detach
                     .object_data
                     .iter()
-                    .map(|object| object.object_local_id)
+                    .map(|object| RegionLocalObjectId(object.object_local_id))
                     .collect();
                 self.events.push_back(ServerEvent::DetachObjects(ids));
             }
@@ -2719,7 +2719,7 @@ impl SimSession {
                 let ids = drop
                     .object_data
                     .iter()
-                    .map(|object| object.object_local_id)
+                    .map(|object| RegionLocalObjectId(object.object_local_id))
                     .collect();
                 self.events.push_back(ServerEvent::DropAttachments(ids));
             }
@@ -2921,7 +2921,7 @@ impl SimSession {
                         .object_data
                         .iter()
                         .map(|item| ObjectBuyItem {
-                            local_id: item.object_local_id,
+                            local_id: RegionLocalObjectId(item.object_local_id),
                             sale_type: SaleType::from_code(item.sale_type),
                             sale_price: item.sale_price,
                         })
@@ -2969,7 +2969,7 @@ impl SimSession {
                     local_ids: dup
                         .object_data
                         .iter()
-                        .map(|item| item.object_local_id)
+                        .map(|item| RegionLocalObjectId(item.object_local_id))
                         .collect(),
                     group_id: agent.group_id,
                     ray_start: agent.ray_start.clone(),
@@ -3056,17 +3056,17 @@ impl SimSession {
             AnyMessage::ParcelObjectOwnersRequest(request) => {
                 self.events
                     .push_back(ServerEvent::RequestParcelObjectOwners {
-                        local_id: request.parcel_data.local_id,
+                        local_id: RegionLocalParcelId(request.parcel_data.local_id),
                     });
             }
             AnyMessage::ParcelBuyPass(pass) => {
                 self.events.push_back(ServerEvent::BuyParcelPass {
-                    local_id: pass.parcel_data.local_id,
+                    local_id: RegionLocalParcelId(pass.parcel_data.local_id),
                 });
             }
             AnyMessage::ParcelDisableObjects(disable) => {
                 self.events.push_back(ServerEvent::DisableParcelObjects {
-                    local_id: disable.parcel_data.local_id,
+                    local_id: RegionLocalParcelId(disable.parcel_data.local_id),
                     return_type: disable.parcel_data.return_type,
                     owner_ids: disable
                         .owner_i_ds
@@ -3388,11 +3388,11 @@ fn telehub_server_event(params: &[EstateOwnerMessageParamListBlock]) -> Option<S
     let event = match command.trim() {
         "info ui" => ServerEvent::RequestTelehubInfo,
         "connect" => ServerEvent::ConnectTelehub {
-            object_local_id: param1(),
+            object_local_id: RegionLocalObjectId(param1()),
         },
         "delete" => ServerEvent::DisconnectTelehub,
         "spawnpoint add" => ServerEvent::AddTelehubSpawnPoint {
-            object_local_id: param1(),
+            object_local_id: RegionLocalObjectId(param1()),
         },
         "spawnpoint remove" => ServerEvent::RemoveTelehubSpawnPoint {
             spawn_index: param1(),

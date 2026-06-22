@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use sl_client_tokio::{
     Client, Command, DeRezDestination, DisconnectReason, Event, LoginParams, LoginRequest,
-    ObjectTransform, PrimShape, SaleType, Throttle, Uuid, Vector, pcode,
+    ObjectTransform, PrimShape, RegionLocalObjectId, SaleType, Throttle, Uuid, Vector, pcode,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -63,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
 
     // The local id of our freshly-rezzed prim, once we recognise it.
-    let mut target: Option<u32> = None;
+    let mut target: Option<RegionLocalObjectId> = None;
     // The agent's Trash folder id, learned from the login inventory skeleton.
     let mut trash_folder: Option<Uuid> = None;
     let mut deleted = false;

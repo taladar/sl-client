@@ -6,6 +6,7 @@ use sl_types::lsl::Vector;
 use sl_wire::Permissions5;
 use sl_wire::ReflectionProbeFlags;
 use sl_wire::RegionHandle;
+use sl_wire::RegionLocalObjectId;
 use uuid::Uuid;
 
 /// Linden `PCode` constants: the object-class byte (`p_code`) in an object
@@ -60,12 +61,12 @@ pub struct Object {
     pub region_handle: RegionHandle,
     /// The region-local id (the transient handle the simulator uses; not stable
     /// across region crossings or relogins).
-    pub local_id: u32,
+    pub local_id: RegionLocalObjectId,
     /// The object's persistent global id.
     pub full_id: Uuid,
     /// The local id of the parent object this is linked/attached to, or 0 if it
     /// has no parent (a root object).
-    pub parent_id: u32,
+    pub parent_id: RegionLocalObjectId,
     /// The object class (see the [`pcode`] constants).
     pub pcode: u8,
     /// The raw object `state` byte, passed through verbatim. Its meaning
@@ -732,9 +733,9 @@ mod tests {
     fn test_object(pcode: u8, state: u8, name_value: &str) -> super::Object {
         super::Object {
             region_handle: RegionHandle(0),
-            local_id: 0,
+            local_id: RegionLocalObjectId(0),
             full_id: super::Uuid::nil(),
-            parent_id: 0,
+            parent_id: RegionLocalObjectId(0),
             pcode,
             state,
             crc: 0,

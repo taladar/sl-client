@@ -4041,7 +4041,7 @@ mod test {
         drain(&mut session)?;
 
         session.attach_object(
-            42,
+            sl_proto::RegionLocalObjectId(42),
             AttachmentPoint::RightHand,
             AttachmentMode::Add,
             &Rotation {
@@ -4073,8 +4073,14 @@ mod test {
         let mut session = established(now)?;
         drain(&mut session)?;
 
-        session.detach_objects(&[7, 8], now)?;
-        session.drop_attachments(&[9], now)?;
+        session.detach_objects(
+            &[
+                sl_proto::RegionLocalObjectId(7),
+                sl_proto::RegionLocalObjectId(8),
+            ],
+            now,
+        )?;
+        session.drop_attachments(&[sl_proto::RegionLocalObjectId(9)], now)?;
         let sent = drain(&mut session)?;
         let detach = sent
             .iter()
@@ -4592,7 +4598,7 @@ mod test {
             uuid::Uuid::nil(),
             uuid::Uuid::from_u128(0xCA7),
             &[ObjectBuyItem {
-                local_id: 99,
+                local_id: sl_proto::RegionLocalObjectId(99),
                 sale_type: SaleType::Copy,
                 sale_price: 250,
             }],
@@ -4619,7 +4625,7 @@ mod test {
         )?;
         session.spin_object_stop(object, now)?;
         session.duplicate_objects_on_ray(
-            &[99],
+            &[sl_proto::RegionLocalObjectId(99)],
             uuid::Uuid::nil(),
             Vector {
                 x: 1.0,
@@ -5303,7 +5309,7 @@ mod test {
         else {
             return Err("expected GltfMaterialOverride".into());
         };
-        assert_eq!(local_id, 7);
+        assert_eq!(local_id, sl_proto::RegionLocalObjectId(7));
         assert_eq!(faces, vec![0, 2]);
         assert_eq!(
             overrides,
@@ -6686,7 +6692,7 @@ mod test {
             })
             .ok_or("expected a ParcelProperties event")?;
         assert_eq!(parcel.sequence_id, 42);
-        assert_eq!(parcel.local_id, 7);
+        assert_eq!(parcel.local_id, sl_proto::RegionLocalParcelId(7));
         assert_eq!(parcel.area, 4096);
         assert_eq!(parcel.aabb_max.0.to_bits(), 64.0_f32.to_bits());
         assert_eq!(parcel.aabb_max.1.to_bits(), 64.0_f32.to_bits());
@@ -6925,7 +6931,7 @@ mod test {
             .ok_or("expected a ParcelProperties event")?;
         assert_eq!(parcel.sequence_id, 3);
         assert_eq!(parcel.request_result, ParcelRequestResult::Single);
-        assert_eq!(parcel.local_id, 11);
+        assert_eq!(parcel.local_id, sl_proto::RegionLocalParcelId(11));
         assert_eq!(parcel.name, "Harbor Lot");
         assert_eq!(parcel.description, "dockside");
         assert_eq!(parcel.owner_id, uuid::Uuid::from_u128(0x111));
@@ -7569,7 +7575,7 @@ mod test {
         drain(&mut session)?;
 
         let update = ParcelUpdate {
-            local_id: 7,
+            local_id: sl_proto::RegionLocalParcelId(7),
             parcel_flags: ParcelFlags::CREATE_OBJECTS.union(ParcelFlags::USE_BAN_LIST),
             name: "My Parcel".to_owned(),
             description: "A test parcel".to_owned(),
@@ -7610,9 +7616,13 @@ mod test {
         let mut session = established(now)?;
         drain(&mut session)?;
 
-        session.request_parcel_access_list(7, ParcelAccessScope::Ban, now)?;
+        session.request_parcel_access_list(
+            sl_proto::RegionLocalParcelId(7),
+            ParcelAccessScope::Ban,
+            now,
+        )?;
         session.update_parcel_access_list(
-            7,
+            sl_proto::RegionLocalParcelId(7),
             ParcelAccessScope::Access,
             &[ParcelAccessEntry {
                 id: uuid::Uuid::from_u128(0x55),
@@ -7622,10 +7632,17 @@ mod test {
             }],
             now,
         )?;
-        session.request_parcel_dwell(7, now)?;
-        session.buy_parcel(7, 512, 1024, uuid::Uuid::nil(), false, now)?;
+        session.request_parcel_dwell(sl_proto::RegionLocalParcelId(7), now)?;
+        session.buy_parcel(
+            sl_proto::RegionLocalParcelId(7),
+            512,
+            1024,
+            uuid::Uuid::nil(),
+            false,
+            now,
+        )?;
         session.return_parcel_objects(
-            7,
+            sl_proto::RegionLocalParcelId(7),
             ParcelReturnType::OTHER,
             &[uuid::Uuid::from_u128(0x99)],
             &[],
@@ -7716,7 +7733,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a ParcelDwell event")?;
-        assert_eq!(dwell.0, 7);
+        assert_eq!(dwell.0, sl_proto::RegionLocalParcelId(7));
         assert_eq!(dwell.1, uuid::Uuid::from_u128(0xABC));
         assert_eq!(dwell.2.to_bits(), 42.5_f32.to_bits());
         Ok(())
@@ -7764,7 +7781,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a ParcelAccessList event")?;
-        assert_eq!(local_id, 7);
+        assert_eq!(local_id, sl_proto::RegionLocalParcelId(7));
         assert_eq!(scope, ParcelAccessScope::Ban);
         assert_eq!(entries.len(), 2);
         let first = entries.first().ok_or("expected a first entry")?;
@@ -7788,10 +7805,10 @@ mod test {
 
         session.join_parcels(16.0, 32.0, 48.0, 64.0, now)?;
         session.divide_parcel(1.0, 2.0, 3.0, 4.0, now)?;
-        session.request_parcel_object_owners(7, now)?;
-        session.buy_parcel_pass(7, now)?;
+        session.request_parcel_object_owners(sl_proto::RegionLocalParcelId(7), now)?;
+        session.buy_parcel_pass(sl_proto::RegionLocalParcelId(7), now)?;
         session.disable_parcel_objects(
-            7,
+            sl_proto::RegionLocalParcelId(7),
             ParcelReturnType::OTHER,
             &[uuid::Uuid::from_u128(0x99)],
             &[uuid::Uuid::from_u128(0xAB)],
@@ -8193,9 +8210,9 @@ mod test {
 
         session.request_estate_covenant(now)?;
         session.request_telehub_info(now)?;
-        session.connect_telehub(42, now)?;
+        session.connect_telehub(sl_proto::RegionLocalObjectId(42), now)?;
         session.disconnect_telehub(now)?;
-        session.add_telehub_spawn_point(43, now)?;
+        session.add_telehub_spawn_point(sl_proto::RegionLocalObjectId(43), now)?;
         session.remove_telehub_spawn_point(2, now)?;
         let sent = drain(&mut session)?;
 
@@ -8543,7 +8560,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a ParcelProperties event")?;
-        assert_eq!(parcel.local_id, 3);
+        assert_eq!(parcel.local_id, sl_proto::RegionLocalParcelId(3));
         assert_eq!(parcel.sequence_id, 9);
         assert_eq!(parcel.area, 2048);
         assert_eq!(parcel.max_prims, 750);
@@ -9074,7 +9091,7 @@ mod test {
         else {
             return Err(format!("expected ObjectAdded, got {events:?}").into());
         };
-        assert_eq!(object.local_id, 100);
+        assert_eq!(object.local_id, sl_proto::RegionLocalObjectId(100));
         assert_eq!(object.full_id, uuid::Uuid::from_u128(0xABCD));
         assert_eq!(object.pcode, pcode::PRIMITIVE);
         assert_eq!(object.region_handle, RegionHandle(OBJ_REGION));
@@ -9087,7 +9104,7 @@ mod test {
         assert_eq!(object.shape.path_scale_y, 100);
 
         // The object is in the public cache.
-        assert!(session.object(100).is_some());
+        assert!(session.object(sl_proto::RegionLocalObjectId(100)).is_some());
         assert_eq!(session.objects().count(), 1);
 
         // A second update for the same id updates rather than adds.
@@ -9369,7 +9386,9 @@ mod test {
         assert_eq!(object.motion.position, new_pos);
         // Cache reflects the new position.
         assert_eq!(
-            session.object(200).map(|o| o.motion.position.clone()),
+            session
+                .object(sl_proto::RegionLocalObjectId(200))
+                .map(|o| o.motion.position.clone()),
             Some(new_pos)
         );
         Ok(())
@@ -9543,7 +9562,9 @@ mod test {
         session.handle_datagram(sim_addr(), &server_message(&terse, 6, true)?, now)?;
         drain_events(&mut session);
         assert_eq!(
-            session.object(320).and_then(|o| o.motion.collision_plane),
+            session
+                .object(sl_proto::RegionLocalObjectId(320))
+                .and_then(|o| o.motion.collision_plane),
             Some(plane)
         );
         // A plain prim (the full update above) carries no collision plane.
@@ -9551,7 +9572,9 @@ mod test {
         session.handle_datagram(sim_addr(), &server_message(&prim, 7, true)?, now)?;
         drain_events(&mut session);
         assert_eq!(
-            session.object(321).and_then(|o| o.motion.collision_plane),
+            session
+                .object(sl_proto::RegionLocalObjectId(321))
+                .and_then(|o| o.motion.collision_plane),
             None
         );
         Ok(())
@@ -9569,7 +9592,7 @@ mod test {
         drain_events(&mut session);
         assert!(
             session
-                .object(210)
+                .object(sl_proto::RegionLocalObjectId(210))
                 .is_some_and(|o| o.texture_entry.is_empty())
         );
 
@@ -9619,7 +9642,9 @@ mod test {
         // The unwrapped TextureEntry blob reached the object (event and cache).
         assert_eq!(object.texture_entry, te_blob);
         assert_eq!(
-            session.object(210).map(|o| o.texture_entry.clone()),
+            session
+                .object(sl_proto::RegionLocalObjectId(210))
+                .map(|o| o.texture_entry.clone()),
             Some(te_blob)
         );
         Ok(())
@@ -9697,7 +9722,7 @@ mod test {
         let update = object_update(400, 0x5678, zero_vec());
         session.handle_datagram(sim_addr(), &server_message(&update, 5, true)?, now)?;
         drain_events(&mut session);
-        assert!(session.object(400).is_some());
+        assert!(session.object(sl_proto::RegionLocalObjectId(400)).is_some());
 
         let kill = AnyMessage::KillObject(KillObject {
             object_data: vec![KillObjectObjectDataBlock { id: 400 }],
@@ -9711,8 +9736,11 @@ mod test {
             } => Some((*local_id, *region_handle)),
             _ => None,
         });
-        assert_eq!(removed, Some((400, RegionHandle(OBJ_REGION))));
-        assert!(session.object(400).is_none());
+        assert_eq!(
+            removed,
+            Some((sl_proto::RegionLocalObjectId(400), RegionHandle(OBJ_REGION)))
+        );
+        assert!(session.object(sl_proto::RegionLocalObjectId(400)).is_none());
         Ok(())
     }
 
@@ -9787,7 +9815,7 @@ mod test {
         // Merged into the cached object.
         assert_eq!(
             session
-                .object(500)
+                .object(sl_proto::RegionLocalObjectId(500))
                 .and_then(|o| o.properties.as_ref())
                 .map(|p| p.name.clone()),
             Some("Test Prim".to_owned())
@@ -9846,7 +9874,7 @@ mod test {
         else {
             return Err(format!("expected ObjectAdded from compressed, got {events:?}").into());
         };
-        assert_eq!(object.local_id, 600);
+        assert_eq!(object.local_id, sl_proto::RegionLocalObjectId(600));
         assert_eq!(object.full_id, uuid::Uuid::from_u128(0xDEAD));
         assert_eq!(object.crc, 99);
         assert_eq!(object.owner_id, uuid::Uuid::from_u128(0x44));
@@ -9967,7 +9995,7 @@ mod test {
         else {
             return Err(format!("expected ObjectAdded from compressed, got {events:?}").into());
         };
-        assert_eq!(object.local_id, 700);
+        assert_eq!(object.local_id, sl_proto::RegionLocalObjectId(700));
         assert_eq!(object.text, "hello");
         assert_eq!(object.text_color, [10, 20, 30, 200]);
         assert_eq!(object.media_url, "http://example/");
@@ -10037,7 +10065,7 @@ mod test {
         else {
             return Err(format!("expected neighbour ObjectAdded, got {events:?}").into());
         };
-        assert_eq!(object.local_id, 700);
+        assert_eq!(object.local_id, sl_proto::RegionLocalObjectId(700));
         assert_eq!(object.region_handle, RegionHandle(NB_REGION));
 
         // It lives in the neighbour region's set; the root-region `object()`
@@ -10046,7 +10074,7 @@ mod test {
             session.objects_in_region(RegionHandle(NB_REGION)).count(),
             1
         );
-        assert!(session.object(700).is_none());
+        assert!(session.object(sl_proto::RegionLocalObjectId(700)).is_none());
         assert_eq!(session.objects().count(), 1);
 
         // A terse update for an unknown neighbour id requests the full update on
@@ -10084,7 +10112,7 @@ mod test {
             events.iter().any(|e| matches!(
                 e,
                 Event::ObjectRemoved {
-                    local_id: 700,
+                    local_id: sl_proto::RegionLocalObjectId(700),
                     region_handle,
                 } if *region_handle == RegionHandle(NB_REGION)
             )),
@@ -10158,7 +10186,7 @@ mod test {
             s: sin45,
         };
         session.update_object(
-            42,
+            sl_proto::RegionLocalObjectId(42),
             &ObjectTransform {
                 position: Some(position.clone()),
                 rotation: Some(rotation),
@@ -10201,7 +10229,7 @@ mod test {
         drain(&mut session)?;
 
         session.set_object_scale(
-            7,
+            sl_proto::RegionLocalObjectId(7),
             Vector {
                 x: 2.0,
                 y: 2.0,
@@ -10235,7 +10263,7 @@ mod test {
         let mut session = established(now)?;
         drain(&mut session)?;
 
-        session.touch_object(55, now)?;
+        session.touch_object(sl_proto::RegionLocalObjectId(55), now)?;
         let sent = drain(&mut session)?;
         let grab = sent
             .iter()
@@ -10263,7 +10291,7 @@ mod test {
         let mut session = established(now)?;
         drain(&mut session)?;
 
-        session.set_object_name(9, "Vendor", now)?;
+        session.set_object_name(sl_proto::RegionLocalObjectId(9), "Vendor", now)?;
         let sent = drain(&mut session)?;
         let name = sent
             .iter()
@@ -10284,7 +10312,13 @@ mod test {
         let mut session = established(now)?;
         drain(&mut session)?;
 
-        session.delete_objects(&[11, 12], now)?;
+        session.delete_objects(
+            &[
+                sl_proto::RegionLocalObjectId(11),
+                sl_proto::RegionLocalObjectId(12),
+            ],
+            now,
+        )?;
         let sent = drain(&mut session)?;
         let delete = sent
             .iter()
@@ -10311,7 +10345,7 @@ mod test {
 
         let folder = uuid::Uuid::from_u128(0xF0_1DE2);
         session.derez_objects(
-            &[21],
+            &[sl_proto::RegionLocalObjectId(21)],
             DeRezDestination::TakeIntoAgentInventory,
             folder,
             uuid::Uuid::from_u128(0x7),
@@ -10340,7 +10374,13 @@ mod test {
         drain(&mut session)?;
 
         // PERM_COPY = 0x8000 in the LSL permission flags.
-        session.set_object_permissions(&[31], PermissionField::NextOwner, false, 0x8000, now)?;
+        session.set_object_permissions(
+            &[sl_proto::RegionLocalObjectId(31)],
+            PermissionField::NextOwner,
+            false,
+            0x8000,
+            now,
+        )?;
         let sent = drain(&mut session)?;
         let perms = sent
             .iter()
@@ -10364,7 +10404,14 @@ mod test {
         let mut session = established(now)?;
         drain(&mut session)?;
 
-        session.link_objects(&[100, 101, 102], now)?;
+        session.link_objects(
+            &[
+                sl_proto::RegionLocalObjectId(100),
+                sl_proto::RegionLocalObjectId(101),
+                sl_proto::RegionLocalObjectId(102),
+            ],
+            now,
+        )?;
         let sent = drain(&mut session)?;
         let link = sent
             .iter()
@@ -10384,11 +10431,11 @@ mod test {
         let mut session = established(now)?;
         drain(&mut session)?;
 
-        session.set_object_click_action(1, ClickAction::Buy, now)?;
-        session.set_object_material(1, Material::Metal, now)?;
-        session.set_object_for_sale(1, SaleType::Copy, 250, now)?;
+        session.set_object_click_action(sl_proto::RegionLocalObjectId(1), ClickAction::Buy, now)?;
+        session.set_object_material(sl_proto::RegionLocalObjectId(1), Material::Metal, now)?;
+        session.set_object_for_sale(sl_proto::RegionLocalObjectId(1), SaleType::Copy, 250, now)?;
         session.set_object_flags(
-            1,
+            sl_proto::RegionLocalObjectId(1),
             &ObjectFlagSettings {
                 use_physics: true,
                 is_phantom: true,
@@ -10396,7 +10443,7 @@ mod test {
             },
             now,
         )?;
-        session.set_object_include_in_search(1, true, now)?;
+        session.set_object_include_in_search(sl_proto::RegionLocalObjectId(1), true, now)?;
         let sent = drain(&mut session)?;
 
         let click = sent
@@ -10656,7 +10703,7 @@ mod test {
         let Event::ParcelVoiceInfo(info) = event else {
             return Err("expected ParcelVoiceInfo".into());
         };
-        assert_eq!(info.parcel_local_id, 7);
+        assert_eq!(info.parcel_local_id, sl_proto::RegionLocalParcelId(7));
         assert_eq!(info.region_name, "Default Region");
         assert_eq!(
             info.channel_uri.as_deref(),
@@ -10906,7 +10953,9 @@ mod test {
             Some(sl_proto::PhysicsShapeType::ConvexHull)
         );
 
-        let eq_body = sl_proto::build_object_physics_properties(&[(42, data)]).to_llsd_xml();
+        let eq_body =
+            sl_proto::build_object_physics_properties(&[(sl_proto::RegionLocalObjectId(42), data)])
+                .to_llsd_xml();
         let eq = sl_proto::parse_llsd_xml(&eq_body)?;
         session.handle_caps_event("ObjectPhysicsProperties", &eq, now)?;
         let pushed = drain_events(&mut session)
@@ -10916,7 +10965,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an ObjectPhysicsProperties event")?;
-        assert_eq!(pushed.first().map(|entry| entry.0), Some(42));
+        assert_eq!(
+            pushed.first().map(|entry| entry.0),
+            Some(sl_proto::RegionLocalObjectId(42))
+        );
         Ok(())
     }
 
@@ -11029,7 +11081,7 @@ mod test {
         let parcels = vec![sl_proto::ParcelScriptResources {
             name: "Home".to_owned(),
             id: uuid::Uuid::from_u128(0x55),
-            local_id: 3,
+            local_id: sl_proto::RegionLocalParcelId(3),
             objects: Vec::new(),
         }];
         let body =
@@ -11042,7 +11094,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a LandResourceDetail event")?;
-        assert_eq!(decoded.first().map(|p| p.local_id), Some(3));
+        assert_eq!(
+            decoded.first().map(|p| p.local_id),
+            Some(sl_proto::RegionLocalParcelId(3))
+        );
         Ok(())
     }
 

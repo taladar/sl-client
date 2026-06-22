@@ -86,7 +86,7 @@ fn gltf_override_envelope() -> Result<(), String> {
     assert_eq!(
         decoded,
         GltfMaterialOverride {
-            local_id: 42,
+            local_id: crate::RegionLocalObjectId(42),
             faces: vec![0, 3],
             overrides: vec![b"{'bc':[r1,r1,r1,r1]}".to_vec(), b"{'mf':r0.5}".to_vec(),],
         }
@@ -116,7 +116,7 @@ fn modify_material_params_body() {
 #[test]
 fn gltf_override_round_trip() -> Result<(), String> {
     let original = GltfMaterialOverride {
-        local_id: 42,
+        local_id: crate::RegionLocalObjectId(42),
         faces: vec![0, 3],
         overrides: vec![b"{'bc':[r1,r1,r1,r1]}".to_vec(), b"{'mf':r0.5}".to_vec()],
     };

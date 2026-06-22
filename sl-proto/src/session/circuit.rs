@@ -217,7 +217,10 @@ use sl_wire::messages::{
     GroupVoteHistoryRequestGroupDataBlock, GroupVoteHistoryRequestTransactionDataBlock,
     StartGroupProposal, StartGroupProposalAgentDataBlock, StartGroupProposalProposalDataBlock,
 };
-use sl_wire::{AnyMessage, PacketFlags, WireError, Writer, encode_datagram};
+use sl_wire::{
+    AnyMessage, PacketFlags, RegionLocalObjectId, RegionLocalParcelId, WireError, Writer,
+    encode_datagram,
+};
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
 use std::time::Instant;
@@ -1998,7 +2001,7 @@ impl Circuit {
     /// attachment is added alongside or replaces what is on the point).
     pub(crate) fn send_object_attach(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         attachment_point: AttachmentPoint,
         mode: AttachmentMode,
         rotation: &Rotation,
@@ -2011,7 +2014,7 @@ impl Circuit {
                 attachment_point: attachment_point.with_mode(mode),
             },
             object_data: vec![ObjectAttachObjectDataBlock {
-                object_local_id: local_id,
+                object_local_id: local_id.0,
                 rotation: rotation.clone(),
             }],
         });
@@ -2022,7 +2025,7 @@ impl Circuit {
     /// back to inventory.
     pub(crate) fn send_object_detach(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDetach(ObjectDetach {
@@ -2032,7 +2035,9 @@ impl Circuit {
             },
             object_data: local_ids
                 .iter()
-                .map(|&object_local_id| ObjectDetachObjectDataBlock { object_local_id })
+                .map(|&object_local_id| ObjectDetachObjectDataBlock {
+                    object_local_id: object_local_id.0,
+                })
                 .collect(),
         });
         self.send(&message, Reliability::Reliable, now)
@@ -2042,7 +2047,7 @@ impl Circuit {
     /// the avatar onto the ground.
     pub(crate) fn send_object_drop(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDrop(ObjectDrop {
@@ -2052,7 +2057,9 @@ impl Circuit {
             },
             object_data: local_ids
                 .iter()
-                .map(|&object_local_id| ObjectDropObjectDataBlock { object_local_id })
+                .map(|&object_local_id| ObjectDropObjectDataBlock {
+                    object_local_id: object_local_id.0,
+                })
                 .collect(),
         });
         self.send(&message, Reliability::Reliable, now)
@@ -2988,7 +2995,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             parcel_data: ParcelPropertiesUpdateParcelDataBlock {
-                local_id: update.local_id,
+                local_id: update.local_id.0,
                 // The message-level flag the reference viewer sends (0x01).
                 flags: 0x1,
                 parcel_flags: update.parcel_flags.bits(),
@@ -3017,7 +3024,7 @@ impl Circuit {
     /// selected by `flags`). The reply is a `ParcelAccessListReply`.
     pub(crate) fn send_parcel_access_list_request(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         flags: u32,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -3029,7 +3036,7 @@ impl Circuit {
             data: ParcelAccessListRequestDataBlock {
                 sequence_id: 0,
                 flags,
-                local_id,
+                local_id: local_id.0,
             },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -3040,7 +3047,7 @@ impl Circuit {
     /// the reference viewer does).
     pub(crate) fn send_parcel_access_list_update(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         flags: u32,
         entries: &[ParcelAccessEntry],
         now: Instant,
@@ -3068,7 +3075,7 @@ impl Circuit {
             },
             data: ParcelAccessListUpdateDataBlock {
                 flags,
-                local_id,
+                local_id: local_id.0,
                 transaction_id: Uuid::nil(),
                 sequence_id: 1,
                 sections: 1,
@@ -3081,7 +3088,7 @@ impl Circuit {
     /// Queues a `ParcelDwellRequest` reliably. The reply is a `ParcelDwellReply`.
     pub(crate) fn send_parcel_dwell_request(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelDwellRequest(ParcelDwellRequest {
@@ -3091,7 +3098,7 @@ impl Circuit {
             },
             // The simulator fills in parcel_id from local_id.
             data: ParcelDwellRequestDataBlock {
-                local_id,
+                local_id: local_id.0,
                 parcel_id: Uuid::nil(),
             },
         });
@@ -3101,7 +3108,7 @@ impl Circuit {
     /// Queues a `ParcelBuy` reliably (purchase the parcel).
     pub(crate) fn send_parcel_buy(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         price: i32,
         area: i32,
         group_id: Uuid,
@@ -3117,7 +3124,7 @@ impl Circuit {
                 group_id,
                 is_group_owned,
                 remove_contribution: false,
-                local_id,
+                local_id: local_id.0,
                 r#final: true,
             },
             parcel_data: ParcelBuyParcelDataBlock { price, area },
@@ -3129,7 +3136,7 @@ impl Circuit {
     /// matching `return_type`, optionally scoped to the given owner/task ids).
     pub(crate) fn send_parcel_return_objects(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         return_type: u32,
         owner_ids: &[Uuid],
         task_ids: &[Uuid],
@@ -3141,7 +3148,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             parcel_data: ParcelReturnObjectsParcelDataBlock {
-                local_id,
+                local_id: local_id.0,
                 return_type,
             },
             task_i_ds: task_ids
@@ -3160,7 +3167,7 @@ impl Circuit {
     /// `return_type`, or the explicit `object_ids` when using the list type).
     pub(crate) fn send_parcel_select_objects(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         return_type: u32,
         object_ids: &[Uuid],
         now: Instant,
@@ -3171,7 +3178,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             parcel_data: ParcelSelectObjectsParcelDataBlock {
-                local_id,
+                local_id: local_id.0,
                 return_type,
             },
             return_i_ds: object_ids
@@ -3185,7 +3192,7 @@ impl Circuit {
     /// Queues a `ParcelDeedToGroup` reliably (deed the parcel to `group_id`).
     pub(crate) fn send_parcel_deed_to_group(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         group_id: Uuid,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -3194,7 +3201,10 @@ impl Circuit {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
             },
-            data: ParcelDeedToGroupDataBlock { group_id, local_id },
+            data: ParcelDeedToGroupDataBlock {
+                group_id,
+                local_id: local_id.0,
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -3202,7 +3212,7 @@ impl Circuit {
     /// Queues a `ParcelReclaim` reliably (reclaim the parcel to the estate).
     pub(crate) fn send_parcel_reclaim(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelReclaim(ParcelReclaim {
@@ -3210,7 +3220,9 @@ impl Circuit {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
             },
-            data: ParcelReclaimDataBlock { local_id },
+            data: ParcelReclaimDataBlock {
+                local_id: local_id.0,
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -3218,7 +3230,7 @@ impl Circuit {
     /// Queues a `ParcelRelease` reliably (abandon the parcel back to the estate).
     pub(crate) fn send_parcel_release(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelRelease(ParcelRelease {
@@ -3226,7 +3238,9 @@ impl Circuit {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
             },
-            data: ParcelReleaseDataBlock { local_id },
+            data: ParcelReleaseDataBlock {
+                local_id: local_id.0,
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -3285,7 +3299,7 @@ impl Circuit {
     /// for the parcel).
     pub(crate) fn send_parcel_object_owners_request(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelObjectOwnersRequest(ParcelObjectOwnersRequest {
@@ -3293,7 +3307,9 @@ impl Circuit {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
             },
-            parcel_data: ParcelObjectOwnersRequestParcelDataBlock { local_id },
+            parcel_data: ParcelObjectOwnersRequestParcelDataBlock {
+                local_id: local_id.0,
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -3302,7 +3318,7 @@ impl Circuit {
     /// parcel at its configured price).
     pub(crate) fn send_parcel_buy_pass(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelBuyPass(ParcelBuyPass {
@@ -3310,7 +3326,9 @@ impl Circuit {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
             },
-            parcel_data: ParcelBuyPassParcelDataBlock { local_id },
+            parcel_data: ParcelBuyPassParcelDataBlock {
+                local_id: local_id.0,
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -3319,7 +3337,7 @@ impl Circuit {
     /// `return_type`, or the explicit `task_ids` when using the list type).
     pub(crate) fn send_parcel_disable_objects(
         &mut self,
-        local_id: i32,
+        local_id: RegionLocalParcelId,
         return_type: u32,
         owner_ids: &[Uuid],
         task_ids: &[Uuid],
@@ -3331,7 +3349,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             parcel_data: ParcelDisableObjectsParcelDataBlock {
-                local_id,
+                local_id: local_id.0,
                 return_type,
             },
             task_i_ds: task_ids
@@ -3372,7 +3390,7 @@ impl Circuit {
         report_type: u32,
         request_flags: u32,
         filter: &str,
-        parcel_local_id: i32,
+        parcel_local_id: RegionLocalParcelId,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::LandStatRequest(LandStatRequest {
@@ -3384,7 +3402,7 @@ impl Circuit {
                 report_type,
                 request_flags,
                 filter: with_nul(filter),
-                parcel_local_id,
+                parcel_local_id: parcel_local_id.0,
             },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -3643,7 +3661,7 @@ impl Circuit {
     /// the full `ObjectUpdate` for each local id (cache-miss type "full" = 0).
     pub(crate) fn send_request_multiple_objects(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::RequestMultipleObjects(RequestMultipleObjects {
@@ -3655,7 +3673,7 @@ impl Circuit {
                 .iter()
                 .map(|id| RequestMultipleObjectsObjectDataBlock {
                     cache_miss_type: 0,
-                    id: *id,
+                    id: id.0,
                 })
                 .collect(),
         });
@@ -3666,7 +3684,7 @@ impl Circuit {
     /// object makes the simulator send its `ObjectProperties`.
     pub(crate) fn send_object_select(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectSelect(ObjectSelect {
@@ -3677,7 +3695,7 @@ impl Circuit {
             object_data: local_ids
                 .iter()
                 .map(|id| ObjectSelectObjectDataBlock {
-                    object_local_id: *id,
+                    object_local_id: id.0,
                 })
                 .collect(),
         });
@@ -3687,7 +3705,7 @@ impl Circuit {
     /// Queues an `ObjectDeselect` reliably for the given local ids.
     pub(crate) fn send_object_deselect(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDeselect(ObjectDeselect {
@@ -3698,7 +3716,7 @@ impl Circuit {
             object_data: local_ids
                 .iter()
                 .map(|id| ObjectDeselectObjectDataBlock {
-                    object_local_id: *id,
+                    object_local_id: id.0,
                 })
                 .collect(),
         });
@@ -3711,7 +3729,7 @@ impl Circuit {
     /// with `grab_offset` and an empty surface-info list.
     pub(crate) fn send_object_grab(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         grab_offset: Vector,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -3721,7 +3739,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             object_data: ObjectGrabObjectDataBlock {
-                local_id,
+                local_id: local_id.0,
                 grab_offset,
             },
             surface_info: Vec::new(),
@@ -3758,7 +3776,7 @@ impl Circuit {
     /// Queues an `ObjectDeGrab` reliably (the end of a touch/click) for `local_id`.
     pub(crate) fn send_object_degrab(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDeGrab(ObjectDeGrab {
@@ -3766,7 +3784,9 @@ impl Circuit {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
             },
-            object_data: ObjectDeGrabObjectDataBlock { local_id },
+            object_data: ObjectDeGrabObjectDataBlock {
+                local_id: local_id.0,
+            },
             surface_info: Vec::new(),
         });
         self.send(&message, Reliability::Reliable, now)
@@ -3825,7 +3845,7 @@ impl Circuit {
     /// Queues an `ObjectDuplicate` reliably (copy `local_ids` by `offset`).
     pub(crate) fn send_object_duplicate(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         offset: Vector,
         group_id: Uuid,
         now: Instant,
@@ -3843,7 +3863,7 @@ impl Circuit {
             object_data: local_ids
                 .iter()
                 .map(|id| ObjectDuplicateObjectDataBlock {
-                    object_local_id: *id,
+                    object_local_id: id.0,
                 })
                 .collect(),
         });
@@ -3853,7 +3873,7 @@ impl Circuit {
     /// Queues an `ObjectDelete` reliably for `local_ids` (non-god, non-forced).
     pub(crate) fn send_object_delete(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDelete(ObjectDelete {
@@ -3865,7 +3885,7 @@ impl Circuit {
             object_data: local_ids
                 .iter()
                 .map(|id| ObjectDeleteObjectDataBlock {
-                    object_local_id: *id,
+                    object_local_id: id.0,
                 })
                 .collect(),
         });
@@ -3875,7 +3895,7 @@ impl Circuit {
     /// Queues a `DeRezObject` reliably (take/return/trash `local_ids`).
     pub(crate) fn send_derez_object(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         destination: DeRezDestination,
         destination_id: Uuid,
         transaction_id: Uuid,
@@ -3899,7 +3919,7 @@ impl Circuit {
             object_data: local_ids
                 .iter()
                 .map(|id| DeRezObjectObjectDataBlock {
-                    object_local_id: *id,
+                    object_local_id: id.0,
                 })
                 .collect(),
         });
@@ -3909,7 +3929,7 @@ impl Circuit {
     /// Queues an `ObjectName` reliably (rename `local_id`).
     pub(crate) fn send_object_name(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         name: &str,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -3919,7 +3939,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             object_data: vec![ObjectNameObjectDataBlock {
-                local_id,
+                local_id: local_id.0,
                 name: name.as_bytes().to_vec(),
             }],
         });
@@ -3929,7 +3949,7 @@ impl Circuit {
     /// Queues an `ObjectDescription` reliably (re-describe `local_id`).
     pub(crate) fn send_object_description(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         description: &str,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -3939,7 +3959,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             object_data: vec![ObjectDescriptionObjectDataBlock {
-                local_id,
+                local_id: local_id.0,
                 description: description.as_bytes().to_vec(),
             }],
         });
@@ -3949,7 +3969,7 @@ impl Circuit {
     /// Queues an `ObjectClickAction` reliably (set the left-click behaviour).
     pub(crate) fn send_object_click_action(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         action: ClickAction,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -3959,7 +3979,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             object_data: vec![ObjectClickActionObjectDataBlock {
-                object_local_id: local_id,
+                object_local_id: local_id.0,
                 click_action: action.to_code(),
             }],
         });
@@ -3969,7 +3989,7 @@ impl Circuit {
     /// Queues an `ObjectMaterial` reliably (set the physical material).
     pub(crate) fn send_object_material(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         material: Material,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -3979,7 +3999,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             object_data: vec![ObjectMaterialObjectDataBlock {
-                object_local_id: local_id,
+                object_local_id: local_id.0,
                 material: material.to_code(),
             }],
         });
@@ -3989,7 +4009,7 @@ impl Circuit {
     /// Queues an `ObjectFlagUpdate` reliably (set physics/temporary/phantom).
     pub(crate) fn send_object_flag_update(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         flags: &ObjectFlagSettings,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -3997,7 +4017,7 @@ impl Circuit {
             agent_data: ObjectFlagUpdateAgentDataBlock {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
-                object_local_id: local_id,
+                object_local_id: local_id.0,
                 use_physics: flags.use_physics,
                 is_temporary: flags.is_temporary,
                 is_phantom: flags.is_phantom,
@@ -4012,7 +4032,7 @@ impl Circuit {
     /// Queues an `ObjectGroup` reliably (set the group `local_ids` are set to).
     pub(crate) fn send_object_group(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         group_id: Uuid,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -4025,7 +4045,7 @@ impl Circuit {
             object_data: local_ids
                 .iter()
                 .map(|id| ObjectGroupObjectDataBlock {
-                    object_local_id: *id,
+                    object_local_id: id.0,
                 })
                 .collect(),
         });
@@ -4035,7 +4055,7 @@ impl Circuit {
     /// Queues an `ObjectPermissions` reliably (set/clear `mask` bits of `field`).
     pub(crate) fn send_object_permissions(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         field: PermissionField,
         set: bool,
         mask: u32,
@@ -4050,7 +4070,7 @@ impl Circuit {
             object_data: local_ids
                 .iter()
                 .map(|id| ObjectPermissionsObjectDataBlock {
-                    object_local_id: *id,
+                    object_local_id: id.0,
                     field: field.to_code(),
                     set: u8::from(set),
                     mask,
@@ -4063,7 +4083,7 @@ impl Circuit {
     /// Queues an `ObjectSaleInfo` reliably (set the sale type and price).
     pub(crate) fn send_object_sale_info(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         sale_type: SaleType,
         sale_price: i32,
         now: Instant,
@@ -4074,7 +4094,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             object_data: vec![ObjectSaleInfoObjectDataBlock {
-                local_id,
+                local_id: local_id.0,
                 sale_type: sale_type.to_code(),
                 sale_price,
             }],
@@ -4085,7 +4105,7 @@ impl Circuit {
     /// Queues an `ObjectCategory` reliably (set the object's category code).
     pub(crate) fn send_object_category(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         category: u32,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -4094,7 +4114,10 @@ impl Circuit {
                 agent_id: self.agent_id,
                 session_id: self.session_id,
             },
-            object_data: vec![ObjectCategoryObjectDataBlock { local_id, category }],
+            object_data: vec![ObjectCategoryObjectDataBlock {
+                local_id: local_id.0,
+                category,
+            }],
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -4102,7 +4125,7 @@ impl Circuit {
     /// Queues an `ObjectIncludeInSearch` reliably (toggle search visibility).
     pub(crate) fn send_object_include_in_search(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         include: bool,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -4112,7 +4135,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             object_data: vec![ObjectIncludeInSearchObjectDataBlock {
-                object_local_id: local_id,
+                object_local_id: local_id.0,
                 include_in_search: include,
             }],
         });
@@ -4123,7 +4146,7 @@ impl Circuit {
     /// the linkset root).
     pub(crate) fn send_object_link(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectLink(ObjectLink {
@@ -4134,7 +4157,7 @@ impl Circuit {
             object_data: local_ids
                 .iter()
                 .map(|id| ObjectLinkObjectDataBlock {
-                    object_local_id: *id,
+                    object_local_id: id.0,
                 })
                 .collect(),
         });
@@ -4144,7 +4167,7 @@ impl Circuit {
     /// Queues an `ObjectDelink` reliably unlinking `local_ids`.
     pub(crate) fn send_object_delink(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDelink(ObjectDelink {
@@ -4155,7 +4178,7 @@ impl Circuit {
             object_data: local_ids
                 .iter()
                 .map(|id| ObjectDelinkObjectDataBlock {
-                    object_local_id: *id,
+                    object_local_id: id.0,
                 })
                 .collect(),
         });
@@ -4180,7 +4203,7 @@ impl Circuit {
             object_data: objects
                 .iter()
                 .map(|item| ObjectBuyObjectDataBlock {
-                    object_local_id: item.local_id,
+                    object_local_id: item.local_id.0,
                     sale_type: item.sale_type.to_code(),
                     sale_price: item.sale_price,
                 })
@@ -4360,7 +4383,7 @@ impl Circuit {
     )]
     pub(crate) fn send_object_duplicate_on_ray(
         &mut self,
-        local_ids: &[u32],
+        local_ids: &[RegionLocalObjectId],
         group_id: Uuid,
         ray_start: Vector,
         ray_end: Vector,
@@ -4389,7 +4412,7 @@ impl Circuit {
             object_data: local_ids
                 .iter()
                 .map(|id| ObjectDuplicateOnRayObjectDataBlock {
-                    object_local_id: *id,
+                    object_local_id: id.0,
                 })
                 .collect(),
         });
@@ -4479,7 +4502,7 @@ impl Circuit {
     /// order, matching the simulator's `MultipleObjectUpdate` parser.
     pub(crate) fn send_multiple_object_update(
         &mut self,
-        local_id: u32,
+        local_id: RegionLocalObjectId,
         transform: &ObjectTransform,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -4502,7 +4525,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             object_data: vec![MultipleObjectUpdateObjectDataBlock {
-                object_local_id: local_id,
+                object_local_id: local_id.0,
                 r#type: transform.type_byte(),
                 data: data.into_bytes(),
             }],

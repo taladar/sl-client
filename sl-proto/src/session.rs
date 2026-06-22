@@ -8,6 +8,7 @@ use crate::types::{
 use sl_types::lsl::Rotation;
 use sl_wire::ControlFlags;
 use sl_wire::RegionHandle;
+use sl_wire::RegionLocalObjectId;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -809,7 +810,7 @@ pub struct Session {
     /// region-local id. Region-local ids are only unique within a simulator, so
     /// the cache is partitioned per sim. A sim's objects are dropped when its
     /// circuit goes away (`DisableSimulator`, teleport handover, relogin).
-    objects: BTreeMap<SocketAddr, BTreeMap<u32, Object>>,
+    objects: BTreeMap<SocketAddr, BTreeMap<RegionLocalObjectId, Object>>,
     /// The decoded terrain cache, keyed by the simulator the patches belong to
     /// (the root region *and* every neighbour streamed over a child circuit),
     /// then by `(layer code, patch x, patch y)` so each layer's patches are kept

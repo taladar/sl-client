@@ -397,7 +397,7 @@ pub struct ParcelScriptResources {
     /// The parcel's grid-wide ("fake") id (`id`).
     pub id: Uuid,
     /// The parcel's region-local id (`local_id`).
-    pub local_id: i32,
+    pub local_id: crate::RegionLocalParcelId,
     /// The scripted objects on the parcel (`objects`).
     pub objects: Vec<ScriptedObjectInfo>,
 }
@@ -418,7 +418,9 @@ pub fn parse_land_resource_detail(body: &Llsd) -> Vec<ParcelScriptResources> {
                         .unwrap_or_default()
                         .to_owned(),
                     id: parcel.get("id").and_then(Llsd::as_uuid).unwrap_or_default(),
-                    local_id: parcel.get("local_id").and_then(Llsd::as_i32).unwrap_or(0),
+                    local_id: crate::RegionLocalParcelId(
+                        parcel.get("local_id").and_then(Llsd::as_i32).unwrap_or(0),
+                    ),
                     objects: scripted_objects_from_llsd(parcel.get("objects")),
                 })
                 .collect()
@@ -439,7 +441,7 @@ pub fn build_land_resource_detail_response(parcels: &[ParcelScriptResources]) ->
                     Llsd::Map(HashMap::from([
                         ("name".to_owned(), Llsd::String(parcel.name.clone())),
                         ("id".to_owned(), Llsd::Uuid(parcel.id)),
-                        ("local_id".to_owned(), Llsd::Integer(parcel.local_id)),
+                        ("local_id".to_owned(), Llsd::Integer(parcel.local_id.0)),
                         (
                             "objects".to_owned(),
                             Llsd::Array(
@@ -556,7 +558,7 @@ mod tests {
         let parcels = vec![ParcelScriptResources {
             name: "Home".to_owned(),
             id: Uuid::from_u128(0x55),
-            local_id: 3,
+            local_id: crate::RegionLocalParcelId(3),
             objects: vec![sample_object()],
         }];
         let xml = build_land_resource_detail_response(&parcels);

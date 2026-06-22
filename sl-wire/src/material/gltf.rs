@@ -49,7 +49,7 @@ pub fn parse_gltf_material_override(data: &[u8]) -> Option<GltfMaterialOverride>
         .filter_map(|value| u8::try_from(value).ok())
         .collect();
     Some(GltfMaterialOverride {
-        local_id,
+        local_id: crate::RegionLocalObjectId(local_id),
         faces,
         overrides,
     })
