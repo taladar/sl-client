@@ -7,6 +7,7 @@ use crate::types::{
     AssetType, Camera, Diagnostic, Event, ImageCodec, InventoryFolder, InventoryItem, LoginAccount,
     LoginParams, Object, TerrainPatch, Throttle,
 };
+use sl_types::key::AgentKey;
 use sl_types::lsl::Rotation;
 use sl_wire::CircuitCode;
 use sl_wire::ControlFlags;
@@ -673,7 +674,7 @@ struct Circuit {
     /// The simulator's UDP address.
     sim_addr: SocketAddr,
     /// The agent/avatar id.
-    agent_id: Uuid,
+    agent_id: AgentKey,
     /// The session id.
     session_id: Uuid,
     /// The circuit code.

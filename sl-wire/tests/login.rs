@@ -502,7 +502,9 @@ mod test {
             })
         };
         Ok(sl_wire::LoginSuccess {
-            agent_id: "11111111-1111-1111-1111-111111111111".parse()?,
+            agent_id: sl_types::key::AgentKey::from(
+                "11111111-1111-1111-1111-111111111111".parse::<uuid::Uuid>()?,
+            ),
             session_id: "22222222-2222-2222-2222-222222222222".parse()?,
             secure_session_id: "33333333-3333-3333-3333-333333333333".parse()?,
             circuit_code: sl_wire::CircuitCode(123_456),

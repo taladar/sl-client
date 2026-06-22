@@ -732,7 +732,9 @@ mod tests {
     use std::net::SocketAddr;
 
     use pretty_assertions::assert_eq;
-    use sl_proto::{Command, Diagnostic, Event, MessageId, RegionHandle, Uuid, WireError};
+    use sl_proto::{
+        AgentKey, Command, Diagnostic, Event, MessageId, RegionHandle, Uuid, WireError,
+    };
 
     use super::{format_command, format_diagnostic, format_event, hexdump};
     use crate::context::{NoContext, SessionContext};
@@ -777,7 +779,7 @@ mod tests {
         ctx.set_identity(uuid('1'), uuid('2'), sl_proto::CircuitCode(7));
         let formatted = format_command(
             &Command::InstantMessage {
-                to_agent_id: uuid('1'),
+                to_agent_id: AgentKey::from(uuid('1')),
                 message: "hello".to_owned(),
             },
             &ctx,

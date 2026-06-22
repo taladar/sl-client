@@ -531,12 +531,12 @@ fn repl_driver(
         if let (Some(agent), Some(session), Some(circuit)) =
             (id.agent_id, id.session_id, id.circuit_code)
         {
-            state.ctx.set_identity(agent, session, circuit);
+            state.ctx.set_identity(agent.uuid(), session, circuit);
         }
         if let Some(seed) = &id.seed_capability {
             state.ctx.set_cap("Seed", seed);
         }
-        state.self_agent = id.agent_id;
+        state.self_agent = id.agent_id.map(|agent| agent.uuid());
     }
     for caps in capabilities.read() {
         state.ctx.set_caps(caps.0.clone().into_iter().collect());

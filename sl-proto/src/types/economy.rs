@@ -1,5 +1,6 @@
 //! Economy and money: balances, transactions, economy data.
 
+use sl_types::key::AgentKey;
 use sl_types::money::LindenAmount;
 use uuid::Uuid;
 
@@ -10,7 +11,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoneyBalance {
     /// The agent the balance belongs to (the client's own id).
-    pub agent_id: Uuid,
+    pub agent_id: AgentKey,
     /// The id of the transaction that triggered this reply, correlating it back to
     /// the pay/buy that caused it (e.g. the `TransactionID` echoed by a
     /// [`Session::send_money_transfer`](crate::Session::send_money_transfer)). Nil

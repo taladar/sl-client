@@ -1,6 +1,7 @@
 //! Object interaction and editing value types: clicks, materials, transforms.
 
 use super::pcode;
+use sl_types::key::AgentKey;
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::Permissions5;
@@ -662,7 +663,7 @@ pub struct RestoreItem {
     /// The folder the item lives in.
     pub folder_id: Uuid,
     /// The item's creator (for the rezzed object's permissions).
-    pub creator_id: Uuid,
+    pub creator_id: AgentKey,
     /// The item's owner (for the rezzed object's permissions).
     pub owner_id: Uuid,
     /// The group the item is set to (for permissions).

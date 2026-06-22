@@ -12,6 +12,7 @@
 //! directory) lists an agent's or group's land holdings.
 
 use crate::types::ParcelCategory;
+use sl_types::key::AgentKey;
 use uuid::Uuid;
 
 /// The directory-query flags (`DFQ_*`), shared by every `Dir*Query` and
@@ -168,7 +169,7 @@ impl Default for LandSearchType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirPeopleResult {
     /// The matched avatar.
-    pub agent_id: Uuid,
+    pub agent_id: AgentKey,
     /// The avatar's first (legacy) name.
     pub first_name: String,
     /// The avatar's last (legacy) name.
@@ -270,7 +271,7 @@ pub struct DirLandResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AvatarPickerResult {
     /// The matched avatar.
-    pub avatar_id: Uuid,
+    pub avatar_id: AgentKey,
     /// The avatar's first (legacy) name.
     pub first_name: String,
     /// The avatar's last (legacy) name.
@@ -318,7 +319,7 @@ pub struct EventInfo {
     pub event_id: u32,
     /// The avatar running the event (the viewer parses the `Creator` string as a
     /// UUID; a non-UUID value reads as [`Uuid::nil`](uuid::Uuid::nil)).
-    pub creator: Uuid,
+    pub creator: AgentKey,
     /// The event's name.
     pub name: String,
     /// The event's category (a human-readable label, e.g. `"Discussion"`).

@@ -554,7 +554,7 @@ async fn run_repl(args: RunArgs) -> Result<(), Error> {
         client.session_id(),
         client.circuit_code(),
     ) {
-        ctx.set_identity(agent, session, circuit);
+        ctx.set_identity(agent.uuid(), session, circuit);
     }
     if let Some(seed) = client.seed_capability() {
         ctx.set_cap("Seed", seed);
@@ -591,7 +591,7 @@ async fn run_repl(args: RunArgs) -> Result<(), Error> {
                         if args.smoke && !smoke_fired {
                             smoke_fired = true;
                             if let Some(agent) = self_agent {
-                                for command in smoke_battery(agent) {
+                                for command in smoke_battery(agent.uuid()) {
                                     command_tx.send(command).await.ok();
                                 }
                             }

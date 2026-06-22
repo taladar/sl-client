@@ -1,6 +1,7 @@
 //! In-world object schema: motion, shape, materials, animations, particles.
 
 use sl_types::attachment::AttachmentPoint;
+use sl_types::key::AgentKey;
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::Permissions5;
@@ -656,7 +657,7 @@ pub struct ObjectProperties {
     /// The object's persistent global id.
     pub object_id: Uuid,
     /// The creator's id.
-    pub creator_id: Uuid,
+    pub creator_id: AgentKey,
     /// The current owner's id.
     pub owner_id: Uuid,
     /// The group the object is set to.

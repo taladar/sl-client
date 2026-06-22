@@ -43,38 +43,39 @@ use sl_proto::{
 // Re-export the core types a consumer needs so they can depend on this crate
 // alone.
 pub use sl_proto::{
-    ActiveGroup, AgentPreferences, AnimatedObjects, AnyMessage, Asset, AssetType, AvatarClassified,
-    AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, Camera, CameraError,
-    ChatAudible, ChatMessage, ChatSourceType, ChatType, CircuitCode, CircuitId, ClassifiedInfo,
-    ClassifiedUpdate, ClickAction, Command, ControlFlags, CreateGroupParams, DeRezDestination,
-    DetachOrder, Diagnostic, DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind,
-    EstateInfo, Event, ExperienceInfo, ExperiencePermission, ExperienceProperties,
-    ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights, GltfMaterialOverride,
-    GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupProfile, GroupRole,
-    GroupRoleChange, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType,
-    GroupTitle, HomeLocation, IceCandidate, ImDialog, ImageCodec, InstantMessage, InterestsUpdate,
-    InventoryCallbackId, InventoryFolder, InventoryItem, InventoryOffer, InventoryType, Kilobits,
-    LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LoadUrlRequest, LoginAccount,
-    LoginParams, LoginRequest, LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
-    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
-    MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType, NeighborInfo,
-    NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse,
-    ObjectMotion, ObjectPermMasks, ObjectProperties, ObjectTransform, OpenSimExtras,
-    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
-    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
-    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
-    PhysicsShapeTypes, PickInfo, PickUpdate, PingId, PlayingAnimation, PrimShape, PrimShapeParams,
-    ProductType, ProfileUpdate, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
-    RegionCombatSettings, RegionFlags, RegionHandle, RegionHandleError, RegionIdentity,
-    RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, Reliability,
-    RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
-    ScriptControl, ScriptControlAction, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, SculptData, SequenceNumber, SimulatorFeatures, SoundFlags, SoundPreload,
-    StartLocation, StartLocationParseError, TerrainLayerType, TerrainPatch, Texture,
-    TextureAnimation, TextureEntry, TextureFace, Throttle, ThrottleBuilder, ThrottleError,
-    TransferId, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest,
-    Wearable, WearableType, XferId, avatar_texture, decode_particle_system, decode_texture_anim,
+    ActiveGroup, AgentKey, AgentPreferences, AnimatedObjects, AnyMessage, Asset, AssetType,
+    AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, Camera,
+    CameraError, ChatAudible, ChatMessage, ChatSourceType, ChatType, CircuitCode, CircuitId,
+    ClassifiedInfo, ClassifiedUpdate, ClickAction, Command, ControlFlags, CreateGroupParams,
+    DeRezDestination, DetachOrder, Diagnostic, DisconnectReason, EconomyData, EstateAccessDelta,
+    EstateAccessKind, EstateInfo, Event, ExperienceInfo, ExperiencePermission,
+    ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights,
+    GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
+    GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleMember,
+    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
+    ImageCodec, InstantMessage, InterestsUpdate, InventoryCallbackId, InventoryFolder,
+    InventoryItem, InventoryOffer, InventoryType, Key, Kilobits, LandingType, LegacyMaterial,
+    LightData, LightImage, LindenAmount, LoadUrlRequest, LoginAccount, LoginParams, LoginRequest,
+    LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
+    MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate,
+    Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
+    MovementMode, MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, Object,
+    ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks,
+    ObjectProperties, ObjectTransform, OpenSimExtras, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus,
+    ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, PhysicsShapeTypes, PickInfo,
+    PickUpdate, PingId, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
+    ReflectionProbe, ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionFlags,
+    RegionHandle, RegionHandleError, RegionIdentity, RegionInfoUpdate, RegionLimits,
+    RegionLocalObjectId, RegionLocalParcelId, Reliability, RenderMaterialEntry, RenderMaterialRef,
+    Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData,
+    SequenceNumber, SimulatorFeatures, SoundFlags, SoundPreload, StartLocation,
+    StartLocationParseError, TerrainLayerType, TerrainPatch, Texture, TextureAnimation,
+    TextureEntry, TextureFace, Throttle, ThrottleBuilder, ThrottleError, TransferId,
+    TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable,
+    WearableType, XferId, avatar_texture, decode_particle_system, decode_texture_anim,
     decode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
     particle_pattern, pcode, sim_access, texture_anim_mode,
 };
@@ -206,7 +207,7 @@ impl Client {
     /// requests (e.g. reading one's own picks or classifieds) before
     /// [`Client::run`] consumes the client.
     #[must_use]
-    pub fn agent_id(&self) -> Option<Uuid> {
+    pub fn agent_id(&self) -> Option<AgentKey> {
         self.session.agent_id()
     }
 
@@ -475,7 +476,11 @@ impl Client {
                                 (caps.get(CAP_FETCH_INVENTORY).cloned(), self.session.agent_id())
                             {
                                 tokio::spawn(fetch_inventory(
-                                    url, owner, folder_ids, http.clone(), caps_tx.clone(),
+                                    url,
+                                    owner.uuid(),
+                                    folder_ids,
+                                    http.clone(),
+                                    caps_tx.clone(),
                                 ));
                             }
                         }

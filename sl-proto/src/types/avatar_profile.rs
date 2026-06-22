@@ -1,19 +1,20 @@
 //! Avatar profile and relationships: properties, picks, classifieds, friends.
 
 use super::Maturity;
+use sl_types::key::AgentKey;
 use uuid::Uuid;
 
 /// An avatar's profile properties, parsed from `AvatarPropertiesReply`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AvatarProperties {
     /// The avatar the profile is about.
-    pub avatar_id: Uuid,
+    pub avatar_id: AgentKey,
     /// The "second life" profile image (texture id).
     pub image_id: Uuid,
     /// The "first life" profile image (texture id).
     pub fl_image_id: Uuid,
     /// The avatar's partner, or nil if none.
-    pub partner_id: Uuid,
+    pub partner_id: AgentKey,
     /// The "second life" about text.
     pub about_text: String,
     /// The "first life" about text.
@@ -32,7 +33,7 @@ pub struct AvatarProperties {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AvatarInterests {
     /// The avatar the interests are about.
-    pub avatar_id: Uuid,
+    pub avatar_id: AgentKey,
     /// The "want to" category bitmask.
     pub want_to_mask: u32,
     /// The "want to" free text.
@@ -89,7 +90,7 @@ pub struct PickInfo {
     /// The pick id.
     pub pick_id: Uuid,
     /// The avatar that created the pick.
-    pub creator_id: Uuid,
+    pub creator_id: AgentKey,
     /// Whether this is a "top pick" (a god-only legacy flag, normally `false`).
     pub top_pick: bool,
     /// The parcel the pick points at.
@@ -122,7 +123,7 @@ pub struct ClassifiedInfo {
     /// The classified id.
     pub classified_id: Uuid,
     /// The avatar that created the classified.
-    pub creator_id: Uuid,
+    pub creator_id: AgentKey,
     /// The creation date (Unix timestamp, seconds).
     pub creation_date: u32,
     /// The expiration date (Unix timestamp, seconds).

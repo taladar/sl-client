@@ -6,18 +6,18 @@
 
 use crate::scoped_id::{ScopedObjectId, ScopedParcelId};
 use crate::{
-    AbuseReport, AgentPreferences, AnyMessage, AssetType, AttachmentMode, AttachmentPoint, Camera,
-    ChatType, ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, DeRezDestination,
-    DetachOrder, DirFindFlags, EstateAccessDelta, ExperiencePermission, ExperienceUpdate,
-    FriendRights, GestureActivation, GroupNoticeAttachment, GroupRoleEdit, GroupRoleMemberChange,
-    IceCandidate, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LandSearchType,
-    LandStatReportType, LindenAmount, MapItemType, Material, MaterialOverrideUpdate, MediaEntry,
-    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
-    ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
-    ParcelCategory, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, Postcard,
-    PrimShape, ProfileUpdate, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem,
-    RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect,
-    VoiceProvisionRequest, Wearable,
+    AbuseReport, AgentKey, AgentPreferences, AnyMessage, AssetType, AttachmentMode,
+    AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction, ControlFlags,
+    CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, EstateAccessDelta,
+    ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation, GroupNoticeAttachment,
+    GroupRoleEdit, GroupRoleMemberChange, IceCandidate, InterestsUpdate, InventoryItem,
+    InventoryOffer, InventoryType, LandSearchType, LandStatReportType, LindenAmount, MapItemType,
+    Material, MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MovementMode, MuteFlags,
+    MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform,
+    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelReturnType, ParcelUpdate,
+    PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate, RegionHandle,
+    RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, Rotation, SaleType,
+    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -47,7 +47,7 @@ pub enum Command {
     /// [`Event::InstantMessageReceived`](crate::Event::InstantMessageReceived).
     InstantMessage {
         /// The recipient's agent id.
-        to_agent_id: Uuid,
+        to_agent_id: AgentKey,
         /// The message text.
         message: String,
     },
@@ -55,7 +55,7 @@ pub enum Command {
     /// `false` = stop). Other clients see it as an [`Event::ImTyping`](crate::Event::ImTyping).
     ImTyping {
         /// The correspondent's agent id.
-        to_agent_id: Uuid,
+        to_agent_id: AgentKey,
         /// Whether typing started (`true`) or stopped (`false`).
         typing: bool,
     },
@@ -114,7 +114,7 @@ pub enum Command {
     /// [`Event::PickInfo`](crate::Event::PickInfo).
     RequestPickInfo {
         /// The avatar that owns the pick.
-        creator_id: Uuid,
+        creator_id: AgentKey,
         /// The pick id.
         pick_id: Uuid,
     },
@@ -222,7 +222,7 @@ pub enum Command {
     /// with an [`Event::InventoryBulkUpdate`](crate::Event::InventoryBulkUpdate) for the new item.
     CopyInventoryItem {
         /// The current owner of the source item.
-        old_agent_id: Uuid,
+        old_agent_id: AgentKey,
         /// The source item.
         old_item_id: Uuid,
         /// The destination folder.
@@ -336,7 +336,7 @@ pub enum Command {
     /// [`Event::InstantMessageReceived`](crate::Event::InstantMessageReceived) with [`ImDialog::FriendshipOffered`](crate::ImDialog::FriendshipOffered).
     OfferFriendship {
         /// The agent to offer friendship to.
-        to_agent_id: Uuid,
+        to_agent_id: AgentKey,
         /// The offer message text.
         message: String,
     },
@@ -446,7 +446,7 @@ pub enum Command {
         /// The group to eject from.
         group_id: Uuid,
         /// The agent ids to eject.
-        member_ids: Vec<Uuid>,
+        member_ids: Vec<AgentKey>,
     },
     /// Request a group's financial summary (`GroupAccountSummaryRequest`) for an
     /// accounting interval. The reply arrives as
@@ -1547,7 +1547,7 @@ pub enum Command {
     /// `prey` index then points at the tracked avatar).
     TrackAgent {
         /// The agent to track.
-        prey_id: Uuid,
+        prey_id: AgentKey,
     },
     /// Ask the simulator for an agent's global position (`FindAgent`): an
     /// estate/god lookup. The simulator answers with a `FindAgent` carrying the
@@ -1912,7 +1912,7 @@ pub enum Command {
     /// Decline a teleport lure (`IM_LURE_DECLINED`).
     DeclineTeleportLure {
         /// The offer IM's sender.
-        from_agent_id: Uuid,
+        from_agent_id: AgentKey,
         /// The lure id from the offer IM.
         lure_id: Uuid,
     },
@@ -1920,14 +1920,14 @@ pub enum Command {
     /// offer this agent a teleport.
     RequestTeleport {
         /// The agent to ask.
-        to_agent_id: Uuid,
+        to_agent_id: AgentKey,
         /// The accompanying message.
         message: String,
     },
     /// Offer an inventory item to `to_agent_id` over IM (`IM_INVENTORY_OFFERED`).
     GiveInventory {
         /// The recipient agent.
-        to_agent_id: Uuid,
+        to_agent_id: AgentKey,
         /// The offered item's id.
         item_id: Uuid,
         /// The offered item's asset class.
@@ -1940,7 +1940,7 @@ pub enum Command {
     /// Offer an inventory folder to `to_agent_id` over IM (`IM_INVENTORY_OFFERED`).
     GiveInventoryFolder {
         /// The recipient agent.
-        to_agent_id: Uuid,
+        to_agent_id: AgentKey,
         /// The offered folder's id.
         folder_id: Uuid,
         /// The folder's name (shown to the recipient).
