@@ -1,6 +1,7 @@
 //! Wire/LLSD <-> value-type converters shared by the session impls, plus the
 //! server-side CAPS serializers and their round-trip tests.
 
+use crate::GroupRoleKey;
 use crate::appearance;
 use crate::types::{
     ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment, AvatarGroupMembership,
@@ -19,6 +20,7 @@ use crate::types::{
     handle_to_grid,
 };
 use sl_types::key::AgentKey;
+use sl_types::key::GroupKey;
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::RegionHandle;
@@ -110,8 +112,11 @@ pub(crate) fn parse_lure_region_handle(lure_id: Uuid) -> RegionHandle {
 /// [`send_im`](Circuit::send_im). Groups the dialog-dependent fields so the
 /// offer-reply / give-inventory / conference flows (#28) share one builder.
 pub(crate) struct OutgoingIm<'a> {
-    /// The recipient agent id (or session id for a conference message).
-    pub(crate) to_agent_id: AgentKey,
+    /// The `ToAgentID` wire field. Its meaning is dialog-dependent: an agent id
+    /// for a 1:1 IM, a group id for a group notice / group-session message, or
+    /// an ad-hoc session id for a conference message — so it is a raw `Uuid`
+    /// rather than any one typed key.
+    pub(crate) to_agent_id: Uuid,
     /// Whether the message is from a group (sets the `FromGroup` flag).
     pub(crate) from_group: bool,
     /// The IM dialog (sub-type).
@@ -640,7 +645,7 @@ pub(crate) fn parcel_info(msg: &ParcelProperties) -> ParcelInfo {
         local_id: RegionLocalParcelId(data.local_id),
         owner_id: data.owner_id,
         is_group_owned: data.is_group_owned,
-        group_id: data.group_id,
+        group_id: GroupKey::from(data.group_id),
         auction_id: data.auction_id,
         claim_date: data.claim_date,
         claim_price: data.claim_price,
@@ -797,7 +802,7 @@ pub(crate) fn avatar_interests(
 /// Builds an [`AvatarGroupMembership`] from an `AvatarGroupsReply` group entry.
 pub(crate) fn avatar_group(data: &AvatarGroupsReplyGroupDataBlock) -> AvatarGroupMembership {
     AvatarGroupMembership {
-        group_id: data.group_id,
+        group_id: GroupKey::from(data.group_id),
         group_name: trimmed_string(&data.group_name),
         group_title: trimmed_string(&data.group_title),
         group_powers: data.group_powers,
@@ -875,7 +880,7 @@ pub(crate) fn active_group(data: &AgentDataUpdateAgentDataBlock) -> ActiveGroup 
         first_name: trimmed_string(&data.first_name),
         last_name: trimmed_string(&data.last_name),
         group_title: trimmed_string(&data.group_title),
-        active_group_id: data.active_group_id,
+        active_group_id: GroupKey::from(data.active_group_id),
         group_powers: data.group_powers,
         group_name: trimmed_string(&data.group_name),
     }
@@ -884,7 +889,7 @@ pub(crate) fn active_group(data: &AgentDataUpdateAgentDataBlock) -> ActiveGroup 
 /// Builds [`GroupMembership`] from an `AgentGroupDataUpdate` entry.
 pub(crate) fn group_membership(data: &AgentGroupDataUpdateGroupDataBlock) -> GroupMembership {
     GroupMembership {
-        group_id: data.group_id,
+        group_id: GroupKey::from(data.group_id),
         group_powers: data.group_powers,
         accept_notices: data.accept_notices,
         group_insignia_id: data.group_insignia_id,
@@ -908,7 +913,7 @@ pub(crate) fn group_member(data: &GroupMembersReplyMemberDataBlock) -> GroupMemb
 /// Builds [`GroupRole`] from a `GroupRoleDataReply` entry.
 pub(crate) fn group_role(data: &GroupRoleDataReplyRoleDataBlock) -> GroupRole {
     GroupRole {
-        role_id: data.role_id,
+        role_id: GroupRoleKey::from(data.role_id),
         name: trimmed_string(&data.name),
         title: trimmed_string(&data.title),
         description: trimmed_string(&data.description),
@@ -921,7 +926,7 @@ pub(crate) fn group_role(data: &GroupRoleDataReplyRoleDataBlock) -> GroupRole {
 pub(crate) fn group_title(data: &GroupTitlesReplyGroupDataBlock) -> GroupTitle {
     GroupTitle {
         title: trimmed_string(&data.title),
-        role_id: data.role_id,
+        role_id: GroupRoleKey::from(data.role_id),
         selected: data.selected,
     }
 }
@@ -929,7 +934,7 @@ pub(crate) fn group_title(data: &GroupTitlesReplyGroupDataBlock) -> GroupTitle {
 /// Builds [`GroupProfile`] from a `GroupProfileReply` block.
 pub(crate) fn group_profile(data: &GroupProfileReplyGroupDataBlock) -> GroupProfile {
     GroupProfile {
-        group_id: data.group_id,
+        group_id: GroupKey::from(data.group_id),
         name: trimmed_string(&data.name),
         charter: trimmed_string(&data.charter),
         show_in_list: data.show_in_list,
@@ -944,7 +949,7 @@ pub(crate) fn group_profile(data: &GroupProfileReplyGroupDataBlock) -> GroupProf
         role_count: data.group_roles_count,
         allow_publish: data.allow_publish,
         mature_publish: data.mature_publish,
-        owner_role: data.owner_role,
+        owner_role: GroupRoleKey::from(data.owner_role),
     }
 }
 
@@ -964,7 +969,7 @@ pub(crate) fn group_notice(data: &GroupNoticesListReplyDataBlock) -> GroupNotice
 pub(crate) fn group_account_summary(reply: &GroupAccountSummaryReply) -> GroupAccountSummary {
     let money = &reply.money_data;
     GroupAccountSummary {
-        group_id: reply.agent_data.group_id,
+        group_id: GroupKey::from(reply.agent_data.group_id),
         request_id: money.request_id,
         interval_days: money.interval_days,
         current_interval: money.current_interval,
@@ -992,7 +997,7 @@ pub(crate) fn group_account_summary(reply: &GroupAccountSummaryReply) -> GroupAc
 pub(crate) fn group_account_details(reply: &GroupAccountDetailsReply) -> GroupAccountDetails {
     let money = &reply.money_data;
     GroupAccountDetails {
-        group_id: reply.agent_data.group_id,
+        group_id: GroupKey::from(reply.agent_data.group_id),
         request_id: money.request_id,
         interval_days: money.interval_days,
         current_interval: money.current_interval,
@@ -1014,7 +1019,7 @@ pub(crate) fn group_account_transactions(
 ) -> GroupAccountTransactions {
     let money = &reply.money_data;
     GroupAccountTransactions {
-        group_id: reply.agent_data.group_id,
+        group_id: GroupKey::from(reply.agent_data.group_id),
         request_id: money.request_id,
         interval_days: money.interval_days,
         current_interval: money.current_interval,
@@ -1152,7 +1157,7 @@ pub(crate) fn inventory_item_crc(item: &InventoryItem) -> u32 {
     let permissions_crc = uuid_crc(item.creator_id.uuid())
         .wrapping_add(uuid_crc(item.owner_id))
         .wrapping_add(uuid_crc(item.last_owner_id))
-        .wrapping_add(uuid_crc(item.group_id))
+        .wrapping_add(uuid_crc(item.group_id.uuid()))
         .wrapping_add(
             item.permissions
                 .base
@@ -1195,7 +1200,7 @@ pub(crate) fn inventory_item(data: &InventoryDescendentsItemDataBlock) -> Invent
         // The legacy UDP descendents reply carries no previous-owner id.
         last_owner_id: Uuid::nil(),
         creator_id: AgentKey::from(data.creator_id),
-        group_id: data.group_id,
+        group_id: GroupKey::from(data.group_id),
         group_owned: data.group_owned,
         permissions: Permissions5 {
             base: Permissions::from_bits(data.base_mask),
@@ -1227,7 +1232,7 @@ pub(crate) fn inventory_item_from_create(
         owner_id: data.owner_id,
         last_owner_id: Uuid::nil(),
         creator_id: AgentKey::from(data.creator_id),
-        group_id: data.group_id,
+        group_id: GroupKey::from(data.group_id),
         group_owned: data.group_owned,
         permissions: Permissions5 {
             base: Permissions::from_bits(data.base_mask),
@@ -1267,7 +1272,7 @@ pub(crate) fn bulk_update_item(data: &BulkUpdateInventoryItemDataBlock) -> Inven
         owner_id: data.owner_id,
         last_owner_id: Uuid::nil(),
         creator_id: AgentKey::from(data.creator_id),
-        group_id: data.group_id,
+        group_id: GroupKey::from(data.group_id),
         group_owned: data.group_owned,
         permissions: Permissions5 {
             base: Permissions::from_bits(data.base_mask),
@@ -1697,7 +1702,7 @@ pub(crate) fn parcel_info_from_llsd(body: &Llsd) -> Option<ParcelInfo> {
         local_id: RegionLocalParcelId(i32_field("LocalID")),
         owner_id: uuid_field("OwnerID"),
         is_group_owned: bool_field("IsGroupOwned"),
-        group_id: uuid_field("GroupID"),
+        group_id: GroupKey::from(uuid_field("GroupID")),
         // OpenSim encodes the `uint` AuctionID as a 4-byte binary LLSD element,
         // so read it tolerantly (binary / integer / string).
         auction_id: data.get("AuctionID").map_or(0, llsd_u32),
@@ -2134,7 +2139,7 @@ pub(crate) fn group_memberships_from_caps_llsd(body: &Llsd) -> Option<Event> {
         .filter_map(|group| {
             let group_id = group.get("GroupID").and_then(Llsd::as_uuid)?;
             Some(GroupMembership {
-                group_id,
+                group_id: GroupKey::from(group_id),
                 group_powers: group.get("GroupPowers").map_or(0, llsd_u64),
                 accept_notices: group
                     .get("AcceptNotices")
@@ -2209,7 +2214,7 @@ pub(crate) fn group_members_from_caps_llsd(body: &Llsd) -> Option<Event> {
     roster.sort_by_key(|member| member.agent_id.uuid());
     let member_count = i32::try_from(roster.len()).unwrap_or(i32::MAX);
     Some(Event::GroupMembers {
-        group_id,
+        group_id: GroupKey::from(group_id),
         request_id: Uuid::nil(),
         member_count,
         members: roster,
@@ -2298,7 +2303,7 @@ pub(crate) fn bulk_update_item_from_llsd(item: &Llsd) -> InventoryItem {
         owner_id: uuid_member(item, "OwnerID"),
         last_owner_id: Uuid::nil(),
         creator_id: AgentKey::from(uuid_member(item, "CreatorID")),
-        group_id: uuid_member(item, "GroupID"),
+        group_id: GroupKey::from(uuid_member(item, "GroupID")),
         group_owned: item
             .get("GroupOwned")
             .and_then(Llsd::as_bool)
@@ -2400,7 +2405,7 @@ pub(crate) fn inventory_item_from_llsd(item: &Llsd) -> InventoryItem {
         owner_id: perm_uuid("owner_id"),
         last_owner_id: perm_uuid("last_owner_id"),
         creator_id: AgentKey::from(perm_uuid("creator_id")),
-        group_id: perm_uuid("group_id"),
+        group_id: GroupKey::from(perm_uuid("group_id")),
         group_owned: permissions
             .and_then(|p| p.get("is_owner_group"))
             .and_then(Llsd::as_bool)
@@ -2767,7 +2772,7 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Llsd {
         ("LocalID", Llsd::Integer(info.local_id.0)),
         ("OwnerID", Llsd::Uuid(info.owner_id)),
         ("IsGroupOwned", Llsd::Boolean(info.is_group_owned)),
-        ("GroupID", Llsd::Uuid(info.group_id)),
+        ("GroupID", Llsd::Uuid(info.group_id.uuid())),
         ("AuctionID", u32_to_llsd(info.auction_id)),
         ("ClaimDate", Llsd::Integer(info.claim_date)),
         ("ClaimPrice", Llsd::Integer(info.claim_price)),
@@ -2953,7 +2958,7 @@ pub fn group_memberships_to_caps_llsd(event: &Event) -> Llsd {
         .iter()
         .map(|membership| {
             llsd_map(vec![
-                ("GroupID", Llsd::Uuid(membership.group_id)),
+                ("GroupID", Llsd::Uuid(membership.group_id.uuid())),
                 ("GroupPowers", u64_to_llsd(membership.group_powers)),
                 ("AcceptNotices", Llsd::Boolean(membership.accept_notices)),
                 ("GroupInsigniaID", Llsd::Uuid(membership.group_insignia_id)),
@@ -2995,7 +3000,7 @@ pub fn group_members_to_caps_llsd(event: &Event) -> Llsd {
         roster.insert(member.agent_id.to_string(), llsd_map(entries));
     }
     llsd_map(vec![
-        ("group_id", Llsd::Uuid(*group_id)),
+        ("group_id", Llsd::Uuid(group_id.uuid())),
         ("members", Llsd::Map(roster)),
         ("titles", Llsd::Array(titles)),
         (
@@ -3087,7 +3092,7 @@ pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Llsd {
         ("CreationDate", Llsd::Integer(item.creation_date)),
         ("OwnerID", Llsd::Uuid(item.owner_id)),
         ("CreatorID", Llsd::Uuid(item.creator_id.uuid())),
-        ("GroupID", Llsd::Uuid(item.group_id)),
+        ("GroupID", Llsd::Uuid(item.group_id.uuid())),
         ("GroupOwned", Llsd::Boolean(item.group_owned)),
         (
             "BaseMask",
@@ -3191,7 +3196,7 @@ pub(crate) fn inventory_item_to_llsd(item: &InventoryItem) -> Llsd {
         ("owner_id", Llsd::Uuid(item.owner_id)),
         ("last_owner_id", Llsd::Uuid(item.last_owner_id)),
         ("creator_id", Llsd::Uuid(item.creator_id.uuid())),
-        ("group_id", Llsd::Uuid(item.group_id)),
+        ("group_id", Llsd::Uuid(item.group_id.uuid())),
         ("is_owner_group", Llsd::Boolean(item.group_owned)),
     ]);
     let sale_info = llsd_map(vec![
@@ -3324,7 +3329,7 @@ pub(crate) fn object_properties(block: &ObjectPropertiesObjectDataBlock) -> Obje
         object_id: block.object_id,
         creator_id: AgentKey::from(block.creator_id),
         owner_id: block.owner_id,
-        group_id: block.group_id,
+        group_id: GroupKey::from(block.group_id),
         last_owner_id: block.last_owner_id,
         creation_date: block.creation_date,
         permissions: Permissions5 {
@@ -3368,6 +3373,7 @@ mod caps_serializer_tests {
 
     use pretty_assertions::assert_eq;
     use sl_types::key::AgentKey;
+    use sl_types::key::GroupKey;
     use uuid::Uuid;
 
     use super::{
@@ -3472,7 +3478,7 @@ mod caps_serializer_tests {
             local_id: sl_wire::RegionLocalParcelId(42),
             owner_id: Uuid::from_u128(0x11),
             is_group_owned: false,
-            group_id: Uuid::from_u128(0x22),
+            group_id: GroupKey::from(Uuid::from_u128(0x22)),
             auction_id: 0xdead_beef,
             claim_date: 1_700_000_000,
             claim_price: 100,
@@ -3574,7 +3580,7 @@ mod caps_serializer_tests {
     #[test]
     fn group_memberships_round_trip() {
         let event = Event::GroupMemberships(vec![GroupMembership {
-            group_id: Uuid::from_u128(0xc1),
+            group_id: GroupKey::from(Uuid::from_u128(0xc1)),
             group_powers: 0x0000_0001_0000_00ff,
             accept_notices: true,
             group_insignia_id: Uuid::from_u128(0xc2),
@@ -3592,7 +3598,7 @@ mod caps_serializer_tests {
         // Members already sorted by agent id, request id nil, count == roster
         // length — the shape the parser reconstructs.
         let event = Event::GroupMembers {
-            group_id: Uuid::from_u128(0xd0),
+            group_id: GroupKey::from(Uuid::from_u128(0xd0)),
             request_id: Uuid::nil(),
             member_count: 2,
             members: vec![
@@ -3638,7 +3644,7 @@ mod caps_serializer_tests {
             owner_id: Uuid::from_u128(seed.wrapping_add(0x300)),
             last_owner_id: Uuid::from_u128(seed.wrapping_add(0x400)),
             creator_id: AgentKey::from(Uuid::from_u128(seed.wrapping_add(0x500))),
-            group_id: Uuid::from_u128(seed.wrapping_add(0x600)),
+            group_id: GroupKey::from(Uuid::from_u128(seed.wrapping_add(0x600))),
             group_owned: true,
             permissions: Permissions5 {
                 base: Permissions::from_bits(0x7fff_ffff),

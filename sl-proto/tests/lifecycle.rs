@@ -13,8 +13,8 @@ mod test {
         ChatAudible, ChatSourceType, ChatType, ClassifiedUpdate, ClickAction, CoarseLocation,
         ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, DetachOrder,
         Diagnostic, DirFindFlags, DisconnectReason, EnvironmentSettings, EstateAccessDelta,
-        EstateAccessKind, Event, FollowCamProperty, FriendRights, GestureActivation,
-        GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
+        EstateAccessKind, Event, FollowCamProperty, FriendRights, GestureActivation, GroupKey,
+        GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
         GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate, InventoryCallbackId,
         InventoryItem, LandingType, LindenAmount, LoginAccount, LoginParams, LookAtType,
         MapItemType, Material, Maturity, MeanCollisionType, MoneyTransactionType, MovementMode,
@@ -2135,7 +2135,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an ActiveGroupChanged event")?;
-        assert_eq!(active.active_group_id, group);
+        assert_eq!(active.active_group_id, GroupKey::from(group));
         assert_eq!(active.group_title, "Founder");
         assert_eq!(active.group_name, "Test Group");
         assert_eq!(active.group_powers, 0x1234);
@@ -2174,7 +2174,7 @@ mod test {
             .ok_or("expected a GroupMemberships event")?;
         assert_eq!(groups.len(), 1);
         let first = groups.first().ok_or("first group")?;
-        assert_eq!(first.group_id, group);
+        assert_eq!(first.group_id, GroupKey::from(group));
         assert_eq!(first.group_name, "Test Group");
         assert!(first.accept_notices);
         assert_eq!(first.contribution, 50);
@@ -2219,7 +2219,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a GroupMembers event")?;
-        assert_eq!(group_id, group);
+        assert_eq!(group_id, GroupKey::from(group));
         assert_eq!(members.len(), 1);
         let first = members.first().ok_or("first member")?;
         assert_eq!(first.agent_id, AgentKey::from(member));
@@ -2273,11 +2273,11 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a GroupRoleData event")?;
-        assert_eq!(group_id, group);
+        assert_eq!(group_id, GroupKey::from(group));
         assert_eq!(role_count, 5);
         assert_eq!(roles.len(), 1);
         let first = roles.first().ok_or("first role")?;
-        assert_eq!(first.role_id, role);
+        assert_eq!(first.role_id, GroupRoleKey::from(role));
         assert_eq!(first.name, "Officers");
         Ok(())
     }
@@ -2319,11 +2319,11 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a GroupRoleMembers event")?;
-        assert_eq!(group_id, group);
+        assert_eq!(group_id, GroupKey::from(group));
         assert_eq!(total_pairs, 12);
         assert_eq!(pairs.len(), 1);
         let first = pairs.first().ok_or("first pair")?;
-        assert_eq!(first.role_id, role);
+        assert_eq!(first.role_id, GroupRoleKey::from(role));
         assert_eq!(first.member_id, AgentKey::from(member));
         Ok(())
     }
@@ -2369,7 +2369,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a GroupProfileReceived event")?;
-        assert_eq!(profile.group_id, group);
+        assert_eq!(profile.group_id, GroupKey::from(group));
         assert_eq!(profile.name, "Test Group");
         assert_eq!(profile.charter, "a charter");
         assert_eq!(profile.founder_id, AgentKey::from(founder));
@@ -2430,7 +2430,7 @@ mod test {
                 from_name,
                 message,
             } => {
-                assert_eq!(group_id, group);
+                assert_eq!(group_id, GroupKey::from(group));
                 assert_eq!(from_agent_id, AgentKey::from(sender));
                 assert_eq!(from_name, "Friend Tester");
                 assert_eq!(message, "hello group");
@@ -2447,8 +2447,8 @@ mod test {
         drain(&mut session)?;
 
         let group = uuid::Uuid::from_u128(0x670A);
-        session.activate_group(group, now)?;
-        session.request_group_members(group, now)?;
+        session.activate_group(GroupKey::from(group), now)?;
+        session.request_group_members(GroupKey::from(group), now)?;
         let sent = drain(&mut session)?;
 
         let activate = sent
@@ -2478,8 +2478,8 @@ mod test {
         drain(&mut session)?;
 
         let group = uuid::Uuid::from_u128(0x670B);
-        session.start_group_session(group, now)?;
-        session.send_group_message(group, "hi all", now)?;
+        session.start_group_session(GroupKey::from(group), now)?;
+        session.send_group_message(GroupKey::from(group), "hi all", now)?;
         let sent = drain(&mut session)?;
         let ims: Vec<_> = sent
             .iter()
@@ -2527,9 +2527,16 @@ mod test {
         )?;
         let group = uuid::Uuid::from_u128(0x670C);
         let invitee = uuid::Uuid::from_u128(0x670D);
-        session.join_group(group, now)?;
-        session.leave_group(group, now)?;
-        session.invite_to_group(group, &[(invitee, uuid::Uuid::nil())], now)?;
+        session.join_group(GroupKey::from(group), now)?;
+        session.leave_group(GroupKey::from(group), now)?;
+        session.invite_to_group(
+            GroupKey::from(group),
+            &[(
+                AgentKey::from(invitee),
+                GroupRoleKey::from(uuid::Uuid::nil()),
+            )],
+            now,
+        )?;
         let sent = drain(&mut session)?;
 
         let create = sent
@@ -2569,10 +2576,10 @@ mod test {
         let group = uuid::Uuid::from_u128(0x6711);
         let role = uuid::Uuid::from_u128(0x6712);
         session.update_group_roles(
-            group,
+            GroupKey::from(group),
             &[
                 GroupRoleEdit {
-                    role_id: role,
+                    role_id: GroupRoleKey::from(role),
                     name: "Officers".to_owned(),
                     description: "the officers".to_owned(),
                     title: "Officer".to_owned(),
@@ -2580,7 +2587,7 @@ mod test {
                     update_type: GroupRoleUpdateType::Create,
                 },
                 GroupRoleEdit {
-                    role_id: uuid::Uuid::from_u128(0x6713),
+                    role_id: GroupRoleKey::from(uuid::Uuid::from_u128(0x6713)),
                     name: String::new(),
                     description: String::new(),
                     title: String::new(),
@@ -2623,15 +2630,15 @@ mod test {
         let role = uuid::Uuid::from_u128(0x6715);
         let member = uuid::Uuid::from_u128(0x6716);
         session.change_group_role_members(
-            group,
+            GroupKey::from(group),
             &[
                 GroupRoleMemberChange {
-                    role_id: role,
+                    role_id: GroupRoleKey::from(role),
                     member_id: AgentKey::from(member),
                     change: GroupRoleChange::Add,
                 },
                 GroupRoleMemberChange {
-                    role_id: role,
+                    role_id: GroupRoleKey::from(role),
                     member_id: AgentKey::from(uuid::Uuid::from_u128(0x6717)),
                     change: GroupRoleChange::Remove,
                 },
@@ -2665,7 +2672,7 @@ mod test {
 
         let group = uuid::Uuid::from_u128(0x6718);
         let ejectee = uuid::Uuid::from_u128(0x6719);
-        session.eject_group_members(group, &[AgentKey::from(ejectee)], now)?;
+        session.eject_group_members(GroupKey::from(group), &[AgentKey::from(ejectee)], now)?;
         let sent = drain(&mut session)?;
         let eject = sent
             .iter()
@@ -3100,7 +3107,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an EjectGroupMemberResult event")?;
-        assert_eq!(group_id, group);
+        assert_eq!(group_id, GroupKey::from(group));
         assert!(success);
         Ok(())
     }
@@ -3115,10 +3122,10 @@ mod test {
         let item = uuid::Uuid::from_u128(0x671C);
         let owner = uuid::Uuid::from_u128(0x671D);
         // A plain notice (empty bucket).
-        session.send_group_notice(group, "Subject", "Body text", None, now)?;
+        session.send_group_notice(GroupKey::from(group), "Subject", "Body text", None, now)?;
         // A notice with an inventory attachment (LLSD bucket).
         session.send_group_notice(
-            group,
+            GroupKey::from(group),
             "Gift",
             "Here you go",
             Some(GroupNoticeAttachment {
@@ -3189,7 +3196,10 @@ mod test {
             .ok_or("expected a GroupMemberships event")?;
         assert_eq!(groups.len(), 1);
         let first = groups.first().ok_or("first group")?;
-        assert_eq!(first.group_id, uuid::Uuid::from_u128(0x6701));
+        assert_eq!(
+            first.group_id,
+            GroupKey::from(uuid::Uuid::from_u128(0x6701))
+        );
         assert_eq!(first.group_name, "CAPS Group");
         assert_eq!(first.group_powers, 4660);
         assert!(first.accept_notices);
@@ -3231,7 +3241,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a GroupMembers event")?;
-        assert_eq!(group_id, uuid::Uuid::from_u128(0x6703));
+        assert_eq!(group_id, GroupKey::from(uuid::Uuid::from_u128(0x6703)));
         assert_eq!(members.len(), 1);
         let first = members.first().ok_or("first member")?;
         assert_eq!(
@@ -4622,7 +4632,7 @@ mod test {
 
         let object = uuid::Uuid::from_u128(0xB0B);
         session.buy_object(
-            uuid::Uuid::nil(),
+            GroupKey::from(uuid::Uuid::nil()),
             uuid::Uuid::from_u128(0xCA7),
             &[ObjectBuyItem {
                 local_id: sl_proto::RegionLocalObjectId(99),
@@ -4656,7 +4666,7 @@ mod test {
                 circuit,
                 sl_proto::RegionLocalObjectId(99),
             )],
-            uuid::Uuid::nil(),
+            GroupKey::from(uuid::Uuid::nil()),
             Vector {
                 x: 1.0,
                 y: 2.0,
@@ -4762,7 +4772,7 @@ mod test {
                 folder_id: uuid::Uuid::nil(),
                 creator_id: AgentKey::from(uuid::Uuid::nil()),
                 owner_id: uuid::Uuid::nil(),
-                group_id: uuid::Uuid::nil(),
+                group_id: GroupKey::from(uuid::Uuid::nil()),
                 permissions: Permissions5 {
                     base: Permissions::from_bits(0x0008_e000),
                     owner: Permissions::from_bits(0x0008_e000),
@@ -4786,7 +4796,7 @@ mod test {
         )?;
         session.rez_object_from_notecard(
             &NotecardRez {
-                group_id: uuid::Uuid::nil(),
+                group_id: GroupKey::from(uuid::Uuid::nil()),
                 from_task_id: uuid::Uuid::nil(),
                 bypass_raycast: false,
                 ray_start: Vector {
@@ -4931,13 +4941,26 @@ mod test {
         let request_id = uuid::Uuid::from_u128(0xF00D);
         let transaction_id = uuid::Uuid::from_u128(0x7AC7);
         let proposal_id = uuid::Uuid::from_u128(0x9A0E);
-        session.request_group_account_summary(group_id, request_id, 60, 0, now)?;
-        session.request_group_account_details(group_id, request_id, 60, 0, now)?;
-        session.request_group_account_transactions(group_id, request_id, 60, 0, now)?;
-        session.request_group_active_proposals(group_id, transaction_id, now)?;
-        session.request_group_vote_history(group_id, transaction_id, now)?;
-        session.start_group_proposal(group_id, 3, 0.5, 86_400, "Adopt the bylaws?", now)?;
-        session.cast_group_proposal_ballot(proposal_id, group_id, "yes", now)?;
+        session.request_group_account_summary(GroupKey::from(group_id), request_id, 60, 0, now)?;
+        session.request_group_account_details(GroupKey::from(group_id), request_id, 60, 0, now)?;
+        session.request_group_account_transactions(
+            GroupKey::from(group_id),
+            request_id,
+            60,
+            0,
+            now,
+        )?;
+        session.request_group_active_proposals(GroupKey::from(group_id), transaction_id, now)?;
+        session.request_group_vote_history(GroupKey::from(group_id), transaction_id, now)?;
+        session.start_group_proposal(
+            GroupKey::from(group_id),
+            3,
+            0.5,
+            86_400,
+            "Adopt the bylaws?",
+            now,
+        )?;
+        session.cast_group_proposal_ballot(proposal_id, GroupKey::from(group_id), "yes", now)?;
         let sent = drain(&mut session)?;
 
         let summary = sent
@@ -5048,7 +5071,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a GroupAccountSummary event")?;
-        assert_eq!(got.group_id, group_id);
+        assert_eq!(got.group_id, GroupKey::from(group_id));
         assert_eq!(got.request_id, request_id);
         assert_eq!(got.balance, 1234);
         assert_eq!(got.start_date, "2026-06-01");
@@ -5092,7 +5115,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a GroupActiveProposals event")?;
-        assert_eq!(active.0, group_id);
+        assert_eq!(active.0, GroupKey::from(group_id));
         assert_eq!(active.1, transaction_id);
         assert_eq!(active.2, 1);
         let proposal = active.3.first().ok_or("expected one proposal")?;
@@ -6842,7 +6865,7 @@ mod test {
         assert_eq!(parcel.description, "A quiet beach parcel");
         assert_eq!(parcel.owner_id, owner);
         assert!(parcel.is_group_owned);
-        assert_eq!(parcel.group_id, group);
+        assert_eq!(parcel.group_id, GroupKey::from(group));
         assert_eq!(parcel.auction_id, 7);
         assert_eq!(parcel.claim_date, 1_700_000_000);
         assert_eq!(parcel.claim_price, 512);
@@ -6966,7 +6989,10 @@ mod test {
         assert_eq!(parcel.description, "dockside");
         assert_eq!(parcel.owner_id, uuid::Uuid::from_u128(0x111));
         assert!(parcel.is_group_owned);
-        assert_eq!(parcel.group_id, uuid::Uuid::from_u128(0x222));
+        assert_eq!(
+            parcel.group_id,
+            GroupKey::from(uuid::Uuid::from_u128(0x222))
+        );
         // 2023-11-14T22:13:20Z == 1_700_000_000 Unix seconds.
         assert_eq!(parcel.claim_date, 1_700_000_000);
         assert_eq!(parcel.sale_price, 4500);
@@ -7675,7 +7701,7 @@ mod test {
             ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(7)),
             512,
             1024,
-            uuid::Uuid::nil(),
+            GroupKey::from(uuid::Uuid::nil()),
             false,
             now,
         )?;
@@ -10297,7 +10323,11 @@ mod test {
             y: 64.0,
             z: 25.0,
         };
-        session.rez_object(&PrimShape::cube(position.clone()), uuid::Uuid::nil(), now)?;
+        session.rez_object(
+            &PrimShape::cube(position.clone()),
+            GroupKey::from(uuid::Uuid::nil()),
+            now,
+        )?;
         let sent = drain(&mut session)?;
         let add = sent
             .iter()
@@ -10527,7 +10557,7 @@ mod test {
             DeRezDestination::TakeIntoAgentInventory,
             folder,
             uuid::Uuid::from_u128(0x7),
-            uuid::Uuid::nil(),
+            GroupKey::from(uuid::Uuid::nil()),
             now,
         )?;
         let sent = drain(&mut session)?;
@@ -11821,7 +11851,7 @@ mod test {
             owner_id: uuid::Uuid::nil(),
             last_owner_id: uuid::Uuid::nil(),
             creator_id: AgentKey::from(uuid::Uuid::nil()),
-            group_id: uuid::Uuid::nil(),
+            group_id: GroupKey::from(uuid::Uuid::nil()),
             group_owned: false,
             permissions: Permissions5::empty(),
         }

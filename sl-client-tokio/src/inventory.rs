@@ -2,8 +2,8 @@
 
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
-    CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA, Llsd, Uuid, build_fetch_inventory_request,
-    build_group_member_data_request, parse_llsd_xml,
+    CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA, GroupKey, Llsd, Uuid,
+    build_fetch_inventory_request, build_group_member_data_request, parse_llsd_xml,
 };
 use tokio::sync::mpsc;
 
@@ -42,11 +42,11 @@ pub(crate) async fn fetch_inventory(
 /// LLSD roster back over `caps_tx` to be surfaced as an [`Event::GroupMembers`].
 pub(crate) async fn fetch_group_members(
     cap_url: String,
-    group_id: Uuid,
+    group_id: GroupKey,
     http: ReqwestClient,
     caps_tx: mpsc::Sender<(String, Llsd)>,
 ) {
-    let body = build_group_member_data_request(group_id);
+    let body = build_group_member_data_request(group_id.uuid());
     let Ok(response) = http
         .post(&cap_url)
         .header("Content-Type", "application/llsd+xml")

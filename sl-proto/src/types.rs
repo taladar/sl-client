@@ -60,7 +60,7 @@ pub use group::{
     ActiveGroup, CreateGroupParams, GroupAccountDetails, GroupAccountDetailsEntry,
     GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
     GroupActiveProposalItem, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
-    GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleMember,
+    GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
     GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, GroupVote, GroupVoteHistoryItem,
     group_powers,
 };

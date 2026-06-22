@@ -9,15 +9,16 @@ use crate::{
     AbuseReport, AgentKey, AgentPreferences, AnyMessage, AssetType, AttachmentMode,
     AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction, ControlFlags,
     CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, EstateAccessDelta,
-    ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation, GroupNoticeAttachment,
-    GroupRoleEdit, GroupRoleMemberChange, IceCandidate, InterestsUpdate, InventoryItem,
-    InventoryOffer, InventoryType, LandSearchType, LandStatReportType, LindenAmount, MapItemType,
-    Material, MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MovementMode, MuteFlags,
-    MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform,
-    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelReturnType, ParcelUpdate,
-    PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate, RegionHandle,
-    RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, Rotation, SaleType,
-    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
+    ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation, GroupKey,
+    GroupNoticeAttachment, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate,
+    InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LandSearchType,
+    LandStatReportType, LindenAmount, MapItemType, Material, MaterialOverrideUpdate, MediaEntry,
+    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
+    ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
+    ParcelCategory, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, Postcard,
+    PrimShape, ProfileUpdate, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem,
+    RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect,
+    VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -356,27 +357,27 @@ pub enum Command {
     DeclineFriendship(Uuid),
     /// Make a group the active group (`ActivateGroup`); nil clears it. Confirmed
     /// by [`Event::ActiveGroupChanged`](crate::Event::ActiveGroupChanged).
-    ActivateGroup(Uuid),
+    ActivateGroup(GroupKey),
     /// Request a group's member roster over **UDP** (`GroupMembersRequest`).
     /// Replies arrive as [`Event::GroupMembers`](crate::Event::GroupMembers).
-    RequestGroupMembers(Uuid),
+    RequestGroupMembers(GroupKey),
     /// Fetch a group's member roster over the **HTTP CAPS** path
     /// (`GroupMemberData`) — the modern path used on Second Life. The roster
     /// arrives as an [`Event::GroupMembers`](crate::Event::GroupMembers).
-    FetchGroupMembers(Uuid),
+    FetchGroupMembers(GroupKey),
     /// Request a group's roles. The reply arrives as [`Event::GroupRoleData`](crate::Event::GroupRoleData).
-    RequestGroupRoles(Uuid),
+    RequestGroupRoles(GroupKey),
     /// Request a group's role↔member pairings. The reply arrives as
     /// [`Event::GroupRoleMembers`](crate::Event::GroupRoleMembers).
-    RequestGroupRoleMembers(Uuid),
+    RequestGroupRoleMembers(GroupKey),
     /// Request the agent's selectable titles in a group. The reply arrives as
     /// [`Event::GroupTitles`](crate::Event::GroupTitles).
-    RequestGroupTitles(Uuid),
+    RequestGroupTitles(GroupKey),
     /// Request a group's profile. The reply arrives as
     /// [`Event::GroupProfileReceived`](crate::Event::GroupProfileReceived).
-    RequestGroupProfile(Uuid),
+    RequestGroupProfile(GroupKey),
     /// Request a group's notice list. The reply arrives as [`Event::GroupNotices`](crate::Event::GroupNotices).
-    RequestGroupNotices(Uuid),
+    RequestGroupNotices(GroupKey),
     /// Request a single group notice's full body (by notice id). Delivered as an
     /// [`Event::InstantMessageReceived`](crate::Event::InstantMessageReceived) with the group-notice dialog.
     RequestGroupNotice(Uuid),
@@ -384,21 +385,21 @@ pub enum Command {
     CreateGroup(CreateGroupParams),
     /// Join an open-enrollment group. The result arrives as
     /// [`Event::JoinGroupResult`](crate::Event::JoinGroupResult).
-    JoinGroup(Uuid),
+    JoinGroup(GroupKey),
     /// Leave a group. The result arrives as [`Event::LeaveGroupResult`](crate::Event::LeaveGroupResult).
-    LeaveGroup(Uuid),
+    LeaveGroup(GroupKey),
     /// Invite agents to a group, each an `(invitee_id, role_id)` pair (nil role
     /// = the default Everyone role).
     InviteToGroup {
         /// The group to invite into.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The `(invitee_id, role_id)` pairs.
-        invitees: Vec<(Uuid, Uuid)>,
+        invitees: Vec<(AgentKey, GroupRoleKey)>,
     },
     /// Set whether the agent accepts notices from a group / lists it in profile.
     SetGroupAcceptNotices {
         /// The group.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// Whether to accept notices.
         accept_notices: bool,
         /// Whether to list the group in the agent's profile.
@@ -407,36 +408,36 @@ pub enum Command {
     /// Set the agent's L$ contribution to a group.
     SetGroupContribution {
         /// The group.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The new contribution amount.
         contribution: i32,
     },
     /// Start (join) a group's IM session (`IM_SESSION_GROUP_START`). Group
     /// messages then arrive as [`Event::GroupSessionMessage`](crate::Event::GroupSessionMessage).
-    StartGroupSession(Uuid),
+    StartGroupSession(GroupKey),
     /// Send a message into a group's IM session. Other members receive it as
     /// [`Event::GroupSessionMessage`](crate::Event::GroupSessionMessage).
     SendGroupMessage {
         /// The group (and IM session) to post to.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The message text.
         message: String,
     },
     /// Leave a group's IM session (stop receiving its chat) without leaving the
     /// group itself.
-    LeaveGroupSession(Uuid),
+    LeaveGroupSession(GroupKey),
     /// Create, update, or delete group roles (`GroupRoleUpdate`), one
     /// [`GroupRoleEdit`] per role. Re-request the roles to observe the change.
     UpdateGroupRoles {
         /// The group whose roles to edit.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The role create/update/delete edits.
         roles: Vec<GroupRoleEdit>,
     },
     /// Add members to or remove members from group roles (`GroupRoleChanges`).
     ChangeGroupRoleMembers {
         /// The group whose role assignments to change.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The member↔role add/remove changes.
         changes: Vec<GroupRoleMemberChange>,
     },
@@ -444,7 +445,7 @@ pub enum Command {
     /// as [`Event::EjectGroupMemberResult`](crate::Event::EjectGroupMemberResult).
     EjectGroupMembers {
         /// The group to eject from.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The agent ids to eject.
         member_ids: Vec<AgentKey>,
     },
@@ -453,7 +454,7 @@ pub enum Command {
     /// [`Event::GroupAccountSummary`](crate::Event::GroupAccountSummary).
     RequestGroupAccountSummary {
         /// The group to query.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// A client-chosen id echoed back in the reply for correlation.
         request_id: Uuid,
         /// The interval length in days.
@@ -466,7 +467,7 @@ pub enum Command {
     /// [`Event::GroupAccountDetails`](crate::Event::GroupAccountDetails).
     RequestGroupAccountDetails {
         /// The group to query.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// A client-chosen id echoed back in the reply for correlation.
         request_id: Uuid,
         /// The interval length in days.
@@ -479,7 +480,7 @@ pub enum Command {
     /// [`Event::GroupAccountTransactions`](crate::Event::GroupAccountTransactions).
     RequestGroupAccountTransactions {
         /// The group to query.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// A client-chosen id echoed back in the reply for correlation.
         request_id: Uuid,
         /// The interval length in days.
@@ -492,7 +493,7 @@ pub enum Command {
     /// [`Event::GroupActiveProposals`](crate::Event::GroupActiveProposals).
     RequestGroupActiveProposals {
         /// The group to query.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// A client-chosen id echoed back in the reply for correlation.
         transaction_id: Uuid,
     },
@@ -501,7 +502,7 @@ pub enum Command {
     /// [`Event::GroupVoteHistory`](crate::Event::GroupVoteHistory).
     RequestGroupVoteHistory {
         /// The group to query.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// A client-chosen id echoed back in the reply for correlation.
         transaction_id: Uuid,
     },
@@ -509,7 +510,7 @@ pub enum Command {
     /// the group's active proposals.
     StartGroupProposal {
         /// The group to start the proposal in.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The minimum number of votes required for the result to count.
         quorum: i32,
         /// The fraction of votes needed to pass (0.0–1.0).
@@ -525,7 +526,7 @@ pub enum Command {
         /// [`Event::GroupActiveProposals`](crate::Event::GroupActiveProposals)).
         proposal_id: Uuid,
         /// The group the proposal belongs to.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The vote to cast (e.g. `"yes"`/`"no"`/`"abstain"`).
         vote_cast: String,
     },
@@ -533,7 +534,7 @@ pub enum Command {
     /// item. The grid relays it to members who accept notices.
     SendGroupNotice {
         /// The group to post to.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The notice subject.
         subject: String,
         /// The notice body.
@@ -758,7 +759,7 @@ pub enum Command {
         /// The parcel area in m².
         area: i32,
         /// The group to buy for (nil for a personal purchase).
-        group_id: Uuid,
+        group_id: GroupKey,
         /// Whether the purchase is group-owned.
         is_group_owned: bool,
     },
@@ -787,7 +788,7 @@ pub enum Command {
         /// The parcel's region-local id.
         local_id: ScopedParcelId,
         /// The group to deed the parcel to.
-        group_id: Uuid,
+        group_id: GroupKey,
     },
     /// Reclaim a parcel to the estate (`ParcelReclaim`).
     ReclaimParcel {
@@ -1080,7 +1081,7 @@ pub enum Command {
         /// The shape of the prim to rez.
         shape: PrimShape,
         /// The group the new object is set to ([`Uuid::nil`] for none).
-        group_id: Uuid,
+        group_id: GroupKey,
     },
     /// Duplicate objects with an offset (`ObjectDuplicate`).
     DuplicateObjects {
@@ -1089,7 +1090,7 @@ pub enum Command {
         /// The offset to apply to the copies.
         offset: Vector,
         /// The group the copies are set to.
-        group_id: Uuid,
+        group_id: GroupKey,
     },
     /// Delete objects to the trash (`ObjectDelete`).
     DeleteObjects {
@@ -1107,7 +1108,7 @@ pub enum Command {
         /// A caller-chosen id correlating the resulting inventory update.
         transaction_id: Uuid,
         /// The active group ([`Uuid::nil`] for none).
-        group_id: Uuid,
+        group_id: GroupKey,
     },
     /// Move/rotate/scale an object (`MultipleObjectUpdate`).
     UpdateObject {
@@ -1156,7 +1157,7 @@ pub enum Command {
         /// The region-local ids.
         local_ids: Vec<ScopedObjectId>,
         /// The group id.
-        group_id: Uuid,
+        group_id: GroupKey,
     },
     /// Set or clear permission bits on objects (`ObjectPermissions`).
     SetObjectPermissions {
@@ -1209,7 +1210,7 @@ pub enum Command {
     /// in `category_id`.
     BuyObject {
         /// The active group ([`Uuid::nil`] for none).
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The inventory folder a derezed purchase is placed in.
         category_id: Uuid,
         /// The objects to buy (each with its advertised sale type and price).
@@ -1268,7 +1269,7 @@ pub enum Command {
         /// The region-local ids to duplicate.
         local_ids: Vec<ScopedObjectId>,
         /// The active group the copies are set to ([`Uuid::nil`] for none).
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The ray's start point (region-local).
         ray_start: Vector,
         /// The ray's end point (region-local).
@@ -1856,7 +1857,7 @@ pub enum Command {
     /// The reply arrives as [`Event::GroupExperiences`](crate::Event::GroupExperiences).
     RequestGroupExperiences {
         /// The group to query.
-        group_id: Uuid,
+        group_id: GroupKey,
     },
     /// Test whether the agent administers an experience over the
     /// `IsExperienceAdmin` capability. The reply arrives as

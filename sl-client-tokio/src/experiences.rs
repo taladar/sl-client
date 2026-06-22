@@ -2,14 +2,14 @@
 
 use crate::http::get_llsd;
 use reqwest::Client as ReqwestClient;
-use sl_proto::{Event, Uuid, parse_experience_ids, parse_experience_status};
+use sl_proto::{Event, GroupKey, Uuid, parse_experience_ids, parse_experience_status};
 use tokio::sync::mpsc;
 
 /// GETs the `GroupExperiences` capability and forwards an [`Event::GroupExperiences`]
 /// over `events`, echoing the queried `group_id` (the cap reply does not carry it).
 pub(crate) async fn fetch_group_experiences(
     url: String,
-    group_id: Uuid,
+    group_id: GroupKey,
     http: ReqwestClient,
     events: mpsc::Sender<Event>,
 ) {

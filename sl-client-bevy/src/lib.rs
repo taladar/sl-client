@@ -2282,7 +2282,7 @@ fn advance_running(
                 if let Some(caps) = caps.as_ref()
                     && let Some(base) = caps.map.get(CAP_GROUP_EXPERIENCES).cloned()
                 {
-                    let url = format!("{base}{}", group_experiences_query(*group_id));
+                    let url = format!("{base}{}", group_experiences_query(group_id.uuid()));
                     let group_id = *group_id;
                     let asset_tx = caps.asset_tx.clone();
                     std::thread::spawn(move || {

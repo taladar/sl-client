@@ -1,7 +1,7 @@
 //! In-world object schema: motion, shape, materials, animations, particles.
 
 use sl_types::attachment::AttachmentPoint;
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, GroupKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::Permissions5;
@@ -661,7 +661,7 @@ pub struct ObjectProperties {
     /// The current owner's id.
     pub owner_id: Uuid,
     /// The group the object is set to.
-    pub group_id: Uuid,
+    pub group_id: GroupKey,
     /// The previous owner's id.
     pub last_owner_id: Uuid,
     /// The creation timestamp (seconds since the Unix epoch).
@@ -724,7 +724,7 @@ pub struct ObjectPropertiesFamily {
     /// The current owner's id.
     pub owner_id: Uuid,
     /// The group the object is set to.
-    pub group_id: Uuid,
+    pub group_id: GroupKey,
     /// The base / owner / group / everyone / next-owner permission masks.
     pub permissions: Permissions5,
     /// The ownership cost, in L$.

@@ -3,12 +3,16 @@
 use crate::http::blocking_get_llsd;
 use crossbeam_channel::Sender;
 use sl_proto::Event as SessionEvent;
-use sl_proto::{Uuid, parse_experience_ids, parse_experience_status};
+use sl_proto::{GroupKey, Uuid, parse_experience_ids, parse_experience_status};
 
 /// GETs the `GroupExperiences` capability and forwards an
 /// [`SlSessionEvent::GroupExperiences`] over `asset_tx`, echoing the queried
 /// `group_id` (the cap reply does not carry it).
-pub(crate) fn run_group_experiences(url: &str, group_id: Uuid, asset_tx: &Sender<SessionEvent>) {
+pub(crate) fn run_group_experiences(
+    url: &str,
+    group_id: GroupKey,
+    asset_tx: &Sender<SessionEvent>,
+) {
     if let Some(llsd) = blocking_get_llsd(url) {
         asset_tx
             .send(SessionEvent::GroupExperiences {

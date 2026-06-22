@@ -34,6 +34,7 @@ use super::{
     LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, Session, SessionState, TELEPORT_TIMEOUT,
     TextureDownload, deadline, merge_deadline,
 };
+use crate::GroupRoleKey;
 use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
 use crate::error::Error;
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
@@ -59,7 +60,7 @@ use crate::types::{
     TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
     ViewerEffectType, Wearable, WearableType,
 };
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, GroupKey};
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::{
@@ -1672,7 +1673,7 @@ impl Session {
                     // Group IM session traffic (the session id is the group id).
                     ImDialog::SessionSend if block.from_group => {
                         self.events.push_back(Event::GroupSessionMessage {
-                            group_id: block.id,
+                            group_id: GroupKey::from(block.id),
                             from_agent_id: AgentKey::from(im.agent_data.agent_id),
                             from_name: trimmed_string(&block.from_agent_name),
                             message: trimmed_string(&block.message),
@@ -1682,7 +1683,7 @@ impl Session {
                         if block.from_group =>
                     {
                         self.events.push_back(Event::GroupSessionParticipant {
-                            group_id: block.id,
+                            group_id: GroupKey::from(block.id),
                             agent_id: AgentKey::from(im.agent_data.agent_id),
                             joined: matches!(dialog, ImDialog::SessionAdd),
                         });
@@ -2336,7 +2337,7 @@ impl Session {
                         .query_replies
                         .iter()
                         .map(|block| DirGroupResult {
-                            group_id: block.group_id,
+                            group_id: GroupKey::from(block.group_id),
                             group_name: trimmed_string(&block.group_name),
                             members: block.members,
                             search_order: block.search_order,
@@ -2512,7 +2513,7 @@ impl Session {
                         request_flags: data.request_flags,
                         object_id: data.object_id,
                         owner_id: data.owner_id,
-                        group_id: data.group_id,
+                        group_id: GroupKey::from(data.group_id),
                         permissions: Permissions5 {
                             base: Permissions::from_bits(data.base_mask),
                             owner: Permissions::from_bits(data.owner_mask),
@@ -2680,7 +2681,7 @@ impl Session {
             }
             AnyMessage::GroupMembersReply(reply) => {
                 self.events.push_back(Event::GroupMembers {
-                    group_id: reply.group_data.group_id,
+                    group_id: GroupKey::from(reply.group_data.group_id),
                     request_id: reply.group_data.request_id,
                     member_count: reply.group_data.member_count,
                     members: reply.member_data.iter().map(group_member).collect(),
@@ -2688,7 +2689,7 @@ impl Session {
             }
             AnyMessage::GroupRoleDataReply(reply) => {
                 self.events.push_back(Event::GroupRoleData {
-                    group_id: reply.group_data.group_id,
+                    group_id: GroupKey::from(reply.group_data.group_id),
                     request_id: reply.group_data.request_id,
                     role_count: reply.group_data.role_count,
                     roles: reply.role_data.iter().map(group_role).collect(),
@@ -2696,14 +2697,14 @@ impl Session {
             }
             AnyMessage::GroupRoleMembersReply(reply) => {
                 self.events.push_back(Event::GroupRoleMembers {
-                    group_id: reply.agent_data.group_id,
+                    group_id: GroupKey::from(reply.agent_data.group_id),
                     request_id: reply.agent_data.request_id,
                     total_pairs: reply.agent_data.total_pairs,
                     pairs: reply
                         .member_data
                         .iter()
                         .map(|pair| GroupRoleMember {
-                            role_id: pair.role_id,
+                            role_id: GroupRoleKey::from(pair.role_id),
                             member_id: AgentKey::from(pair.member_id),
                         })
                         .collect(),
@@ -2711,7 +2712,7 @@ impl Session {
             }
             AnyMessage::GroupTitlesReply(reply) => {
                 self.events.push_back(Event::GroupTitles {
-                    group_id: reply.agent_data.group_id,
+                    group_id: GroupKey::from(reply.agent_data.group_id),
                     request_id: reply.agent_data.request_id,
                     titles: reply.group_data.iter().map(group_title).collect(),
                 });
@@ -2724,7 +2725,7 @@ impl Session {
             }
             AnyMessage::GroupNoticesListReply(reply) => {
                 self.events.push_back(Event::GroupNotices {
-                    group_id: reply.agent_data.group_id,
+                    group_id: GroupKey::from(reply.agent_data.group_id),
                     notices: reply.data.iter().map(group_notice).collect(),
                 });
             }
@@ -2744,7 +2745,7 @@ impl Session {
             }
             AnyMessage::GroupActiveProposalItemReply(reply) => {
                 self.events.push_back(Event::GroupActiveProposals {
-                    group_id: reply.agent_data.group_id,
+                    group_id: GroupKey::from(reply.agent_data.group_id),
                     transaction_id: reply.transaction_data.transaction_id,
                     total_num_items: reply.transaction_data.total_num_items,
                     proposals: reply
@@ -2756,7 +2757,7 @@ impl Session {
             }
             AnyMessage::GroupVoteHistoryItemReply(reply) => {
                 self.events.push_back(Event::GroupVoteHistory {
-                    group_id: reply.agent_data.group_id,
+                    group_id: GroupKey::from(reply.agent_data.group_id),
                     transaction_id: reply.transaction_data.transaction_id,
                     total_num_items: reply.transaction_data.total_num_items,
                     item: group_vote_history_item(reply),
@@ -2764,31 +2765,31 @@ impl Session {
             }
             AnyMessage::CreateGroupReply(reply) => {
                 self.events.push_back(Event::CreateGroupResult {
-                    group_id: reply.reply_data.group_id,
+                    group_id: GroupKey::from(reply.reply_data.group_id),
                     success: reply.reply_data.success,
                     message: trimmed_string(&reply.reply_data.message),
                 });
             }
             AnyMessage::JoinGroupReply(reply) => {
                 self.events.push_back(Event::JoinGroupResult {
-                    group_id: reply.group_data.group_id,
+                    group_id: GroupKey::from(reply.group_data.group_id),
                     success: reply.group_data.success,
                 });
             }
             AnyMessage::LeaveGroupReply(reply) => {
                 self.events.push_back(Event::LeaveGroupResult {
-                    group_id: reply.group_data.group_id,
+                    group_id: GroupKey::from(reply.group_data.group_id),
                     success: reply.group_data.success,
                 });
             }
             AnyMessage::AgentDropGroup(drop) => {
                 self.events.push_back(Event::DroppedFromGroup {
-                    group_id: drop.agent_data.group_id,
+                    group_id: GroupKey::from(drop.agent_data.group_id),
                 });
             }
             AnyMessage::EjectGroupMemberReply(reply) => {
                 self.events.push_back(Event::EjectGroupMemberResult {
-                    group_id: reply.group_data.group_id,
+                    group_id: GroupKey::from(reply.group_data.group_id),
                     success: reply.eject_data.success,
                 });
             }
@@ -3667,7 +3668,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn activate_group(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn activate_group(&mut self, group_id: GroupKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_activate_group(group_id, now)?;
         Ok(())
@@ -3681,7 +3682,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn request_group_members(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn request_group_members(&mut self, group_id: GroupKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_members_request(group_id, now)?;
         Ok(())
@@ -3694,7 +3695,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn request_group_roles(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn request_group_roles(&mut self, group_id: GroupKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_role_data_request(group_id, now)?;
         Ok(())
@@ -3709,7 +3710,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_group_role_members(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -3724,7 +3725,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn request_group_titles(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn request_group_titles(&mut self, group_id: GroupKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_titles_request(group_id, now)?;
         Ok(())
@@ -3737,7 +3738,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn request_group_profile(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn request_group_profile(&mut self, group_id: GroupKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_profile_request(group_id, now)?;
         Ok(())
@@ -3751,7 +3752,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn request_group_notices(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn request_group_notices(&mut self, group_id: GroupKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_notices_list_request(group_id, now)?;
         Ok(())
@@ -3793,7 +3794,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn join_group(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn join_group(&mut self, group_id: GroupKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_join_group_request(group_id, now)?;
         Ok(())
@@ -3806,7 +3807,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn leave_group(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn leave_group(&mut self, group_id: GroupKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_leave_group_request(group_id, now)?;
         Ok(())
@@ -3822,8 +3823,8 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn invite_to_group(
         &mut self,
-        group_id: Uuid,
-        invitees: &[(Uuid, Uuid)],
+        group_id: GroupKey,
+        invitees: &[(AgentKey, GroupRoleKey)],
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -3840,7 +3841,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_group_accept_notices(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         accept_notices: bool,
         list_in_profile: bool,
         now: Instant,
@@ -3858,7 +3859,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_group_contribution(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         contribution: i32,
         now: Instant,
     ) -> Result<(), Error> {
@@ -3876,7 +3877,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the message fails to encode.
-    pub fn start_group_session(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn start_group_session(&mut self, group_id: GroupKey, now: Instant) -> Result<(), Error> {
         let from_name = self.agent_name();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_session_im(
@@ -3899,7 +3900,7 @@ impl Session {
     /// [`Error::Wire`] if the message fails to encode.
     pub fn send_group_message(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         message: &str,
         now: Instant,
     ) -> Result<(), Error> {
@@ -3917,7 +3918,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the message fails to encode.
-    pub fn leave_group_session(&mut self, group_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn leave_group_session(&mut self, group_id: GroupKey, now: Instant) -> Result<(), Error> {
         let from_name = self.agent_name();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_session_im(group_id, ImDialog::SessionLeave, "", &from_name, now)?;
@@ -3943,7 +3944,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn update_group_roles(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         roles: &[GroupRoleEdit],
         now: Instant,
     ) -> Result<(), Error> {
@@ -3965,7 +3966,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn change_group_role_members(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         changes: &[GroupRoleMemberChange],
         now: Instant,
     ) -> Result<(), Error> {
@@ -3986,7 +3987,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn eject_group_members(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         member_ids: &[AgentKey],
         now: Instant,
     ) -> Result<(), Error> {
@@ -4120,7 +4121,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_group_account_summary(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         request_id: Uuid,
         interval_days: i32,
         current_interval: i32,
@@ -4147,7 +4148,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_group_account_details(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         request_id: Uuid,
         interval_days: i32,
         current_interval: i32,
@@ -4173,7 +4174,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_group_account_transactions(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         request_id: Uuid,
         interval_days: i32,
         current_interval: i32,
@@ -4200,7 +4201,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_group_active_proposals(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         transaction_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
@@ -4218,7 +4219,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_group_vote_history(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         transaction_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
@@ -4237,7 +4238,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn start_group_proposal(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         quorum: i32,
         majority: f32,
         duration: i32,
@@ -4266,7 +4267,7 @@ impl Session {
     pub fn cast_group_proposal_ballot(
         &mut self,
         proposal_id: Uuid,
-        group_id: Uuid,
+        group_id: GroupKey,
         vote_cast: &str,
         now: Instant,
     ) -> Result<(), Error> {
@@ -4290,7 +4291,7 @@ impl Session {
     /// [`Error::Wire`] if the message fails to encode.
     pub fn send_group_notice(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         subject: &str,
         message: &str,
         attachment: Option<GroupNoticeAttachment>,
@@ -4307,7 +4308,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
-                to_agent_id: AgentKey::from(group_id),
+                to_agent_id: group_id.uuid(),
                 from_group: false,
                 dialog: ImDialog::GroupNotice,
                 id: Uuid::nil(),
@@ -4388,7 +4389,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
-                to_agent_id: from_agent_id,
+                to_agent_id: from_agent_id.uuid(),
                 from_group: false,
                 dialog: ImDialog::LureDeclined,
                 id: lure_id,
@@ -4418,7 +4419,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
-                to_agent_id,
+                to_agent_id: to_agent_id.uuid(),
                 from_group: false,
                 dialog: ImDialog::TeleportRequest,
                 id: Uuid::nil(),
@@ -4455,7 +4456,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
-                to_agent_id,
+                to_agent_id: to_agent_id.uuid(),
                 from_group: false,
                 dialog: ImDialog::InventoryOffered,
                 id: transaction_id,
@@ -4489,7 +4490,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
-                to_agent_id,
+                to_agent_id: to_agent_id.uuid(),
                 from_group: false,
                 dialog: ImDialog::InventoryOffered,
                 id: transaction_id,
@@ -4521,7 +4522,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
-                to_agent_id: offer.from_agent_id,
+                to_agent_id: offer.from_agent_id.uuid(),
                 from_group: false,
                 dialog: ImDialog::InventoryAccepted,
                 id: offer.transaction_id,
@@ -4551,7 +4552,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
-                to_agent_id: offer.from_agent_id,
+                to_agent_id: offer.from_agent_id.uuid(),
                 from_group: false,
                 dialog: ImDialog::InventoryDeclined,
                 id: offer.transaction_id,
@@ -4589,7 +4590,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
-                to_agent_id: AgentKey::from(to_agent_id),
+                to_agent_id,
                 from_group: false,
                 dialog: ImDialog::SessionConferenceStart,
                 id: session_id,
@@ -4620,7 +4621,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
-                to_agent_id: AgentKey::from(session_id),
+                to_agent_id: session_id,
                 from_group: false,
                 dialog: ImDialog::SessionSend,
                 id: session_id,
@@ -4645,7 +4646,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
-                to_agent_id: AgentKey::from(session_id),
+                to_agent_id: session_id,
                 from_group: false,
                 dialog: ImDialog::SessionLeave,
                 id: session_id,
@@ -5352,7 +5353,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn buy_object(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         category_id: Uuid,
         objects: &[ObjectBuyItem],
         now: Instant,
@@ -5471,7 +5472,7 @@ impl Session {
     pub fn duplicate_objects_on_ray(
         &mut self,
         local_ids: &[ScopedObjectId],
-        group_id: Uuid,
+        group_id: GroupKey,
         ray_start: Vector,
         ray_end: Vector,
         bypass_raycast: bool,
@@ -6394,7 +6395,7 @@ impl Session {
         local_id: ScopedParcelId,
         price: i32,
         area: i32,
-        group_id: Uuid,
+        group_id: GroupKey,
         is_group_owned: bool,
         now: Instant,
     ) -> Result<(), Error> {
@@ -6459,7 +6460,7 @@ impl Session {
     pub fn deed_parcel_to_group(
         &mut self,
         local_id: ScopedParcelId,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit_for_scope(local_id.circuit)?;
@@ -7253,7 +7254,7 @@ impl Session {
     pub fn rez_object(
         &mut self,
         shape: &PrimShape,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -7272,7 +7273,7 @@ impl Session {
         &mut self,
         local_ids: &[ScopedObjectId],
         offset: Vector,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), Error> {
         let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
@@ -7325,7 +7326,7 @@ impl Session {
         destination: DeRezDestination,
         destination_id: Uuid,
         transaction_id: Uuid,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), Error> {
         let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
@@ -7543,7 +7544,7 @@ impl Session {
     pub fn set_object_group(
         &mut self,
         local_ids: &[ScopedObjectId],
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), Error> {
         let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {

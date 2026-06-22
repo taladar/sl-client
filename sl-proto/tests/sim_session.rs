@@ -16,7 +16,7 @@ mod test {
         DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventInfo, FollowCamProperty,
         FollowCamPropertyValue, GestureActivation, GroupAccountDetails, GroupAccountDetailsEntry,
         GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
-        GroupActiveProposalItem, GroupName, GroupVote, GroupVoteHistoryItem, ImDialog,
+        GroupActiveProposalItem, GroupKey, GroupName, GroupVote, GroupVoteHistoryItem, ImDialog,
         LandSearchType, LandStatItem, LandStatReportType, LoginParams, MapItem, MapItemType,
         MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
         MovementMode, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory,
@@ -667,7 +667,7 @@ mod test {
         sim.send_dir_groups_reply(
             qid,
             &[DirGroupResult {
-                group_id: uuid::Uuid::from_u128(0xF11),
+                group_id: GroupKey::from(uuid::Uuid::from_u128(0xF11)),
                 group_name: "Builders".to_owned(),
                 members: 42,
                 search_order: 1.5,
@@ -922,7 +922,7 @@ mod test {
 
         // Client -> sim: the full commerce/spin/rez command surface.
         client.buy_object(
-            uuid::Uuid::nil(),
+            GroupKey::from(uuid::Uuid::nil()),
             uuid::Uuid::from_u128(0xCA7),
             &[ObjectBuyItem {
                 local_id: RegionLocalObjectId(99),
@@ -947,7 +947,7 @@ mod test {
                 folder_id: uuid::Uuid::nil(),
                 creator_id: AgentKey::from(uuid::Uuid::nil()),
                 owner_id: uuid::Uuid::nil(),
-                group_id: uuid::Uuid::nil(),
+                group_id: GroupKey::from(uuid::Uuid::nil()),
                 permissions: Permissions5::empty(),
                 group_owned: false,
                 transaction_id: uuid::Uuid::nil(),
@@ -965,7 +965,7 @@ mod test {
         )?;
         client.rez_object_from_notecard(
             &NotecardRez {
-                group_id: uuid::Uuid::nil(),
+                group_id: GroupKey::from(uuid::Uuid::nil()),
                 from_task_id: uuid::Uuid::nil(),
                 bypass_raycast: false,
                 ray_start: sl_types::lsl::Vector {
@@ -1067,7 +1067,7 @@ mod test {
                 request_flags: 0x04,
                 object_id: object,
                 owner_id: uuid::Uuid::from_u128(0x0E),
-                group_id: uuid::Uuid::nil(),
+                group_id: GroupKey::from(uuid::Uuid::nil()),
                 permissions: Permissions5::empty(),
                 ownership_cost: 0,
                 sale_type: SaleType::Copy.to_code(),
@@ -1443,13 +1443,26 @@ mod test {
         let proposal_id = uuid::Uuid::from_u128(0x9A0E);
 
         // Client -> sim: every G10 request surfaces a matching server event.
-        client.request_group_account_summary(group_id, request_id, 60, 0, now)?;
-        client.request_group_account_details(group_id, request_id, 60, 0, now)?;
-        client.request_group_account_transactions(group_id, request_id, 60, 0, now)?;
-        client.request_group_active_proposals(group_id, transaction_id, now)?;
-        client.request_group_vote_history(group_id, transaction_id, now)?;
-        client.start_group_proposal(group_id, 3, 0.5, 86_400, "Adopt the bylaws?", now)?;
-        client.cast_group_proposal_ballot(proposal_id, group_id, "yes", now)?;
+        client.request_group_account_summary(GroupKey::from(group_id), request_id, 60, 0, now)?;
+        client.request_group_account_details(GroupKey::from(group_id), request_id, 60, 0, now)?;
+        client.request_group_account_transactions(
+            GroupKey::from(group_id),
+            request_id,
+            60,
+            0,
+            now,
+        )?;
+        client.request_group_active_proposals(GroupKey::from(group_id), transaction_id, now)?;
+        client.request_group_vote_history(GroupKey::from(group_id), transaction_id, now)?;
+        client.start_group_proposal(
+            GroupKey::from(group_id),
+            3,
+            0.5,
+            86_400,
+            "Adopt the bylaws?",
+            now,
+        )?;
+        client.cast_group_proposal_ballot(proposal_id, GroupKey::from(group_id), "yes", now)?;
         pump(&mut client, &mut sim, now)?;
 
         let server_events = drain_server(&mut sim);
@@ -1457,7 +1470,7 @@ mod test {
             server_events.iter().any(|e| matches!(
                 e,
                 ServerEvent::RequestGroupAccountSummary { group_id: g, request_id: r, .. }
-                    if *g == group_id && *r == request_id
+                    if *g == GroupKey::from(group_id) && *r == request_id
             )),
             "expected a RequestGroupAccountSummary server event"
         );
@@ -1506,7 +1519,7 @@ mod test {
 
         // Sim -> client: every G10 reply surfaces a matching client event.
         let summary = GroupAccountSummary {
-            group_id,
+            group_id: GroupKey::from(group_id),
             request_id,
             interval_days: 7,
             current_interval: 0,
@@ -1530,7 +1543,7 @@ mod test {
         };
         sim.send_group_account_summary_reply(&summary, now)?;
         let details = GroupAccountDetails {
-            group_id,
+            group_id: GroupKey::from(group_id),
             request_id,
             interval_days: 7,
             current_interval: 0,
@@ -1542,7 +1555,7 @@ mod test {
         };
         sim.send_group_account_details_reply(&details, now)?;
         let transactions = GroupAccountTransactions {
-            group_id,
+            group_id: GroupKey::from(group_id),
             request_id,
             interval_days: 7,
             current_interval: 0,
@@ -1568,7 +1581,13 @@ mod test {
             quorum: 3,
             proposal_text: "Adopt the bylaws?".to_owned(),
         };
-        sim.send_group_active_proposals_reply(group_id, transaction_id, 1, &[proposal], now)?;
+        sim.send_group_active_proposals_reply(
+            GroupKey::from(group_id),
+            transaction_id,
+            1,
+            &[proposal],
+            now,
+        )?;
         let history = GroupVoteHistoryItem {
             vote_id: proposal_id,
             terse_date_id: "td".to_owned(),
@@ -1586,7 +1605,13 @@ mod test {
                 num_votes: 7,
             }],
         };
-        sim.send_group_vote_history_reply(group_id, transaction_id, 1, &history, now)?;
+        sim.send_group_vote_history_reply(
+            GroupKey::from(group_id),
+            transaction_id,
+            1,
+            &history,
+            now,
+        )?;
         pump(&mut client, &mut sim, now)?;
 
         let client_events = drain_client(&mut client);

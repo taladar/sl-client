@@ -1,7 +1,7 @@
 //! Avatar profile and relationships: properties, picks, classifieds, friends.
 
 use super::Maturity;
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, GroupKey};
 use uuid::Uuid;
 
 /// An avatar's profile properties, parsed from `AvatarPropertiesReply`.
@@ -50,7 +50,7 @@ pub struct AvatarInterests {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AvatarGroupMembership {
     /// The group id.
-    pub group_id: Uuid,
+    pub group_id: GroupKey,
     /// The group name.
     pub group_name: String,
     /// The avatar's title in the group.

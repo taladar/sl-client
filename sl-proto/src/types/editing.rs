@@ -1,7 +1,7 @@
 //! Object interaction and editing value types: clicks, materials, transforms.
 
 use super::pcode;
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, GroupKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::Permissions5;
@@ -613,7 +613,7 @@ pub struct ObjectBuyItem {
 )]
 pub struct NotecardRez {
     /// The active group the new object is set to ([`Uuid::nil`] for none).
-    pub group_id: Uuid,
+    pub group_id: GroupKey,
     /// The task (prim) whose inventory holds the notecard, when rezzing from an
     /// in-world object's contents ([`Uuid::nil`] when rezzing from the agent's
     /// own inventory notecard).
@@ -667,7 +667,7 @@ pub struct RestoreItem {
     /// The item's owner (for the rezzed object's permissions).
     pub owner_id: Uuid,
     /// The group the item is set to (for permissions).
-    pub group_id: Uuid,
+    pub group_id: GroupKey,
     /// The base / owner / group / everyone / next-owner permission masks.
     pub permissions: Permissions5,
     /// Whether the item is group-owned.
