@@ -20,7 +20,7 @@ use super::{
     ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload,
     TelehubInfo, TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
 };
-use sl_types::key::{AgentKey, GroupKey};
+use sl_types::key::{AgentKey, GroupKey, ObjectKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::AgentPreferences;
@@ -174,7 +174,7 @@ pub enum Event {
     /// `GetObjectCost` capability reply to
     /// [`Command::RequestObjectCost`](crate::Command::RequestObjectCost). One
     /// entry per object, keyed by object id (sorted by id).
-    ObjectCosts(Vec<(Uuid, ObjectCost)>),
+    ObjectCosts(Vec<(ObjectKey, ObjectCost)>),
     /// The summed physics/streaming/simulation cost of the current selection,
     /// from a `ResourceCostSelected` capability reply to
     /// [`Command::RequestSelectedCost`](crate::Command::RequestSelectedCost).
@@ -183,7 +183,7 @@ pub enum Event {
     /// `GetObjectPhysicsData` capability reply to
     /// [`Command::RequestObjectPhysicsData`](crate::Command::RequestObjectPhysicsData).
     /// One entry per object, keyed by object id (sorted by id).
-    ObjectPhysicsData(Vec<(Uuid, ObjectPhysicsData)>),
+    ObjectPhysicsData(Vec<(ObjectKey, ObjectPhysicsData)>),
     /// Updated physics-material parameters pushed unsolicited over the event
     /// queue (`ObjectPhysicsProperties`), sent when a prim's physics material
     /// changes. One entry per object, keyed by its scoped region-local id.
@@ -763,7 +763,7 @@ pub enum Event {
     /// Carries the object id and the list of parameter/value pairs.
     SetFollowCamProperties {
         /// The scripted object that set the camera parameters.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The follow-camera parameters and their values.
         properties: Vec<FollowCamPropertyValue>,
     },
@@ -772,7 +772,7 @@ pub enum Event {
     /// control of the agent's camera.
     ClearFollowCamProperties {
         /// The scripted object that cleared the camera parameters.
-        object_id: Uuid,
+        object_id: ObjectKey,
     },
     /// The agent's mute (block) list, in response to
     /// [`Session::request_mute_list`](crate::Session::request_mute_list): the
@@ -791,7 +791,7 @@ pub enum Event {
     /// completing `AgentSit`.
     SitResult {
         /// The object sat upon.
-        sit_object: Uuid,
+        sit_object: ObjectKey,
         /// Whether the simulator wants the viewer to autopilot (walk) to the seat
         /// first (the target was out of immediate sit range).
         autopilot: bool,
@@ -864,7 +864,7 @@ pub enum Event {
     /// `-1`/`-2` is LL's convention for "hide"/"default" buttons).
     PayPriceReply {
         /// The object queried.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The default pay amount, in L$ (`-1` if the object sets none).
         default_pay_price: i32,
         /// The quick-pay button amounts, in L$.
@@ -874,7 +874,7 @@ pub enum Event {
     /// [`Command::RequestScriptRunning`](crate::Command::RequestScriptRunning).
     ScriptRunning {
         /// The object (task) holding the script.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The script inventory item inside that task.
         item_id: Uuid,
         /// Whether the script is currently running.
@@ -888,7 +888,7 @@ pub enum Event {
     /// `NavigateObjectMedia`.
     ObjectMedia {
         /// The object the media belongs to.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The media version string (`x-mv:<serial>/<uuid>`); the same value the
         /// object's [`Object::media_url`] carries, advanced on every change.
         version: String,
@@ -1279,10 +1279,10 @@ pub enum Event {
         /// The owner of the object that triggered the sound.
         owner_id: Uuid,
         /// The object that triggered the sound (nil if none).
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The triggering object's parent (root) id, or `None` when the object
         /// is itself the root (the wire `ParentID` is nil).
-        parent_id: Option<Uuid>,
+        parent_id: Option<ObjectKey>,
         /// The handle of the region the sound plays in. Because a `SoundTrigger`
         /// can originate in a neighbouring region, this need not be the agent's
         /// current region.
@@ -1302,7 +1302,7 @@ pub enum Event {
         /// The sound asset to play.
         sound_id: Uuid,
         /// The object the sound is attached to.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The object owner's id.
         owner_id: Uuid,
         /// The linear gain (volume), `0.0`..=`1.0`.
@@ -1315,7 +1315,7 @@ pub enum Event {
     /// for the same `object_id`.
     AttachedSoundGainChange {
         /// The object whose attached-sound volume changed.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The new linear gain (volume), `0.0`..=`1.0`.
         gain: f32,
     },

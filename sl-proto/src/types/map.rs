@@ -3,6 +3,7 @@
 use std::net::SocketAddr;
 
 use super::Maturity;
+use sl_types::key::ObjectKey;
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::RegionHandle;
@@ -112,7 +113,7 @@ pub struct EstateCovenant {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TelehubInfo {
     /// The telehub object's id (nil when the region has no telehub).
-    pub object_id: Uuid,
+    pub object_id: ObjectKey,
     /// The telehub object's name (empty when there is no telehub).
     pub object_name: String,
     /// The telehub object's region-local position (a fallback the viewer uses

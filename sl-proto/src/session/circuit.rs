@@ -20,7 +20,7 @@ use crate::types::{
     PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate, Reliability, RestoreItem,
     RezAttachment, SaleType, TeleportFlags, Throttle, ViewerEffect, Wearable,
 };
-use sl_types::key::{AgentKey, GroupKey};
+use sl_types::key::{AgentKey, GroupKey, ObjectKey};
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::AbuseReport;
 use sl_wire::messages::{
@@ -1738,7 +1738,7 @@ impl Circuit {
     /// Queues a `ScriptDialogReply` reliably (the chosen `llDialog` button).
     pub(crate) fn send_script_dialog_reply(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         chat_channel: i32,
         button_index: i32,
         button_label: &str,
@@ -1750,7 +1750,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             data: ScriptDialogReplyDataBlock {
-                object_id,
+                object_id: object_id.uuid(),
                 chat_channel,
                 button_index,
                 button_label: with_nul(button_label),
@@ -1763,7 +1763,7 @@ impl Circuit {
     /// `item_id` in object `task_id` (pass `0` to deny everything).
     pub(crate) fn send_script_answer_yes(
         &mut self,
-        task_id: Uuid,
+        task_id: ObjectKey,
         item_id: Uuid,
         permissions: i32,
         now: Instant,
@@ -1774,7 +1774,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             data: ScriptAnswerYesDataBlock {
-                task_id,
+                task_id: task_id.uuid(),
                 item_id,
                 questions: permissions,
             },
@@ -3168,7 +3168,7 @@ impl Circuit {
         local_id: RegionLocalParcelId,
         return_type: u32,
         owner_ids: &[Uuid],
-        task_ids: &[Uuid],
+        task_ids: &[ObjectKey],
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelReturnObjects(ParcelReturnObjects {
@@ -3182,7 +3182,7 @@ impl Circuit {
             },
             task_i_ds: task_ids
                 .iter()
-                .map(|id| ParcelReturnObjectsTaskIDsBlock { task_id: *id })
+                .map(|id| ParcelReturnObjectsTaskIDsBlock { task_id: id.uuid() })
                 .collect(),
             owner_i_ds: owner_ids
                 .iter()
@@ -3198,7 +3198,7 @@ impl Circuit {
         &mut self,
         local_id: RegionLocalParcelId,
         return_type: u32,
-        object_ids: &[Uuid],
+        object_ids: &[ObjectKey],
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelSelectObjects(ParcelSelectObjects {
@@ -3212,7 +3212,9 @@ impl Circuit {
             },
             return_i_ds: object_ids
                 .iter()
-                .map(|id| ParcelSelectObjectsReturnIDsBlock { return_id: *id })
+                .map(|id| ParcelSelectObjectsReturnIDsBlock {
+                    return_id: id.uuid(),
+                })
                 .collect(),
         });
         self.send(&message, Reliability::Reliable, now)
@@ -3369,7 +3371,7 @@ impl Circuit {
         local_id: RegionLocalParcelId,
         return_type: u32,
         owner_ids: &[Uuid],
-        task_ids: &[Uuid],
+        task_ids: &[ObjectKey],
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelDisableObjects(ParcelDisableObjects {
@@ -3383,7 +3385,7 @@ impl Circuit {
             },
             task_i_ds: task_ids
                 .iter()
-                .map(|id| ParcelDisableObjectsTaskIDsBlock { task_id: *id })
+                .map(|id| ParcelDisableObjectsTaskIDsBlock { task_id: id.uuid() })
                 .collect(),
             owner_i_ds: owner_ids
                 .iter()
@@ -3649,7 +3651,7 @@ impl Circuit {
                 position: report.position.clone(),
                 check_flags: report.check_flags,
                 screenshot_id: report.screenshot_id,
-                object_id: report.object_id,
+                object_id: report.object_id.uuid(),
                 abuser_id: report.abuser_id,
                 abuse_region_name: with_nul(&report.abuse_region_name),
                 abuse_region_id: report.abuse_region_id,
@@ -3780,7 +3782,7 @@ impl Circuit {
     /// object `object_id`.
     pub(crate) fn send_object_grab_update(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         grab_offset_initial: Vector,
         grab_position: Vector,
         time_since_last: u32,
@@ -3792,7 +3794,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             object_data: ObjectGrabUpdateObjectDataBlock {
-                object_id,
+                object_id: object_id.uuid(),
                 grab_offset_initial,
                 grab_position,
                 time_since_last,
@@ -4244,7 +4246,7 @@ impl Circuit {
     /// Queues a `BuyObjectInventory` reliably (buy `item_id` out of `object_id`).
     pub(crate) fn send_buy_object_inventory(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         item_id: Uuid,
         folder_id: Uuid,
         now: Instant,
@@ -4255,7 +4257,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             data: BuyObjectInventoryDataBlock {
-                object_id,
+                object_id: object_id.uuid(),
                 item_id,
                 folder_id,
             },
@@ -4266,11 +4268,13 @@ impl Circuit {
     /// Queues a `RequestPayPrice` reliably (ask `object_id` for its pay buttons).
     pub(crate) fn send_request_pay_price(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::RequestPayPrice(RequestPayPrice {
-            object_data: RequestPayPriceObjectDataBlock { object_id },
+            object_data: RequestPayPriceObjectDataBlock {
+                object_id: object_id.uuid(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -4280,7 +4284,7 @@ impl Circuit {
     pub(crate) fn send_request_object_properties_family(
         &mut self,
         request_flags: u32,
-        object_id: Uuid,
+        object_id: ObjectKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::RequestObjectPropertiesFamily(RequestObjectPropertiesFamily {
@@ -4290,7 +4294,7 @@ impl Circuit {
             },
             object_data: RequestObjectPropertiesFamilyObjectDataBlock {
                 request_flags,
-                object_id,
+                object_id: object_id.uuid(),
             },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -4299,7 +4303,7 @@ impl Circuit {
     /// Queues an `ObjectSpinStart` reliably (begin spinning `object_id`).
     pub(crate) fn send_object_spin_start(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectSpinStart(ObjectSpinStart {
@@ -4307,7 +4311,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            object_data: ObjectSpinStartObjectDataBlock { object_id },
+            object_data: ObjectSpinStartObjectDataBlock {
+                object_id: object_id.uuid(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -4315,7 +4321,7 @@ impl Circuit {
     /// Queues an `ObjectSpinUpdate` reliably (the latest spin `rotation`).
     pub(crate) fn send_object_spin_update(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         rotation: Rotation,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -4325,7 +4331,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             object_data: ObjectSpinUpdateObjectDataBlock {
-                object_id,
+                object_id: object_id.uuid(),
                 rotation,
             },
         });
@@ -4335,7 +4341,7 @@ impl Circuit {
     /// Queues an `ObjectSpinStop` reliably (end spinning `object_id`).
     pub(crate) fn send_object_spin_stop(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectSpinStop(ObjectSpinStop {
@@ -4343,7 +4349,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            object_data: ObjectSpinStopObjectDataBlock { object_id },
+            object_data: ObjectSpinStopObjectDataBlock {
+                object_id: object_id.uuid(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -4352,12 +4360,15 @@ impl Circuit {
     /// task `object_id` is running). This message carries no `AgentData` block.
     pub(crate) fn send_get_script_running(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         item_id: Uuid,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::GetScriptRunning(GetScriptRunning {
-            script: GetScriptRunningScriptBlock { object_id, item_id },
+            script: GetScriptRunningScriptBlock {
+                object_id: object_id.uuid(),
+                item_id,
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -4366,7 +4377,7 @@ impl Circuit {
     /// inside the task `object_id`).
     pub(crate) fn send_set_script_running(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         item_id: Uuid,
         running: bool,
         now: Instant,
@@ -4377,7 +4388,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             script: SetScriptRunningScriptBlock {
-                object_id,
+                object_id: object_id.uuid(),
                 item_id,
                 running,
             },
@@ -4389,7 +4400,7 @@ impl Circuit {
     /// task `object_id`).
     pub(crate) fn send_script_reset(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         item_id: Uuid,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -4398,7 +4409,10 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            script: ScriptResetScriptBlock { object_id, item_id },
+            script: ScriptResetScriptBlock {
+                object_id: object_id.uuid(),
+                item_id,
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -4420,7 +4434,7 @@ impl Circuit {
         ray_end_is_intersection: bool,
         copy_centers: bool,
         copy_rotates: bool,
-        ray_target_id: Uuid,
+        ray_target_id: ObjectKey,
         duplicate_flags: u32,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -4435,7 +4449,7 @@ impl Circuit {
                 ray_end_is_intersection,
                 copy_centers,
                 copy_rotates,
-                ray_target_id,
+                ray_target_id: ray_target_id.uuid(),
                 duplicate_flags,
             },
             object_data: local_ids
@@ -4501,11 +4515,11 @@ impl Circuit {
                 group_id: rez.group_id.uuid(),
             },
             rez_data: RezObjectFromNotecardRezDataBlock {
-                from_task_id: rez.from_task_id,
+                from_task_id: rez.from_task_id.uuid(),
                 bypass_raycast: u8::from(rez.bypass_raycast),
                 ray_start: rez.ray_start.clone(),
                 ray_end: rez.ray_end.clone(),
-                ray_target_id: rez.ray_target_id,
+                ray_target_id: rez.ray_target_id.uuid(),
                 ray_end_is_intersection: rez.ray_end_is_intersection,
                 rez_selected: rez.rez_selected,
                 remove_item: rez.remove_item,
@@ -4516,7 +4530,7 @@ impl Circuit {
             },
             notecard_data: RezObjectFromNotecardNotecardDataBlock {
                 notecard_item_id: rez.notecard_item_id,
-                object_id: rez.object_id,
+                object_id: rez.object_id.uuid(),
             },
             inventory_data: rez
                 .item_ids

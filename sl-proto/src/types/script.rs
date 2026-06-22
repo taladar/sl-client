@@ -1,6 +1,6 @@
 //! Scripts and notifications: dialogs, permissions, alerts, mutes.
 
-use sl_types::key::OwnerKey;
+use sl_types::key::{ObjectKey, OwnerKey};
 use sl_wire::ControlFlags;
 use uuid::Uuid;
 
@@ -11,7 +11,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScriptDialog {
     /// The object id that raised the dialog (the reply target).
-    pub object_id: Uuid,
+    pub object_id: ObjectKey,
     /// The object's name.
     pub object_name: String,
     /// The object owner's first name.
@@ -93,7 +93,7 @@ impl ScriptPermissions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScriptPermissionRequest {
     /// The task (object) id holding the script.
-    pub task_id: Uuid,
+    pub task_id: ObjectKey,
     /// The script item id within the object.
     pub item_id: Uuid,
     /// The object's name.
@@ -113,7 +113,7 @@ pub struct LoadUrlRequest {
     /// The object's name.
     pub object_name: String,
     /// The object id.
-    pub object_id: Uuid,
+    pub object_id: ObjectKey,
     /// The object's owner — an agent or a group.
     pub owner: OwnerKey,
     /// The accompanying message text.

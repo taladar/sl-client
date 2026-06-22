@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use sl_proto::{Rotation, Uuid, Vector};
+use sl_proto::{ObjectKey, Rotation, Uuid, Vector};
 
 use crate::context::ReplContext;
 use crate::error::ReplError;
@@ -333,6 +333,41 @@ impl Args {
                 value,
                 expected: "UUID".to_owned(),
             })
+    }
+
+    /// A required [`ObjectKey`] argument (a raw UUID parsed and wrapped).
+    pub(crate) fn req_object(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        pos: usize,
+    ) -> Result<ObjectKey, ReplError> {
+        Ok(ObjectKey::from(self.req_uuid(ctx, field, pos)?))
+    }
+
+    /// An optional [`ObjectKey`] argument, defaulting to the nil key if absent.
+    pub(crate) fn object_or_nil(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        pos: usize,
+    ) -> Result<ObjectKey, ReplError> {
+        Ok(ObjectKey::from(self.uuid_or_nil(ctx, field, pos)?))
+    }
+
+    /// A list of [`ObjectKey`]s from the keyword/positional UUID list (each raw
+    /// UUID wrapped).
+    pub(crate) fn vec_object(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        pos: usize,
+    ) -> Result<Vec<ObjectKey>, ReplError> {
+        Ok(self
+            .vec_uuid(ctx, field, pos)?
+            .into_iter()
+            .map(ObjectKey::from)
+            .collect())
     }
 
     /// An optional [`Uuid`] argument, defaulting to [`Uuid::nil`] if absent.

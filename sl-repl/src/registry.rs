@@ -346,7 +346,7 @@ fn abuse_report_from_args(
         }),
         check_flags: 0,
         screenshot_id: Uuid::nil(),
-        object_id: args.uuid_or_nil(ctx, "object_id", 5)?,
+        object_id: args.object_or_nil(ctx, "object_id", 5)?,
         abuser_id: args.uuid_or_nil(ctx, "abuser_id", 1)?,
         abuse_region_name: args.opt_str(ctx, "region_name", 2)?.unwrap_or_default(),
         abuse_region_id: Uuid::nil(),
@@ -800,13 +800,13 @@ fn parse_effect_data(
     match norm(&selector).as_str() {
         "lookat" => Ok(ViewerEffectData::LookAt {
             source: AgentKey::from(args.uuid_or_nil(ctx, "source", 201)?),
-            target: args.uuid_or_nil(ctx, "target", 202)?,
+            target: args.object_or_nil(ctx, "target", 202)?,
             target_position: position_or_zero(args, ctx, "position", 203)?,
             look_at_type: parse_lookat_type("look_at", &args.str_or(ctx, "look_at", 204, "none")?)?,
         }),
         "pointat" => Ok(ViewerEffectData::PointAt {
             source: AgentKey::from(args.uuid_or_nil(ctx, "source", 201)?),
-            target: args.uuid_or_nil(ctx, "target", 202)?,
+            target: args.object_or_nil(ctx, "target", 202)?,
             target_position: position_or_zero(args, ctx, "position", 203)?,
             point_at_type: parse_pointat_type(
                 "point_at",
@@ -814,8 +814,8 @@ fn parse_effect_data(
             )?,
         }),
         "spiral" => Ok(ViewerEffectData::Spiral {
-            source: args.uuid_or_nil(ctx, "source", 201)?,
-            target: args.uuid_or_nil(ctx, "target", 202)?,
+            source: args.object_or_nil(ctx, "source", 201)?,
+            target: args.object_or_nil(ctx, "target", 202)?,
             position: position_or_zero(args, ctx, "position", 203)?,
         }),
         "raw" => Ok(ViewerEffectData::Raw(args.bytes_or_empty(ctx, "raw", 206)?)),
@@ -2146,7 +2146,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_id> <chat_channel> <button_index> <button_label>",
             build: |args, ctx| {
                 Ok(Command::ReplyScriptDialog {
-                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    object_id: args.req_object(ctx, "object_id", 0)?,
                     chat_channel: args.req_parse(ctx, "chat_channel", 1, "i32")?,
                     button_index: args.req_parse(ctx, "button_index", 2, "i32")?,
                     button_label: args.req_str(ctx, "button_label", 3)?,
@@ -2158,7 +2158,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<task_id> <item_id> <permissions-i32>",
             build: |args, ctx| {
                 Ok(Command::AnswerScriptPermissions {
-                    task_id: args.req_uuid(ctx, "task_id", 0)?,
+                    task_id: args.req_object(ctx, "task_id", 0)?,
                     item_id: args.req_uuid(ctx, "item_id", 1)?,
                     permissions: ScriptPermissions(args.parse_or(
                         ctx,
@@ -2340,7 +2340,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     local_id: scoped_parcel(ctx, args.req_parse(ctx, "local_id", 0, "i32")?)?,
                     return_type: ParcelReturnType(args.req_parse(ctx, "return_type", 1, "u32")?),
                     owner_ids: args.vec_uuid(ctx, "owner_ids", 2)?,
-                    task_ids: args.vec_uuid(ctx, "task_ids", 3)?,
+                    task_ids: args.vec_object(ctx, "task_ids", 3)?,
                 })
             },
         },
@@ -2351,7 +2351,7 @@ fn all_specs() -> Vec<CommandSpec> {
                 Ok(Command::SelectParcelObjects {
                     local_id: scoped_parcel(ctx, args.req_parse(ctx, "local_id", 0, "i32")?)?,
                     return_type: ParcelReturnType(args.req_parse(ctx, "return_type", 1, "u32")?),
-                    object_ids: args.vec_uuid(ctx, "object_ids", 2)?,
+                    object_ids: args.vec_object(ctx, "object_ids", 2)?,
                 })
             },
         },
@@ -2433,7 +2433,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     local_id: scoped_parcel(ctx, args.req_parse(ctx, "local_id", 0, "i32")?)?,
                     return_type: ParcelReturnType(args.req_parse(ctx, "return_type", 1, "u32")?),
                     owner_ids: args.vec_uuid(ctx, "owner_ids", 2)?,
-                    task_ids: args.vec_uuid(ctx, "task_ids", 3)?,
+                    task_ids: args.vec_object(ctx, "task_ids", 3)?,
                 })
             },
         },
@@ -2488,7 +2488,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_ids-comma-separated>",
             build: |args, ctx| {
                 Ok(Command::RequestObjectCost {
-                    object_ids: args.vec_uuid(ctx, "object_ids", 0)?,
+                    object_ids: args.vec_object(ctx, "object_ids", 0)?,
                 })
             },
         },
@@ -2497,7 +2497,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_ids-comma-separated> [roots=true]",
             build: |args, ctx| {
                 Ok(Command::RequestSelectedCost {
-                    object_ids: args.vec_uuid(ctx, "object_ids", 0)?,
+                    object_ids: args.vec_object(ctx, "object_ids", 0)?,
                     roots: args.bool_or(ctx, "roots", 1, true)?,
                 })
             },
@@ -2507,7 +2507,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_ids-comma-separated>",
             build: |args, ctx| {
                 Ok(Command::RequestObjectPhysicsData {
-                    object_ids: args.vec_uuid(ctx, "object_ids", 0)?,
+                    object_ids: args.vec_object(ctx, "object_ids", 0)?,
                 })
             },
         },
@@ -2855,7 +2855,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_id> <grab_offset_initial> <grab_position> <time_since_last>",
             build: |args, ctx| {
                 Ok(Command::GrabObjectUpdate {
-                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    object_id: args.req_object(ctx, "object_id", 0)?,
                     grab_offset_initial: args.req_vector(ctx, "grab_offset_initial", 1)?,
                     grab_position: args.req_vector(ctx, "grab_position", 2)?,
                     time_since_last: args.parse_or(ctx, "time_since_last", 3, "u32", 0)?,
@@ -3103,7 +3103,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_id> <item_id> <folder_id>",
             build: |args, ctx| {
                 Ok(Command::BuyObjectInventory {
-                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    object_id: args.req_object(ctx, "object_id", 0)?,
                     item_id: args.req_uuid(ctx, "item_id", 1)?,
                     folder_id: args.uuid_or_nil(ctx, "folder_id", 2)?,
                 })
@@ -3114,7 +3114,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_id>",
             build: |args, ctx| {
                 Ok(Command::RequestPayPrice {
-                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    object_id: args.req_object(ctx, "object_id", 0)?,
                 })
             },
         },
@@ -3123,7 +3123,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_id> [request_flags=]",
             build: |args, ctx| {
                 Ok(Command::RequestObjectPropertiesFamily {
-                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    object_id: args.req_object(ctx, "object_id", 0)?,
                     request_flags: args.parse_or(ctx, "request_flags", 1, "u32", 0)?,
                 })
             },
@@ -3133,7 +3133,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_id>",
             build: |args, ctx| {
                 Ok(Command::SpinObjectStart {
-                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    object_id: args.req_object(ctx, "object_id", 0)?,
                 })
             },
         },
@@ -3142,7 +3142,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_id> <rotation>",
             build: |args, ctx| {
                 Ok(Command::SpinObjectUpdate {
-                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    object_id: args.req_object(ctx, "object_id", 0)?,
                     rotation: args.req_rotation(ctx, "rotation", 1)?,
                 })
             },
@@ -3152,7 +3152,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_id>",
             build: |args, ctx| {
                 Ok(Command::SpinObjectStop {
-                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    object_id: args.req_object(ctx, "object_id", 0)?,
                 })
             },
         },
@@ -3170,7 +3170,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     ray_start: args.req_vector(ctx, "ray_start", 1)?,
                     ray_end: args.req_vector(ctx, "ray_end", 2)?,
                     group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 100)?),
-                    ray_target_id: args.uuid_or_nil(ctx, "ray_target_id", 101)?,
+                    ray_target_id: args.object_or_nil(ctx, "ray_target_id", 101)?,
                     bypass_raycast: args.bool_or(ctx, "bypass_raycast", 102, false)?,
                     ray_end_is_intersection: args.bool_or(
                         ctx,
@@ -3283,9 +3283,9 @@ fn all_specs() -> Vec<CommandSpec> {
                         ray_end: args.req_vector(ctx, "ray_end", 2)?,
                         item_ids: args.vec_uuid(ctx, "item_ids", 3)?,
                         group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 100)?),
-                        from_task_id: args.uuid_or_nil(ctx, "from_task_id", 101)?,
-                        object_id: args.uuid_or_nil(ctx, "object_id", 102)?,
-                        ray_target_id: args.uuid_or_nil(ctx, "ray_target_id", 103)?,
+                        from_task_id: args.object_or_nil(ctx, "from_task_id", 101)?,
+                        object_id: args.object_or_nil(ctx, "object_id", 102)?,
+                        ray_target_id: args.object_or_nil(ctx, "ray_target_id", 103)?,
                         bypass_raycast: args.bool_or(ctx, "bypass_raycast", 104, false)?,
                         ray_end_is_intersection: args.bool_or(
                             ctx,
@@ -3308,7 +3308,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_id> <item_id>",
             build: |args, ctx| {
                 Ok(Command::RequestScriptRunning {
-                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    object_id: args.req_object(ctx, "object_id", 0)?,
                     item_id: args.req_uuid(ctx, "item_id", 1)?,
                 })
             },
@@ -3318,7 +3318,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_id> <item_id> <running>",
             build: |args, ctx| {
                 Ok(Command::SetScriptRunning {
-                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    object_id: args.req_object(ctx, "object_id", 0)?,
                     item_id: args.req_uuid(ctx, "item_id", 1)?,
                     running: args.req_bool(ctx, "running", 2)?,
                 })
@@ -3329,7 +3329,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_id> <item_id>",
             build: |args, ctx| {
                 Ok(Command::ResetScript {
-                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    object_id: args.req_object(ctx, "object_id", 0)?,
                     item_id: args.req_uuid(ctx, "item_id", 1)?,
                 })
             },
@@ -3899,7 +3899,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_id>",
             build: |args, ctx| {
                 Ok(Command::RequestObjectMedia {
-                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    object_id: args.req_object(ctx, "object_id", 0)?,
                 })
             },
         },
@@ -3923,7 +3923,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     faces
                 };
                 Ok(Command::SetObjectMedia {
-                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    object_id: args.req_object(ctx, "object_id", 0)?,
                     faces,
                 })
             },
@@ -3933,7 +3933,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<object_id> <face> <url>",
             build: |args, ctx| {
                 Ok(Command::NavigateObjectMedia {
-                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    object_id: args.req_object(ctx, "object_id", 0)?,
                     face: args.req_parse(ctx, "face", 1, "u8")?,
                     url: args.req_str(ctx, "url", 2)?,
                 })
@@ -3953,7 +3953,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "object_id=<id> [side=-1] [gltf_json=] [asset_id=]",
             build: |args, ctx| {
                 let update = MaterialOverrideUpdate {
-                    object_id: args.req_uuid(ctx, "object_id", 0)?,
+                    object_id: args.req_object(ctx, "object_id", 0)?,
                     side: args.parse_or(ctx, "side", 1, "i32", -1)?,
                     gltf_json: args.opt_str(ctx, "gltf_json", 2)?,
                     asset_id: match args.opt_str(ctx, "asset_id", 3)? {
@@ -4298,8 +4298,8 @@ mod tests {
     use sl_proto::{
         AbuseReportType, AgentPreferences, AssetType, ChatType, CircuitId, Command, ControlFlags,
         FriendRights, GroupKey, LandStatReportType, MapItemType, MovementMode, ObjectBuyItem,
-        RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId,
-        ScopedParcelId, Uuid,
+        ObjectKey, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SaleType,
+        ScopedObjectId, ScopedParcelId, Uuid,
     };
 
     use super::Registry;
@@ -4754,7 +4754,7 @@ mod tests {
         assert!(matches!(
             build(&format!("request_object_properties_family {ONE} request_flags=4")),
             Ok(Command::RequestObjectPropertiesFamily { request_flags: 4, object_id })
-                if object_id == uuid(ONE)
+                if object_id == ObjectKey::from(uuid(ONE))
         ));
     }
 
@@ -4762,7 +4762,7 @@ mod tests {
     fn spin_object_update_parses_rotation() {
         assert!(matches!(
             build(&format!("spin_object_update {ONE} <0,0,0,1>")),
-            Ok(Command::SpinObjectUpdate { object_id, .. }) if object_id == uuid(ONE)
+            Ok(Command::SpinObjectUpdate { object_id, .. }) if object_id == ObjectKey::from(uuid(ONE))
         ));
     }
 
@@ -4792,7 +4792,7 @@ mod tests {
         assert!(matches!(
             build_scoped(&format!("disable_parcel_objects 7 8 owner_ids={ONE} task_ids={TWO}")),
             Ok(Command::DisableParcelObjects { local_id: ScopedParcelId { circuit: TEST_CIRCUIT, id: RegionLocalParcelId(7) }, return_type, owner_ids, task_ids })
-                if return_type.0 == 8 && owner_ids == vec![uuid(ONE)] && task_ids == vec![uuid(TWO)]
+                if return_type.0 == 8 && owner_ids == vec![uuid(ONE)] && task_ids == vec![ObjectKey::from(uuid(TWO))]
         ));
     }
 
@@ -4860,7 +4860,7 @@ mod tests {
     fn request_object_cost_parses_ids() {
         assert!(matches!(
             build(&format!("request_object_cost {ONE}")),
-            Ok(Command::RequestObjectCost { object_ids }) if object_ids == vec![uuid(ONE)]
+            Ok(Command::RequestObjectCost { object_ids }) if object_ids == vec![ObjectKey::from(uuid(ONE))]
         ));
     }
 
@@ -4869,7 +4869,7 @@ mod tests {
         assert!(matches!(
             build(&format!("request_selected_cost {ONE} false")),
             Ok(Command::RequestSelectedCost { object_ids, roots })
-                if object_ids == vec![uuid(ONE)] && !roots
+                if object_ids == vec![ObjectKey::from(uuid(ONE))] && !roots
         ));
     }
 
@@ -4885,7 +4885,7 @@ mod tests {
     fn request_object_physics_data_parses_ids() {
         assert!(matches!(
             build(&format!("request_object_physics_data {ONE}")),
-            Ok(Command::RequestObjectPhysicsData { object_ids }) if object_ids == vec![uuid(ONE)]
+            Ok(Command::RequestObjectPhysicsData { object_ids }) if object_ids == vec![ObjectKey::from(uuid(ONE))]
         ));
     }
 
@@ -4972,7 +4972,7 @@ mod tests {
                  22222222-2222-2222-2222-222222222222"
             ),
             Ok(Command::RequestScriptRunning { object_id, item_id })
-                if object_id == Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111)
+                if object_id == ObjectKey::from(Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111))
                     && item_id == Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222)
         ));
     }
@@ -4998,7 +4998,7 @@ mod tests {
                  22222222-2222-2222-2222-222222222222"
             ),
             Ok(Command::ResetScript { object_id, item_id })
-                if object_id == Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111)
+                if object_id == ObjectKey::from(Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111))
                     && item_id == Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222)
         ));
     }

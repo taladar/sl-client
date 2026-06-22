@@ -20,6 +20,7 @@
 
 use std::collections::HashMap;
 
+use sl_types::key::ObjectKey;
 use uuid::Uuid;
 
 use crate::llsd::Llsd;
@@ -133,45 +134,45 @@ fn object_physics_data_from_llsd(value: &Llsd) -> ObjectPhysicsData {
 /// Builds the LLSD body for a `GetObjectPhysicsData` POST
 /// (`{ object_ids: [...] }`).
 #[must_use]
-pub fn build_get_object_physics_data_request(object_ids: &[Uuid]) -> String {
+pub fn build_get_object_physics_data_request(object_ids: &[ObjectKey]) -> String {
     object_ids_request(object_ids).to_llsd_xml()
 }
 
 /// Decodes a `GetObjectPhysicsData` request: the requested object ids.
 #[must_use]
-pub fn parse_get_object_physics_data_request(body: &Llsd) -> Vec<Uuid> {
+pub fn parse_get_object_physics_data_request(body: &Llsd) -> Vec<ObjectKey> {
     parse_object_ids(body)
 }
 
 /// Decodes a `GetObjectPhysicsData` reply: the per-object physics data, keyed by
 /// object id and sorted by id so it is deterministic.
 #[must_use]
-pub fn parse_get_object_physics_data(body: &Llsd) -> Vec<(Uuid, ObjectPhysicsData)> {
-    let mut data: Vec<(Uuid, ObjectPhysicsData)> = body
+pub fn parse_get_object_physics_data(body: &Llsd) -> Vec<(ObjectKey, ObjectPhysicsData)> {
+    let mut data: Vec<(ObjectKey, ObjectPhysicsData)> = body
         .as_map()
         .map(|map| {
             map.iter()
                 .filter_map(|(key, value)| {
                     Uuid::parse_str(key)
                         .ok()
-                        .map(|id| (id, object_physics_data_from_llsd(value)))
+                        .map(|id| (ObjectKey::from(id), object_physics_data_from_llsd(value)))
                 })
                 .collect()
         })
         .unwrap_or_default();
-    data.sort_by_key(|(id, _data)| *id);
+    data.sort_by_key(|(id, _data)| id.uuid());
     data
 }
 
 /// Builds a `GetObjectPhysicsData` reply from the per-object physics data (server
 /// side) — the inverse of [`parse_get_object_physics_data`].
 #[must_use]
-pub fn build_get_object_physics_data_response(data: &[(Uuid, ObjectPhysicsData)]) -> String {
+pub fn build_get_object_physics_data_response(data: &[(ObjectKey, ObjectPhysicsData)]) -> String {
     Llsd::Map(
         data.iter()
             .map(|(id, value)| {
                 (
-                    id.to_string(),
+                    id.uuid().to_string(),
                     Llsd::Map(object_physics_data_to_llsd(value)),
                 )
             })
@@ -234,6 +235,7 @@ pub fn build_object_physics_properties(
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+    use sl_types::key::ObjectKey;
     use uuid::Uuid;
 
     use super::{
@@ -248,7 +250,7 @@ mod tests {
     /// client decoder, sorted by id, preserving the shape type.
     #[test]
     fn physics_data_round_trips() -> Result<(), String> {
-        let id = Uuid::from_u128(0x42);
+        let id = ObjectKey::from(Uuid::from_u128(0x42));
         let data = vec![(
             id,
             ObjectPhysicsData {
@@ -270,7 +272,10 @@ mod tests {
     /// A `GetObjectPhysicsData` request carries the requested ids.
     #[test]
     fn physics_request_carries_ids() -> Result<(), String> {
-        let ids = [Uuid::from_u128(0x1), Uuid::from_u128(0x2)];
+        let ids = [
+            ObjectKey::from(Uuid::from_u128(0x1)),
+            ObjectKey::from(Uuid::from_u128(0x2)),
+        ];
         let body = build_get_object_physics_data_request(&ids);
         let parsed = parse_get_object_physics_data_request(
             &parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?,

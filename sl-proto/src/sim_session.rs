@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
-use sl_types::key::{AgentKey, GroupKey};
+use sl_types::key::{AgentKey, GroupKey, ObjectKey};
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
     AgentAlertMessage, AgentAlertMessageAgentDataBlock, AgentAlertMessageAlertDataBlock,
@@ -506,7 +506,7 @@ pub enum ServerEvent {
     /// (`BuyObjectInventory`).
     BuyObjectInventory {
         /// The object whose contents holds the item.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The inventory item to buy.
         item_id: Uuid,
         /// The folder the bought item is placed in.
@@ -516,7 +516,7 @@ pub enum ServerEvent {
     /// the simulator answers with [`SimSession::send_pay_price_reply`].
     RequestPayPrice {
         /// The object queried.
-        object_id: Uuid,
+        object_id: ObjectKey,
     },
     /// The client asked for an object's condensed broadcast properties
     /// (`RequestObjectPropertiesFamily`); the simulator answers with
@@ -525,24 +525,24 @@ pub enum ServerEvent {
         /// The request flags, echoed back in the reply.
         request_flags: u32,
         /// The object queried.
-        object_id: Uuid,
+        object_id: ObjectKey,
     },
     /// The client began an interactive object spin (`ObjectSpinStart`).
     SpinObjectStart {
         /// The object being spun.
-        object_id: Uuid,
+        object_id: ObjectKey,
     },
     /// The client updated an in-progress object spin (`ObjectSpinUpdate`).
     SpinObjectUpdate {
         /// The object being spun.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The new rotation.
         rotation: Rotation,
     },
     /// The client ended an interactive object spin (`ObjectSpinStop`).
     SpinObjectStop {
         /// The object being spun.
-        object_id: Uuid,
+        object_id: ObjectKey,
     },
     /// The client wants to duplicate objects onto a raycast surface
     /// (`ObjectDuplicateOnRay`).
@@ -564,7 +564,7 @@ pub enum ServerEvent {
         /// Whether to copy each object's rotation.
         copy_rotates: bool,
         /// The object the ray is cast against ([`Uuid::nil`] for the terrain).
-        ray_target_id: Uuid,
+        ray_target_id: ObjectKey,
         /// The duplicate flags (see `object_flags.h`).
         duplicate_flags: u32,
     },
@@ -627,7 +627,7 @@ pub enum ServerEvent {
         /// The owner-id scope (empty for none).
         owner_ids: Vec<Uuid>,
         /// The explicit object/task-id scope (empty for none).
-        task_ids: Vec<Uuid>,
+        task_ids: Vec<ObjectKey>,
     },
     /// The client asked for a parcel's basic listing by grid-wide parcel id
     /// (`ParcelInfoRequest`); the simulator answers with
@@ -640,14 +640,14 @@ pub enum ServerEvent {
     /// the simulator answers with [`SimSession::send_script_running_reply`].
     RequestScriptRunning {
         /// The object (task) holding the script.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The script inventory item inside that task.
         item_id: Uuid,
     },
     /// The client asked to start or stop a task's script (`SetScriptRunning`).
     SetScriptRunning {
         /// The object (task) holding the script.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The script inventory item inside that task.
         item_id: Uuid,
         /// `true` to run the script, `false` to stop it.
@@ -656,7 +656,7 @@ pub enum ServerEvent {
     /// The client asked to reset a task's script (`ScriptReset`).
     ResetScript {
         /// The object (task) holding the script.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The script inventory item inside that task.
         item_id: Uuid,
     },
@@ -1318,7 +1318,7 @@ impl SimSession {
     /// the message fails to encode.
     pub fn send_set_follow_cam_properties(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         properties: &[FollowCamPropertyValue],
         now: Instant,
     ) -> Result<(), Error> {
@@ -1326,7 +1326,9 @@ impl SimSession {
             return Err(Error::NoCircuit);
         }
         let message = AnyMessage::SetFollowCamProperties(SetFollowCamProperties {
-            object_data: SetFollowCamPropertiesObjectDataBlock { object_id },
+            object_data: SetFollowCamPropertiesObjectDataBlock {
+                object_id: object_id.uuid(),
+            },
             camera_property: properties
                 .iter()
                 .map(|property| SetFollowCamPropertiesCameraPropertyBlock {
@@ -1351,14 +1353,16 @@ impl SimSession {
     /// the message fails to encode.
     pub fn send_clear_follow_cam_properties(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         now: Instant,
     ) -> Result<(), Error> {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
         let message = AnyMessage::ClearFollowCamProperties(ClearFollowCamProperties {
-            object_data: ClearFollowCamPropertiesObjectDataBlock { object_id },
+            object_data: ClearFollowCamPropertiesObjectDataBlock {
+                object_id: object_id.uuid(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
@@ -1500,7 +1504,7 @@ impl SimSession {
                 .iter()
                 .map(|item| LandStatReplyReportDataBlock {
                     task_local_id: item.task_local_id.0,
-                    task_id: item.task_id,
+                    task_id: item.task_id.uuid(),
                     location_x: item.location[0],
                     location_y: item.location[1],
                     location_z: item.location[2],
@@ -1963,7 +1967,7 @@ impl SimSession {
     /// the message fails to encode.
     pub fn send_pay_price_reply(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         default_pay_price: i32,
         pay_buttons: &[i32],
         now: Instant,
@@ -1973,7 +1977,7 @@ impl SimSession {
         }
         let message = AnyMessage::PayPriceReply(PayPriceReply {
             object_data: PayPriceReplyObjectDataBlock {
-                object_id,
+                object_id: object_id.uuid(),
                 default_pay_price,
             },
             button_data: pay_buttons
@@ -1997,7 +2001,7 @@ impl SimSession {
     /// the message fails to encode.
     pub fn send_script_running_reply(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         item_id: Uuid,
         running: bool,
         now: Instant,
@@ -2007,7 +2011,7 @@ impl SimSession {
         }
         let message = AnyMessage::ScriptRunningReply(ScriptRunningReply {
             script: ScriptRunningReplyScriptBlock {
-                object_id,
+                object_id: object_id.uuid(),
                 item_id,
                 running,
             },
@@ -2270,7 +2274,7 @@ impl SimSession {
         let message = AnyMessage::ObjectPropertiesFamily(ObjectPropertiesFamilyMessage {
             object_data: ObjectPropertiesFamilyObjectDataBlockMessage {
                 request_flags: properties.request_flags,
-                object_id: properties.object_id,
+                object_id: properties.object_id.uuid(),
                 owner_id: object_owner_wire.0,
                 group_id: object_owner_wire.1,
                 base_mask: properties.permissions.base.bits(),
@@ -2408,7 +2412,7 @@ impl SimSession {
         }
         let message = AnyMessage::TelehubInfo(TelehubInfoMessage {
             telehub_block: TelehubInfoTelehubBlockBlock {
-                object_id: info.object_id,
+                object_id: info.object_id.uuid(),
                 object_name: with_nul(&info.object_name),
                 telehub_pos: info.position.clone(),
                 telehub_rot: info.rotation.clone(),
@@ -2948,37 +2952,37 @@ impl SimSession {
             }
             AnyMessage::BuyObjectInventory(buy) => {
                 self.events.push_back(ServerEvent::BuyObjectInventory {
-                    object_id: buy.data.object_id,
+                    object_id: ObjectKey::from(buy.data.object_id),
                     item_id: buy.data.item_id,
                     folder_id: buy.data.folder_id,
                 });
             }
             AnyMessage::RequestPayPrice(request) => {
                 self.events.push_back(ServerEvent::RequestPayPrice {
-                    object_id: request.object_data.object_id,
+                    object_id: ObjectKey::from(request.object_data.object_id),
                 });
             }
             AnyMessage::RequestObjectPropertiesFamily(request) => {
                 self.events
                     .push_back(ServerEvent::RequestObjectPropertiesFamily {
                         request_flags: request.object_data.request_flags,
-                        object_id: request.object_data.object_id,
+                        object_id: ObjectKey::from(request.object_data.object_id),
                     });
             }
             AnyMessage::ObjectSpinStart(spin) => {
                 self.events.push_back(ServerEvent::SpinObjectStart {
-                    object_id: spin.object_data.object_id,
+                    object_id: ObjectKey::from(spin.object_data.object_id),
                 });
             }
             AnyMessage::ObjectSpinUpdate(spin) => {
                 self.events.push_back(ServerEvent::SpinObjectUpdate {
-                    object_id: spin.object_data.object_id,
+                    object_id: ObjectKey::from(spin.object_data.object_id),
                     rotation: spin.object_data.rotation.clone(),
                 });
             }
             AnyMessage::ObjectSpinStop(spin) => {
                 self.events.push_back(ServerEvent::SpinObjectStop {
-                    object_id: spin.object_data.object_id,
+                    object_id: ObjectKey::from(spin.object_data.object_id),
                 });
             }
             AnyMessage::ObjectDuplicateOnRay(dup) => {
@@ -2996,7 +3000,7 @@ impl SimSession {
                     ray_end_is_intersection: agent.ray_end_is_intersection,
                     copy_centers: agent.copy_centers,
                     copy_rotates: agent.copy_rotates,
-                    ray_target_id: agent.ray_target_id,
+                    ray_target_id: ObjectKey::from(agent.ray_target_id),
                     duplicate_flags: agent.duplicate_flags,
                 });
             }
@@ -3038,11 +3042,11 @@ impl SimSession {
                 self.events.push_back(ServerEvent::RezObjectFromNotecard {
                     rez: NotecardRez {
                         group_id: GroupKey::from(rez.agent_data.group_id),
-                        from_task_id: rez_data.from_task_id,
+                        from_task_id: ObjectKey::from(rez_data.from_task_id),
                         bypass_raycast: rez_data.bypass_raycast != 0,
                         ray_start: rez_data.ray_start.clone(),
                         ray_end: rez_data.ray_end.clone(),
-                        ray_target_id: rez_data.ray_target_id,
+                        ray_target_id: ObjectKey::from(rez_data.ray_target_id),
                         ray_end_is_intersection: rez_data.ray_end_is_intersection,
                         rez_selected: rez_data.rez_selected,
                         remove_item: rez_data.remove_item,
@@ -3051,7 +3055,7 @@ impl SimSession {
                         everyone_mask: rez_data.everyone_mask,
                         next_owner_mask: rez_data.next_owner_mask,
                         notecard_item_id: rez.notecard_data.notecard_item_id,
-                        object_id: rez.notecard_data.object_id,
+                        object_id: ObjectKey::from(rez.notecard_data.object_id),
                         item_ids: rez.inventory_data.iter().map(|item| item.item_id).collect(),
                     },
                 });
@@ -3094,7 +3098,11 @@ impl SimSession {
                         .iter()
                         .map(|owner| owner.owner_id)
                         .collect(),
-                    task_ids: disable.task_i_ds.iter().map(|task| task.task_id).collect(),
+                    task_ids: disable
+                        .task_i_ds
+                        .iter()
+                        .map(|task| ObjectKey::from(task.task_id))
+                        .collect(),
                 });
             }
             AnyMessage::ParcelInfoRequest(request) => {
@@ -3104,20 +3112,20 @@ impl SimSession {
             }
             AnyMessage::GetScriptRunning(request) => {
                 self.events.push_back(ServerEvent::RequestScriptRunning {
-                    object_id: request.script.object_id,
+                    object_id: ObjectKey::from(request.script.object_id),
                     item_id: request.script.item_id,
                 });
             }
             AnyMessage::SetScriptRunning(request) => {
                 self.events.push_back(ServerEvent::SetScriptRunning {
-                    object_id: request.script.object_id,
+                    object_id: ObjectKey::from(request.script.object_id),
                     item_id: request.script.item_id,
                     running: request.script.running,
                 });
             }
             AnyMessage::ScriptReset(request) => {
                 self.events.push_back(ServerEvent::ResetScript {
-                    object_id: request.script.object_id,
+                    object_id: ObjectKey::from(request.script.object_id),
                     item_id: request.script.item_id,
                 });
             }
@@ -3196,7 +3204,7 @@ impl SimSession {
                         position: data.position.clone(),
                         check_flags: data.check_flags,
                         screenshot_id: data.screenshot_id,
-                        object_id: data.object_id,
+                        object_id: ObjectKey::from(data.object_id),
                         abuser_id: data.abuser_id,
                         abuse_region_name: trimmed_string(&data.abuse_region_name),
                         abuse_region_id: data.abuse_region_id,

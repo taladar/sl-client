@@ -104,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     && near_rez(&object.motion.position)
                 {
                     target_local = Some(object.scoped_id());
-                    target_full = Some(object.full_id);
+                    target_full = Some(object.full_id.uuid());
                     info!(
                         "rezzed prim recognised: local id {} full id {}",
                         object.local_id, object.full_id
@@ -163,7 +163,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 version,
                 faces,
             } => {
-                if Some(object_id) == target_full {
+                if Some(object_id.uuid()) == target_full {
                     saw_media = true;
                     let with_media = faces.iter().filter(|f| f.is_some()).count();
                     info!(

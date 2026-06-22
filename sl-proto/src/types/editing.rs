@@ -1,7 +1,7 @@
 //! Object interaction and editing value types: clicks, materials, transforms.
 
 use super::pcode;
-use sl_types::key::{AgentKey, GroupKey, OwnerKey};
+use sl_types::key::{AgentKey, GroupKey, ObjectKey, OwnerKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::Permissions5;
@@ -617,7 +617,7 @@ pub struct NotecardRez {
     /// The task (prim) whose inventory holds the notecard, when rezzing from an
     /// in-world object's contents ([`Uuid::nil`] when rezzing from the agent's
     /// own inventory notecard).
-    pub from_task_id: Uuid,
+    pub from_task_id: ObjectKey,
     /// When set, the simulator trusts `ray_end` rather than raycasting.
     pub bypass_raycast: bool,
     /// The ray's start point (region-local).
@@ -625,7 +625,7 @@ pub struct NotecardRez {
     /// The ray's end point (region-local).
     pub ray_end: Vector,
     /// The object the ray is cast against ([`Uuid::nil`] for the terrain).
-    pub ray_target_id: Uuid,
+    pub ray_target_id: ObjectKey,
     /// Whether `ray_end` is the actual intersection point.
     pub ray_end_is_intersection: bool,
     /// Whether the rezzed object should be left selected.
@@ -644,7 +644,7 @@ pub struct NotecardRez {
     pub notecard_item_id: Uuid,
     /// The object that holds the notecard ([`Uuid::nil`] when the notecard is in
     /// the agent's own inventory).
-    pub object_id: Uuid,
+    pub object_id: ObjectKey,
     /// The embedded inventory item ids to rez out of the notecard.
     pub item_ids: Vec<Uuid>,
 }

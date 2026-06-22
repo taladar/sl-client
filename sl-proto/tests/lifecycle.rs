@@ -19,15 +19,15 @@ mod test {
         InventoryItem, LandingType, LindenAmount, LoginAccount, LoginParams, LookAtType,
         MapItemType, Material, Maturity, MeanCollisionType, MoneyTransactionType, MovementMode,
         MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
-        ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-        ParcelFlags, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-        ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate, PointAtType,
-        Postcard, PrimShape, ProductType, ProfileUpdate, ReflectionProbeFlags, RegionHandle,
-        RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType, ScopedObjectId,
-        ScopedParcelId, ScriptControlAction, ScriptPermissions, Session, SkySettings, SoundFlags,
-        TeleportFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
-        group_powers, pcode,
+        ObjectKey, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+        ParcelCategory, ParcelFlags, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType,
+        ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate,
+        PointAtType, Postcard, PrimShape, ProductType, ProfileUpdate, ReflectionProbeFlags,
+        RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType,
+        ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissions, Session,
+        SkySettings, SoundFlags, TeleportFlags, TerrainLayerType, Throttle, TransferStatus,
+        Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
+        avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -1235,7 +1235,7 @@ mod test {
         else {
             return Err("expected a SitResult event".into());
         };
-        assert_eq!(sit_object, target);
+        assert_eq!(sit_object, ObjectKey::from(target));
         assert!(!autopilot);
         assert_eq!(sit_position, vec3(0.0, 0.0, 0.5));
         // The full SitTransform — rotation, scripted-sit camera offsets, and the
@@ -2898,7 +2898,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a SetFollowCamProperties event")?;
-        assert_eq!(set_object, object);
+        assert_eq!(set_object, ObjectKey::from(object));
         let first = properties.first().ok_or("first property")?;
         assert_eq!(first.property, FollowCamProperty::Distance);
         assert_eq!(first.value.to_bits(), 4.5_f32.to_bits());
@@ -2918,7 +2918,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a ClearFollowCamProperties event")?;
-        assert_eq!(cleared, object);
+        assert_eq!(cleared, ObjectKey::from(object));
         Ok(())
     }
 
@@ -3294,7 +3294,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a ScriptDialog event")?;
-        assert_eq!(dialog.object_id, object);
+        assert_eq!(dialog.object_id, ObjectKey::from(object));
         assert_eq!(dialog.owner_id, owner);
         assert_eq!(dialog.object_name, "Vendor");
         assert_eq!(dialog.message, "Pick one");
@@ -3335,7 +3335,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a ScriptPermissionRequest event")?;
-        assert_eq!(request.task_id, task);
+        assert_eq!(request.task_id, ObjectKey::from(task));
         assert_eq!(request.item_id, item);
         assert_eq!(request.object_name, "Money Tree");
         assert_eq!(request.permissions.0, requested);
@@ -3356,7 +3356,7 @@ mod test {
         drain(&mut session)?;
 
         let object = uuid::Uuid::from_u128(0x8005);
-        session.reply_script_dialog(object, -1234, 1, "No", now)?;
+        session.reply_script_dialog(ObjectKey::from(object), -1234, 1, "No", now)?;
         let sent = drain(&mut session)?;
         let reply = sent
             .iter()
@@ -3381,7 +3381,7 @@ mod test {
         let task = uuid::Uuid::from_u128(0x8006);
         let item = uuid::Uuid::from_u128(0x8007);
         session.answer_script_permissions(
-            task,
+            ObjectKey::from(task),
             item,
             ScriptPermissions(ScriptPermissions::TAKE_CONTROLS),
             now,
@@ -4262,7 +4262,7 @@ mod test {
                 color: [255, 0, 0, 255],
                 data: ViewerEffectData::LookAt {
                     source: AgentKey::from(self_id),
-                    target,
+                    target: ObjectKey::from(target),
                     target_position: [1.0, 2.0, 3.0],
                     look_at_type: LookAtType::Focus,
                 },
@@ -4285,7 +4285,7 @@ mod test {
             ViewerEffectData::from_wire(ViewerEffectType::LookAt, &block.type_data),
             ViewerEffectData::LookAt {
                 source: AgentKey::from(self_id),
-                target,
+                target: ObjectKey::from(target),
                 target_position: [1.0, 2.0, 3.0],
                 look_at_type: LookAtType::Focus,
             },
@@ -4393,7 +4393,7 @@ mod test {
         let target = uuid::Uuid::from_u128(0x11);
         let data = ViewerEffectData::PointAt {
             source: AgentKey::from(source),
-            target,
+            target: ObjectKey::from(target),
             target_position: [4.0, 5.0, 6.0],
             point_at_type: PointAtType::Grab,
         };
@@ -4642,16 +4642,16 @@ mod test {
             now,
         )?;
         session.buy_object_inventory(
-            object,
+            ObjectKey::from(object),
             uuid::Uuid::from_u128(0x17E),
             uuid::Uuid::nil(),
             now,
         )?;
-        session.request_pay_price(object, now)?;
-        session.request_object_properties_family(0x04, object, now)?;
-        session.spin_object_start(object, now)?;
+        session.request_pay_price(ObjectKey::from(object), now)?;
+        session.request_object_properties_family(0x04, ObjectKey::from(object), now)?;
+        session.spin_object_start(ObjectKey::from(object), now)?;
         session.spin_object_update(
-            object,
+            ObjectKey::from(object),
             Rotation {
                 x: 0.0,
                 y: 0.0,
@@ -4660,7 +4660,7 @@ mod test {
             },
             now,
         )?;
-        session.spin_object_stop(object, now)?;
+        session.spin_object_stop(ObjectKey::from(object), now)?;
         session.duplicate_objects_on_ray(
             &[ScopedObjectId::new(
                 circuit,
@@ -4681,7 +4681,7 @@ mod test {
             true,
             true,
             false,
-            uuid::Uuid::nil(),
+            ObjectKey::from(uuid::Uuid::nil()),
             0,
             now,
         )?;
@@ -4796,7 +4796,7 @@ mod test {
         session.rez_object_from_notecard(
             &NotecardRez {
                 group_id: GroupKey::from(uuid::Uuid::nil()),
-                from_task_id: uuid::Uuid::nil(),
+                from_task_id: ObjectKey::from(uuid::Uuid::nil()),
                 bypass_raycast: false,
                 ray_start: Vector {
                     x: 1.0,
@@ -4808,7 +4808,7 @@ mod test {
                     y: 5.0,
                     z: 6.0,
                 },
-                ray_target_id: uuid::Uuid::nil(),
+                ray_target_id: ObjectKey::from(uuid::Uuid::nil()),
                 ray_end_is_intersection: true,
                 rez_selected: false,
                 remove_item: false,
@@ -4817,7 +4817,7 @@ mod test {
                 everyone_mask: 0,
                 next_owner_mask: 0x0008_e000,
                 notecard_item_id: uuid::Uuid::from_u128(0xCA5E),
-                object_id: uuid::Uuid::nil(),
+                object_id: ObjectKey::from(uuid::Uuid::nil()),
                 item_ids: vec![uuid::Uuid::from_u128(0x1), uuid::Uuid::from_u128(0x2)],
             },
             now,
@@ -4859,9 +4859,9 @@ mod test {
 
         let object_id = uuid::Uuid::from_u128(0x0B1E);
         let item_id = uuid::Uuid::from_u128(0x17E3);
-        session.request_script_running(object_id, item_id, now)?;
-        session.set_script_running(object_id, item_id, true, now)?;
-        session.reset_script(object_id, item_id, now)?;
+        session.request_script_running(ObjectKey::from(object_id), item_id, now)?;
+        session.set_script_running(ObjectKey::from(object_id), item_id, true, now)?;
+        session.reset_script(ObjectKey::from(object_id), item_id, now)?;
         let sent = drain(&mut session)?;
 
         let get = sent
@@ -4924,7 +4924,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a ScriptRunning event")?;
-        assert_eq!(running.0, uuid::Uuid::from_u128(0x0B1E));
+        assert_eq!(running.0, ObjectKey::from(uuid::Uuid::from_u128(0x0B1E)));
         assert_eq!(running.1, uuid::Uuid::from_u128(0x17E3));
         assert!(running.2);
         Ok(())
@@ -5156,7 +5156,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a PayPriceReply event")?;
-        assert_eq!(object_id, object);
+        assert_eq!(object_id, ObjectKey::from(object));
         assert_eq!(default_pay_price, 10);
         assert_eq!(pay_buttons, vec![1, 5, 20]);
         Ok(())
@@ -5200,7 +5200,7 @@ mod test {
             })
             .ok_or("expected an ObjectPropertiesFamily event")?;
         assert_eq!(properties.request_flags, 0x04);
-        assert_eq!(properties.object_id, object);
+        assert_eq!(properties.object_id, ObjectKey::from(object));
         assert_eq!(
             properties.owner,
             sl_proto::OwnerKey::Agent(sl_proto::AgentKey::from(owner))
@@ -5275,11 +5275,11 @@ mod test {
         assert_eq!(first.sequence_id, 1);
         // A nil source UUID is still a populated source slot; only a *missing*
         // slot decodes to `None`. The viewer treats nil as "no triggering object".
-        assert_eq!(first.source_id, Some(uuid::Uuid::nil()));
+        assert_eq!(first.source_id, Some(ObjectKey::from(uuid::Uuid::nil())));
         let second = animations.get(1).ok_or("second animation")?;
         assert_eq!(second.anim_id, scripted);
         assert_eq!(second.sequence_id, 2);
-        assert_eq!(second.source_id, Some(trigger_object));
+        assert_eq!(second.source_id, Some(ObjectKey::from(trigger_object)));
         Ok(())
     }
 
@@ -5326,7 +5326,7 @@ mod test {
         };
         assert_eq!(sound_id, sound);
         assert_eq!(owner_id, owner);
-        assert_eq!(object_id, object);
+        assert_eq!(object_id, ObjectKey::from(object));
         assert_eq!(parent_id, None);
         assert_eq!(region_handle, RegionHandle(0x0000_03E8_0000_03E8));
         assert_eq!(position, vec3(128.0, 64.0, 25.0));
@@ -5517,7 +5517,7 @@ mod test {
         else {
             return Err("expected ObjectMedia".into());
         };
-        assert_eq!(object_id, object);
+        assert_eq!(object_id, ObjectKey::from(object));
         assert_eq!(version, format!("x-mv:0000000003/{object}"));
         assert_eq!(faces.len(), 2);
         let face0 = faces
@@ -5574,7 +5574,7 @@ mod test {
             return Err("expected AttachedSound".into());
         };
         assert_eq!(sound_id, sound);
-        assert_eq!(object_id, object);
+        assert_eq!(object_id, ObjectKey::from(object));
         assert_eq!(owner_id, owner);
         assert!((gain - 1.0).abs() < f32::EPSILON);
         assert!(flags.is_loop());
@@ -5614,7 +5614,10 @@ mod test {
         assert_eq!(sounds.len(), 2);
         let first = sounds.first().ok_or("first preload")?;
         assert_eq!(first.sound_id, uuid::Uuid::from_u128(0x73));
-        assert_eq!(first.object_id, uuid::Uuid::from_u128(0x71));
+        assert_eq!(
+            first.object_id,
+            ObjectKey::from(uuid::Uuid::from_u128(0x71))
+        );
         let second = sounds.get(1).ok_or("second preload")?;
         assert_eq!(second.sound_id, uuid::Uuid::from_u128(0x83));
         Ok(())
@@ -7895,7 +7898,7 @@ mod test {
             ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(7)),
             ParcelReturnType::OTHER,
             &[uuid::Uuid::from_u128(0x99)],
-            &[uuid::Uuid::from_u128(0xAB)],
+            &[ObjectKey::from(uuid::Uuid::from_u128(0xAB))],
             now,
         )?;
         session.request_parcel_info(uuid::Uuid::from_u128(0x00C0_FFEE), now)?;
@@ -8426,7 +8429,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a TelehubInfo event")?;
-        assert_eq!(telehub.object_id, uuid::Uuid::from_u128(0x7E1E));
+        assert_eq!(
+            telehub.object_id,
+            ObjectKey::from(uuid::Uuid::from_u128(0x7E1E))
+        );
         assert_eq!(telehub.object_name, "Welcome Hub");
         assert_eq!(telehub.position.x.to_bits(), 128.0_f32.to_bits());
         assert_eq!(telehub.spawn_points.len(), 2);
@@ -8850,7 +8856,7 @@ mod test {
             },
             check_flags: 0,
             screenshot_id: uuid::Uuid::nil(),
-            object_id: uuid::Uuid::from_u128(0x22),
+            object_id: ObjectKey::from(uuid::Uuid::from_u128(0x22)),
             abuser_id: uuid::Uuid::from_u128(0x33),
             abuse_region_name: "TestRegion".to_owned(),
             abuse_region_id: uuid::Uuid::nil(),
@@ -9194,7 +9200,10 @@ mod test {
             return Err(format!("expected ObjectAdded, got {events:?}").into());
         };
         assert_eq!(object.local_id, sl_proto::RegionLocalObjectId(100));
-        assert_eq!(object.full_id, uuid::Uuid::from_u128(0xABCD));
+        assert_eq!(
+            object.full_id,
+            ObjectKey::from(uuid::Uuid::from_u128(0xABCD))
+        );
         assert_eq!(object.pcode, pcode::PRIMITIVE);
         assert_eq!(object.region_handle, RegionHandle(OBJ_REGION));
         assert_eq!(object.motion.position, position);
@@ -9486,7 +9495,7 @@ mod test {
         assert!((ps.burst_speed_max - 2.0).abs() < f32::EPSILON);
         assert_eq!(ps.burst_part_count, 20);
         assert_eq!(ps.texture_id, part_image);
-        assert_eq!(ps.target_id, target);
+        assert_eq!(ps.target_id, ObjectKey::from(target));
         assert_eq!(ps.part_flags, 0x40);
         assert!((ps.part_max_age - 10.0).abs() < f32::EPSILON);
         assert_eq!(ps.part_start_color, [255, 255, 255, 255]);
@@ -9999,7 +10008,10 @@ mod test {
         assert_eq!(properties.inventory_serial, 7);
         assert_eq!(properties.item_id, uuid::Uuid::from_u128(0x44));
         assert_eq!(properties.folder_id, uuid::Uuid::from_u128(0x55));
-        assert_eq!(properties.from_task_id, uuid::Uuid::from_u128(0x66));
+        assert_eq!(
+            properties.from_task_id,
+            ObjectKey::from(uuid::Uuid::from_u128(0x66))
+        );
         assert_eq!(properties.aggregate_perms, 0x0E);
         assert_eq!(properties.aggregate_perm_textures, 0x0F);
         assert_eq!(properties.aggregate_perm_textures_owner, 0x0D);
@@ -10073,7 +10085,10 @@ mod test {
             return Err(format!("expected ObjectAdded from compressed, got {events:?}").into());
         };
         assert_eq!(object.local_id, sl_proto::RegionLocalObjectId(600));
-        assert_eq!(object.full_id, uuid::Uuid::from_u128(0xDEAD));
+        assert_eq!(
+            object.full_id,
+            ObjectKey::from(uuid::Uuid::from_u128(0xDEAD))
+        );
         assert_eq!(object.crc, 99);
         assert_eq!(object.owner_id, uuid::Uuid::from_u128(0x44));
         assert_eq!(object.motion.position, position);
@@ -11137,7 +11152,7 @@ mod test {
 
         let id = uuid::Uuid::from_u128(0x000B_7EC0);
         let costs = vec![(
-            id,
+            ObjectKey::from(id),
             sl_proto::ObjectCost {
                 linked_set_resource_cost: 12.5,
                 resource_cost: 3.5,
@@ -11158,7 +11173,10 @@ mod test {
             return Err("expected ObjectCosts".into());
         };
         assert_eq!(decoded.len(), 1);
-        assert_eq!(decoded.first().map(|entry| entry.0), Some(id));
+        assert_eq!(
+            decoded.first().map(|entry| entry.0),
+            Some(ObjectKey::from(id))
+        );
         assert_eq!(
             decoded
                 .first()
@@ -11186,7 +11204,7 @@ mod test {
             restitution: 0.5,
             gravity_multiplier: 1.0,
         };
-        let xml = sl_proto::build_get_object_physics_data_response(&[(id, data)]);
+        let xml = sl_proto::build_get_object_physics_data_response(&[(ObjectKey::from(id), data)]);
         let body = sl_proto::parse_llsd_xml(&xml)?;
         session.handle_caps_event(sl_proto::CAP_GET_OBJECT_PHYSICS_DATA, &body, now)?;
 
@@ -11197,7 +11215,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an ObjectPhysicsData event")?;
-        assert_eq!(decoded.first().map(|entry| entry.0), Some(id));
+        assert_eq!(
+            decoded.first().map(|entry| entry.0),
+            Some(ObjectKey::from(id))
+        );
         assert_eq!(
             decoded.first().map(|entry| entry.1.physics_shape_type),
             Some(sl_proto::PhysicsShapeType::ConvexHull)

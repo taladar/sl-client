@@ -60,7 +60,7 @@ use crate::types::{
     TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
     ViewerEffectType, Wearable, WearableType,
 };
-use sl_types::key::{AgentKey, GroupKey};
+use sl_types::key::{AgentKey, GroupKey, ObjectKey};
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::{
@@ -1575,7 +1575,7 @@ impl Session {
                         .iter()
                         .map(|item| LandStatItem {
                             task_local_id: RegionLocalObjectId(item.task_local_id),
-                            task_id: item.task_id,
+                            task_id: ObjectKey::from(item.task_id),
                             location: [item.location_x, item.location_y, item.location_z],
                             score: item.score,
                             task_name: trimmed_string(&item.task_name),
@@ -1631,7 +1631,7 @@ impl Session {
             AnyMessage::TelehubInfo(info) => {
                 let block = &info.telehub_block;
                 self.events.push_back(Event::TelehubInfo(TelehubInfo {
-                    object_id: block.object_id,
+                    object_id: ObjectKey::from(block.object_id),
                     object_name: trimmed_string(&block.object_name),
                     position: block.telehub_pos.clone(),
                     rotation: block.telehub_rot.clone(),
@@ -1727,7 +1727,7 @@ impl Session {
                     }
                     let transform = &response.sit_transform;
                     self.events.push_back(Event::SitResult {
-                        sit_object: response.sit_object.id,
+                        sit_object: ObjectKey::from(response.sit_object.id),
                         autopilot: transform.auto_pilot,
                         sit_position: transform.sit_position.clone(),
                         sit_rotation: transform.sit_rotation.clone(),
@@ -2207,8 +2207,9 @@ impl Session {
                 self.events.push_back(Event::SoundTrigger {
                     sound_id: block.sound_id,
                     owner_id: block.owner_id,
-                    object_id: block.object_id,
-                    parent_id: (!block.parent_id.is_nil()).then_some(block.parent_id),
+                    object_id: ObjectKey::from(block.object_id),
+                    parent_id: (!block.parent_id.is_nil())
+                        .then_some(ObjectKey::from(block.parent_id)),
                     region_handle: RegionHandle(block.handle),
                     position: block.position.clone(),
                     gain: block.gain,
@@ -2220,7 +2221,7 @@ impl Session {
                 let block = &sound.data_block;
                 self.events.push_back(Event::AttachedSound {
                     sound_id: block.sound_id,
-                    object_id: block.object_id,
+                    object_id: ObjectKey::from(block.object_id),
                     owner_id: block.owner_id,
                     gain: block.gain,
                     flags: SoundFlags(block.flags),
@@ -2230,7 +2231,7 @@ impl Session {
             AnyMessage::AttachedSoundGainChange(change) => {
                 let block = &change.data_block;
                 self.events.push_back(Event::AttachedSoundGainChange {
-                    object_id: block.object_id,
+                    object_id: ObjectKey::from(block.object_id),
                     gain: block.gain,
                 });
             }
@@ -2242,7 +2243,7 @@ impl Session {
                         .iter()
                         .map(|block| SoundPreload {
                             sound_id: block.sound_id,
-                            object_id: block.object_id,
+                            object_id: ObjectKey::from(block.object_id),
                             owner_id: block.owner_id,
                         })
                         .collect(),
@@ -2497,7 +2498,7 @@ impl Session {
             // An object's pay-button layout, in reply to a `RequestPayPrice`.
             AnyMessage::PayPriceReply(reply) => {
                 self.events.push_back(Event::PayPriceReply {
-                    object_id: reply.object_data.object_id,
+                    object_id: ObjectKey::from(reply.object_data.object_id),
                     default_pay_price: reply.object_data.default_pay_price,
                     pay_buttons: reply
                         .button_data
@@ -2513,7 +2514,7 @@ impl Session {
                 self.events.push_back(Event::ObjectPropertiesFamily {
                     properties: ObjectPropertiesFamily {
                         request_flags: data.request_flags,
-                        object_id: data.object_id,
+                        object_id: ObjectKey::from(data.object_id),
                         owner: crate::types::object_owner_from_wire(data.owner_id, data.group_id),
                         group: crate::types::group_from_wire(data.group_id),
                         permissions: Permissions5 {
@@ -2536,7 +2537,7 @@ impl Session {
             AnyMessage::ScriptRunningReply(reply) => {
                 let script = &reply.script;
                 self.events.push_back(Event::ScriptRunning {
-                    object_id: script.object_id,
+                    object_id: ObjectKey::from(script.object_id),
                     item_id: script.item_id,
                     running: script.running,
                 });
@@ -2570,7 +2571,7 @@ impl Session {
                 self.events.push_back(Event::ScriptControlChange(controls));
             }
             AnyMessage::SetFollowCamProperties(properties) => {
-                let object_id = properties.object_data.object_id;
+                let object_id = ObjectKey::from(properties.object_data.object_id);
                 let properties = properties
                     .camera_property
                     .iter()
@@ -2586,7 +2587,7 @@ impl Session {
             }
             AnyMessage::ClearFollowCamProperties(clear) => {
                 self.events.push_back(Event::ClearFollowCamProperties {
-                    object_id: clear.object_data.object_id,
+                    object_id: ObjectKey::from(clear.object_data.object_id),
                 });
             }
             AnyMessage::AlertMessage(alert) => {
@@ -2648,7 +2649,7 @@ impl Session {
                 self.events
                     .push_back(Event::LoadUrl(Box::new(LoadUrlRequest {
                         object_name: trimmed_string(&data.object_name),
-                        object_id: data.object_id,
+                        object_id: ObjectKey::from(data.object_id),
                         owner: crate::types::owner_key_from_wire(
                             data.owner_id,
                             data.owner_is_group,
@@ -4692,7 +4693,7 @@ impl Session {
     /// [`Error::Wire`] if the reply fails to encode.
     pub fn reply_script_dialog(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         chat_channel: i32,
         button_index: i32,
         button_label: &str,
@@ -4720,7 +4721,7 @@ impl Session {
     /// [`Error::Wire`] if the reply fails to encode.
     pub fn answer_script_permissions(
         &mut self,
-        task_id: Uuid,
+        task_id: ObjectKey,
         item_id: Uuid,
         permissions: ScriptPermissions,
         now: Instant,
@@ -5376,7 +5377,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn buy_object_inventory(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         item_id: Uuid,
         folder_id: Uuid,
         now: Instant,
@@ -5393,7 +5394,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn request_pay_price(&mut self, object_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn request_pay_price(&mut self, object_id: ObjectKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_request_pay_price(object_id, now)?;
         Ok(())
@@ -5411,7 +5412,7 @@ impl Session {
     pub fn request_object_properties_family(
         &mut self,
         request_flags: u32,
-        object_id: Uuid,
+        object_id: ObjectKey,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -5426,7 +5427,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn spin_object_start(&mut self, object_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn spin_object_start(&mut self, object_id: ObjectKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_object_spin_start(object_id, now)?;
         Ok(())
@@ -5441,7 +5442,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn spin_object_update(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         rotation: Rotation,
         now: Instant,
     ) -> Result<(), Error> {
@@ -5456,7 +5457,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn spin_object_stop(&mut self, object_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn spin_object_stop(&mut self, object_id: ObjectKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_object_spin_stop(object_id, now)?;
         Ok(())
@@ -5484,7 +5485,7 @@ impl Session {
         ray_end_is_intersection: bool,
         copy_centers: bool,
         copy_rotates: bool,
-        ray_target_id: Uuid,
+        ray_target_id: ObjectKey,
         duplicate_flags: u32,
         now: Instant,
     ) -> Result<(), Error> {
@@ -5546,7 +5547,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_script_running(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         item_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
@@ -5564,7 +5565,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_script_running(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         item_id: Uuid,
         running: bool,
         now: Instant,
@@ -5583,7 +5584,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn reset_script(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         item_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
@@ -6425,7 +6426,7 @@ impl Session {
         local_id: ScopedParcelId,
         return_type: ParcelReturnType,
         owner_ids: &[Uuid],
-        task_ids: &[Uuid],
+        task_ids: &[ObjectKey],
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit_for_scope(local_id.circuit)?;
@@ -6446,7 +6447,7 @@ impl Session {
         &mut self,
         local_id: ScopedParcelId,
         return_type: ParcelReturnType,
-        object_ids: &[Uuid],
+        object_ids: &[ObjectKey],
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit_for_scope(local_id.circuit)?;
@@ -6590,7 +6591,7 @@ impl Session {
         local_id: ScopedParcelId,
         return_type: ParcelReturnType,
         owner_ids: &[Uuid],
-        task_ids: &[Uuid],
+        task_ids: &[ObjectKey],
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit_for_scope(local_id.circuit)?;
@@ -7217,7 +7218,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn grab_object_update(
         &mut self,
-        object_id: Uuid,
+        object_id: ObjectKey,
         grab_offset_initial: Vector,
         grab_position: Vector,
         time_since_last: u32,

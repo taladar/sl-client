@@ -1,7 +1,7 @@
 //! In-world object schema: motion, shape, materials, animations, particles.
 
 use sl_types::attachment::AttachmentPoint;
-use sl_types::key::{AgentKey, GroupKey, OwnerKey};
+use sl_types::key::{AgentKey, GroupKey, ObjectKey, OwnerKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::Permissions5;
@@ -72,7 +72,7 @@ pub struct Object {
     /// through the cache. Read it via [`scoped_id`](Self::scoped_id).
     pub circuit: CircuitId,
     /// The object's persistent global id.
-    pub full_id: Uuid,
+    pub full_id: ObjectKey,
     /// The local id of the parent object this is linked/attached to, or 0 if it
     /// has no parent (a root object).
     pub parent_id: RegionLocalObjectId,
@@ -623,7 +623,7 @@ pub struct ParticleSystem {
     pub texture_id: Uuid,
     /// The target object the particles follow/aim at (for the target patterns and
     /// the `TARGET_POS`/`TARGET_LINEAR` particle flags); nil if none.
-    pub target_id: Uuid,
+    pub target_id: ObjectKey,
     /// The per-particle flags (`LL_PART_*_MASK` — interpolation, bounce, wind,
     /// follow, emissive, beam, ribbon, and the glow/blend system-set bits).
     pub part_flags: u32,
@@ -655,7 +655,7 @@ pub struct ParticleSystem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObjectProperties {
     /// The object's persistent global id.
-    pub object_id: Uuid,
+    pub object_id: ObjectKey,
     /// The creator's id.
     pub creator_id: AgentKey,
     /// The current owner — an agent, or a group when the object is deeded to a
@@ -689,7 +689,7 @@ pub struct ObjectProperties {
     pub folder_id: Uuid,
     /// The task (object) this item came from, when it was rezzed from another
     /// object's contents (nil if not applicable).
-    pub from_task_id: Uuid,
+    pub from_task_id: ObjectKey,
     /// The aggregate permission rollup across the linkset's contents — the
     /// build-floater "next owner can…" summary.
     pub aggregate_perms: u8,
@@ -722,7 +722,7 @@ pub struct ObjectPropertiesFamily {
     /// `0x04`), letting a viewer route the reply to the dialog that asked.
     pub request_flags: u32,
     /// The object's persistent global id.
-    pub object_id: Uuid,
+    pub object_id: ObjectKey,
     /// The current owner — an agent, or a group when the object is deeded to a
     /// group (signalled on the wire by a null `OwnerID`).
     pub owner: OwnerKey,
@@ -767,7 +767,7 @@ mod tests {
             region_handle: RegionHandle(0),
             local_id: RegionLocalObjectId(0),
             circuit: CircuitId::default(),
-            full_id: super::Uuid::nil(),
+            full_id: ObjectKey::from(super::Uuid::nil()),
             parent_id: RegionLocalObjectId(0),
             pcode,
             state,
@@ -840,6 +840,19 @@ mod tests {
                 z: 0.0,
             },
         }
+    }
+
+    /// The [`ObjectKey`] wrapper on [`Object::full_id`] round-trips
+    /// bit-identically to the raw `Uuid` it replaced (wrap then unwrap is the
+    /// identity), so the codec boundary is transparent.
+    #[test]
+    fn object_key_round_trips_raw_uuid() {
+        let raw = super::Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10);
+        let key = ObjectKey::from(raw);
+        assert_eq!(key.uuid(), raw);
+        let object = test_object(0, 0, "");
+        // The default object's full id is the nil object key, not a stray value.
+        assert_eq!(object.full_id, ObjectKey::from(super::Uuid::nil()));
     }
 
     #[test]

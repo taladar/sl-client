@@ -1,7 +1,7 @@
 //! Nearby-avatar presence and viewer effects: coarse (minimap) locations, the
 //! `ViewerEffect` look-at / point-at / beam machinery, and agent tracking.
 
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, ObjectKey};
 use sl_wire::{Reader, Writer};
 use uuid::Uuid;
 
@@ -275,7 +275,7 @@ pub enum ViewerEffectData {
         /// The avatar the gaze belongs to (nil if absent).
         source: AgentKey,
         /// The object being looked at (nil for none).
-        target: Uuid,
+        target: ObjectKey,
         /// The global target position, in metres.
         target_position: [f64; 3],
         /// What the gaze is directed at.
@@ -286,7 +286,7 @@ pub enum ViewerEffectData {
         /// The avatar doing the pointing (nil if absent).
         source: AgentKey,
         /// The object being pointed at (nil for none).
-        target: Uuid,
+        target: ObjectKey,
         /// The global target position, in metres.
         target_position: [f64; 3],
         /// What the gesture is directed at.
@@ -297,9 +297,9 @@ pub enum ViewerEffectData {
     /// and a global position.
     Spiral {
         /// The object the effect emanates from (nil if absent).
-        source: Uuid,
+        source: ObjectKey,
         /// The object the effect points to (nil for none).
-        target: Uuid,
+        target: ObjectKey,
         /// The global position, in metres (zero when unused).
         position: [f64; 3],
     },
@@ -331,7 +331,7 @@ impl ViewerEffectData {
     fn decode_lookat(bytes: &[u8]) -> Option<Self> {
         let mut reader = Reader::new(bytes);
         let source = AgentKey::from(reader.uuid().ok()?);
-        let target = reader.uuid().ok()?;
+        let target = ObjectKey::from(reader.uuid().ok()?);
         let target_position = reader.vector3d().ok()?;
         let look_at_type = LookAtType::from_code(reader.u8().ok()?);
         Some(Self::LookAt {
@@ -346,7 +346,7 @@ impl ViewerEffectData {
     fn decode_pointat(bytes: &[u8]) -> Option<Self> {
         let mut reader = Reader::new(bytes);
         let source = AgentKey::from(reader.uuid().ok()?);
-        let target = reader.uuid().ok()?;
+        let target = ObjectKey::from(reader.uuid().ok()?);
         let target_position = reader.vector3d().ok()?;
         let point_at_type = PointAtType::from_code(reader.u8().ok()?);
         Some(Self::PointAt {
@@ -360,8 +360,8 @@ impl ViewerEffectData {
     /// Decodes a 56-byte spiral-family `TypeData` blob (`None` on a short read).
     fn decode_spiral(bytes: &[u8]) -> Option<Self> {
         let mut reader = Reader::new(bytes);
-        let source = reader.uuid().ok()?;
-        let target = reader.uuid().ok()?;
+        let source = ObjectKey::from(reader.uuid().ok()?);
+        let target = ObjectKey::from(reader.uuid().ok()?);
         let position = reader.vector3d().ok()?;
         Some(Self::Spiral {
             source,
@@ -383,7 +383,7 @@ impl ViewerEffectData {
                 look_at_type,
             } => {
                 writer.put_uuid(source.uuid());
-                writer.put_uuid(*target);
+                writer.put_uuid(target.uuid());
                 writer.put_vector3d(*target_position);
                 writer.put_u8(look_at_type.to_code());
             }
@@ -394,7 +394,7 @@ impl ViewerEffectData {
                 point_at_type,
             } => {
                 writer.put_uuid(source.uuid());
-                writer.put_uuid(*target);
+                writer.put_uuid(target.uuid());
                 writer.put_vector3d(*target_position);
                 writer.put_u8(point_at_type.to_code());
             }
@@ -403,8 +403,8 @@ impl ViewerEffectData {
                 target,
                 position,
             } => {
-                writer.put_uuid(*source);
-                writer.put_uuid(*target);
+                writer.put_uuid(source.uuid());
+                writer.put_uuid(target.uuid());
                 writer.put_vector3d(*position);
             }
             Self::Raw(bytes) => return bytes.clone(),
@@ -439,7 +439,7 @@ pub struct ViewerEffect {
 
 #[cfg(test)]
 mod tests {
-    use sl_types::key::AgentKey;
+    use sl_types::key::{AgentKey, ObjectKey};
 
     use super::{LookAtType, PointAtType, ViewerEffectData, ViewerEffectType};
     use pretty_assertions::assert_eq;
@@ -458,7 +458,7 @@ mod tests {
     fn lookat_round_trips() {
         let data = ViewerEffectData::LookAt {
             source: AgentKey::from(Uuid::from_u128(1)),
-            target: Uuid::from_u128(2),
+            target: ObjectKey::from(Uuid::from_u128(2)),
             target_position: [1.5, -2.5, 3.5],
             look_at_type: LookAtType::Focus,
         };
@@ -475,7 +475,7 @@ mod tests {
     fn pointat_round_trips() {
         let data = ViewerEffectData::PointAt {
             source: AgentKey::from(Uuid::from_u128(3)),
-            target: Uuid::from_u128(4),
+            target: ObjectKey::from(Uuid::from_u128(4)),
             target_position: [0.0, 0.0, 0.0],
             point_at_type: PointAtType::Grab,
         };
@@ -491,8 +491,8 @@ mod tests {
     #[test]
     fn spiral_round_trips() {
         let data = ViewerEffectData::Spiral {
-            source: Uuid::from_u128(5),
-            target: Uuid::from_u128(6),
+            source: ObjectKey::from(Uuid::from_u128(5)),
+            target: ObjectKey::from(Uuid::from_u128(6)),
             position: [10.0, 20.0, 30.0],
         };
         let bytes = data.to_wire();

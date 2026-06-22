@@ -278,7 +278,7 @@ pub fn build_modify_material_params_request(updates: &[MaterialOverrideUpdate]) 
     let mut out = String::from("<llsd><array>");
     for update in updates {
         out.push_str("<map><key>object_id</key><uuid>");
-        out.push_str(&update.object_id.to_string());
+        out.push_str(&update.object_id.uuid().to_string());
         out.push_str("</uuid><key>side</key><integer>");
         out.push_str(&update.side.to_string());
         out.push_str("</integer>");
@@ -359,7 +359,7 @@ pub fn parse_modify_material_params_request(
 /// Decodes one `ModifyMaterialParams` array entry into a
 /// [`MaterialOverrideUpdate`], or `None` if it lacks an `object_id`.
 fn modify_material_update(item: &Llsd) -> Option<MaterialOverrideUpdate> {
-    let object_id = item.get("object_id").and_then(Llsd::as_uuid)?;
+    let object_id = sl_types::key::ObjectKey::from(item.get("object_id").and_then(Llsd::as_uuid)?);
     let side = item.get("side").and_then(Llsd::as_i32).unwrap_or(-1);
     let gltf_json = item
         .get("gltf_json")
