@@ -47,7 +47,7 @@ use sl_proto::{
 // survey commands, and read events. `Event` is aliased to avoid clashing with
 // Bevy's `Event` derive.
 pub use sl_proto::{
-    ActiveGroup, AgentPreferences, AnimatedObjects, AnyMessage, AvatarClassified,
+    ActiveGroup, AgentKey, AgentPreferences, AnimatedObjects, AnyMessage, AvatarClassified,
     AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, Camera, CameraError,
     ChatAudible, ChatMessage, ChatSourceType, ChatType, CircuitCode, CircuitId, ClassifiedInfo,
     ClassifiedUpdate, ClickAction, Command, ControlFlags, CreateGroupParams, DeRezDestination,
@@ -57,7 +57,7 @@ pub use sl_proto::{
     GroupMembership, GroupNotice, GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleChange,
     GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
     HomeLocation, IceCandidate, ImDialog, InstantMessage, InterestsUpdate, InventoryCallbackId,
-    InventoryFolder, InventoryItem, InventoryOffer, InventoryType, Kilobits, LandingType,
+    InventoryFolder, InventoryItem, InventoryOffer, InventoryType, Key, Kilobits, LandingType,
     LegacyMaterial, LightData, LightImage, LindenAmount, LoadUrlRequest, LoginAccount, LoginParams,
     LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
     MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate,
@@ -172,7 +172,7 @@ pub struct SlCapabilities(pub HashMap<String, String>);
 #[derive(Event, Debug, Clone)]
 pub struct SlIdentity {
     /// The logged-in avatar's agent id.
-    pub agent_id: Option<Uuid>,
+    pub agent_id: Option<AgentKey>,
     /// The session id assigned by the grid.
     pub session_id: Option<Uuid>,
     /// The circuit code assigned by the grid.
@@ -609,7 +609,7 @@ fn advance_running(
                     let events_tx = caps.events_tx.clone();
                     let folders = folder_ids.clone();
                     std::thread::spawn(move || {
-                        run_inventory_fetch(&url, owner, &folders, &events_tx);
+                        run_inventory_fetch(&url, owner.uuid(), &folders, &events_tx);
                     });
                 }
             }

@@ -1,5 +1,6 @@
 //! Inventory structure and region-handle coordinate helpers.
 
+use sl_types::key::AgentKey;
 use sl_wire::{Permissions5, RegionHandle};
 use uuid::Uuid;
 
@@ -52,7 +53,7 @@ pub struct InventoryItem {
     /// item's permissions checksum, the `CRC` of `UpdateInventoryItem`).
     pub last_owner_id: Uuid,
     /// The creator's id.
-    pub creator_id: Uuid,
+    pub creator_id: AgentKey,
     /// The group associated with the item.
     pub group_id: Uuid,
     /// Whether the item is group-owned.

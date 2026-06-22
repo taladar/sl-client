@@ -17,6 +17,7 @@
 
 use std::collections::BTreeMap;
 
+use sl_proto::AgentKey;
 use sl_proto::CircuitId;
 use sl_proto::{
     AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentMode, AttachmentPoint,
@@ -795,13 +796,13 @@ fn parse_effect_data(
     let selector = args.str_or(ctx, "data", 200, default_effect_data_kind(effect_type))?;
     match norm(&selector).as_str() {
         "lookat" => Ok(ViewerEffectData::LookAt {
-            source: args.uuid_or_nil(ctx, "source", 201)?,
+            source: AgentKey::from(args.uuid_or_nil(ctx, "source", 201)?),
             target: args.uuid_or_nil(ctx, "target", 202)?,
             target_position: position_or_zero(args, ctx, "position", 203)?,
             look_at_type: parse_lookat_type("look_at", &args.str_or(ctx, "look_at", 204, "none")?)?,
         }),
         "pointat" => Ok(ViewerEffectData::PointAt {
-            source: args.uuid_or_nil(ctx, "source", 201)?,
+            source: AgentKey::from(args.uuid_or_nil(ctx, "source", 201)?),
             target: args.uuid_or_nil(ctx, "target", 202)?,
             target_position: position_or_zero(args, ctx, "position", 203)?,
             point_at_type: parse_pointat_type(
@@ -1000,7 +1001,7 @@ fn build_inventory_item(args: &Args, ctx: &dyn ReplContext) -> Result<InventoryI
         creation_date: args.parse_or(ctx, "creation_date", 10, "i32", 0)?,
         owner_id: args.uuid_or_nil(ctx, "owner_id", 11)?,
         last_owner_id: args.uuid_or_nil(ctx, "last_owner_id", 12)?,
-        creator_id: args.uuid_or_nil(ctx, "creator_id", 13)?,
+        creator_id: AgentKey::from(args.uuid_or_nil(ctx, "creator_id", 13)?),
         group_id: args.uuid_or_nil(ctx, "group_id", 14)?,
         group_owned: args.bool_or(ctx, "group_owned", 15, false)?,
         permissions: Permissions5 {
@@ -1199,7 +1200,7 @@ fn build_inventory_offer(args: &Args, ctx: &dyn ReplContext) -> Result<Inventory
         asset_type: enum_arg(args, ctx, "asset_type", 0, parse_asset_type)?,
         item_id: args.req_uuid(ctx, "item_id", 1)?,
         transaction_id: args.uuid_or_nil(ctx, "transaction_id", 2)?,
-        from_agent_id: args.uuid_or_nil(ctx, "from_agent_id", 3)?,
+        from_agent_id: AgentKey::from(args.uuid_or_nil(ctx, "from_agent_id", 3)?),
         from_task: args.bool_or(ctx, "from_task", 4, false)?,
     })
 }
@@ -1274,7 +1275,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<to_agent_id> <message>",
             build: |args, ctx| {
                 Ok(Command::InstantMessage {
-                    to_agent_id: args.req_uuid(ctx, "to_agent_id", 0)?,
+                    to_agent_id: AgentKey::from(args.req_uuid(ctx, "to_agent_id", 0)?),
                     message: args.req_str(ctx, "message", 1)?,
                 })
             },
@@ -1284,7 +1285,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<to_agent_id> <true|false>",
             build: |args, ctx| {
                 Ok(Command::ImTyping {
-                    to_agent_id: args.req_uuid(ctx, "to_agent_id", 0)?,
+                    to_agent_id: AgentKey::from(args.req_uuid(ctx, "to_agent_id", 0)?),
                     typing: args.req_bool(ctx, "typing", 1)?,
                 })
             },
@@ -1398,7 +1399,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<creator_id> <pick_id>",
             build: |args, ctx| {
                 Ok(Command::RequestPickInfo {
-                    creator_id: args.req_uuid(ctx, "creator_id", 0)?,
+                    creator_id: AgentKey::from(args.req_uuid(ctx, "creator_id", 0)?),
                     pick_id: args.req_uuid(ctx, "pick_id", 1)?,
                 })
             },
@@ -1586,7 +1587,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<old_agent_id> <old_item_id> <new_folder_id> <new_name>",
             build: |args, ctx| {
                 Ok(Command::CopyInventoryItem {
-                    old_agent_id: args.req_uuid(ctx, "old_agent_id", 0)?,
+                    old_agent_id: AgentKey::from(args.req_uuid(ctx, "old_agent_id", 0)?),
                     old_item_id: args.req_uuid(ctx, "old_item_id", 1)?,
                     new_folder_id: args.req_uuid(ctx, "new_folder_id", 2)?,
                     new_name: args.req_str(ctx, "new_name", 3)?,
@@ -1753,7 +1754,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<to_agent_id> [message]",
             build: |args, ctx| {
                 Ok(Command::OfferFriendship {
-                    to_agent_id: args.req_uuid(ctx, "to_agent_id", 0)?,
+                    to_agent_id: AgentKey::from(args.req_uuid(ctx, "to_agent_id", 0)?),
                     message: args.str_or(ctx, "message", 1, "")?,
                 })
             },
@@ -1988,10 +1989,10 @@ fn all_specs() -> Vec<CommandSpec> {
                             "changes",
                             record_field("changes", &record, 0)?,
                         )?,
-                        member_id: args::literal_uuid(
+                        member_id: AgentKey::from(args::literal_uuid(
                             "changes",
                             record_field("changes", &record, 1)?,
-                        )?,
+                        )?),
                         change: parse_group_role_change(
                             "changes",
                             record_field("changes", &record, 2)?,
@@ -2010,7 +2011,11 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::EjectGroupMembers {
                     group_id: args.req_uuid(ctx, "group_id", 0)?,
-                    member_ids: args.vec_uuid(ctx, "member_ids", 1)?,
+                    member_ids: args
+                        .vec_uuid(ctx, "member_ids", 1)?
+                        .into_iter()
+                        .map(AgentKey::from)
+                        .collect(),
                 })
             },
         },
@@ -3167,7 +3172,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     item: RestoreItem {
                         item_id: args.req_uuid(ctx, "item_id", 0)?,
                         folder_id: args.uuid_or_nil(ctx, "folder_id", 100)?,
-                        creator_id: args.uuid_or_nil(ctx, "creator_id", 101)?,
+                        creator_id: AgentKey::from(args.uuid_or_nil(ctx, "creator_id", 101)?),
                         owner_id: args.uuid_or_nil(ctx, "owner_id", 102)?,
                         group_id: args.uuid_or_nil(ctx, "group_id", 103)?,
                         permissions: Permissions5 {
@@ -3528,7 +3533,7 @@ fn all_specs() -> Vec<CommandSpec> {
                 let effect_type = enum_arg(args, ctx, "effect_type", 0, parse_viewer_effect_type)?;
                 Ok(Command::ViewerEffect(vec![ViewerEffect {
                     id: args.uuid_or_nil(ctx, "id", 100)?,
-                    agent_id: args.uuid_or_nil(ctx, "agent", 101)?,
+                    agent_id: AgentKey::from(args.uuid_or_nil(ctx, "agent", 101)?),
                     effect_type,
                     duration: args.parse_or(ctx, "duration", 102, "f32", 1.0_f32)?,
                     color: color_or_white(args, ctx, "color", 103)?,
@@ -3541,7 +3546,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<prey_id>",
             build: |args, ctx| {
                 Ok(Command::TrackAgent {
-                    prey_id: args.req_uuid(ctx, "prey_id", 0)?,
+                    prey_id: AgentKey::from(args.req_uuid(ctx, "prey_id", 0)?),
                 })
             },
         },
@@ -4084,7 +4089,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<from_agent_id> <lure_id>",
             build: |args, ctx| {
                 Ok(Command::DeclineTeleportLure {
-                    from_agent_id: args.req_uuid(ctx, "from_agent_id", 0)?,
+                    from_agent_id: AgentKey::from(args.req_uuid(ctx, "from_agent_id", 0)?),
                     lure_id: args.req_uuid(ctx, "lure_id", 1)?,
                 })
             },
@@ -4094,7 +4099,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<to_agent_id> [message]",
             build: |args, ctx| {
                 Ok(Command::RequestTeleport {
-                    to_agent_id: args.req_uuid(ctx, "to_agent_id", 0)?,
+                    to_agent_id: AgentKey::from(args.req_uuid(ctx, "to_agent_id", 0)?),
                     message: args.str_or(ctx, "message", 1, "")?,
                 })
             },
@@ -4104,7 +4109,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<to_agent_id> <item_id> <asset_type-code> <item_name> [transaction_id]",
             build: |args, ctx| {
                 Ok(Command::GiveInventory {
-                    to_agent_id: args.req_uuid(ctx, "to_agent_id", 0)?,
+                    to_agent_id: AgentKey::from(args.req_uuid(ctx, "to_agent_id", 0)?),
                     item_id: args.req_uuid(ctx, "item_id", 1)?,
                     asset_type: enum_arg(args, ctx, "asset_type", 2, parse_asset_type)?,
                     item_name: args.str_or(ctx, "item_name", 3, "")?,
@@ -4117,7 +4122,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<to_agent_id> <folder_id> <folder_name> [transaction_id]",
             build: |args, ctx| {
                 Ok(Command::GiveInventoryFolder {
-                    to_agent_id: args.req_uuid(ctx, "to_agent_id", 0)?,
+                    to_agent_id: AgentKey::from(args.req_uuid(ctx, "to_agent_id", 0)?),
                     folder_id: args.req_uuid(ctx, "folder_id", 1)?,
                     folder_name: args.str_or(ctx, "folder_name", 2, "")?,
                     transaction_id: args.uuid_or_nil(ctx, "transaction_id", 3)?,

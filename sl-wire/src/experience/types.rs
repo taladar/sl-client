@@ -2,6 +2,7 @@
 
 use super::llsd_uuid;
 use crate::llsd::Llsd;
+use sl_types::key::AgentKey;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -122,14 +123,14 @@ impl ExperiencePermission {
 
 /// A single experience's metadata record, as carried in a cap reply's
 /// `experience_keys` array (and decoded by [`ExperienceInfo::from_llsd`]).
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExperienceInfo {
     /// The experience's public id (`public_id`) — the key used everywhere else.
     pub public_id: Uuid,
     /// The experience's display name.
     pub name: String,
     /// The owning agent (`agent_id`); nil when group-owned.
-    pub agent_id: Uuid,
+    pub agent_id: AgentKey,
     /// The owning group (`group_id`); nil when agent-owned.
     pub group_id: Uuid,
     /// The free-text description.
@@ -152,6 +153,25 @@ pub struct ExperienceInfo {
     pub missing: bool,
 }
 
+impl Default for ExperienceInfo {
+    fn default() -> Self {
+        Self {
+            public_id: Uuid::default(),
+            name: String::default(),
+            agent_id: AgentKey::from(Uuid::default()),
+            group_id: Uuid::default(),
+            description: String::default(),
+            properties: ExperienceProperties::default(),
+            quota: i32::default(),
+            expiration: f64::default(),
+            maturity: i32::default(),
+            slurl: String::default(),
+            extended_metadata: String::default(),
+            missing: bool::default(),
+        }
+    }
+}
+
 impl ExperienceInfo {
     /// Decodes an [`ExperienceInfo`] from one `experience_keys` map element.
     /// Missing fields take their defaults rather than failing.
@@ -166,7 +186,7 @@ impl ExperienceInfo {
         Self {
             public_id: map.get("public_id").and_then(llsd_uuid).unwrap_or_default(),
             name: string("name"),
-            agent_id: map.get("agent_id").and_then(llsd_uuid).unwrap_or_default(),
+            agent_id: AgentKey::from(map.get("agent_id").and_then(llsd_uuid).unwrap_or_default()),
             group_id: map.get("group_id").and_then(llsd_uuid).unwrap_or_default(),
             description: string("description"),
             properties: ExperienceProperties(
@@ -194,7 +214,7 @@ impl ExperienceInfo {
         let mut map: HashMap<String, Llsd> = HashMap::from([
             ("public_id".to_owned(), Llsd::Uuid(self.public_id)),
             ("name".to_owned(), Llsd::String(self.name.clone())),
-            ("agent_id".to_owned(), Llsd::Uuid(self.agent_id)),
+            ("agent_id".to_owned(), Llsd::Uuid(self.agent_id.uuid())),
             ("group_id".to_owned(), Llsd::Uuid(self.group_id)),
             (
                 "description".to_owned(),

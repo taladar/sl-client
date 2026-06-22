@@ -1,6 +1,7 @@
 //! Nearby-avatar presence and viewer effects: coarse (minimap) locations, the
 //! `ViewerEffect` look-at / point-at / beam machinery, and agent tracking.
 
+use sl_types::key::AgentKey;
 use sl_wire::{Reader, Writer};
 use uuid::Uuid;
 
@@ -13,7 +14,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoarseLocation {
     /// The avatar (or in-world object) the position belongs to.
-    pub agent_id: Uuid,
+    pub agent_id: AgentKey,
     /// Metres east of the region's south-west corner (`0`–`255`).
     pub x: u8,
     /// Metres north of the region's south-west corner (`0`–`255`).
@@ -272,7 +273,7 @@ pub enum ViewerEffectData {
     /// look-at kind.
     LookAt {
         /// The avatar the gaze belongs to (nil if absent).
-        source: Uuid,
+        source: AgentKey,
         /// The object being looked at (nil for none).
         target: Uuid,
         /// The global target position, in metres.
@@ -283,7 +284,7 @@ pub enum ViewerEffectData {
     /// An avatar's pointing gesture (the 57-byte `LLHUDEffectPointAt` layout).
     PointAt {
         /// The avatar doing the pointing (nil if absent).
-        source: Uuid,
+        source: AgentKey,
         /// The object being pointed at (nil for none).
         target: Uuid,
         /// The global target position, in metres.
@@ -329,7 +330,7 @@ impl ViewerEffectData {
     /// Decodes a 57-byte look-at `TypeData` blob (`None` on a short read).
     fn decode_lookat(bytes: &[u8]) -> Option<Self> {
         let mut reader = Reader::new(bytes);
-        let source = reader.uuid().ok()?;
+        let source = AgentKey::from(reader.uuid().ok()?);
         let target = reader.uuid().ok()?;
         let target_position = reader.vector3d().ok()?;
         let look_at_type = LookAtType::from_code(reader.u8().ok()?);
@@ -344,7 +345,7 @@ impl ViewerEffectData {
     /// Decodes a 57-byte point-at `TypeData` blob (`None` on a short read).
     fn decode_pointat(bytes: &[u8]) -> Option<Self> {
         let mut reader = Reader::new(bytes);
-        let source = reader.uuid().ok()?;
+        let source = AgentKey::from(reader.uuid().ok()?);
         let target = reader.uuid().ok()?;
         let target_position = reader.vector3d().ok()?;
         let point_at_type = PointAtType::from_code(reader.u8().ok()?);
@@ -381,7 +382,7 @@ impl ViewerEffectData {
                 target_position,
                 look_at_type,
             } => {
-                writer.put_uuid(*source);
+                writer.put_uuid(source.uuid());
                 writer.put_uuid(*target);
                 writer.put_vector3d(*target_position);
                 writer.put_u8(look_at_type.to_code());
@@ -392,7 +393,7 @@ impl ViewerEffectData {
                 target_position,
                 point_at_type,
             } => {
-                writer.put_uuid(*source);
+                writer.put_uuid(source.uuid());
                 writer.put_uuid(*target);
                 writer.put_vector3d(*target_position);
                 writer.put_u8(point_at_type.to_code());
@@ -425,7 +426,7 @@ pub struct ViewerEffect {
     /// A unique id for the effect (a fresh UUID per effect).
     pub id: Uuid,
     /// The avatar the effect belongs to (the source agent).
-    pub agent_id: Uuid,
+    pub agent_id: AgentKey,
     /// The effect type.
     pub effect_type: ViewerEffectType,
     /// How long the effect lasts, in seconds.
@@ -438,6 +439,8 @@ pub struct ViewerEffect {
 
 #[cfg(test)]
 mod tests {
+    use sl_types::key::AgentKey;
+
     use super::{LookAtType, PointAtType, ViewerEffectData, ViewerEffectType};
     use pretty_assertions::assert_eq;
     use uuid::Uuid;
@@ -454,7 +457,7 @@ mod tests {
     #[test]
     fn lookat_round_trips() {
         let data = ViewerEffectData::LookAt {
-            source: Uuid::from_u128(1),
+            source: AgentKey::from(Uuid::from_u128(1)),
             target: Uuid::from_u128(2),
             target_position: [1.5, -2.5, 3.5],
             look_at_type: LookAtType::Focus,
@@ -471,7 +474,7 @@ mod tests {
     #[test]
     fn pointat_round_trips() {
         let data = ViewerEffectData::PointAt {
-            source: Uuid::from_u128(3),
+            source: AgentKey::from(Uuid::from_u128(3)),
             target: Uuid::from_u128(4),
             target_position: [0.0, 0.0, 0.0],
             point_at_type: PointAtType::Grab,

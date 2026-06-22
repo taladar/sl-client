@@ -18,6 +18,7 @@ use crate::types::{
     ScriptPermissionRequest, ScriptPermissions, SkySettings, WaterSettings, avatar_texture,
     handle_to_grid,
 };
+use sl_types::key::AgentKey;
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::RegionHandle;
@@ -110,7 +111,7 @@ pub(crate) fn parse_lure_region_handle(lure_id: Uuid) -> RegionHandle {
 /// offer-reply / give-inventory / conference flows (#28) share one builder.
 pub(crate) struct OutgoingIm<'a> {
     /// The recipient agent id (or session id for a conference message).
-    pub(crate) to_agent_id: Uuid,
+    pub(crate) to_agent_id: AgentKey,
     /// Whether the message is from a group (sets the `FromGroup` flag).
     pub(crate) from_group: bool,
     /// The IM dialog (sub-type).
@@ -516,7 +517,7 @@ pub(crate) fn money_balance(reply: &sl_wire::messages::MoneyBalanceReply) -> Mon
         item_description: trimmed_string(&info.item_description),
     });
     MoneyBalance {
-        agent_id: data.agent_id,
+        agent_id: AgentKey::from(data.agent_id),
         transaction_id: data.transaction_id,
         success: data.transaction_success,
         balance: LindenAmount(u64::try_from(data.money_balance).unwrap_or(0)),
@@ -717,15 +718,18 @@ pub(crate) fn chat_message(data: &ChatFromSimulatorChatDataBlock) -> ChatMessage
 /// Computes the canonical 1:1 IM session id the viewer uses: the byte-wise XOR
 /// of the two agent ids, except an IM to oneself (where the XOR would be nil)
 /// uses the agent id directly.
-pub(crate) fn compute_im_session_id(agent_id: Uuid, other: Uuid) -> Uuid {
+pub(crate) fn compute_im_session_id(agent_id: AgentKey, other: AgentKey) -> Uuid {
     if agent_id == other {
-        return agent_id;
+        return agent_id.uuid();
     }
     let mut out = [0u8; 16];
-    for (slot, (a, b)) in out
-        .iter_mut()
-        .zip(agent_id.as_bytes().iter().zip(other.as_bytes()))
-    {
+    for (slot, (a, b)) in out.iter_mut().zip(
+        agent_id
+            .uuid()
+            .as_bytes()
+            .iter()
+            .zip(other.uuid().as_bytes()),
+    ) {
         *slot = a ^ b;
     }
     Uuid::from_bytes(out)
@@ -740,9 +744,9 @@ pub(crate) fn instant_message(
     block: &ImprovedInstantMessageMessageBlockBlock,
 ) -> InstantMessage {
     InstantMessage {
-        from_agent_id: agent_data.agent_id,
+        from_agent_id: AgentKey::from(agent_data.agent_id),
         from_agent_name: trimmed_string(&block.from_agent_name),
-        to_agent_id: block.to_agent_id,
+        to_agent_id: AgentKey::from(block.to_agent_id),
         dialog: ImDialog::from_u8(block.dialog),
         from_group: block.from_group,
         region_id: block.region_id,
@@ -762,10 +766,10 @@ pub(crate) fn avatar_properties(
     data: &AvatarPropertiesReplyPropertiesDataBlock,
 ) -> AvatarProperties {
     AvatarProperties {
-        avatar_id,
+        avatar_id: AgentKey::from(avatar_id),
         image_id: data.image_id,
         fl_image_id: data.fl_image_id,
-        partner_id: data.partner_id,
+        partner_id: AgentKey::from(data.partner_id),
         about_text: trimmed_string(&data.about_text),
         fl_about_text: trimmed_string(&data.fl_about_text),
         born_on: trimmed_string(&data.born_on),
@@ -781,7 +785,7 @@ pub(crate) fn avatar_interests(
     data: &AvatarInterestsReplyPropertiesDataBlock,
 ) -> AvatarInterests {
     AvatarInterests {
-        avatar_id,
+        avatar_id: AgentKey::from(avatar_id),
         want_to_mask: data.want_to_mask,
         want_to_text: trimmed_string(&data.want_to_text),
         skills_mask: data.skills_mask,
@@ -807,7 +811,7 @@ pub(crate) fn pick_info(data: &PickInfoReplyDataBlock) -> PickInfo {
     let [x, y, z] = data.pos_global;
     PickInfo {
         pick_id: data.pick_id,
-        creator_id: data.creator_id,
+        creator_id: AgentKey::from(data.creator_id),
         top_pick: data.top_pick,
         parcel_id: data.parcel_id,
         name: trimmed_string(&data.name),
@@ -827,7 +831,7 @@ pub(crate) fn classified_info(data: &ClassifiedInfoReplyDataBlock) -> Classified
     let [x, y, z] = data.pos_global;
     ClassifiedInfo {
         classified_id: data.classified_id,
-        creator_id: data.creator_id,
+        creator_id: AgentKey::from(data.creator_id),
         creation_date: data.creation_date,
         expiration_date: data.expiration_date,
         category: data.category,
@@ -867,7 +871,7 @@ pub(crate) const fn friend(entry: &sl_wire::BuddyListEntry) -> Friend {
 /// Builds [`ActiveGroup`] from an `AgentDataUpdate` block.
 pub(crate) fn active_group(data: &AgentDataUpdateAgentDataBlock) -> ActiveGroup {
     ActiveGroup {
-        agent_id: data.agent_id,
+        agent_id: AgentKey::from(data.agent_id),
         first_name: trimmed_string(&data.first_name),
         last_name: trimmed_string(&data.last_name),
         group_title: trimmed_string(&data.group_title),
@@ -892,7 +896,7 @@ pub(crate) fn group_membership(data: &AgentGroupDataUpdateGroupDataBlock) -> Gro
 /// Builds [`GroupMember`] from a `GroupMembersReply` entry.
 pub(crate) fn group_member(data: &GroupMembersReplyMemberDataBlock) -> GroupMember {
     GroupMember {
-        agent_id: data.agent_id,
+        agent_id: AgentKey::from(data.agent_id),
         contribution: data.contribution,
         online_status: trimmed_string(&data.online_status),
         agent_powers: data.agent_powers,
@@ -932,7 +936,7 @@ pub(crate) fn group_profile(data: &GroupProfileReplyGroupDataBlock) -> GroupProf
         member_title: trimmed_string(&data.member_title),
         powers: data.powers_mask,
         insignia_id: data.insignia_id,
-        founder_id: data.founder_id,
+        founder_id: AgentKey::from(data.founder_id),
         membership_fee: data.membership_fee,
         open_enrollment: data.open_enrollment,
         money: data.money,
@@ -1036,7 +1040,7 @@ pub(crate) fn group_active_proposal_item(
 ) -> GroupActiveProposalItem {
     GroupActiveProposalItem {
         vote_id: data.vote_id,
-        vote_initiator: data.vote_initiator,
+        vote_initiator: AgentKey::from(data.vote_initiator),
         terse_date_id: trimmed_string(&data.terse_date_id),
         start_date_time: trimmed_string(&data.start_date_time),
         end_date_time: trimmed_string(&data.end_date_time),
@@ -1057,7 +1061,7 @@ pub(crate) fn group_vote_history_item(reply: &GroupVoteHistoryItemReply) -> Grou
         terse_date_id: trimmed_string(&item.terse_date_id),
         start_date_time: trimmed_string(&item.start_date_time),
         end_date_time: trimmed_string(&item.end_date_time),
-        vote_initiator: item.vote_initiator,
+        vote_initiator: AgentKey::from(item.vote_initiator),
         vote_type: trimmed_string(&item.vote_type),
         vote_result: trimmed_string(&item.vote_result),
         majority: item.majority,
@@ -1145,7 +1149,7 @@ pub(crate) fn uuid_crc(id: Uuid) -> u32 {
 /// `LLSaleInfo::getCRC32`). The simulator uses it to detect a no-op update; an
 /// `i8` asset/inventory type is sign-extended to `u32` as in the C++ promotion.
 pub(crate) fn inventory_item_crc(item: &InventoryItem) -> u32 {
-    let permissions_crc = uuid_crc(item.creator_id)
+    let permissions_crc = uuid_crc(item.creator_id.uuid())
         .wrapping_add(uuid_crc(item.owner_id))
         .wrapping_add(uuid_crc(item.last_owner_id))
         .wrapping_add(uuid_crc(item.group_id))
@@ -1190,7 +1194,7 @@ pub(crate) fn inventory_item(data: &InventoryDescendentsItemDataBlock) -> Invent
         owner_id: data.owner_id,
         // The legacy UDP descendents reply carries no previous-owner id.
         last_owner_id: Uuid::nil(),
-        creator_id: data.creator_id,
+        creator_id: AgentKey::from(data.creator_id),
         group_id: data.group_id,
         group_owned: data.group_owned,
         permissions: Permissions5 {
@@ -1222,7 +1226,7 @@ pub(crate) fn inventory_item_from_create(
         creation_date: data.creation_date,
         owner_id: data.owner_id,
         last_owner_id: Uuid::nil(),
-        creator_id: data.creator_id,
+        creator_id: AgentKey::from(data.creator_id),
         group_id: data.group_id,
         group_owned: data.group_owned,
         permissions: Permissions5 {
@@ -1262,7 +1266,7 @@ pub(crate) fn bulk_update_item(data: &BulkUpdateInventoryItemDataBlock) -> Inven
         creation_date: data.creation_date,
         owner_id: data.owner_id,
         last_owner_id: Uuid::nil(),
-        creator_id: data.creator_id,
+        creator_id: AgentKey::from(data.creator_id),
         group_id: data.group_id,
         group_owned: data.group_owned,
         permissions: Permissions5 {
@@ -1373,7 +1377,7 @@ pub(crate) fn map_region_info_to_data_block(info: &MapRegionInfo) -> MapBlockRep
 /// several replies by the caller.
 #[must_use]
 pub fn build_map_block_reply(
-    agent_id: Uuid,
+    agent_id: AgentKey,
     flags: MapRequestFlags,
     regions: &[MapRegionInfo],
 ) -> MapBlockReply {
@@ -1393,7 +1397,7 @@ pub fn build_map_block_reply(
     };
     MapBlockReply {
         agent_data: MapBlockReplyAgentDataBlock {
-            agent_id,
+            agent_id: agent_id.uuid(),
             flags: flags.0,
         },
         data: regions.iter().map(map_region_info_to_data_block).collect(),
@@ -1422,14 +1426,14 @@ pub(crate) fn map_item_to_data_block(item: &MapItem) -> MapItemReplyDataBlock {
 /// byte allows; longer runs must be split across several replies by the caller.
 #[must_use]
 pub fn build_map_item_reply(
-    agent_id: Uuid,
+    agent_id: AgentKey,
     flags: MapRequestFlags,
     item_type: MapItemType,
     items: &[MapItem],
 ) -> MapItemReply {
     MapItemReply {
         agent_data: MapItemReplyAgentDataBlock {
-            agent_id,
+            agent_id: agent_id.uuid(),
             flags: flags.0,
         },
         request_data: MapItemReplyRequestDataBlock {
@@ -1469,13 +1473,13 @@ pub(crate) const fn map_layer_to_data_block(layer: &MapLayer) -> MapLayerReplyLa
 /// array is capped at the 255 entries the wire count byte allows.
 #[must_use]
 pub fn build_map_layer_reply(
-    agent_id: Uuid,
+    agent_id: AgentKey,
     flags: MapRequestFlags,
     layers: &[MapLayer],
 ) -> MapLayerReply {
     MapLayerReply {
         agent_data: MapLayerReplyAgentDataBlock {
-            agent_id,
+            agent_id: agent_id.uuid(),
             flags: flags.0,
         },
         layer_data: layers.iter().map(map_layer_to_data_block).collect(),
@@ -2008,9 +2012,9 @@ pub(crate) fn offline_message_from_record(record: &Llsd) -> Option<InstantMessag
         .map(<[u8]>::to_vec)
         .unwrap_or_default();
     Some(InstantMessage {
-        from_agent_id: uuid_member_lenient(record, "from_agent_id"),
+        from_agent_id: AgentKey::from(uuid_member_lenient(record, "from_agent_id")),
         from_agent_name: string_member(record, "from_agent_name"),
-        to_agent_id: uuid_member_lenient(record, "to_agent_id"),
+        to_agent_id: AgentKey::from(uuid_member_lenient(record, "to_agent_id")),
         dialog,
         from_group: record
             .get("from_group")
@@ -2065,7 +2069,7 @@ pub(crate) fn chatterbox_invitation_from_llsd(body: &Llsd) -> Option<Event> {
         .map_or_else(Vec::new, <[u8]>::to_vec);
     Some(Event::ConferenceInvited {
         session_id: uuid_member_lenient(params, "id"),
-        from_agent_id: uuid_member_lenient(params, "from_id"),
+        from_agent_id: AgentKey::from(uuid_member_lenient(params, "from_id")),
         from_name: string_member(params, "from_name"),
         dialog: ImDialog::from_u8(u8::try_from(i32_member(params, "type")).unwrap_or(0)),
         from_group: params
@@ -2176,7 +2180,7 @@ pub(crate) fn group_members_from_caps_llsd(body: &Llsd) -> Option<Event> {
     let mut roster: Vec<GroupMember> = members
         .iter()
         .filter_map(|(member_id, info)| {
-            let agent_id = Uuid::parse_str(member_id).ok()?;
+            let agent_id = AgentKey::from(Uuid::parse_str(member_id).ok()?);
             let title = info
                 .get("title")
                 .and_then(Llsd::as_i32)
@@ -2202,7 +2206,7 @@ pub(crate) fn group_members_from_caps_llsd(body: &Llsd) -> Option<Event> {
         })
         .collect();
     // The members map is unordered; sort by id for deterministic output.
-    roster.sort_by_key(|member| member.agent_id);
+    roster.sort_by_key(|member| member.agent_id.uuid());
     let member_count = i32::try_from(roster.len()).unwrap_or(i32::MAX);
     Some(Event::GroupMembers {
         group_id,
@@ -2293,7 +2297,7 @@ pub(crate) fn bulk_update_item_from_llsd(item: &Llsd) -> InventoryItem {
         creation_date: i32_member(item, "CreationDate"),
         owner_id: uuid_member(item, "OwnerID"),
         last_owner_id: Uuid::nil(),
-        creator_id: uuid_member(item, "CreatorID"),
+        creator_id: AgentKey::from(uuid_member(item, "CreatorID")),
         group_id: uuid_member(item, "GroupID"),
         group_owned: item
             .get("GroupOwned")
@@ -2395,7 +2399,7 @@ pub(crate) fn inventory_item_from_llsd(item: &Llsd) -> InventoryItem {
         creation_date: i32_member(item, "created_at"),
         owner_id: perm_uuid("owner_id"),
         last_owner_id: perm_uuid("last_owner_id"),
-        creator_id: perm_uuid("creator_id"),
+        creator_id: AgentKey::from(perm_uuid("creator_id")),
         group_id: perm_uuid("group_id"),
         group_owned: permissions
             .and_then(|p| p.get("is_owner_group"))
@@ -2878,9 +2882,9 @@ pub fn offline_messages_to_llsd(messages: &[InstantMessage]) -> Llsd {
 /// always marks these messages offline), so it is not emitted.
 pub(crate) fn offline_message_to_record(im: &InstantMessage) -> Llsd {
     llsd_map(vec![
-        ("from_agent_id", Llsd::Uuid(im.from_agent_id)),
+        ("from_agent_id", Llsd::Uuid(im.from_agent_id.uuid())),
         ("from_agent_name", Llsd::String(im.from_agent_name.clone())),
-        ("to_agent_id", Llsd::Uuid(im.to_agent_id)),
+        ("to_agent_id", Llsd::Uuid(im.to_agent_id.uuid())),
         ("dialog", Llsd::Integer(i32::from(im.dialog.to_u8()))),
         ("from_group", Llsd::Boolean(im.from_group)),
         ("region_id", Llsd::Uuid(im.region_id)),
@@ -2918,7 +2922,7 @@ pub fn chatterbox_invitation_to_llsd(event: &Event) -> Llsd {
     };
     let params = llsd_map(vec![
         ("id", Llsd::Uuid(*session_id)),
-        ("from_id", Llsd::Uuid(*from_agent_id)),
+        ("from_id", Llsd::Uuid(from_agent_id.uuid())),
         ("from_name", Llsd::String(from_name.clone())),
         ("type", Llsd::Integer(i32::from(dialog.to_u8()))),
         ("from_group", Llsd::Boolean(*from_group)),
@@ -3082,7 +3086,7 @@ pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Llsd {
         ("SalePrice", Llsd::Integer(item.sale_price)),
         ("CreationDate", Llsd::Integer(item.creation_date)),
         ("OwnerID", Llsd::Uuid(item.owner_id)),
-        ("CreatorID", Llsd::Uuid(item.creator_id)),
+        ("CreatorID", Llsd::Uuid(item.creator_id.uuid())),
         ("GroupID", Llsd::Uuid(item.group_id)),
         ("GroupOwned", Llsd::Boolean(item.group_owned)),
         (
@@ -3186,7 +3190,7 @@ pub(crate) fn inventory_item_to_llsd(item: &InventoryItem) -> Llsd {
         ),
         ("owner_id", Llsd::Uuid(item.owner_id)),
         ("last_owner_id", Llsd::Uuid(item.last_owner_id)),
-        ("creator_id", Llsd::Uuid(item.creator_id)),
+        ("creator_id", Llsd::Uuid(item.creator_id.uuid())),
         ("group_id", Llsd::Uuid(item.group_id)),
         ("is_owner_group", Llsd::Boolean(item.group_owned)),
     ]);
@@ -3318,7 +3322,7 @@ pub(crate) const fn shape_from_full_block(block: &ObjectUpdateObjectDataBlock) -
 pub(crate) fn object_properties(block: &ObjectPropertiesObjectDataBlock) -> ObjectProperties {
     ObjectProperties {
         object_id: block.object_id,
-        creator_id: block.creator_id,
+        creator_id: AgentKey::from(block.creator_id),
         owner_id: block.owner_id,
         group_id: block.group_id,
         last_owner_id: block.last_owner_id,
@@ -3363,6 +3367,7 @@ mod caps_serializer_tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     use pretty_assertions::assert_eq;
+    use sl_types::key::AgentKey;
     use uuid::Uuid;
 
     use super::{
@@ -3524,9 +3529,9 @@ mod caps_serializer_tests {
     #[test]
     fn offline_messages_round_trip() {
         let messages = vec![InstantMessage {
-            from_agent_id: Uuid::from_u128(0xa1),
+            from_agent_id: AgentKey::from(Uuid::from_u128(0xa1)),
             from_agent_name: "Sender Resident".to_owned(),
-            to_agent_id: Uuid::from_u128(0xa2),
+            to_agent_id: AgentKey::from(Uuid::from_u128(0xa2)),
             dialog: ImDialog::FromTask,
             from_group: false,
             region_id: Uuid::from_u128(0xa3),
@@ -3548,7 +3553,7 @@ mod caps_serializer_tests {
     fn chatterbox_invitation_round_trips() {
         let event = Event::ConferenceInvited {
             session_id: Uuid::from_u128(0xb1),
-            from_agent_id: Uuid::from_u128(0xb2),
+            from_agent_id: AgentKey::from(Uuid::from_u128(0xb2)),
             from_name: "Inviter Resident".to_owned(),
             dialog: ImDialog::SessionGroupStart,
             from_group: true,
@@ -3592,7 +3597,7 @@ mod caps_serializer_tests {
             member_count: 2,
             members: vec![
                 GroupMember {
-                    agent_id: Uuid::from_u128(0xd1),
+                    agent_id: AgentKey::from(Uuid::from_u128(0xd1)),
                     contribution: 10,
                     online_status: "Online".to_owned(),
                     agent_powers: 0x0000_0002_0000_0000,
@@ -3600,7 +3605,7 @@ mod caps_serializer_tests {
                     is_owner: true,
                 },
                 GroupMember {
-                    agent_id: Uuid::from_u128(0xd2),
+                    agent_id: AgentKey::from(Uuid::from_u128(0xd2)),
                     contribution: 0,
                     online_status: "Offline".to_owned(),
                     agent_powers: 7,
@@ -3632,7 +3637,7 @@ mod caps_serializer_tests {
             creation_date: 1_700_002_000,
             owner_id: Uuid::from_u128(seed.wrapping_add(0x300)),
             last_owner_id: Uuid::from_u128(seed.wrapping_add(0x400)),
-            creator_id: Uuid::from_u128(seed.wrapping_add(0x500)),
+            creator_id: AgentKey::from(Uuid::from_u128(seed.wrapping_add(0x500))),
             group_id: Uuid::from_u128(seed.wrapping_add(0x600)),
             group_owned: true,
             permissions: Permissions5 {

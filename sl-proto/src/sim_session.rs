@@ -23,6 +23,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
+use sl_types::key::AgentKey;
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
     AgentAlertMessage, AgentAlertMessageAgentDataBlock, AgentAlertMessageAlertDataBlock,
@@ -244,7 +245,7 @@ pub enum ServerEvent {
     /// knows the agent/session ids and circuit code for this link.
     CircuitOpened {
         /// The agent (avatar) id.
-        agent_id: Uuid,
+        agent_id: AgentKey,
         /// The session id.
         session_id: Uuid,
         /// The circuit code.
@@ -381,7 +382,7 @@ pub enum ServerEvent {
     /// [`SimSession::send_coarse_location_update`].
     TrackAgent {
         /// The agent to track.
-        prey_id: Uuid,
+        prey_id: AgentKey,
     },
     /// The client asked for an agent's global position (`FindAgent`); the
     /// simulator answers with [`SimSession::send_find_agent_reply`].
@@ -849,7 +850,7 @@ pub struct SimSession {
     /// The client's UDP address, learned from the first inbound datagram.
     client_addr: Option<SocketAddr>,
     /// The agent id, from `UseCircuitCode`.
-    agent_id: Option<Uuid>,
+    agent_id: Option<AgentKey>,
     /// The session id, from `UseCircuitCode`.
     session_id: Option<Uuid>,
     /// The circuit code, from `UseCircuitCode`.
@@ -913,7 +914,7 @@ impl SimSession {
 
     /// The agent id once the circuit is open.
     #[must_use]
-    pub const fn agent_id(&self) -> Option<Uuid> {
+    pub const fn agent_id(&self) -> Option<AgentKey> {
         self.agent_id
     }
 
@@ -1058,7 +1059,7 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let agent_id = self.agent_id.unwrap_or_else(Uuid::nil);
+        let agent_id = self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil()));
         let message = AnyMessage::MapBlockReply(build_map_block_reply(agent_id, flags, regions));
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
@@ -1083,7 +1084,7 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let agent_id = self.agent_id.unwrap_or_else(Uuid::nil);
+        let agent_id = self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil()));
         let message =
             AnyMessage::MapItemReply(build_map_item_reply(agent_id, flags, item_type, items));
         self.send(&message, Reliability::Reliable, now)?;
@@ -1108,7 +1109,7 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let agent_id = self.agent_id.unwrap_or_else(Uuid::nil);
+        let agent_id = self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil()));
         let message = AnyMessage::MapLayerReply(build_map_layer_reply(agent_id, flags, layers));
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
@@ -1229,7 +1230,7 @@ impl SimSession {
             agent_data: locations
                 .iter()
                 .map(|location| CoarseLocationUpdateAgentDataBlock {
-                    agent_id: location.agent_id,
+                    agent_id: location.agent_id.uuid(),
                 })
                 .collect(),
         });
@@ -1246,7 +1247,7 @@ impl SimSession {
     /// the message fails to encode.
     pub fn send_viewer_effect(
         &mut self,
-        source_agent: Uuid,
+        source_agent: AgentKey,
         effects: &[ViewerEffect],
         now: Instant,
     ) -> Result<(), Error> {
@@ -1255,14 +1256,14 @@ impl SimSession {
         }
         let message = AnyMessage::ViewerEffect(ViewerEffectMessage {
             agent_data: ViewerEffectAgentDataBlock {
-                agent_id: source_agent,
+                agent_id: source_agent.uuid(),
                 session_id: Uuid::nil(),
             },
             effect: effects
                 .iter()
                 .map(|effect| ViewerEffectEffectBlock {
                     id: effect.id,
-                    agent_id: effect.agent_id,
+                    agent_id: effect.agent_id.uuid(),
                     r#type: effect.effect_type.to_code(),
                     duration: effect.duration,
                     color: effect.color,
@@ -1414,7 +1415,7 @@ impl SimSession {
     /// the message fails to encode.
     pub fn send_agent_alert_message(
         &mut self,
-        agent_id: Uuid,
+        agent_id: AgentKey,
         modal: bool,
         message: &str,
         now: Instant,
@@ -1423,7 +1424,9 @@ impl SimSession {
             return Err(Error::NoCircuit);
         }
         let message = AnyMessage::AgentAlertMessage(AgentAlertMessage {
-            agent_data: AgentAlertMessageAgentDataBlock { agent_id },
+            agent_data: AgentAlertMessageAgentDataBlock {
+                agent_id: agent_id.uuid(),
+            },
             alert_data: AgentAlertMessageAlertDataBlock {
                 modal,
                 message: message.as_bytes().to_vec(),
@@ -1621,13 +1624,13 @@ impl SimSession {
         }
         let message = AnyMessage::DirPeopleReply(DirPeopleReply {
             agent_data: DirPeopleReplyAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
             },
             query_data: DirPeopleReplyQueryDataBlock { query_id },
             query_replies: results
                 .iter()
                 .map(|result| DirPeopleReplyQueryRepliesBlock {
-                    agent_id: result.agent_id,
+                    agent_id: result.agent_id.uuid(),
                     first_name: with_nul(&result.first_name),
                     last_name: with_nul(&result.last_name),
                     group: with_nul(&result.group),
@@ -1658,7 +1661,7 @@ impl SimSession {
         }
         let message = AnyMessage::DirGroupsReply(DirGroupsReply {
             agent_data: DirGroupsReplyAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
             },
             query_data: DirGroupsReplyQueryDataBlock { query_id },
             query_replies: results
@@ -1695,7 +1698,7 @@ impl SimSession {
         }
         let message = AnyMessage::DirEventsReply(DirEventsReply {
             agent_data: DirEventsReplyAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
             },
             query_data: DirEventsReplyQueryDataBlock { query_id },
             query_replies: results
@@ -1736,7 +1739,7 @@ impl SimSession {
         }
         let message = AnyMessage::DirClassifiedReply(DirClassifiedReply {
             agent_data: DirClassifiedReplyAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
             },
             query_data: DirClassifiedReplyQueryDataBlock { query_id },
             query_replies: results
@@ -1776,7 +1779,7 @@ impl SimSession {
         }
         let message = AnyMessage::DirPlacesReply(DirPlacesReply {
             agent_data: DirPlacesReplyAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
             },
             query_data: vec![DirPlacesReplyQueryDataBlock { query_id }],
             query_replies: results
@@ -1813,7 +1816,7 @@ impl SimSession {
         }
         let message = AnyMessage::DirLandReply(DirLandReply {
             agent_data: DirLandReplyAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
             },
             query_data: DirLandReplyQueryDataBlock { query_id },
             query_replies: results
@@ -1851,13 +1854,13 @@ impl SimSession {
         }
         let message = AnyMessage::AvatarPickerReply(AvatarPickerReply {
             agent_data: AvatarPickerReplyAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
                 query_id,
             },
             data: results
                 .iter()
                 .map(|result| AvatarPickerReplyDataBlock {
-                    avatar_id: result.avatar_id,
+                    avatar_id: result.avatar_id.uuid(),
                     first_name: with_nul(&result.first_name),
                     last_name: with_nul(&result.last_name),
                 })
@@ -1887,7 +1890,7 @@ impl SimSession {
         }
         let message = AnyMessage::PlacesReply(PlacesReply {
             agent_data: PlacesReplyAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
                 query_id,
             },
             transaction_data: PlacesReplyTransactionDataBlock { transaction_id },
@@ -1929,7 +1932,7 @@ impl SimSession {
         let (global_x, global_y, global_z) = info.global_position;
         let message = AnyMessage::EventInfoReply(EventInfoReply {
             agent_data: EventInfoReplyAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
             },
             event_data: EventInfoReplyEventDataBlock {
                 event_id: info.event_id,
@@ -2031,7 +2034,7 @@ impl SimSession {
         }
         let message = AnyMessage::GroupAccountSummaryReply(GroupAccountSummaryReply {
             agent_data: GroupAccountSummaryReplyAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
                 group_id: summary.group_id,
             },
             money_data: GroupAccountSummaryReplyMoneyDataBlock {
@@ -2079,7 +2082,7 @@ impl SimSession {
         }
         let message = AnyMessage::GroupAccountDetailsReply(GroupAccountDetailsReply {
             agent_data: GroupAccountDetailsReplyAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
                 group_id: details.group_id,
             },
             money_data: GroupAccountDetailsReplyMoneyDataBlock {
@@ -2119,7 +2122,7 @@ impl SimSession {
         }
         let message = AnyMessage::GroupAccountTransactionsReply(GroupAccountTransactionsReply {
             agent_data: GroupAccountTransactionsReplyAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
                 group_id: transactions.group_id,
             },
             money_data: GroupAccountTransactionsReplyMoneyDataBlock {
@@ -2165,7 +2168,7 @@ impl SimSession {
         }
         let message = AnyMessage::GroupActiveProposalItemReply(GroupActiveProposalItemReply {
             agent_data: GroupActiveProposalItemReplyAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
                 group_id,
             },
             transaction_data: GroupActiveProposalItemReplyTransactionDataBlock {
@@ -2176,7 +2179,7 @@ impl SimSession {
                 .iter()
                 .map(|item| GroupActiveProposalItemReplyProposalDataBlock {
                     vote_id: item.vote_id,
-                    vote_initiator: item.vote_initiator,
+                    vote_initiator: item.vote_initiator.uuid(),
                     terse_date_id: with_nul(&item.terse_date_id),
                     start_date_time: with_nul(&item.start_date_time),
                     end_date_time: with_nul(&item.end_date_time),
@@ -2213,7 +2216,7 @@ impl SimSession {
         }
         let message = AnyMessage::GroupVoteHistoryItemReply(GroupVoteHistoryItemReply {
             agent_data: GroupVoteHistoryItemReplyAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
                 group_id,
             },
             transaction_data: GroupVoteHistoryItemReplyTransactionDataBlock {
@@ -2225,7 +2228,7 @@ impl SimSession {
                 terse_date_id: with_nul(&item.terse_date_id),
                 start_date_time: with_nul(&item.start_date_time),
                 end_date_time: with_nul(&item.end_date_time),
-                vote_initiator: item.vote_initiator,
+                vote_initiator: item.vote_initiator.uuid(),
                 vote_type: with_nul(&item.vote_type),
                 vote_result: with_nul(&item.vote_result),
                 majority: item.majority,
@@ -2336,7 +2339,7 @@ impl SimSession {
         }
         let message = AnyMessage::ParcelInfoReply(ParcelInfoReply {
             agent_data: ParcelInfoReplyAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
             },
             data: ParcelInfoReplyDataBlock {
                 parcel_id: details.parcel_id,
@@ -2613,7 +2616,7 @@ impl SimSession {
         match message {
             AnyMessage::UseCircuitCode(use_circuit) => {
                 let block = &use_circuit.circuit_code;
-                self.agent_id = Some(block.id);
+                self.agent_id = Some(AgentKey::from(block.id));
                 self.session_id = Some(block.session_id);
                 self.circuit_code = Some(CircuitCode(block.code));
                 if matches!(self.state, SimState::AwaitingCircuit) {
@@ -2621,7 +2624,7 @@ impl SimSession {
                     self.ping = Some(deadline(now, PING_INTERVAL));
                 }
                 self.events.push_back(ServerEvent::CircuitOpened {
-                    agent_id: block.id,
+                    agent_id: AgentKey::from(block.id),
                     session_id: block.session_id,
                     circuit_code: CircuitCode(block.code),
                 });
@@ -2788,7 +2791,7 @@ impl SimSession {
                         let effect_type = ViewerEffectType::from_code(block.r#type);
                         ViewerEffect {
                             id: block.id,
-                            agent_id: block.agent_id,
+                            agent_id: AgentKey::from(block.agent_id),
                             effect_type,
                             duration: block.duration,
                             color: block.color,
@@ -2847,7 +2850,7 @@ impl SimSession {
             }
             AnyMessage::TrackAgent(track) => {
                 self.events.push_back(ServerEvent::TrackAgent {
-                    prey_id: track.target_data.prey_id,
+                    prey_id: AgentKey::from(track.target_data.prey_id),
                 });
             }
             AnyMessage::FindAgent(find) => {
@@ -3001,7 +3004,7 @@ impl SimSession {
                     item: RestoreItem {
                         item_id: data.item_id,
                         folder_id: data.folder_id,
-                        creator_id: data.creator_id,
+                        creator_id: AgentKey::from(data.creator_id),
                         owner_id: data.owner_id,
                         group_id: data.group_id,
                         permissions: Permissions5 {
@@ -3257,7 +3260,7 @@ impl SimSession {
     fn send_agent_movement_complete(&mut self, now: Instant) -> Result<(), WireError> {
         let message = AnyMessage::AgentMovementComplete(AgentMovementComplete {
             agent_data: AgentMovementCompleteAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
                 session_id: self.session_id.unwrap_or_else(Uuid::nil),
             },
             data: AgentMovementCompleteDataBlock {
@@ -3281,7 +3284,7 @@ impl SimSession {
     fn send_logout_reply(&mut self, now: Instant) -> Result<(), WireError> {
         let message = AnyMessage::LogoutReply(LogoutReply {
             agent_data: LogoutReplyAgentDataBlock {
-                agent_id: self.agent_id.unwrap_or_else(Uuid::nil),
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
                 session_id: self.session_id.unwrap_or_else(Uuid::nil),
             },
             inventory_data: Vec::new(),

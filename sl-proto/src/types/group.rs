@@ -1,5 +1,6 @@
 //! Groups: membership, roles, notices, and management.
 
+use sl_types::key::AgentKey;
 use uuid::Uuid;
 
 /// The agent's active group and title, parsed from `AgentDataUpdate` (pushed on
@@ -8,7 +9,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveGroup {
     /// The agent the update is about.
-    pub agent_id: Uuid,
+    pub agent_id: AgentKey,
     /// The agent's first name.
     pub first_name: String,
     /// The agent's last name.
@@ -44,7 +45,7 @@ pub struct GroupMembership {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupMember {
     /// The member's agent id.
-    pub agent_id: Uuid,
+    pub agent_id: AgentKey,
     /// The member's L$ contribution.
     pub contribution: i32,
     /// The member's online status string (grid-formatted, e.g. `"Online"`).
@@ -80,7 +81,7 @@ pub struct GroupRoleMember {
     /// The role id.
     pub role_id: Uuid,
     /// The member's agent id.
-    pub member_id: Uuid,
+    pub member_id: AgentKey,
 }
 
 /// One title the agent may wear in a group, from a `GroupTitlesReply` entry.
@@ -116,7 +117,7 @@ pub struct GroupProfile {
     /// The group insignia (texture id).
     pub insignia_id: Uuid,
     /// The group founder's agent id.
-    pub founder_id: Uuid,
+    pub founder_id: AgentKey,
     /// The L$ fee to join.
     pub membership_fee: i32,
     /// Whether enrollment is open (no invitation needed).
@@ -266,7 +267,7 @@ pub struct GroupRoleMemberChange {
     /// The role to add the member to or remove them from.
     pub role_id: Uuid,
     /// The member's agent id.
-    pub member_id: Uuid,
+    pub member_id: AgentKey,
     /// Whether to add or remove the member.
     pub change: GroupRoleChange,
 }
@@ -407,7 +408,7 @@ pub struct GroupActiveProposalItem {
     /// The proposal's id (used as the ballot's `proposal_id`).
     pub vote_id: Uuid,
     /// The agent that started the proposal.
-    pub vote_initiator: Uuid,
+    pub vote_initiator: AgentKey,
     /// A terse date id (grid-internal string).
     pub terse_date_id: String,
     /// When voting opened (grid-formatted string).
@@ -452,7 +453,7 @@ pub struct GroupVoteHistoryItem {
     /// When voting closed (grid-formatted string).
     pub end_date_time: String,
     /// The agent that started the proposal.
-    pub vote_initiator: Uuid,
+    pub vote_initiator: AgentKey,
     /// The proposal/vote type (grid-formatted string).
     pub vote_type: String,
     /// The outcome (grid-formatted string, e.g. `"Success"`).

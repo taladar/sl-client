@@ -1,6 +1,7 @@
 //! Round-trip tests for the experience cap codecs.
 
 use pretty_assertions::assert_eq;
+use sl_types::key::AgentKey;
 use uuid::Uuid;
 
 use super::{
@@ -316,7 +317,7 @@ fn experience_infos_response_round_trip() -> Result<(), String> {
     let real = ExperienceInfo {
         public_id: uuid("11111111-1111-1111-1111-111111111111")?,
         name: "My Experience".to_owned(),
-        agent_id: uuid("22222222-2222-2222-2222-222222222222")?,
+        agent_id: AgentKey::from(uuid("22222222-2222-2222-2222-222222222222")?),
         description: "fun & games".to_owned(),
         properties: ExperienceProperties(PROPERTY_GRID),
         maturity: 13,

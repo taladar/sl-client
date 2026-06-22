@@ -10,8 +10,8 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        AbuseReport, AbuseReportType, AlertInfo, AttachmentMode, AttachmentPoint, AvatarName,
-        AvatarPickerResult, ChatType, CoarseLocation, ControlFlags, DetachOrder,
+        AbuseReport, AbuseReportType, AgentKey, AlertInfo, AttachmentMode, AttachmentPoint,
+        AvatarName, AvatarPickerResult, ChatType, CoarseLocation, ControlFlags, DetachOrder,
         DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
         DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventInfo, FollowCamProperty,
         FollowCamPropertyValue, GestureActivation, GroupAccountDetails, GroupAccountDetailsEntry,
@@ -73,7 +73,7 @@ mod test {
     /// A successful login response pointing at the test simulator.
     fn success() -> LoginResponse {
         LoginResponse::Success(Box::new(LoginSuccess {
-            agent_id: uuid::Uuid::from_u128(1),
+            agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
             session_id: uuid::Uuid::from_u128(2),
             secure_session_id: uuid::Uuid::from_u128(3),
             circuit_code: CircuitCode(0x0011_2233),
@@ -188,7 +188,7 @@ mod test {
                     agent_id,
                     session_id,
                     circuit_code,
-                } if *agent_id == uuid::Uuid::from_u128(1)
+                } if *agent_id == AgentKey::from(uuid::Uuid::from_u128(1))
                     && *session_id == uuid::Uuid::from_u128(2)
                     && *circuit_code == CircuitCode(0x0011_2233)
             )),
@@ -200,7 +200,10 @@ mod test {
                 .any(|e| matches!(e, ServerEvent::AgentArrived)),
             "expected AgentArrived, got {server_events:?}"
         );
-        assert_eq!(sim.agent_id(), Some(uuid::Uuid::from_u128(1)));
+        assert_eq!(
+            sim.agent_id(),
+            Some(AgentKey::from(uuid::Uuid::from_u128(1)))
+        );
         assert_eq!(sim.client_addr(), Some(client_addr()));
 
         // The client reached the active state off the AgentMovementComplete reply.
@@ -386,7 +389,7 @@ mod test {
 
         let source = uuid::Uuid::from_u128(0xA00);
         let data = ViewerEffectData::PointAt {
-            source,
+            source: AgentKey::from(source),
             target: uuid::Uuid::from_u128(0xA01),
             target_position: [1.0, 2.0, 3.0],
             point_at_type: PointAtType::Grab,
@@ -394,7 +397,7 @@ mod test {
         client.send_viewer_effect(
             &[ViewerEffect {
                 id: uuid::Uuid::from_u128(0xA0F),
-                agent_id: source,
+                agent_id: AgentKey::from(source),
                 effect_type: ViewerEffectType::PointAt,
                 duration: 1.0,
                 color: [1, 2, 3, 4],
@@ -425,7 +428,7 @@ mod test {
 
         let prey = uuid::Uuid::from_u128(0xB01);
         let hunter = uuid::Uuid::from_u128(0xB00);
-        client.track_agent(prey, now)?;
+        client.track_agent(AgentKey::from(prey), now)?;
         client.find_agent(hunter, prey, now)?;
         pump(&mut client, &mut sim, now)?;
 
@@ -437,7 +440,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a TrackAgent server event")?;
-        assert_eq!(tracked, prey);
+        assert_eq!(tracked, AgentKey::from(prey));
         let found = events
             .iter()
             .find_map(|e| match e {
@@ -460,13 +463,13 @@ mod test {
         sim.send_coarse_location_update(
             &[
                 CoarseLocation {
-                    agent_id: me,
+                    agent_id: AgentKey::from(me),
                     x: 100,
                     y: 50,
                     z: 80, // sent as 80/4 = 20 on the wire, decoded back to 80
                 },
                 CoarseLocation {
-                    agent_id: other,
+                    agent_id: AgentKey::from(other),
                     x: 1,
                     y: 2,
                     z: 4,
@@ -492,7 +495,7 @@ mod test {
         assert_eq!(you, Some(0));
         assert_eq!(prey, Some(1));
         let first = locations.first().ok_or("first location")?;
-        assert_eq!(first.agent_id, me);
+        assert_eq!(first.agent_id, AgentKey::from(me));
         assert_eq!(first.z, 80);
         Ok(())
     }
@@ -652,7 +655,7 @@ mod test {
         sim.send_dir_people_reply(
             qid,
             &[DirPeopleResult {
-                agent_id: uuid::Uuid::from_u128(0xF10),
+                agent_id: AgentKey::from(uuid::Uuid::from_u128(0xF10)),
                 first_name: "Alice".to_owned(),
                 last_name: "Resident".to_owned(),
                 group: String::new(),
@@ -724,7 +727,7 @@ mod test {
         sim.send_avatar_picker_reply(
             qid,
             &[AvatarPickerResult {
-                avatar_id: uuid::Uuid::from_u128(0xF16),
+                avatar_id: AgentKey::from(uuid::Uuid::from_u128(0xF16)),
                 first_name: "Bob".to_owned(),
                 last_name: "Resident".to_owned(),
             }],
@@ -876,7 +879,7 @@ mod test {
         sim.send_event_info_reply(
             &EventInfo {
                 event_id: 42,
-                creator,
+                creator: AgentKey::from(creator),
                 name: "Beach Party".to_owned(),
                 category: "Discussion".to_owned(),
                 description: "Come along".to_owned(),
@@ -901,7 +904,7 @@ mod test {
             })
             .ok_or("expected an EventInfoReply client event")?;
         assert_eq!(info.event_id, 42);
-        assert_eq!(info.creator, creator);
+        assert_eq!(info.creator, AgentKey::from(creator));
         assert_eq!(info.name, "Beach Party");
         assert_eq!(info.amount, 50);
         assert_eq!(info.global_position, (256_000.0, 257_000.0, 30.0));
@@ -942,7 +945,7 @@ mod test {
             &RestoreItem {
                 item_id: uuid::Uuid::from_u128(0x17E),
                 folder_id: uuid::Uuid::nil(),
-                creator_id: uuid::Uuid::nil(),
+                creator_id: AgentKey::from(uuid::Uuid::nil()),
                 owner_id: uuid::Uuid::nil(),
                 group_id: uuid::Uuid::nil(),
                 permissions: Permissions5::empty(),
@@ -1555,7 +1558,7 @@ mod test {
         sim.send_group_account_transactions_reply(&transactions, now)?;
         let proposal = GroupActiveProposalItem {
             vote_id: proposal_id,
-            vote_initiator: uuid::Uuid::from_u128(0x1217),
+            vote_initiator: AgentKey::from(uuid::Uuid::from_u128(0x1217)),
             terse_date_id: "td".to_owned(),
             start_date_time: "2026-06-01".to_owned(),
             end_date_time: "2026-06-08".to_owned(),
@@ -1571,7 +1574,7 @@ mod test {
             terse_date_id: "td".to_owned(),
             start_date_time: "2026-05-01".to_owned(),
             end_date_time: "2026-05-08".to_owned(),
-            vote_initiator: uuid::Uuid::from_u128(0x1217),
+            vote_initiator: AgentKey::from(uuid::Uuid::from_u128(0x1217)),
             vote_type: "Proposal".to_owned(),
             vote_result: "Success".to_owned(),
             majority: 0.5,
@@ -1833,7 +1836,7 @@ mod test {
             &[agent],
             now,
         )?;
-        sim.send_agent_alert_message(agent, true, "you were teleported home", now)?;
+        sim.send_agent_alert_message(AgentKey::from(agent), true, "you were teleported home", now)?;
         sim.send_mean_collision_alert(
             &[MeanCollision {
                 victim,
@@ -1880,7 +1883,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an AgentAlertMessage client event")?;
-        assert_eq!(alert_agent, agent);
+        assert_eq!(alert_agent, AgentKey::from(agent));
         assert!(modal);
         assert_eq!(alert_message, "you were teleported home");
 
@@ -2014,7 +2017,7 @@ mod test {
         drain_server(&mut sim);
 
         let target = uuid::Uuid::from_u128(99);
-        client.send_instant_message(target, "psst", now)?;
+        client.send_instant_message(AgentKey::from(target), "psst", now)?;
         pump(&mut client, &mut sim, now)?;
 
         let events = drain_server(&mut sim);
@@ -2026,7 +2029,7 @@ mod test {
             })
             .ok_or("expected an InstantMessage server event")?;
         assert_eq!(im.message, "psst");
-        assert_eq!(im.to_agent_id, target);
+        assert_eq!(im.to_agent_id, AgentKey::from(target));
         assert_eq!(im.dialog, ImDialog::Message);
         Ok(())
     }

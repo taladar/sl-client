@@ -19,6 +19,7 @@ use crate::types::{
     PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate, Reliability, RestoreItem,
     RezAttachment, SaleType, TeleportFlags, Throttle, ViewerEffect, Wearable,
 };
+use sl_types::key::AgentKey;
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::AbuseReport;
 use sl_wire::messages::{
@@ -235,7 +236,7 @@ impl Circuit {
     pub(crate) fn new(
         id: CircuitId,
         sim_addr: SocketAddr,
-        agent_id: Uuid,
+        agent_id: AgentKey,
         session_id: Uuid,
         circuit_code: CircuitCode,
         draw_distance: f32,
@@ -332,7 +333,7 @@ impl Circuit {
             circuit_code: UseCircuitCodeCircuitCodeBlock {
                 code: self.code.get(),
                 session_id: self.session_id,
-                id: self.agent_id,
+                id: self.agent_id.uuid(),
             },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -354,7 +355,7 @@ impl Circuit {
         }
         let message = AnyMessage::AgentThrottle(AgentThrottle {
             agent_data: AgentThrottleAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 circuit_code: self.code.get(),
             },
@@ -370,7 +371,7 @@ impl Circuit {
     pub(crate) fn send_complete_agent_movement(&mut self, now: Instant) -> Result<(), WireError> {
         let message = AnyMessage::CompleteAgentMovement(CompleteAgentMovement {
             agent_data: CompleteAgentMovementAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 circuit_code: self.code.get(),
             },
@@ -382,7 +383,7 @@ impl Circuit {
     pub(crate) fn send_region_handshake_reply(&mut self, now: Instant) -> Result<(), WireError> {
         let message = AnyMessage::RegionHandshakeReply(RegionHandshakeReply {
             agent_data: RegionHandshakeReplyAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             region_info: RegionHandshakeReplyRegionInfoBlock { flags: 0 },
@@ -417,7 +418,7 @@ impl Circuit {
         bytes.push(0);
         let message = AnyMessage::ChatFromViewer(ChatFromViewer {
             agent_data: ChatFromViewerAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             chat_data: ChatFromViewerChatDataBlock {
@@ -436,7 +437,7 @@ impl Circuit {
     /// carry trailing NULs, as a real viewer sends.
     pub(crate) fn send_instant_message_raw(
         &mut self,
-        to_agent_id: Uuid,
+        to_agent_id: AgentKey,
         dialog: ImDialog,
         message: &str,
         from_name: &str,
@@ -448,12 +449,12 @@ impl Circuit {
         message_bytes.push(0);
         let message = AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
             agent_data: ImprovedInstantMessageAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             message_block: ImprovedInstantMessageMessageBlockBlock {
                 from_group: false,
-                to_agent_id,
+                to_agent_id: to_agent_id.uuid(),
                 parent_estate_id: 0,
                 region_id: Uuid::nil(),
                 position: Vector {
@@ -487,12 +488,12 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let im = AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
             agent_data: ImprovedInstantMessageAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             message_block: ImprovedInstantMessageMessageBlockBlock {
                 from_group: params.from_group,
-                to_agent_id: params.to_agent_id,
+                to_agent_id: params.to_agent_id.uuid(),
                 parent_estate_id: 0,
                 region_id: Uuid::nil(),
                 position: Vector {
@@ -526,7 +527,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let lure = AnyMessage::StartLure(StartLure {
             agent_data: StartLureAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             info: StartLureInfoBlock {
@@ -586,7 +587,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let request = AnyMessage::TeleportLureRequest(TeleportLureRequest {
             info: TeleportLureRequestInfoBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 lure_id,
                 teleport_flags: teleport_flags.0,
@@ -601,7 +602,7 @@ impl Circuit {
     pub(crate) fn send_retrieve_instant_messages(&mut self, now: Instant) -> Result<(), WireError> {
         let request = AnyMessage::RetrieveInstantMessages(RetrieveInstantMessages {
             agent_data: RetrieveInstantMessagesAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
         });
@@ -626,7 +627,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::AgentUpdate(AgentUpdate {
             agent_data: AgentUpdateAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 body_rotation,
                 head_rotation,
@@ -652,7 +653,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::AgentRequestSit(AgentRequestSit {
             agent_data: AgentRequestSitAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             target_object: AgentRequestSitTargetObjectBlock {
@@ -667,7 +668,7 @@ impl Circuit {
     pub(crate) fn send_agent_sit(&mut self, now: Instant) -> Result<(), WireError> {
         let message = AnyMessage::AgentSit(AgentSit {
             agent_data: AgentSitAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
         });
@@ -684,7 +685,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GenericMessage(GenericMessage {
             agent_data: GenericMessageAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 transaction_id: Uuid::nil(),
             },
@@ -710,7 +711,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::AvatarPropertiesRequest(AvatarPropertiesRequest {
             agent_data: AvatarPropertiesRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 avatar_id: target,
             },
@@ -727,7 +728,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::AvatarPropertiesUpdate(AvatarPropertiesUpdate {
             agent_data: AvatarPropertiesUpdateAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             properties_data: AvatarPropertiesUpdatePropertiesDataBlock {
@@ -752,7 +753,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::AvatarInterestsUpdate(AvatarInterestsUpdate {
             agent_data: AvatarInterestsUpdateAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             properties_data: AvatarInterestsUpdatePropertiesDataBlock {
@@ -776,7 +777,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::AvatarNotesUpdate(AvatarNotesUpdate {
             agent_data: AvatarNotesUpdateAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: AvatarNotesUpdateDataBlock {
@@ -796,7 +797,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ClassifiedInfoRequest(ClassifiedInfoRequest {
             agent_data: ClassifiedInfoRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: ClassifiedInfoRequestDataBlock { classified_id },
@@ -814,12 +815,12 @@ impl Circuit {
         let (x, y, z) = update.pos_global;
         let message = AnyMessage::PickInfoUpdate(PickInfoUpdate {
             agent_data: PickInfoUpdateAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: PickInfoUpdateDataBlock {
                 pick_id: update.pick_id,
-                creator_id: self.agent_id,
+                creator_id: self.agent_id.uuid(),
                 // Only gods may set the legacy "top pick" flag; the viewer
                 // always sends false.
                 top_pick: false,
@@ -843,7 +844,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::PickDelete(PickDelete {
             agent_data: PickDeleteAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: PickDeleteDataBlock { pick_id },
@@ -861,7 +862,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::PickGodDelete(PickGodDelete {
             agent_data: PickGodDeleteAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: PickGodDeleteDataBlock { pick_id, query_id },
@@ -879,7 +880,7 @@ impl Circuit {
         let (x, y, z) = update.pos_global;
         let message = AnyMessage::ClassifiedInfoUpdate(ClassifiedInfoUpdate {
             agent_data: ClassifiedInfoUpdateAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: ClassifiedInfoUpdateDataBlock {
@@ -908,7 +909,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ClassifiedDelete(ClassifiedDelete {
             agent_data: ClassifiedDeleteAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: ClassifiedDeleteDataBlock { classified_id },
@@ -926,7 +927,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ClassifiedGodDelete(ClassifiedGodDelete {
             agent_data: ClassifiedGodDeleteAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: ClassifiedGodDeleteDataBlock {
@@ -947,7 +948,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GrantUserRights(GrantUserRights {
             agent_data: GrantUserRightsAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             rights: vec![GrantUserRightsRightsBlock {
@@ -967,7 +968,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::TerminateFriendship(TerminateFriendship {
             agent_data: TerminateFriendshipAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             ex_block: TerminateFriendshipExBlockBlock { other_id: other },
@@ -985,7 +986,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::AcceptFriendship(AcceptFriendship {
             agent_data: AcceptFriendshipAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             transaction_block: AcceptFriendshipTransactionBlockBlock { transaction_id },
@@ -1003,7 +1004,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::DeclineFriendship(DeclineFriendship {
             agent_data: DeclineFriendshipAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             transaction_block: DeclineFriendshipTransactionBlockBlock { transaction_id },
@@ -1020,7 +1021,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ActivateGroup(ActivateGroup {
             agent_data: ActivateGroupAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 group_id,
             },
@@ -1036,7 +1037,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupMembersRequest(GroupMembersRequest {
             agent_data: GroupMembersRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             group_data: GroupMembersRequestGroupDataBlock {
@@ -1055,7 +1056,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupRoleDataRequest(GroupRoleDataRequest {
             agent_data: GroupRoleDataRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             group_data: GroupRoleDataRequestGroupDataBlock {
@@ -1074,7 +1075,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupRoleMembersRequest(GroupRoleMembersRequest {
             agent_data: GroupRoleMembersRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             group_data: GroupRoleMembersRequestGroupDataBlock {
@@ -1093,7 +1094,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupTitlesRequest(GroupTitlesRequest {
             agent_data: GroupTitlesRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 group_id,
                 request_id: Uuid::nil(),
@@ -1110,7 +1111,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupProfileRequest(GroupProfileRequest {
             agent_data: GroupProfileRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             group_data: GroupProfileRequestGroupDataBlock { group_id },
@@ -1126,7 +1127,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupNoticesListRequest(GroupNoticesListRequest {
             agent_data: GroupNoticesListRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: GroupNoticesListRequestDataBlock { group_id },
@@ -1142,7 +1143,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupNoticeRequest(GroupNoticeRequest {
             agent_data: GroupNoticeRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: GroupNoticeRequestDataBlock {
@@ -1160,7 +1161,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::CreateGroupRequest(CreateGroupRequest {
             agent_data: CreateGroupRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             group_data: CreateGroupRequestGroupDataBlock {
@@ -1185,7 +1186,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::JoinGroupRequest(JoinGroupRequest {
             agent_data: JoinGroupRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             group_data: JoinGroupRequestGroupDataBlock { group_id },
@@ -1201,7 +1202,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::LeaveGroupRequest(LeaveGroupRequest {
             agent_data: LeaveGroupRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             group_data: LeaveGroupRequestGroupDataBlock { group_id },
@@ -1220,7 +1221,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::InviteGroupRequest(InviteGroupRequest {
             agent_data: InviteGroupRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             group_data: InviteGroupRequestGroupDataBlock { group_id },
@@ -1245,7 +1246,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::SetGroupAcceptNotices(SetGroupAcceptNotices {
             agent_data: SetGroupAcceptNoticesAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: SetGroupAcceptNoticesDataBlock {
@@ -1266,7 +1267,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::SetGroupContribution(SetGroupContribution {
             agent_data: SetGroupContributionAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: SetGroupContributionDataBlock {
@@ -1287,7 +1288,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupRoleUpdate(GroupRoleUpdate {
             agent_data: GroupRoleUpdateAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 group_id,
             },
@@ -1316,7 +1317,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupRoleChanges(GroupRoleChanges {
             agent_data: GroupRoleChangesAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 group_id,
             },
@@ -1324,7 +1325,7 @@ impl Circuit {
                 .iter()
                 .map(|change| GroupRoleChangesRoleChangeBlock {
                     role_id: change.role_id,
-                    member_id: change.member_id,
+                    member_id: change.member_id.uuid(),
                     change: change.change.to_u32(),
                 })
                 .collect(),
@@ -1337,19 +1338,19 @@ impl Circuit {
     pub(crate) fn send_eject_group_members(
         &mut self,
         group_id: Uuid,
-        member_ids: &[Uuid],
+        member_ids: &[AgentKey],
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::EjectGroupMemberRequest(EjectGroupMemberRequest {
             agent_data: EjectGroupMemberRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             group_data: EjectGroupMemberRequestGroupDataBlock { group_id },
             eject_data: member_ids
                 .iter()
                 .map(|ejectee_id| EjectGroupMemberRequestEjectDataBlock {
-                    ejectee_id: *ejectee_id,
+                    ejectee_id: ejectee_id.uuid(),
                 })
                 .collect(),
         });
@@ -1365,7 +1366,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ActivateGestures(ActivateGestures {
             agent_data: ActivateGesturesAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 flags: 0,
             },
@@ -1390,7 +1391,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::DeactivateGestures(DeactivateGestures {
             agent_data: DeactivateGesturesAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 flags: 0,
             },
@@ -1422,7 +1423,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::SetAlwaysRun(SetAlwaysRun {
             agent_data: SetAlwaysRunAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 always_run: mode.is_always_run(),
             },
@@ -1436,7 +1437,7 @@ impl Circuit {
         let serial_num = self.next_pause_serial();
         let message = AnyMessage::AgentPause(AgentPause {
             agent_data: AgentPauseAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 serial_num,
             },
@@ -1450,7 +1451,7 @@ impl Circuit {
         let serial_num = self.next_pause_serial();
         let message = AnyMessage::AgentResume(AgentResume {
             agent_data: AgentResumeAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 serial_num,
             },
@@ -1467,7 +1468,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::AgentFOV(AgentFOV {
             agent_data: AgentFOVAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 circuit_code: self.code.get(),
             },
@@ -1489,7 +1490,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::AgentHeightWidth(AgentHeightWidth {
             agent_data: AgentHeightWidthAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 circuit_code: self.code.get(),
             },
@@ -1510,7 +1511,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ForceScriptControlRelease(ForceScriptControlRelease {
             agent_data: ForceScriptControlReleaseAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
         });
@@ -1529,7 +1530,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupAccountSummaryRequest(GroupAccountSummaryRequest {
             agent_data: GroupAccountSummaryRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 group_id,
             },
@@ -1553,7 +1554,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupAccountDetailsRequest(GroupAccountDetailsRequest {
             agent_data: GroupAccountDetailsRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 group_id,
             },
@@ -1578,7 +1579,7 @@ impl Circuit {
         let message =
             AnyMessage::GroupAccountTransactionsRequest(GroupAccountTransactionsRequest {
                 agent_data: GroupAccountTransactionsRequestAgentDataBlock {
-                    agent_id: self.agent_id,
+                    agent_id: self.agent_id.uuid(),
                     session_id: self.session_id,
                     group_id,
                 },
@@ -1600,7 +1601,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupActiveProposalsRequest(GroupActiveProposalsRequest {
             agent_data: GroupActiveProposalsRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             group_data: GroupActiveProposalsRequestGroupDataBlock { group_id },
@@ -1618,7 +1619,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupVoteHistoryRequest(GroupVoteHistoryRequest {
             agent_data: GroupVoteHistoryRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             group_data: GroupVoteHistoryRequestGroupDataBlock { group_id },
@@ -1640,7 +1641,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::StartGroupProposal(StartGroupProposal {
             agent_data: StartGroupProposalAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             proposal_data: StartGroupProposalProposalDataBlock {
@@ -1665,7 +1666,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupProposalBallot(GroupProposalBallot {
             agent_data: GroupProposalBallotAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             proposal_data: GroupProposalBallotProposalDataBlock {
@@ -1690,7 +1691,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let im = AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
             agent_data: ImprovedInstantMessageAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             message_block: ImprovedInstantMessageMessageBlockBlock {
@@ -1728,7 +1729,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ScriptDialogReply(ScriptDialogReply {
             agent_data: ScriptDialogReplyAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: ScriptDialogReplyDataBlock {
@@ -1752,7 +1753,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ScriptAnswerYes(ScriptAnswerYes {
             agent_data: ScriptAnswerYesAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: ScriptAnswerYesDataBlock {
@@ -1773,7 +1774,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::MuteListRequest(MuteListRequest {
             agent_data: MuteListRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             mute_data: MuteListRequestMuteDataBlock { mute_crc },
@@ -1792,7 +1793,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::UpdateMuteListEntry(UpdateMuteListEntry {
             agent_data: UpdateMuteListEntryAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             mute_data: UpdateMuteListEntryMuteDataBlock {
@@ -1814,7 +1815,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::RemoveMuteListEntry(RemoveMuteListEntry {
             agent_data: RemoveMuteListEntryAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             mute_data: RemoveMuteListEntryMuteDataBlock {
@@ -1923,7 +1924,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::RequestImage(RequestImage {
             agent_data: RequestImageAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             request_image: vec![RequestImageRequestImageBlock {
@@ -1974,7 +1975,7 @@ impl Circuit {
     pub(crate) fn send_agent_wearables_request(&mut self, now: Instant) -> Result<(), WireError> {
         let message = AnyMessage::AgentWearablesRequest(AgentWearablesRequest {
             agent_data: AgentWearablesRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
         });
@@ -1990,7 +1991,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::AgentIsNowWearing(AgentIsNowWearing {
             agent_data: AgentIsNowWearingAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             wearable_data: wearables
@@ -2017,7 +2018,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectAttach(ObjectAttach {
             agent_data: ObjectAttachAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 attachment_point: attachment_point.with_mode(mode),
             },
@@ -2038,7 +2039,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDetach(ObjectDetach {
             agent_data: ObjectDetachAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: local_ids
@@ -2060,7 +2061,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDrop(ObjectDrop {
             agent_data: ObjectDropAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: local_ids
@@ -2083,7 +2084,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::RemoveAttachment(RemoveAttachment {
             agent_data: RemoveAttachmentAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             attachment_block: RemoveAttachmentAttachmentBlockBlock {
@@ -2105,7 +2106,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::RezSingleAttachmentFromInv(RezSingleAttachmentFromInv {
             agent_data: RezSingleAttachmentFromInvAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: RezSingleAttachmentFromInvObjectDataBlock {
@@ -2142,7 +2143,7 @@ impl Circuit {
             })?;
         let message = AnyMessage::RezMultipleAttachmentsFromInv(RezMultipleAttachmentsFromInv {
             agent_data: RezMultipleAttachmentsFromInvAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             header_data: RezMultipleAttachmentsFromInvHeaderDataBlock {
@@ -2179,14 +2180,14 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ViewerEffect(ViewerEffectMessage {
             agent_data: ViewerEffectAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             effect: effects
                 .iter()
                 .map(|effect| ViewerEffectEffectBlock {
                     id: effect.id,
-                    agent_id: effect.agent_id,
+                    agent_id: effect.agent_id.uuid(),
                     r#type: effect.effect_type.to_code(),
                     duration: effect.duration,
                     color: effect.color,
@@ -2201,15 +2202,17 @@ impl Circuit {
     /// position (streamed back via `CoarseLocationUpdate`).
     pub(crate) fn send_track_agent(
         &mut self,
-        prey_id: Uuid,
+        prey_id: AgentKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::TrackAgent(TrackAgent {
             agent_data: TrackAgentAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            target_data: TrackAgentTargetDataBlock { prey_id },
+            target_data: TrackAgentTargetDataBlock {
+                prey_id: prey_id.uuid(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -2247,7 +2250,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::DirFindQuery(DirFindQuery {
             agent_data: DirFindQueryAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             query_data: DirFindQueryQueryDataBlock {
@@ -2274,7 +2277,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::DirPlacesQuery(DirPlacesQuery {
             agent_data: DirPlacesQueryAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             query_data: DirPlacesQueryQueryDataBlock {
@@ -2303,7 +2306,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::DirLandQuery(DirLandQuery {
             agent_data: DirLandQueryAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             query_data: DirLandQueryQueryDataBlock {
@@ -2330,7 +2333,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::DirClassifiedQuery(DirClassifiedQuery {
             agent_data: DirClassifiedQueryAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             query_data: DirClassifiedQueryQueryDataBlock {
@@ -2353,7 +2356,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::AvatarPickerRequest(AvatarPickerRequest {
             agent_data: AvatarPickerRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 query_id,
             },
@@ -2378,7 +2381,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::PlacesQuery(PlacesQuery {
             agent_data: PlacesQueryAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 query_id,
             },
@@ -2402,7 +2405,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::EventInfoRequest(EventInfoRequest {
             agent_data: EventInfoRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             event_data: EventInfoRequestEventDataBlock { event_id },
@@ -2419,7 +2422,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::EventNotificationAddRequest(EventNotificationAddRequest {
             agent_data: EventNotificationAddRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             event_data: EventNotificationAddRequestEventDataBlock { event_id },
@@ -2436,7 +2439,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::EventNotificationRemoveRequest(EventNotificationRemoveRequest {
             agent_data: EventNotificationRemoveRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             event_data: EventNotificationRemoveRequestEventDataBlock { event_id },
@@ -2460,7 +2463,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::AgentSetAppearance(AgentSetAppearance {
             agent_data: AgentSetAppearanceAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 serial_num: serial,
                 size,
@@ -2496,7 +2499,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::AgentAnimation(AgentAnimation {
             agent_data: AgentAnimationAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             animation_list: animations
@@ -2524,7 +2527,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::AgentCachedTexture(AgentCachedTexture {
             agent_data: AgentCachedTextureAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 serial_num: serial,
             },
@@ -2548,13 +2551,13 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::FetchInventoryDescendents(FetchInventoryDescendents {
             agent_data: FetchInventoryDescendentsAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             inventory_data: FetchInventoryDescendentsInventoryDataBlock {
                 folder_id,
                 // Own inventory: the owner is the agent itself.
-                owner_id: self.agent_id,
+                owner_id: self.agent_id.uuid(),
                 sort_order: 0, // 0 = by name
                 fetch_folders: true,
                 fetch_items: true,
@@ -2575,7 +2578,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::CreateInventoryFolder(CreateInventoryFolder {
             agent_data: CreateInventoryFolderAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             folder_data: CreateInventoryFolderFolderDataBlock {
@@ -2600,7 +2603,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::UpdateInventoryFolder(UpdateInventoryFolder {
             agent_data: UpdateInventoryFolderAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             folder_data: vec![UpdateInventoryFolderFolderDataBlock {
@@ -2623,7 +2626,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::MoveInventoryFolder(MoveInventoryFolder {
             agent_data: MoveInventoryFolderAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 stamp,
             },
@@ -2649,7 +2652,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::RemoveInventoryFolder(RemoveInventoryFolder {
             agent_data: RemoveInventoryFolderAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             folder_data: folder_ids
@@ -2671,7 +2674,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::CreateInventoryItem(CreateInventoryItem {
             agent_data: CreateInventoryItemAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             inventory_block: CreateInventoryItemInventoryBlockBlock {
@@ -2701,7 +2704,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::UpdateInventoryItem(UpdateInventoryItem {
             agent_data: UpdateInventoryItemAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 transaction_id,
             },
@@ -2709,7 +2712,7 @@ impl Circuit {
                 item_id: item.item_id,
                 folder_id: item.folder_id,
                 callback_id: callback_id.get(),
-                creator_id: item.creator_id,
+                creator_id: item.creator_id.uuid(),
                 owner_id: item.owner_id,
                 group_id: item.group_id,
                 base_mask: item.permissions.base.bits(),
@@ -2744,7 +2747,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::MoveInventoryItem(MoveInventoryItem {
             agent_data: MoveInventoryItemAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 stamp,
             },
@@ -2767,7 +2770,7 @@ impl Circuit {
     /// `BulkUpdateInventory` for the new item.
     pub(crate) fn send_copy_inventory_item(
         &mut self,
-        old_agent_id: Uuid,
+        old_agent_id: AgentKey,
         old_item_id: Uuid,
         new_folder_id: Uuid,
         new_name: &str,
@@ -2776,12 +2779,12 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::CopyInventoryItem(CopyInventoryItem {
             agent_data: CopyInventoryItemAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             inventory_data: vec![CopyInventoryItemInventoryDataBlock {
                 callback_id: callback_id.get(),
-                old_agent_id,
+                old_agent_id: old_agent_id.uuid(),
                 old_item_id,
                 new_folder_id,
                 new_name: with_nul(new_name),
@@ -2798,7 +2801,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::RemoveInventoryItem(RemoveInventoryItem {
             agent_data: RemoveInventoryItemAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             inventory_data: item_ids
@@ -2818,7 +2821,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ChangeInventoryItemFlags(ChangeInventoryItemFlags {
             agent_data: ChangeInventoryItemFlagsAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             inventory_data: vec![ChangeInventoryItemFlagsInventoryDataBlock { item_id, flags }],
@@ -2835,7 +2838,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::PurgeInventoryDescendents(PurgeInventoryDescendents {
             agent_data: PurgeInventoryDescendentsAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             inventory_data: PurgeInventoryDescendentsInventoryDataBlock { folder_id },
@@ -2853,7 +2856,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::RemoveInventoryObjects(RemoveInventoryObjects {
             agent_data: RemoveInventoryObjectsAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             folder_data: folder_ids
@@ -2878,7 +2881,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::TeleportLocationRequest(TeleportLocationRequest {
             agent_data: TeleportLocationRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             info: TeleportLocationRequestInfoBlock {
@@ -2894,7 +2897,7 @@ impl Circuit {
     pub(crate) fn send_logout_request(&mut self, now: Instant) -> Result<(), WireError> {
         let message = AnyMessage::LogoutRequest(LogoutRequest {
             agent_data: LogoutRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
         });
@@ -2905,7 +2908,7 @@ impl Circuit {
     pub(crate) fn send_request_region_info(&mut self, now: Instant) -> Result<(), WireError> {
         let message = AnyMessage::RequestRegionInfo(RequestRegionInfo {
             agent_data: RequestRegionInfoAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
         });
@@ -2917,7 +2920,7 @@ impl Circuit {
     pub(crate) fn send_money_balance_request(&mut self, now: Instant) -> Result<(), WireError> {
         let message = AnyMessage::MoneyBalanceRequest(MoneyBalanceRequest {
             agent_data: MoneyBalanceRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             money_data: MoneyBalanceRequestMoneyDataBlock {
@@ -2945,11 +2948,11 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::MoneyTransferRequest(MoneyTransferRequest {
             agent_data: MoneyTransferRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             money_data: MoneyTransferRequestMoneyDataBlock {
-                source_id: self.agent_id,
+                source_id: self.agent_id.uuid(),
                 dest_id: dest,
                 // Flags and the aggregate-permission hints are unused for a plain
                 // avatar/object payment; the simulator ignores them.
@@ -2976,7 +2979,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelPropertiesRequest(ParcelPropertiesRequest {
             agent_data: ParcelPropertiesRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             parcel_data: ParcelPropertiesRequestParcelDataBlock {
@@ -2999,7 +3002,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelPropertiesUpdate(ParcelPropertiesUpdate {
             agent_data: ParcelPropertiesUpdateAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             parcel_data: ParcelPropertiesUpdateParcelDataBlock {
@@ -3038,7 +3041,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelAccessListRequest(ParcelAccessListRequest {
             agent_data: ParcelAccessListRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: ParcelAccessListRequestDataBlock {
@@ -3078,7 +3081,7 @@ impl Circuit {
         };
         let message = AnyMessage::ParcelAccessListUpdate(ParcelAccessListUpdate {
             agent_data: ParcelAccessListUpdateAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: ParcelAccessListUpdateDataBlock {
@@ -3101,7 +3104,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelDwellRequest(ParcelDwellRequest {
             agent_data: ParcelDwellRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             // The simulator fills in parcel_id from local_id.
@@ -3125,7 +3128,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelBuy(ParcelBuy {
             agent_data: ParcelBuyAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: ParcelBuyDataBlock {
@@ -3152,7 +3155,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelReturnObjects(ParcelReturnObjects {
             agent_data: ParcelReturnObjectsAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             parcel_data: ParcelReturnObjectsParcelDataBlock {
@@ -3182,7 +3185,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelSelectObjects(ParcelSelectObjects {
             agent_data: ParcelSelectObjectsAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             parcel_data: ParcelSelectObjectsParcelDataBlock {
@@ -3206,7 +3209,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelDeedToGroup(ParcelDeedToGroup {
             agent_data: ParcelDeedToGroupAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: ParcelDeedToGroupDataBlock {
@@ -3225,7 +3228,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelReclaim(ParcelReclaim {
             agent_data: ParcelReclaimAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: ParcelReclaimDataBlock {
@@ -3243,7 +3246,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelRelease(ParcelRelease {
             agent_data: ParcelReleaseAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: ParcelReleaseDataBlock {
@@ -3265,7 +3268,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelJoin(ParcelJoin {
             agent_data: ParcelJoinAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             parcel_data: ParcelJoinParcelDataBlock {
@@ -3290,7 +3293,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelDivide(ParcelDivide {
             agent_data: ParcelDivideAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             parcel_data: ParcelDivideParcelDataBlock {
@@ -3312,7 +3315,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelObjectOwnersRequest(ParcelObjectOwnersRequest {
             agent_data: ParcelObjectOwnersRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             parcel_data: ParcelObjectOwnersRequestParcelDataBlock {
@@ -3331,7 +3334,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelBuyPass(ParcelBuyPass {
             agent_data: ParcelBuyPassAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             parcel_data: ParcelBuyPassParcelDataBlock {
@@ -3353,7 +3356,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelDisableObjects(ParcelDisableObjects {
             agent_data: ParcelDisableObjectsAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             parcel_data: ParcelDisableObjectsParcelDataBlock {
@@ -3381,7 +3384,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelInfoRequest(ParcelInfoRequest {
             agent_data: ParcelInfoRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: ParcelInfoRequestDataBlock { parcel_id },
@@ -3403,7 +3406,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::LandStatRequest(LandStatRequest {
             agent_data: LandStatRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             request_data: LandStatRequestRequestDataBlock {
@@ -3439,7 +3442,7 @@ impl Circuit {
         };
         let message = AnyMessage::EstateOwnerMessage(EstateOwnerMessage {
             agent_data: EstateOwnerMessageAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 transaction_id: Uuid::nil(),
             },
@@ -3457,7 +3460,7 @@ impl Circuit {
     pub(crate) fn send_estate_covenant_request(&mut self, now: Instant) -> Result<(), WireError> {
         let message = AnyMessage::EstateCovenantRequest(EstateCovenantRequest {
             agent_data: EstateCovenantRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
         });
@@ -3485,7 +3488,7 @@ impl Circuit {
         };
         let message = AnyMessage::GodlikeMessage(GodlikeMessage {
             agent_data: GodlikeMessageAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 transaction_id: Uuid::nil(),
             },
@@ -3507,7 +3510,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::GodKickUser(GodKickUser {
             user_info: GodKickUserUserInfoBlock {
-                god_id: self.agent_id,
+                god_id: self.agent_id.uuid(),
                 god_session_id: self.session_id,
                 agent_id: target,
                 kick_flags: 0,
@@ -3528,7 +3531,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::MapBlockRequest(MapBlockRequest {
             agent_data: MapBlockRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 // Flags 0 selects the terrain map layer; estate/godlike unused.
                 flags: 0,
@@ -3554,7 +3557,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::MapNameRequest(MapNameRequest {
             agent_data: MapNameRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 // The viewer's map-layer flag (2); estate/godlike filled by the sim.
                 flags: MapRequestFlags::LAYER,
@@ -3578,7 +3581,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::MapItemRequest(MapItemRequest {
             agent_data: MapItemRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 flags: MapRequestFlags::LAYER,
                 estate_id: 0,
@@ -3599,7 +3602,7 @@ impl Circuit {
     pub(crate) fn send_map_layer_request(&mut self, now: Instant) -> Result<(), WireError> {
         let message = AnyMessage::MapLayerRequest(MapLayerRequest {
             agent_data: MapLayerRequestAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 flags: MapRequestFlags::LAYER,
                 estate_id: 0,
@@ -3619,7 +3622,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::UserReport(UserReport {
             agent_data: UserReportAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             report_data: UserReportReportDataBlock {
@@ -3649,7 +3652,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::SendPostcard(SendPostcard {
             agent_data: SendPostcardAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 asset_id: postcard.asset_id,
                 pos_global: postcard.pos_global,
@@ -3674,7 +3677,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::RequestMultipleObjects(RequestMultipleObjects {
             agent_data: RequestMultipleObjectsAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: local_ids
@@ -3697,7 +3700,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectSelect(ObjectSelect {
             agent_data: ObjectSelectAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: local_ids
@@ -3718,7 +3721,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDeselect(ObjectDeselect {
             agent_data: ObjectDeselectAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: local_ids
@@ -3743,7 +3746,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectGrab(ObjectGrab {
             agent_data: ObjectGrabAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: ObjectGrabObjectDataBlock {
@@ -3767,7 +3770,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectGrabUpdate(ObjectGrabUpdate {
             agent_data: ObjectGrabUpdateAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: ObjectGrabUpdateObjectDataBlock {
@@ -3789,7 +3792,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDeGrab(ObjectDeGrab {
             agent_data: ObjectDeGrabAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: ObjectDeGrabObjectDataBlock {
@@ -3809,7 +3812,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectAdd(ObjectAdd {
             agent_data: ObjectAddAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 group_id,
             },
@@ -3860,7 +3863,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDuplicate(ObjectDuplicate {
             agent_data: ObjectDuplicateAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 group_id,
             },
@@ -3886,7 +3889,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDelete(ObjectDelete {
             agent_data: ObjectDeleteAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 force: false,
             },
@@ -3912,7 +3915,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::DeRezObject(DeRezObject {
             agent_data: DeRezObjectAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             agent_block: DeRezObjectAgentBlockBlock {
@@ -3943,7 +3946,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectName(ObjectName {
             agent_data: ObjectNameAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: vec![ObjectNameObjectDataBlock {
@@ -3963,7 +3966,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDescription(ObjectDescription {
             agent_data: ObjectDescriptionAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: vec![ObjectDescriptionObjectDataBlock {
@@ -3983,7 +3986,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectClickAction(ObjectClickAction {
             agent_data: ObjectClickActionAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: vec![ObjectClickActionObjectDataBlock {
@@ -4003,7 +4006,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectMaterial(ObjectMaterial {
             agent_data: ObjectMaterialAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: vec![ObjectMaterialObjectDataBlock {
@@ -4023,7 +4026,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectFlagUpdate(ObjectFlagUpdate {
             agent_data: ObjectFlagUpdateAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 object_local_id: local_id.0,
                 use_physics: flags.use_physics,
@@ -4046,7 +4049,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectGroup(ObjectGroup {
             agent_data: ObjectGroupAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 group_id,
             },
@@ -4071,7 +4074,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectPermissions(ObjectPermissions {
             agent_data: ObjectPermissionsAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             header_data: ObjectPermissionsHeaderDataBlock { r#override: false },
@@ -4098,7 +4101,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectSaleInfo(ObjectSaleInfo {
             agent_data: ObjectSaleInfoAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: vec![ObjectSaleInfoObjectDataBlock {
@@ -4119,7 +4122,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectCategory(ObjectCategory {
             agent_data: ObjectCategoryAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: vec![ObjectCategoryObjectDataBlock {
@@ -4139,7 +4142,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectIncludeInSearch(ObjectIncludeInSearch {
             agent_data: ObjectIncludeInSearchAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: vec![ObjectIncludeInSearchObjectDataBlock {
@@ -4159,7 +4162,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectLink(ObjectLink {
             agent_data: ObjectLinkAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: local_ids
@@ -4180,7 +4183,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDelink(ObjectDelink {
             agent_data: ObjectDelinkAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: local_ids
@@ -4203,7 +4206,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectBuy(ObjectBuy {
             agent_data: ObjectBuyAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 group_id,
                 category_id,
@@ -4230,7 +4233,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::BuyObjectInventory(BuyObjectInventory {
             agent_data: BuyObjectInventoryAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             data: BuyObjectInventoryDataBlock {
@@ -4264,7 +4267,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::RequestObjectPropertiesFamily(RequestObjectPropertiesFamily {
             agent_data: RequestObjectPropertiesFamilyAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: RequestObjectPropertiesFamilyObjectDataBlock {
@@ -4283,7 +4286,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectSpinStart(ObjectSpinStart {
             agent_data: ObjectSpinStartAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: ObjectSpinStartObjectDataBlock { object_id },
@@ -4300,7 +4303,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectSpinUpdate(ObjectSpinUpdate {
             agent_data: ObjectSpinUpdateAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: ObjectSpinUpdateObjectDataBlock {
@@ -4319,7 +4322,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectSpinStop(ObjectSpinStop {
             agent_data: ObjectSpinStopAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: ObjectSpinStopObjectDataBlock { object_id },
@@ -4352,7 +4355,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::SetScriptRunning(SetScriptRunning {
             agent_data: SetScriptRunningAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             script: SetScriptRunningScriptBlock {
@@ -4374,7 +4377,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ScriptReset(ScriptReset {
             agent_data: ScriptResetAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             script: ScriptResetScriptBlock { object_id, item_id },
@@ -4405,7 +4408,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDuplicateOnRay(ObjectDuplicateOnRay {
             agent_data: ObjectDuplicateOnRayAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 group_id,
                 ray_start,
@@ -4435,13 +4438,13 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::RezRestoreToWorld(RezRestoreToWorld {
             agent_data: RezRestoreToWorldAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             inventory_data: RezRestoreToWorldInventoryDataBlock {
                 item_id: item.item_id,
                 folder_id: item.folder_id,
-                creator_id: item.creator_id,
+                creator_id: item.creator_id.uuid(),
                 owner_id: item.owner_id,
                 group_id: item.group_id,
                 base_mask: item.permissions.base.bits(),
@@ -4474,7 +4477,7 @@ impl Circuit {
     ) -> Result<(), WireError> {
         let message = AnyMessage::RezObjectFromNotecard(RezObjectFromNotecard {
             agent_data: RezObjectFromNotecardAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 group_id: rez.group_id,
             },
@@ -4529,7 +4532,7 @@ impl Circuit {
         }
         let message = AnyMessage::MultipleObjectUpdate(MultipleObjectUpdate {
             agent_data: MultipleObjectUpdateAgentDataBlock {
-                agent_id: self.agent_id,
+                agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
             object_data: vec![MultipleObjectUpdateObjectDataBlock {

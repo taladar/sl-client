@@ -164,4 +164,5 @@ pub use sl_wire::{
 // Re-export the vector and rotation types used by the teleport and movement APIs.
 pub use sl_types::lsl::{Rotation, Vector};
 // Re-export the L$ amount type used by the money balance/transfer APIs.
+pub use sl_types::key::{AgentKey, Key};
 pub use sl_types::money::LindenAmount;

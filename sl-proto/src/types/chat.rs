@@ -1,6 +1,7 @@
 //! Chat and instant messaging value types.
 
 use super::AssetType;
+use sl_types::key::AgentKey;
 use uuid::Uuid;
 
 /// The kind of a chat message, from the `Type`/`ChatType` byte shared by
@@ -284,11 +285,11 @@ impl ImDialog {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstantMessage {
     /// The sender's agent id.
-    pub from_agent_id: Uuid,
+    pub from_agent_id: AgentKey,
     /// The sender's display name (with any trailing NUL padding removed).
     pub from_agent_name: String,
     /// The recipient's agent id (this agent for a direct IM, or a group id).
-    pub to_agent_id: Uuid,
+    pub to_agent_id: AgentKey,
     /// The dialog (sub-type) of the message.
     pub dialog: ImDialog,
     /// Whether the message came from a group (rather than an agent).
@@ -353,7 +354,65 @@ pub struct InventoryOffer {
     /// The offer's transaction id (the IM's `id`), echoed back when replying.
     pub transaction_id: Uuid,
     /// The agent (or, for a task offer, the object owner) that made the offer.
-    pub from_agent_id: Uuid,
+    pub from_agent_id: AgentKey,
     /// Whether the offer came from an in-world object/task rather than an agent.
     pub from_task: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+    use sl_types::key::AgentKey;
+    use uuid::Uuid;
+
+    use super::{AssetType, ImDialog, InstantMessage};
+
+    /// An [`AgentKey`] is a transparent wrapper over its [`Uuid`]: wrapping a raw
+    /// id and unwrapping it again yields the identical bytes, so the on-wire
+    /// representation is unchanged by the newtype.
+    #[test]
+    fn agent_key_round_trips_uuid_bit_identically() {
+        for raw in [
+            Uuid::nil(),
+            Uuid::from_u128(1),
+            Uuid::from_u128(0xdead_beef_dead_beef_dead_beef_dead_beef),
+        ] {
+            assert_eq!(AgentKey::from(raw).uuid(), raw);
+        }
+    }
+
+    /// The sender id carried on an [`InstantMessage`] survives the inventory-offer
+    /// extraction path unchanged — the `from_agent_id` typed as [`AgentKey`] is
+    /// copied through to the [`InventoryOffer`] with byte-identical contents.
+    #[test]
+    fn instant_message_from_agent_id_survives_inventory_offer() -> Result<(), String> {
+        let sender = Uuid::from_u128(0xa11);
+        let item = Uuid::from_u128(0xbb22);
+        // The bucket is `[asset-type byte] ++ [16-byte item id]`; 7 is `Notecard`.
+        let mut bucket = vec![7_u8];
+        bucket.extend_from_slice(item.as_bytes());
+        let im = InstantMessage {
+            from_agent_id: AgentKey::from(sender),
+            from_agent_name: "Giver Resident".to_owned(),
+            to_agent_id: AgentKey::from(Uuid::from_u128(0xa12)),
+            dialog: ImDialog::InventoryOffered,
+            from_group: false,
+            region_id: Uuid::nil(),
+            position: (0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: 0,
+            id: Uuid::from_u128(0xcc33),
+            parent_estate_id: 0,
+            message: "here you go".to_owned(),
+            binary_bucket: bucket,
+        };
+        let offer = im
+            .inventory_offer()
+            .ok_or_else(|| "expected a valid inventory offer".to_owned())?;
+        assert_eq!(offer.from_agent_id, im.from_agent_id);
+        assert_eq!(offer.from_agent_id.uuid(), sender);
+        assert_eq!(offer.item_id, item);
+        assert_eq!(offer.asset_type, AssetType::Notecard);
+        Ok(())
+    }
 }

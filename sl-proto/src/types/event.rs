@@ -20,6 +20,7 @@ use super::{
     ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload,
     TelehubInfo, TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
 };
+use sl_types::key::AgentKey;
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::AgentPreferences;
@@ -355,7 +356,7 @@ pub enum Event {
     /// dialog).
     ImTyping {
         /// The typist's id (agent id).
-        from_agent_id: Uuid,
+        from_agent_id: AgentKey,
         /// The typist's display name.
         from_agent_name: String,
         /// The IM session id the typing belongs to.
@@ -373,7 +374,7 @@ pub enum Event {
     /// alongside [`Event::AvatarProperties`].
     AvatarGroups {
         /// The avatar whose groups these are.
-        avatar_id: Uuid,
+        avatar_id: AgentKey,
         /// The groups listed in the profile.
         groups: Vec<AvatarGroupMembership>,
         /// Whether the avatar lists groups in their profile.
@@ -610,7 +611,7 @@ pub enum Event {
         /// The group (and IM session) the message belongs to.
         group_id: Uuid,
         /// The sender's agent id.
-        from_agent_id: Uuid,
+        from_agent_id: AgentKey,
         /// The sender's display name.
         from_name: String,
         /// The message text.
@@ -623,7 +624,7 @@ pub enum Event {
         /// The group (and IM session) id.
         group_id: Uuid,
         /// The participant's agent id.
-        agent_id: Uuid,
+        agent_id: AgentKey,
         /// `true` when the participant joined, `false` when they left.
         joined: bool,
     },
@@ -635,7 +636,7 @@ pub enum Event {
         /// The conference's IM session id.
         session_id: Uuid,
         /// The sender's agent id.
-        from_agent_id: Uuid,
+        from_agent_id: AgentKey,
         /// The sender's display name.
         from_name: String,
         /// The message text.
@@ -648,7 +649,7 @@ pub enum Event {
         /// The conference's IM session id.
         session_id: Uuid,
         /// The participant's agent id.
-        agent_id: Uuid,
+        agent_id: AgentKey,
         /// `true` when the participant joined, `false` when they left.
         joined: bool,
     },
@@ -660,7 +661,7 @@ pub enum Event {
         /// The IM session id to join.
         session_id: Uuid,
         /// The inviting agent's id.
-        from_agent_id: Uuid,
+        from_agent_id: AgentKey,
         /// The inviting agent's display name.
         from_name: String,
         /// The session kind multiplexed over the invitation (from the
@@ -1150,7 +1151,7 @@ pub enum Event {
     /// [`Session::stop_animation`](crate::Session::stop_animation).
     AvatarAnimation {
         /// The avatar whose animation state this describes.
-        avatar_id: Uuid,
+        avatar_id: AgentKey,
         /// The animations that avatar is currently playing.
         animations: Vec<PlayingAnimation>,
         /// The raw `PhysicalAvatarEventList` blocks — one opaque `TypeData`
@@ -1347,7 +1348,7 @@ pub enum Event {
     /// `modal` flag saying whether the viewer should block on a dialog.
     AgentAlertMessage {
         /// The agent the alert is addressed to.
-        agent_id: Uuid,
+        agent_id: AgentKey,
         /// Whether the alert should be shown as a modal (blocking) dialog rather
         /// than a transient notification.
         modal: bool,

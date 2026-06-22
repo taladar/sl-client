@@ -21,7 +21,7 @@
 use std::time::Duration;
 
 use sl_client_tokio::{
-    Client, Command, CreateGroupParams, DisconnectReason, Error, Event, GroupRoleChange,
+    AgentKey, Client, Command, CreateGroupParams, DisconnectReason, Error, Event, GroupRoleChange,
     GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, LoginParams, LoginRequest, Throttle,
     Uuid, group_powers,
 };
@@ -203,7 +203,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     group_id: group,
                                     changes: vec![GroupRoleMemberChange {
                                         role_id: found.role_id,
-                                        member_id,
+                                        member_id: AgentKey::from(member_id),
                                         change: GroupRoleChange::Add,
                                     }],
                                 })
@@ -213,7 +213,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             command_tx
                                 .send(Command::EjectGroupMembers {
                                     group_id: group,
-                                    member_ids: vec![member_id],
+                                    member_ids: vec![AgentKey::from(member_id)],
                                 })
                                 .await
                                 .ok();

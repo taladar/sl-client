@@ -59,6 +59,7 @@ use crate::types::{
     TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
     ViewerEffectType, Wearable, WearableType,
 };
+use sl_types::key::AgentKey;
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::{
@@ -1662,7 +1663,7 @@ impl Session {
                     // distinct signal rather than an empty instant message.
                     dialog @ (ImDialog::TypingStart | ImDialog::TypingStop) => {
                         self.events.push_back(Event::ImTyping {
-                            from_agent_id: im.agent_data.agent_id,
+                            from_agent_id: AgentKey::from(im.agent_data.agent_id),
                             from_agent_name: trimmed_string(&block.from_agent_name),
                             session_id: block.id,
                             typing: matches!(dialog, ImDialog::TypingStart),
@@ -1672,7 +1673,7 @@ impl Session {
                     ImDialog::SessionSend if block.from_group => {
                         self.events.push_back(Event::GroupSessionMessage {
                             group_id: block.id,
-                            from_agent_id: im.agent_data.agent_id,
+                            from_agent_id: AgentKey::from(im.agent_data.agent_id),
                             from_name: trimmed_string(&block.from_agent_name),
                             message: trimmed_string(&block.message),
                         });
@@ -1682,7 +1683,7 @@ impl Session {
                     {
                         self.events.push_back(Event::GroupSessionParticipant {
                             group_id: block.id,
-                            agent_id: im.agent_data.agent_id,
+                            agent_id: AgentKey::from(im.agent_data.agent_id),
                             joined: matches!(dialog, ImDialog::SessionAdd),
                         });
                     }
@@ -1692,7 +1693,7 @@ impl Session {
                     ImDialog::SessionSend => {
                         self.events.push_back(Event::ConferenceSessionMessage {
                             session_id: block.id,
-                            from_agent_id: im.agent_data.agent_id,
+                            from_agent_id: AgentKey::from(im.agent_data.agent_id),
                             from_name: trimmed_string(&block.from_agent_name),
                             message: trimmed_string(&block.message),
                         });
@@ -1700,7 +1701,7 @@ impl Session {
                     dialog @ (ImDialog::SessionAdd | ImDialog::SessionLeave) => {
                         self.events.push_back(Event::ConferenceSessionParticipant {
                             session_id: block.id,
-                            agent_id: im.agent_data.agent_id,
+                            agent_id: AgentKey::from(im.agent_data.agent_id),
                             joined: matches!(dialog, ImDialog::SessionAdd),
                         });
                     }
@@ -1749,7 +1750,7 @@ impl Session {
             }
             AnyMessage::AvatarGroupsReply(reply) => {
                 self.events.push_back(Event::AvatarGroups {
-                    avatar_id: reply.agent_data.avatar_id,
+                    avatar_id: AgentKey::from(reply.agent_data.avatar_id),
                     groups: reply.group_data.iter().map(avatar_group).collect(),
                     list_in_profile: reply.new_group_data.list_in_profile,
                 });
@@ -2184,7 +2185,7 @@ impl Session {
             // delta — a stopped animation simply drops out of a later update.
             AnyMessage::AvatarAnimation(animation) => {
                 self.events.push_back(Event::AvatarAnimation {
-                    avatar_id: animation.sender.id,
+                    avatar_id: AgentKey::from(animation.sender.id),
                     animations: avatar_animations(animation),
                     physical_events: animation
                         .physical_avatar_event_list
@@ -2264,7 +2265,7 @@ impl Session {
                     .iter()
                     .zip(update.location.iter())
                     .map(|(agent, location)| CoarseLocation {
-                        agent_id: agent.agent_id,
+                        agent_id: AgentKey::from(agent.agent_id),
                         x: location.x,
                         y: location.y,
                         z: u16::from(location.z).saturating_mul(4),
@@ -2287,7 +2288,7 @@ impl Session {
                         let effect_type = ViewerEffectType::from_code(block.r#type);
                         ViewerEffect {
                             id: block.id,
-                            agent_id: block.agent_id,
+                            agent_id: AgentKey::from(block.agent_id),
                             effect_type,
                             duration: block.duration,
                             color: block.color,
@@ -2317,7 +2318,7 @@ impl Session {
                         .query_replies
                         .iter()
                         .map(|block| DirPeopleResult {
-                            agent_id: block.agent_id,
+                            agent_id: AgentKey::from(block.agent_id),
                             first_name: trimmed_string(&block.first_name),
                             last_name: trimmed_string(&block.last_name),
                             group: trimmed_string(&block.group),
@@ -2437,7 +2438,7 @@ impl Session {
                         .data
                         .iter()
                         .map(|block| AvatarPickerResult {
-                            avatar_id: block.avatar_id,
+                            avatar_id: AgentKey::from(block.avatar_id),
                             first_name: trimmed_string(&block.first_name),
                             last_name: trimmed_string(&block.last_name),
                         })
@@ -2475,7 +2476,7 @@ impl Session {
                 self.events.push_back(Event::EventInfoReply {
                     info: EventInfo {
                         event_id: data.event_id,
-                        creator: parse_uuid_string(&data.creator),
+                        creator: AgentKey::from(parse_uuid_string(&data.creator)),
                         name: trimmed_string(&data.name),
                         category: trimmed_string(&data.category),
                         description: trimmed_string(&data.desc),
@@ -2605,7 +2606,7 @@ impl Session {
             }
             AnyMessage::AgentAlertMessage(alert) => {
                 self.events.push_back(Event::AgentAlertMessage {
-                    agent_id: alert.agent_data.agent_id,
+                    agent_id: AgentKey::from(alert.agent_data.agent_id),
                     modal: alert.alert_data.modal,
                     message: trimmed_string(&alert.alert_data.message),
                 });
@@ -2703,7 +2704,7 @@ impl Session {
                         .iter()
                         .map(|pair| GroupRoleMember {
                             role_id: pair.role_id,
-                            member_id: pair.member_id,
+                            member_id: AgentKey::from(pair.member_id),
                         })
                         .collect(),
                 });
@@ -2820,7 +2821,7 @@ impl Session {
                 let own = self
                     .circuit
                     .as_ref()
-                    .map_or_else(Uuid::nil, |circuit| circuit.agent_id);
+                    .map_or_else(Uuid::nil, |circuit| circuit.agent_id.uuid());
                 for block in &change.rights {
                     let granted_to_us = change.agent_data.agent_id != own;
                     let friend_id = if granted_to_us {
@@ -3098,7 +3099,7 @@ impl Session {
     /// [`Error::Wire`] if the message fails to encode.
     pub fn send_instant_message(
         &mut self,
-        to_agent_id: Uuid,
+        to_agent_id: AgentKey,
         message: &str,
         now: Instant,
     ) -> Result<(), Error> {
@@ -3124,7 +3125,7 @@ impl Session {
     /// [`Error::Wire`] if the message fails to encode.
     pub fn send_im_typing(
         &mut self,
-        to_agent_id: Uuid,
+        to_agent_id: AgentKey,
         typing: bool,
         now: Instant,
     ) -> Result<(), Error> {
@@ -3153,7 +3154,7 @@ impl Session {
     /// [`Error::Wire`] if the message fails to encode.
     pub fn send_friendship_offer(
         &mut self,
-        to_agent_id: Uuid,
+        to_agent_id: AgentKey,
         message: &str,
         now: Instant,
     ) -> Result<(), Error> {
@@ -3413,7 +3414,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_pick_info(
         &mut self,
-        creator_id: Uuid,
+        creator_id: AgentKey,
         pick_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
@@ -3986,7 +3987,7 @@ impl Session {
     pub fn eject_group_members(
         &mut self,
         group_id: Uuid,
-        member_ids: &[Uuid],
+        member_ids: &[AgentKey],
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -4306,7 +4307,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
-                to_agent_id: group_id,
+                to_agent_id: AgentKey::from(group_id),
                 from_group: false,
                 dialog: ImDialog::GroupNotice,
                 id: Uuid::nil(),
@@ -4379,7 +4380,7 @@ impl Session {
     /// [`Error::Wire`] if the message fails to encode.
     pub fn decline_teleport_lure(
         &mut self,
-        from_agent_id: Uuid,
+        from_agent_id: AgentKey,
         lure_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
@@ -4409,7 +4410,7 @@ impl Session {
     /// [`Error::Wire`] if the message fails to encode.
     pub fn request_teleport(
         &mut self,
-        to_agent_id: Uuid,
+        to_agent_id: AgentKey,
         message: &str,
         now: Instant,
     ) -> Result<(), Error> {
@@ -4442,7 +4443,7 @@ impl Session {
     /// [`Error::Wire`] if the message fails to encode.
     pub fn give_inventory(
         &mut self,
-        to_agent_id: Uuid,
+        to_agent_id: AgentKey,
         item_id: Uuid,
         asset_type: AssetType,
         item_name: &str,
@@ -4477,7 +4478,7 @@ impl Session {
     /// [`Error::Wire`] if the message fails to encode.
     pub fn give_inventory_folder(
         &mut self,
-        to_agent_id: Uuid,
+        to_agent_id: AgentKey,
         folder_id: Uuid,
         folder_name: &str,
         transaction_id: Uuid,
@@ -4588,7 +4589,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
-                to_agent_id,
+                to_agent_id: AgentKey::from(to_agent_id),
                 from_group: false,
                 dialog: ImDialog::SessionConferenceStart,
                 id: session_id,
@@ -4619,7 +4620,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
-                to_agent_id: session_id,
+                to_agent_id: AgentKey::from(session_id),
                 from_group: false,
                 dialog: ImDialog::SessionSend,
                 id: session_id,
@@ -4644,7 +4645,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
-                to_agent_id: session_id,
+                to_agent_id: AgentKey::from(session_id),
                 from_group: false,
                 dialog: ImDialog::SessionLeave,
                 id: session_id,
@@ -5114,7 +5115,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn track_agent(&mut self, prey_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn track_agent(&mut self, prey_id: AgentKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_track_agent(prey_id, now)?;
         Ok(())
@@ -5699,7 +5700,7 @@ impl Session {
     /// `owner_id` for inventory fetches and for recognising the client's own
     /// messages.
     #[must_use]
-    pub fn agent_id(&self) -> Option<Uuid> {
+    pub fn agent_id(&self) -> Option<AgentKey> {
         self.circuit.as_ref().map(|circuit| circuit.agent_id)
     }
 
@@ -6081,7 +6082,7 @@ impl Session {
     /// [`Error::Wire`] on an encode failure.
     pub fn copy_inventory_item(
         &mut self,
-        old_agent_id: Uuid,
+        old_agent_id: AgentKey,
         old_item_id: Uuid,
         new_folder_id: Uuid,
         new_name: &str,

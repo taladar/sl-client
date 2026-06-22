@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
+use sl_types::key::AgentKey;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -321,7 +322,7 @@ pub struct MfaChallenge {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoginSuccess {
     /// The avatar/agent id.
-    pub agent_id: Uuid,
+    pub agent_id: AgentKey,
     /// The session id used in the circuit.
     pub session_id: Uuid,
     /// The secure session id.
@@ -519,7 +520,7 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
     }
 
     Ok(LoginResponse::Success(Box::new(LoginSuccess {
-        agent_id: parse_uuid(&members, "agent_id")?,
+        agent_id: AgentKey::from(parse_uuid(&members, "agent_id")?),
         session_id: parse_uuid(&members, "session_id")?,
         secure_session_id: parse_uuid(&members, "secure_session_id")?,
         circuit_code: CircuitCode(parse_parsed(&members, "circuit_code")?),

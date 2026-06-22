@@ -9,7 +9,7 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
-        AbuseReport, AbuseReportType, AssetType, AttachmentMode, AttachmentPoint, Camera,
+        AbuseReport, AbuseReportType, AgentKey, AssetType, AttachmentMode, AttachmentPoint, Camera,
         ChatAudible, ChatSourceType, ChatType, ClassifiedUpdate, ClickAction, CoarseLocation,
         ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, DetachOrder,
         Diagnostic, DirFindFlags, DisconnectReason, EnvironmentSettings, EstateAccessDelta,
@@ -169,7 +169,7 @@ mod test {
     /// A successful login response pointing at the test simulator.
     fn success() -> LoginResponse {
         LoginResponse::Success(Box::new(LoginSuccess {
-            agent_id: uuid::Uuid::from_u128(1),
+            agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
             session_id: uuid::Uuid::from_u128(2),
             secure_session_id: uuid::Uuid::from_u128(3),
             circuit_code: CircuitCode(0x0011_2233),
@@ -703,7 +703,7 @@ mod test {
         drain(&mut session)?;
 
         let target = uuid::Uuid::from_u128(0x99);
-        session.send_instant_message(target, "hi there", now)?;
+        session.send_instant_message(AgentKey::from(target), "hi there", now)?;
         let sent = drain(&mut session)?;
         let im = sent
             .iter()
@@ -732,7 +732,7 @@ mod test {
         let mut session = established(now)?;
         drain(&mut session)?;
 
-        session.send_im_typing(uuid::Uuid::from_u128(0x99), true, now)?;
+        session.send_im_typing(AgentKey::from(uuid::Uuid::from_u128(0x99)), true, now)?;
         let sent = drain(&mut session)?;
         let im = sent
             .iter()
@@ -790,7 +790,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an InstantMessageReceived event")?;
-        assert_eq!(received.from_agent_id, uuid::Uuid::from_u128(0x55));
+        assert_eq!(
+            received.from_agent_id,
+            AgentKey::from(uuid::Uuid::from_u128(0x55))
+        );
         assert_eq!(received.from_agent_name, "Friendly Bot");
         assert_eq!(received.message, "hi there");
         assert_eq!(received.dialog, ImDialog::Message);
@@ -827,7 +830,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an ImTyping event")?;
-        assert_eq!(typing.0, uuid::Uuid::from_u128(0x55));
+        assert_eq!(typing.0, AgentKey::from(uuid::Uuid::from_u128(0x55)));
         assert!(typing.1, "IM_TYPING_START should set typing = true");
         Ok(())
     }
@@ -1361,10 +1364,13 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an AvatarProperties event")?;
-        assert_eq!(props.avatar_id, target);
+        assert_eq!(props.avatar_id, AgentKey::from(target));
         assert_eq!(props.about_text, "a test avatar");
         assert_eq!(props.born_on, "2008-01-15");
-        assert_eq!(props.partner_id, uuid::Uuid::from_u128(0xB3));
+        assert_eq!(
+            props.partner_id,
+            AgentKey::from(uuid::Uuid::from_u128(0xB3))
+        );
         assert_eq!(props.flags, 0x10);
         Ok(())
     }
@@ -1526,7 +1532,7 @@ mod test {
 
         let creator = uuid::Uuid::from_u128(0xA1);
         let pick = uuid::Uuid::from_u128(0xC1);
-        session.request_pick_info(creator, pick, now)?;
+        session.request_pick_info(AgentKey::from(creator), pick, now)?;
         let sent = drain(&mut session)?;
         let generic = sent
             .iter()
@@ -2003,7 +2009,7 @@ mod test {
         drain(&mut session)?;
 
         let friend = uuid::Uuid::from_u128(0xA6);
-        session.send_friendship_offer(friend, "be my friend", now)?;
+        session.send_friendship_offer(AgentKey::from(friend), "be my friend", now)?;
         let sent = drain(&mut session)?;
         let im = sent
             .iter()
@@ -2216,7 +2222,7 @@ mod test {
         assert_eq!(group_id, group);
         assert_eq!(members.len(), 1);
         let first = members.first().ok_or("first member")?;
-        assert_eq!(first.agent_id, member);
+        assert_eq!(first.agent_id, AgentKey::from(member));
         assert_eq!(first.title, "Owner");
         assert!(first.is_owner);
         assert_eq!(first.agent_powers, 0xABCD);
@@ -2318,7 +2324,7 @@ mod test {
         assert_eq!(pairs.len(), 1);
         let first = pairs.first().ok_or("first pair")?;
         assert_eq!(first.role_id, role);
-        assert_eq!(first.member_id, member);
+        assert_eq!(first.member_id, AgentKey::from(member));
         Ok(())
     }
 
@@ -2366,7 +2372,7 @@ mod test {
         assert_eq!(profile.group_id, group);
         assert_eq!(profile.name, "Test Group");
         assert_eq!(profile.charter, "a charter");
-        assert_eq!(profile.founder_id, founder);
+        assert_eq!(profile.founder_id, AgentKey::from(founder));
         assert_eq!(profile.member_count, 2);
         assert!(profile.open_enrollment);
         Ok(())
@@ -2425,7 +2431,7 @@ mod test {
                 message,
             } => {
                 assert_eq!(group_id, group);
-                assert_eq!(from_agent_id, sender);
+                assert_eq!(from_agent_id, AgentKey::from(sender));
                 assert_eq!(from_name, "Friend Tester");
                 assert_eq!(message, "hello group");
             }
@@ -2621,12 +2627,12 @@ mod test {
             &[
                 GroupRoleMemberChange {
                     role_id: role,
-                    member_id: member,
+                    member_id: AgentKey::from(member),
                     change: GroupRoleChange::Add,
                 },
                 GroupRoleMemberChange {
                     role_id: role,
-                    member_id: uuid::Uuid::from_u128(0x6717),
+                    member_id: AgentKey::from(uuid::Uuid::from_u128(0x6717)),
                     change: GroupRoleChange::Remove,
                 },
             ],
@@ -2659,7 +2665,7 @@ mod test {
 
         let group = uuid::Uuid::from_u128(0x6718);
         let ejectee = uuid::Uuid::from_u128(0x6719);
-        session.eject_group_members(group, &[ejectee], now)?;
+        session.eject_group_members(group, &[AgentKey::from(ejectee)], now)?;
         let sent = drain(&mut session)?;
         let eject = sent
             .iter()
@@ -2967,7 +2973,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an AgentAlertMessage event")?;
-        assert_eq!(agent_id, agent);
+        assert_eq!(agent_id, AgentKey::from(agent));
         assert!(modal);
         assert_eq!(message, "Please confirm");
         Ok(())
@@ -3228,7 +3234,10 @@ mod test {
         assert_eq!(group_id, uuid::Uuid::from_u128(0x6703));
         assert_eq!(members.len(), 1);
         let first = members.first().ok_or("first member")?;
-        assert_eq!(first.agent_id, uuid::Uuid::from_u128(0x6704));
+        assert_eq!(
+            first.agent_id,
+            AgentKey::from(uuid::Uuid::from_u128(0x6704))
+        );
         assert_eq!(first.title, "Owner");
         assert_eq!(first.agent_powers, 0xabcd);
         assert_eq!(first.online_status, "Online");
@@ -4237,12 +4246,12 @@ mod test {
         session.send_viewer_effect(
             &[ViewerEffect {
                 id: uuid::Uuid::from_u128(0xEF),
-                agent_id: self_id,
+                agent_id: AgentKey::from(self_id),
                 effect_type: ViewerEffectType::LookAt,
                 duration: 2.0,
                 color: [255, 0, 0, 255],
                 data: ViewerEffectData::LookAt {
-                    source: self_id,
+                    source: AgentKey::from(self_id),
                     target,
                     target_position: [1.0, 2.0, 3.0],
                     look_at_type: LookAtType::Focus,
@@ -4265,7 +4274,7 @@ mod test {
         assert_eq!(
             ViewerEffectData::from_wire(ViewerEffectType::LookAt, &block.type_data),
             ViewerEffectData::LookAt {
-                source: self_id,
+                source: AgentKey::from(self_id),
                 target,
                 target_position: [1.0, 2.0, 3.0],
                 look_at_type: LookAtType::Focus,
@@ -4282,7 +4291,7 @@ mod test {
 
         let prey = uuid::Uuid::from_u128(0xF1);
         let hunter = uuid::Uuid::from_u128(0xF0);
-        session.track_agent(prey, now)?;
+        session.track_agent(AgentKey::from(prey), now)?;
         session.find_agent(hunter, prey, now)?;
         let sent = drain(&mut session)?;
         let track = sent
@@ -4348,13 +4357,13 @@ mod test {
             locations,
             vec![
                 CoarseLocation {
-                    agent_id: me,
+                    agent_id: AgentKey::from(me),
                     x: 128,
                     y: 64,
                     z: 20,
                 },
                 CoarseLocation {
-                    agent_id: other,
+                    agent_id: AgentKey::from(other),
                     x: 10,
                     y: 20,
                     z: 24,
@@ -4373,7 +4382,7 @@ mod test {
         let source = uuid::Uuid::from_u128(0x10);
         let target = uuid::Uuid::from_u128(0x11);
         let data = ViewerEffectData::PointAt {
-            source,
+            source: AgentKey::from(source),
             target,
             target_position: [4.0, 5.0, 6.0],
             point_at_type: PointAtType::Grab,
@@ -4507,7 +4516,7 @@ mod test {
             .ok_or("expected a DirPeopleReply event")?;
         assert_eq!(reply_query, query_id);
         let person = results.first().ok_or("first person")?;
-        assert_eq!(person.agent_id, agent);
+        assert_eq!(person.agent_id, AgentKey::from(agent));
         assert_eq!(person.first_name, "Alice");
         assert_eq!(person.last_name, "Resident");
         assert!(person.online);
@@ -4591,7 +4600,7 @@ mod test {
             })
             .ok_or("expected an EventInfoReply event")?;
         assert_eq!(info.event_id, 42);
-        assert_eq!(info.creator, creator);
+        assert_eq!(info.creator, AgentKey::from(creator));
         assert_eq!(info.name, "Beach Party");
         assert_eq!(info.category, "Discussion");
         assert_eq!(info.description, "Come along");
@@ -4751,7 +4760,7 @@ mod test {
             &RestoreItem {
                 item_id: uuid::Uuid::from_u128(0x17E),
                 folder_id: uuid::Uuid::nil(),
-                creator_id: uuid::Uuid::nil(),
+                creator_id: AgentKey::from(uuid::Uuid::nil()),
                 owner_id: uuid::Uuid::nil(),
                 group_id: uuid::Uuid::nil(),
                 permissions: Permissions5 {
@@ -5232,7 +5241,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an AvatarAnimation event")?;
-        assert_eq!(avatar_id, avatar);
+        assert_eq!(avatar_id, AgentKey::from(avatar));
         assert_eq!(animations.len(), 2);
         assert_eq!(physical_events, vec![vec![0xDE, 0xAD, 0xBE, 0xEF]]);
         let first = animations.first().ok_or("first animation")?;
@@ -5702,7 +5711,7 @@ mod test {
         let mut session = new_session();
         let root = uuid::Uuid::from_u128(0xF0);
         let login = LoginResponse::Success(Box::new(LoginSuccess {
-            agent_id: uuid::Uuid::from_u128(1),
+            agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
             session_id: uuid::Uuid::from_u128(2),
             secure_session_id: uuid::Uuid::from_u128(3),
             circuit_code: CircuitCode(0x0011_2233),
@@ -5765,7 +5774,7 @@ mod test {
         let lib_root = uuid::Uuid::from_u128(0x0112);
         let lib_owner = uuid::Uuid::from_u128(0xAB);
         let login = LoginResponse::Success(Box::new(LoginSuccess {
-            agent_id: uuid::Uuid::from_u128(1),
+            agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
             session_id: uuid::Uuid::from_u128(2),
             secure_session_id: uuid::Uuid::from_u128(3),
             circuit_code: CircuitCode(0x0011_2233),
@@ -5991,7 +6000,7 @@ mod test {
         assert_eq!(item.name, "a notecard");
         assert_eq!(item.description, "my notes");
         assert_eq!(item.asset_id, uuid::Uuid::from_u128(0xA1));
-        assert_eq!(item.creator_id, uuid::Uuid::from_u128(0xC1));
+        assert_eq!(item.creator_id, AgentKey::from(uuid::Uuid::from_u128(0xC1)));
         assert_eq!(item.inv_type, 7);
         assert_eq!(item.permissions.base, Permissions::from_bits(0x7FFF_FFFF));
         assert_eq!(item.permissions.next_owner, Permissions::from_bits(532_480));
@@ -7393,7 +7402,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a MoneyBalance event")?;
-        assert_eq!(balance.agent_id, uuid::Uuid::from_u128(1));
+        assert_eq!(balance.agent_id, AgentKey::from(uuid::Uuid::from_u128(1)));
         assert!(balance.success);
         assert_eq!(balance.balance, LindenAmount(1234));
         assert_eq!(balance.square_meters_credit, 512);
@@ -11453,7 +11462,7 @@ mod test {
 
         let from = uuid::Uuid::from_u128(0x55);
         let lure_id = uuid::Uuid::from_u128(0xCAFE);
-        session.decline_teleport_lure(from, lure_id, now)?;
+        session.decline_teleport_lure(AgentKey::from(from), lure_id, now)?;
         let sent = drain(&mut session)?;
         let block = first_im(&sent)?;
         assert_eq!(block.dialog, 24); // IM_LURE_DECLINED
@@ -11470,7 +11479,7 @@ mod test {
         drain(&mut session)?;
 
         let target = uuid::Uuid::from_u128(0x77);
-        session.request_teleport(target, "please tp me", now)?;
+        session.request_teleport(AgentKey::from(target), "please tp me", now)?;
         let sent = drain(&mut session)?;
         let block = first_im(&sent)?;
         assert_eq!(block.dialog, 26); // IM_TELEPORT_REQUEST
@@ -11489,7 +11498,14 @@ mod test {
         let to = uuid::Uuid::from_u128(0xD1);
         let item = uuid::Uuid::from_u128(0x1234);
         let tx = uuid::Uuid::from_u128(0x9999);
-        session.give_inventory(to, item, AssetType::Notecard, "My Card", tx, now)?;
+        session.give_inventory(
+            AgentKey::from(to),
+            item,
+            AssetType::Notecard,
+            "My Card",
+            tx,
+            now,
+        )?;
         let sent = drain(&mut session)?;
         let block = first_im(&sent)?;
         assert_eq!(block.dialog, 4); // IM_INVENTORY_OFFERED
@@ -11514,7 +11530,7 @@ mod test {
 
         let folder = uuid::Uuid::from_u128(0x4321);
         session.give_inventory_folder(
-            uuid::Uuid::from_u128(0xD1),
+            AgentKey::from(uuid::Uuid::from_u128(0xD1)),
             folder,
             "My Folder",
             uuid::Uuid::from_u128(0x9999),
@@ -11560,7 +11576,7 @@ mod test {
         assert_eq!(offer.asset_type, AssetType::Notecard);
         assert_eq!(offer.item_id, item);
         assert_eq!(offer.transaction_id, tx);
-        assert_eq!(offer.from_agent_id, from);
+        assert_eq!(offer.from_agent_id, AgentKey::from(from));
         assert!(!offer.from_task);
 
         // Accept files the item into a destination folder.
@@ -11709,7 +11725,7 @@ mod test {
             })
             .ok_or("expected an InstantMessageReceived event")?;
         assert!(received.offline);
-        assert_eq!(received.from_agent_id, from);
+        assert_eq!(received.from_agent_id, AgentKey::from(from));
         assert_eq!(received.from_agent_name, "Sender Name");
         assert_eq!(received.message, "stored hello");
         assert_eq!(received.timestamp, 1_700_000_000);
@@ -11771,7 +11787,7 @@ mod test {
             return Err("expected ConferenceInvited".into());
         };
         assert_eq!(got, session_id);
-        assert_eq!(from_agent_id, from);
+        assert_eq!(from_agent_id, AgentKey::from(from));
         assert_eq!(from_name, "Inviter");
         assert_eq!(dialog, ImDialog::SessionGroupStart);
         assert!(from_group);
@@ -11804,7 +11820,7 @@ mod test {
             creation_date: 0,
             owner_id: uuid::Uuid::nil(),
             last_owner_id: uuid::Uuid::nil(),
-            creator_id: uuid::Uuid::nil(),
+            creator_id: AgentKey::from(uuid::Uuid::nil()),
             group_id: uuid::Uuid::nil(),
             group_owned: false,
             permissions: Permissions5::empty(),

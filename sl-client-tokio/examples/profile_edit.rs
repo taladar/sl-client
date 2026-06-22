@@ -20,8 +20,8 @@
 use std::time::Duration;
 
 use sl_client_tokio::{
-    ClassifiedUpdate, Client, Command, DisconnectReason, Error, Event, LoginParams, LoginRequest,
-    PickUpdate, ProfileUpdate, Throttle, Uuid,
+    AgentKey, ClassifiedUpdate, Client, Command, DisconnectReason, Error, Event, LoginParams,
+    LoginRequest, PickUpdate, ProfileUpdate, Throttle, Uuid,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -65,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(other) => return Err(other.into()),
     };
     let agent_id = client.agent_id().ok_or("no agent id after login")?;
-    let target = target_override.unwrap_or(agent_id);
+    let target = target_override.unwrap_or_else(|| agent_id.uuid());
     info!("login succeeded; agent {agent_id}, inspecting {target}");
 
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .await
                     .ok();
 
-                if !readonly && target == agent_id {
+                if !readonly && target == agent_id.uuid() {
                     // Edit the agent's own about text, then create a pick, read
                     // its details back, and remove it.
                     command_tx
@@ -177,7 +177,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // Fetch each pick's full details.
                     command_tx
                         .send(Command::RequestPickInfo {
-                            creator_id: target,
+                            creator_id: AgentKey::from(target),
                             pick_id: pick.pick_id,
                         })
                         .await
