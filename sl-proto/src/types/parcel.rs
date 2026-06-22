@@ -1,6 +1,6 @@
 //! Parcels and land management: properties, access lists, media, overlays.
 
-use sl_types::key::{GroupKey, OwnerKey};
+use sl_types::key::{GroupKey, ObjectKey, OwnerKey};
 use sl_types::lsl::Vector;
 use sl_wire::ParcelFlags;
 use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
@@ -735,7 +735,7 @@ pub struct LandStatItem {
     /// The object's region-local id (`TaskLocalID`).
     pub task_local_id: RegionLocalObjectId,
     /// The object's id (`TaskID`).
-    pub task_id: Uuid,
+    pub task_id: ObjectKey,
     /// The object's region position (`LocationX`/`Y`/`Z`), as `[x, y, z]` metres.
     pub location: [f32; 3],
     /// The object's score for this report (`Score`): script time for top-scripts,

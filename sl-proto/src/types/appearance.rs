@@ -1,5 +1,6 @@
 //! Wearables and avatar appearance: textures, attachments, animations.
 
+use sl_types::key::ObjectKey;
 use sl_types::lsl::Vector;
 use uuid::Uuid;
 
@@ -332,7 +333,7 @@ pub struct PlayingAnimation {
     /// The object that triggered the animation, when the simulator names one
     /// (an `AnimationSourceList` entry — e.g. a scripted `llStartAnimation`).
     /// `None` for animations the agent or simulator started directly.
-    pub source_id: Option<Uuid>,
+    pub source_id: Option<ObjectKey>,
 }
 
 /// The playback flags carried by an [`Event::AttachedSound`](crate::Event::AttachedSound) (`AttachedSound`'s
@@ -380,7 +381,7 @@ pub struct SoundPreload {
     /// The sound asset to pre-fetch.
     pub sound_id: Uuid,
     /// The object that will play the sound.
-    pub object_id: Uuid,
+    pub object_id: ObjectKey,
     /// The object owner's id.
     pub owner_id: Uuid,
 }
@@ -390,7 +391,7 @@ pub struct SoundPreload {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AvatarAttachment {
     /// The attached object's id.
-    pub id: Uuid,
+    pub id: ObjectKey,
     /// The attachment point byte (LL's attachment-point enumeration).
     pub attachment_point: u8,
 }

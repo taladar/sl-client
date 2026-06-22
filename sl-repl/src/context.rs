@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use sl_proto::{CircuitCode, CircuitId, Event, RegionHandle, Uuid};
+use sl_proto::{CircuitCode, CircuitId, Event, ObjectKey, RegionHandle, Uuid};
 
 /// Resolves the `$placeholder` argument tokens a REPL line may use, and the
 /// reverse mapping from a literal back to the placeholder that stands for it.
@@ -106,7 +106,7 @@ pub struct SessionContext {
     /// The region-local id of the most recently seen parcel (`$parcel`).
     parcel_local_id: Option<i32>,
     /// The persistent id of the most recently seen object (`$lastobj`).
-    last_object: Option<Uuid>,
+    last_object: Option<ObjectKey>,
     /// The capability name → URL map (`$cap:Name`).
     caps: BTreeMap<String, String>,
     /// The user variables set with the `set` meta command (`$var`).

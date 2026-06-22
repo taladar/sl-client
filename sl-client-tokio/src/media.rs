@@ -1,14 +1,14 @@
 //! Object-media capability fetch and update.
 
 use reqwest::Client as ReqwestClient;
-use sl_proto::{CAP_OBJECT_MEDIA, Llsd, Uuid, build_object_media_get_request, parse_llsd_xml};
+use sl_proto::{CAP_OBJECT_MEDIA, Llsd, ObjectKey, build_object_media_get_request, parse_llsd_xml};
 use tokio::sync::mpsc;
 
 /// POSTs an `ObjectMedia` GET for `object_id`, forwarding the decoded LLSD
 /// response back over `caps_tx` to be surfaced as an [`Event::ObjectMedia`].
 pub(crate) async fn fetch_object_media(
     cap_url: String,
-    object_id: Uuid,
+    object_id: ObjectKey,
     http: ReqwestClient,
     caps_tx: mpsc::Sender<(String, Llsd)>,
 ) {

@@ -228,7 +228,8 @@ though OpenSim serves them too.
 
 - **`GetObjectCost`** — `Command::RequestObjectCost { object_ids }` `POST`s a
   list of object ids; the reply is
-  `Event::ObjectCosts(Vec<(Uuid, ObjectCost)>)`, each `ObjectCost` carrying the
+  `Event::ObjectCosts(Vec<(ObjectKey, ObjectCost)>)`, each `ObjectCost` carrying
+  the
   per-part and whole-linkset *resource* (land-impact) and *physics* costs.
 - **`ResourceCostSelected`** — `Command::RequestSelectedCost { object_ids, roots
   }` sums a selection's `physics`/`streaming`/`simulation` cost into one
@@ -238,7 +239,8 @@ though OpenSim serves them too.
   `Command::RequestObjectPhysicsData { object_ids }` fetches each object's
   physics-material parameters (shape type, density, friction, restitution,
   gravity multiplier) as
-  `Event::ObjectPhysicsData(Vec<(Uuid, ObjectPhysicsData)>)`. The simulator also
+  `Event::ObjectPhysicsData(Vec<(ObjectKey, ObjectPhysicsData)>)`. The simulator
+  also
   **pushes** the same data unsolicited over the [event queue](../comms/caps.md)
   as `ObjectPhysicsProperties` — surfaced as
   `Event::ObjectPhysicsProperties(Vec<(u32, ObjectPhysicsData)>)`, keyed by

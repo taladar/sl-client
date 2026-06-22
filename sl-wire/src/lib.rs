@@ -453,13 +453,14 @@ mod test {
 
     #[test]
     fn object_media_get_and_navigate_requests_carry_fields() {
-        let object = uuid::Uuid::from_u128(0x000b_1ec7);
+        let object = sl_types::key::ObjectKey::from(uuid::Uuid::from_u128(0x000b_1ec7));
+        let raw = object.uuid();
         let get = build_object_media_get_request(object);
         assert!(get.contains("<key>verb</key><string>GET</string>"));
-        assert!(get.contains(&format!("<key>object_id</key><uuid>{object}</uuid>")));
+        assert!(get.contains(&format!("<key>object_id</key><uuid>{raw}</uuid>")));
 
         let navigate = build_object_media_navigate_request(object, 3, "https://example.com/a&b");
-        assert!(navigate.contains(&format!("<key>object_id</key><uuid>{object}</uuid>")));
+        assert!(navigate.contains(&format!("<key>object_id</key><uuid>{raw}</uuid>")));
         // The URL is XML-escaped.
         assert!(
             navigate.contains("<key>current_url</key><string>https://example.com/a&amp;b</string>")
@@ -470,7 +471,7 @@ mod test {
     #[test]
     fn object_media_update_round_trips_through_a_get_response()
     -> Result<(), Box<dyn std::error::Error>> {
-        let object = uuid::Uuid::from_u128(0x000b_1ec7);
+        let object = sl_types::key::ObjectKey::from(uuid::Uuid::from_u128(0x000b_1ec7));
         let entry = MediaEntry {
             current_url: "https://example.com/stream".to_owned(),
             home_url: "https://example.com/home".to_owned(),

@@ -5,6 +5,7 @@ use crate::scoped_id::CircuitId;
 use crate::session::ZERO_VECTOR;
 use crate::types::{Object, ObjectExtraParams, ObjectMotion, PrimShapeParams};
 use core::ops::BitOrAssign;
+use sl_types::key::ObjectKey;
 use sl_wire::{Reader, RegionHandle, RegionLocalObjectId, Writer};
 use uuid::Uuid;
 
@@ -228,7 +229,7 @@ pub(crate) fn compressed_object(
         local_id: RegionLocalObjectId(local_id),
         // Stamped by the session when the object is cached (`upsert_object`).
         circuit: CircuitId::default(),
-        full_id,
+        full_id: ObjectKey::from(full_id),
         parent_id: RegionLocalObjectId(parent_id),
         pcode,
         state,
@@ -393,7 +394,7 @@ fn compressed_flags(object: &Object) -> CompressedFlags {
 pub fn encode_compressed_object(object: &Object) -> Vec<u8> {
     let mut writer = Writer::new();
     let cflags = compressed_flags(object);
-    writer.put_uuid(object.full_id);
+    writer.put_uuid(object.full_id.uuid());
     writer.put_u32(object.local_id.0);
     writer.put_u8(object.pcode);
     writer.put_u8(object.state);

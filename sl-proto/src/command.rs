@@ -14,9 +14,9 @@ use crate::{
     InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LandSearchType,
     LandStatReportType, LindenAmount, MapItemType, Material, MaterialOverrideUpdate, MediaEntry,
     MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
-    ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelAccessScope,
-    ParcelCategory, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, Postcard,
-    PrimShape, ProfileUpdate, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem,
+    ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessScope, ParcelCategory, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate,
+    Postcard, PrimShape, ProfileUpdate, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem,
     RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect,
     VoiceProvisionRequest, Wearable,
 };
@@ -546,7 +546,7 @@ pub enum Command {
     /// [`Event::ScriptDialog`](crate::Event::ScriptDialog) — the chosen button on its hidden `chat_channel`.
     ReplyScriptDialog {
         /// The object that raised the dialog.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The dialog's hidden chat channel.
         chat_channel: i32,
         /// The chosen button index.
@@ -559,7 +559,7 @@ pub enum Command {
     /// those requested; [`ScriptPermissions::default`] denies everything).
     AnswerScriptPermissions {
         /// The task (object) id holding the script.
-        task_id: Uuid,
+        task_id: ObjectKey,
         /// The script item id.
         item_id: Uuid,
         /// The permissions to grant.
@@ -643,7 +643,7 @@ pub enum Command {
     /// seed omits the capability.
     RequestObjectCost {
         /// The objects to price (the root prim of each linkset, normally).
-        object_ids: Vec<Uuid>,
+        object_ids: Vec<ObjectKey>,
     },
     /// Request the summed **physics/streaming/simulation cost of a selection** via
     /// the `ResourceCostSelected` capability; the reply arrives as
@@ -653,7 +653,7 @@ pub enum Command {
     /// the capability.
     RequestSelectedCost {
         /// The selected object ids.
-        object_ids: Vec<Uuid>,
+        object_ids: Vec<ObjectKey>,
         /// Whether the ids are linkset roots (`selected_roots`) rather than
         /// individual prims (`selected_prims`).
         roots: bool,
@@ -666,7 +666,7 @@ pub enum Command {
     /// no-op when the region seed omits the capability.
     RequestObjectPhysicsData {
         /// The objects whose physics parameters to fetch.
-        object_ids: Vec<Uuid>,
+        object_ids: Vec<ObjectKey>,
     },
     /// Request the agent's **attachment resource report** via the
     /// `AttachmentResources` capability; the reply arrives as
@@ -772,7 +772,7 @@ pub enum Command {
         /// Optional owner-id scope.
         owner_ids: Vec<Uuid>,
         /// Optional explicit object/task-id scope.
-        task_ids: Vec<Uuid>,
+        task_ids: Vec<ObjectKey>,
     },
     /// Select (highlight) objects on a parcel (`ParcelSelectObjects`).
     SelectParcelObjects {
@@ -781,7 +781,7 @@ pub enum Command {
         /// Which objects to select (combine `ParcelReturnType` constants).
         return_type: ParcelReturnType,
         /// Explicit object ids (used with `ParcelReturnType::LIST`).
-        object_ids: Vec<Uuid>,
+        object_ids: Vec<ObjectKey>,
     },
     /// Deed a parcel to a group (`ParcelDeedToGroup`).
     DeedParcelToGroup {
@@ -851,7 +851,7 @@ pub enum Command {
         /// Optional owner-id scope.
         owner_ids: Vec<Uuid>,
         /// Optional explicit object/task-id scope.
-        task_ids: Vec<Uuid>,
+        task_ids: Vec<ObjectKey>,
     },
     /// Request a parcel's basic listing by its grid-wide parcel id
     /// (`ParcelInfoRequest`); the reply arrives as
@@ -1063,7 +1063,7 @@ pub enum Command {
     /// Update an in-progress grab as the object is dragged (`ObjectGrabUpdate`).
     GrabObjectUpdate {
         /// The object's persistent global id.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The initial grab offset.
         grab_offset_initial: Vector,
         /// The current region-local grab position.
@@ -1220,7 +1220,7 @@ pub enum Command {
     /// success the simulator copies the item into the agent's inventory.
     BuyObjectInventory {
         /// The object whose contents holds the item.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The inventory item to buy.
         item_id: Uuid,
         /// The folder the bought item is placed in.
@@ -1231,7 +1231,7 @@ pub enum Command {
     /// listing the default price and the quick-pay button amounts.
     RequestPayPrice {
         /// The object to query.
-        object_id: Uuid,
+        object_id: ObjectKey,
     },
     /// Ask for an object's condensed broadcast properties
     /// (`RequestObjectPropertiesFamily`); the simulator answers with an
@@ -1242,26 +1242,26 @@ pub enum Command {
         /// the reply; `0` for a plain hover/info query.
         request_flags: u32,
         /// The object to query.
-        object_id: Uuid,
+        object_id: ObjectKey,
     },
     /// Begin an interactive spin (rotate) of an object (`ObjectSpinStart`); pairs
     /// with [`Command::SpinObjectUpdate`] and [`Command::SpinObjectStop`].
     SpinObjectStart {
         /// The object being spun.
-        object_id: Uuid,
+        object_id: ObjectKey,
     },
     /// Update an in-progress object spin with the latest rotation
     /// (`ObjectSpinUpdate`).
     SpinObjectUpdate {
         /// The object being spun.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The new rotation.
         rotation: Rotation,
     },
     /// End an interactive object spin (`ObjectSpinStop`).
     SpinObjectStop {
         /// The object being spun.
-        object_id: Uuid,
+        object_id: ObjectKey,
     },
     /// Duplicate objects, placing the copies against the surface a ray hits
     /// (`ObjectDuplicateOnRay`) — the "copy and drop in place" gesture.
@@ -1283,7 +1283,7 @@ pub enum Command {
         /// Whether to copy each object's rotation.
         copy_rotates: bool,
         /// The object the ray is cast against ([`Uuid::nil`] for the terrain).
-        ray_target_id: Uuid,
+        ray_target_id: ObjectKey,
         /// The duplicate flags (see `object_flags.h`).
         duplicate_flags: u32,
     },
@@ -1304,14 +1304,14 @@ pub enum Command {
     /// [`Event::ScriptRunning`](crate::Event::ScriptRunning).
     RequestScriptRunning {
         /// The object (task) holding the script.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The script inventory item inside that task.
         item_id: Uuid,
     },
     /// Start or stop a task's script (`SetScriptRunning`).
     SetScriptRunning {
         /// The object (task) holding the script.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The script inventory item inside that task.
         item_id: Uuid,
         /// `true` to run the script, `false` to stop it.
@@ -1321,7 +1321,7 @@ pub enum Command {
     /// just been (re)compiled.
     ResetScript {
         /// The object (task) holding the script.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The script inventory item inside that task.
         item_id: Uuid,
     },
@@ -1751,7 +1751,7 @@ pub enum Command {
     /// [`Event::ObjectMedia`](crate::Event::ObjectMedia).
     RequestObjectMedia {
         /// The object whose media to fetch.
-        object_id: Uuid,
+        object_id: ObjectKey,
     },
     /// Set an object's per-face media over the `ObjectMedia` capability (an
     /// UPDATE). `faces` is one entry per prim face in order; a face with no media
@@ -1759,7 +1759,7 @@ pub enum Command {
     /// subsequent [`Command::RequestObjectMedia`]) rather than replying.
     SetObjectMedia {
         /// The object whose media to set.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// Per-face media, one slot per prim face in order (`None` = no media).
         faces: Vec<Option<MediaEntry>>,
     },
@@ -1768,7 +1768,7 @@ pub enum Command {
     /// media version (visible on a subsequent [`Command::RequestObjectMedia`]).
     NavigateObjectMedia {
         /// The object whose media to navigate.
-        object_id: Uuid,
+        object_id: ObjectKey,
         /// The prim face (texture index) to navigate.
         face: u8,
         /// The URL to navigate that face's media to.

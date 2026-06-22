@@ -1,5 +1,6 @@
 //! Material value types: GLTF override, legacy material, render-material entry.
 
+use sl_types::key::ObjectKey;
 use uuid::Uuid;
 
 /// The `GenericStreamingMessage` method id for a GLTF material override
@@ -75,7 +76,7 @@ pub struct RenderMaterialEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaterialOverrideUpdate {
     /// The object to modify.
-    pub object_id: Uuid,
+    pub object_id: ObjectKey,
     /// The target face index, or `-1` for every face.
     pub side: i32,
     /// The GLTF override document to apply (passed through verbatim; `""` clears

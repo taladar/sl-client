@@ -19,6 +19,7 @@
 
 use std::collections::HashMap;
 
+use sl_types::key::ObjectKey;
 use sl_types::lsl::Vector;
 use uuid::Uuid;
 
@@ -81,7 +82,7 @@ pub struct AbuseReport {
     /// The uploaded snapshot asset id, or nil for the no-screenshot path.
     pub screenshot_id: Uuid,
     /// The reported object's id, or nil when reporting an avatar/region.
-    pub object_id: Uuid,
+    pub object_id: ObjectKey,
     /// The reported (abusing) avatar's id, or nil if unknown.
     pub abuser_id: Uuid,
     /// The name of the region the abuse occurred in.
@@ -108,7 +109,7 @@ impl Default for AbuseReport {
             },
             check_flags: 0,
             screenshot_id: Uuid::nil(),
-            object_id: Uuid::nil(),
+            object_id: ObjectKey::from(Uuid::nil()),
             abuser_id: Uuid::nil(),
             abuse_region_name: String::new(),
             abuse_region_id: Uuid::nil(),
@@ -155,7 +156,7 @@ pub fn parse_send_user_report(body: &Llsd) -> AbuseReport {
         position: vector_from_llsd(body.get("position")),
         check_flags: read_u8("check-flags"),
         screenshot_id: read_uuid("screenshot-id"),
-        object_id: read_uuid("object-id"),
+        object_id: ObjectKey::from(read_uuid("object-id")),
         abuser_id: read_uuid("abuser-id"),
         abuse_region_name: read_str("abuse-region-name"),
         abuse_region_id: read_uuid("abuse-region-id"),
@@ -182,7 +183,7 @@ fn abuse_report_to_llsd(report: &AbuseReport) -> Llsd {
             Llsd::Integer(i32::from(report.check_flags)),
         ),
         ("screenshot-id".to_owned(), Llsd::Uuid(report.screenshot_id)),
-        ("object-id".to_owned(), Llsd::Uuid(report.object_id)),
+        ("object-id".to_owned(), Llsd::Uuid(report.object_id.uuid())),
         ("abuser-id".to_owned(), Llsd::Uuid(report.abuser_id)),
         (
             "abuse-region-name".to_owned(),
@@ -229,6 +230,7 @@ fn vector_from_llsd(value: Option<&Llsd>) -> Vector {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+    use sl_types::key::ObjectKey;
     use sl_types::lsl::Vector;
     use uuid::Uuid;
 
@@ -249,7 +251,7 @@ mod tests {
             },
             check_flags: 0,
             screenshot_id: Uuid::from_u128(0x11),
-            object_id: Uuid::from_u128(0x22),
+            object_id: ObjectKey::from(Uuid::from_u128(0x22)),
             abuser_id: Uuid::from_u128(0x33),
             abuse_region_name: "Test Region".to_owned(),
             abuse_region_id: Uuid::from_u128(0x44),

@@ -7,6 +7,7 @@
 //! reference viewer's `LLTextureAnim::unpackTAMessage` (`lltextureanim.cpp`) and
 //! `LLPartSysData::unpackBlock` (`llpartdata.cpp`).
 
+use sl_types::key::ObjectKey;
 use sl_types::lsl::Vector;
 use sl_wire::{Reader, Writer};
 
@@ -172,7 +173,7 @@ fn decode_system(reader: &mut Reader<'_>) -> Option<ParticleSystem> {
         angular_velocity,
         acceleration,
         texture_id,
-        target_id,
+        target_id: ObjectKey::from(target_id),
         part_flags: 0,
         part_max_age: 0.0,
         part_start_color: [255; 4],
@@ -340,7 +341,7 @@ fn encode_system(writer: &mut Writer, system: &ParticleSystem) {
     pack_fixed_vector_signed(writer, &system.angular_velocity, 8, 7);
     pack_fixed_vector_signed(writer, &system.acceleration, 8, 7);
     writer.put_uuid(system.texture_id);
-    writer.put_uuid(system.target_id);
+    writer.put_uuid(system.target_id.uuid());
 }
 
 /// Encodes the 18-byte legacy particle-template block (the inverse of
@@ -425,6 +426,7 @@ const fn trunc_to_u16(value: f32) -> u16 {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+    use sl_types::key::ObjectKey;
     use sl_types::lsl::Vector;
     use uuid::Uuid;
 
@@ -564,7 +566,7 @@ mod tests {
         close(ps.angular_velocity.x, 0.0)?;
         close(ps.acceleration.z, 0.0)?;
         assert_eq!(ps.texture_id, image);
-        assert_eq!(ps.target_id, target);
+        assert_eq!(ps.target_id, ObjectKey::from(target));
         assert_eq!(ps.part_flags, 0x11);
         close(ps.part_max_age, 10.0)?;
         assert_eq!(ps.part_start_color, [255, 0, 0, 255]);
@@ -652,7 +654,7 @@ mod tests {
                 z: 3.0,
             },
             texture_id: Uuid::from_u128(0x1234),
-            target_id: Uuid::from_u128(0x5678),
+            target_id: ObjectKey::from(Uuid::from_u128(0x5678)),
             part_flags,
             part_max_age: 10.0,
             part_start_color: [255, 0, 0, 255],

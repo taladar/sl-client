@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 
 use base64::Engine as _;
+use sl_types::key::ObjectKey;
 use uuid::Uuid;
 
 /// A parsed LLSD value.
@@ -793,7 +794,8 @@ fn push_string_field(out: &mut String, key: &str, value: &str) {
 /// `{ verb: "GET", object_id }` map asking for an object's current per-face
 /// media. The simulator replies with an [`ObjectMediaResponse`].
 #[must_use]
-pub fn build_object_media_get_request(object_id: Uuid) -> String {
+pub fn build_object_media_get_request(object_id: ObjectKey) -> String {
+    let object_id = object_id.uuid();
     format!(
         "<llsd><map><key>verb</key><string>GET</string><key>object_id</key><uuid>{object_id}</uuid></map></llsd>"
     )
@@ -804,10 +806,13 @@ pub fn build_object_media_get_request(object_id: Uuid) -> String {
 /// object's per-face media. `faces` is one entry per prim face in order; a face
 /// with no media is `None` (serialized as an LLSD `undef`, as the viewer does).
 #[must_use]
-pub fn build_object_media_update_request(object_id: Uuid, faces: &[Option<MediaEntry>]) -> String {
+pub fn build_object_media_update_request(
+    object_id: ObjectKey,
+    faces: &[Option<MediaEntry>],
+) -> String {
     let mut out =
         String::from("<llsd><map><key>verb</key><string>UPDATE</string><key>object_id</key><uuid>");
-    out.push_str(&object_id.to_string());
+    out.push_str(&object_id.uuid().to_string());
     out.push_str("</uuid><key>object_media_data</key><array>");
     for face in faces {
         match face {
@@ -823,9 +828,9 @@ pub fn build_object_media_update_request(object_id: Uuid, faces: &[Option<MediaE
 /// `{ object_id, current_url, texture_index }` map navigating the media on a
 /// single face (`face`) to `url`.
 #[must_use]
-pub fn build_object_media_navigate_request(object_id: Uuid, face: u8, url: &str) -> String {
+pub fn build_object_media_navigate_request(object_id: ObjectKey, face: u8, url: &str) -> String {
     let mut out = String::from("<llsd><map><key>object_id</key><uuid>");
-    out.push_str(&object_id.to_string());
+    out.push_str(&object_id.uuid().to_string());
     out.push_str("</uuid><key>current_url</key><string>");
     push_escaped(&mut out, url);
     out.push_str("</string><key>texture_index</key><integer>");
@@ -840,7 +845,7 @@ pub fn build_object_media_navigate_request(object_id: Uuid, face: u8, url: &str)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObjectMediaResponse {
     /// The object the media belongs to.
-    pub object_id: Uuid,
+    pub object_id: ObjectKey,
     /// The media version string (`x-mv:<serial>/<uuid>`); the same value the
     /// object's `MediaURL` field carries, advanced on every media change.
     pub version: String,
@@ -855,7 +860,7 @@ impl ObjectMediaResponse {
     /// Returns `None` if the body carries no `object_id`.
     #[must_use]
     pub fn from_llsd(body: &Llsd) -> Option<Self> {
-        let object_id = body.get("object_id").and_then(llsd_uuid)?;
+        let object_id = ObjectKey::from(body.get("object_id").and_then(llsd_uuid)?);
         let version = body
             .get("object_media_version")
             .and_then(Llsd::as_str)

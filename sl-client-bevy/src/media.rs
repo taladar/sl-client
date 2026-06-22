@@ -4,14 +4,14 @@ use crate::EVENT_QUEUE_TIMEOUT;
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use reqwest::blocking::Client as ReqwestBlockingClient;
-use sl_proto::{CAP_OBJECT_MEDIA, Llsd, Uuid, build_object_media_get_request, parse_llsd_xml};
+use sl_proto::{CAP_OBJECT_MEDIA, Llsd, ObjectKey, build_object_media_get_request, parse_llsd_xml};
 
 /// POSTs an `ObjectMedia` GET for `object_id` and forwards the decoded LLSD
 /// response to `caps_tx` tagged [`CAP_OBJECT_MEDIA`], for the session to surface
 /// as a [`SlSessionEvent::ObjectMedia`].
 pub(crate) fn run_object_media_fetch(
     cap_url: &str,
-    object_id: Uuid,
+    object_id: ObjectKey,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
     let Ok(http) = ReqwestBlockingClient::builder()

@@ -21,6 +21,7 @@ use crate::types::{
 };
 use sl_types::key::AgentKey;
 use sl_types::key::GroupKey;
+use sl_types::key::ObjectKey;
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::RegionHandle;
@@ -547,7 +548,7 @@ pub(crate) fn avatar_appearance(message: &sl_wire::messages::AvatarAppearance) -
         .attachment_block
         .iter()
         .map(|block| AvatarAttachment {
-            id: block.id,
+            id: ObjectKey::from(block.id),
             attachment_point: block.attachment_point,
         })
         .collect();
@@ -584,7 +585,7 @@ pub(crate) fn avatar_animations(
             source_id: message
                 .animation_source_list
                 .get(index)
-                .map(|source| source.object_id),
+                .map(|source| ObjectKey::from(source.object_id)),
         })
         .collect()
 }
@@ -1085,7 +1086,7 @@ pub(crate) fn group_vote_history_item(reply: &GroupVoteHistoryItemReply) -> Grou
 pub(crate) fn script_dialog(message: &sl_wire::messages::ScriptDialog) -> ScriptDialog {
     let data = &message.data;
     ScriptDialog {
-        object_id: data.object_id,
+        object_id: ObjectKey::from(data.object_id),
         object_name: trimmed_string(&data.object_name),
         owner_first_name: trimmed_string(&data.first_name),
         owner_last_name: trimmed_string(&data.last_name),
@@ -1110,7 +1111,7 @@ pub(crate) fn script_permission_request(
 ) -> ScriptPermissionRequest {
     let data = &message.data;
     ScriptPermissionRequest {
-        task_id: data.task_id,
+        task_id: ObjectKey::from(data.task_id),
         item_id: data.item_id,
         object_name: trimmed_string(&data.object_name),
         object_owner: trimmed_string(&data.object_owner),
@@ -3277,7 +3278,7 @@ pub(crate) fn object_from_full_update(
         local_id: RegionLocalObjectId(block.id),
         // Stamped by the session when the object is cached (`upsert_object`).
         circuit: crate::scoped_id::CircuitId::default(),
-        full_id: block.full_id,
+        full_id: ObjectKey::from(block.full_id),
         parent_id: RegionLocalObjectId(block.parent_id),
         pcode: block.p_code,
         state: block.state,
@@ -3342,7 +3343,7 @@ pub(crate) const fn shape_from_full_block(block: &ObjectUpdateObjectDataBlock) -
 /// Builds an [`ObjectProperties`] from an `ObjectProperties` object-data block.
 pub(crate) fn object_properties(block: &ObjectPropertiesObjectDataBlock) -> ObjectProperties {
     ObjectProperties {
-        object_id: block.object_id,
+        object_id: ObjectKey::from(block.object_id),
         creator_id: AgentKey::from(block.creator_id),
         owner: crate::types::object_owner_from_wire(block.owner_id, block.group_id),
         group: crate::types::group_from_wire(block.group_id),
@@ -3362,7 +3363,7 @@ pub(crate) fn object_properties(block: &ObjectPropertiesObjectDataBlock) -> Obje
         inventory_serial: block.inventory_serial,
         item_id: block.item_id,
         folder_id: block.folder_id,
-        from_task_id: block.from_task_id,
+        from_task_id: ObjectKey::from(block.from_task_id),
         aggregate_perms: block.aggregate_perms,
         aggregate_perm_textures: block.aggregate_perm_textures,
         aggregate_perm_textures_owner: block.aggregate_perm_textures_owner,

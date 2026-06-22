@@ -20,6 +20,7 @@
 
 use std::collections::HashMap;
 
+use sl_types::key::ObjectKey;
 use uuid::Uuid;
 
 use crate::llsd::Llsd;
@@ -80,19 +81,24 @@ impl SelectedCostKind {
 /// Builds an LLSD `{ object_ids: [uuid, …] }` request body — the shape shared by
 /// `GetObjectCost` and `GetObjectPhysicsData`.
 #[must_use]
-pub(crate) fn object_ids_request(object_ids: &[Uuid]) -> Llsd {
+pub(crate) fn object_ids_request(object_ids: &[ObjectKey]) -> Llsd {
     Llsd::Map(HashMap::from([(
         "object_ids".to_owned(),
-        Llsd::Array(object_ids.iter().copied().map(Llsd::Uuid).collect()),
+        Llsd::Array(object_ids.iter().map(|id| Llsd::Uuid(id.uuid())).collect()),
     )]))
 }
 
 /// Decodes the `object_ids` array of an `{ object_ids: [...] }` request body.
 #[must_use]
-pub(crate) fn parse_object_ids(body: &Llsd) -> Vec<Uuid> {
+pub(crate) fn parse_object_ids(body: &Llsd) -> Vec<ObjectKey> {
     body.get("object_ids")
         .and_then(Llsd::as_array)
-        .map(|ids| ids.iter().filter_map(Llsd::as_uuid).collect())
+        .map(|ids| {
+            ids.iter()
+                .filter_map(Llsd::as_uuid)
+                .map(ObjectKey::from)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -156,38 +162,38 @@ fn object_cost_from_llsd(value: &Llsd) -> ObjectCost {
 
 /// Builds the LLSD body for a `GetObjectCost` POST (`{ object_ids: [...] }`).
 #[must_use]
-pub fn build_get_object_cost_request(object_ids: &[Uuid]) -> String {
+pub fn build_get_object_cost_request(object_ids: &[ObjectKey]) -> String {
     object_ids_request(object_ids).to_llsd_xml()
 }
 
 /// Decodes a `GetObjectCost` reply: the per-object costs, keyed by object id.
 /// The result is sorted by id so it is deterministic.
 #[must_use]
-pub fn parse_get_object_cost(body: &Llsd) -> Vec<(Uuid, ObjectCost)> {
-    let mut costs: Vec<(Uuid, ObjectCost)> = body
+pub fn parse_get_object_cost(body: &Llsd) -> Vec<(ObjectKey, ObjectCost)> {
+    let mut costs: Vec<(ObjectKey, ObjectCost)> = body
         .as_map()
         .map(|map| {
             map.iter()
                 .filter_map(|(key, value)| {
                     Uuid::parse_str(key)
                         .ok()
-                        .map(|id| (id, object_cost_from_llsd(value)))
+                        .map(|id| (ObjectKey::from(id), object_cost_from_llsd(value)))
                 })
                 .collect()
         })
         .unwrap_or_default();
-    costs.sort_by_key(|(id, _cost)| *id);
+    costs.sort_by_key(|(id, _cost)| id.uuid());
     costs
 }
 
 /// Builds a `GetObjectCost` reply from the per-object costs (server side) — the
 /// inverse of [`parse_get_object_cost`].
 #[must_use]
-pub fn build_get_object_cost_response(costs: &[(Uuid, ObjectCost)]) -> String {
+pub fn build_get_object_cost_response(costs: &[(ObjectKey, ObjectCost)]) -> String {
     Llsd::Map(
         costs
             .iter()
-            .map(|(id, cost)| (id.to_string(), object_cost_to_llsd(cost)))
+            .map(|(id, cost)| (id.uuid().to_string(), object_cost_to_llsd(cost)))
             .collect(),
     )
     .to_llsd_xml()
@@ -201,10 +207,13 @@ pub fn build_get_object_cost_response(costs: &[(Uuid, ObjectCost)]) -> String {
 /// the ids are linkset roots (`selected_roots`) or individual prims
 /// (`selected_prims`).
 #[must_use]
-pub fn build_resource_cost_selected_request(kind: SelectedCostKind, object_ids: &[Uuid]) -> String {
+pub fn build_resource_cost_selected_request(
+    kind: SelectedCostKind,
+    object_ids: &[ObjectKey],
+) -> String {
     Llsd::Map(HashMap::from([(
         kind.key().to_owned(),
-        Llsd::Array(object_ids.iter().copied().map(Llsd::Uuid).collect()),
+        Llsd::Array(object_ids.iter().map(|id| Llsd::Uuid(id.uuid())).collect()),
     )]))
     .to_llsd_xml()
 }
@@ -212,7 +221,7 @@ pub fn build_resource_cost_selected_request(kind: SelectedCostKind, object_ids: 
 /// Decodes a `ResourceCostSelected` request: the selection kind and the ids.
 /// Defaults to [`SelectedCostKind::Roots`] with no ids when neither key is set.
 #[must_use]
-pub fn parse_resource_cost_selected_request(body: &Llsd) -> (SelectedCostKind, Vec<Uuid>) {
+pub fn parse_resource_cost_selected_request(body: &Llsd) -> (SelectedCostKind, Vec<ObjectKey>) {
     let (kind, key) = if body.get("selected_prims").is_some() {
         (SelectedCostKind::Prims, "selected_prims")
     } else {
@@ -221,7 +230,12 @@ pub fn parse_resource_cost_selected_request(body: &Llsd) -> (SelectedCostKind, V
     let ids = body
         .get(key)
         .and_then(Llsd::as_array)
-        .map(|ids| ids.iter().filter_map(Llsd::as_uuid).collect())
+        .map(|ids| {
+            ids.iter()
+                .filter_map(Llsd::as_uuid)
+                .map(ObjectKey::from)
+                .collect()
+        })
         .unwrap_or_default();
     (kind, ids)
 }
@@ -267,6 +281,7 @@ pub fn build_resource_cost_selected_response(cost: &SelectedResourceCost) -> Str
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+    use sl_types::key::ObjectKey;
     use uuid::Uuid;
 
     use super::{
@@ -282,8 +297,8 @@ mod tests {
     /// client decoder, sorted by id.
     #[test]
     fn object_cost_round_trips() -> Result<(), String> {
-        let id_a = Uuid::from_u128(0x11);
-        let id_b = Uuid::from_u128(0x22);
+        let id_a = ObjectKey::from(Uuid::from_u128(0x11));
+        let id_b = ObjectKey::from(Uuid::from_u128(0x22));
         let costs = vec![
             (
                 id_b,
@@ -322,7 +337,10 @@ mod tests {
     /// A `GetObjectCost` request carries the requested ids under `object_ids`.
     #[test]
     fn object_cost_request_carries_ids() -> Result<(), String> {
-        let ids = [Uuid::from_u128(0xaa), Uuid::from_u128(0xbb)];
+        let ids = [
+            ObjectKey::from(Uuid::from_u128(0xaa)),
+            ObjectKey::from(Uuid::from_u128(0xbb)),
+        ];
         let body = build_get_object_cost_request(&ids);
         let parsed =
             parse_object_ids(&parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?);
@@ -334,7 +352,7 @@ mod tests {
     /// and the reply round-trips the summed costs.
     #[test]
     fn resource_cost_selected_round_trips() -> Result<(), String> {
-        let ids = [Uuid::from_u128(0xc0)];
+        let ids = [ObjectKey::from(Uuid::from_u128(0xc0))];
         let body = build_resource_cost_selected_request(SelectedCostKind::Roots, &ids);
         let (kind, parsed_ids) = parse_resource_cost_selected_request(
             &parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?,

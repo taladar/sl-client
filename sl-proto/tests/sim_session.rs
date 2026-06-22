@@ -19,13 +19,13 @@ mod test {
         GroupActiveProposalItem, GroupKey, GroupName, GroupVote, GroupVoteHistoryItem, ImDialog,
         LandSearchType, LandStatItem, LandStatReportType, LoginParams, MapItem, MapItemType,
         MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
-        MovementMode, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory,
-        ParcelDetails, ParcelObjectOwner, ParcelReturnType, Permissions5, PingId, PlacesResult,
-        PointAtType, Postcard, ProductType, RegionHandle, RegionIdentity, RegionLocalObjectId,
-        RegionLocalParcelId, RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId,
-        ScriptControl, ScriptControlAction, ServerEvent, Session, SimSession, TelehubInfo,
-        Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        enable_simulator_to_caps_llsd, parse_event_queue_response,
+        MovementMode, NotecardRez, ObjectBuyItem, ObjectKey, ObjectPropertiesFamily,
+        ParcelCategory, ParcelDetails, ParcelObjectOwner, ParcelReturnType, Permissions5, PingId,
+        PlacesResult, PointAtType, Postcard, ProductType, RegionHandle, RegionIdentity,
+        RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment, SaleType,
+        ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ServerEvent, Session,
+        SimSession, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -390,7 +390,7 @@ mod test {
         let source = uuid::Uuid::from_u128(0xA00);
         let data = ViewerEffectData::PointAt {
             source: AgentKey::from(source),
-            target: uuid::Uuid::from_u128(0xA01),
+            target: ObjectKey::from(uuid::Uuid::from_u128(0xA01)),
             target_position: [1.0, 2.0, 3.0],
             point_at_type: PointAtType::Grab,
         };
@@ -918,7 +918,7 @@ mod test {
         drain_server(&mut sim);
         drain_client(&mut client);
 
-        let object = uuid::Uuid::from_u128(0xB0B);
+        let object = ObjectKey::from(uuid::Uuid::from_u128(0xB0B));
 
         // Client -> sim: the full commerce/spin/rez command surface.
         client.buy_object(
@@ -965,7 +965,7 @@ mod test {
         client.rez_object_from_notecard(
             &NotecardRez {
                 group_id: GroupKey::from(uuid::Uuid::nil()),
-                from_task_id: uuid::Uuid::nil(),
+                from_task_id: ObjectKey::from(uuid::Uuid::nil()),
                 bypass_raycast: false,
                 ray_start: sl_types::lsl::Vector {
                     x: 1.0,
@@ -977,7 +977,7 @@ mod test {
                     y: 5.0,
                     z: 6.0,
                 },
-                ray_target_id: uuid::Uuid::nil(),
+                ray_target_id: ObjectKey::from(uuid::Uuid::nil()),
                 ray_end_is_intersection: true,
                 rez_selected: false,
                 remove_item: false,
@@ -986,7 +986,7 @@ mod test {
                 everyone_mask: 0,
                 next_owner_mask: 0,
                 notecard_item_id: uuid::Uuid::from_u128(0xCA5E),
-                object_id: uuid::Uuid::nil(),
+                object_id: ObjectKey::from(uuid::Uuid::nil()),
                 item_ids: vec![uuid::Uuid::from_u128(0x1)],
             },
             now,
@@ -1134,7 +1134,7 @@ mod test {
             ScopedParcelId::new(circuit, RegionLocalParcelId(7)),
             ParcelReturnType::OTHER,
             &[uuid::Uuid::from_u128(0x99)],
-            &[uuid::Uuid::from_u128(0xAB)],
+            &[ObjectKey::from(uuid::Uuid::from_u128(0xAB))],
             now,
         )?;
         client.request_parcel_info(uuid::Uuid::from_u128(0x00C0_FFEE), now)?;
@@ -1324,7 +1324,7 @@ mod test {
         )?;
         sim.send_telehub_info(
             &TelehubInfo {
-                object_id: uuid::Uuid::from_u128(0x7E1E),
+                object_id: ObjectKey::from(uuid::Uuid::from_u128(0x7E1E)),
                 object_name: "Welcome Hub".to_owned(),
                 position: sl_types::lsl::Vector {
                     x: 128.0,
@@ -1377,7 +1377,7 @@ mod test {
         drain_server(&mut sim);
         drain_client(&mut client);
 
-        let object_id = uuid::Uuid::from_u128(0x0B1E);
+        let object_id = ObjectKey::from(uuid::Uuid::from_u128(0x0B1E));
         let item_id = uuid::Uuid::from_u128(0x17E3);
 
         // Client -> sim: the three task-script control messages surface.
@@ -1784,7 +1784,7 @@ mod test {
         let (mut client, mut sim) = setup(now)?;
         drain_client(&mut client);
 
-        let object = uuid::Uuid::from_u128(0xCA3_1001);
+        let object = ObjectKey::from(uuid::Uuid::from_u128(0xCA3_1001));
         // Sim -> client: a script takes controls, sets follow-cam, then clears it.
         sim.send_script_control_change(
             &[ScriptControl {
@@ -1965,7 +1965,7 @@ mod test {
         let (mut client, mut sim) = setup(now)?;
         drain_client(&mut client);
 
-        let task = uuid::Uuid::from_u128(0x70B_5C0E);
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x70B_5C0E));
         sim.send_land_stat_reply(
             LandStatReportType::TopScripts,
             0,
@@ -2479,7 +2479,7 @@ mod test {
             },
             check_flags: 0,
             screenshot_id: uuid::Uuid::nil(),
-            object_id: uuid::Uuid::from_u128(0x22),
+            object_id: ObjectKey::from(uuid::Uuid::from_u128(0x22)),
             abuser_id: uuid::Uuid::from_u128(0x33),
             abuse_region_name: "TestRegion".to_owned(),
             abuse_region_id: uuid::Uuid::nil(),

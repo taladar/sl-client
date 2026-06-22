@@ -97,7 +97,9 @@ fn gltf_override_envelope() -> Result<(), String> {
 /// `ModifyMaterialParams` serializes object id, side and the opaque JSON.
 #[test]
 fn modify_material_params_body() {
-    let object_id = Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10);
+    let object_id =
+        sl_types::key::ObjectKey::from(Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10));
+    let object_raw = object_id.uuid();
     let asset_id = Uuid::from_u128(0x1111_2222_3333_4444_5555_6666_7777_8888);
     let body = build_modify_material_params_request(&[MaterialOverrideUpdate {
         object_id,
@@ -105,7 +107,7 @@ fn modify_material_params_body() {
         gltf_json: Some("{\"a\":1}".to_owned()),
         asset_id: Some(asset_id),
     }]);
-    assert!(body.contains(&format!("<uuid>{object_id}</uuid>")));
+    assert!(body.contains(&format!("<uuid>{object_raw}</uuid>")));
     assert!(body.contains("<key>side</key><integer>-1</integer>"));
     assert!(body.contains("<key>gltf_json</key><string>{&quot;a&quot;:1}</string>"));
     assert!(body.contains(&format!("<key>asset_id</key><uuid>{asset_id}</uuid>")));
@@ -132,13 +134,17 @@ fn gltf_override_round_trip() -> Result<(), String> {
 fn modify_material_params_round_trip() -> Result<(), String> {
     let updates = vec![
         MaterialOverrideUpdate {
-            object_id: Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10),
+            object_id: sl_types::key::ObjectKey::from(Uuid::from_u128(
+                0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10,
+            )),
             side: -1,
             gltf_json: Some("{\"a\":1}".to_owned()),
             asset_id: Some(Uuid::from_u128(0x1111_2222_3333_4444_5555_6666_7777_8888)),
         },
         MaterialOverrideUpdate {
-            object_id: Uuid::from_u128(0x00ab_cdef_0011_2233_4455_6677_8899_aabb),
+            object_id: sl_types::key::ObjectKey::from(Uuid::from_u128(
+                0x00ab_cdef_0011_2233_4455_6677_8899_aabb,
+            )),
             side: 2,
             gltf_json: None,
             asset_id: None,
