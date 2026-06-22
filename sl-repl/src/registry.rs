@@ -4165,7 +4165,11 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::StartConference {
                     session_id: args.req_uuid(ctx, "session_id", 0)?,
-                    invitees: args.vec_uuid(ctx, "invitees", 1)?,
+                    invitees: args
+                        .vec_uuid(ctx, "invitees", 1)?
+                        .into_iter()
+                        .map(AgentKey::from)
+                        .collect(),
                     message: args.str_or(ctx, "message", 2, "")?,
                 })
             },

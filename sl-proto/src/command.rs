@@ -1973,7 +1973,7 @@ pub enum Command {
         /// A fresh, caller-chosen session id naming the conference.
         session_id: Uuid,
         /// The agents to invite.
-        invitees: Vec<Uuid>,
+        invitees: Vec<AgentKey>,
         /// The opening message.
         message: String,
     },
