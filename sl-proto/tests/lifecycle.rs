@@ -11638,7 +11638,12 @@ mod test {
         let session_id = uuid::Uuid::from_u128(0x5E51);
         let a = uuid::Uuid::from_u128(0xA1);
         let b = uuid::Uuid::from_u128(0xB2);
-        session.start_conference(session_id, &[a, b], "hello all", now)?;
+        session.start_conference(
+            session_id,
+            &[AgentKey::from(a), AgentKey::from(b)],
+            "hello all",
+            now,
+        )?;
         let sent = drain(&mut session)?;
         let block = first_im(&sent)?;
         assert_eq!(block.dialog, 16); // IM_SESSION_CONFERENCE_START

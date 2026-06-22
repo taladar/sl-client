@@ -4580,13 +4580,14 @@ impl Session {
     pub fn start_conference(
         &mut self,
         session_id: Uuid,
-        invitees: &[Uuid],
+        invitees: &[AgentKey],
         message: &str,
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
-        let bucket = pack_uuids(invitees);
-        let to_agent_id = invitees.first().copied().unwrap_or(session_id);
+        let invitee_ids: Vec<Uuid> = invitees.iter().map(AgentKey::uuid).collect();
+        let bucket = pack_uuids(&invitee_ids);
+        let to_agent_id = invitee_ids.first().copied().unwrap_or(session_id);
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
