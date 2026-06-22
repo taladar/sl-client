@@ -1,5 +1,6 @@
 //! Parcels and land management: properties, access lists, media, overlays.
 
+use sl_types::key::GroupKey;
 use sl_types::lsl::Vector;
 use sl_wire::ParcelFlags;
 use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
@@ -177,7 +178,7 @@ pub struct ParcelInfo {
     /// Whether [`owner_id`](Self::owner_id) names a group rather than an agent.
     pub is_group_owned: bool,
     /// The group the parcel is set to (nil if none).
-    pub group_id: Uuid,
+    pub group_id: GroupKey,
     /// The auction id, if the parcel is being auctioned (`0` if not).
     pub auction_id: u32,
     /// When the parcel was claimed, as a Unix timestamp (`time_t`).
@@ -621,7 +622,7 @@ pub struct ParcelUpdate {
     /// Whether to auto-scale the media to the prim face.
     pub media_auto_scale: bool,
     /// The group the parcel is set to.
-    pub group_id: Uuid,
+    pub group_id: GroupKey,
     /// The price of a parcel pass in L$.
     pub pass_price: i32,
     /// How many hours a parcel pass lasts.
@@ -652,7 +653,7 @@ impl Default for ParcelUpdate {
             media_url: String::new(),
             media_id: Uuid::nil(),
             media_auto_scale: false,
-            group_id: Uuid::nil(),
+            group_id: GroupKey::from(Uuid::nil()),
             pass_price: 0,
             pass_hours: 0.0,
             category: ParcelCategory::None,

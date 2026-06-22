@@ -1357,7 +1357,7 @@ impl Client {
                         }
                         Some(Command::RequestGroupExperiences { group_id }) => {
                             if let Some(base) = caps.get(CAP_GROUP_EXPERIENCES).cloned() {
-                                let url = format!("{base}{}", group_experiences_query(group_id));
+                                let url = format!("{base}{}", group_experiences_query(group_id.uuid()));
                                 tokio::spawn(fetch_group_experiences(url, group_id, http.clone(), events.clone()));
                             }
                         }

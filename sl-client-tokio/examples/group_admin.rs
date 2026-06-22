@@ -80,8 +80,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // A tiny state machine across the role CRUD cycle. We learn the group id from
     // CreateGroupResult and the server-assigned role id from GroupRoleData.
     let mut started = false;
-    let mut group_id: Option<Uuid> = None;
-    let mut role_id: Option<Uuid> = None;
+    let mut group_id = None;
+    let mut role_id = None;
     let mut role_updated = false;
 
     while let Some(event) = event_rx.recv().await {
@@ -132,7 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .send(Command::UpdateGroupRoles {
                         group_id: created,
                         roles: vec![GroupRoleEdit {
-                            role_id: Uuid::new_v4(),
+                            role_id: Uuid::new_v4().into(),
                             name: ROLE_NAME.to_owned(),
                             description: "created by #31".to_owned(),
                             title: "Tester".to_owned(),

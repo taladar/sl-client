@@ -1,7 +1,40 @@
 //! Groups: membership, roles, notices, and management.
 
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, GroupKey};
 use uuid::Uuid;
+
+/// A Second Life group *role* id — the UUID that identifies one role within a
+/// group (e.g. the "Owners" role, or the nil-keyed default "Everyone" role), as
+/// distinct from the group's own [`GroupKey`]. A group carries a set of named
+/// roles, each with its own id, powers bitfield, title, and member list.
+///
+/// This is a client-only newtype (it lives in `sl-proto`, not `sl-types`):
+/// group-role ids never surface in the user-facing tooling the shared
+/// `sl-types` crate serves, only in the LLUDP group-management messages. Its
+/// shape mirrors the `sl-types` `*Key` newtypes — `from(uuid)` to construct at
+/// the codec boundary, [`uuid`](Self::uuid) to extract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GroupRoleKey(pub Uuid);
+
+impl GroupRoleKey {
+    /// The wrapped raw UUID.
+    #[must_use]
+    pub const fn uuid(&self) -> Uuid {
+        self.0
+    }
+}
+
+impl From<Uuid> for GroupRoleKey {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl std::fmt::Display for GroupRoleKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 /// The agent's active group and title, parsed from `AgentDataUpdate` (pushed on
 /// login and whenever the active group changes via
@@ -17,7 +50,7 @@ pub struct ActiveGroup {
     /// The active group's title shown over the avatar (empty if no active group).
     pub group_title: String,
     /// The active group's id (nil if no active group).
-    pub active_group_id: Uuid,
+    pub active_group_id: GroupKey,
     /// The agent's powers bitfield within the active group.
     pub group_powers: u64,
     /// The active group's name (empty if no active group).
@@ -28,7 +61,7 @@ pub struct ActiveGroup {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupMembership {
     /// The group id.
-    pub group_id: Uuid,
+    pub group_id: GroupKey,
     /// The agent's powers bitfield in the group.
     pub group_powers: u64,
     /// Whether the agent accepts notices from the group.
@@ -62,7 +95,7 @@ pub struct GroupMember {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupRole {
     /// The role id (nil for the "Everyone" default role).
-    pub role_id: Uuid,
+    pub role_id: GroupRoleKey,
     /// The role name.
     pub name: String,
     /// The role title shown over members holding it.
@@ -79,7 +112,7 @@ pub struct GroupRole {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GroupRoleMember {
     /// The role id.
-    pub role_id: Uuid,
+    pub role_id: GroupRoleKey,
     /// The member's agent id.
     pub member_id: AgentKey,
 }
@@ -90,7 +123,7 @@ pub struct GroupTitle {
     /// The title text.
     pub title: String,
     /// The role the title belongs to.
-    pub role_id: Uuid,
+    pub role_id: GroupRoleKey,
     /// Whether this is the agent's currently selected title.
     pub selected: bool,
 }
@@ -103,7 +136,7 @@ pub struct GroupTitle {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupProfile {
     /// The group id.
-    pub group_id: Uuid,
+    pub group_id: GroupKey,
     /// The group name.
     pub name: String,
     /// The group charter text.
@@ -133,7 +166,7 @@ pub struct GroupProfile {
     /// Whether the group is flagged mature.
     pub mature_publish: bool,
     /// The owner role id.
-    pub owner_role: Uuid,
+    pub owner_role: GroupRoleKey,
 }
 
 /// The parameters for creating a group via
@@ -225,7 +258,7 @@ impl GroupRoleUpdateType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupRoleEdit {
     /// The role id (a fresh id for `Create`, the existing role for the rest).
-    pub role_id: Uuid,
+    pub role_id: GroupRoleKey,
     /// The role name.
     pub name: String,
     /// The role description.
@@ -265,7 +298,7 @@ impl GroupRoleChange {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GroupRoleMemberChange {
     /// The role to add the member to or remove them from.
-    pub role_id: Uuid,
+    pub role_id: GroupRoleKey,
     /// The member's agent id.
     pub member_id: AgentKey,
     /// Whether to add or remove the member.
@@ -293,7 +326,7 @@ pub struct GroupNoticeAttachment {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupAccountSummary {
     /// The group the summary is for.
-    pub group_id: Uuid,
+    pub group_id: GroupKey,
     /// The client-chosen request id echoed from the request, for correlation.
     pub request_id: Uuid,
     /// The accounting interval length in days.
@@ -352,7 +385,7 @@ pub struct GroupAccountDetailsEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupAccountDetails {
     /// The group the detail is for.
-    pub group_id: Uuid,
+    pub group_id: GroupKey,
     /// The client-chosen request id echoed from the request, for correlation.
     pub request_id: Uuid,
     /// The accounting interval length in days.
@@ -387,7 +420,7 @@ pub struct GroupAccountTransaction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupAccountTransactions {
     /// The group the log is for.
-    pub group_id: Uuid,
+    pub group_id: GroupKey,
     /// The client-chosen request id echoed from the request, for correlation.
     pub request_id: Uuid,
     /// The accounting interval length in days.
@@ -505,4 +538,35 @@ pub mod group_powers {
     pub const NOTICES_SEND: u64 = 1 << 42;
     /// Receive group notices and view notice history.
     pub const NOTICES_RECEIVE: u64 = 1 << 43;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GroupRoleKey;
+    use pretty_assertions::assert_eq;
+    use sl_types::key::GroupKey;
+    use uuid::Uuid;
+
+    #[test]
+    fn group_role_key_round_trips_bit_identically() {
+        let raw = Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10);
+        let key = GroupRoleKey::from(raw);
+        // Wrapping then extracting must yield the exact wire bytes back.
+        assert_eq!(key.uuid(), raw);
+        // The Display rendering matches the underlying UUID.
+        assert_eq!(key.to_string(), raw.to_string());
+        // The nil "Everyone" role survives the round trip too.
+        assert_eq!(GroupRoleKey::from(Uuid::nil()).uuid(), Uuid::nil());
+    }
+
+    #[test]
+    fn group_and_role_keys_are_distinct_types() {
+        // A group id and a role id wrap the same UUID space but are different
+        // types, so a role id can never be passed where a group id is expected
+        // (this is the whole point of the sweep — enforced at compile time).
+        let raw = Uuid::from_u128(0xdead_beef);
+        let group = GroupKey::from(raw);
+        let role = GroupRoleKey::from(raw);
+        assert_eq!(group.uuid(), role.uuid());
+    }
 }

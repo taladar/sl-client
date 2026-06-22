@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, GroupKey};
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
     AgentAlertMessage, AgentAlertMessageAgentDataBlock, AgentAlertMessageAlertDataBlock,
@@ -496,7 +496,7 @@ pub enum ServerEvent {
     /// The client wants to buy in-world objects (`ObjectBuy`).
     BuyObject {
         /// The active group ([`Uuid::nil`] for none).
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The inventory folder a derezed purchase is placed in.
         category_id: Uuid,
         /// The objects to buy (each with its advertised sale type and price).
@@ -550,7 +550,7 @@ pub enum ServerEvent {
         /// The region-local ids to duplicate.
         local_ids: Vec<RegionLocalObjectId>,
         /// The active group the copies are set to ([`Uuid::nil`] for none).
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The ray's start point (region-local).
         ray_start: Vector,
         /// The ray's end point (region-local).
@@ -665,7 +665,7 @@ pub enum ServerEvent {
     /// [`SimSession::send_group_account_summary_reply`].
     RequestGroupAccountSummary {
         /// The group to summarise.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The client-chosen request id to echo back.
         request_id: Uuid,
         /// The accounting interval length in days.
@@ -678,7 +678,7 @@ pub enum ServerEvent {
     /// [`SimSession::send_group_account_details_reply`].
     RequestGroupAccountDetails {
         /// The group to detail.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The client-chosen request id to echo back.
         request_id: Uuid,
         /// The accounting interval length in days.
@@ -691,7 +691,7 @@ pub enum ServerEvent {
     /// [`SimSession::send_group_account_transactions_reply`].
     RequestGroupAccountTransactions {
         /// The group whose log to return.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The client-chosen request id to echo back.
         request_id: Uuid,
         /// The accounting interval length in days.
@@ -704,7 +704,7 @@ pub enum ServerEvent {
     /// [`SimSession::send_group_active_proposals_reply`].
     RequestGroupActiveProposals {
         /// The group to query.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The client-chosen transaction id to echo back.
         transaction_id: Uuid,
     },
@@ -713,14 +713,14 @@ pub enum ServerEvent {
     /// [`SimSession::send_group_vote_history_reply`].
     RequestGroupVoteHistory {
         /// The group to query.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The client-chosen transaction id to echo back.
         transaction_id: Uuid,
     },
     /// The client started a new group proposal (`StartGroupProposal`).
     StartGroupProposal {
         /// The group to start the proposal in.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The minimum number of votes required for the result to count.
         quorum: i32,
         /// The fraction of votes needed to pass (0.0–1.0).
@@ -736,7 +736,7 @@ pub enum ServerEvent {
         /// The proposal's id.
         proposal_id: Uuid,
         /// The group the proposal belongs to.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The vote cast (e.g. `"yes"`/`"no"`).
         vote_cast: String,
     },
@@ -1667,7 +1667,7 @@ impl SimSession {
             query_replies: results
                 .iter()
                 .map(|result| DirGroupsReplyQueryRepliesBlock {
-                    group_id: result.group_id,
+                    group_id: result.group_id.uuid(),
                     group_name: with_nul(&result.group_name),
                     members: result.members,
                     search_order: result.search_order,
@@ -2035,7 +2035,7 @@ impl SimSession {
         let message = AnyMessage::GroupAccountSummaryReply(GroupAccountSummaryReply {
             agent_data: GroupAccountSummaryReplyAgentDataBlock {
                 agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
-                group_id: summary.group_id,
+                group_id: summary.group_id.uuid(),
             },
             money_data: GroupAccountSummaryReplyMoneyDataBlock {
                 request_id: summary.request_id,
@@ -2083,7 +2083,7 @@ impl SimSession {
         let message = AnyMessage::GroupAccountDetailsReply(GroupAccountDetailsReply {
             agent_data: GroupAccountDetailsReplyAgentDataBlock {
                 agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
-                group_id: details.group_id,
+                group_id: details.group_id.uuid(),
             },
             money_data: GroupAccountDetailsReplyMoneyDataBlock {
                 request_id: details.request_id,
@@ -2123,7 +2123,7 @@ impl SimSession {
         let message = AnyMessage::GroupAccountTransactionsReply(GroupAccountTransactionsReply {
             agent_data: GroupAccountTransactionsReplyAgentDataBlock {
                 agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
-                group_id: transactions.group_id,
+                group_id: transactions.group_id.uuid(),
             },
             money_data: GroupAccountTransactionsReplyMoneyDataBlock {
                 request_id: transactions.request_id,
@@ -2157,7 +2157,7 @@ impl SimSession {
     /// the message fails to encode.
     pub fn send_group_active_proposals_reply(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         transaction_id: Uuid,
         total_num_items: u32,
         proposals: &[GroupActiveProposalItem],
@@ -2169,7 +2169,7 @@ impl SimSession {
         let message = AnyMessage::GroupActiveProposalItemReply(GroupActiveProposalItemReply {
             agent_data: GroupActiveProposalItemReplyAgentDataBlock {
                 agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
-                group_id,
+                group_id: group_id.uuid(),
             },
             transaction_data: GroupActiveProposalItemReplyTransactionDataBlock {
                 transaction_id,
@@ -2205,7 +2205,7 @@ impl SimSession {
     /// the message fails to encode.
     pub fn send_group_vote_history_reply(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         transaction_id: Uuid,
         total_num_items: u32,
         item: &GroupVoteHistoryItem,
@@ -2217,7 +2217,7 @@ impl SimSession {
         let message = AnyMessage::GroupVoteHistoryItemReply(GroupVoteHistoryItemReply {
             agent_data: GroupVoteHistoryItemReplyAgentDataBlock {
                 agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
-                group_id,
+                group_id: group_id.uuid(),
             },
             transaction_data: GroupVoteHistoryItemReplyTransactionDataBlock {
                 transaction_id,
@@ -2270,7 +2270,7 @@ impl SimSession {
                 request_flags: properties.request_flags,
                 object_id: properties.object_id,
                 owner_id: properties.owner_id,
-                group_id: properties.group_id,
+                group_id: properties.group_id.uuid(),
                 base_mask: properties.permissions.base.bits(),
                 owner_mask: properties.permissions.owner.bits(),
                 group_mask: properties.permissions.group.bits(),
@@ -2931,7 +2931,7 @@ impl SimSession {
             }
             AnyMessage::ObjectBuy(buy) => {
                 self.events.push_back(ServerEvent::BuyObject {
-                    group_id: buy.agent_data.group_id,
+                    group_id: GroupKey::from(buy.agent_data.group_id),
                     category_id: buy.agent_data.category_id,
                     objects: buy
                         .object_data
@@ -2987,7 +2987,7 @@ impl SimSession {
                         .iter()
                         .map(|item| RegionLocalObjectId(item.object_local_id))
                         .collect(),
-                    group_id: agent.group_id,
+                    group_id: GroupKey::from(agent.group_id),
                     ray_start: agent.ray_start.clone(),
                     ray_end: agent.ray_end.clone(),
                     bypass_raycast: agent.bypass_raycast,
@@ -3006,7 +3006,7 @@ impl SimSession {
                         folder_id: data.folder_id,
                         creator_id: AgentKey::from(data.creator_id),
                         owner_id: data.owner_id,
-                        group_id: data.group_id,
+                        group_id: GroupKey::from(data.group_id),
                         permissions: Permissions5 {
                             base: Permissions::from_bits(data.base_mask),
                             owner: Permissions::from_bits(data.owner_mask),
@@ -3032,7 +3032,7 @@ impl SimSession {
                 let rez_data = &rez.rez_data;
                 self.events.push_back(ServerEvent::RezObjectFromNotecard {
                     rez: NotecardRez {
-                        group_id: rez.agent_data.group_id,
+                        group_id: GroupKey::from(rez.agent_data.group_id),
                         from_task_id: rez_data.from_task_id,
                         bypass_raycast: rez_data.bypass_raycast != 0,
                         ray_start: rez_data.ray_start.clone(),
@@ -3119,7 +3119,7 @@ impl SimSession {
             AnyMessage::GroupAccountSummaryRequest(request) => {
                 self.events
                     .push_back(ServerEvent::RequestGroupAccountSummary {
-                        group_id: request.agent_data.group_id,
+                        group_id: GroupKey::from(request.agent_data.group_id),
                         request_id: request.money_data.request_id,
                         interval_days: request.money_data.interval_days,
                         current_interval: request.money_data.current_interval,
@@ -3128,7 +3128,7 @@ impl SimSession {
             AnyMessage::GroupAccountDetailsRequest(request) => {
                 self.events
                     .push_back(ServerEvent::RequestGroupAccountDetails {
-                        group_id: request.agent_data.group_id,
+                        group_id: GroupKey::from(request.agent_data.group_id),
                         request_id: request.money_data.request_id,
                         interval_days: request.money_data.interval_days,
                         current_interval: request.money_data.current_interval,
@@ -3137,7 +3137,7 @@ impl SimSession {
             AnyMessage::GroupAccountTransactionsRequest(request) => {
                 self.events
                     .push_back(ServerEvent::RequestGroupAccountTransactions {
-                        group_id: request.agent_data.group_id,
+                        group_id: GroupKey::from(request.agent_data.group_id),
                         request_id: request.money_data.request_id,
                         interval_days: request.money_data.interval_days,
                         current_interval: request.money_data.current_interval,
@@ -3146,19 +3146,19 @@ impl SimSession {
             AnyMessage::GroupActiveProposalsRequest(request) => {
                 self.events
                     .push_back(ServerEvent::RequestGroupActiveProposals {
-                        group_id: request.group_data.group_id,
+                        group_id: GroupKey::from(request.group_data.group_id),
                         transaction_id: request.transaction_data.transaction_id,
                     });
             }
             AnyMessage::GroupVoteHistoryRequest(request) => {
                 self.events.push_back(ServerEvent::RequestGroupVoteHistory {
-                    group_id: request.group_data.group_id,
+                    group_id: GroupKey::from(request.group_data.group_id),
                     transaction_id: request.transaction_data.transaction_id,
                 });
             }
             AnyMessage::StartGroupProposal(request) => {
                 self.events.push_back(ServerEvent::StartGroupProposal {
-                    group_id: request.proposal_data.group_id,
+                    group_id: GroupKey::from(request.proposal_data.group_id),
                     quorum: request.proposal_data.quorum,
                     majority: request.proposal_data.majority,
                     duration: request.proposal_data.duration,
@@ -3168,7 +3168,7 @@ impl SimSession {
             AnyMessage::GroupProposalBallot(request) => {
                 self.events.push_back(ServerEvent::GroupProposalBallot {
                     proposal_id: request.proposal_data.proposal_id,
-                    group_id: request.proposal_data.group_id,
+                    group_id: GroupKey::from(request.proposal_data.group_id),
                     vote_cast: trimmed_string(&request.proposal_data.vote_cast),
                 });
             }

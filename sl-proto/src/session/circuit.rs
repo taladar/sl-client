@@ -7,6 +7,7 @@ use super::{
     ACK_FLUSH_DELAY, Circuit, INACTIVITY_TIMEOUT, MAX_ACKS_PER_PACKET, MAX_RESEND_ATTEMPTS,
     RESEND_TIMEOUT, SeenWindow, Timers, UnackedPacket, deadline,
 };
+use crate::GroupRoleKey;
 use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
 use crate::scoped_id::CircuitId;
 use crate::types::directory::category_to_wire;
@@ -19,7 +20,7 @@ use crate::types::{
     PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate, Reliability, RestoreItem,
     RezAttachment, SaleType, TeleportFlags, Throttle, ViewerEffect, Wearable,
 };
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, GroupKey};
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::AbuseReport;
 use sl_wire::messages::{
@@ -493,7 +494,7 @@ impl Circuit {
             },
             message_block: ImprovedInstantMessageMessageBlockBlock {
                 from_group: params.from_group,
-                to_agent_id: params.to_agent_id.uuid(),
+                to_agent_id: params.to_agent_id,
                 parent_estate_id: 0,
                 region_id: Uuid::nil(),
                 position: Vector {
@@ -1016,14 +1017,14 @@ impl Circuit {
     /// (nil clears the active group).
     pub(crate) fn send_activate_group(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ActivateGroup(ActivateGroup {
             agent_data: ActivateGroupAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                group_id,
+                group_id: group_id.uuid(),
             },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -1032,7 +1033,7 @@ impl Circuit {
     /// Queues a `GroupMembersRequest` reliably for `group_id`.
     pub(crate) fn send_group_members_request(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupMembersRequest(GroupMembersRequest {
@@ -1041,7 +1042,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             group_data: GroupMembersRequestGroupDataBlock {
-                group_id,
+                group_id: group_id.uuid(),
                 request_id: Uuid::nil(),
             },
         });
@@ -1051,7 +1052,7 @@ impl Circuit {
     /// Queues a `GroupRoleDataRequest` reliably for `group_id`.
     pub(crate) fn send_group_role_data_request(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupRoleDataRequest(GroupRoleDataRequest {
@@ -1060,7 +1061,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             group_data: GroupRoleDataRequestGroupDataBlock {
-                group_id,
+                group_id: group_id.uuid(),
                 request_id: Uuid::nil(),
             },
         });
@@ -1070,7 +1071,7 @@ impl Circuit {
     /// Queues a `GroupRoleMembersRequest` reliably for `group_id`.
     pub(crate) fn send_group_role_members_request(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupRoleMembersRequest(GroupRoleMembersRequest {
@@ -1079,7 +1080,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             group_data: GroupRoleMembersRequestGroupDataBlock {
-                group_id,
+                group_id: group_id.uuid(),
                 request_id: Uuid::nil(),
             },
         });
@@ -1089,14 +1090,14 @@ impl Circuit {
     /// Queues a `GroupTitlesRequest` reliably for `group_id`.
     pub(crate) fn send_group_titles_request(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupTitlesRequest(GroupTitlesRequest {
             agent_data: GroupTitlesRequestAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                group_id,
+                group_id: group_id.uuid(),
                 request_id: Uuid::nil(),
             },
         });
@@ -1106,7 +1107,7 @@ impl Circuit {
     /// Queues a `GroupProfileRequest` reliably for `group_id`.
     pub(crate) fn send_group_profile_request(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupProfileRequest(GroupProfileRequest {
@@ -1114,7 +1115,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            group_data: GroupProfileRequestGroupDataBlock { group_id },
+            group_data: GroupProfileRequestGroupDataBlock {
+                group_id: group_id.uuid(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -1122,7 +1125,7 @@ impl Circuit {
     /// Queues a `GroupNoticesListRequest` reliably for `group_id`.
     pub(crate) fn send_group_notices_list_request(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupNoticesListRequest(GroupNoticesListRequest {
@@ -1130,7 +1133,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            data: GroupNoticesListRequestDataBlock { group_id },
+            data: GroupNoticesListRequestDataBlock {
+                group_id: group_id.uuid(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -1181,7 +1186,7 @@ impl Circuit {
     /// Queues a `JoinGroupRequest` reliably for `group_id`.
     pub(crate) fn send_join_group_request(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::JoinGroupRequest(JoinGroupRequest {
@@ -1189,7 +1194,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            group_data: JoinGroupRequestGroupDataBlock { group_id },
+            group_data: JoinGroupRequestGroupDataBlock {
+                group_id: group_id.uuid(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -1197,7 +1204,7 @@ impl Circuit {
     /// Queues a `LeaveGroupRequest` reliably for `group_id`.
     pub(crate) fn send_leave_group_request(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::LeaveGroupRequest(LeaveGroupRequest {
@@ -1205,7 +1212,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            group_data: LeaveGroupRequestGroupDataBlock { group_id },
+            group_data: LeaveGroupRequestGroupDataBlock {
+                group_id: group_id.uuid(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -1215,8 +1224,8 @@ impl Circuit {
     /// to `group_id`.
     pub(crate) fn send_invite_group_request(
         &mut self,
-        group_id: Uuid,
-        invitees: &[(Uuid, Uuid)],
+        group_id: GroupKey,
+        invitees: &[(AgentKey, GroupRoleKey)],
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::InviteGroupRequest(InviteGroupRequest {
@@ -1224,12 +1233,14 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            group_data: InviteGroupRequestGroupDataBlock { group_id },
+            group_data: InviteGroupRequestGroupDataBlock {
+                group_id: group_id.uuid(),
+            },
             invite_data: invitees
                 .iter()
                 .map(|(invitee_id, role_id)| InviteGroupRequestInviteDataBlock {
-                    invitee_id: *invitee_id,
-                    role_id: *role_id,
+                    invitee_id: invitee_id.uuid(),
+                    role_id: role_id.uuid(),
                 })
                 .collect(),
         });
@@ -1239,7 +1250,7 @@ impl Circuit {
     /// Queues a `SetGroupAcceptNotices` reliably for `group_id`.
     pub(crate) fn send_set_group_accept_notices(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         accept_notices: bool,
         list_in_profile: bool,
         now: Instant,
@@ -1250,7 +1261,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             data: SetGroupAcceptNoticesDataBlock {
-                group_id,
+                group_id: group_id.uuid(),
                 accept_notices,
             },
             new_data: SetGroupAcceptNoticesNewDataBlock { list_in_profile },
@@ -1261,7 +1272,7 @@ impl Circuit {
     /// Queues a `SetGroupContribution` reliably for `group_id`.
     pub(crate) fn send_set_group_contribution(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         contribution: i32,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -1271,7 +1282,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             data: SetGroupContributionDataBlock {
-                group_id,
+                group_id: group_id.uuid(),
                 contribution,
             },
         });
@@ -1282,7 +1293,7 @@ impl Circuit {
     /// role create/update/delete in `roles`.
     pub(crate) fn send_group_role_update(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         roles: &[GroupRoleEdit],
         now: Instant,
     ) -> Result<(), WireError> {
@@ -1290,12 +1301,12 @@ impl Circuit {
             agent_data: GroupRoleUpdateAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                group_id,
+                group_id: group_id.uuid(),
             },
             role_data: roles
                 .iter()
                 .map(|role| GroupRoleUpdateRoleDataBlock {
-                    role_id: role.role_id,
+                    role_id: role.role_id.uuid(),
                     name: with_nul(&role.name),
                     description: with_nul(&role.description),
                     title: with_nul(&role.title),
@@ -1311,7 +1322,7 @@ impl Circuit {
     /// member↔role add/remove in `changes`.
     pub(crate) fn send_group_role_changes(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         changes: &[GroupRoleMemberChange],
         now: Instant,
     ) -> Result<(), WireError> {
@@ -1319,12 +1330,12 @@ impl Circuit {
             agent_data: GroupRoleChangesAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                group_id,
+                group_id: group_id.uuid(),
             },
             role_change: changes
                 .iter()
                 .map(|change| GroupRoleChangesRoleChangeBlock {
-                    role_id: change.role_id,
+                    role_id: change.role_id.uuid(),
                     member_id: change.member_id.uuid(),
                     change: change.change.to_u32(),
                 })
@@ -1337,7 +1348,7 @@ impl Circuit {
     /// `member_ids` from `group_id`.
     pub(crate) fn send_eject_group_members(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         member_ids: &[AgentKey],
         now: Instant,
     ) -> Result<(), WireError> {
@@ -1346,7 +1357,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            group_data: EjectGroupMemberRequestGroupDataBlock { group_id },
+            group_data: EjectGroupMemberRequestGroupDataBlock {
+                group_id: group_id.uuid(),
+            },
             eject_data: member_ids
                 .iter()
                 .map(|ejectee_id| EjectGroupMemberRequestEjectDataBlock {
@@ -1522,7 +1535,7 @@ impl Circuit {
     /// accounting interval selected by `interval_days`/`current_interval`.
     pub(crate) fn send_group_account_summary_request(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         request_id: Uuid,
         interval_days: i32,
         current_interval: i32,
@@ -1532,7 +1545,7 @@ impl Circuit {
             agent_data: GroupAccountSummaryRequestAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                group_id,
+                group_id: group_id.uuid(),
             },
             money_data: GroupAccountSummaryRequestMoneyDataBlock {
                 request_id,
@@ -1546,7 +1559,7 @@ impl Circuit {
     /// Queues a `GroupAccountDetailsRequest` reliably for `group_id`.
     pub(crate) fn send_group_account_details_request(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         request_id: Uuid,
         interval_days: i32,
         current_interval: i32,
@@ -1556,7 +1569,7 @@ impl Circuit {
             agent_data: GroupAccountDetailsRequestAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                group_id,
+                group_id: group_id.uuid(),
             },
             money_data: GroupAccountDetailsRequestMoneyDataBlock {
                 request_id,
@@ -1570,7 +1583,7 @@ impl Circuit {
     /// Queues a `GroupAccountTransactionsRequest` reliably for `group_id`.
     pub(crate) fn send_group_account_transactions_request(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         request_id: Uuid,
         interval_days: i32,
         current_interval: i32,
@@ -1581,7 +1594,7 @@ impl Circuit {
                 agent_data: GroupAccountTransactionsRequestAgentDataBlock {
                     agent_id: self.agent_id.uuid(),
                     session_id: self.session_id,
-                    group_id,
+                    group_id: group_id.uuid(),
                 },
                 money_data: GroupAccountTransactionsRequestMoneyDataBlock {
                     request_id,
@@ -1595,7 +1608,7 @@ impl Circuit {
     /// Queues a `GroupActiveProposalsRequest` reliably for `group_id`.
     pub(crate) fn send_group_active_proposals_request(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         transaction_id: Uuid,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -1604,7 +1617,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            group_data: GroupActiveProposalsRequestGroupDataBlock { group_id },
+            group_data: GroupActiveProposalsRequestGroupDataBlock {
+                group_id: group_id.uuid(),
+            },
             transaction_data: GroupActiveProposalsRequestTransactionDataBlock { transaction_id },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -1613,7 +1628,7 @@ impl Circuit {
     /// Queues a `GroupVoteHistoryRequest` reliably for `group_id`.
     pub(crate) fn send_group_vote_history_request(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         transaction_id: Uuid,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -1622,7 +1637,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            group_data: GroupVoteHistoryRequestGroupDataBlock { group_id },
+            group_data: GroupVoteHistoryRequestGroupDataBlock {
+                group_id: group_id.uuid(),
+            },
             transaction_data: GroupVoteHistoryRequestTransactionDataBlock { transaction_id },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -1632,7 +1649,7 @@ impl Circuit {
     /// `group_id`).
     pub(crate) fn send_start_group_proposal(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         quorum: i32,
         majority: f32,
         duration: i32,
@@ -1645,7 +1662,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             proposal_data: StartGroupProposalProposalDataBlock {
-                group_id,
+                group_id: group_id.uuid(),
                 quorum,
                 majority,
                 duration,
@@ -1660,7 +1677,7 @@ impl Circuit {
     pub(crate) fn send_group_proposal_ballot(
         &mut self,
         proposal_id: Uuid,
-        group_id: Uuid,
+        group_id: GroupKey,
         vote_cast: &str,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -1671,7 +1688,7 @@ impl Circuit {
             },
             proposal_data: GroupProposalBallotProposalDataBlock {
                 proposal_id,
-                group_id,
+                group_id: group_id.uuid(),
                 vote_cast: with_nul(vote_cast),
             },
         });
@@ -1683,7 +1700,7 @@ impl Circuit {
     /// start/send/leave.
     pub(crate) fn send_group_session_im(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         dialog: ImDialog,
         message: &str,
         from_name: &str,
@@ -1696,7 +1713,7 @@ impl Circuit {
             },
             message_block: ImprovedInstantMessageMessageBlockBlock {
                 from_group: false,
-                to_agent_id: group_id,
+                to_agent_id: group_id.uuid(),
                 parent_estate_id: 0,
                 region_id: Uuid::nil(),
                 position: Vector {
@@ -1706,7 +1723,7 @@ impl Circuit {
                 },
                 offline: 0,
                 dialog: dialog.to_u8(),
-                id: group_id,
+                id: group_id.uuid(),
                 timestamp: 0,
                 from_agent_name: with_nul(from_name),
                 message: with_nul(message),
@@ -2714,7 +2731,7 @@ impl Circuit {
                 callback_id: callback_id.get(),
                 creator_id: item.creator_id.uuid(),
                 owner_id: item.owner_id,
-                group_id: item.group_id,
+                group_id: item.group_id.uuid(),
                 base_mask: item.permissions.base.bits(),
                 owner_mask: item.permissions.owner.bits(),
                 group_mask: item.permissions.group.bits(),
@@ -3017,7 +3034,7 @@ impl Circuit {
                 media_url: with_nul(&update.media_url),
                 media_id: update.media_id,
                 media_auto_scale: u8::from(update.media_auto_scale),
-                group_id: update.group_id,
+                group_id: update.group_id.uuid(),
                 pass_price: update.pass_price,
                 pass_hours: update.pass_hours,
                 category: update.category.to_u8(),
@@ -3122,7 +3139,7 @@ impl Circuit {
         local_id: RegionLocalParcelId,
         price: i32,
         area: i32,
-        group_id: Uuid,
+        group_id: GroupKey,
         is_group_owned: bool,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -3132,7 +3149,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             data: ParcelBuyDataBlock {
-                group_id,
+                group_id: group_id.uuid(),
                 is_group_owned,
                 remove_contribution: false,
                 local_id: local_id.0,
@@ -3204,7 +3221,7 @@ impl Circuit {
     pub(crate) fn send_parcel_deed_to_group(
         &mut self,
         local_id: RegionLocalParcelId,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelDeedToGroup(ParcelDeedToGroup {
@@ -3213,7 +3230,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             data: ParcelDeedToGroupDataBlock {
-                group_id,
+                group_id: group_id.uuid(),
                 local_id: local_id.0,
             },
         });
@@ -3807,14 +3824,14 @@ impl Circuit {
     pub(crate) fn send_object_add(
         &mut self,
         shape: &PrimShape,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectAdd(ObjectAdd {
             agent_data: ObjectAddAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                group_id,
+                group_id: group_id.uuid(),
             },
             object_data: ObjectAddObjectDataBlock {
                 p_code: shape.pcode,
@@ -3858,14 +3875,14 @@ impl Circuit {
         &mut self,
         local_ids: &[RegionLocalObjectId],
         offset: Vector,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDuplicate(ObjectDuplicate {
             agent_data: ObjectDuplicateAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                group_id,
+                group_id: group_id.uuid(),
             },
             shared_data: ObjectDuplicateSharedDataBlock {
                 offset,
@@ -3910,7 +3927,7 @@ impl Circuit {
         destination: DeRezDestination,
         destination_id: Uuid,
         transaction_id: Uuid,
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::DeRezObject(DeRezObject {
@@ -3919,7 +3936,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             agent_block: DeRezObjectAgentBlockBlock {
-                group_id,
+                group_id: group_id.uuid(),
                 destination: destination.to_code(),
                 destination_id,
                 transaction_id,
@@ -4044,14 +4061,14 @@ impl Circuit {
     pub(crate) fn send_object_group(
         &mut self,
         local_ids: &[RegionLocalObjectId],
-        group_id: Uuid,
+        group_id: GroupKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectGroup(ObjectGroup {
             agent_data: ObjectGroupAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                group_id,
+                group_id: group_id.uuid(),
             },
             object_data: local_ids
                 .iter()
@@ -4199,7 +4216,7 @@ impl Circuit {
     /// Queues an `ObjectBuy` reliably (purchase `objects` into `category_id`).
     pub(crate) fn send_object_buy(
         &mut self,
-        group_id: Uuid,
+        group_id: GroupKey,
         category_id: Uuid,
         objects: &[ObjectBuyItem],
         now: Instant,
@@ -4208,7 +4225,7 @@ impl Circuit {
             agent_data: ObjectBuyAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                group_id,
+                group_id: group_id.uuid(),
                 category_id,
             },
             object_data: objects
@@ -4395,7 +4412,7 @@ impl Circuit {
     pub(crate) fn send_object_duplicate_on_ray(
         &mut self,
         local_ids: &[RegionLocalObjectId],
-        group_id: Uuid,
+        group_id: GroupKey,
         ray_start: Vector,
         ray_end: Vector,
         bypass_raycast: bool,
@@ -4410,7 +4427,7 @@ impl Circuit {
             agent_data: ObjectDuplicateOnRayAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                group_id,
+                group_id: group_id.uuid(),
                 ray_start,
                 ray_end,
                 bypass_raycast,
@@ -4446,7 +4463,7 @@ impl Circuit {
                 folder_id: item.folder_id,
                 creator_id: item.creator_id.uuid(),
                 owner_id: item.owner_id,
-                group_id: item.group_id,
+                group_id: item.group_id.uuid(),
                 base_mask: item.permissions.base.bits(),
                 owner_mask: item.permissions.owner.bits(),
                 group_mask: item.permissions.group.bits(),
@@ -4479,7 +4496,7 @@ impl Circuit {
             agent_data: RezObjectFromNotecardAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                group_id: rez.group_id,
+                group_id: rez.group_id.uuid(),
             },
             rez_data: RezObjectFromNotecardRezDataBlock {
                 from_task_id: rez.from_task_id,

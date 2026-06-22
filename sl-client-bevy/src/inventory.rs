@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::{
-    CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA, CAP_UPDATE_AVATAR_APPEARANCE, Llsd, Uuid,
+    CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA, CAP_UPDATE_AVATAR_APPEARANCE, GroupKey, Llsd, Uuid,
     build_fetch_inventory_request, build_group_member_data_request,
     build_update_avatar_appearance_request, parse_llsd_xml,
 };
@@ -47,7 +47,7 @@ pub(crate) fn run_inventory_fetch(
 /// decode into [`SlSessionEvent::GroupMembers`].
 pub(crate) fn run_group_members_fetch(
     cap_url: &str,
-    group_id: Uuid,
+    group_id: GroupKey,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
     let Ok(http) = ReqwestBlockingClient::builder()
@@ -56,7 +56,7 @@ pub(crate) fn run_group_members_fetch(
     else {
         return;
     };
-    let body = build_group_member_data_request(group_id);
+    let body = build_group_member_data_request(group_id.uuid());
     let Ok(response) = http
         .post(cap_url)
         .header("Content-Type", "application/llsd+xml")

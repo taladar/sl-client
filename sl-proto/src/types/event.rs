@@ -20,7 +20,7 @@ use super::{
     ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload,
     TelehubInfo, TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
 };
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, GroupKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::AgentPreferences;
@@ -512,7 +512,7 @@ pub enum Event {
     /// [`Session::request_group_members`](crate::Session::request_group_members).
     GroupMembers {
         /// The group whose members these are.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The request id echoed from the request.
         request_id: Uuid,
         /// The total member count the simulator reports.
@@ -524,7 +524,7 @@ pub enum Event {
     /// [`Session::request_group_roles`](crate::Session::request_group_roles).
     GroupRoleData {
         /// The group whose roles these are.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The request id echoed from the request.
         request_id: Uuid,
         /// The total role count the simulator reports across all packets of this
@@ -538,7 +538,7 @@ pub enum Event {
     /// [`Session::request_group_role_members`](crate::Session::request_group_role_members).
     GroupRoleMembers {
         /// The group whose pairings these are.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The request id echoed from the request.
         request_id: Uuid,
         /// The total role↔member pair count the simulator reports across all
@@ -552,7 +552,7 @@ pub enum Event {
     /// to [`Session::request_group_titles`](crate::Session::request_group_titles).
     GroupTitles {
         /// The group whose titles these are.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The request id echoed from the request.
         request_id: Uuid,
         /// The titles.
@@ -565,7 +565,7 @@ pub enum Event {
     /// [`Session::request_group_notices`](crate::Session::request_group_notices).
     GroupNotices {
         /// The group whose notices these are.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The notice headers.
         notices: Vec<GroupNotice>,
     },
@@ -583,7 +583,7 @@ pub enum Event {
     /// [`Command::RequestGroupActiveProposals`](crate::Command::RequestGroupActiveProposals).
     GroupActiveProposals {
         /// The group the proposals belong to.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The request's transaction id, echoed for correlation.
         transaction_id: Uuid,
         /// The total number of active proposals in the reply set.
@@ -596,7 +596,7 @@ pub enum Event {
     /// [`Command::RequestGroupVoteHistory`](crate::Command::RequestGroupVoteHistory).
     GroupVoteHistory {
         /// The group the proposal belongs to.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The request's transaction id, echoed for correlation.
         transaction_id: Uuid,
         /// The total number of history items in the reply set.
@@ -609,7 +609,7 @@ pub enum Event {
     /// the group id.
     GroupSessionMessage {
         /// The group (and IM session) the message belongs to.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The sender's agent id.
         from_agent_id: AgentKey,
         /// The sender's display name.
@@ -622,7 +622,7 @@ pub enum Event {
     /// `IM_SESSION_LEAVE`/`SessionDrop` dialog and `from_group` set).
     GroupSessionParticipant {
         /// The group (and IM session) id.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The participant's agent id.
         agent_id: AgentKey,
         /// `true` when the participant joined, `false` when they left.
@@ -698,7 +698,7 @@ pub enum Event {
     /// (`CreateGroupReply`).
     CreateGroupResult {
         /// The new group's id (nil on failure).
-        group_id: Uuid,
+        group_id: GroupKey,
         /// Whether creation succeeded.
         success: bool,
         /// The grid's human-readable result message.
@@ -708,7 +708,7 @@ pub enum Event {
     /// (`JoinGroupReply`).
     JoinGroupResult {
         /// The group joined.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// Whether the join succeeded.
         success: bool,
     },
@@ -716,7 +716,7 @@ pub enum Event {
     /// (`LeaveGroupReply`).
     LeaveGroupResult {
         /// The group left.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// Whether the leave succeeded.
         success: bool,
     },
@@ -724,14 +724,14 @@ pub enum Event {
     /// ejection, or the group being dissolved.
     DroppedFromGroup {
         /// The group the agent is no longer in.
-        group_id: Uuid,
+        group_id: GroupKey,
     },
     /// The result of an
     /// [`Session::eject_group_members`](crate::Session::eject_group_members)
     /// (`EjectGroupMemberReply`).
     EjectGroupMemberResult {
         /// The group a member was ejected from.
-        group_id: Uuid,
+        group_id: GroupKey,
         /// Whether the ejection succeeded.
         success: bool,
     },
@@ -973,7 +973,7 @@ pub enum Event {
     GroupExperiences {
         /// The group the experiences belong to (the queried id, echoed by the
         /// runtime since the cap reply does not carry it).
-        group_id: Uuid,
+        group_id: GroupKey,
         /// The experiences the group owns.
         experience_ids: Vec<Uuid>,
     },

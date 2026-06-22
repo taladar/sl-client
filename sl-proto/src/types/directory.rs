@@ -12,7 +12,7 @@
 //! directory) lists an agent's or group's land holdings.
 
 use crate::types::ParcelCategory;
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, GroupKey};
 use uuid::Uuid;
 
 /// The directory-query flags (`DFQ_*`), shared by every `Dir*Query` and
@@ -187,7 +187,7 @@ pub struct DirPeopleResult {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DirGroupResult {
     /// The matched group.
-    pub group_id: Uuid,
+    pub group_id: GroupKey,
     /// The group's name.
     pub group_name: String,
     /// The group's member count.

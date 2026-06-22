@@ -67,10 +67,10 @@ pub use types::{
     GestureActivation, GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
     GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupMember,
     GroupMembership, GroupName, GroupNotice, GroupNoticeAttachment, GroupProfile, GroupRole,
-    GroupRoleChange, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType,
-    GroupTitle, GroupVote, GroupVoteHistoryItem, ImDialog, ImageCodec, InstantMessage,
-    InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer, InventoryType, Kilobits,
-    LandSearchType, LandStatItem, LandStatReportType, LandingType, LightData, LightImage,
+    GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange,
+    GroupRoleUpdateType, GroupTitle, GroupVote, GroupVoteHistoryItem, ImDialog, ImageCodec,
+    InstantMessage, InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer, InventoryType,
+    Kilobits, LandSearchType, LandStatItem, LandStatReportType, LandingType, LightData, LightImage,
     LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, LookAtType, MapItem, MapItemType,
     MapLayer, MapRegionInfo, MapRequestFlags, Material, Maturity, MeanCollision, MeanCollisionType,
     MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags,
@@ -164,5 +164,5 @@ pub use sl_wire::{
 // Re-export the vector and rotation types used by the teleport and movement APIs.
 pub use sl_types::lsl::{Rotation, Vector};
 // Re-export the L$ amount type used by the money balance/transfer APIs.
-pub use sl_types::key::{AgentKey, Key};
+pub use sl_types::key::{AgentKey, GroupKey, Key};
 pub use sl_types::money::LindenAmount;

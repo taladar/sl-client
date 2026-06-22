@@ -19,6 +19,8 @@ use std::collections::BTreeMap;
 
 use sl_proto::AgentKey;
 use sl_proto::CircuitId;
+use sl_proto::GroupKey;
+use sl_proto::GroupRoleKey;
 use sl_proto::{
     AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentMode, AttachmentPoint,
     Camera, ChatType, ClassifiedUpdate, Command, ControlFlags, CreateGroupParams, DeRezDestination,
@@ -1002,7 +1004,7 @@ fn build_inventory_item(args: &Args, ctx: &dyn ReplContext) -> Result<InventoryI
         owner_id: args.uuid_or_nil(ctx, "owner_id", 11)?,
         last_owner_id: args.uuid_or_nil(ctx, "last_owner_id", 12)?,
         creator_id: AgentKey::from(args.uuid_or_nil(ctx, "creator_id", 13)?),
-        group_id: args.uuid_or_nil(ctx, "group_id", 14)?,
+        group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 14)?),
         group_owned: args.bool_or(ctx, "group_owned", 15, false)?,
         permissions: Permissions5 {
             base: Permissions::from_bits(args.parse_or(ctx, "base_mask", 16, "u32", 0)?),
@@ -1032,7 +1034,7 @@ fn build_parcel_update(args: &Args, ctx: &dyn ReplContext) -> Result<ParcelUpdat
         media_url: args.str_or(ctx, "media_url", 6, "")?,
         media_id: args.uuid_or_nil(ctx, "media_id", 7)?,
         media_auto_scale: args.bool_or(ctx, "media_auto_scale", 8, false)?,
-        group_id: args.uuid_or_nil(ctx, "group_id", 9)?,
+        group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 9)?),
         pass_price: args.parse_or(ctx, "pass_price", 10, "i32", 0)?,
         pass_hours: args.parse_or(ctx, "pass_hours", 11, "f32", 0.0)?,
         category: ParcelCategory::from_u8(args.parse_or(ctx, "category", 12, "u8", 0)?),
@@ -1793,72 +1795,72 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "activate_group",
             usage: "[group_id]",
             build: |args, ctx| {
-                Ok(Command::ActivateGroup(
+                Ok(Command::ActivateGroup(GroupKey::from(
                     args.uuid_or_nil(ctx, "group_id", 0)?,
-                ))
+                )))
             },
         },
         CommandSpec {
             name: "request_group_members",
             usage: "<group_id>",
             build: |args, ctx| {
-                Ok(Command::RequestGroupMembers(
+                Ok(Command::RequestGroupMembers(GroupKey::from(
                     args.req_uuid(ctx, "group_id", 0)?,
-                ))
+                )))
             },
         },
         CommandSpec {
             name: "fetch_group_members",
             usage: "<group_id>",
             build: |args, ctx| {
-                Ok(Command::FetchGroupMembers(
+                Ok(Command::FetchGroupMembers(GroupKey::from(
                     args.req_uuid(ctx, "group_id", 0)?,
-                ))
+                )))
             },
         },
         CommandSpec {
             name: "request_group_roles",
             usage: "<group_id>",
             build: |args, ctx| {
-                Ok(Command::RequestGroupRoles(
+                Ok(Command::RequestGroupRoles(GroupKey::from(
                     args.req_uuid(ctx, "group_id", 0)?,
-                ))
+                )))
             },
         },
         CommandSpec {
             name: "request_group_role_members",
             usage: "<group_id>",
             build: |args, ctx| {
-                Ok(Command::RequestGroupRoleMembers(
+                Ok(Command::RequestGroupRoleMembers(GroupKey::from(
                     args.req_uuid(ctx, "group_id", 0)?,
-                ))
+                )))
             },
         },
         CommandSpec {
             name: "request_group_titles",
             usage: "<group_id>",
             build: |args, ctx| {
-                Ok(Command::RequestGroupTitles(
+                Ok(Command::RequestGroupTitles(GroupKey::from(
                     args.req_uuid(ctx, "group_id", 0)?,
-                ))
+                )))
             },
         },
         CommandSpec {
             name: "request_group_profile",
             usage: "<group_id>",
             build: |args, ctx| {
-                Ok(Command::RequestGroupProfile(
+                Ok(Command::RequestGroupProfile(GroupKey::from(
                     args.req_uuid(ctx, "group_id", 0)?,
-                ))
+                )))
             },
         },
         CommandSpec {
             name: "request_group_notices",
             usage: "<group_id>",
             build: |args, ctx| {
-                Ok(Command::RequestGroupNotices(
+                Ok(Command::RequestGroupNotices(GroupKey::from(
                     args.req_uuid(ctx, "group_id", 0)?,
-                ))
+                )))
             },
         },
         CommandSpec {
@@ -1880,12 +1882,20 @@ fn all_specs() -> Vec<CommandSpec> {
         CommandSpec {
             name: "join_group",
             usage: "<group_id>",
-            build: |args, ctx| Ok(Command::JoinGroup(args.req_uuid(ctx, "group_id", 0)?)),
+            build: |args, ctx| {
+                Ok(Command::JoinGroup(GroupKey::from(
+                    args.req_uuid(ctx, "group_id", 0)?,
+                )))
+            },
         },
         CommandSpec {
             name: "leave_group",
             usage: "<group_id>",
-            build: |args, ctx| Ok(Command::LeaveGroup(args.req_uuid(ctx, "group_id", 0)?)),
+            build: |args, ctx| {
+                Ok(Command::LeaveGroup(GroupKey::from(
+                    args.req_uuid(ctx, "group_id", 0)?,
+                )))
+            },
         },
         CommandSpec {
             name: "invite_to_group",
@@ -1899,10 +1909,10 @@ fn all_specs() -> Vec<CommandSpec> {
                         Some(value) => args::literal_uuid("invitees", value)?,
                         None => Uuid::nil(),
                     };
-                    invitees.push((invitee, role));
+                    invitees.push((AgentKey::from(invitee), GroupRoleKey::from(role)));
                 }
                 Ok(Command::InviteToGroup {
-                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
                     invitees,
                 })
             },
@@ -1912,7 +1922,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<group_id> <accept_notices> <list_in_profile>",
             build: |args, ctx| {
                 Ok(Command::SetGroupAcceptNotices {
-                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
                     accept_notices: args.req_bool(ctx, "accept_notices", 1)?,
                     list_in_profile: args.bool_or(ctx, "list_in_profile", 2, true)?,
                 })
@@ -1923,7 +1933,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<group_id> <contribution>",
             build: |args, ctx| {
                 Ok(Command::SetGroupContribution {
-                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
                     contribution: args.req_parse(ctx, "contribution", 1, "i32")?,
                 })
             },
@@ -1932,9 +1942,9 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "start_group_session",
             usage: "<group_id>",
             build: |args, ctx| {
-                Ok(Command::StartGroupSession(
+                Ok(Command::StartGroupSession(GroupKey::from(
                     args.req_uuid(ctx, "group_id", 0)?,
-                ))
+                )))
             },
         },
         CommandSpec {
@@ -1942,7 +1952,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<group_id> <message>",
             build: |args, ctx| {
                 Ok(Command::SendGroupMessage {
-                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
                     message: args.req_str(ctx, "message", 1)?,
                 })
             },
@@ -1951,9 +1961,9 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "leave_group_session",
             usage: "<group_id>",
             build: |args, ctx| {
-                Ok(Command::LeaveGroupSession(
+                Ok(Command::LeaveGroupSession(GroupKey::from(
                     args.req_uuid(ctx, "group_id", 0)?,
-                ))
+                )))
             },
         },
         CommandSpec {
@@ -1965,7 +1975,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     None => sl_proto::GroupRoleUpdateType::UpdateAll,
                 };
                 let role = GroupRoleEdit {
-                    role_id: args.uuid_or_nil(ctx, "role_id", 1)?,
+                    role_id: GroupRoleKey::from(args.uuid_or_nil(ctx, "role_id", 1)?),
                     name: args.str_or(ctx, "name", 2, "")?,
                     description: args.str_or(ctx, "description", 3, "")?,
                     title: args.str_or(ctx, "title", 4, "")?,
@@ -1973,7 +1983,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     update_type,
                 };
                 Ok(Command::UpdateGroupRoles {
-                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
                     roles: vec![role],
                 })
             },
@@ -1985,10 +1995,10 @@ fn all_specs() -> Vec<CommandSpec> {
                 let mut changes = Vec::new();
                 for record in args.vec_records(ctx, "changes", 1)? {
                     changes.push(GroupRoleMemberChange {
-                        role_id: args::literal_uuid(
+                        role_id: GroupRoleKey::from(args::literal_uuid(
                             "changes",
                             record_field("changes", &record, 0)?,
-                        )?,
+                        )?),
                         member_id: AgentKey::from(args::literal_uuid(
                             "changes",
                             record_field("changes", &record, 1)?,
@@ -2000,7 +2010,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     });
                 }
                 Ok(Command::ChangeGroupRoleMembers {
-                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
                     changes,
                 })
             },
@@ -2010,7 +2020,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<group_id> <member_id,member_id,…>",
             build: |args, ctx| {
                 Ok(Command::EjectGroupMembers {
-                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
                     member_ids: args
                         .vec_uuid(ctx, "member_ids", 1)?
                         .into_iter()
@@ -2031,7 +2041,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     None => None,
                 };
                 Ok(Command::SendGroupNotice {
-                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
                     subject: args.req_str(ctx, "subject", 1)?,
                     message: args.req_str(ctx, "message", 2)?,
                     attachment,
@@ -2043,7 +2053,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<group_id> <request_id> <interval_days> <current_interval>",
             build: |args, ctx| {
                 Ok(Command::RequestGroupAccountSummary {
-                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
                     request_id: args.req_uuid(ctx, "request_id", 1)?,
                     interval_days: args.req_parse(ctx, "interval_days", 2, "i32")?,
                     current_interval: args.req_parse(ctx, "current_interval", 3, "i32")?,
@@ -2055,7 +2065,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<group_id> <request_id> <interval_days> <current_interval>",
             build: |args, ctx| {
                 Ok(Command::RequestGroupAccountDetails {
-                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
                     request_id: args.req_uuid(ctx, "request_id", 1)?,
                     interval_days: args.req_parse(ctx, "interval_days", 2, "i32")?,
                     current_interval: args.req_parse(ctx, "current_interval", 3, "i32")?,
@@ -2067,7 +2077,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<group_id> <request_id> <interval_days> <current_interval>",
             build: |args, ctx| {
                 Ok(Command::RequestGroupAccountTransactions {
-                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
                     request_id: args.req_uuid(ctx, "request_id", 1)?,
                     interval_days: args.req_parse(ctx, "interval_days", 2, "i32")?,
                     current_interval: args.req_parse(ctx, "current_interval", 3, "i32")?,
@@ -2079,7 +2089,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<group_id> <transaction_id>",
             build: |args, ctx| {
                 Ok(Command::RequestGroupActiveProposals {
-                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
                     transaction_id: args.req_uuid(ctx, "transaction_id", 1)?,
                 })
             },
@@ -2089,7 +2099,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<group_id> <transaction_id>",
             build: |args, ctx| {
                 Ok(Command::RequestGroupVoteHistory {
-                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
                     transaction_id: args.req_uuid(ctx, "transaction_id", 1)?,
                 })
             },
@@ -2099,7 +2109,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<group_id> <quorum> <majority> <duration_secs> <proposal_text>",
             build: |args, ctx| {
                 Ok(Command::StartGroupProposal {
-                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
                     quorum: args.req_parse(ctx, "quorum", 1, "i32")?,
                     majority: args.req_parse(ctx, "majority", 2, "f32")?,
                     duration: args.req_parse(ctx, "duration", 3, "i32")?,
@@ -2113,7 +2123,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::GroupProposalBallot {
                     proposal_id: args.req_uuid(ctx, "proposal_id", 0)?,
-                    group_id: args.req_uuid(ctx, "group_id", 1)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 1)?),
                     vote_cast: args.req_str(ctx, "vote_cast", 2)?,
                 })
             },
@@ -2304,7 +2314,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     local_id: scoped_parcel(ctx, args.req_parse(ctx, "local_id", 0, "i32")?)?,
                     price: args.req_parse(ctx, "price", 1, "i32")?,
                     area: args.req_parse(ctx, "area", 2, "i32")?,
-                    group_id: args.uuid_or_nil(ctx, "group_id", 3)?,
+                    group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 3)?),
                     is_group_owned: args.bool_or(ctx, "is_group_owned", 4, false)?,
                 })
             },
@@ -2338,7 +2348,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::DeedParcelToGroup {
                     local_id: scoped_parcel(ctx, args.req_parse(ctx, "local_id", 0, "i32")?)?,
-                    group_id: args.req_uuid(ctx, "group_id", 1)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 1)?),
                 })
             },
         },
@@ -2854,7 +2864,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::RezObject {
                     shape: PrimShape::cube(args.req_vector(ctx, "position", 0)?),
-                    group_id: args.uuid_or_nil(ctx, "group_id", 1)?,
+                    group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 1)?),
                 })
             },
         },
@@ -2868,7 +2878,7 @@ fn all_specs() -> Vec<CommandSpec> {
                         args.vec_parse::<u32>(ctx, "local_ids", 0, "u32")?,
                     )?,
                     offset: args.req_vector(ctx, "offset", 1)?,
-                    group_id: args.uuid_or_nil(ctx, "group_id", 2)?,
+                    group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 2)?),
                 })
             },
         },
@@ -2896,7 +2906,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     destination: enum_arg(args, ctx, "destination", 1, parse_derez_destination)?,
                     destination_id: args.uuid_or_nil(ctx, "destination_id", 2)?,
                     transaction_id: args.uuid_or_nil(ctx, "transaction_id", 3)?,
-                    group_id: args.uuid_or_nil(ctx, "group_id", 4)?,
+                    group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 4)?),
                 })
             },
         },
@@ -2969,7 +2979,7 @@ fn all_specs() -> Vec<CommandSpec> {
                         ctx,
                         args.vec_parse::<u32>(ctx, "local_ids", 0, "u32")?,
                     )?,
-                    group_id: args.req_uuid(ctx, "group_id", 1)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 1)?),
                 })
             },
         },
@@ -3047,7 +3057,7 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "buy_object",
             usage: "<group_id> <category_id> <local_id:sale_type:sale_price,…>",
             build: |args, ctx| {
-                let group_id = args.uuid_or_nil(ctx, "group_id", 0)?;
+                let group_id = GroupKey::from(args.uuid_or_nil(ctx, "group_id", 0)?);
                 let category_id = args.uuid_or_nil(ctx, "category_id", 1)?;
                 let mut objects = Vec::new();
                 for record in args.vec_records(ctx, "objects", 2)? {
@@ -3146,7 +3156,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     )?,
                     ray_start: args.req_vector(ctx, "ray_start", 1)?,
                     ray_end: args.req_vector(ctx, "ray_end", 2)?,
-                    group_id: args.uuid_or_nil(ctx, "group_id", 100)?,
+                    group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 100)?),
                     ray_target_id: args.uuid_or_nil(ctx, "ray_target_id", 101)?,
                     bypass_raycast: args.bool_or(ctx, "bypass_raycast", 102, false)?,
                     ray_end_is_intersection: args.bool_or(
@@ -3174,7 +3184,7 @@ fn all_specs() -> Vec<CommandSpec> {
                         folder_id: args.uuid_or_nil(ctx, "folder_id", 100)?,
                         creator_id: AgentKey::from(args.uuid_or_nil(ctx, "creator_id", 101)?),
                         owner_id: args.uuid_or_nil(ctx, "owner_id", 102)?,
-                        group_id: args.uuid_or_nil(ctx, "group_id", 103)?,
+                        group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 103)?),
                         permissions: Permissions5 {
                             base: Permissions::from_bits(args.parse_or(
                                 ctx,
@@ -3247,7 +3257,7 @@ fn all_specs() -> Vec<CommandSpec> {
                         ray_start: args.req_vector(ctx, "ray_start", 1)?,
                         ray_end: args.req_vector(ctx, "ray_end", 2)?,
                         item_ids: args.vec_uuid(ctx, "item_ids", 3)?,
-                        group_id: args.uuid_or_nil(ctx, "group_id", 100)?,
+                        group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 100)?),
                         from_task_id: args.uuid_or_nil(ctx, "from_task_id", 101)?,
                         object_id: args.uuid_or_nil(ctx, "object_id", 102)?,
                         ray_target_id: args.uuid_or_nil(ctx, "ray_target_id", 103)?,
@@ -4018,7 +4028,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<group_id>",
             build: |args, ctx| {
                 Ok(Command::RequestGroupExperiences {
-                    group_id: args.req_uuid(ctx, "group_id", 0)?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
                 })
             },
         },
@@ -4258,8 +4268,9 @@ mod tests {
 
     use sl_proto::{
         AbuseReportType, AgentPreferences, AssetType, ChatType, CircuitId, Command, ControlFlags,
-        FriendRights, LandStatReportType, MapItemType, MovementMode, ObjectBuyItem, RegionHandle,
-        RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId, ScopedParcelId, Uuid,
+        FriendRights, GroupKey, LandStatReportType, MapItemType, MovementMode, ObjectBuyItem,
+        RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId,
+        ScopedParcelId, Uuid,
     };
 
     use super::Registry;
@@ -4976,7 +4987,7 @@ mod tests {
                 interval_days: 60,
                 current_interval: 1,
                 ..
-            }) if group_id == Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111)
+            }) if group_id == GroupKey::from(Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111))
         ));
     }
 
@@ -4989,7 +5000,7 @@ mod tests {
                  22222222-2222-2222-2222-222222222222"
             ),
             Ok(Command::RequestGroupActiveProposals { group_id, transaction_id })
-                if group_id == Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111)
+                if group_id == GroupKey::from(Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111))
                     && transaction_id == Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222)
         ));
     }
@@ -5021,7 +5032,7 @@ mod tests {
             ),
             Ok(Command::GroupProposalBallot { proposal_id, group_id, vote_cast })
                 if proposal_id == Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111)
-                    && group_id == Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222)
+                    && group_id == GroupKey::from(Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222))
                     && vote_cast == "yes"
         ));
     }
