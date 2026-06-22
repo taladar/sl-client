@@ -1,6 +1,6 @@
 //! Parcels and land management: properties, access lists, media, overlays.
 
-use sl_types::key::{GroupKey, ObjectKey, OwnerKey};
+use sl_types::key::{GroupKey, ObjectKey, OwnerKey, TextureKey};
 use sl_types::lsl::Vector;
 use sl_wire::ParcelFlags;
 use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
@@ -235,13 +235,13 @@ pub struct ParcelInfo {
     /// the per-face media-on-a-prim system is a separate (CAPS) surface.
     pub media_url: String,
     /// The texture id the parcel media replaces while playing (nil if none).
-    pub media_id: Uuid,
+    pub media_id: TextureKey,
     /// Whether the media is auto-scaled to fit the surface it replaces.
     pub media_auto_scale: bool,
     /// The only agent allowed to buy the parcel (nil for anyone).
     pub auth_buyer_id: Uuid,
     /// The parcel's snapshot texture id (nil if none).
-    pub snapshot_id: Uuid,
+    pub snapshot_id: TextureKey,
     /// The price of a parcel pass, in L$.
     pub pass_price: i32,
     /// How many hours a parcel pass lasts.
@@ -402,7 +402,7 @@ pub struct ParcelMediaUpdateInfo {
     /// The media URL the parcel streams (e.g. an HLS/MP4/web page).
     pub media_url: String,
     /// The texture the media replaces on the parcel surface (nil if none).
-    pub media_id: Uuid,
+    pub media_id: TextureKey,
     /// Whether the media is auto-scaled to the surface.
     pub media_auto_scale: bool,
     /// The media MIME type (e.g. `"video/vnd.secondlife.qt.legacy"`,
@@ -617,7 +617,7 @@ pub struct ParcelUpdate {
     /// The streaming media URL.
     pub media_url: String,
     /// The media texture id.
-    pub media_id: Uuid,
+    pub media_id: TextureKey,
     /// Whether to auto-scale the media to the prim face.
     pub media_auto_scale: bool,
     /// The group the parcel is set to.
@@ -631,7 +631,7 @@ pub struct ParcelUpdate {
     /// The only agent allowed to buy the parcel (nil for anyone).
     pub auth_buyer_id: Uuid,
     /// The parcel snapshot texture id.
-    pub snapshot_id: Uuid,
+    pub snapshot_id: TextureKey,
     /// The teleport-landing location within the parcel.
     pub user_location: Vector,
     /// The direction an arriving agent faces at the landing point.
@@ -650,14 +650,14 @@ impl Default for ParcelUpdate {
             description: String::new(),
             music_url: String::new(),
             media_url: String::new(),
-            media_id: Uuid::nil(),
+            media_id: TextureKey::from(Uuid::nil()),
             media_auto_scale: false,
             group_id: GroupKey::from(Uuid::nil()),
             pass_price: 0,
             pass_hours: 0.0,
             category: ParcelCategory::None,
             auth_buyer_id: Uuid::nil(),
-            snapshot_id: Uuid::nil(),
+            snapshot_id: TextureKey::from(Uuid::nil()),
             user_location: Vector {
                 x: 0.0,
                 y: 0.0,
@@ -780,7 +780,7 @@ pub struct ParcelDetails {
     /// The containing region's name.
     pub sim_name: String,
     /// The parcel snapshot texture id.
-    pub snapshot_id: Uuid,
+    pub snapshot_id: TextureKey,
     /// The parcel's dwell (traffic) value.
     pub dwell: f32,
     /// The sale price in L$ (when for sale).
@@ -803,7 +803,7 @@ impl Default for ParcelDetails {
             global_y: 0.0,
             global_z: 0.0,
             sim_name: String::new(),
-            snapshot_id: Uuid::nil(),
+            snapshot_id: TextureKey::from(Uuid::nil()),
             dwell: 0.0,
             sale_price: 0,
             auction_id: 0,

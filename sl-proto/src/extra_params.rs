@@ -10,6 +10,7 @@
 //! [`ObjectExtraParams`] fields, mirroring each subtype's `unpack` in the
 //! viewer's `llprimitive.cpp`.
 
+use sl_types::key::TextureKey;
 use sl_types::lsl::Vector;
 use sl_wire::{Reader, ReflectionProbeFlags, Writer};
 
@@ -255,7 +256,7 @@ fn encode_sculpt(data: &SculptData) -> Vec<u8> {
 /// inverse of [`decode_light_image`].
 fn encode_light_image(data: &LightImage) -> Vec<u8> {
     let mut writer = Writer::new();
-    writer.put_uuid(data.texture);
+    writer.put_uuid(data.texture.uuid());
     writer.put_vector3(&data.params);
     writer.into_bytes()
 }
@@ -355,7 +356,10 @@ fn decode_sculpt(reader: &mut Reader<'_>) -> Option<SculptData> {
 fn decode_light_image(reader: &mut Reader<'_>) -> Option<LightImage> {
     let texture = reader.uuid().ok()?;
     let params = reader.vector3().ok()?;
-    Some(LightImage { texture, params })
+    Some(LightImage {
+        texture: TextureKey::from(texture),
+        params,
+    })
 }
 
 /// Decodes `LLExtendedMeshParams`: a single flags word.
@@ -395,6 +399,7 @@ fn decode_reflection_probe(reader: &mut Reader<'_>) -> Option<ReflectionProbe> {
 #[cfg(test)]
 mod encode_tests {
     use pretty_assertions::assert_eq;
+    use sl_types::key::TextureKey;
     use sl_types::lsl::Vector;
     use uuid::Uuid;
 
@@ -437,7 +442,9 @@ mod encode_tests {
                 sculpt_type: 5,
             }),
             light_image: Some(LightImage {
-                texture: Uuid::from_u128(0x9999_aaaa_bbbb_cccc_dddd_eeee_ffff_0000),
+                texture: TextureKey::from(Uuid::from_u128(
+                    0x9999_aaaa_bbbb_cccc_dddd_eeee_ffff_0000,
+                )),
                 params: Vector {
                     x: 0.5,
                     y: 0.25,

@@ -1,7 +1,7 @@
 //! Avatar profile and relationships: properties, picks, classifieds, friends.
 
 use super::Maturity;
-use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey};
+use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, TextureKey};
 use uuid::Uuid;
 
 /// An avatar's profile properties, parsed from `AvatarPropertiesReply`.
@@ -10,9 +10,9 @@ pub struct AvatarProperties {
     /// The avatar the profile is about.
     pub avatar_id: AgentKey,
     /// The "second life" profile image (texture id).
-    pub image_id: Uuid,
+    pub image_id: TextureKey,
     /// The "first life" profile image (texture id).
-    pub fl_image_id: Uuid,
+    pub fl_image_id: TextureKey,
     /// The avatar's partner, or nil if none.
     pub partner_id: AgentKey,
     /// The "second life" about text.
@@ -60,7 +60,7 @@ pub struct AvatarGroupMembership {
     /// Whether the avatar accepts notices from the group.
     pub accept_notices: bool,
     /// The group's insignia (texture id).
-    pub group_insignia_id: Uuid,
+    pub group_insignia_id: TextureKey,
 }
 
 /// One pick from an `AvatarPicksReply` (header data only: id and name).
@@ -100,7 +100,7 @@ pub struct PickInfo {
     /// The pick description.
     pub description: String,
     /// The pick snapshot texture id.
-    pub snapshot_id: Uuid,
+    pub snapshot_id: TextureKey,
     /// The owner's account name, as the grid resolves it.
     pub user: String,
     /// The parcel's original name.
@@ -139,7 +139,7 @@ pub struct ClassifiedInfo {
     /// The parent estate id.
     pub parent_estate: u32,
     /// The classified snapshot texture id.
-    pub snapshot_id: Uuid,
+    pub snapshot_id: TextureKey,
     /// The region name the classified is in.
     pub sim_name: String,
     /// The classified's global position (metres, grid-wide coordinates).
@@ -158,12 +158,12 @@ pub struct ClassifiedInfo {
 /// current values with
 /// [`Session::request_avatar_properties`](crate::Session::request_avatar_properties)
 /// first and edit from there.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProfileUpdate {
     /// The "second life" profile image (texture id).
-    pub image_id: Uuid,
+    pub image_id: TextureKey,
     /// The "first life" profile image (texture id).
-    pub fl_image_id: Uuid,
+    pub fl_image_id: TextureKey,
     /// The "second life" about text.
     pub about_text: String,
     /// The "first life" about text.
@@ -174,6 +174,20 @@ pub struct ProfileUpdate {
     pub mature_publish: bool,
     /// The web profile URL.
     pub profile_url: String,
+}
+
+impl Default for ProfileUpdate {
+    fn default() -> Self {
+        Self {
+            image_id: TextureKey::from(Uuid::nil()),
+            fl_image_id: TextureKey::from(Uuid::nil()),
+            about_text: String::new(),
+            fl_about_text: String::new(),
+            allow_publish: false,
+            mature_publish: false,
+            profile_url: String::new(),
+        }
+    }
 }
 
 /// An update to the agent's own interests, sent via
@@ -209,7 +223,7 @@ pub struct PickUpdate {
     /// The pick description.
     pub description: String,
     /// The pick snapshot texture id.
-    pub snapshot_id: Uuid,
+    pub snapshot_id: TextureKey,
     /// The pick's global position (metres; nil/zero to use the agent's).
     pub pos_global: (f64, f64, f64),
     /// The sort order (only meaningful for top picks; normally `0`).
@@ -225,7 +239,7 @@ impl Default for PickUpdate {
             parcel_id: Uuid::nil(),
             name: String::new(),
             description: String::new(),
-            snapshot_id: Uuid::nil(),
+            snapshot_id: TextureKey::from(Uuid::nil()),
             pos_global: (0.0, 0.0, 0.0),
             sort_order: 0,
             enabled: true,
@@ -253,7 +267,7 @@ pub struct ClassifiedUpdate {
     /// The parcel the classified points at (nil to use the agent's current).
     pub parcel_id: Uuid,
     /// The classified snapshot texture id.
-    pub snapshot_id: Uuid,
+    pub snapshot_id: TextureKey,
     /// The classified's global position (metres; nil/zero to use the agent's).
     pub pos_global: (f64, f64, f64),
     /// The classified flags bitfield (e.g. mature, auto-renew).
@@ -270,7 +284,7 @@ impl Default for ClassifiedUpdate {
             name: String::new(),
             description: String::new(),
             parcel_id: Uuid::nil(),
-            snapshot_id: Uuid::nil(),
+            snapshot_id: TextureKey::from(Uuid::nil()),
             pos_global: (0.0, 0.0, 0.0),
             classified_flags: 0,
             price_for_listing: 0,

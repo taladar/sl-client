@@ -16,6 +16,7 @@
 //! at [`MAX_FACES`] (≤ 64), so no shift can actually wrap. Floating-point
 //! conversions are exact for the small integers involved.
 
+use sl_types::key::TextureKey;
 use sl_wire::{Reader, Writer};
 use uuid::Uuid;
 
@@ -108,7 +109,7 @@ pub fn decode_texture_entry(bytes: &[u8], face_count: usize) -> TextureEntry {
 
     let faces = (0..count)
         .map(|index| TextureFace {
-            texture_id: texture_id.get(index).copied().unwrap_or_default(),
+            texture_id: TextureKey::from(texture_id.get(index).copied().unwrap_or_default()),
             color: uninvert_color(color.get(index).copied().unwrap_or([0; 4])),
             scale_s: scale_s.get(index).copied().unwrap_or(1.0),
             scale_t: scale_t.get(index).copied().unwrap_or(1.0),
@@ -265,7 +266,7 @@ pub fn encode_texture_entry(entry: &TextureEntry) -> Vec<u8> {
 
     // Re-quantize each field into a per-face array, in face-index order, exactly
     // as the viewer's packTEMessage fills its parallel arrays before packing.
-    let texture_id: Vec<Uuid> = faces.iter().map(|face| face.texture_id).collect();
+    let texture_id: Vec<Uuid> = faces.iter().map(|face| face.texture_id.uuid()).collect();
     let color: Vec<[u8; 4]> = faces.iter().map(|face| invert_color(face.color)).collect();
     let scale_s: Vec<f32> = faces.iter().map(|face| face.scale_s).collect();
     let scale_t: Vec<f32> = faces.iter().map(|face| face.scale_t).collect();
@@ -393,7 +394,7 @@ fn write_face_bitmask(writer: &mut Writer, faces: u64) {
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use super::{decode_texture_entry, encode_texture_entry, unpack_field};
+    use super::{TextureKey, decode_texture_entry, encode_texture_entry, unpack_field};
     use crate::types::{TextureEntry, TextureFace};
     use sl_wire::{Reader, Writer};
     use uuid::Uuid;
@@ -488,9 +489,9 @@ mod tests {
 
         let entry = decode_texture_entry(&bytes, 3);
         assert_eq!(entry.faces.len(), 3);
-        assert_eq!(entry.texture_id(0), Some(face0_tex));
-        assert_eq!(entry.texture_id(1), Some(default_tex));
-        assert_eq!(entry.texture_id(2), Some(default_tex));
+        assert_eq!(entry.texture_id(0), Some(TextureKey::from(face0_tex)));
+        assert_eq!(entry.texture_id(1), Some(TextureKey::from(default_tex)));
+        assert_eq!(entry.texture_id(2), Some(TextureKey::from(default_tex)));
         let face = entry.face(1).ok_or("expected face 1")?;
         assert_eq!(face.color, [255, 255, 255, 255]);
         assert!((face.scale_s - 1.0).abs() < f32::EPSILON);
@@ -516,7 +517,7 @@ mod tests {
         let tex_b = Uuid::from_u128(0xbbbb);
         // face0 differs; faces 1 and 2 share a value (become the field default).
         let face0 = TextureFace {
-            texture_id: tex_a,
+            texture_id: TextureKey::from(tex_a),
             color: [255, 0, 128, 255],
             scale_s: 2.0,
             scale_t: 0.5,
@@ -531,7 +532,7 @@ mod tests {
             material_id: Uuid::nil(),
         };
         let shared = TextureFace {
-            texture_id: tex_b,
+            texture_id: TextureKey::from(tex_b),
             color: [255, 255, 255, 255],
             scale_s: 1.0,
             scale_t: 1.0,

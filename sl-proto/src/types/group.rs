@@ -1,6 +1,6 @@
 //! Groups: membership, roles, notices, and management.
 
-use sl_types::key::{AgentKey, GroupKey, InventoryKey};
+use sl_types::key::{AgentKey, GroupKey, InventoryKey, TextureKey};
 use uuid::Uuid;
 
 /// A Second Life group *role* id — the UUID that identifies one role within a
@@ -67,7 +67,7 @@ pub struct GroupMembership {
     /// Whether the agent accepts notices from the group.
     pub accept_notices: bool,
     /// The group's insignia (texture id).
-    pub group_insignia_id: Uuid,
+    pub group_insignia_id: TextureKey,
     /// The agent's L$ contribution to the group.
     pub contribution: i32,
     /// The group name.
@@ -148,7 +148,7 @@ pub struct GroupProfile {
     /// The requesting agent's powers bitfield.
     pub powers: u64,
     /// The group insignia (texture id).
-    pub insignia_id: Uuid,
+    pub insignia_id: TextureKey,
     /// The group founder's agent id.
     pub founder_id: AgentKey,
     /// The L$ fee to join.
@@ -185,7 +185,7 @@ pub struct CreateGroupParams {
     /// Whether the group is shown in search.
     pub show_in_list: bool,
     /// The group insignia (texture id); nil for none.
-    pub insignia_id: Uuid,
+    pub insignia_id: TextureKey,
     /// The L$ fee to join.
     pub membership_fee: i32,
     /// Whether enrollment is open (no invitation needed).

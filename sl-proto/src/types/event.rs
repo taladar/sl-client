@@ -20,7 +20,7 @@ use super::{
     ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload,
     TelehubInfo, TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
 };
-use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey};
+use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey, TextureKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::AgentPreferences;
@@ -1025,7 +1025,7 @@ pub enum Event {
     /// A requested texture does not exist in the asset store
     /// (`ImageNotInDatabase`), or its HTTP fetch returned 404. Carries the
     /// texture's UUID.
-    TextureNotFound(Uuid),
+    TextureNotFound(TextureKey),
     /// A requested generic asset finished downloading: the reassembled
     /// [`Asset`] from the UDP transfer path
     /// ([`Session::request_asset`](crate::Session::request_asset)) or the HTTP

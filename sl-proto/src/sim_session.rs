@@ -1911,7 +1911,7 @@ impl SimSession {
                     global_y: result.global_position.1,
                     global_z: result.global_position.2,
                     sim_name: with_nul(&result.sim_name),
-                    snapshot_id: result.snapshot_id,
+                    snapshot_id: result.snapshot_id.uuid(),
                     dwell: result.dwell,
                     price: result.price,
                 })
@@ -2359,7 +2359,7 @@ impl SimSession {
                 global_y: details.global_y,
                 global_z: details.global_z,
                 sim_name: with_nul(&details.sim_name),
-                snapshot_id: details.snapshot_id,
+                snapshot_id: details.snapshot_id.uuid(),
                 dwell: details.dwell,
                 sale_price: details.sale_price,
                 auction_id: details.auction_id,

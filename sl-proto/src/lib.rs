@@ -165,6 +165,6 @@ pub use sl_wire::{
 pub use sl_types::lsl::{Rotation, Vector};
 // Re-export the L$ amount type used by the money balance/transfer APIs.
 pub use sl_types::key::{
-    AgentKey, GroupKey, InventoryFolderKey, InventoryKey, Key, ObjectKey, OwnerKey,
+    AgentKey, GroupKey, InventoryFolderKey, InventoryKey, Key, ObjectKey, OwnerKey, TextureKey,
 };
 pub use sl_types::money::LindenAmount;

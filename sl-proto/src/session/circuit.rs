@@ -20,7 +20,7 @@ use crate::types::{
     PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate, Reliability, RestoreItem,
     RezAttachment, SaleType, TeleportFlags, Throttle, ViewerEffect, Wearable,
 };
-use sl_types::key::{AgentKey, GroupKey, ObjectKey};
+use sl_types::key::{AgentKey, GroupKey, ObjectKey, TextureKey};
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::AbuseReport;
 use sl_wire::messages::{
@@ -733,8 +733,8 @@ impl Circuit {
                 session_id: self.session_id,
             },
             properties_data: AvatarPropertiesUpdatePropertiesDataBlock {
-                image_id: update.image_id,
-                fl_image_id: update.fl_image_id,
+                image_id: update.image_id.uuid(),
+                fl_image_id: update.fl_image_id.uuid(),
                 about_text: with_nul(&update.about_text),
                 fl_about_text: with_nul(&update.fl_about_text),
                 allow_publish: update.allow_publish,
@@ -828,7 +828,7 @@ impl Circuit {
                 parcel_id: update.parcel_id,
                 name: with_nul(&update.name),
                 desc: with_nul(&update.description),
-                snapshot_id: update.snapshot_id,
+                snapshot_id: update.snapshot_id.uuid(),
                 pos_global: [x, y, z],
                 sort_order: update.sort_order,
                 enabled: update.enabled,
@@ -892,7 +892,7 @@ impl Circuit {
                 parcel_id: update.parcel_id,
                 // Set on the simulator as the message passes through.
                 parent_estate: 0,
-                snapshot_id: update.snapshot_id,
+                snapshot_id: update.snapshot_id.uuid(),
                 pos_global: [x, y, z],
                 classified_flags: update.classified_flags,
                 price_for_listing: update.price_for_listing,
@@ -1173,7 +1173,7 @@ impl Circuit {
                 name: with_nul(&params.name),
                 charter: with_nul(&params.charter),
                 show_in_list: params.show_in_list,
-                insignia_id: params.insignia_id,
+                insignia_id: params.insignia_id.uuid(),
                 membership_fee: params.membership_fee,
                 open_enrollment: params.open_enrollment,
                 allow_publish: params.allow_publish,
@@ -1932,7 +1932,7 @@ impl Circuit {
     /// `priority`. `image_type` is the request channel (0 = normal).
     pub(crate) fn send_request_image(
         &mut self,
-        image_id: Uuid,
+        image_id: TextureKey,
         discard_level: i8,
         priority: f32,
         packet: u32,
@@ -1945,7 +1945,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             request_image: vec![RequestImageRequestImageBlock {
-                image: image_id,
+                image: image_id.uuid(),
                 discard_level,
                 download_priority: priority,
                 packet,
@@ -3033,14 +3033,14 @@ impl Circuit {
                 desc: with_nul(&update.description),
                 music_url: with_nul(&update.music_url),
                 media_url: with_nul(&update.media_url),
-                media_id: update.media_id,
+                media_id: update.media_id.uuid(),
                 media_auto_scale: u8::from(update.media_auto_scale),
                 group_id: update.group_id.uuid(),
                 pass_price: update.pass_price,
                 pass_hours: update.pass_hours,
                 category: update.category.to_u8(),
                 auth_buyer_id: update.auth_buyer_id,
-                snapshot_id: update.snapshot_id,
+                snapshot_id: update.snapshot_id.uuid(),
                 user_location: update.user_location.clone(),
                 user_look_at: update.user_look_at.clone(),
                 landing_type: update.landing_type,

@@ -1,7 +1,9 @@
 //! In-world object schema: motion, shape, materials, animations, particles.
 
 use sl_types::attachment::AttachmentPoint;
-use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey};
+use sl_types::key::{
+    AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, TextureKey,
+};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::Permissions5;
@@ -476,7 +478,7 @@ pub struct SculptData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LightImage {
     /// The projected texture id.
-    pub texture: Uuid,
+    pub texture: TextureKey,
     /// The projection parameters `(field-of-view, focus, ambiance)`.
     pub params: Vector,
 }
@@ -620,7 +622,7 @@ pub struct ParticleSystem {
     /// The acceleration applied to each particle, in metres/second² per axis.
     pub acceleration: Vector,
     /// The particle texture asset id (nil for the default).
-    pub texture_id: Uuid,
+    pub texture_id: TextureKey,
     /// The target object the particles follow/aim at (for the target patterns and
     /// the `TARGET_POS`/`TARGET_LINEAR` particle flags); nil if none.
     pub target_id: ObjectKey,
@@ -707,7 +709,7 @@ pub struct ObjectProperties {
     pub sit_name: String,
     /// The linkset's concatenated texture-asset ids (the wire carries them as a
     /// run of 16-byte UUIDs); empty if the sim sent none.
-    pub texture_ids: Vec<Uuid>,
+    pub texture_ids: Vec<TextureKey>,
 }
 
 /// An object's condensed broadcast properties (`ObjectPropertiesFamily`),

@@ -12,6 +12,7 @@
 
 use std::collections::BTreeMap;
 
+use sl_types::key::TextureKey;
 use sl_types::lsl::Rotation;
 use uuid::Uuid;
 
@@ -149,17 +150,17 @@ pub struct SkySettings {
     /// The planet radius.
     pub planet_radius: f32,
     /// The sun disc texture (nil for the default).
-    pub sun_texture: Uuid,
+    pub sun_texture: TextureKey,
     /// The moon disc texture (nil for the default).
-    pub moon_texture: Uuid,
+    pub moon_texture: TextureKey,
     /// The cloud texture (nil for the default).
-    pub cloud_texture: Uuid,
+    pub cloud_texture: TextureKey,
     /// The bloom texture (nil for the default).
-    pub bloom_texture: Uuid,
+    pub bloom_texture: TextureKey,
     /// The halo texture (nil for the default).
-    pub halo_texture: Uuid,
+    pub halo_texture: TextureKey,
     /// The rainbow texture (nil for the default).
-    pub rainbow_texture: Uuid,
+    pub rainbow_texture: TextureKey,
 }
 
 /// A single water frame (`LLSettingsWater`): the surface and underwater state at
@@ -179,13 +180,13 @@ pub struct WaterSettings {
     /// The normal-map (wavelet) scale (X, Y, Z).
     pub normal_scale: [f32; 3],
     /// The normal/wave texture.
-    pub normal_map: Uuid,
+    pub normal_map: TextureKey,
     /// The refraction scale above the surface.
     pub scale_above: f32,
     /// The refraction scale below the surface.
     pub scale_below: f32,
     /// The transparent-water texture.
-    pub transparent_texture: Uuid,
+    pub transparent_texture: TextureKey,
     /// The underwater fog modifier.
     pub underwater_fog_mod: f32,
     /// The water fog colour, RGB.

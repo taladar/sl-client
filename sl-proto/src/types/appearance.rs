@@ -1,6 +1,6 @@
 //! Wearables and avatar appearance: textures, attachments, animations.
 
-use sl_types::key::{InventoryKey, ObjectKey};
+use sl_types::key::{AgentKey, InventoryKey, ObjectKey, TextureKey};
 use sl_types::lsl::Vector;
 use uuid::Uuid;
 
@@ -190,7 +190,7 @@ pub mod avatar_texture {
 pub struct TextureFace {
     /// The face's texture asset id. For an avatar's baked slots (see
     /// [`avatar_texture`]) this is the composited bake to fetch and render.
-    pub texture_id: Uuid,
+    pub texture_id: TextureKey,
     /// The tint colour applied to the texture, as RGBA bytes (un-inverted from
     /// the wire's `255 - value` encoding; `[255; 4]` is opaque white = no tint).
     pub color: [u8; 4],
@@ -277,7 +277,7 @@ impl TextureEntry {
     /// Combine with the [`avatar_texture`] baked-slot constants to read an
     /// avatar's baked textures.
     #[must_use]
-    pub fn texture_id(&self, index: usize) -> Option<Uuid> {
+    pub fn texture_id(&self, index: usize) -> Option<TextureKey> {
         self.faces.get(index).map(|face| face.texture_id)
     }
 }
@@ -292,7 +292,7 @@ impl TextureEntry {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AvatarAppearance {
     /// The avatar this appearance describes.
-    pub avatar_id: Uuid,
+    pub avatar_id: AgentKey,
     /// Whether the avatar is on a trial account.
     pub is_trial: bool,
     /// The decoded per-face texture entry (the baked avatar textures live in the
@@ -799,7 +799,7 @@ mod tests {
     /// `media_flags`, all other fields irrelevant to the accessor under test.
     fn face(bump_shiny_fullbright: u8, media_flags: u8) -> super::TextureFace {
         super::TextureFace {
-            texture_id: super::Uuid::nil(),
+            texture_id: super::TextureKey::from(super::Uuid::nil()),
             color: [255; 4],
             scale_s: 1.0,
             scale_t: 1.0,

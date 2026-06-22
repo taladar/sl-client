@@ -340,7 +340,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         appearance
                             .texture_entry
                             .texture_id(*index)
-                            .is_some_and(|id| !id.is_nil())
+                            .is_some_and(|id| !id.uuid().is_nil())
                     })
                     .map(|(_, name)| *name)
                     .collect();

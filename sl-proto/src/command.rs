@@ -18,7 +18,8 @@ use crate::{
     ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelReturnType, ParcelUpdate,
     PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate, RegionHandle,
     RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, Rotation, SaleType,
-    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
+    ScriptPermissions, TextureKey, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
+    Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1330,7 +1331,7 @@ pub enum Command {
     /// [`Event::TextureNotFound`](crate::Event::TextureNotFound)).
     RequestTexture {
         /// The texture's asset id.
-        texture_id: Uuid,
+        texture_id: TextureKey,
         /// The level of detail (0 = full resolution; higher = coarser).
         discard_level: i8,
         /// The download priority (larger is fetched sooner).
@@ -1353,7 +1354,7 @@ pub enum Command {
     /// level-of-detail prefix via [`j2c`](crate::j2c).
     FetchTexture {
         /// The texture's asset id.
-        texture_id: Uuid,
+        texture_id: TextureKey,
         /// The level of detail (0 = full resolution; higher = coarser).
         discard_level: u8,
     },
