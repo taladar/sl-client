@@ -2,6 +2,7 @@
 
 mod abuse_report;
 mod agent_preferences;
+mod circuit_code;
 mod control_flags;
 mod display_name;
 mod endian;
@@ -26,6 +27,7 @@ mod region_handle;
 mod region_local_id;
 mod remote_parcel;
 mod resource_report;
+mod sequence_number;
 mod sim_features;
 mod voice;
 mod zerocode;
@@ -37,6 +39,7 @@ pub use agent_preferences::{
     AgentPreferences, ObjectPermMasks, build_agent_preferences_request,
     build_agent_preferences_response, parse_agent_preferences,
 };
+pub use circuit_code::CircuitCode;
 pub use control_flags::ControlFlags;
 pub use display_name::{
     DisplayName, build_display_names_response, display_names_query, parse_display_names,
@@ -126,6 +129,7 @@ pub use resource_report::{
     build_land_resources_response, parse_attachment_resources, parse_land_resource_detail,
     parse_land_resource_summary, parse_land_resources_reply, parse_land_resources_request,
 };
+pub use sequence_number::SequenceNumber;
 pub use sim_features::{
     AnimatedObjects, OpenSimExtras, PhysicsShapeTypes, SimulatorFeatures,
     build_simulator_features_response, parse_simulator_features,
@@ -158,8 +162,8 @@ mod test {
     use pretty_assertions::assert_eq;
 
     use super::{
-        MediaEntry, MessageId, ObjectMediaResponse, PacketFlags, Reader, WireError, Writer,
-        build_group_notice_bucket, build_new_file_agent_inventory_request,
+        MediaEntry, MessageId, ObjectMediaResponse, PacketFlags, Reader, SequenceNumber, WireError,
+        Writer, build_group_notice_bucket, build_new_file_agent_inventory_request,
         build_object_media_get_request, build_object_media_navigate_request,
         build_object_media_update_request, build_update_item_asset_request, combine_uuids,
         encode_datagram, message_name, parse_asset_upload_response, parse_datagram, parse_llsd_xml,
@@ -310,13 +314,13 @@ mod test {
     #[test]
     fn datagram_header_round_trip() -> Result<(), WireError> {
         let body = [0xDE, 0xAD, 0xBE, 0xEF];
-        let datagram = encode_datagram(PacketFlags::RELIABLE, 0x0001_0203, &body);
+        let datagram = encode_datagram(PacketFlags::RELIABLE, SequenceNumber(0x0001_0203), &body);
         // Sequence number is big-endian in the header.
         assert_eq!(datagram.get(1..5), Some(&[0x00, 0x01, 0x02, 0x03][..]));
 
         let parsed = parse_datagram(&datagram)?;
         assert_eq!(parsed.flags, PacketFlags::RELIABLE);
-        assert_eq!(parsed.sequence, 0x0001_0203);
+        assert_eq!(parsed.sequence, SequenceNumber(0x0001_0203));
         assert!(parsed.extra.is_empty());
         assert!(parsed.acks.is_empty());
         assert_eq!(parsed.body, &body);
@@ -335,8 +339,8 @@ mod test {
         datagram.push(0x02); // ack count
 
         let parsed = parse_datagram(&datagram)?;
-        assert_eq!(parsed.sequence, 9);
-        assert_eq!(parsed.acks, vec![7, 8]);
+        assert_eq!(parsed.sequence, SequenceNumber(9));
+        assert_eq!(parsed.acks, vec![SequenceNumber(7), SequenceNumber(8)]);
         assert_eq!(parsed.body, &[0xAA, 0xBB]);
         Ok(())
     }

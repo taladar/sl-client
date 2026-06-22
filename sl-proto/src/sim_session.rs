@@ -82,12 +82,14 @@ use sl_wire::messages::{
     TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock,
 };
 use sl_wire::{
-    AnyMessage, ControlFlags, EventQueueEvent, Llsd, MessageId, PacketFlags, Permissions,
-    Permissions5, Reader, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, WireError,
-    Writer, build_event_queue_response, encode_datagram, parse_datagram, zero_decode,
+    AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, Llsd, MessageId, PacketFlags,
+    Permissions, Permissions5, Reader, RegionHandle, RegionLocalObjectId, RegionLocalParcelId,
+    SequenceNumber, WireError, Writer, build_event_queue_response, encode_datagram, parse_datagram,
+    zero_decode,
 };
 use uuid::Uuid;
 
+use crate::bookkeeping_ids::PingId;
 use crate::error::Error;
 use crate::session::{
     build_map_block_reply, build_map_item_reply, build_map_layer_reply, instant_message,
@@ -171,14 +173,14 @@ struct UnackedPacket {
 #[derive(Debug, Default)]
 struct SeenWindow {
     /// Membership set for O(1) lookup.
-    set: HashSet<u32>,
+    set: HashSet<SequenceNumber>,
     /// Insertion order, for evicting the oldest entries.
-    order: VecDeque<u32>,
+    order: VecDeque<SequenceNumber>,
 }
 
 impl SeenWindow {
     /// Records `sequence`; returns `true` if it was not seen before.
-    fn insert(&mut self, sequence: u32) -> bool {
+    fn insert(&mut self, sequence: SequenceNumber) -> bool {
         if !self.set.insert(sequence) {
             return false;
         }
@@ -246,7 +248,7 @@ pub enum ServerEvent {
         /// The session id.
         session_id: Uuid,
         /// The circuit code.
-        circuit_code: u32,
+        circuit_code: CircuitCode,
     },
     /// The client sent `CompleteAgentMovement`; the simulator has replied with an
     /// `AgentMovementComplete` and the agent is now present in the region.
@@ -257,7 +259,7 @@ pub enum ServerEvent {
     /// replied with a `CompletePingCheck`.
     PingRequested {
         /// The ping id echoed back to the client.
-        ping_id: u8,
+        ping_id: PingId,
     },
     /// The client set its bandwidth throttle (`AgentThrottle`).
     Throttle(Throttle),
@@ -851,15 +853,15 @@ pub struct SimSession {
     /// The session id, from `UseCircuitCode`.
     session_id: Option<Uuid>,
     /// The circuit code, from `UseCircuitCode`.
-    circuit_code: Option<u32>,
+    circuit_code: Option<CircuitCode>,
     /// The next outgoing sequence number.
-    next_sequence: u32,
+    next_sequence: SequenceNumber,
     /// The next `StartPingCheck` ping id.
-    next_ping_id: u8,
+    next_ping_id: PingId,
     /// Inbound reliable sequence numbers we still owe acknowledgements for.
-    pending_acks: Vec<u32>,
+    pending_acks: Vec<SequenceNumber>,
     /// Outgoing reliable packets awaiting acknowledgement, keyed by sequence.
-    unacked: BTreeMap<u32, UnackedPacket>,
+    unacked: BTreeMap<SequenceNumber, UnackedPacket>,
     /// Recently seen inbound reliable sequence numbers.
     seen: SeenWindow,
     /// Datagrams ready to be transmitted to the client.
@@ -894,8 +896,8 @@ impl SimSession {
             agent_id: None,
             session_id: None,
             circuit_code: None,
-            next_sequence: 1,
-            next_ping_id: 1,
+            next_sequence: SequenceNumber::FIRST,
+            next_ping_id: PingId(1),
             pending_acks: Vec::new(),
             unacked: BTreeMap::new(),
             seen: SeenWindow::default(),
@@ -934,9 +936,9 @@ impl SimSession {
     }
 
     /// Allocates the next outgoing sequence number.
-    const fn next_sequence(&mut self) -> u32 {
+    const fn next_sequence(&mut self) -> SequenceNumber {
         let sequence = self.next_sequence;
-        self.next_sequence = self.next_sequence.wrapping_add(1);
+        self.next_sequence = self.next_sequence.wrapping_next();
         sequence
     }
 
@@ -2425,16 +2427,21 @@ impl SimSession {
     /// # Errors
     ///
     /// Returns a wire error if the message fails to encode.
-    pub fn start_ping_check(&mut self, now: Instant) -> Result<Option<u8>, Error> {
+    pub fn start_ping_check(&mut self, now: Instant) -> Result<Option<PingId>, Error> {
         if self.client_addr.is_none() {
             return Ok(None);
         }
         let ping_id = self.next_ping_id;
-        self.next_ping_id = self.next_ping_id.wrapping_add(1);
-        let oldest_unacked = self.unacked.keys().next().copied().unwrap_or(0);
+        self.next_ping_id = self.next_ping_id.wrapping_next();
+        let oldest_unacked = self
+            .unacked
+            .keys()
+            .next()
+            .copied()
+            .map_or(0, SequenceNumber::get);
         let message = AnyMessage::StartPingCheck(StartPingCheck {
             ping_id: StartPingCheckPingIDBlock {
-                ping_id,
+                ping_id: ping_id.get(),
                 oldest_unacked,
             },
         });
@@ -2479,7 +2486,7 @@ impl SimSession {
     }
 
     /// Records that we owe an acknowledgement for `sequence`, arming the flush.
-    fn queue_ack(&mut self, sequence: u32, now: Instant) {
+    fn queue_ack(&mut self, sequence: SequenceNumber, now: Instant) {
         self.pending_acks.push(sequence);
         if self.ack_flush.is_none() {
             self.ack_flush = Some(deadline(now, ACK_FLUSH_DELAY));
@@ -2487,7 +2494,7 @@ impl SimSession {
     }
 
     /// Removes the given outgoing sequence numbers from the unacked set.
-    fn record_acks(&mut self, ids: &[u32]) {
+    fn record_acks(&mut self, ids: &[SequenceNumber]) {
         for id in ids {
             self.unacked.remove(id);
         }
@@ -2503,7 +2510,7 @@ impl SimSession {
         for chunk in acks.chunks(MAX_ACKS_PER_PACKET) {
             let packets = chunk
                 .iter()
-                .map(|id| sl_wire::messages::PacketAckPacketsBlock { id: *id })
+                .map(|id| sl_wire::messages::PacketAckPacketsBlock { id: id.get() })
                 .collect();
             let message = AnyMessage::PacketAck(PacketAck { packets });
             self.send(&message, Reliability::Unreliable, now)?;
@@ -2608,7 +2615,7 @@ impl SimSession {
                 let block = &use_circuit.circuit_code;
                 self.agent_id = Some(block.id);
                 self.session_id = Some(block.session_id);
-                self.circuit_code = Some(block.code);
+                self.circuit_code = Some(CircuitCode(block.code));
                 if matches!(self.state, SimState::AwaitingCircuit) {
                     self.state = SimState::Active;
                     self.ping = Some(deadline(now, PING_INTERVAL));
@@ -2616,7 +2623,7 @@ impl SimSession {
                 self.events.push_back(ServerEvent::CircuitOpened {
                     agent_id: block.id,
                     session_id: block.session_id,
-                    circuit_code: block.code,
+                    circuit_code: CircuitCode(block.code),
                 });
             }
             AnyMessage::CompleteAgentMovement(_) => {
@@ -2627,9 +2634,11 @@ impl SimSession {
                 self.events.push_back(ServerEvent::RegionHandshakeReplied);
             }
             AnyMessage::StartPingCheck(ping) => {
-                let ping_id = ping.ping_id.ping_id;
+                let ping_id = PingId(ping.ping_id.ping_id);
                 let reply = AnyMessage::CompletePingCheck(CompletePingCheck {
-                    ping_id: CompletePingCheckPingIDBlock { ping_id },
+                    ping_id: CompletePingCheckPingIDBlock {
+                        ping_id: ping_id.get(),
+                    },
                 });
                 self.send(&reply, Reliability::Unreliable, now)?;
                 self.events
@@ -2638,7 +2647,11 @@ impl SimSession {
             // The client answering our periodic `StartPingCheck`; consumed.
             AnyMessage::CompletePingCheck(_) => {}
             AnyMessage::PacketAck(ack) => {
-                let ids: Vec<u32> = ack.packets.iter().map(|packet| packet.id).collect();
+                let ids: Vec<SequenceNumber> = ack
+                    .packets
+                    .iter()
+                    .map(|packet| SequenceNumber(packet.id))
+                    .collect();
                 self.record_acks(&ids);
             }
             AnyMessage::AgentThrottle(throttle) => {

@@ -15,18 +15,19 @@ mod test {
         Diagnostic, DirFindFlags, DisconnectReason, EnvironmentSettings, EstateAccessDelta,
         EstateAccessKind, Event, FollowCamProperty, FriendRights, GestureActivation,
         GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
-        GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate, InventoryItem, LandingType,
-        LindenAmount, LoginAccount, LoginParams, LookAtType, MapItemType, Material, Maturity,
-        MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
-        NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform,
-        ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
-        ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
-        PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
-        ProductType, ProfileUpdate, ReflectionProbeFlags, RegionHandle, RegionInfoUpdate,
-        Reliability, RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId,
-        ScriptControlAction, ScriptPermissions, Session, SkySettings, SoundFlags, TeleportFlags,
-        TerrainLayerType, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, WaterSettings, WearableType, avatar_texture, group_powers, pcode,
+        GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate, InventoryCallbackId,
+        InventoryItem, LandingType, LindenAmount, LoginAccount, LoginParams, LookAtType,
+        MapItemType, Material, Maturity, MeanCollisionType, MoneyTransactionType, MovementMode,
+        MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
+        ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+        ParcelFlags, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
+        ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate, PointAtType,
+        Postcard, PrimShape, ProductType, ProfileUpdate, ReflectionProbeFlags, RegionHandle,
+        RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType, ScopedObjectId,
+        ScopedParcelId, ScriptControlAction, ScriptPermissions, Session, SkySettings, SoundFlags,
+        TeleportFlags, TerrainLayerType, Throttle, TransferStatus, Transmit, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
+        group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -124,9 +125,9 @@ mod test {
         ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
     };
     use sl_wire::{
-        AnyMessage, HomeLocation, Llsd, LoginFailure, LoginRequest, LoginResponse, LoginSuccess,
-        MessageId, PacketFlags, Reader, SkeletonFolder, StartLocation, WireError, Writer,
-        encode_datagram, parse_datagram, parse_llsd_xml,
+        AnyMessage, CircuitCode, HomeLocation, Llsd, LoginFailure, LoginRequest, LoginResponse,
+        LoginSuccess, MessageId, PacketFlags, Reader, SequenceNumber, SkeletonFolder,
+        StartLocation, WireError, Writer, encode_datagram, parse_datagram, parse_llsd_xml,
     };
 
     /// A boxed test error.
@@ -171,7 +172,7 @@ mod test {
             agent_id: uuid::Uuid::from_u128(1),
             session_id: uuid::Uuid::from_u128(2),
             secure_session_id: uuid::Uuid::from_u128(3),
-            circuit_code: 0x0011_2233,
+            circuit_code: CircuitCode(0x0011_2233),
             sim_ip: Ipv4Addr::new(127, 0, 0, 1),
             sim_port: 9000,
             seed_capability: "http://127.0.0.1:9000/seed".to_owned(),
@@ -238,7 +239,7 @@ mod test {
         } else {
             PacketFlags::EMPTY
         };
-        encode_datagram(flags, sequence, &writer.into_bytes())
+        encode_datagram(flags, SequenceNumber(sequence), &writer.into_bytes())
     }
 
     /// Builds an inbound datagram carrying a fully encoded server message.
@@ -255,7 +256,11 @@ mod test {
         } else {
             PacketFlags::EMPTY
         };
-        Ok(encode_datagram(flags, sequence, &writer.into_bytes()))
+        Ok(encode_datagram(
+            flags,
+            SequenceNumber(sequence),
+            &writer.into_bytes(),
+        ))
     }
 
     /// Drives a session from login through the region handshake into the active
@@ -5700,7 +5705,7 @@ mod test {
             agent_id: uuid::Uuid::from_u128(1),
             session_id: uuid::Uuid::from_u128(2),
             secure_session_id: uuid::Uuid::from_u128(3),
-            circuit_code: 0x0011_2233,
+            circuit_code: CircuitCode(0x0011_2233),
             sim_ip: Ipv4Addr::new(127, 0, 0, 1),
             sim_port: 9000,
             seed_capability: "http://127.0.0.1:9000/seed".to_owned(),
@@ -5763,7 +5768,7 @@ mod test {
             agent_id: uuid::Uuid::from_u128(1),
             session_id: uuid::Uuid::from_u128(2),
             secure_session_id: uuid::Uuid::from_u128(3),
-            circuit_code: 0x0011_2233,
+            circuit_code: CircuitCode(0x0011_2233),
             sim_ip: Ipv4Addr::new(127, 0, 0, 1),
             sim_port: 9000,
             seed_capability: "http://127.0.0.1:9000/seed".to_owned(),
@@ -8633,7 +8638,7 @@ mod test {
         message.encode_body(&mut writer)?;
         let mut body = writer.into_bytes();
         body.truncate(body.len().saturating_sub(2));
-        let datagram = encode_datagram(PacketFlags::EMPTY, 9, &body);
+        let datagram = encode_datagram(PacketFlags::EMPTY, SequenceNumber(9), &body);
         session.handle_datagram(sim_addr(), &datagram, now)?;
 
         let events = drain_events(&mut session);
@@ -11868,7 +11873,11 @@ mod test {
             description: "a note".to_owned(),
         };
         let callback_id = session.create_inventory_item(&new, now)?;
-        assert_eq!(callback_id, 1, "first callback id should be 1");
+        assert_eq!(
+            callback_id,
+            InventoryCallbackId(1),
+            "first callback id should be 1"
+        );
         let sent = drain(&mut session)?;
         let create = sent
             .iter()
@@ -12018,11 +12027,11 @@ mod test {
         assert_eq!(created.len(), 2);
         let (sim_approved, callback_id, item) = created.first().ok_or("first item")?;
         assert!(*sim_approved);
-        assert_eq!(*callback_id, 7);
+        assert_eq!(*callback_id, InventoryCallbackId(7));
         assert_eq!(item.name, "Fresh Note");
         assert_eq!(item.asset_id, uuid::Uuid::from_u128(0x55));
         let (_, second_callback, second_item) = created.get(1).ok_or("second item")?;
-        assert_eq!(*second_callback, 8);
+        assert_eq!(*second_callback, InventoryCallbackId(8));
         assert_eq!(second_item.name, "Second Note");
 
         let cached = session
@@ -12101,7 +12110,7 @@ mod test {
         assert_eq!(items.len(), 1);
         // The per-item async callback id round-trips so a copy/create can be
         // correlated even when its result arrives as a `BulkUpdateInventory`.
-        assert_eq!(item_callbacks, vec![(item_id, 13)]);
+        assert_eq!(item_callbacks, vec![(item_id, InventoryCallbackId(13))]);
 
         assert_eq!(
             session

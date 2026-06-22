@@ -203,7 +203,7 @@ mod tests {
         ctx.set_identity(
             Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap_or_else(|_| Uuid::nil()),
             Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap_or_else(|_| Uuid::nil()),
-            7,
+            sl_proto::CircuitCode(7),
         );
         let built = command("im $self hi").map(|pending| pending.resolve(&ctx));
         assert!(

@@ -34,6 +34,7 @@ use super::{
     LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, Session, SessionState, TELEPORT_TIMEOUT,
     TextureDownload, deadline, merge_deadline,
 };
+use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
 use crate::error::Error;
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::terrain;
@@ -61,16 +62,16 @@ use crate::types::{
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::{
-    AbuseReport, AnyMessage, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd, MessageId,
-    ObjectMediaResponse, PacketFlags, ParcelVoiceInfo, Permissions, Permissions5, Reader,
-    RegionHandle, RegionLocalObjectId, RegionLocalParcelId, VoiceAccountInfo,
-    build_group_notice_bucket, build_login_request, message_name, parse_agent_preferences,
-    parse_attachment_resources, parse_datagram, parse_display_names, parse_experience_ids,
-    parse_experience_infos, parse_experience_permissions, parse_get_object_cost,
-    parse_get_object_physics_data, parse_gltf_material_override, parse_land_resource_detail,
-    parse_land_resource_summary, parse_land_resources_reply, parse_object_physics_properties,
-    parse_region_experiences, parse_remote_parcel_reply, parse_resource_cost_selected,
-    parse_simulator_features, zero_decode,
+    AbuseReport, AnyMessage, CircuitCode, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd,
+    MessageId, ObjectMediaResponse, PacketFlags, ParcelVoiceInfo, Permissions, Permissions5,
+    Reader, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber,
+    VoiceAccountInfo, build_group_notice_bucket, build_login_request, message_name,
+    parse_agent_preferences, parse_attachment_resources, parse_datagram, parse_display_names,
+    parse_experience_ids, parse_experience_infos, parse_experience_permissions,
+    parse_get_object_cost, parse_get_object_physics_data, parse_gltf_material_override,
+    parse_land_resource_detail, parse_land_resource_summary, parse_land_resources_reply,
+    parse_object_physics_properties, parse_region_experiences, parse_remote_parcel_reply,
+    parse_resource_cost_selected, parse_simulator_features, zero_decode,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -127,7 +128,7 @@ impl Session {
             inventory_root: None,
             login_account: None,
             mute_xfers: BTreeMap::new(),
-            next_xfer_id: 1,
+            next_xfer_id: XferId(1),
             texture_downloads: BTreeMap::new(),
             asset_transfers: BTreeMap::new(),
             next_transfer_id: 1,
@@ -141,7 +142,7 @@ impl Session {
             time_dilation: BTreeMap::new(),
             inventory_folders: BTreeMap::new(),
             inventory_items: BTreeMap::new(),
-            next_inventory_callback: 1,
+            next_inventory_callback: InventoryCallbackId(1),
             events: VecDeque::new(),
             diagnostics_enabled: false,
             diagnostics: VecDeque::new(),
@@ -1029,7 +1030,7 @@ impl Session {
         match message {
             AnyMessage::StartPingCheck(ping) => {
                 if let Some(circuit) = self.children.get_mut(&from) {
-                    circuit.send_complete_ping_check(ping.ping_id.ping_id, now)?;
+                    circuit.send_complete_ping_check(PingId(ping.ping_id.ping_id), now)?;
                 }
             }
             AnyMessage::RegionHandshake(_) => {
@@ -1040,7 +1041,7 @@ impl Session {
             AnyMessage::PacketAck(ack) => {
                 if let Some(circuit) = self.children.get_mut(&from) {
                     for packet in &ack.packets {
-                        circuit.record_acks(&[packet.id]);
+                        circuit.record_acks(&[SequenceNumber(packet.id)]);
                     }
                 }
             }
@@ -1820,7 +1821,7 @@ impl Session {
                     self.events.push_back(Event::InventoryItemCreated {
                         sim_approved: reply.agent_data.sim_approved,
                         transaction_id: reply.agent_data.transaction_id,
-                        callback_id: data.callback_id,
+                        callback_id: InventoryCallbackId(data.callback_id),
                         item,
                     });
                 }
@@ -1836,11 +1837,11 @@ impl Session {
                 // that issued a create/copy can correlate the returned callback id
                 // to the resulting item even though the reply arrived here rather
                 // than as an `UpdateCreateInventoryItem`.
-                let item_callbacks: Vec<(Uuid, u32)> = update
+                let item_callbacks: Vec<(Uuid, InventoryCallbackId)> = update
                     .item_data
                     .iter()
                     .filter(|data| data.callback_id != 0)
-                    .map(|data| (data.item_id, data.callback_id))
+                    .map(|data| (data.item_id, InventoryCallbackId(data.callback_id)))
                     .collect();
                 self.cache_inventory(&folders, &items);
                 self.events.push_back(Event::InventoryBulkUpdate {
@@ -1949,13 +1950,13 @@ impl Session {
             }
             AnyMessage::StartPingCheck(ping) => {
                 if let Some(circuit) = self.circuit.as_mut() {
-                    circuit.send_complete_ping_check(ping.ping_id.ping_id, now)?;
+                    circuit.send_complete_ping_check(PingId(ping.ping_id.ping_id), now)?;
                 }
             }
             AnyMessage::PacketAck(ack) => {
                 if let Some(circuit) = self.circuit.as_mut() {
                     for packet in &ack.packets {
-                        circuit.record_acks(&[packet.id]);
+                        circuit.record_acks(&[SequenceNumber(packet.id)]);
                     }
                 }
             }
@@ -1966,7 +1967,7 @@ impl Session {
                     self.events.push_back(Event::MuteList(Vec::new()));
                 } else {
                     let xfer_id = self.next_xfer_id;
-                    self.next_xfer_id = self.next_xfer_id.checked_add(1).unwrap_or(1);
+                    self.next_xfer_id = XferId(self.next_xfer_id.get().checked_add(1).unwrap_or(1));
                     self.mute_xfers.insert(xfer_id, Vec::new());
                     if let Some(circuit) = self.circuit.as_mut() {
                         circuit.send_request_xfer(xfer_id, &filename, now)?;
@@ -1982,7 +1983,7 @@ impl Session {
             // streaming `SendXferPacket`s; the simulator pulls each subsequent
             // packet by acking the previous one (`ConfirmXferPacket`).
             AnyMessage::RequestXfer(request) => {
-                let xfer_id = request.xfer_id.id;
+                let xfer_id = XferId(request.xfer_id.id);
                 let asset_id = request.xfer_id.v_file_id;
                 if self.asset_uploads.contains_key(&asset_id) {
                     self.upload_xfers.insert(xfer_id, asset_id);
@@ -1992,7 +1993,7 @@ impl Session {
             // The simulator acknowledged one of our upload packets; send the
             // next chunk (the terminal `AssetUploadComplete` follows the last).
             AnyMessage::ConfirmXferPacket(ack) => {
-                let xfer_id = ack.xfer_id.id;
+                let xfer_id = XferId(ack.xfer_id.id);
                 if let Some(&asset_id) = self.upload_xfers.get(&xfer_id) {
                     let more = self
                         .asset_uploads
@@ -2018,7 +2019,7 @@ impl Session {
                 });
             }
             AnyMessage::SendXferPacket(packet) => {
-                let xfer_id = packet.xfer_id.id;
+                let xfer_id = XferId(packet.xfer_id.id);
                 let packet_num = packet.xfer_id.packet;
                 // The high bit marks the final packet; the low 31 bits are the
                 // sequence number (the first packet is sequence 0).
@@ -2096,7 +2097,7 @@ impl Session {
             AnyMessage::TransferInfo(info) => {
                 // The transfer's initial status/size. A non-success status here
                 // (e.g. the asset is missing or denied) means no data follows.
-                let transfer_id = info.transfer_info.transfer_id;
+                let transfer_id = TransferId(info.transfer_info.transfer_id);
                 let status = TransferStatus::from_code(info.transfer_info.status);
                 if matches!(status, TransferStatus::Ok | TransferStatus::Done) {
                     // Success: the asset exists and its bytes follow as
@@ -2120,7 +2121,7 @@ impl Session {
             AnyMessage::TransferPacket(packet) => {
                 // A data chunk of a generic asset transfer; the final packet
                 // carries `LLTS_DONE`.
-                let transfer_id = packet.transfer_data.transfer_id;
+                let transfer_id = TransferId(packet.transfer_data.transfer_id);
                 let status = TransferStatus::from_code(packet.transfer_data.status);
                 let packet_index = packet.transfer_data.packet;
                 let mut done = false;
@@ -2914,7 +2915,7 @@ impl Session {
         if !exhausted.is_empty() {
             for (sequence, name) in exhausted {
                 tracing::warn!(
-                    sequence,
+                    sequence = sequence.get(),
                     message = name.unwrap_or("?"),
                     "reliable packet exhausted its retransmission budget"
                 );
@@ -2999,7 +3000,7 @@ impl Session {
         }
         for (sequence, name) in child_exhausted {
             tracing::warn!(
-                sequence,
+                sequence = sequence.get(),
                 message = name.unwrap_or("?"),
                 "reliable packet on a child circuit exhausted its retransmission budget"
             );
@@ -4830,7 +4831,7 @@ impl Session {
         priority: f32,
         now: Instant,
     ) -> Result<(), Error> {
-        let transfer_id = Uuid::from_u128(self.next_transfer_id);
+        let transfer_id = TransferId::from_u128(self.next_transfer_id);
         self.next_transfer_id = self.next_transfer_id.checked_add(1).unwrap_or(1);
         self.asset_transfers.insert(
             transfer_id,
@@ -4906,7 +4907,12 @@ impl Session {
 
     /// Sends the next `SendXferPacket` of the upload keyed by `asset_id` over the
     /// root circuit, flagging the final packet, and advancing its sent counter.
-    fn advance_upload(&mut self, xfer_id: u64, asset_id: Uuid, now: Instant) -> Result<(), Error> {
+    fn advance_upload(
+        &mut self,
+        xfer_id: XferId,
+        asset_id: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
         let Some(upload) = self.asset_uploads.get_mut(&asset_id) else {
             return Ok(());
         };
@@ -5712,7 +5718,7 @@ impl Session {
     /// [`Session::agent_id`] for a driver that wants to symbolize the circuit in
     /// its logs.
     #[must_use]
-    pub const fn circuit_code(&self) -> Option<u32> {
+    pub const fn circuit_code(&self) -> Option<CircuitCode> {
         match self.circuit.as_ref() {
             Some(circuit) => Some(circuit.code),
             None => None,
@@ -5847,9 +5853,10 @@ impl Session {
     }
 
     /// Allocates the next async inventory `CallbackID` (never zero).
-    fn next_inventory_callback(&mut self) -> u32 {
+    fn next_inventory_callback(&mut self) -> InventoryCallbackId {
         let id = self.next_inventory_callback;
-        self.next_inventory_callback = self.next_inventory_callback.wrapping_add(1).max(1);
+        self.next_inventory_callback =
+            InventoryCallbackId(self.next_inventory_callback.get().wrapping_add(1).max(1));
         id
     }
 
@@ -5991,7 +5998,7 @@ impl Session {
         &mut self,
         new: &NewInventoryItem,
         now: Instant,
-    ) -> Result<u32, Error> {
+    ) -> Result<InventoryCallbackId, Error> {
         let callback_id = self.next_inventory_callback();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_create_inventory_item(new, callback_id, now)?;
@@ -6079,7 +6086,7 @@ impl Session {
         new_folder_id: Uuid,
         new_name: &str,
         now: Instant,
-    ) -> Result<u32, Error> {
+    ) -> Result<InventoryCallbackId, Error> {
         let callback_id = self.next_inventory_callback();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_copy_inventory_item(

@@ -40,6 +40,7 @@ use sl_wire::SimulatorFeatures;
 use sl_wire::VoiceAccountInfo;
 use uuid::Uuid;
 
+use crate::bookkeeping_ids::InventoryCallbackId;
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 
 /// A high-level event surfaced to the driver/application.
@@ -450,7 +451,7 @@ pub enum Event {
         transaction_id: Uuid,
         /// The async callback id echoed from the originating request (`0` if
         /// none), used by a client to correlate the reply with its request.
-        callback_id: u32,
+        callback_id: InventoryCallbackId,
         /// The created/updated item.
         item: InventoryItem,
     },
@@ -473,7 +474,7 @@ pub enum Event {
         /// even when the result arrives as a `BulkUpdateInventory` rather than an
         /// [`Event::InventoryItemCreated`]. Empty for delivery paths that carry no
         /// callback id (the CAPS event-queue / AIS3 forms).
-        item_callbacks: Vec<(Uuid, u32)>,
+        item_callbacks: Vec<(Uuid, InventoryCallbackId)>,
     },
     /// The agent's friends (the buddy list), parsed from the login response.
     /// Emitted once, right after [`Event::CircuitEstablished`], when the login

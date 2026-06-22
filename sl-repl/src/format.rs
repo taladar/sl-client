@@ -774,7 +774,7 @@ mod tests {
     #[test]
     fn command_symbolizes_session_bindings() {
         let mut ctx = SessionContext::new();
-        ctx.set_identity(uuid('1'), uuid('2'), 7);
+        ctx.set_identity(uuid('1'), uuid('2'), sl_proto::CircuitCode(7));
         let formatted = format_command(
             &Command::InstantMessage {
                 to_agent_id: uuid('1'),
@@ -832,7 +832,7 @@ mod tests {
         assert_eq!(
             format_diagnostic(&Diagnostic::ExpectedReplyMissing {
                 request: "Logout".to_owned(),
-                sequence: Some(42),
+                sequence: Some(sl_proto::SequenceNumber(42)),
             }),
             "ExpectedReplyMissing request=Logout sequence=42"
         );

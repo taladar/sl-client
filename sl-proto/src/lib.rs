@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 mod appearance;
+mod bookkeeping_ids;
 mod command;
 mod error;
 mod extra_params;
@@ -14,6 +15,7 @@ mod terrain;
 mod types;
 
 pub use appearance::{MAX_FACES, decode_texture_entry, encode_texture_entry};
+pub use bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
 pub use command::Command;
 pub use error::Error;
 pub use extra_params::encode_extra_params;
@@ -99,8 +101,8 @@ pub use uuid::Uuid;
 pub use sl_wire::{
     AbuseReport, AbuseReportType, AgentPreferences, AisCategoryCreate, AisItemUpdate, AisUpdate,
     AnimatedObjects, AnyMessage, AssetUploadResponse, AttachmentLocation,
-    AttachmentResourcesReport, ControlFlags, CreateInventoryCategoryRequest, DisplayName,
-    EventQueueEvent, EventQueueResponse, ExperienceInfo, ExperiencePermission,
+    AttachmentResourcesReport, CircuitCode, ControlFlags, CreateInventoryCategoryRequest,
+    DisplayName, EventQueueEvent, EventQueueResponse, ExperienceInfo, ExperiencePermission,
     ExperienceProperties, ExperienceUpdate, GLTF_MATERIAL_OVERRIDE_METHOD, GltfMaterialOverride,
     HomeLocation, IceCandidate, LandResourcesUrls, LegacyMaterial, Llsd, LoginRequest,
     LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
@@ -110,10 +112,10 @@ pub use sl_wire::{
     PhysicsShapeTypes, ReflectionProbeFlags, RegionFlags, RegionHandle, RegionHandleError,
     RegionLocalObjectId, RegionLocalParcelId, RemoteParcelRequest, RenderMaterialEntry,
     ResourceAmount, ResourceSummary, ScriptedObjectInfo, ScriptedObjectResources, SelectedCostKind,
-    SelectedResourceCost, SimulatorFeatures, StartLocation, StartLocationParseError,
-    VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC, VoiceAccountInfo, VoiceProvisionRequest,
-    WireError, ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, build_agent_preferences_request,
+    SelectedResourceCost, SequenceNumber, SimulatorFeatures, StartLocation,
+    StartLocationParseError, VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC, VoiceAccountInfo,
+    VoiceProvisionRequest, WireError, ais_category_children_fetch_url, ais_category_children_url,
+    ais_category_url, ais_create_category_url, ais_item_url, build_agent_preferences_request,
     build_agent_preferences_response, build_ais_create_category_body, build_ais_move_body,
     build_ais_rename_category_body, build_ais_update_item_body, build_ais_update_response,
     build_attachment_resources_response, build_create_inventory_category_request,

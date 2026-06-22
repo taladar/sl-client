@@ -11,6 +11,7 @@
 
 use crate::endian;
 use crate::error::WireError;
+use crate::sequence_number::SequenceNumber;
 
 /// The number of bytes in the fixed part of the header (flags, sequence,
 /// extra-header length), before any extra-header bytes.
@@ -69,12 +70,12 @@ pub struct ParsedDatagram<'a> {
     /// The packet flags.
     pub flags: PacketFlags,
     /// The big-endian sequence number.
-    pub sequence: u32,
+    pub sequence: SequenceNumber,
     /// Any extra-header bytes (usually empty).
     pub extra: &'a [u8],
     /// Acknowledgement ids appended to this datagram (already stripped from the
     /// body), in wire order.
-    pub acks: Vec<u32>,
+    pub acks: Vec<SequenceNumber>,
     /// The message body. Still zero-coded if `flags.contains(PacketFlags::ZEROCODED)`.
     pub body: &'a [u8],
 }
@@ -99,7 +100,7 @@ pub fn parse_datagram(datagram: &[u8]) -> Result<ParsedDatagram<'_>, WireError> 
         .ok_or(WireError::ShortHeader)?
         .try_into()
         .map_err(|_ignored| WireError::ShortHeader)?;
-    let sequence = endian::u32_from_be(seq_bytes);
+    let sequence = SequenceNumber(endian::u32_from_be(seq_bytes));
 
     let extra_len = usize::from(*datagram.get(5).ok_or(WireError::ShortHeader)?);
     let extra_end = PRELUDE_LEN
@@ -129,7 +130,7 @@ pub fn parse_datagram(datagram: &[u8]) -> Result<ParsedDatagram<'_>, WireError> 
             let id_bytes: [u8; 4] = chunk
                 .try_into()
                 .map_err(|_ignored| WireError::MalformedAcks)?;
-            acks.push(endian::u32_from_be(id_bytes));
+            acks.push(SequenceNumber(endian::u32_from_be(id_bytes)));
         }
         end = acks_start;
     }
@@ -150,10 +151,10 @@ pub fn parse_datagram(datagram: &[u8]) -> Result<ParsedDatagram<'_>, WireError> 
 /// The caller is responsible for the consistency of `flags` with `body` (for
 /// example, only setting [`PacketFlags::ZEROCODED`] when `body` is zero-coded).
 #[must_use]
-pub fn encode_datagram(flags: PacketFlags, sequence: u32, body: &[u8]) -> Vec<u8> {
+pub fn encode_datagram(flags: PacketFlags, sequence: SequenceNumber, body: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(PRELUDE_LEN.saturating_add(body.len()));
     out.push(flags.bits());
-    out.extend_from_slice(&endian::u32_to_be(sequence));
+    out.extend_from_slice(&endian::u32_to_be(sequence.get()));
     out.push(0x00); // extra-header length
     out.extend_from_slice(body);
     out

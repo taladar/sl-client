@@ -11,6 +11,8 @@ use std::str::FromStr;
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::CircuitCode;
+
 /// Where a login should place the avatar — the `start` member of a
 /// [`LoginRequest`].
 ///
@@ -325,7 +327,7 @@ pub struct LoginSuccess {
     /// The secure session id.
     pub secure_session_id: Uuid,
     /// The circuit code for `UseCircuitCode`.
-    pub circuit_code: u32,
+    pub circuit_code: CircuitCode,
     /// The destination simulator's IPv4 address.
     pub sim_ip: Ipv4Addr,
     /// The destination simulator's UDP port.
@@ -520,7 +522,7 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
         agent_id: parse_uuid(&members, "agent_id")?,
         session_id: parse_uuid(&members, "session_id")?,
         secure_session_id: parse_uuid(&members, "secure_session_id")?,
-        circuit_code: parse_parsed(&members, "circuit_code")?,
+        circuit_code: CircuitCode(parse_parsed(&members, "circuit_code")?),
         sim_ip: parse_parsed(&members, "sim_ip")?,
         sim_port: parse_parsed(&members, "sim_port")?,
         seed_capability: required(&members, "seed_capability")?.clone(),
@@ -960,7 +962,7 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
         "secure_session_id",
         &success.secure_session_id.to_string(),
     );
-    push_int_member(out, "circuit_code", i64::from(success.circuit_code));
+    push_int_member(out, "circuit_code", i64::from(success.circuit_code.get()));
     push_string_member(out, "sim_ip", &success.sim_ip.to_string());
     push_int_member(out, "sim_port", i64::from(success.sim_port));
     push_string_member(out, "seed_capability", &success.seed_capability);

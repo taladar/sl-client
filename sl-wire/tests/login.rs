@@ -95,7 +95,7 @@ mod test {
         let LoginResponse::Success(success) = parse_login_response(xml)? else {
             return Err("expected a successful login".into());
         };
-        assert_eq!(success.circuit_code, 123_456);
+        assert_eq!(success.circuit_code, sl_wire::CircuitCode(123_456));
         assert_eq!(success.sim_ip, Ipv4Addr::new(127, 0, 0, 1));
         assert_eq!(success.sim_port, 9000);
         assert_eq!(success.seed_capability, "http://127.0.0.1:9000/CAPS/seed");
@@ -505,7 +505,7 @@ mod test {
             agent_id: "11111111-1111-1111-1111-111111111111".parse()?,
             session_id: "22222222-2222-2222-2222-222222222222".parse()?,
             secure_session_id: "33333333-3333-3333-3333-333333333333".parse()?,
-            circuit_code: 123_456,
+            circuit_code: sl_wire::CircuitCode(123_456),
             sim_ip: Ipv4Addr::new(127, 0, 0, 1),
             sim_port: 9000,
             seed_capability: "http://127.0.0.1:9000/CAPS/seed".to_owned(),

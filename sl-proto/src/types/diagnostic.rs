@@ -1,6 +1,6 @@
 //! Protocol-level diagnostics: anomalies the session noticed in inbound data.
 
-use sl_wire::{MessageId, WireError};
+use sl_wire::{MessageId, SequenceNumber, WireError};
 
 /// A protocol-level anomaly the session noticed while processing inbound data.
 ///
@@ -72,6 +72,6 @@ pub enum Diagnostic {
         request: String,
         /// The sequence number of the unacked reliable packet, when one is
         /// known (`None` for operation-level timeouts).
-        sequence: Option<u32>,
+        sequence: Option<SequenceNumber>,
     },
 }

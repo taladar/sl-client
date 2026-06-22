@@ -1,15 +1,18 @@
 //! The sans-I/O session state machine: login, circuit establishment,
 //! keep-alive, and clean logout, driven entirely by passed-in time.
 
+use crate::bookkeeping_ids::{InventoryCallbackId, TransferId, XferId};
 use crate::scoped_id::CircuitId;
 use crate::types::{
     AssetType, Camera, Diagnostic, Event, ImageCodec, InventoryFolder, InventoryItem, LoginAccount,
     LoginParams, Object, TerrainPatch, Throttle,
 };
 use sl_types::lsl::Rotation;
+use sl_wire::CircuitCode;
 use sl_wire::ControlFlags;
 use sl_wire::RegionHandle;
 use sl_wire::RegionLocalObjectId;
+use sl_wire::SequenceNumber;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -501,14 +504,14 @@ struct UnackedPacket {
 #[derive(Debug, Default)]
 struct SeenWindow {
     /// Membership set for O(1) lookup.
-    set: HashSet<u32>,
+    set: HashSet<SequenceNumber>,
     /// Insertion order, for evicting the oldest entries.
-    order: VecDeque<u32>,
+    order: VecDeque<SequenceNumber>,
 }
 
 impl SeenWindow {
     /// Records `sequence`; returns `true` if it was not seen before.
-    fn insert(&mut self, sequence: u32) -> bool {
+    fn insert(&mut self, sequence: SequenceNumber) -> bool {
         if !self.set.insert(sequence) {
             return false;
         }
@@ -674,16 +677,16 @@ struct Circuit {
     /// The session id.
     session_id: Uuid,
     /// The circuit code.
-    code: u32,
+    code: CircuitCode,
     /// The next outgoing sequence number.
-    next_sequence: u32,
+    next_sequence: SequenceNumber,
     /// The monotonically increasing serial number shared by `AgentPause` and
     /// `AgentResume`; the simulator ignores non-increasing values.
     pause_serial_num: u32,
     /// Inbound reliable sequence numbers we still owe acknowledgements for.
-    pending_acks: Vec<u32>,
+    pending_acks: Vec<SequenceNumber>,
     /// Outgoing reliable packets awaiting acknowledgement, keyed by sequence.
-    unacked: BTreeMap<u32, UnackedPacket>,
+    unacked: BTreeMap<SequenceNumber, UnackedPacket>,
     /// Recently seen inbound reliable sequence numbers.
     seen: SeenWindow,
     /// Datagrams ready to be transmitted.
@@ -782,9 +785,9 @@ pub struct Session {
     login_account: Option<LoginAccount>,
     /// In-flight mute-list file downloads (`Xfer` id → accumulated file bytes),
     /// started when a `MuteListUpdate` arrives.
-    mute_xfers: BTreeMap<u64, Vec<u8>>,
+    mute_xfers: BTreeMap<XferId, Vec<u8>>,
     /// A monotonic counter for generating `Xfer` ids (never zero).
-    next_xfer_id: u64,
+    next_xfer_id: XferId,
     /// In-flight legacy UDP texture downloads, keyed by the texture's asset id
     /// (echoed in every `ImageData`/`ImagePacket`). Started by
     /// [`Session::request_texture`].
@@ -792,7 +795,7 @@ pub struct Session {
     /// In-flight generic asset transfers, keyed by the client-generated
     /// transfer id (echoed in every `TransferInfo`/`TransferPacket`). Started by
     /// [`Session::request_asset`].
-    asset_transfers: BTreeMap<Uuid, AssetTransfer>,
+    asset_transfers: BTreeMap<TransferId, AssetTransfer>,
     /// A monotonic counter for generating asset transfer ids (each packed into a
     /// fresh `TransferID` UUID; never zero).
     next_transfer_id: u128,
@@ -809,7 +812,7 @@ pub struct Session {
     /// Maps an active upload `Xfer` id (chosen by the simulator in its
     /// `RequestXfer`) to the predicted asset id keying [`asset_uploads`](Self::asset_uploads),
     /// so an inbound `ConfirmXferPacket` can find the upload to advance.
-    upload_xfers: BTreeMap<u64, Uuid>,
+    upload_xfers: BTreeMap<XferId, Uuid>,
     /// A monotonic counter for generating upload transaction ids (each packed
     /// into a fresh transaction UUID; never zero).
     next_upload_id: u128,
@@ -853,7 +856,7 @@ pub struct Session {
     inventory_items: BTreeMap<Uuid, InventoryItem>,
     /// A monotonic counter for the async `CallbackID` of inventory create/update
     /// requests, echoed back in the simulator's reply so a client can correlate.
-    next_inventory_callback: u32,
+    next_inventory_callback: InventoryCallbackId,
     /// Pending high-level events for the driver.
     events: VecDeque<Event>,
     /// Whether protocol diagnostics are collected. Off by default so the

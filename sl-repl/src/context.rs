@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use sl_proto::{CircuitId, Event, RegionHandle, Uuid};
+use sl_proto::{CircuitCode, CircuitId, Event, RegionHandle, Uuid};
 
 /// Resolves the `$placeholder` argument tokens a REPL line may use, and the
 /// reverse mapping from a literal back to the placeholder that stands for it.
@@ -93,7 +93,7 @@ pub struct SessionContext {
     /// The session id (`$session`), once login has completed.
     session_id: Option<Uuid>,
     /// The circuit code (`$circuit`), once login has completed.
-    circuit_code: Option<u32>,
+    circuit_code: Option<CircuitCode>,
     /// The current root circuit's instance id (`$circuitid`), tracked from the
     /// [`Event::CircuitEstablished`] / [`Event::RegionChanged`] stream. Used to
     /// scope freshly typed region-local object/parcel ids into the scoped form
@@ -134,7 +134,7 @@ impl SessionContext {
 
     /// Seed the login-time identity facts: the agent id (`$self`), session id
     /// (`$session`), and circuit code (`$circuit`).
-    pub fn set_identity(&mut self, agent_id: Uuid, session_id: Uuid, circuit_code: u32) {
+    pub fn set_identity(&mut self, agent_id: Uuid, session_id: Uuid, circuit_code: CircuitCode) {
         bind(&mut self.agent_id, agent_id, "self");
         bind(&mut self.session_id, session_id, "session");
         bind(&mut self.circuit_code, circuit_code, "circuit");
@@ -292,7 +292,7 @@ impl ReplContext for SessionContext {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use sl_proto::{RegionHandle, Uuid};
+    use sl_proto::{CircuitCode, RegionHandle, Uuid};
 
     use super::{ReplContext as _, SessionContext};
 
@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn resolves_identity_placeholders() {
         let mut ctx = SessionContext::new();
-        ctx.set_identity(uuid('1'), uuid('2'), 12345);
+        ctx.set_identity(uuid('1'), uuid('2'), CircuitCode(12345));
         assert_eq!(ctx.resolve_placeholder("self"), Some(uuid('1').to_string()));
         assert_eq!(
             ctx.resolve_placeholder("session"),
@@ -364,7 +364,7 @@ mod tests {
     #[test]
     fn symbolize_inverts_resolution() {
         let mut ctx = SessionContext::new();
-        ctx.set_identity(uuid('1'), uuid('2'), 12345);
+        ctx.set_identity(uuid('1'), uuid('2'), CircuitCode(12345));
         ctx.set_region(RegionHandle(1_099_511_628_032), "Da Boom");
         ctx.set_cap("GetTexture", "https://sim/cap/abc");
         ctx.set_var("dest", "Da Boom Plaza");
