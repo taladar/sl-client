@@ -5,8 +5,8 @@ use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::{
-    CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA, CAP_UPDATE_AVATAR_APPEARANCE, GroupKey, Llsd, Uuid,
-    build_fetch_inventory_request, build_group_member_data_request,
+    CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA, CAP_UPDATE_AVATAR_APPEARANCE, GroupKey,
+    InventoryFolderKey, Llsd, Uuid, build_fetch_inventory_request, build_group_member_data_request,
     build_update_avatar_appearance_request, parse_llsd_xml,
 };
 
@@ -16,7 +16,7 @@ use sl_proto::{
 pub(crate) fn run_inventory_fetch(
     cap_url: &str,
     owner_id: Uuid,
-    folder_ids: &[Uuid],
+    folder_ids: &[InventoryFolderKey],
     caps_tx: &Sender<(String, Llsd)>,
 ) {
     let Ok(http) = ReqwestBlockingClient::builder()

@@ -19,8 +19,8 @@
 use std::time::Duration;
 
 use sl_client_tokio::{
-    AssetType, Client, Command, DisconnectReason, Error, Event, InventoryType, LoginParams,
-    LoginRequest, Throttle, Uuid,
+    AssetType, Client, Command, DisconnectReason, Error, Event, InventoryFolderKey, InventoryType,
+    LoginParams, LoginRequest, Throttle,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -76,14 +76,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // The destination folder for the CAPS upload, learned from the inventory
     // skeleton (the root "My Inventory" folder, whose parent is nil).
-    let mut root_folder: Option<Uuid> = None;
+    let mut root_folder: Option<InventoryFolderKey> = None;
     let mut requested = false;
     while let Some(event) = event_rx.recv().await {
         match event {
             Event::InventorySkeleton(folders) => {
                 root_folder = folders
                     .iter()
-                    .find(|folder| folder.parent_id.is_nil())
+                    .find(|folder| folder.parent_id.uuid().is_nil())
                     .map(|folder| folder.folder_id)
                     .or(root_folder);
             }

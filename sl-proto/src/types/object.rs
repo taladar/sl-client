@@ -1,7 +1,7 @@
 //! In-world object schema: motion, shape, materials, animations, particles.
 
 use sl_types::attachment::AttachmentPoint;
-use sl_types::key::{AgentKey, GroupKey, ObjectKey, OwnerKey};
+use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::Permissions5;
@@ -684,9 +684,9 @@ pub struct ObjectProperties {
     /// The inventory item this object was rezzed from (nil if not applicable),
     /// used to correlate an in-world object back to its inventory item — needed
     /// for attachments and "find in inventory".
-    pub item_id: Uuid,
+    pub item_id: InventoryKey,
     /// The inventory folder the source item lives in (nil if not applicable).
-    pub folder_id: Uuid,
+    pub folder_id: InventoryFolderKey,
     /// The task (object) this item came from, when it was rezzed from another
     /// object's contents (nil if not applicable).
     pub from_task_id: ObjectKey,

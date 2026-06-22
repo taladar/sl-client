@@ -20,7 +20,7 @@ use super::{
     ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload,
     TelehubInfo, TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
 };
-use sl_types::key::{AgentKey, GroupKey, ObjectKey};
+use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::AgentPreferences;
@@ -430,7 +430,7 @@ pub enum Event {
     /// its immediate sub-folders and items.
     InventoryDescendents {
         /// The folder whose contents these are.
-        folder_id: Uuid,
+        folder_id: InventoryFolderKey,
         /// The folder version (for cache validation).
         version: i32,
         /// The total descendent count the simulator reports.
@@ -475,7 +475,7 @@ pub enum Event {
         /// even when the result arrives as a `BulkUpdateInventory` rather than an
         /// [`Event::InventoryItemCreated`]. Empty for delivery paths that carry no
         /// callback id (the CAPS event-queue / AIS3 forms).
-        item_callbacks: Vec<(Uuid, InventoryCallbackId)>,
+        item_callbacks: Vec<(InventoryKey, InventoryCallbackId)>,
     },
     /// The agent's friends (the buddy list), parsed from the login response.
     /// Emitted once, right after [`Event::CircuitEstablished`], when the login
@@ -876,7 +876,7 @@ pub enum Event {
         /// The object (task) holding the script.
         object_id: ObjectKey,
         /// The script inventory item inside that task.
-        item_id: Uuid,
+        item_id: InventoryKey,
         /// Whether the script is currently running.
         running: bool,
     },

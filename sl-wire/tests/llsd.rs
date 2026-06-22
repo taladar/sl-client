@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod test {
     use pretty_assertions::assert_eq;
+    use sl_types::key::InventoryFolderKey;
     use sl_wire::{
         EventQueueEvent, Llsd, build_event_queue_request, build_event_queue_response,
         build_seed_request, parse_event_queue_response, parse_llsd_xml, parse_seed_response,
@@ -127,7 +128,8 @@ mod test {
     fn builds_fetch_inventory_request() -> Result<(), TestError> {
         let owner = "11111111-1111-1111-1111-111111111111".parse::<uuid::Uuid>()?;
         let folder = "22222222-2222-2222-2222-222222222222".parse::<uuid::Uuid>()?;
-        let body = sl_wire::build_fetch_inventory_request(owner, &[folder]);
+        let body =
+            sl_wire::build_fetch_inventory_request(owner, &[InventoryFolderKey::from(folder)]);
         assert!(body.starts_with("<llsd><map><key>folders</key><array>"));
         assert!(
             body.contains("<key>folder_id</key><uuid>22222222-2222-2222-2222-222222222222</uuid>")

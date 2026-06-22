@@ -1,6 +1,6 @@
 //! Groups: membership, roles, notices, and management.
 
-use sl_types::key::{AgentKey, GroupKey};
+use sl_types::key::{AgentKey, GroupKey, InventoryKey};
 use uuid::Uuid;
 
 /// A Second Life group *role* id — the UUID that identifies one role within a
@@ -313,7 +313,7 @@ pub struct GroupRoleMemberChange {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GroupNoticeAttachment {
     /// The attached inventory item's id.
-    pub item_id: Uuid,
+    pub item_id: InventoryKey,
     /// The item owner's agent id (usually the sender).
     pub owner_id: Uuid,
 }

@@ -7,7 +7,7 @@ use crate::types::{
     AssetType, Camera, Diagnostic, Event, ImageCodec, InventoryFolder, InventoryItem, LoginAccount,
     LoginParams, Object, TerrainPatch, Throttle,
 };
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, InventoryFolderKey};
 use sl_types::lsl::Rotation;
 use sl_wire::CircuitCode;
 use sl_wire::ControlFlags;
@@ -780,7 +780,7 @@ pub struct Session {
     seed_capability: Option<String>,
     /// The agent's inventory root ("My Inventory") folder id, from the login
     /// response.
-    inventory_root: Option<Uuid>,
+    inventory_root: Option<InventoryFolderKey>,
     /// Account-level facts from the login response (home, maturity, group limit,
     /// Library roots), or `None` before login.
     login_account: Option<LoginAccount>,

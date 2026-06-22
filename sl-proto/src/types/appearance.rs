@@ -1,6 +1,6 @@
 //! Wearables and avatar appearance: textures, attachments, animations.
 
-use sl_types::key::ObjectKey;
+use sl_types::key::{InventoryKey, ObjectKey};
 use sl_types::lsl::Vector;
 use uuid::Uuid;
 
@@ -124,7 +124,7 @@ impl WearableType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Wearable {
     /// The inventory item id of the worn wearable.
-    pub item_id: Uuid,
+    pub item_id: InventoryKey,
     /// The wearable's asset id (nil when not known, e.g. when sending).
     pub asset_id: Uuid,
     /// Which body/clothing slot this wearable occupies.
@@ -776,7 +776,7 @@ impl DetachOrder {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RezAttachment {
     /// The inventory item id to wear.
-    pub item_id: Uuid,
+    pub item_id: InventoryKey,
     /// The item's owner id (the agent's own id for an item from its inventory).
     pub owner_id: Uuid,
     /// The attachment point to wear it on ([`AttachmentPoint::Default`] lets the

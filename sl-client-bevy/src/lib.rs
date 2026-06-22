@@ -57,30 +57,31 @@ pub use sl_proto::{
     GroupMembership, GroupNotice, GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleChange,
     GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
     HomeLocation, IceCandidate, ImDialog, InstantMessage, InterestsUpdate, InventoryCallbackId,
-    InventoryFolder, InventoryItem, InventoryOffer, InventoryType, Key, Kilobits, LandingType,
-    LegacyMaterial, LightData, LightImage, LindenAmount, LoadUrlRequest, LoginAccount, LoginParams,
-    LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
-    MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate,
-    Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
-    MovementMode, MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, Object,
-    ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks,
-    ObjectProperties, ObjectTransform, OpenSimExtras, OwnerKey, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
-    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
-    PhysicsShapeTypes, PickInfo, PickUpdate, PingId, PlayingAnimation, PrimShape, PrimShapeParams,
-    ProductType, ProfileUpdate, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
-    RegionCombatSettings, RegionFlags, RegionHandle, RegionHandleError, RegionIdentity,
-    RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, Reliability,
-    RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
-    ScriptControl, ScriptControlAction, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, SculptData, SequenceNumber, SimulatorFeatures, SoundFlags, SoundPreload,
-    StartLocation, StartLocationParseError, TerrainLayerType, TerrainPatch, TextureAnimation,
-    TextureEntry, TextureFace, Throttle, ThrottleBuilder, ThrottleError, TransferId, Transmit,
-    Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, XferId,
-    avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
-    grid_to_handle, group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode,
-    sim_access, texture_anim_mode,
+    InventoryFolder, InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer,
+    InventoryType, Key, Kilobits, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount,
+    LoadUrlRequest, LoginAccount, LoginParams, LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE,
+    MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
+    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge, MoneyBalance,
+    MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
+    NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings,
+    ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties, ObjectTransform,
+    OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+    ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
+    ParcelVoiceInfo, ParticleSystem, PermissionField, PhysicsShapeTypes, PickInfo, PickUpdate,
+    PingId, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
+    ReflectionProbe, ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionFlags,
+    RegionHandle, RegionHandleError, RegionIdentity, RegionInfoUpdate, RegionLimits,
+    RegionLocalObjectId, RegionLocalParcelId, Reliability, RenderMaterialEntry, RenderMaterialRef,
+    Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData,
+    SequenceNumber, SimulatorFeatures, SoundFlags, SoundPreload, StartLocation,
+    StartLocationParseError, TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry,
+    TextureFace, Throttle, ThrottleBuilder, ThrottleError, TransferId, Transmit, Uuid, Vector,
+    VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, XferId, avatar_texture,
+    decode_particle_system, decode_texture_anim, decode_texture_entry, grid_to_handle,
+    group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode, sim_access,
+    texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -597,7 +598,7 @@ fn advance_running(
                     .ok();
             }
             Command::RequestFolderContents(folder_id) => {
-                session.request_folder_contents(*folder_id, now).ok();
+                session.request_folder_contents(folder_id.uuid(), now).ok();
             }
             Command::FetchInventoryFolders(folder_ids) => {
                 if let Some(caps) = caps.as_ref()
@@ -620,7 +621,13 @@ fn advance_running(
                 name,
             } => {
                 session
-                    .create_inventory_folder(*folder_id, *parent_id, *folder_type, name, now)
+                    .create_inventory_folder(
+                        folder_id.uuid(),
+                        parent_id.uuid(),
+                        *folder_type,
+                        name,
+                        now,
+                    )
                     .ok();
             }
             Command::UpdateInventoryFolder {
@@ -630,7 +637,13 @@ fn advance_running(
                 name,
             } => {
                 session
-                    .update_inventory_folder(*folder_id, *parent_id, *folder_type, name, now)
+                    .update_inventory_folder(
+                        folder_id.uuid(),
+                        parent_id.uuid(),
+                        *folder_type,
+                        name,
+                        now,
+                    )
                     .ok();
             }
             Command::MoveInventoryFolder {
@@ -638,11 +651,12 @@ fn advance_running(
                 parent_id,
             } => {
                 session
-                    .move_inventory_folder(*folder_id, *parent_id, now)
+                    .move_inventory_folder(folder_id.uuid(), parent_id.uuid(), now)
                     .ok();
             }
             Command::RemoveInventoryFolders(folder_ids) => {
-                session.remove_inventory_folders(folder_ids, now).ok();
+                let folder_ids: Vec<Uuid> = folder_ids.iter().map(|id| id.uuid()).collect();
+                session.remove_inventory_folders(&folder_ids, now).ok();
             }
             Command::CreateInventoryItem(new) => {
                 session.create_inventory_item(new, now).ok();
@@ -661,7 +675,7 @@ fn advance_running(
                 new_name,
             } => {
                 session
-                    .move_inventory_item(*item_id, *folder_id, new_name, now)
+                    .move_inventory_item(item_id.uuid(), folder_id.uuid(), new_name, now)
                     .ok();
             }
             Command::CopyInventoryItem {
@@ -671,26 +685,37 @@ fn advance_running(
                 new_name,
             } => {
                 session
-                    .copy_inventory_item(*old_agent_id, *old_item_id, *new_folder_id, new_name, now)
+                    .copy_inventory_item(
+                        *old_agent_id,
+                        old_item_id.uuid(),
+                        new_folder_id.uuid(),
+                        new_name,
+                        now,
+                    )
                     .ok();
             }
             Command::RemoveInventoryItems(item_ids) => {
-                session.remove_inventory_items(item_ids, now).ok();
+                let item_ids: Vec<Uuid> = item_ids.iter().map(|id| id.uuid()).collect();
+                session.remove_inventory_items(&item_ids, now).ok();
             }
             Command::ChangeInventoryItemFlags { item_id, flags } => {
                 session
-                    .change_inventory_item_flags(*item_id, *flags, now)
+                    .change_inventory_item_flags(item_id.uuid(), *flags, now)
                     .ok();
             }
             Command::PurgeInventoryDescendents(folder_id) => {
-                session.purge_inventory_descendents(*folder_id, now).ok();
+                session
+                    .purge_inventory_descendents(folder_id.uuid(), now)
+                    .ok();
             }
             Command::RemoveInventoryObjects {
                 folder_ids,
                 item_ids,
             } => {
+                let folder_ids: Vec<Uuid> = folder_ids.iter().map(|id| id.uuid()).collect();
+                let item_ids: Vec<Uuid> = item_ids.iter().map(|id| id.uuid()).collect();
                 session
-                    .remove_inventory_objects(folder_ids, item_ids, now)
+                    .remove_inventory_objects(&folder_ids, &item_ids, now)
                     .ok();
             }
             Command::CreateInventoryCategory {
@@ -703,7 +728,7 @@ fn advance_running(
                 {
                     let events_tx = caps.events_tx.clone();
                     let body = build_create_inventory_category_request(
-                        Uuid::new_v4(),
+                        InventoryFolderKey::from(Uuid::new_v4()),
                         *parent_id,
                         *folder_type,
                         name,
@@ -875,7 +900,7 @@ fn advance_running(
                 calling_card_folder,
             } => {
                 session
-                    .accept_friendship(*transaction_id, *calling_card_folder, now)
+                    .accept_friendship(*transaction_id, calling_card_folder.uuid(), now)
                     .ok();
             }
             Command::DeclineFriendship(transaction_id) => {
@@ -961,7 +986,8 @@ fn advance_running(
                 session.activate_gestures(gestures, now).ok();
             }
             Command::DeactivateGestures { item_ids } => {
-                session.deactivate_gestures(item_ids, now).ok();
+                let item_ids: Vec<Uuid> = item_ids.iter().map(|id| id.uuid()).collect();
+                session.deactivate_gestures(&item_ids, now).ok();
             }
             Command::SetAlwaysRun { mode } => {
                 session.set_always_run(*mode, now).ok();
@@ -1104,7 +1130,7 @@ fn advance_running(
                 permissions,
             } => {
                 session
-                    .answer_script_permissions(*task_id, *item_id, *permissions, now)
+                    .answer_script_permissions(*task_id, item_id.uuid(), *permissions, now)
                     .ok();
             }
             Command::RequestMuteList => {
@@ -1669,7 +1695,7 @@ fn advance_running(
                 item_id,
             } => {
                 session
-                    .remove_attachment(*attachment_point, *item_id, now)
+                    .remove_attachment(*attachment_point, item_id.uuid(), now)
                     .ok();
             }
             Command::RezAttachment(rez) => {
@@ -1810,7 +1836,7 @@ fn advance_running(
                 folder_id,
             } => {
                 session
-                    .buy_object_inventory(*object_id, *item_id, *folder_id, now)
+                    .buy_object_inventory(*object_id, item_id.uuid(), folder_id.uuid(), now)
                     .ok();
             }
             Command::RequestPayPrice { object_id } => {
@@ -1874,7 +1900,7 @@ fn advance_running(
             }
             Command::RequestScriptRunning { object_id, item_id } => {
                 session
-                    .request_script_running(*object_id, *item_id, now)
+                    .request_script_running(*object_id, item_id.uuid(), now)
                     .ok();
             }
             Command::SetScriptRunning {
@@ -1883,11 +1909,11 @@ fn advance_running(
                 running,
             } => {
                 session
-                    .set_script_running(*object_id, *item_id, *running, now)
+                    .set_script_running(*object_id, item_id.uuid(), *running, now)
                     .ok();
             }
             Command::ResetScript { object_id, item_id } => {
-                session.reset_script(*object_id, *item_id, now).ok();
+                session.reset_script(*object_id, item_id.uuid(), now).ok();
             }
             Command::UploadAssetUdp {
                 asset_type,
@@ -2380,7 +2406,7 @@ fn advance_running(
                 session
                     .give_inventory(
                         *to_agent_id,
-                        *item_id,
+                        item_id.uuid(),
                         *asset_type,
                         item_name,
                         *transaction_id,
@@ -2397,7 +2423,7 @@ fn advance_running(
                 session
                     .give_inventory_folder(
                         *to_agent_id,
-                        *folder_id,
+                        folder_id.uuid(),
                         folder_name,
                         *transaction_id,
                         now,
@@ -2405,14 +2431,16 @@ fn advance_running(
                     .ok();
             }
             Command::AcceptInventoryOffer { offer, folder_id } => {
-                session.accept_inventory_offer(offer, *folder_id, now).ok();
+                session
+                    .accept_inventory_offer(offer, folder_id.uuid(), now)
+                    .ok();
             }
             Command::DeclineInventoryOffer {
                 offer,
                 trash_folder_id,
             } => {
                 session
-                    .decline_inventory_offer(offer, *trash_folder_id, now)
+                    .decline_inventory_offer(offer, trash_folder_id.uuid(), now)
                     .ok();
             }
             Command::StartConference {

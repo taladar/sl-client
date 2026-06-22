@@ -23,8 +23,8 @@
 use std::time::Duration;
 
 use sl_client_tokio::{
-    Client, Command, DisconnectReason, Error, Event, LoginParams, LoginRequest, NewInventoryItem,
-    Throttle, Uuid,
+    Client, Command, DisconnectReason, Error, Event, InventoryFolderKey, InventoryKey, LoginParams,
+    LoginRequest, NewInventoryItem, Throttle, Uuid,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -69,9 +69,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // The inventory root (learned from the login skeleton: the folder with a nil
     // parent), and a fresh folder/item we create then clean up.
-    let mut root: Option<Uuid> = None;
-    let test_folder = Uuid::new_v4();
-    let mut created_item: Option<Uuid> = None;
+    let mut root: Option<InventoryFolderKey> = None;
+    let test_folder = InventoryFolderKey::from(Uuid::new_v4());
+    let mut created_item: Option<InventoryKey> = None;
     let mut started = false;
 
     while let Some(event) = event_rx.recv().await {
@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 info!("inventory skeleton: {} folders", folders.len());
                 root = folders
                     .iter()
-                    .find(|folder| folder.parent_id.is_nil())
+                    .find(|folder| folder.parent_id.uuid().is_nil())
                     .map(|folder| folder.folder_id)
                     .or(root);
             }

@@ -11,14 +11,14 @@ use crate::{
     CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, EstateAccessDelta,
     ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation, GroupKey,
     GroupNoticeAttachment, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate,
-    InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LandSearchType,
-    LandStatReportType, LindenAmount, MapItemType, Material, MaterialOverrideUpdate, MediaEntry,
-    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
-    ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessScope, ParcelCategory, ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate,
-    Postcard, PrimShape, ProfileUpdate, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem,
-    RezAttachment, Rotation, SaleType, ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect,
-    VoiceProvisionRequest, Wearable,
+    InterestsUpdate, InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer,
+    InventoryType, LandSearchType, LandStatReportType, LindenAmount, MapItemType, Material,
+    MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
+    NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform,
+    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelReturnType, ParcelUpdate,
+    PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate, RegionHandle,
+    RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, Rotation, SaleType,
+    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -159,20 +159,20 @@ pub enum Command {
     /// **UDP** (`FetchInventoryDescendents`). The reply arrives as
     /// [`Event::InventoryDescendents`](crate::Event::InventoryDescendents). The full folder skeleton arrives once at
     /// login as [`Event::InventorySkeleton`](crate::Event::InventorySkeleton).
-    RequestFolderContents(Uuid),
+    RequestFolderContents(InventoryFolderKey),
     /// Fetch the contents of one or more inventory folders over the **HTTP CAPS**
     /// path (`FetchInventoryDescendents2`) — the modern path used on Second Life.
     /// Each folder's contents arrive as an [`Event::InventoryDescendents`](crate::Event::InventoryDescendents).
-    FetchInventoryFolders(Vec<Uuid>),
+    FetchInventoryFolders(Vec<InventoryFolderKey>),
     /// Create an inventory folder (`CreateInventoryFolder`, UDP). `folder_id` is a
     /// fresh, caller-chosen id. The simulator sends no reply; the folder is added
     /// to the local cache optimistically. Use [`Command::CreateInventoryCategory`]
     /// for a confirmed reply.
     CreateInventoryFolder {
         /// The new folder's id (a fresh, caller-chosen UUID).
-        folder_id: Uuid,
+        folder_id: InventoryFolderKey,
         /// The parent folder.
-        parent_id: Uuid,
+        parent_id: InventoryFolderKey,
         /// The folder's preferred type (`FolderType`, or `-1` for none).
         folder_type: i8,
         /// The folder name.
@@ -181,9 +181,9 @@ pub enum Command {
     /// Rename / re-type / re-parent an existing folder (`UpdateInventoryFolder`).
     UpdateInventoryFolder {
         /// The folder to update.
-        folder_id: Uuid,
+        folder_id: InventoryFolderKey,
         /// The (possibly new) parent folder.
-        parent_id: Uuid,
+        parent_id: InventoryFolderKey,
         /// The folder's preferred type (`FolderType`, or `-1`).
         folder_type: i8,
         /// The folder name.
@@ -192,12 +192,12 @@ pub enum Command {
     /// Move a folder under a new parent (`MoveInventoryFolder`).
     MoveInventoryFolder {
         /// The folder to move.
-        folder_id: Uuid,
+        folder_id: InventoryFolderKey,
         /// The new parent folder.
-        parent_id: Uuid,
+        parent_id: InventoryFolderKey,
     },
     /// Delete folders (to the server trash) via `RemoveInventoryFolder`.
-    RemoveInventoryFolders(Vec<Uuid>),
+    RemoveInventoryFolders(Vec<InventoryFolderKey>),
     /// Create an inventory item (`CreateInventoryItem`). The simulator allocates
     /// the id and replies with an [`Event::InventoryItemCreated`](crate::Event::InventoryItemCreated).
     CreateInventoryItem(NewInventoryItem),
@@ -213,9 +213,9 @@ pub enum Command {
     /// keeps the name), via `MoveInventoryItem`.
     MoveInventoryItem {
         /// The item to move.
-        item_id: Uuid,
+        item_id: InventoryKey,
         /// The destination folder.
-        folder_id: Uuid,
+        folder_id: InventoryFolderKey,
         /// The new name, or empty to keep the current name.
         new_name: String,
     },
@@ -225,29 +225,29 @@ pub enum Command {
         /// The current owner of the source item.
         old_agent_id: AgentKey,
         /// The source item.
-        old_item_id: Uuid,
+        old_item_id: InventoryKey,
         /// The destination folder.
-        new_folder_id: Uuid,
+        new_folder_id: InventoryFolderKey,
         /// The new item's name.
         new_name: String,
     },
     /// Delete items (`RemoveInventoryItem`).
-    RemoveInventoryItems(Vec<Uuid>),
+    RemoveInventoryItems(Vec<InventoryKey>),
     /// Rewrite an item's flags (`ChangeInventoryItemFlags`).
     ChangeInventoryItemFlags {
         /// The item to change.
-        item_id: Uuid,
+        item_id: InventoryKey,
         /// The new flags bitfield.
         flags: u32,
     },
     /// Empty a folder's contents (e.g. the Trash) via `PurgeInventoryDescendents`.
-    PurgeInventoryDescendents(Uuid),
+    PurgeInventoryDescendents(InventoryFolderKey),
     /// Delete a mixed set of folders and items in one `RemoveInventoryObjects`.
     RemoveInventoryObjects {
         /// The folders to delete.
-        folder_ids: Vec<Uuid>,
+        folder_ids: Vec<InventoryFolderKey>,
         /// The items to delete.
-        item_ids: Vec<Uuid>,
+        item_ids: Vec<InventoryKey>,
     },
     /// Create a folder via the `CreateInventoryCategory` capability (served by
     /// both OpenSim and Second Life). Unlike the UDP `CreateInventoryFolder`, the
@@ -255,7 +255,7 @@ pub enum Command {
     /// with the created folder. The runtime allocates the new folder id.
     CreateInventoryCategory {
         /// The parent folder.
-        parent_id: Uuid,
+        parent_id: InventoryFolderKey,
         /// The folder's preferred type (`FolderType`, or `-1`).
         folder_type: i32,
         /// The folder name.
@@ -266,7 +266,7 @@ pub enum Command {
     /// [`Event::InventoryBulkUpdate`](crate::Event::InventoryBulkUpdate).
     Ais3CreateFolder {
         /// The parent folder.
-        parent_id: Uuid,
+        parent_id: InventoryFolderKey,
         /// The folder's preferred type (`FolderType`, or `-1`).
         folder_type: i32,
         /// The folder name.
@@ -275,7 +275,7 @@ pub enum Command {
     /// Rename a folder over AIS3 (`PATCH /category/<id>`). Second-Life only.
     Ais3RenameFolder {
         /// The folder to rename.
-        folder_id: Uuid,
+        folder_id: InventoryFolderKey,
         /// The new name.
         name: String,
     },
@@ -283,20 +283,20 @@ pub enum Command {
     /// Second-Life only.
     Ais3MoveFolder {
         /// The folder to move.
-        folder_id: Uuid,
+        folder_id: InventoryFolderKey,
         /// The new parent folder.
-        parent_id: Uuid,
+        parent_id: InventoryFolderKey,
     },
     /// Delete a folder over AIS3 (`DELETE /category/<id>`). Second-Life only.
-    Ais3RemoveFolder(Uuid),
+    Ais3RemoveFolder(InventoryFolderKey),
     /// Empty a folder over AIS3 (`DELETE /category/<id>/children`). Second-Life
     /// only.
-    Ais3PurgeFolder(Uuid),
+    Ais3PurgeFolder(InventoryFolderKey),
     /// Fetch a folder's children over AIS3 (`GET /category/<id>/children?depth=`).
     /// Second-Life only; the result arrives as an [`Event::InventoryBulkUpdate`](crate::Event::InventoryBulkUpdate).
     Ais3FetchFolderChildren {
         /// The folder whose children to fetch.
-        folder_id: Uuid,
+        folder_id: InventoryFolderKey,
         /// The recursion depth (clamped to the AIS maximum).
         depth: i32,
     },
@@ -304,7 +304,7 @@ pub enum Command {
     /// Second-Life only.
     Ais3UpdateItem {
         /// The item to update.
-        item_id: Uuid,
+        item_id: InventoryKey,
         /// The new name.
         name: String,
         /// The new description.
@@ -314,15 +314,15 @@ pub enum Command {
     /// Second-Life only.
     Ais3MoveItem {
         /// The item to move.
-        item_id: Uuid,
+        item_id: InventoryKey,
         /// The new parent folder.
-        parent_id: Uuid,
+        parent_id: InventoryFolderKey,
     },
     /// Delete an item over AIS3 (`DELETE /item/<id>`). Second-Life only.
-    Ais3RemoveItem(Uuid),
+    Ais3RemoveItem(InventoryKey),
     /// Fetch a single item over AIS3 (`GET /item/<id>`). Second-Life only; the
     /// item arrives as an [`Event::InventoryBulkUpdate`](crate::Event::InventoryBulkUpdate).
-    Ais3FetchItem(Uuid),
+    Ais3FetchItem(InventoryKey),
     /// Set the friendship rights granted to a friend (`GrantUserRights`). The
     /// `rights` bitfield combines the [`FriendRights`] `CAN_*` flags. The change
     /// is echoed back as an [`Event::FriendRightsChanged`](crate::Event::FriendRightsChanged).
@@ -350,7 +350,7 @@ pub enum Command {
         /// The offer's transaction id (the friendship-offer IM's `id`).
         transaction_id: Uuid,
         /// The inventory folder to place the new calling card in.
-        calling_card_folder: Uuid,
+        calling_card_folder: InventoryFolderKey,
     },
     /// Decline a friendship offer (`DeclineFriendship`). The `transaction_id` is
     /// the [`InstantMessage::id`](crate::InstantMessage::id) of the incoming friendship-offer IM.
@@ -561,7 +561,7 @@ pub enum Command {
         /// The task (object) id holding the script.
         task_id: ObjectKey,
         /// The script item id.
-        item_id: Uuid,
+        item_id: InventoryKey,
         /// The permissions to grant.
         permissions: ScriptPermissions,
     },
@@ -1222,9 +1222,9 @@ pub enum Command {
         /// The object whose contents holds the item.
         object_id: ObjectKey,
         /// The inventory item to buy.
-        item_id: Uuid,
+        item_id: InventoryKey,
         /// The folder the bought item is placed in.
-        folder_id: Uuid,
+        folder_id: InventoryFolderKey,
     },
     /// Ask an object for its pay-button layout (`RequestPayPrice`); the simulator
     /// answers with an [`Event::PayPriceReply`](crate::Event::PayPriceReply)
@@ -1306,14 +1306,14 @@ pub enum Command {
         /// The object (task) holding the script.
         object_id: ObjectKey,
         /// The script inventory item inside that task.
-        item_id: Uuid,
+        item_id: InventoryKey,
     },
     /// Start or stop a task's script (`SetScriptRunning`).
     SetScriptRunning {
         /// The object (task) holding the script.
         object_id: ObjectKey,
         /// The script inventory item inside that task.
-        item_id: Uuid,
+        item_id: InventoryKey,
         /// `true` to run the script, `false` to stop it.
         running: bool,
     },
@@ -1323,7 +1323,7 @@ pub enum Command {
         /// The object (task) holding the script.
         object_id: ObjectKey,
         /// The script inventory item inside that task.
-        item_id: Uuid,
+        item_id: InventoryKey,
     },
     /// Request a texture over the legacy UDP image path (`RequestImage`); the
     /// reassembled image arrives as [`Event::TextureReceived`](crate::Event::TextureReceived) (or
@@ -1444,7 +1444,7 @@ pub enum Command {
     /// (`DeactivateGestures`), naming them by inventory item id.
     DeactivateGestures {
         /// The inventory item ids of the gestures to deactivate.
-        item_ids: Vec<Uuid>,
+        item_ids: Vec<InventoryKey>,
     },
     /// Choose whether the avatar runs or walks for ground movement
     /// (`SetAlwaysRun`). Fire-and-forget; there is no reply.
@@ -1517,7 +1517,7 @@ pub enum Command {
         /// item by id; [`AttachmentPoint::Default`] is accepted).
         attachment_point: AttachmentPoint,
         /// The worn item's inventory item id.
-        item_id: Uuid,
+        item_id: InventoryKey,
     },
     /// Wear an inventory item as an attachment (`RezSingleAttachmentFromInv`):
     /// rez it directly onto the avatar from inventory. To attach an object that
@@ -1702,7 +1702,7 @@ pub enum Command {
     /// cost generation).
     UploadAsset {
         /// The destination inventory folder.
-        folder_id: Uuid,
+        folder_id: InventoryFolderKey,
         /// The asset class (e.g. [`AssetType::Texture`], [`AssetType::Animation`]).
         asset_type: AssetType,
         /// The inventory-item class (e.g. [`InventoryType::Texture`],
@@ -1739,7 +1739,7 @@ pub enum Command {
     /// [`Event::AssetUploaded`](crate::Event::AssetUploaded) or [`Event::AssetUploadFailed`](crate::Event::AssetUploadFailed).
     UpdateInventoryAsset {
         /// The inventory item whose asset is being replaced.
-        item_id: Uuid,
+        item_id: InventoryKey,
         /// The item's asset class (selects the capability; see
         /// [`AssetType::update_item_cap`]).
         asset_type: AssetType,
@@ -1930,7 +1930,7 @@ pub enum Command {
         /// The recipient agent.
         to_agent_id: AgentKey,
         /// The offered item's id.
-        item_id: Uuid,
+        item_id: InventoryKey,
         /// The offered item's asset class.
         asset_type: AssetType,
         /// The item's name (shown to the recipient).
@@ -1943,7 +1943,7 @@ pub enum Command {
         /// The recipient agent.
         to_agent_id: AgentKey,
         /// The offered folder's id.
-        folder_id: Uuid,
+        folder_id: InventoryFolderKey,
         /// The folder's name (shown to the recipient).
         folder_name: String,
         /// A fresh transaction id echoed back on accept/decline.
@@ -1956,7 +1956,7 @@ pub enum Command {
         /// The decoded inventory offer.
         offer: InventoryOffer,
         /// The destination folder to file the item into.
-        folder_id: Uuid,
+        folder_id: InventoryFolderKey,
     },
     /// Decline an inventory offer (`IM_INVENTORY_DECLINED`); the item is routed to
     /// `trash_folder_id`.
@@ -1964,7 +1964,7 @@ pub enum Command {
         /// The decoded inventory offer.
         offer: InventoryOffer,
         /// The trash folder the simulator routes the declined item to.
-        trash_folder_id: Uuid,
+        trash_folder_id: InventoryFolderKey,
     },
     /// Start (or add invitees to) an ad-hoc conference IM session
     /// (`IM_SESSION_CONFERENCE_START`). Messages arrive as

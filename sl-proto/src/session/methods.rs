@@ -60,7 +60,7 @@ use crate::types::{
     TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
     ViewerEffectType, Wearable, WearableType,
 };
-use sl_types::key::{AgentKey, GroupKey, ObjectKey};
+use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey};
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::{
@@ -914,7 +914,7 @@ impl Session {
                     // Seed the live inventory cache with the skeleton.
                     for folder in &folders {
                         self.inventory_folders
-                            .insert(folder.folder_id, folder.clone());
+                            .insert(folder.folder_id.uuid(), folder.clone());
                     }
                     self.events.push_back(Event::InventorySkeleton(folders));
                 }
@@ -1805,7 +1805,7 @@ impl Session {
                     reply.item_data.iter().map(inventory_item).collect();
                 self.cache_inventory(&folders, &items);
                 self.events.push_back(Event::InventoryDescendents {
-                    folder_id: reply.agent_data.folder_id,
+                    folder_id: InventoryFolderKey::from(reply.agent_data.folder_id),
                     version: reply.agent_data.version,
                     descendents: reply.agent_data.descendents,
                     folders,
@@ -1841,11 +1841,16 @@ impl Session {
                 // that issued a create/copy can correlate the returned callback id
                 // to the resulting item even though the reply arrived here rather
                 // than as an `UpdateCreateInventoryItem`.
-                let item_callbacks: Vec<(Uuid, InventoryCallbackId)> = update
+                let item_callbacks: Vec<(InventoryKey, InventoryCallbackId)> = update
                     .item_data
                     .iter()
                     .filter(|data| data.callback_id != 0)
-                    .map(|data| (data.item_id, InventoryCallbackId(data.callback_id)))
+                    .map(|data| {
+                        (
+                            InventoryKey::from(data.item_id),
+                            InventoryCallbackId(data.callback_id),
+                        )
+                    })
                     .collect();
                 self.cache_inventory(&folders, &items);
                 self.events.push_back(Event::InventoryBulkUpdate {
@@ -2176,7 +2181,7 @@ impl Session {
                         .wearable_data
                         .iter()
                         .map(|block| Wearable {
-                            item_id: block.item_id,
+                            item_id: InventoryKey::from(block.item_id),
                             asset_id: block.asset_id,
                             wearable_type: WearableType::from_code(block.wearable_type),
                         })
@@ -2538,7 +2543,7 @@ impl Session {
                 let script = &reply.script;
                 self.events.push_back(Event::ScriptRunning {
                     object_id: ObjectKey::from(script.object_id),
-                    item_id: script.item_id,
+                    item_id: InventoryKey::from(script.item_id),
                     running: script.running,
                 });
             }
@@ -5737,7 +5742,7 @@ impl Session {
     /// response, or `None` if the grid did not provide it. Use it as the starting
     /// point for [`Session::request_folder_contents`].
     #[must_use]
-    pub const fn inventory_root(&self) -> Option<Uuid> {
+    pub const fn inventory_root(&self) -> Option<InventoryFolderKey> {
         self.inventory_root
     }
 
@@ -5804,12 +5809,12 @@ impl Session {
         let folders = self
             .inventory_folders
             .values()
-            .filter(|folder| folder.parent_id == folder_id)
+            .filter(|folder| folder.parent_id.uuid() == folder_id)
             .collect();
         let items = self
             .inventory_items
             .values()
-            .filter(|item| item.folder_id == folder_id)
+            .filter(|item| item.folder_id.uuid() == folder_id)
             .collect();
         (folders, items)
     }
@@ -5820,11 +5825,12 @@ impl Session {
     fn cache_inventory_folder(&mut self, mut folder: InventoryFolder) {
         if let (0, Some(existing)) = (
             folder.version,
-            self.inventory_folders.get(&folder.folder_id),
+            self.inventory_folders.get(&folder.folder_id.uuid()),
         ) {
             folder.version = existing.version;
         }
-        self.inventory_folders.insert(folder.folder_id, folder);
+        self.inventory_folders
+            .insert(folder.folder_id.uuid(), folder);
     }
 
     /// Merges a batch of folders and items into the live cache (from a
@@ -5840,7 +5846,7 @@ impl Session {
 
     /// Inserts/updates an item in the cache.
     fn cache_inventory_item(&mut self, item: InventoryItem) {
-        self.inventory_items.insert(item.item_id, item);
+        self.inventory_items.insert(item.item_id.uuid(), item);
     }
 
     /// Recursively drops a folder's cached descendents (sub-folders and items),
@@ -5849,11 +5855,11 @@ impl Session {
         let subfolders: Vec<Uuid> = self
             .inventory_folders
             .values()
-            .filter(|folder| folder.parent_id == folder_id)
-            .map(|folder| folder.folder_id)
+            .filter(|folder| folder.parent_id.uuid() == folder_id)
+            .map(|folder| folder.folder_id.uuid())
             .collect();
         self.inventory_items
-            .retain(|_, item| item.folder_id != folder_id);
+            .retain(|_, item| item.folder_id.uuid() != folder_id);
         for sub in subfolders {
             self.purge_cached_descendents(sub);
             self.inventory_folders.remove(&sub);
@@ -5892,8 +5898,8 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_create_inventory_folder(folder_id, parent_id, folder_type, name, now)?;
         self.cache_inventory_folder(InventoryFolder {
-            folder_id,
-            parent_id,
+            folder_id: InventoryFolderKey::from(folder_id),
+            parent_id: InventoryFolderKey::from(parent_id),
             name: name.to_owned(),
             folder_type,
             version: 1,
@@ -5919,8 +5925,8 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_update_inventory_folder(folder_id, parent_id, folder_type, name, now)?;
         self.cache_inventory_folder(InventoryFolder {
-            folder_id,
-            parent_id,
+            folder_id: InventoryFolderKey::from(folder_id),
+            parent_id: InventoryFolderKey::from(parent_id),
             name: name.to_owned(),
             folder_type,
             version: self
@@ -5966,7 +5972,7 @@ impl Session {
         circuit.send_move_inventory_folders(moves, stamp, now)?;
         for &(folder_id, parent_id) in moves {
             if let Some(folder) = self.inventory_folders.get_mut(&folder_id) {
-                folder.parent_id = parent_id;
+                folder.parent_id = InventoryFolderKey::from(parent_id);
             }
         }
         Ok(())
@@ -6069,7 +6075,7 @@ impl Session {
         circuit.send_move_inventory_items(moves, stamp, now)?;
         for (item_id, folder_id, new_name) in moves {
             if let Some(item) = self.inventory_items.get_mut(item_id) {
-                item.folder_id = *folder_id;
+                item.folder_id = InventoryFolderKey::from(*folder_id);
                 if !new_name.is_empty() {
                     item.name.clone_from(new_name);
                 }

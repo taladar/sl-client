@@ -16,18 +16,18 @@ mod test {
         EstateAccessKind, Event, FollowCamProperty, FriendRights, GestureActivation, GroupKey,
         GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
         GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate, InventoryCallbackId,
-        InventoryItem, LandingType, LindenAmount, LoginAccount, LoginParams, LookAtType,
-        MapItemType, Material, Maturity, MeanCollisionType, MoneyTransactionType, MovementMode,
-        MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
-        ObjectKey, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-        ParcelCategory, ParcelFlags, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType,
-        ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate,
-        PointAtType, Postcard, PrimShape, ProductType, ProfileUpdate, ReflectionProbeFlags,
-        RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType,
-        ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissions, Session,
-        SkySettings, SoundFlags, TeleportFlags, TerrainLayerType, Throttle, TransferStatus,
-        Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
-        avatar_texture, group_powers, pcode,
+        InventoryFolderKey, InventoryItem, InventoryKey, LandingType, LindenAmount, LoginAccount,
+        LoginParams, LookAtType, MapItemType, Material, Maturity, MeanCollisionType,
+        MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
+        ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform, ParcelAccessEntry,
+        ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelMediaCommand,
+        ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField,
+        Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape, ProductType,
+        ProfileUpdate, ReflectionProbeFlags, RegionHandle, RegionInfoUpdate, Reliability,
+        RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ScriptControlAction,
+        ScriptPermissions, Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType,
+        Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        WaterSettings, WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -2699,7 +2699,7 @@ mod test {
         let asset = uuid::Uuid::from_u128(0x6E5_7002);
         session.activate_gestures(
             &[GestureActivation {
-                item_id: item,
+                item_id: InventoryKey::from(item),
                 asset_id: asset,
             }],
             now,
@@ -3129,7 +3129,7 @@ mod test {
             "Gift",
             "Here you go",
             Some(GroupNoticeAttachment {
-                item_id: item,
+                item_id: InventoryKey::from(item),
                 owner_id: owner,
             }),
             now,
@@ -3336,7 +3336,7 @@ mod test {
             })
             .ok_or("expected a ScriptPermissionRequest event")?;
         assert_eq!(request.task_id, ObjectKey::from(task));
-        assert_eq!(request.item_id, item);
+        assert_eq!(request.item_id, InventoryKey::from(item));
         assert_eq!(request.object_name, "Money Tree");
         assert_eq!(request.permissions.0, requested);
         assert!(request.permissions.contains(ScriptPermissions::DEBIT));
@@ -4052,7 +4052,7 @@ mod test {
         assert_eq!(serial, 7);
         assert_eq!(wearables.len(), 2);
         let shape = wearables.first().ok_or("first wearable")?;
-        assert_eq!(shape.item_id, shape_item);
+        assert_eq!(shape.item_id, InventoryKey::from(shape_item));
         assert_eq!(shape.asset_id, shape_asset);
         assert_eq!(shape.wearable_type, WearableType::Shape);
         assert!(shape.wearable_type.is_body_part());
@@ -4178,7 +4178,7 @@ mod test {
         let owner = uuid::Uuid::from_u128(0xB2);
         session.rez_attachment(
             &RezAttachment {
-                item_id: item,
+                item_id: InventoryKey::from(item),
                 owner_id: owner,
                 attachment_point: AttachmentPoint::Chest,
                 mode: AttachmentMode::Replace,
@@ -4211,7 +4211,7 @@ mod test {
         let compound = uuid::Uuid::from_u128(0xC0);
         let attachments = vec![
             RezAttachment {
-                item_id: uuid::Uuid::from_u128(0xD1),
+                item_id: InventoryKey::from(uuid::Uuid::from_u128(0xD1)),
                 owner_id: uuid::Uuid::from_u128(0xD0),
                 attachment_point: AttachmentPoint::LeftHand,
                 mode: AttachmentMode::Add,
@@ -4219,7 +4219,7 @@ mod test {
                 description: String::new(),
             },
             RezAttachment {
-                item_id: uuid::Uuid::from_u128(0xD2),
+                item_id: InventoryKey::from(uuid::Uuid::from_u128(0xD2)),
                 owner_id: uuid::Uuid::from_u128(0xD0),
                 attachment_point: AttachmentPoint::Default,
                 mode: AttachmentMode::Replace,
@@ -4768,8 +4768,8 @@ mod test {
 
         session.rez_restore_to_world(
             &RestoreItem {
-                item_id: uuid::Uuid::from_u128(0x17E),
-                folder_id: uuid::Uuid::nil(),
+                item_id: InventoryKey::from(uuid::Uuid::from_u128(0x17E)),
+                folder_id: InventoryFolderKey::from(uuid::Uuid::nil()),
                 creator_id: AgentKey::from(uuid::Uuid::nil()),
                 owner: sl_proto::OwnerKey::Agent(AgentKey::from(uuid::Uuid::nil())),
                 group: None,
@@ -4816,9 +4816,12 @@ mod test {
                 group_mask: 0,
                 everyone_mask: 0,
                 next_owner_mask: 0x0008_e000,
-                notecard_item_id: uuid::Uuid::from_u128(0xCA5E),
+                notecard_item_id: InventoryKey::from(uuid::Uuid::from_u128(0xCA5E)),
                 object_id: ObjectKey::from(uuid::Uuid::nil()),
-                item_ids: vec![uuid::Uuid::from_u128(0x1), uuid::Uuid::from_u128(0x2)],
+                item_ids: vec![
+                    InventoryKey::from(uuid::Uuid::from_u128(0x1)),
+                    InventoryKey::from(uuid::Uuid::from_u128(0x2)),
+                ],
             },
             now,
         )?;
@@ -4925,7 +4928,7 @@ mod test {
             })
             .ok_or("expected a ScriptRunning event")?;
         assert_eq!(running.0, ObjectKey::from(uuid::Uuid::from_u128(0x0B1E)));
-        assert_eq!(running.1, uuid::Uuid::from_u128(0x17E3));
+        assert_eq!(running.1, InventoryKey::from(uuid::Uuid::from_u128(0x17E3)));
         assert!(running.2);
         Ok(())
     }
@@ -5738,7 +5741,7 @@ mod test {
     fn login_skeleton_emits_inventory_skeleton() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = new_session();
-        let root = uuid::Uuid::from_u128(0xF0);
+        let root = InventoryFolderKey::from(uuid::Uuid::from_u128(0xF0));
         let login = LoginResponse::Success(Box::new(LoginSuccess {
             agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
             session_id: uuid::Uuid::from_u128(2),
@@ -5753,13 +5756,13 @@ mod test {
             inventory_skeleton: vec![
                 SkeletonFolder {
                     folder_id: root,
-                    parent_id: uuid::Uuid::nil(),
+                    parent_id: InventoryFolderKey::from(uuid::Uuid::nil()),
                     name: "My Inventory".to_owned(),
                     type_default: 8,
                     version: 5,
                 },
                 SkeletonFolder {
-                    folder_id: uuid::Uuid::from_u128(0xF1),
+                    folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0xF1)),
                     parent_id: root,
                     name: "Objects".to_owned(),
                     type_default: 6,
@@ -5800,7 +5803,7 @@ mod test {
     fn login_emits_account_and_library_and_stores_them() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = new_session();
-        let lib_root = uuid::Uuid::from_u128(0x0112);
+        let lib_root = InventoryFolderKey::from(uuid::Uuid::from_u128(0x0112));
         let lib_owner = uuid::Uuid::from_u128(0xAB);
         let login = LoginResponse::Success(Box::new(LoginSuccess {
             agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
@@ -5830,7 +5833,7 @@ mod test {
             library_owner: Some(lib_owner),
             library_skeleton: vec![SkeletonFolder {
                 folder_id: lib_root,
-                parent_id: uuid::Uuid::nil(),
+                parent_id: InventoryFolderKey::from(uuid::Uuid::nil()),
                 name: "Library".to_owned(),
                 type_default: 8,
                 version: 1,
@@ -5947,7 +5950,7 @@ mod test {
                     folders,
                     items,
                     ..
-                } if folder_id == folder => Some((folders, items)),
+                } if folder_id == InventoryFolderKey::from(folder) => Some((folders, items)),
                 _ => None,
             })
             .ok_or("expected an InventoryDescendents event")?;
@@ -6016,7 +6019,9 @@ mod test {
                     folders,
                     items,
                     ..
-                } if folder_id == uuid::Uuid::from_u128(0xF0) && version == 7 => {
+                } if folder_id == InventoryFolderKey::from(uuid::Uuid::from_u128(0xF0))
+                    && version == 7 =>
+                {
                     Some((folders, items))
                 }
                 _ => None,
@@ -6024,7 +6029,10 @@ mod test {
             .ok_or("expected an InventoryDescendents event")?;
         let folder = folders.first().ok_or("category")?;
         assert_eq!(folder.name, "Clothing");
-        assert_eq!(folder.folder_id, uuid::Uuid::from_u128(0xF2));
+        assert_eq!(
+            folder.folder_id,
+            InventoryFolderKey::from(uuid::Uuid::from_u128(0xF2))
+        );
         let item = items.first().ok_or("item")?;
         assert_eq!(item.name, "a notecard");
         assert_eq!(item.description, "my notes");
@@ -10006,8 +10014,14 @@ mod test {
         assert_eq!(properties.description, "a description");
         // Recovered ObjectData fields (#36).
         assert_eq!(properties.inventory_serial, 7);
-        assert_eq!(properties.item_id, uuid::Uuid::from_u128(0x44));
-        assert_eq!(properties.folder_id, uuid::Uuid::from_u128(0x55));
+        assert_eq!(
+            properties.item_id,
+            InventoryKey::from(uuid::Uuid::from_u128(0x44))
+        );
+        assert_eq!(
+            properties.folder_id,
+            InventoryFolderKey::from(uuid::Uuid::from_u128(0x55))
+        );
         assert_eq!(
             properties.from_task_id,
             ObjectKey::from(uuid::Uuid::from_u128(0x66))
@@ -11883,8 +11897,8 @@ mod test {
     /// Builds an [`InventoryItem`] with a single non-default field for tests.
     fn sample_item(item_id: uuid::Uuid, folder_id: uuid::Uuid, name: &str) -> InventoryItem {
         InventoryItem {
-            item_id,
-            folder_id,
+            item_id: InventoryKey::from(item_id),
+            folder_id: InventoryFolderKey::from(folder_id),
             name: name.to_owned(),
             description: String::new(),
             asset_id: uuid::Uuid::nil(),
@@ -11930,7 +11944,7 @@ mod test {
             .inventory_folder(folder_id)
             .ok_or("folder should be cached")?;
         assert_eq!(cached.name, "Toys & Co");
-        assert_eq!(cached.parent_id, parent_id);
+        assert_eq!(cached.parent_id, InventoryFolderKey::from(parent_id));
 
         // Removing it drops it from the cache.
         session.remove_inventory_folders(&[folder_id], now)?;
@@ -11954,7 +11968,7 @@ mod test {
         drain(&mut session)?;
 
         let new = NewInventoryItem {
-            folder_id: uuid::Uuid::from_u128(0x11),
+            folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0x11)),
             transaction_id: uuid::Uuid::nil(),
             next_owner_mask: 0x0008_e000,
             asset_type: 7, // notecard
@@ -12201,7 +12215,10 @@ mod test {
         assert_eq!(items.len(), 1);
         // The per-item async callback id round-trips so a copy/create can be
         // correlated even when its result arrives as a `BulkUpdateInventory`.
-        assert_eq!(item_callbacks, vec![(item_id, InventoryCallbackId(13))]);
+        assert_eq!(
+            item_callbacks,
+            vec![(InventoryKey::from(item_id), InventoryCallbackId(13))]
+        );
 
         assert_eq!(
             session

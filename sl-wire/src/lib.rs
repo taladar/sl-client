@@ -172,7 +172,7 @@ mod test {
 
     #[test]
     fn group_notice_bucket_has_llsd_header() -> Result<(), WireError> {
-        let item = uuid::Uuid::from_u128(0x4001);
+        let item = sl_types::key::InventoryKey::from(uuid::Uuid::from_u128(0x4001));
         let owner = uuid::Uuid::from_u128(0x4002);
         let bucket = build_group_notice_bucket(item, owner);
         // OpenSim strips exactly 15 bytes of LLSD pre-header before parsing the
@@ -382,7 +382,7 @@ mod test {
 
     #[test]
     fn new_file_agent_inventory_request_carries_metadata() {
-        let folder = uuid::Uuid::from_u128(0x00f0_1de7);
+        let folder = sl_types::key::InventoryFolderKey::from(uuid::Uuid::from_u128(0x00f0_1de7));
         let body = build_new_file_agent_inventory_request(
             folder,
             "texture",
@@ -446,7 +446,7 @@ mod test {
 
     #[test]
     fn update_item_asset_request_carries_item_id() {
-        let item = uuid::Uuid::from_u128(0x17e3);
+        let item = sl_types::key::InventoryKey::from(uuid::Uuid::from_u128(0x17e3));
         let body = build_update_item_asset_request(item);
         assert!(body.contains(&format!("<key>item_id</key><uuid>{item}</uuid>")));
     }

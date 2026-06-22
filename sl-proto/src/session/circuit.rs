@@ -1386,7 +1386,7 @@ impl Circuit {
             data: gestures
                 .iter()
                 .map(|gesture| ActivateGesturesDataBlock {
-                    item_id: gesture.item_id,
+                    item_id: gesture.item_id.uuid(),
                     asset_id: gesture.asset_id,
                     gesture_flags: 0,
                 })
@@ -2014,7 +2014,7 @@ impl Circuit {
             wearable_data: wearables
                 .iter()
                 .map(|wearable| AgentIsNowWearingWearableDataBlock {
-                    item_id: wearable.item_id,
+                    item_id: wearable.item_id.uuid(),
                     wearable_type: wearable.wearable_type.to_code(),
                 })
                 .collect(),
@@ -2127,7 +2127,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             object_data: RezSingleAttachmentFromInvObjectDataBlock {
-                item_id: rez.item_id,
+                item_id: rez.item_id.uuid(),
                 owner_id: rez.owner_id,
                 attachment_pt: rez.attachment_point.with_mode(rez.mode),
                 item_flags: 0,
@@ -2171,7 +2171,7 @@ impl Circuit {
             object_data: attachments
                 .iter()
                 .map(|rez| RezMultipleAttachmentsFromInvObjectDataBlock {
-                    item_id: rez.item_id,
+                    item_id: rez.item_id.uuid(),
                     owner_id: rez.owner_id,
                     attachment_pt: rez.attachment_point.with_mode(rez.mode),
                     item_flags: 0,
@@ -2696,7 +2696,7 @@ impl Circuit {
             },
             inventory_block: CreateInventoryItemInventoryBlockBlock {
                 callback_id: callback_id.get(),
-                folder_id: new.folder_id,
+                folder_id: new.folder_id.uuid(),
                 transaction_id: new.transaction_id,
                 next_owner_mask: new.next_owner_mask,
                 r#type: new.asset_type,
@@ -2727,8 +2727,8 @@ impl Circuit {
                 transaction_id,
             },
             inventory_data: vec![UpdateInventoryItemInventoryDataBlock {
-                item_id: item.item_id,
-                folder_id: item.folder_id,
+                item_id: item.item_id.uuid(),
+                folder_id: item.folder_id.uuid(),
                 callback_id: callback_id.get(),
                 creator_id: item.creator_id.uuid(),
                 owner_id,
@@ -4475,8 +4475,8 @@ impl Circuit {
                 session_id: self.session_id,
             },
             inventory_data: RezRestoreToWorldInventoryDataBlock {
-                item_id: item.item_id,
-                folder_id: item.folder_id,
+                item_id: item.item_id.uuid(),
+                folder_id: item.folder_id.uuid(),
                 creator_id: item.creator_id.uuid(),
                 owner_id,
                 group_id,
@@ -4529,13 +4529,13 @@ impl Circuit {
                 next_owner_mask: rez.next_owner_mask,
             },
             notecard_data: RezObjectFromNotecardNotecardDataBlock {
-                notecard_item_id: rez.notecard_item_id,
+                notecard_item_id: rez.notecard_item_id.uuid(),
                 object_id: rez.object_id.uuid(),
             },
             inventory_data: rez
                 .item_ids
                 .iter()
-                .map(|id| RezObjectFromNotecardInventoryDataBlock { item_id: *id })
+                .map(|id| RezObjectFromNotecardInventoryDataBlock { item_id: id.uuid() })
                 .collect(),
         });
         self.send(&message, Reliability::Reliable, now)

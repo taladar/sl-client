@@ -21,6 +21,8 @@ use crate::types::{
 };
 use sl_types::key::AgentKey;
 use sl_types::key::GroupKey;
+use sl_types::key::InventoryFolderKey;
+use sl_types::key::InventoryKey;
 use sl_types::key::ObjectKey;
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
@@ -1112,7 +1114,7 @@ pub(crate) fn script_permission_request(
     let data = &message.data;
     ScriptPermissionRequest {
         task_id: ObjectKey::from(data.task_id),
-        item_id: data.item_id,
+        item_id: InventoryKey::from(data.item_id),
         object_name: trimmed_string(&data.object_name),
         object_owner: trimmed_string(&data.object_owner),
         experience_id: message.experience.experience_id,
@@ -1124,8 +1126,8 @@ pub(crate) fn script_permission_request(
 /// Such entries carry no per-folder version, so it is reported as `0`.
 pub(crate) fn inventory_folder(data: &InventoryDescendentsFolderDataBlock) -> InventoryFolder {
     InventoryFolder {
-        folder_id: data.folder_id,
-        parent_id: data.parent_id,
+        folder_id: InventoryFolderKey::from(data.folder_id),
+        parent_id: InventoryFolderKey::from(data.parent_id),
         name: trimmed_string(&data.name),
         folder_type: data.r#type,
         version: 0,
@@ -1169,8 +1171,8 @@ pub(crate) fn inventory_item_crc(item: &InventoryItem) -> u32 {
         .sale_price
         .cast_unsigned()
         .wrapping_add(u32::from(item.sale_type).wrapping_mul(0x0707_3096));
-    uuid_crc(item.item_id)
-        .wrapping_add(uuid_crc(item.folder_id))
+    uuid_crc(item.item_id.uuid())
+        .wrapping_add(uuid_crc(item.folder_id.uuid()))
         .wrapping_add(permissions_crc)
         .wrapping_add(uuid_crc(item.asset_id))
         .wrapping_add(i32::from(item.item_type).cast_unsigned())
@@ -1184,8 +1186,8 @@ pub(crate) fn inventory_item_crc(item: &InventoryItem) -> u32 {
 /// Builds an [`InventoryItem`] from an `InventoryDescendents` item entry.
 pub(crate) fn inventory_item(data: &InventoryDescendentsItemDataBlock) -> InventoryItem {
     InventoryItem {
-        item_id: data.item_id,
-        folder_id: data.folder_id,
+        item_id: InventoryKey::from(data.item_id),
+        folder_id: InventoryFolderKey::from(data.folder_id),
         name: trimmed_string(&data.name),
         description: trimmed_string(&data.description),
         asset_id: data.asset_id,
@@ -1220,8 +1222,8 @@ pub(crate) fn inventory_item_from_create(
     data: &UpdateCreateInventoryItemInventoryDataBlock,
 ) -> InventoryItem {
     InventoryItem {
-        item_id: data.item_id,
-        folder_id: data.folder_id,
+        item_id: InventoryKey::from(data.item_id),
+        folder_id: InventoryFolderKey::from(data.folder_id),
         name: trimmed_string(&data.name),
         description: trimmed_string(&data.description),
         asset_id: data.asset_id,
@@ -1252,8 +1254,8 @@ pub(crate) fn inventory_item_from_create(
 /// Builds an [`InventoryFolder`] from a `BulkUpdateInventory` folder entry.
 pub(crate) fn bulk_update_folder(data: &BulkUpdateInventoryFolderDataBlock) -> InventoryFolder {
     InventoryFolder {
-        folder_id: data.folder_id,
-        parent_id: data.parent_id,
+        folder_id: InventoryFolderKey::from(data.folder_id),
+        parent_id: InventoryFolderKey::from(data.parent_id),
         name: trimmed_string(&data.name),
         folder_type: data.r#type,
         version: 0,
@@ -1263,8 +1265,8 @@ pub(crate) fn bulk_update_folder(data: &BulkUpdateInventoryFolderDataBlock) -> I
 /// Builds an [`InventoryItem`] from a `BulkUpdateInventory` item entry.
 pub(crate) fn bulk_update_item(data: &BulkUpdateInventoryItemDataBlock) -> InventoryItem {
     InventoryItem {
-        item_id: data.item_id,
-        folder_id: data.folder_id,
+        item_id: InventoryKey::from(data.item_id),
+        folder_id: InventoryFolderKey::from(data.folder_id),
         name: trimmed_string(&data.name),
         description: trimmed_string(&data.description),
         asset_id: data.asset_id,
@@ -2244,7 +2246,7 @@ pub(crate) fn inventory_descendents_from_llsd(body: &Llsd) -> Vec<Event> {
                 .unwrap_or(&[]);
             let items = folder.get("items").and_then(Llsd::as_array).unwrap_or(&[]);
             Event::InventoryDescendents {
-                folder_id: uuid_member(folder, "folder_id"),
+                folder_id: InventoryFolderKey::from(uuid_member(folder, "folder_id")),
                 version: i32_member(folder, "version"),
                 descendents: i32_member(folder, "descendents"),
                 folders: categories.iter().map(inventory_folder_from_llsd).collect(),
@@ -2273,13 +2275,13 @@ pub(crate) fn bulk_update_inventory_from_llsd(
         .unwrap_or(&[])
         .iter()
         .map(|folder| InventoryFolder {
-            folder_id: uuid_member(folder, "FolderID"),
-            parent_id: uuid_member(folder, "ParentID"),
+            folder_id: InventoryFolderKey::from(uuid_member(folder, "FolderID")),
+            parent_id: InventoryFolderKey::from(uuid_member(folder, "ParentID")),
             name: string_member(folder, "Name"),
             folder_type: i8::try_from(i32_member(folder, "Type")).unwrap_or(-1),
             version: 0,
         })
-        .filter(|folder| !folder.folder_id.is_nil())
+        .filter(|folder| !folder.folder_id.uuid().is_nil())
         .collect();
     let items = body
         .get("ItemData")
@@ -2287,7 +2289,7 @@ pub(crate) fn bulk_update_inventory_from_llsd(
         .unwrap_or(&[])
         .iter()
         .map(bulk_update_item_from_llsd)
-        .filter(|item| !item.item_id.is_nil())
+        .filter(|item| !item.item_id.uuid().is_nil())
         .collect();
     Some((transaction_id, folders, items))
 }
@@ -2296,8 +2298,8 @@ pub(crate) fn bulk_update_inventory_from_llsd(
 /// entry (`CamelCase` keys, flat — permissions are not nested as in AIS).
 pub(crate) fn bulk_update_item_from_llsd(item: &Llsd) -> InventoryItem {
     InventoryItem {
-        item_id: uuid_member(item, "ItemID"),
-        folder_id: uuid_member(item, "FolderID"),
+        item_id: InventoryKey::from(uuid_member(item, "ItemID")),
+        folder_id: InventoryFolderKey::from(uuid_member(item, "FolderID")),
         name: string_member(item, "Name"),
         description: string_member(item, "Description"),
         asset_id: uuid_member(item, "AssetID"),
@@ -2356,8 +2358,8 @@ pub(crate) fn ais_inventory_update_from_llsd(
             items.extend(links.values().map(inventory_item_from_llsd));
         }
     }
-    folders.retain(|folder| !folder.folder_id.is_nil());
-    items.retain(|item| !item.item_id.is_nil());
+    folders.retain(|folder| !folder.folder_id.uuid().is_nil());
+    items.retain(|item| !item.item_id.uuid().is_nil());
     (folders, items)
 }
 
@@ -2369,8 +2371,8 @@ pub(crate) fn created_category_from_llsd(body: &Llsd) -> Option<InventoryFolder>
         return None;
     }
     Some(InventoryFolder {
-        folder_id,
-        parent_id: uuid_member(body, "parent_id"),
+        folder_id: InventoryFolderKey::from(folder_id),
+        parent_id: InventoryFolderKey::from(uuid_member(body, "parent_id")),
         name: string_member(body, "name"),
         folder_type: i8::try_from(i32_member(body, "type")).unwrap_or(-1),
         version: 1,
@@ -2380,8 +2382,8 @@ pub(crate) fn created_category_from_llsd(body: &Llsd) -> Option<InventoryFolder>
 /// Builds an [`InventoryFolder`] from a CAPS `categories` entry.
 pub(crate) fn inventory_folder_from_llsd(category: &Llsd) -> InventoryFolder {
     InventoryFolder {
-        folder_id: uuid_member(category, "category_id"),
-        parent_id: uuid_member(category, "parent_id"),
+        folder_id: InventoryFolderKey::from(uuid_member(category, "category_id")),
+        parent_id: InventoryFolderKey::from(uuid_member(category, "parent_id")),
         name: string_member(category, "name"),
         folder_type: i8::try_from(i32_member(category, "type_default")).unwrap_or(-1),
         version: i32_member(category, "version"),
@@ -2400,8 +2402,8 @@ pub(crate) fn inventory_item_from_llsd(item: &Llsd) -> InventoryItem {
     };
     let perm_uuid = |key: &str| permissions.map_or_else(Uuid::nil, |p| uuid_member(p, key));
     InventoryItem {
-        item_id: uuid_member(item, "item_id"),
-        folder_id: uuid_member(item, "parent_id"),
+        item_id: InventoryKey::from(uuid_member(item, "item_id")),
+        folder_id: InventoryFolderKey::from(uuid_member(item, "parent_id")),
         name: string_member(item, "name"),
         description: string_member(item, "desc"),
         asset_id: uuid_member(item, "asset_id"),
@@ -3044,7 +3046,7 @@ pub fn inventory_descendents_to_llsd(events: &[Event]) -> Llsd {
                 return None;
             };
             Some(llsd_map(vec![
-                ("folder_id", Llsd::Uuid(*folder_id)),
+                ("folder_id", Llsd::Uuid(folder_id.uuid())),
                 ("version", Llsd::Integer(*version)),
                 ("descendents", Llsd::Integer(*descendents)),
                 (
@@ -3074,8 +3076,8 @@ pub fn bulk_update_inventory_to_llsd(
         .iter()
         .map(|folder| {
             llsd_map(vec![
-                ("FolderID", Llsd::Uuid(folder.folder_id)),
-                ("ParentID", Llsd::Uuid(folder.parent_id)),
+                ("FolderID", Llsd::Uuid(folder.folder_id.uuid())),
+                ("ParentID", Llsd::Uuid(folder.parent_id.uuid())),
                 ("Name", Llsd::String(folder.name.clone())),
                 ("Type", Llsd::Integer(i32::from(folder.folder_type))),
             ])
@@ -3095,8 +3097,8 @@ pub fn bulk_update_inventory_to_llsd(
 pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Llsd {
     let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
     llsd_map(vec![
-        ("ItemID", Llsd::Uuid(item.item_id)),
-        ("FolderID", Llsd::Uuid(item.folder_id)),
+        ("ItemID", Llsd::Uuid(item.item_id.uuid())),
+        ("FolderID", Llsd::Uuid(item.folder_id.uuid())),
         ("Name", Llsd::String(item.name.clone())),
         ("Description", Llsd::String(item.description.clone())),
         ("AssetID", Llsd::Uuid(item.asset_id)),
@@ -3166,8 +3168,8 @@ pub fn ais_inventory_update_to_llsd(folders: &[InventoryFolder], items: &[Invent
 #[must_use]
 pub fn created_category_to_llsd(folder: &InventoryFolder) -> Llsd {
     llsd_map(vec![
-        ("folder_id", Llsd::Uuid(folder.folder_id)),
-        ("parent_id", Llsd::Uuid(folder.parent_id)),
+        ("folder_id", Llsd::Uuid(folder.folder_id.uuid())),
+        ("parent_id", Llsd::Uuid(folder.parent_id.uuid())),
         ("name", Llsd::String(folder.name.clone())),
         ("type", Llsd::Integer(i32::from(folder.folder_type))),
     ])
@@ -3177,8 +3179,8 @@ pub fn created_category_to_llsd(folder: &InventoryFolder) -> Llsd {
 /// of [`inventory_folder_from_llsd`]).
 pub(crate) fn inventory_folder_to_llsd(folder: &InventoryFolder) -> Llsd {
     llsd_map(vec![
-        ("category_id", Llsd::Uuid(folder.folder_id)),
-        ("parent_id", Llsd::Uuid(folder.parent_id)),
+        ("category_id", Llsd::Uuid(folder.folder_id.uuid())),
+        ("parent_id", Llsd::Uuid(folder.parent_id.uuid())),
         ("name", Llsd::String(folder.name.clone())),
         ("type_default", Llsd::Integer(i32::from(folder.folder_type))),
         ("version", Llsd::Integer(folder.version)),
@@ -3221,8 +3223,8 @@ pub(crate) fn inventory_item_to_llsd(item: &InventoryItem) -> Llsd {
         ("sale_price", Llsd::Integer(item.sale_price)),
     ]);
     llsd_map(vec![
-        ("item_id", Llsd::Uuid(item.item_id)),
-        ("parent_id", Llsd::Uuid(item.folder_id)),
+        ("item_id", Llsd::Uuid(item.item_id.uuid())),
+        ("parent_id", Llsd::Uuid(item.folder_id.uuid())),
         ("name", Llsd::String(item.name.clone())),
         ("desc", Llsd::String(item.description.clone())),
         ("asset_id", Llsd::Uuid(item.asset_id)),
@@ -3361,8 +3363,8 @@ pub(crate) fn object_properties(block: &ObjectPropertiesObjectDataBlock) -> Obje
         sale_price: block.sale_price,
         category: block.category,
         inventory_serial: block.inventory_serial,
-        item_id: block.item_id,
-        folder_id: block.folder_id,
+        item_id: InventoryKey::from(block.item_id),
+        folder_id: InventoryFolderKey::from(block.folder_id),
         from_task_id: ObjectKey::from(block.from_task_id),
         aggregate_perms: block.aggregate_perms,
         aggregate_perm_textures: block.aggregate_perm_textures,
@@ -3391,6 +3393,8 @@ mod caps_serializer_tests {
     use pretty_assertions::assert_eq;
     use sl_types::key::AgentKey;
     use sl_types::key::GroupKey;
+    use sl_types::key::InventoryFolderKey;
+    use sl_types::key::InventoryKey;
     use uuid::Uuid;
 
     use super::{
@@ -3646,8 +3650,8 @@ mod caps_serializer_tests {
     /// permissions + sale info), used by the descendents and AIS round-trips.
     fn sample_item(seed: u128) -> InventoryItem {
         InventoryItem {
-            item_id: Uuid::from_u128(seed),
-            folder_id: Uuid::from_u128(seed.wrapping_add(0x100)),
+            item_id: InventoryKey::from(Uuid::from_u128(seed)),
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(seed.wrapping_add(0x100))),
             name: "An Item".to_owned(),
             description: "desc".to_owned(),
             asset_id: Uuid::from_u128(seed.wrapping_add(0x200)),
@@ -3676,12 +3680,12 @@ mod caps_serializer_tests {
     #[test]
     fn inventory_descendents_round_trip() {
         let events = vec![Event::InventoryDescendents {
-            folder_id: Uuid::from_u128(0xe0),
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(0xe0)),
             version: 4,
             descendents: 2,
             folders: vec![InventoryFolder {
-                folder_id: Uuid::from_u128(0xe1),
-                parent_id: Uuid::from_u128(0xe0),
+                folder_id: InventoryFolderKey::from(Uuid::from_u128(0xe1)),
+                parent_id: InventoryFolderKey::from(Uuid::from_u128(0xe0)),
                 name: "Sub".to_owned(),
                 folder_type: -1,
                 version: 3,
@@ -3700,8 +3704,8 @@ mod caps_serializer_tests {
         // The bulk wire form carries no folder version (parser defaults 0) and no
         // last-owner id (parser defaults nil).
         let folders = vec![InventoryFolder {
-            folder_id: Uuid::from_u128(0xf1),
-            parent_id: Uuid::from_u128(0xf2),
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(0xf1)),
+            parent_id: InventoryFolderKey::from(Uuid::from_u128(0xf2)),
             name: "Folder".to_owned(),
             folder_type: -1,
             version: 0,
@@ -3722,8 +3726,8 @@ mod caps_serializer_tests {
     #[test]
     fn ais_inventory_update_round_trip() {
         let folders = vec![InventoryFolder {
-            folder_id: Uuid::from_u128(0x1a1),
-            parent_id: Uuid::from_u128(0x1a2),
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(0x1a1)),
+            parent_id: InventoryFolderKey::from(Uuid::from_u128(0x1a2)),
             name: "AIS Folder".to_owned(),
             folder_type: 8,
             version: 5,
@@ -3732,8 +3736,8 @@ mod caps_serializer_tests {
         let (mut got_folders, mut got_items) =
             ais_inventory_update_from_llsd(&ais_inventory_update_to_llsd(&folders, &items));
         // The `_embedded` maps are uuid-keyed and unordered; sort for comparison.
-        got_folders.sort_by_key(|folder| folder.folder_id);
-        got_items.sort_by_key(|item| item.item_id);
+        got_folders.sort_by_key(|folder| folder.folder_id.uuid());
+        got_items.sort_by_key(|item| item.item_id.uuid());
         assert_eq!(got_folders, folders);
         assert_eq!(got_items, items);
     }
@@ -3742,8 +3746,8 @@ mod caps_serializer_tests {
     fn created_category_round_trips() {
         // The synchronous reply fixes version at 1.
         let folder = InventoryFolder {
-            folder_id: Uuid::from_u128(0x2a1),
-            parent_id: Uuid::from_u128(0x2a2),
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(0x2a1)),
+            parent_id: InventoryFolderKey::from(Uuid::from_u128(0x2a2)),
             name: "New Category".to_owned(),
             folder_type: -1,
             version: 1,

@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 
 use base64::Engine as _;
-use sl_types::key::ObjectKey;
+use sl_types::key::{InventoryFolderKey, InventoryKey, ObjectKey};
 use uuid::Uuid;
 
 /// A parsed LLSD value.
@@ -366,7 +366,7 @@ pub fn build_event_queue_request(ack: Option<i32>, done: bool) -> String {
 /// `folders` array, one entry per folder to fetch, each requesting its
 /// sub-folders and items sorted by name.
 #[must_use]
-pub fn build_fetch_inventory_request(owner_id: Uuid, folder_ids: &[Uuid]) -> String {
+pub fn build_fetch_inventory_request(owner_id: Uuid, folder_ids: &[InventoryFolderKey]) -> String {
     let mut out = String::from("<llsd><map><key>folders</key><array>");
     for folder in folder_ids {
         out.push_str("<map><key>folder_id</key><uuid>");
@@ -400,7 +400,7 @@ pub fn build_group_member_data_request(group_id: Uuid) -> String {
 /// verbatim. A notice without an attachment instead sends the one-byte empty
 /// bucket (`[0]`).
 #[must_use]
-pub fn build_group_notice_bucket(item_id: Uuid, owner_id: Uuid) -> Vec<u8> {
+pub fn build_group_notice_bucket(item_id: InventoryKey, owner_id: Uuid) -> Vec<u8> {
     let body = format!(
         "<? LLSD/XML ?>\n<llsd><map>\
          <key>item_id</key><uuid>{item_id}</uuid>\
@@ -437,7 +437,7 @@ pub fn build_update_avatar_appearance_request(cof_version: i32) -> String {
     reason = "mirrors the flat NewFileAgentInventory LLSD request fields"
 )]
 pub fn build_new_file_agent_inventory_request(
-    folder_id: Uuid,
+    folder_id: InventoryFolderKey,
     asset_type: &str,
     inventory_type: &str,
     name: &str,
@@ -478,7 +478,7 @@ pub fn build_new_file_agent_inventory_request(
 /// carrying the `item_id` to update. The simulator replies with an `uploader`
 /// URL (see [`parse_asset_upload_response`]).
 #[must_use]
-pub fn build_update_item_asset_request(item_id: Uuid) -> String {
+pub fn build_update_item_asset_request(item_id: InventoryKey) -> String {
     format!("<llsd><map><key>item_id</key><uuid>{item_id}</uuid></map></llsd>")
 }
 
