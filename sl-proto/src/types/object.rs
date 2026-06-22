@@ -1,7 +1,7 @@
 //! In-world object schema: motion, shape, materials, animations, particles.
 
 use sl_types::attachment::AttachmentPoint;
-use sl_types::key::{AgentKey, GroupKey};
+use sl_types::key::{AgentKey, GroupKey, OwnerKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::Permissions5;
@@ -658,10 +658,12 @@ pub struct ObjectProperties {
     pub object_id: Uuid,
     /// The creator's id.
     pub creator_id: AgentKey,
-    /// The current owner's id.
-    pub owner_id: Uuid,
-    /// The group the object is set to.
-    pub group_id: GroupKey,
+    /// The current owner — an agent, or a group when the object is deeded to a
+    /// group (signalled on the wire by a null `OwnerID`).
+    pub owner: OwnerKey,
+    /// The group the object is set to, or `None` when no group is set (a
+    /// group-*owned* object reports its group via [`owner`](Self::owner)).
+    pub group: Option<GroupKey>,
     /// The previous owner's id.
     pub last_owner_id: Uuid,
     /// The creation timestamp (seconds since the Unix epoch).
@@ -721,10 +723,12 @@ pub struct ObjectPropertiesFamily {
     pub request_flags: u32,
     /// The object's persistent global id.
     pub object_id: Uuid,
-    /// The current owner's id.
-    pub owner_id: Uuid,
-    /// The group the object is set to.
-    pub group_id: GroupKey,
+    /// The current owner — an agent, or a group when the object is deeded to a
+    /// group (signalled on the wire by a null `OwnerID`).
+    pub owner: OwnerKey,
+    /// The group the object is set to, or `None` when no group is set (a
+    /// group-*owned* object reports its group via [`owner`](Self::owner)).
+    pub group: Option<GroupKey>,
     /// The base / owner / group / everyone / next-owner permission masks.
     pub permissions: Permissions5,
     /// The ownership cost, in L$.

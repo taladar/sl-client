@@ -514,10 +514,8 @@ pub(crate) fn money_balance(reply: &sl_wire::messages::MoneyBalanceReply) -> Mon
     let info = &reply.transaction_info;
     let transaction = (info.transaction_type != 0).then(|| MoneyTransaction {
         transaction_type: info.transaction_type,
-        source_id: info.source_id,
-        source_is_group: info.is_source_group,
-        dest_id: info.dest_id,
-        dest_is_group: info.is_dest_group,
+        source: crate::types::owner_key_from_wire(info.source_id, info.is_source_group),
+        dest: crate::types::owner_key_from_wire(info.dest_id, info.is_dest_group),
         amount: LindenAmount(u64::try_from(info.amount).unwrap_or(0)),
         item_description: trimmed_string(&info.item_description),
     });
@@ -643,9 +641,8 @@ pub(crate) fn parcel_info(msg: &ParcelProperties) -> ParcelInfo {
         other_count: data.other_count,
         public_count: data.public_count,
         local_id: RegionLocalParcelId(data.local_id),
-        owner_id: data.owner_id,
-        is_group_owned: data.is_group_owned,
-        group_id: GroupKey::from(data.group_id),
+        owner: crate::types::owner_key_from_wire(data.owner_id, data.is_group_owned),
+        group: crate::types::group_from_wire(data.group_id),
         auction_id: data.auction_id,
         claim_date: data.claim_date,
         claim_price: data.claim_price,
@@ -1154,10 +1151,11 @@ pub(crate) fn uuid_crc(id: Uuid) -> u32 {
 /// `LLSaleInfo::getCRC32`). The simulator uses it to detect a no-op update; an
 /// `i8` asset/inventory type is sign-extended to `u32` as in the C++ promotion.
 pub(crate) fn inventory_item_crc(item: &InventoryItem) -> u32 {
+    let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
     let permissions_crc = uuid_crc(item.creator_id.uuid())
-        .wrapping_add(uuid_crc(item.owner_id))
+        .wrapping_add(uuid_crc(owner_id))
         .wrapping_add(uuid_crc(item.last_owner_id))
-        .wrapping_add(uuid_crc(item.group_id.uuid()))
+        .wrapping_add(uuid_crc(group_id))
         .wrapping_add(
             item.permissions
                 .base
@@ -1196,12 +1194,15 @@ pub(crate) fn inventory_item(data: &InventoryDescendentsItemDataBlock) -> Invent
         sale_type: data.sale_type,
         sale_price: data.sale_price,
         creation_date: data.creation_date,
-        owner_id: data.owner_id,
+        owner: crate::types::inventory_owner_from_wire(
+            data.owner_id,
+            data.group_id,
+            data.group_owned,
+        ),
         // The legacy UDP descendents reply carries no previous-owner id.
         last_owner_id: Uuid::nil(),
         creator_id: AgentKey::from(data.creator_id),
-        group_id: GroupKey::from(data.group_id),
-        group_owned: data.group_owned,
+        group: crate::types::group_from_wire(data.group_id),
         permissions: Permissions5 {
             base: Permissions::from_bits(data.base_mask),
             owner: Permissions::from_bits(data.owner_mask),
@@ -1229,11 +1230,14 @@ pub(crate) fn inventory_item_from_create(
         sale_type: data.sale_type,
         sale_price: data.sale_price,
         creation_date: data.creation_date,
-        owner_id: data.owner_id,
+        owner: crate::types::inventory_owner_from_wire(
+            data.owner_id,
+            data.group_id,
+            data.group_owned,
+        ),
         last_owner_id: Uuid::nil(),
         creator_id: AgentKey::from(data.creator_id),
-        group_id: GroupKey::from(data.group_id),
-        group_owned: data.group_owned,
+        group: crate::types::group_from_wire(data.group_id),
         permissions: Permissions5 {
             base: Permissions::from_bits(data.base_mask),
             owner: Permissions::from_bits(data.owner_mask),
@@ -1269,11 +1273,14 @@ pub(crate) fn bulk_update_item(data: &BulkUpdateInventoryItemDataBlock) -> Inven
         sale_type: data.sale_type,
         sale_price: data.sale_price,
         creation_date: data.creation_date,
-        owner_id: data.owner_id,
+        owner: crate::types::inventory_owner_from_wire(
+            data.owner_id,
+            data.group_id,
+            data.group_owned,
+        ),
         last_owner_id: Uuid::nil(),
         creator_id: AgentKey::from(data.creator_id),
-        group_id: GroupKey::from(data.group_id),
-        group_owned: data.group_owned,
+        group: crate::types::group_from_wire(data.group_id),
         permissions: Permissions5 {
             base: Permissions::from_bits(data.base_mask),
             owner: Permissions::from_bits(data.owner_mask),
@@ -1700,9 +1707,8 @@ pub(crate) fn parcel_info_from_llsd(body: &Llsd) -> Option<ParcelInfo> {
         other_count: i32_field("OtherCount"),
         public_count: i32_field("PublicCount"),
         local_id: RegionLocalParcelId(i32_field("LocalID")),
-        owner_id: uuid_field("OwnerID"),
-        is_group_owned: bool_field("IsGroupOwned"),
-        group_id: GroupKey::from(uuid_field("GroupID")),
+        owner: crate::types::owner_key_from_wire(uuid_field("OwnerID"), bool_field("IsGroupOwned")),
+        group: crate::types::group_from_wire(uuid_field("GroupID")),
         // OpenSim encodes the `uint` AuctionID as a 4-byte binary LLSD element,
         // so read it tolerantly (binary / integer / string).
         auction_id: data.get("AuctionID").map_or(0, llsd_u32),
@@ -2300,14 +2306,16 @@ pub(crate) fn bulk_update_item_from_llsd(item: &Llsd) -> InventoryItem {
         sale_type: u8::try_from(i32_member(item, "SaleType")).unwrap_or(0),
         sale_price: i32_member(item, "SalePrice"),
         creation_date: i32_member(item, "CreationDate"),
-        owner_id: uuid_member(item, "OwnerID"),
+        owner: crate::types::inventory_owner_from_wire(
+            uuid_member(item, "OwnerID"),
+            uuid_member(item, "GroupID"),
+            item.get("GroupOwned")
+                .and_then(Llsd::as_bool)
+                .unwrap_or(false),
+        ),
         last_owner_id: Uuid::nil(),
         creator_id: AgentKey::from(uuid_member(item, "CreatorID")),
-        group_id: GroupKey::from(uuid_member(item, "GroupID")),
-        group_owned: item
-            .get("GroupOwned")
-            .and_then(Llsd::as_bool)
-            .unwrap_or(false),
+        group: crate::types::group_from_wire(uuid_member(item, "GroupID")),
         permissions: Permissions5 {
             base: Permissions::from_bits(i32_member(item, "BaseMask").cast_unsigned()),
             owner: Permissions::from_bits(i32_member(item, "OwnerMask").cast_unsigned()),
@@ -2402,14 +2410,17 @@ pub(crate) fn inventory_item_from_llsd(item: &Llsd) -> InventoryItem {
         sale_type: sale_info.map_or(0, |s| u8::try_from(i32_member(s, "sale_type")).unwrap_or(0)),
         sale_price: sale_info.map_or(0, |s| i32_member(s, "sale_price")),
         creation_date: i32_member(item, "created_at"),
-        owner_id: perm_uuid("owner_id"),
+        owner: crate::types::inventory_owner_from_wire(
+            perm_uuid("owner_id"),
+            perm_uuid("group_id"),
+            permissions
+                .and_then(|p| p.get("is_owner_group"))
+                .and_then(Llsd::as_bool)
+                .unwrap_or(false),
+        ),
         last_owner_id: perm_uuid("last_owner_id"),
         creator_id: AgentKey::from(perm_uuid("creator_id")),
-        group_id: GroupKey::from(perm_uuid("group_id")),
-        group_owned: permissions
-            .and_then(|p| p.get("is_owner_group"))
-            .and_then(Llsd::as_bool)
-            .unwrap_or(false),
+        group: crate::types::group_from_wire(perm_uuid("group_id")),
         permissions: Permissions5 {
             base: Permissions::from_bits(perm("base_mask")),
             owner: Permissions::from_bits(perm("owner_mask")),
@@ -2770,9 +2781,12 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Llsd {
         ("OtherCount", Llsd::Integer(info.other_count)),
         ("PublicCount", Llsd::Integer(info.public_count)),
         ("LocalID", Llsd::Integer(info.local_id.0)),
-        ("OwnerID", Llsd::Uuid(info.owner_id)),
-        ("IsGroupOwned", Llsd::Boolean(info.is_group_owned)),
-        ("GroupID", Llsd::Uuid(info.group_id.uuid())),
+        ("OwnerID", Llsd::Uuid(info.owner.uuid())),
+        ("IsGroupOwned", Llsd::Boolean(info.owner.is_group())),
+        (
+            "GroupID",
+            Llsd::Uuid(crate::types::group_to_wire(info.group)),
+        ),
         ("AuctionID", u32_to_llsd(info.auction_id)),
         ("ClaimDate", Llsd::Integer(info.claim_date)),
         ("ClaimPrice", Llsd::Integer(info.claim_price)),
@@ -3078,6 +3092,7 @@ pub fn bulk_update_inventory_to_llsd(
 /// entry (inverse of [`bulk_update_item_from_llsd`]). `last_owner_id` has no
 /// place in this wire form (the parser leaves it nil), so it is not emitted.
 pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Llsd {
+    let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
     llsd_map(vec![
         ("ItemID", Llsd::Uuid(item.item_id)),
         ("FolderID", Llsd::Uuid(item.folder_id)),
@@ -3090,10 +3105,10 @@ pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Llsd {
         ("SaleType", Llsd::Integer(i32::from(item.sale_type))),
         ("SalePrice", Llsd::Integer(item.sale_price)),
         ("CreationDate", Llsd::Integer(item.creation_date)),
-        ("OwnerID", Llsd::Uuid(item.owner_id)),
+        ("OwnerID", Llsd::Uuid(owner_id)),
         ("CreatorID", Llsd::Uuid(item.creator_id.uuid())),
-        ("GroupID", Llsd::Uuid(item.group_id.uuid())),
-        ("GroupOwned", Llsd::Boolean(item.group_owned)),
+        ("GroupID", Llsd::Uuid(group_id)),
+        ("GroupOwned", Llsd::Boolean(item.owner.is_group())),
         (
             "BaseMask",
             Llsd::Integer(item.permissions.base.bits().cast_signed()),
@@ -3172,6 +3187,7 @@ pub(crate) fn inventory_folder_to_llsd(folder: &InventoryFolder) -> Llsd {
 /// Serializes an [`InventoryItem`] as an AIS-shaped `items` entry with the nested
 /// `permissions` and `sale_info` maps (inverse of [`inventory_item_from_llsd`]).
 pub(crate) fn inventory_item_to_llsd(item: &InventoryItem) -> Llsd {
+    let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
     let permissions = llsd_map(vec![
         (
             "base_mask",
@@ -3193,11 +3209,11 @@ pub(crate) fn inventory_item_to_llsd(item: &InventoryItem) -> Llsd {
             "next_owner_mask",
             Llsd::Integer(item.permissions.next_owner.bits().cast_signed()),
         ),
-        ("owner_id", Llsd::Uuid(item.owner_id)),
+        ("owner_id", Llsd::Uuid(owner_id)),
         ("last_owner_id", Llsd::Uuid(item.last_owner_id)),
         ("creator_id", Llsd::Uuid(item.creator_id.uuid())),
-        ("group_id", Llsd::Uuid(item.group_id.uuid())),
-        ("is_owner_group", Llsd::Boolean(item.group_owned)),
+        ("group_id", Llsd::Uuid(group_id)),
+        ("is_owner_group", Llsd::Boolean(item.owner.is_group())),
     ]);
     let sale_info = llsd_map(vec![
         ("sale_type", Llsd::Integer(i32::from(item.sale_type))),
@@ -3328,8 +3344,8 @@ pub(crate) fn object_properties(block: &ObjectPropertiesObjectDataBlock) -> Obje
     ObjectProperties {
         object_id: block.object_id,
         creator_id: AgentKey::from(block.creator_id),
-        owner_id: block.owner_id,
-        group_id: GroupKey::from(block.group_id),
+        owner: crate::types::object_owner_from_wire(block.owner_id, block.group_id),
+        group: crate::types::group_from_wire(block.group_id),
         last_owner_id: block.last_owner_id,
         creation_date: block.creation_date,
         permissions: Permissions5 {
@@ -3476,9 +3492,8 @@ mod caps_serializer_tests {
             other_count: 2,
             public_count: 3,
             local_id: sl_wire::RegionLocalParcelId(42),
-            owner_id: Uuid::from_u128(0x11),
-            is_group_owned: false,
-            group_id: GroupKey::from(Uuid::from_u128(0x22)),
+            owner: sl_types::key::OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0x11))),
+            group: Some(GroupKey::from(Uuid::from_u128(0x22))),
             auction_id: 0xdead_beef,
             claim_date: 1_700_000_000,
             claim_price: 100,
@@ -3641,11 +3656,12 @@ mod caps_serializer_tests {
             sale_type: 2,
             sale_price: 50,
             creation_date: 1_700_002_000,
-            owner_id: Uuid::from_u128(seed.wrapping_add(0x300)),
+            owner: sl_types::key::OwnerKey::Agent(AgentKey::from(Uuid::from_u128(
+                seed.wrapping_add(0x300),
+            ))),
             last_owner_id: Uuid::from_u128(seed.wrapping_add(0x400)),
             creator_id: AgentKey::from(Uuid::from_u128(seed.wrapping_add(0x500))),
-            group_id: GroupKey::from(Uuid::from_u128(seed.wrapping_add(0x600))),
-            group_owned: true,
+            group: Some(GroupKey::from(Uuid::from_u128(seed.wrapping_add(0x600)))),
             permissions: Permissions5 {
                 base: Permissions::from_bits(0x7fff_ffff),
                 owner: Permissions::from_bits(0x0008_0000),

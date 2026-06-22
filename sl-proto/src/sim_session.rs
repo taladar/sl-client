@@ -2265,12 +2265,14 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
+        let object_owner_wire =
+            crate::types::object_owner_to_wire(properties.owner, properties.group);
         let message = AnyMessage::ObjectPropertiesFamily(ObjectPropertiesFamilyMessage {
             object_data: ObjectPropertiesFamilyObjectDataBlockMessage {
                 request_flags: properties.request_flags,
                 object_id: properties.object_id,
-                owner_id: properties.owner_id,
-                group_id: properties.group_id.uuid(),
+                owner_id: object_owner_wire.0,
+                group_id: object_owner_wire.1,
                 base_mask: properties.permissions.base.bits(),
                 owner_mask: properties.permissions.owner.bits(),
                 group_mask: properties.permissions.group.bits(),
@@ -2309,8 +2311,8 @@ impl SimSession {
             data: owners
                 .iter()
                 .map(|owner| ParcelObjectOwnersReplyDataBlock {
-                    owner_id: owner.owner_id,
-                    is_group_owned: owner.is_group_owned,
+                    owner_id: owner.owner.uuid(),
+                    is_group_owned: owner.owner.is_group(),
                     count: owner.count,
                     online_status: owner.online_status,
                 })
@@ -3005,8 +3007,12 @@ impl SimSession {
                         item_id: data.item_id,
                         folder_id: data.folder_id,
                         creator_id: AgentKey::from(data.creator_id),
-                        owner_id: data.owner_id,
-                        group_id: GroupKey::from(data.group_id),
+                        owner: crate::types::inventory_owner_from_wire(
+                            data.owner_id,
+                            data.group_id,
+                            data.group_owned,
+                        ),
+                        group: crate::types::group_from_wire(data.group_id),
                         permissions: Permissions5 {
                             base: Permissions::from_bits(data.base_mask),
                             owner: Permissions::from_bits(data.owner_mask),
@@ -3014,7 +3020,6 @@ impl SimSession {
                             everyone: Permissions::from_bits(data.everyone_mask),
                             next_owner: Permissions::from_bits(data.next_owner_mask),
                         },
-                        group_owned: data.group_owned,
                         transaction_id: data.transaction_id,
                         asset_type: data.r#type,
                         inv_type: data.inv_type,

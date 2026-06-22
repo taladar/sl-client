@@ -22,6 +22,7 @@
 
 use std::collections::HashMap;
 
+use sl_types::key::{AgentKey, OwnerKey};
 use uuid::Uuid;
 
 use crate::llsd::Llsd;
@@ -60,20 +61,42 @@ pub struct ScriptedObjectResources {
 
 /// One scripted object in a resource report, shared by the attachment report and
 /// the land detail report.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ScriptedObjectInfo {
     /// The object's id (`id`).
     pub id: Uuid,
-    /// Whether the object is deeded to a group (`is_group_owned`).
-    pub is_group_owned: bool,
     /// The object's region position (`location`), as `[x, y, z]` metres.
     pub location: [f32; 3],
     /// The object's name (`name`).
     pub name: String,
-    /// The object's owner id (`owner_id`).
-    pub owner_id: Uuid,
+    /// The object's owner (`owner_id` + `is_group_owned`) — an agent, or a group
+    /// when the object is deeded to a group.
+    pub owner: OwnerKey,
     /// The script resources the object uses (`resources`).
     pub resources: ScriptedObjectResources,
+}
+
+/// Build an [`OwnerKey`] from the report's raw owner UUID and its group flag: a
+/// set flag makes the UUID a [`GroupKey`](sl_types::key::GroupKey), otherwise an
+/// [`AgentKey`]. The inverse on encode is `owner.uuid()` / `owner.is_group()`.
+fn owner_key_from_wire(uuid: Uuid, is_group: bool) -> OwnerKey {
+    if is_group {
+        OwnerKey::Group(sl_types::key::GroupKey::from(uuid))
+    } else {
+        OwnerKey::Agent(AgentKey::from(uuid))
+    }
+}
+
+impl Default for ScriptedObjectInfo {
+    fn default() -> Self {
+        Self {
+            id: Uuid::nil(),
+            location: [0.0, 0.0, 0.0],
+            name: String::new(),
+            owner: OwnerKey::Agent(AgentKey::from(Uuid::nil())),
+            resources: ScriptedObjectResources::default(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -167,11 +190,11 @@ fn scripted_object_to_llsd(object: &ScriptedObjectInfo) -> Llsd {
         ("id".to_owned(), Llsd::Uuid(object.id)),
         (
             "is_group_owned".to_owned(),
-            Llsd::Integer(i32::from(object.is_group_owned)),
+            Llsd::Integer(i32::from(object.owner.is_group())),
         ),
         ("location".to_owned(), vector3_to_llsd(object.location)),
         ("name".to_owned(), Llsd::String(object.name.clone())),
-        ("owner_id".to_owned(), Llsd::Uuid(object.owner_id)),
+        ("owner_id".to_owned(), Llsd::Uuid(object.owner.uuid())),
         ("resources".to_owned(), Llsd::Map(resources)),
     ]))
 }
@@ -181,20 +204,22 @@ fn scripted_object_from_llsd(value: &Llsd) -> ScriptedObjectInfo {
     let resources = value.get("resources");
     ScriptedObjectInfo {
         id: value.get("id").and_then(Llsd::as_uuid).unwrap_or_default(),
-        is_group_owned: value
-            .get("is_group_owned")
-            .and_then(Llsd::as_bool)
-            .unwrap_or(false),
         location: vector3_from_llsd(value.get("location")),
         name: value
             .get("name")
             .and_then(Llsd::as_str)
             .unwrap_or_default()
             .to_owned(),
-        owner_id: value
-            .get("owner_id")
-            .and_then(Llsd::as_uuid)
-            .unwrap_or_default(),
+        owner: owner_key_from_wire(
+            value
+                .get("owner_id")
+                .and_then(Llsd::as_uuid)
+                .unwrap_or_default(),
+            value
+                .get("is_group_owned")
+                .and_then(Llsd::as_bool)
+                .unwrap_or(false),
+        ),
         resources: ScriptedObjectResources {
             memory: resources
                 .and_then(|map| map.get("memory"))
@@ -470,14 +495,14 @@ mod tests {
         parse_land_resource_summary, parse_land_resources_reply, parse_land_resources_request,
     };
     use crate::llsd::parse_llsd_xml;
+    use sl_types::key::{AgentKey, OwnerKey};
 
     fn sample_object() -> ScriptedObjectInfo {
         ScriptedObjectInfo {
             id: Uuid::from_u128(0xabc),
-            is_group_owned: false,
             location: [128.0, 64.5, 25.0],
             name: "Scripted thing".to_owned(),
-            owner_id: Uuid::from_u128(0xdef),
+            owner: OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0xdef))),
             resources: ScriptedObjectResources {
                 memory: Some(0x1_0000),
                 urls: Some(2),

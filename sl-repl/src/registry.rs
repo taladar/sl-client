@@ -21,6 +21,7 @@ use sl_proto::AgentKey;
 use sl_proto::CircuitId;
 use sl_proto::GroupKey;
 use sl_proto::GroupRoleKey;
+use sl_proto::OwnerKey;
 use sl_proto::{
     AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentMode, AttachmentPoint,
     Camera, ChatType, ClassifiedUpdate, Command, ControlFlags, CreateGroupParams, DeRezDestination,
@@ -989,6 +990,19 @@ fn build_new_inventory_item(
 
 /// Build an [`InventoryItem`] from keyword fields (`item_id` required).
 fn build_inventory_item(args: &Args, ctx: &dyn ReplContext) -> Result<InventoryItem, ReplError> {
+    let owner_id = args.uuid_or_nil(ctx, "owner_id", 11)?;
+    let group_id = args.uuid_or_nil(ctx, "group_id", 14)?;
+    let group_owned = args.bool_or(ctx, "group_owned", 15, false)?;
+    let owner = if group_owned {
+        OwnerKey::Group(GroupKey::from(group_id))
+    } else {
+        OwnerKey::Agent(AgentKey::from(owner_id))
+    };
+    let group = if group_id.is_nil() {
+        None
+    } else {
+        Some(GroupKey::from(group_id))
+    };
     Ok(InventoryItem {
         item_id: args.req_uuid(ctx, "item_id", 0)?,
         folder_id: args.uuid_or_nil(ctx, "folder_id", 1)?,
@@ -1001,11 +1015,10 @@ fn build_inventory_item(args: &Args, ctx: &dyn ReplContext) -> Result<InventoryI
         sale_type: args.parse_or(ctx, "sale_type", 8, "u8", 0)?,
         sale_price: args.parse_or(ctx, "sale_price", 9, "i32", 0)?,
         creation_date: args.parse_or(ctx, "creation_date", 10, "i32", 0)?,
-        owner_id: args.uuid_or_nil(ctx, "owner_id", 11)?,
+        owner,
         last_owner_id: args.uuid_or_nil(ctx, "last_owner_id", 12)?,
         creator_id: AgentKey::from(args.uuid_or_nil(ctx, "creator_id", 13)?),
-        group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 14)?),
-        group_owned: args.bool_or(ctx, "group_owned", 15, false)?,
+        group,
         permissions: Permissions5 {
             base: Permissions::from_bits(args.parse_or(ctx, "base_mask", 16, "u32", 0)?),
             owner: Permissions::from_bits(args.parse_or(ctx, "owner_mask", 17, "u32", 0)?),
@@ -3178,13 +3191,26 @@ fn all_specs() -> Vec<CommandSpec> {
                     [group_owned=] [transaction_id=] [asset_type=] [inv_type=] [flags=] \
                     [sale_type=] [sale_price=] [name=] [description=] [creation_date=] [crc=]",
             build: |args, ctx| {
+                let owner_id = args.uuid_or_nil(ctx, "owner_id", 102)?;
+                let group_id = args.uuid_or_nil(ctx, "group_id", 103)?;
+                let group_owned = args.bool_or(ctx, "group_owned", 109, false)?;
+                let owner = if group_owned {
+                    OwnerKey::Group(GroupKey::from(group_id))
+                } else {
+                    OwnerKey::Agent(AgentKey::from(owner_id))
+                };
+                let group = if group_id.is_nil() {
+                    None
+                } else {
+                    Some(GroupKey::from(group_id))
+                };
                 Ok(Command::RezRestoreToWorld {
                     item: RestoreItem {
                         item_id: args.req_uuid(ctx, "item_id", 0)?,
                         folder_id: args.uuid_or_nil(ctx, "folder_id", 100)?,
                         creator_id: AgentKey::from(args.uuid_or_nil(ctx, "creator_id", 101)?),
-                        owner_id: args.uuid_or_nil(ctx, "owner_id", 102)?,
-                        group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 103)?),
+                        owner,
+                        group,
                         permissions: Permissions5 {
                             base: Permissions::from_bits(args.parse_or(
                                 ctx,
@@ -3222,7 +3248,6 @@ fn all_specs() -> Vec<CommandSpec> {
                                 0,
                             )?),
                         },
-                        group_owned: args.bool_or(ctx, "group_owned", 109, false)?,
                         transaction_id: args.uuid_or_nil(ctx, "transaction_id", 110)?,
                         asset_type: args.parse_or(ctx, "asset_type", 111, "i8", -1)?,
                         inv_type: args.parse_or(ctx, "inv_type", 112, "i8", -1)?,

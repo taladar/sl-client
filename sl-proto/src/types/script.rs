@@ -1,5 +1,6 @@
 //! Scripts and notifications: dialogs, permissions, alerts, mutes.
 
+use sl_types::key::OwnerKey;
 use sl_wire::ControlFlags;
 use uuid::Uuid;
 
@@ -113,10 +114,8 @@ pub struct LoadUrlRequest {
     pub object_name: String,
     /// The object id.
     pub object_id: Uuid,
-    /// The object owner's agent (or group) id.
-    pub owner_id: Uuid,
-    /// Whether [`owner_id`](Self::owner_id) is a group rather than an agent.
-    pub owner_is_group: bool,
+    /// The object's owner — an agent or a group.
+    pub owner: OwnerKey,
     /// The accompanying message text.
     pub message: String,
     /// The URL the object asks to open.

@@ -1,6 +1,6 @@
 //! Inventory structure and region-handle coordinate helpers.
 
-use sl_types::key::{AgentKey, GroupKey};
+use sl_types::key::{AgentKey, GroupKey, OwnerKey};
 use sl_wire::{Permissions5, RegionHandle};
 use uuid::Uuid;
 
@@ -46,18 +46,19 @@ pub struct InventoryItem {
     pub sale_price: i32,
     /// The creation date (Unix seconds).
     pub creation_date: i32,
-    /// The current owner's id.
-    pub owner_id: Uuid,
+    /// The current owner — an agent, or a group when the item is group-owned
+    /// (signalled on the wire by the `GroupOwned` flag, with the group carried in
+    /// `GroupID`).
+    pub owner: OwnerKey,
     /// The previous owner's id. Only the CAPS/AIS inventory path carries this;
     /// it is nil for items fetched over the legacy UDP path (and is part of the
     /// item's permissions checksum, the `CRC` of `UpdateInventoryItem`).
     pub last_owner_id: Uuid,
     /// The creator's id.
     pub creator_id: AgentKey,
-    /// The group associated with the item.
-    pub group_id: GroupKey,
-    /// Whether the item is group-owned.
-    pub group_owned: bool,
+    /// The group the item is set to, or `None` when no group is set (a
+    /// group-*owned* item reports its group via [`owner`](Self::owner)).
+    pub group: Option<GroupKey>,
     /// The base / owner / group / everyone / next-owner permission masks.
     pub permissions: Permissions5,
 }

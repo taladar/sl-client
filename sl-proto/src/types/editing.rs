@@ -1,7 +1,7 @@
 //! Object interaction and editing value types: clicks, materials, transforms.
 
 use super::pcode;
-use sl_types::key::{AgentKey, GroupKey};
+use sl_types::key::{AgentKey, GroupKey, OwnerKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::Permissions5;
@@ -664,14 +664,15 @@ pub struct RestoreItem {
     pub folder_id: Uuid,
     /// The item's creator (for the rezzed object's permissions).
     pub creator_id: AgentKey,
-    /// The item's owner (for the rezzed object's permissions).
-    pub owner_id: Uuid,
-    /// The group the item is set to (for permissions).
-    pub group_id: GroupKey,
+    /// The item's owner (for the rezzed object's permissions) — an agent, or a
+    /// group when the item is group-owned (signalled on the wire by the
+    /// `GroupOwned` flag, with the group carried in `GroupID`).
+    pub owner: OwnerKey,
+    /// The group the item is set to, or `None` when no group is set (a
+    /// group-*owned* item reports its group via [`owner`](Self::owner)).
+    pub group: Option<GroupKey>,
     /// The base / owner / group / everyone / next-owner permission masks.
     pub permissions: Permissions5,
-    /// Whether the item is group-owned.
-    pub group_owned: bool,
     /// A caller-chosen transaction id correlating the operation.
     pub transaction_id: Uuid,
     /// The asset type (`AssetType`).

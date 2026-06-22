@@ -1,6 +1,6 @@
 //! Economy and money: balances, transactions, economy data.
 
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, OwnerKey};
 use sl_types::money::LindenAmount;
 use uuid::Uuid;
 
@@ -42,14 +42,10 @@ pub struct MoneyTransaction {
     /// The transaction type code (e.g. `5008` for paying an object); classify
     /// with [`MoneyTransactionType::from_i32`].
     pub transaction_type: i32,
-    /// The source of the funds (the payer).
-    pub source_id: Uuid,
-    /// Whether the source is a group.
-    pub source_is_group: bool,
-    /// The destination of the funds (the payee).
-    pub dest_id: Uuid,
-    /// Whether the destination is a group.
-    pub dest_is_group: bool,
+    /// The source of the funds (the payer) — an agent or a group.
+    pub source: OwnerKey,
+    /// The destination of the funds (the payee) — an agent or a group.
+    pub dest: OwnerKey,
     /// The L$ amount moved.
     pub amount: LindenAmount,
     /// A description of the item or reason for the transaction.
