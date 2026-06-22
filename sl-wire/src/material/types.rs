@@ -1,6 +1,6 @@
 //! Material value types: GLTF override, legacy material, render-material entry.
 
-use sl_types::key::ObjectKey;
+use sl_types::key::{ObjectKey, TextureKey};
 use uuid::Uuid;
 
 /// The `GenericStreamingMessage` method id for a GLTF material override
@@ -30,7 +30,7 @@ pub struct GltfMaterialOverride {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LegacyMaterial {
     /// The normal-map texture id (nil for none).
-    pub normal_map: Uuid,
+    pub normal_map: TextureKey,
     /// The normal-map offset `(s, t)`.
     pub normal_offset: (f32, f32),
     /// The normal-map repeats `(s, t)`.
@@ -38,7 +38,7 @@ pub struct LegacyMaterial {
     /// The normal-map rotation, in radians.
     pub normal_rotation: f32,
     /// The specular-map texture id (nil for none).
-    pub specular_map: Uuid,
+    pub specular_map: TextureKey,
     /// The specular-map offset `(s, t)`.
     pub specular_offset: (f32, f32),
     /// The specular-map repeats `(s, t)`.

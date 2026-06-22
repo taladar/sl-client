@@ -24,6 +24,7 @@ use sl_proto::GroupRoleKey;
 use sl_proto::InventoryFolderKey;
 use sl_proto::InventoryKey;
 use sl_proto::OwnerKey;
+use sl_proto::TextureKey;
 use sl_proto::{
     AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentMode, AttachmentPoint,
     Camera, ChatType, ClassifiedUpdate, Command, ControlFlags, CreateGroupParams, DeRezDestination,
@@ -900,8 +901,8 @@ fn build_camera(args: &Args, ctx: &dyn ReplContext) -> Result<Camera, ReplError>
 /// Build a [`ProfileUpdate`] from keyword fields (all optional).
 fn build_profile_update(args: &Args, ctx: &dyn ReplContext) -> Result<ProfileUpdate, ReplError> {
     Ok(ProfileUpdate {
-        image_id: args.uuid_or_nil(ctx, "image_id", 0)?,
-        fl_image_id: args.uuid_or_nil(ctx, "fl_image_id", 1)?,
+        image_id: TextureKey::from(args.uuid_or_nil(ctx, "image_id", 0)?),
+        fl_image_id: TextureKey::from(args.uuid_or_nil(ctx, "fl_image_id", 1)?),
         about_text: args.str_or(ctx, "about_text", 2, "")?,
         fl_about_text: args.str_or(ctx, "fl_about_text", 3, "")?,
         allow_publish: args.bool_or(ctx, "allow_publish", 4, false)?,
@@ -931,7 +932,7 @@ fn build_pick_update(args: &Args, ctx: &dyn ReplContext) -> Result<PickUpdate, R
         parcel_id: args.uuid_or_nil(ctx, "parcel_id", 1)?,
         name: args.str_or(ctx, "name", 2, "")?,
         description: args.str_or(ctx, "description", 3, "")?,
-        snapshot_id: args.uuid_or_nil(ctx, "snapshot_id", 4)?,
+        snapshot_id: TextureKey::from(args.uuid_or_nil(ctx, "snapshot_id", 4)?),
         pos_global: global_or_zero(args, ctx, "pos_global", 5)?,
         sort_order: args.parse_or(ctx, "sort_order", 6, "i32", 0)?,
         enabled: args.bool_or(ctx, "enabled", 7, true)?,
@@ -949,7 +950,7 @@ fn build_classified_update(
         name: args.str_or(ctx, "name", 2, "")?,
         description: args.str_or(ctx, "description", 3, "")?,
         parcel_id: args.uuid_or_nil(ctx, "parcel_id", 4)?,
-        snapshot_id: args.uuid_or_nil(ctx, "snapshot_id", 5)?,
+        snapshot_id: TextureKey::from(args.uuid_or_nil(ctx, "snapshot_id", 5)?),
         pos_global: global_or_zero(args, ctx, "pos_global", 6)?,
         classified_flags: args.parse_or(ctx, "classified_flags", 7, "u8", 0)?,
         price_for_listing: args.parse_or(ctx, "price_for_listing", 8, "i32", 0)?,
@@ -965,7 +966,7 @@ fn build_create_group_params(
         name: args.req_str(ctx, "name", 0)?,
         charter: args.str_or(ctx, "charter", 1, "")?,
         show_in_list: args.bool_or(ctx, "show_in_list", 2, true)?,
-        insignia_id: args.uuid_or_nil(ctx, "insignia_id", 3)?,
+        insignia_id: TextureKey::from(args.uuid_or_nil(ctx, "insignia_id", 3)?),
         membership_fee: args.parse_or(ctx, "membership_fee", 4, "i32", 0)?,
         open_enrollment: args.bool_or(ctx, "open_enrollment", 5, false)?,
         allow_publish: args.bool_or(ctx, "allow_publish", 6, false)?,
@@ -1047,14 +1048,14 @@ fn build_parcel_update(args: &Args, ctx: &dyn ReplContext) -> Result<ParcelUpdat
         description: args.str_or(ctx, "description", 4, "")?,
         music_url: args.str_or(ctx, "music_url", 5, "")?,
         media_url: args.str_or(ctx, "media_url", 6, "")?,
-        media_id: args.uuid_or_nil(ctx, "media_id", 7)?,
+        media_id: TextureKey::from(args.uuid_or_nil(ctx, "media_id", 7)?),
         media_auto_scale: args.bool_or(ctx, "media_auto_scale", 8, false)?,
         group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 9)?),
         pass_price: args.parse_or(ctx, "pass_price", 10, "i32", 0)?,
         pass_hours: args.parse_or(ctx, "pass_hours", 11, "f32", 0.0)?,
         category: ParcelCategory::from_u8(args.parse_or(ctx, "category", 12, "u8", 0)?),
         auth_buyer_id: args.uuid_or_nil(ctx, "auth_buyer_id", 13)?,
-        snapshot_id: args.uuid_or_nil(ctx, "snapshot_id", 14)?,
+        snapshot_id: TextureKey::from(args.uuid_or_nil(ctx, "snapshot_id", 14)?),
         user_location: args
             .opt_vector(ctx, "user_location", 15)?
             .unwrap_or(Vector {
@@ -3374,7 +3375,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<texture_id> [discard_level=0] [priority=1.0]",
             build: |args, ctx| {
                 Ok(Command::RequestTexture {
-                    texture_id: args.req_uuid(ctx, "texture_id", 0)?,
+                    texture_id: TextureKey::from(args.req_uuid(ctx, "texture_id", 0)?),
                     discard_level: args.parse_or(ctx, "discard_level", 1, "i8", 0)?,
                     priority: args.parse_or(ctx, "priority", 2, "f32", 1.0)?,
                 })
@@ -3396,7 +3397,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<texture_id> [discard_level=0]",
             build: |args, ctx| {
                 Ok(Command::FetchTexture {
-                    texture_id: args.req_uuid(ctx, "texture_id", 0)?,
+                    texture_id: TextureKey::from(args.req_uuid(ctx, "texture_id", 0)?),
                     discard_level: args.parse_or(ctx, "discard_level", 1, "u8", 0)?,
                 })
             },

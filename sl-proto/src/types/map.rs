@@ -3,7 +3,7 @@
 use std::net::SocketAddr;
 
 use super::Maturity;
-use sl_types::key::ObjectKey;
+use sl_types::key::{ObjectKey, TextureKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::RegionHandle;
@@ -198,7 +198,7 @@ pub struct MapRegionInfo {
     /// regions).
     pub water_height: u8,
     /// The region's map tile image id.
-    pub map_image_id: Uuid,
+    pub map_image_id: TextureKey,
 }
 
 /// A kind of world-map overlay item requested via `MapItemRequest` (the
@@ -327,7 +327,7 @@ pub struct MapLayer {
     /// The bottom (minimum y) grid coordinate the tile covers, inclusive.
     pub bottom: u32,
     /// The map-tile texture id for this layer.
-    pub image_id: Uuid,
+    pub image_id: TextureKey,
 }
 
 /// The `Flags` bitfield the viewer sends in the agent block of the world-map

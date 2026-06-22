@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use sl_client_tokio::{
     AssetType, Client, Command, DisconnectReason, Error, Event, LoginParams, LoginRequest,
-    Throttle, Uuid,
+    TextureKey, Throttle, Uuid,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -59,9 +59,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let version = env_or("SL_VERSION", env!("CARGO_PKG_VERSION"));
     let hold_secs: u64 = env_or("SL_HOLD_SECS", "20").parse()?;
     // The standard SL/OpenSim "plywood" default texture, present in a stock grid.
-    let texture_id: Uuid = env_or("SL_TEXTURE_ID", "89556747-24cb-43ed-920b-47caed15465f")
-        .parse()
-        .map_err(|_ignored| "SL_TEXTURE_ID is not a valid UUID")?;
+    let texture_id = TextureKey::from(
+        env_or("SL_TEXTURE_ID", "89556747-24cb-43ed-920b-47caed15465f")
+            .parse::<Uuid>()
+            .map_err(|_ignored| "SL_TEXTURE_ID is not a valid UUID")?,
+    );
     let asset = match std::env::var("SL_ASSET_ID") {
         Ok(value) => {
             let id: Uuid = value

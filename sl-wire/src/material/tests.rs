@@ -13,6 +13,7 @@ use super::{
     write_binary_value,
 };
 use crate::field::Reader;
+use sl_types::key::TextureKey;
 use uuid::Uuid;
 
 /// A binary-LLSD value round-trips through the writer and reader.
@@ -164,11 +165,11 @@ fn render_materials_response_round_trip() -> Result<(), String> {
     let entry = RenderMaterialEntry {
         material_id: Uuid::from_u128(0x00ab_cdef_0011_2233_4455_6677_8899_aabb),
         material: LegacyMaterial {
-            normal_map: Uuid::from_u128(0x1234),
+            normal_map: TextureKey::from(Uuid::from_u128(0x1234)),
             normal_offset: (0.5, -0.25),
             normal_repeat: (2.0, 4.0),
             normal_rotation: 1.5,
-            specular_map: Uuid::from_u128(0x5678),
+            specular_map: TextureKey::from(Uuid::from_u128(0x5678)),
             specular_offset: (0.1, 0.2),
             specular_repeat: (1.0, 1.0),
             specular_rotation: 0.0,

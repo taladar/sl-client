@@ -1,6 +1,6 @@
 //! Scripts and notifications: dialogs, permissions, alerts, mutes.
 
-use sl_types::key::{InventoryKey, ObjectKey, OwnerKey};
+use sl_types::key::{InventoryKey, ObjectKey, OwnerKey, TextureKey};
 use sl_wire::ControlFlags;
 use uuid::Uuid;
 
@@ -25,7 +25,7 @@ pub struct ScriptDialog {
     /// The hidden chat channel the button reply is sent on.
     pub chat_channel: i32,
     /// The dialog's icon (texture id).
-    pub image_id: Uuid,
+    pub image_id: TextureKey,
     /// The button labels, in order (the reply carries the chosen index/label).
     pub buttons: Vec<String>,
 }

@@ -12,7 +12,7 @@
 //! directory) lists an agent's or group's land holdings.
 
 use crate::types::ParcelCategory;
-use sl_types::key::{AgentKey, GroupKey};
+use sl_types::key::{AgentKey, GroupKey, TextureKey};
 use uuid::Uuid;
 
 /// The directory-query flags (`DFQ_*`), shared by every `Dir*Query` and
@@ -301,7 +301,7 @@ pub struct PlacesResult {
     /// The name of the region the parcel is in.
     pub sim_name: String,
     /// The parcel's snapshot texture.
-    pub snapshot_id: Uuid,
+    pub snapshot_id: TextureKey,
     /// The parcel's dwell (traffic) score.
     pub dwell: f32,
     /// The parcel's price, in L$.

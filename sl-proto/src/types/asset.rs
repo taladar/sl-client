@@ -1,5 +1,6 @@
 //! Assets, textures, and transfer value types.
 
+use sl_types::key::TextureKey;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -427,7 +428,7 @@ impl TransferStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Texture {
     /// The texture's asset UUID.
-    pub id: Uuid,
+    pub id: TextureKey,
     /// The codec of [`data`](Self::data). For the HTTP `GetTexture` path this is
     /// always [`J2c`](ImageCodec::J2c) (the cap serves a `.j2c` codestream).
     pub codec: ImageCodec,
@@ -446,4 +447,29 @@ pub struct Asset {
     pub asset_type: AssetType,
     /// The raw encoded asset bytes.
     pub data: Vec<u8>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ImageCodec, Texture, TextureKey};
+    use pretty_assertions::assert_eq;
+    use uuid::Uuid;
+
+    /// A [`TextureKey`] is a transparent wrapper over the wire `Uuid`: wrapping a
+    /// raw id and reading it back is the identity, so a [`Texture`] keyed by a
+    /// `TextureKey` carries the exact same 16 bytes the wire did (the typed key
+    /// changes nothing the simulator sees).
+    #[test]
+    fn texture_key_round_trips_raw_uuid() {
+        let raw = Uuid::from_u128(0x89556747_24cb_43ed_920b_47caed15465f);
+        assert_eq!(TextureKey::from(raw).uuid(), raw);
+        let texture = Texture {
+            id: TextureKey::from(raw),
+            codec: ImageCodec::J2c,
+            data: vec![1, 2, 3],
+        };
+        assert_eq!(texture.id.uuid(), raw);
+        // The default (nil) texture id round-trips too.
+        assert_eq!(TextureKey::from(Uuid::nil()).uuid(), Uuid::nil());
+    }
 }

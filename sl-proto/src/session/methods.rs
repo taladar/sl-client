@@ -60,7 +60,7 @@ use crate::types::{
     TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
     ViewerEffectType, Wearable, WearableType,
 };
-use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey};
+use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey, TextureKey};
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::{
@@ -1510,7 +1510,7 @@ impl Session {
                 self.events
                     .push_back(Event::ParcelMediaUpdate(ParcelMediaUpdateInfo {
                         media_url: trimmed_string(&data.media_url),
-                        media_id: data.media_id,
+                        media_id: TextureKey::from(data.media_id),
                         media_auto_scale: data.media_auto_scale != 0,
                         media_type: trimmed_string(&extended.media_type),
                         media_desc: trimmed_string(&extended.media_desc),
@@ -1598,7 +1598,7 @@ impl Session {
                     global_y: data.global_y,
                     global_z: data.global_z,
                     sim_name: trimmed_string(&data.sim_name),
-                    snapshot_id: data.snapshot_id,
+                    snapshot_id: TextureKey::from(data.snapshot_id),
                     dwell: data.dwell,
                     sale_price: data.sale_price,
                     auction_id: data.auction_id,
@@ -2068,7 +2068,7 @@ impl Session {
                 };
                 if completed && let Some(download) = self.texture_downloads.remove(&id) {
                     let texture = Texture {
-                        id,
+                        id: TextureKey::from(id),
                         codec: download.codec,
                         data: download.assemble(),
                     };
@@ -2090,7 +2090,7 @@ impl Session {
                 };
                 if completed && let Some(download) = self.texture_downloads.remove(&id) {
                     let texture = Texture {
-                        id,
+                        id: TextureKey::from(id),
                         codec: download.codec,
                         data: download.assemble(),
                     };
@@ -2101,7 +2101,8 @@ impl Session {
             AnyMessage::ImageNotInDatabase(missing) => {
                 let id = missing.image_id.id;
                 self.texture_downloads.remove(&id);
-                self.events.push_back(Event::TextureNotFound(id));
+                self.events
+                    .push_back(Event::TextureNotFound(TextureKey::from(id)));
             }
             AnyMessage::TransferInfo(info) => {
                 // The transfer's initial status/size. A non-success status here
@@ -2471,7 +2472,7 @@ impl Session {
                             flags: block.flags,
                             global_position: (block.global_x, block.global_y, block.global_z),
                             sim_name: trimmed_string(&block.sim_name),
-                            snapshot_id: block.snapshot_id,
+                            snapshot_id: TextureKey::from(block.snapshot_id),
                             dwell: block.dwell,
                             price: block.price,
                         })
@@ -4804,14 +4805,14 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_texture(
         &mut self,
-        texture_id: Uuid,
+        texture_id: TextureKey,
         discard_level: i8,
         priority: f32,
         now: Instant,
     ) -> Result<(), Error> {
         // A fresh download buffer; a repeat request just restarts it.
         self.texture_downloads.insert(
-            texture_id,
+            texture_id.uuid(),
             TextureDownload {
                 codec: ImageCodec::J2c,
                 packets: 0,

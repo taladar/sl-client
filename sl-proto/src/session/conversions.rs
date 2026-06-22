@@ -24,6 +24,7 @@ use sl_types::key::GroupKey;
 use sl_types::key::InventoryFolderKey;
 use sl_types::key::InventoryKey;
 use sl_types::key::ObjectKey;
+use sl_types::key::TextureKey;
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::RegionHandle;
@@ -414,12 +415,12 @@ fn sky_settings_from_llsd(name: &str, sky: &Llsd) -> SkySettings {
         sky_top_radius: f32_member(sky, "sky_top_radius"),
         sky_bottom_radius: f32_member(sky, "sky_bottom_radius"),
         planet_radius: f32_member(sky, "planet_radius"),
-        sun_texture: uuid_member(sky, "sun_id"),
-        moon_texture: uuid_member(sky, "moon_id"),
-        cloud_texture: uuid_member(sky, "cloud_id"),
-        bloom_texture: uuid_member(sky, "bloom_id"),
-        halo_texture: uuid_member(sky, "halo_id"),
-        rainbow_texture: uuid_member(sky, "rainbow_id"),
+        sun_texture: TextureKey::from(uuid_member(sky, "sun_id")),
+        moon_texture: TextureKey::from(uuid_member(sky, "moon_id")),
+        cloud_texture: TextureKey::from(uuid_member(sky, "cloud_id")),
+        bloom_texture: TextureKey::from(uuid_member(sky, "bloom_id")),
+        halo_texture: TextureKey::from(uuid_member(sky, "halo_id")),
+        rainbow_texture: TextureKey::from(uuid_member(sky, "rainbow_id")),
     }
 }
 
@@ -431,10 +432,10 @@ fn water_settings_from_llsd(name: &str, water: &Llsd) -> WaterSettings {
         fresnel_offset: f32_member(water, "fresnel_offset"),
         fresnel_scale: f32_member(water, "fresnel_scale"),
         normal_scale: color3_from_llsd(water.get("normal_scale")),
-        normal_map: uuid_member(water, "normal_map"),
+        normal_map: TextureKey::from(uuid_member(water, "normal_map")),
         scale_above: f32_member(water, "scale_above"),
         scale_below: f32_member(water, "scale_below"),
-        transparent_texture: uuid_member(water, "transparent_texture"),
+        transparent_texture: TextureKey::from(uuid_member(water, "transparent_texture")),
         underwater_fog_mod: f32_member(water, "underwater_fog_mod"),
         water_fog_color: color3_from_llsd(water.get("water_fog_color")),
         water_fog_density: f32_member(water, "water_fog_density"),
@@ -555,7 +556,7 @@ pub(crate) fn avatar_appearance(message: &sl_wire::messages::AvatarAppearance) -
         })
         .collect();
     AvatarAppearance {
-        avatar_id: message.sender.id,
+        avatar_id: AgentKey::from(message.sender.id),
         is_trial: message.sender.is_trial,
         texture_entry,
         visual_params,
@@ -672,10 +673,10 @@ pub(crate) fn parcel_info(msg: &ParcelProperties) -> ParcelInfo {
         description: trimmed_string(&data.desc),
         music_url: trimmed_string(&data.music_url),
         media_url: trimmed_string(&data.media_url),
-        media_id: data.media_id,
+        media_id: TextureKey::from(data.media_id),
         media_auto_scale: data.media_auto_scale != 0,
         auth_buyer_id: data.auth_buyer_id,
-        snapshot_id: data.snapshot_id,
+        snapshot_id: TextureKey::from(data.snapshot_id),
         pass_price: data.pass_price,
         pass_hours: data.pass_hours,
         user_location: (
@@ -772,8 +773,8 @@ pub(crate) fn avatar_properties(
 ) -> AvatarProperties {
     AvatarProperties {
         avatar_id: AgentKey::from(avatar_id),
-        image_id: data.image_id,
-        fl_image_id: data.fl_image_id,
+        image_id: TextureKey::from(data.image_id),
+        fl_image_id: TextureKey::from(data.fl_image_id),
         partner_id: AgentKey::from(data.partner_id),
         about_text: trimmed_string(&data.about_text),
         fl_about_text: trimmed_string(&data.fl_about_text),
@@ -807,7 +808,7 @@ pub(crate) fn avatar_group(data: &AvatarGroupsReplyGroupDataBlock) -> AvatarGrou
         group_title: trimmed_string(&data.group_title),
         group_powers: data.group_powers,
         accept_notices: data.accept_notices,
-        group_insignia_id: data.group_insignia_id,
+        group_insignia_id: TextureKey::from(data.group_insignia_id),
     }
 }
 
@@ -821,7 +822,7 @@ pub(crate) fn pick_info(data: &PickInfoReplyDataBlock) -> PickInfo {
         parcel_id: data.parcel_id,
         name: trimmed_string(&data.name),
         description: trimmed_string(&data.desc),
-        snapshot_id: data.snapshot_id,
+        snapshot_id: TextureKey::from(data.snapshot_id),
         user: trimmed_string(&data.user),
         original_name: trimmed_string(&data.original_name),
         sim_name: trimmed_string(&data.sim_name),
@@ -844,7 +845,7 @@ pub(crate) fn classified_info(data: &ClassifiedInfoReplyDataBlock) -> Classified
         description: trimmed_string(&data.desc),
         parcel_id: data.parcel_id,
         parent_estate: data.parent_estate,
-        snapshot_id: data.snapshot_id,
+        snapshot_id: TextureKey::from(data.snapshot_id),
         sim_name: trimmed_string(&data.sim_name),
         pos_global: (x, y, z),
         parcel_name: trimmed_string(&data.parcel_name),
@@ -892,7 +893,7 @@ pub(crate) fn group_membership(data: &AgentGroupDataUpdateGroupDataBlock) -> Gro
         group_id: GroupKey::from(data.group_id),
         group_powers: data.group_powers,
         accept_notices: data.accept_notices,
-        group_insignia_id: data.group_insignia_id,
+        group_insignia_id: TextureKey::from(data.group_insignia_id),
         contribution: data.contribution,
         group_name: trimmed_string(&data.group_name),
     }
@@ -940,7 +941,7 @@ pub(crate) fn group_profile(data: &GroupProfileReplyGroupDataBlock) -> GroupProf
         show_in_list: data.show_in_list,
         member_title: trimmed_string(&data.member_title),
         powers: data.powers_mask,
-        insignia_id: data.insignia_id,
+        insignia_id: TextureKey::from(data.insignia_id),
         founder_id: AgentKey::from(data.founder_id),
         membership_fee: data.membership_fee,
         open_enrollment: data.open_enrollment,
@@ -1098,7 +1099,7 @@ pub(crate) fn script_dialog(message: &sl_wire::messages::ScriptDialog) -> Script
             .map_or_else(Uuid::nil, |owner| owner.owner_id),
         message: trimmed_string(&data.message),
         chat_channel: data.chat_channel,
-        image_id: data.image_id,
+        image_id: TextureKey::from(data.image_id),
         buttons: message
             .buttons
             .iter()
@@ -1343,7 +1344,7 @@ pub(crate) fn map_region_info(
             .unwrap_or(256),
         agents: data.agents,
         water_height: data.water_height,
-        map_image_id: data.map_image_id,
+        map_image_id: TextureKey::from(data.map_image_id),
     })
 }
 
@@ -1375,7 +1376,7 @@ pub(crate) fn map_region_info_to_data_block(info: &MapRegionInfo) -> MapBlockRep
         region_flags: info.region_flags,
         water_height: info.water_height,
         agents: info.agents,
-        map_image_id: info.map_image_id,
+        map_image_id: info.map_image_id.uuid(),
     }
 }
 
@@ -1460,13 +1461,13 @@ pub fn build_map_item_reply(
 
 /// Builds a [`MapLayer`] from a `MapLayerReply` `LayerData` block. The bounds
 /// are inclusive grid coordinates.
-pub(crate) const fn map_layer(data: &MapLayerReplyLayerDataBlock) -> MapLayer {
+pub(crate) fn map_layer(data: &MapLayerReplyLayerDataBlock) -> MapLayer {
     MapLayer {
         left: data.left,
         right: data.right,
         top: data.top,
         bottom: data.bottom,
-        image_id: data.image_id,
+        image_id: TextureKey::from(data.image_id),
     }
 }
 
@@ -1478,7 +1479,7 @@ pub(crate) const fn map_layer_to_data_block(layer: &MapLayer) -> MapLayerReplyLa
         right: layer.right,
         top: layer.top,
         bottom: layer.bottom,
-        image_id: layer.image_id,
+        image_id: layer.image_id.uuid(),
     }
 }
 
@@ -1751,12 +1752,12 @@ pub(crate) fn parcel_info_from_llsd(body: &Llsd) -> Option<ParcelInfo> {
         description: str_field("Desc"),
         music_url: str_field("MusicURL"),
         media_url: str_field("MediaURL"),
-        media_id: uuid_field("MediaID"),
+        media_id: TextureKey::from(uuid_field("MediaID")),
         // OpenSim encodes MediaAutoScale as an LLSD boolean; `as_bool` also
         // tolerates the integer form.
         media_auto_scale: bool_field("MediaAutoScale"),
         auth_buyer_id: uuid_field("AuthBuyerID"),
-        snapshot_id: uuid_field("SnapshotID"),
+        snapshot_id: TextureKey::from(uuid_field("SnapshotID")),
         pass_price: i32_field("PassPrice"),
         pass_hours: data.get("PassHours").and_then(Llsd::as_f32).unwrap_or(0.0),
         user_location: vec3_from_llsd(data.get("UserLocation")),
@@ -2154,10 +2155,12 @@ pub(crate) fn group_memberships_from_caps_llsd(body: &Llsd) -> Option<Event> {
                     .get("AcceptNotices")
                     .and_then(Llsd::as_bool)
                     .unwrap_or(false),
-                group_insignia_id: group
-                    .get("GroupInsigniaID")
-                    .and_then(Llsd::as_uuid)
-                    .unwrap_or_else(Uuid::nil),
+                group_insignia_id: TextureKey::from(
+                    group
+                        .get("GroupInsigniaID")
+                        .and_then(Llsd::as_uuid)
+                        .unwrap_or_else(Uuid::nil),
+                ),
                 contribution: group
                     .get("Contribution")
                     .and_then(Llsd::as_i32)
@@ -2677,12 +2680,12 @@ fn sky_settings_to_llsd(sky: &SkySettings) -> Llsd {
         ("sky_top_radius", real(sky.sky_top_radius)),
         ("sky_bottom_radius", real(sky.sky_bottom_radius)),
         ("planet_radius", real(sky.planet_radius)),
-        ("sun_id", Llsd::Uuid(sky.sun_texture)),
-        ("moon_id", Llsd::Uuid(sky.moon_texture)),
-        ("cloud_id", Llsd::Uuid(sky.cloud_texture)),
-        ("bloom_id", Llsd::Uuid(sky.bloom_texture)),
-        ("halo_id", Llsd::Uuid(sky.halo_texture)),
-        ("rainbow_id", Llsd::Uuid(sky.rainbow_texture)),
+        ("sun_id", Llsd::Uuid(sky.sun_texture.uuid())),
+        ("moon_id", Llsd::Uuid(sky.moon_texture.uuid())),
+        ("cloud_id", Llsd::Uuid(sky.cloud_texture.uuid())),
+        ("bloom_id", Llsd::Uuid(sky.bloom_texture.uuid())),
+        ("halo_id", Llsd::Uuid(sky.halo_texture.uuid())),
+        ("rainbow_id", Llsd::Uuid(sky.rainbow_texture.uuid())),
     ])
 }
 
@@ -2696,10 +2699,13 @@ fn water_settings_to_llsd(water: &WaterSettings) -> Llsd {
         ("fresnel_offset", real(water.fresnel_offset)),
         ("fresnel_scale", real(water.fresnel_scale)),
         ("normal_scale", reals_to_llsd(&water.normal_scale)),
-        ("normal_map", Llsd::Uuid(water.normal_map)),
+        ("normal_map", Llsd::Uuid(water.normal_map.uuid())),
         ("scale_above", real(water.scale_above)),
         ("scale_below", real(water.scale_below)),
-        ("transparent_texture", Llsd::Uuid(water.transparent_texture)),
+        (
+            "transparent_texture",
+            Llsd::Uuid(water.transparent_texture.uuid()),
+        ),
         ("underwater_fog_mod", real(water.underwater_fog_mod)),
         ("water_fog_color", reals_to_llsd(&water.water_fog_color)),
         ("water_fog_density", real(water.water_fog_density)),
@@ -2822,10 +2828,10 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Llsd {
         ("Desc", Llsd::String(info.description.clone())),
         ("MusicURL", Llsd::String(info.music_url.clone())),
         ("MediaURL", Llsd::String(info.media_url.clone())),
-        ("MediaID", Llsd::Uuid(info.media_id)),
+        ("MediaID", Llsd::Uuid(info.media_id.uuid())),
         ("MediaAutoScale", Llsd::Boolean(info.media_auto_scale)),
         ("AuthBuyerID", Llsd::Uuid(info.auth_buyer_id)),
-        ("SnapshotID", Llsd::Uuid(info.snapshot_id)),
+        ("SnapshotID", Llsd::Uuid(info.snapshot_id.uuid())),
         ("PassPrice", Llsd::Integer(info.pass_price)),
         ("PassHours", Llsd::Real(f64::from(info.pass_hours))),
         ("UserLocation", vec3_to_llsd(info.user_location)),
@@ -2978,7 +2984,10 @@ pub fn group_memberships_to_caps_llsd(event: &Event) -> Llsd {
                 ("GroupID", Llsd::Uuid(membership.group_id.uuid())),
                 ("GroupPowers", u64_to_llsd(membership.group_powers)),
                 ("AcceptNotices", Llsd::Boolean(membership.accept_notices)),
-                ("GroupInsigniaID", Llsd::Uuid(membership.group_insignia_id)),
+                (
+                    "GroupInsigniaID",
+                    Llsd::Uuid(membership.group_insignia_id.uuid()),
+                ),
                 ("Contribution", Llsd::Integer(membership.contribution)),
                 ("GroupName", Llsd::String(membership.group_name.clone())),
             ])
@@ -3373,7 +3382,10 @@ pub(crate) fn object_properties(block: &ObjectPropertiesObjectDataBlock) -> Obje
         description: trimmed_string(&block.description),
         touch_name: trimmed_string(&block.touch_name),
         sit_name: trimmed_string(&block.sit_name),
-        texture_ids: concatenated_uuids(&block.texture_id),
+        texture_ids: concatenated_uuids(&block.texture_id)
+            .into_iter()
+            .map(TextureKey::from)
+            .collect(),
     }
 }
 
@@ -3395,6 +3407,7 @@ mod caps_serializer_tests {
     use sl_types::key::GroupKey;
     use sl_types::key::InventoryFolderKey;
     use sl_types::key::InventoryKey;
+    use sl_types::key::TextureKey;
     use uuid::Uuid;
 
     use super::{
@@ -3525,10 +3538,10 @@ mod caps_serializer_tests {
             description: "A description".to_owned(),
             music_url: "http://music".to_owned(),
             media_url: "http://media".to_owned(),
-            media_id: Uuid::from_u128(0x33),
+            media_id: TextureKey::from(Uuid::from_u128(0x33)),
             media_auto_scale: true,
             auth_buyer_id: Uuid::from_u128(0x44),
-            snapshot_id: Uuid::from_u128(0x55),
+            snapshot_id: TextureKey::from(Uuid::from_u128(0x55)),
             pass_price: 25,
             pass_hours: 2.0,
             user_location: (10.0, 20.0, 30.0),
@@ -3603,7 +3616,7 @@ mod caps_serializer_tests {
             group_id: GroupKey::from(Uuid::from_u128(0xc1)),
             group_powers: 0x0000_0001_0000_00ff,
             accept_notices: true,
-            group_insignia_id: Uuid::from_u128(0xc2),
+            group_insignia_id: TextureKey::from(Uuid::from_u128(0xc2)),
             contribution: 128,
             group_name: "Test Group".to_owned(),
         }]);

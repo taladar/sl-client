@@ -7,7 +7,7 @@
 //! reference viewer's `LLTextureAnim::unpackTAMessage` (`lltextureanim.cpp`) and
 //! `LLPartSysData::unpackBlock` (`llpartdata.cpp`).
 
-use sl_types::key::ObjectKey;
+use sl_types::key::{ObjectKey, TextureKey};
 use sl_types::lsl::Vector;
 use sl_wire::{Reader, Writer};
 
@@ -172,7 +172,7 @@ fn decode_system(reader: &mut Reader<'_>) -> Option<ParticleSystem> {
         burst_part_count,
         angular_velocity,
         acceleration,
-        texture_id,
+        texture_id: TextureKey::from(texture_id),
         target_id: ObjectKey::from(target_id),
         part_flags: 0,
         part_max_age: 0.0,
@@ -340,7 +340,7 @@ fn encode_system(writer: &mut Writer, system: &ParticleSystem) {
     writer.put_u8(system.burst_part_count);
     pack_fixed_vector_signed(writer, &system.angular_velocity, 8, 7);
     pack_fixed_vector_signed(writer, &system.acceleration, 8, 7);
-    writer.put_uuid(system.texture_id);
+    writer.put_uuid(system.texture_id.uuid());
     writer.put_uuid(system.target_id.uuid());
 }
 
@@ -426,7 +426,7 @@ const fn trunc_to_u16(value: f32) -> u16 {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use sl_types::key::ObjectKey;
+    use sl_types::key::{ObjectKey, TextureKey};
     use sl_types::lsl::Vector;
     use uuid::Uuid;
 
@@ -565,7 +565,7 @@ mod tests {
         assert_eq!(ps.burst_part_count, 10);
         close(ps.angular_velocity.x, 0.0)?;
         close(ps.acceleration.z, 0.0)?;
-        assert_eq!(ps.texture_id, image);
+        assert_eq!(ps.texture_id, TextureKey::from(image));
         assert_eq!(ps.target_id, ObjectKey::from(target));
         assert_eq!(ps.part_flags, 0x11);
         close(ps.part_max_age, 10.0)?;
@@ -653,7 +653,7 @@ mod tests {
                 y: -0.5,
                 z: 3.0,
             },
-            texture_id: Uuid::from_u128(0x1234),
+            texture_id: TextureKey::from(Uuid::from_u128(0x1234)),
             target_id: ObjectKey::from(Uuid::from_u128(0x5678)),
             part_flags,
             part_max_age: 10.0,

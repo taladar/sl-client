@@ -1,7 +1,9 @@
 //! Binary asset fetch over HTTP (textures, mesh, generic assets).
 
 use reqwest::Client as ReqwestClient;
-use sl_proto::{Asset, AssetType, Event, ImageCodec, Texture, TransferStatus, Uuid, j2c};
+use sl_proto::{
+    Asset, AssetType, Event, ImageCodec, Texture, TextureKey, TransferStatus, Uuid, j2c,
+};
 use tokio::sync::mpsc;
 
 /// GETs a texture from the `GetTexture` capability and surfaces it as an
@@ -17,7 +19,7 @@ use tokio::sync::mpsc;
 /// prefix, just without the bandwidth saving.
 pub(crate) async fn fetch_texture_http(
     cap_url: String,
-    texture_id: Uuid,
+    texture_id: TextureKey,
     discard_level: u8,
     http: ReqwestClient,
     events: mpsc::Sender<Event>,

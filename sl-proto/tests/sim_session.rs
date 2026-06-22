@@ -24,8 +24,9 @@ mod test {
         Permissions5, PingId, PlacesResult, PointAtType, Postcard, ProductType, RegionHandle,
         RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment,
         SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ServerEvent,
-        Session, SimSession, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
+        Session, SimSession, TelehubInfo, TextureKey, Throttle, Transmit, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
+        parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -748,7 +749,7 @@ mod test {
                 flags: 0,
                 global_position: (1000.0, 2000.0, 30.0),
                 sim_name: "Region".to_owned(),
-                snapshot_id: uuid::Uuid::nil(),
+                snapshot_id: TextureKey::from(uuid::Uuid::nil()),
                 dwell: 3.0,
                 price: 0,
             }],
@@ -1228,7 +1229,7 @@ mod test {
                 global_y: 257_024.0,
                 global_z: 23.5,
                 sim_name: "Default Region".to_owned(),
-                snapshot_id: uuid::Uuid::from_u128(0x77),
+                snapshot_id: TextureKey::from(uuid::Uuid::from_u128(0x77)),
                 dwell: 88.0,
                 sale_price: 1000,
                 auction_id: 0,
@@ -2361,7 +2362,7 @@ mod test {
                 size_y: 256,
                 agents: 3,
                 water_height: 20,
-                map_image_id: uuid::Uuid::from_u128(0xABCD),
+                map_image_id: TextureKey::from(uuid::Uuid::from_u128(0xABCD)),
             },
             MapRegionInfo {
                 name: "Variable".to_owned(),
@@ -2374,7 +2375,7 @@ mod test {
                 size_y: 512,
                 agents: 0,
                 water_height: 25,
-                map_image_id: uuid::Uuid::from_u128(0x1234),
+                map_image_id: TextureKey::from(uuid::Uuid::from_u128(0x1234)),
             },
         ];
         sim.send_map_block_reply(MapRequestFlags(MapRequestFlags::LAYER), &regions, now)?;
@@ -2448,14 +2449,14 @@ mod test {
                 right: 9999,
                 top: 9999,
                 bottom: 0,
-                image_id: uuid::Uuid::from_u128(0xABCD),
+                image_id: TextureKey::from(uuid::Uuid::from_u128(0xABCD)),
             },
             MapLayer {
                 left: 1000,
                 right: 1100,
                 top: 1200,
                 bottom: 1000,
-                image_id: uuid::Uuid::from_u128(0x1234),
+                image_id: TextureKey::from(uuid::Uuid::from_u128(0x1234)),
             },
         ];
         sim.send_map_layer_reply(MapRequestFlags(MapRequestFlags::LAYER), &layers, now)?;

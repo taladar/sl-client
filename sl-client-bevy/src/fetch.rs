@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use sl_proto::Event as SessionEvent;
 use sl_proto::{
-    Asset, AssetType, DisconnectReason, ImageCodec, Texture, TransferStatus, Uuid, j2c,
+    Asset, AssetType, DisconnectReason, ImageCodec, Texture, TextureKey, TransferStatus, Uuid, j2c,
 };
 
 /// GETs a texture from the `GetTexture` capability and forwards a
@@ -15,7 +15,7 @@ use sl_proto::{
 /// prefix is fetched, using HTTP `Range` requests (see [`fetch_texture_lod`]).
 pub(crate) fn run_texture_fetch(
     cap_url: &str,
-    texture_id: Uuid,
+    texture_id: TextureKey,
     discard_level: u8,
     asset_tx: &Sender<SessionEvent>,
 ) {

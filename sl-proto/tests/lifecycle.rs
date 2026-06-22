@@ -26,8 +26,8 @@ mod test {
         ProfileUpdate, ReflectionProbeFlags, RegionHandle, RegionInfoUpdate, Reliability,
         RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ScriptControlAction,
         ScriptPermissions, Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType,
-        Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        WaterSettings, WearableType, avatar_texture, group_powers, pcode,
+        TextureKey, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, WaterSettings, WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -1670,7 +1670,7 @@ mod test {
 
         session.update_profile(
             &ProfileUpdate {
-                image_id: uuid::Uuid::from_u128(0x5E),
+                image_id: TextureKey::from(uuid::Uuid::from_u128(0x5E)),
                 about_text: "Hello world".to_owned(),
                 allow_publish: true,
                 profile_url: "https://example.com".to_owned(),
@@ -2517,7 +2517,7 @@ mod test {
                 name: "My Group".to_owned(),
                 charter: "hi".to_owned(),
                 show_in_list: true,
-                insignia_id: uuid::Uuid::nil(),
+                insignia_id: TextureKey::from(uuid::Uuid::nil()),
                 membership_fee: 0,
                 open_enrollment: true,
                 allow_publish: false,
@@ -3531,7 +3531,7 @@ mod test {
         drain(&mut session)?;
 
         let texture = uuid::Uuid::from_u128(0xABCD);
-        session.request_texture(texture, 0, 1.0e6, now)?;
+        session.request_texture(TextureKey::from(texture), 0, 1.0e6, now)?;
 
         // The client sends a RequestImage for the texture at the discard level.
         let sent = drain(&mut session)?;
@@ -3584,7 +3584,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a TextureReceived event")?;
-        assert_eq!(received.id, texture);
+        assert_eq!(received.id, TextureKey::from(texture));
         assert_eq!(received.codec, ImageCodec::J2c);
         assert_eq!(received.data, vec![1, 2, 3, 4, 5, 6]);
         Ok(())
@@ -3597,7 +3597,7 @@ mod test {
         drain(&mut session)?;
 
         let texture = uuid::Uuid::from_u128(0xDEAD);
-        session.request_texture(texture, 3, 1.0e6, now)?;
+        session.request_texture(TextureKey::from(texture), 3, 1.0e6, now)?;
         drain(&mut session)?;
 
         let missing = AnyMessage::ImageNotInDatabase(ImageNotInDatabase {
@@ -3606,9 +3606,9 @@ mod test {
         session.handle_datagram(sim_addr(), &server_message(&missing, 9, true)?, now)?;
 
         assert!(
-            drain_events(&mut session)
-                .iter()
-                .any(|e| matches!(e, Event::TextureNotFound(id) if *id == texture))
+            drain_events(&mut session).iter().any(
+                |e| matches!(e, Event::TextureNotFound(id) if *id == TextureKey::from(texture))
+            )
         );
         Ok(())
     }
@@ -3992,20 +3992,20 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an AvatarAppearance event")?;
-        assert_eq!(appearance.avatar_id, avatar);
+        assert_eq!(appearance.avatar_id, AgentKey::from(avatar));
         assert_eq!(appearance.visual_params, vec![10, 200, 255]);
         // The baked head texture decodes at its slot; an untouched slot is nil.
         assert_eq!(
             appearance
                 .texture_entry
                 .texture_id(avatar_texture::HEAD_BAKED),
-            Some(head_bake)
+            Some(TextureKey::from(head_bake))
         );
         assert_eq!(
             appearance
                 .texture_entry
                 .texture_id(avatar_texture::UPPER_BAKED),
-            Some(uuid::Uuid::nil())
+            Some(TextureKey::from(uuid::Uuid::nil()))
         );
         Ok(())
     }
@@ -5469,7 +5469,7 @@ mod test {
             return Err("expected ParcelMediaUpdate".into());
         };
         assert_eq!(update.media_url, "http://example.com/movie");
-        assert_eq!(update.media_id, media);
+        assert_eq!(update.media_id, TextureKey::from(media));
         assert!(update.media_auto_scale);
         assert_eq!(update.media_type, "text/html");
         assert_eq!(update.media_desc, "a web page");
@@ -6430,7 +6430,10 @@ mod test {
         assert!((sky.max_y - 1605.0).abs() < f32::EPSILON);
         assert!((sky.star_brightness - 0.5).abs() < f32::EPSILON);
         assert!((sky.sun_rotation.s - 1.0).abs() < f32::EPSILON);
-        assert_eq!(sky.cloud_texture, uuid::Uuid::from_u128(0xcc));
+        assert_eq!(
+            sky.cloud_texture,
+            TextureKey::from(uuid::Uuid::from_u128(0xcc))
+        );
         // Haze colours/scalars come from the `legacy_haze` sub-map.
         assert!(
             sky.ambient
@@ -6441,7 +6444,10 @@ mod test {
 
         let water = cycle.water_frames.get("Default").ok_or("water frame")?;
         assert!((water.water_fog_density - 2.0).abs() < f32::EPSILON);
-        assert_eq!(water.normal_map, uuid::Uuid::from_u128(0xaa));
+        assert_eq!(
+            water.normal_map,
+            TextureKey::from(uuid::Uuid::from_u128(0xaa))
+        );
         assert!(
             water
                 .wave1_direction
@@ -6498,12 +6504,12 @@ mod test {
             sky_top_radius: 6400.0,
             sky_bottom_radius: 6360.0,
             planet_radius: 6360.0,
-            sun_texture: uuid::Uuid::from_u128(0x511),
-            moon_texture: uuid::Uuid::from_u128(0x110),
-            cloud_texture: uuid::Uuid::from_u128(0xc10),
-            bloom_texture: uuid::Uuid::from_u128(0xb1),
-            halo_texture: uuid::Uuid::from_u128(0xa10),
-            rainbow_texture: uuid::Uuid::from_u128(0x4a1),
+            sun_texture: TextureKey::from(uuid::Uuid::from_u128(0x511)),
+            moon_texture: TextureKey::from(uuid::Uuid::from_u128(0x110)),
+            cloud_texture: TextureKey::from(uuid::Uuid::from_u128(0xc10)),
+            bloom_texture: TextureKey::from(uuid::Uuid::from_u128(0xb1)),
+            halo_texture: TextureKey::from(uuid::Uuid::from_u128(0xa10)),
+            rainbow_texture: TextureKey::from(uuid::Uuid::from_u128(0x4a1)),
         }
     }
 
@@ -6515,10 +6521,10 @@ mod test {
             fresnel_offset: 0.5,
             fresnel_scale: 0.75,
             normal_scale: [2.0, 2.0, 2.0],
-            normal_map: uuid::Uuid::from_u128(0x404),
+            normal_map: TextureKey::from(uuid::Uuid::from_u128(0x404)),
             scale_above: 0.125,
             scale_below: 0.25,
-            transparent_texture: uuid::Uuid::from_u128(0x7a),
+            transparent_texture: TextureKey::from(uuid::Uuid::from_u128(0x7a)),
             underwater_fog_mod: 0.25,
             water_fog_color: [0.0, 0.25, 0.5],
             water_fog_density: 16.0,
@@ -6773,7 +6779,7 @@ mod test {
         // Absent media → empty URLs / nil id / no auto-scale.
         assert_eq!(parcel.music_url, "");
         assert_eq!(parcel.media_url, "");
-        assert_eq!(parcel.media_id, uuid::Uuid::nil());
+        assert_eq!(parcel.media_id, TextureKey::from(uuid::Uuid::nil()));
         assert!(!parcel.media_auto_scale);
         Ok(())
     }
@@ -6806,7 +6812,7 @@ mod test {
             .ok_or("expected a ParcelProperties event")?;
         assert_eq!(parcel.music_url, "http://stream.example/audio");
         assert_eq!(parcel.media_url, "http://example.com/movie");
-        assert_eq!(parcel.media_id, media_id);
+        assert_eq!(parcel.media_id, TextureKey::from(media_id));
         assert!(parcel.media_auto_scale);
         Ok(())
     }
@@ -6897,7 +6903,7 @@ mod test {
         assert_eq!(parcel.other_clean_time, 15);
         assert_eq!(parcel.sale_price, 9999);
         assert_eq!(parcel.auth_buyer_id, buyer);
-        assert_eq!(parcel.snapshot_id, snapshot);
+        assert_eq!(parcel.snapshot_id, TextureKey::from(snapshot));
         assert_eq!(parcel.pass_price, 25);
         assert_eq!(parcel.pass_hours.to_bits(), 4.0_f32.to_bits());
         assert_eq!(parcel.user_location.0.to_bits(), 12.0_f32.to_bits());
@@ -8685,7 +8691,10 @@ mod test {
         // The stream / media URLs decode off the CAPS LLSD too.
         assert_eq!(parcel.music_url, "http://stream.example/audio");
         assert_eq!(parcel.media_url, "http://example.com/movie");
-        assert_eq!(parcel.media_id, uuid::Uuid::from_u128(0x33ED));
+        assert_eq!(
+            parcel.media_id,
+            TextureKey::from(uuid::Uuid::from_u128(0x33ED))
+        );
         assert!(parcel.media_auto_scale);
         Ok(())
     }
@@ -8843,7 +8852,10 @@ mod test {
         assert_eq!(layer.right, 9999);
         assert_eq!(layer.top, 9999);
         assert_eq!(layer.bottom, 0);
-        assert_eq!(layer.image_id, uuid::Uuid::from_u128(0xABCD));
+        assert_eq!(
+            layer.image_id,
+            TextureKey::from(uuid::Uuid::from_u128(0xABCD))
+        );
         Ok(())
     }
 
@@ -9502,7 +9514,7 @@ mod test {
         assert!((ps.outer_angle - 1.0).abs() < f32::EPSILON);
         assert!((ps.burst_speed_max - 2.0).abs() < f32::EPSILON);
         assert_eq!(ps.burst_part_count, 20);
-        assert_eq!(ps.texture_id, part_image);
+        assert_eq!(ps.texture_id, TextureKey::from(part_image));
         assert_eq!(ps.target_id, ObjectKey::from(target));
         assert_eq!(ps.part_flags, 0x40);
         assert!((ps.part_max_age - 10.0).abs() < f32::EPSILON);
@@ -10031,7 +10043,10 @@ mod test {
         assert_eq!(properties.aggregate_perm_textures_owner, 0x0D);
         assert_eq!(
             properties.texture_ids,
-            vec![uuid::Uuid::from_u128(0x77), uuid::Uuid::from_u128(0x88)]
+            vec![
+                TextureKey::from(uuid::Uuid::from_u128(0x77)),
+                TextureKey::from(uuid::Uuid::from_u128(0x88))
+            ]
         );
         // Merged into the cached object.
         assert_eq!(

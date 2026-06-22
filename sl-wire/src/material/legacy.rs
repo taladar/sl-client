@@ -5,6 +5,7 @@ use crate::endian;
 use crate::field::Reader;
 use crate::llsd::{Llsd, parse_llsd_xml};
 use base64::Engine as _;
+use sl_types::key::TextureKey;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -74,17 +75,19 @@ fn render_material_entry(item: &Llsd) -> Option<RenderMaterialEntry> {
 /// fixed-point scaling on the texture transforms.
 fn legacy_material_from_llsd(map: &Llsd) -> LegacyMaterial {
     LegacyMaterial {
-        normal_map: map
-            .get("NormMap")
-            .and_then(Llsd::as_uuid)
-            .unwrap_or_default(),
+        normal_map: TextureKey::from(
+            map.get("NormMap")
+                .and_then(Llsd::as_uuid)
+                .unwrap_or_default(),
+        ),
         normal_offset: (scaled(map, "NormOffsetX"), scaled(map, "NormOffsetY")),
         normal_repeat: (scaled(map, "NormRepeatX"), scaled(map, "NormRepeatY")),
         normal_rotation: scaled(map, "NormRotation"),
-        specular_map: map
-            .get("SpecMap")
-            .and_then(Llsd::as_uuid)
-            .unwrap_or_default(),
+        specular_map: TextureKey::from(
+            map.get("SpecMap")
+                .and_then(Llsd::as_uuid)
+                .unwrap_or_default(),
+        ),
         specular_offset: (scaled(map, "SpecOffsetX"), scaled(map, "SpecOffsetY")),
         specular_repeat: (scaled(map, "SpecRepeatX"), scaled(map, "SpecRepeatY")),
         specular_rotation: scaled(map, "SpecRotation"),
@@ -304,7 +307,7 @@ fn render_material_entry_to_llsd(entry: &RenderMaterialEntry) -> Llsd {
 /// `legacy_material_from_llsd`).
 fn legacy_material_to_llsd(material: &LegacyMaterial) -> Llsd {
     let mut map = HashMap::new();
-    map.insert("NormMap".to_owned(), Llsd::Uuid(material.normal_map));
+    map.insert("NormMap".to_owned(), Llsd::Uuid(material.normal_map.uuid()));
     map.insert(
         "NormOffsetX".to_owned(),
         fixed_llsd(material.normal_offset.0),
@@ -325,7 +328,10 @@ fn legacy_material_to_llsd(material: &LegacyMaterial) -> Llsd {
         "NormRotation".to_owned(),
         fixed_llsd(material.normal_rotation),
     );
-    map.insert("SpecMap".to_owned(), Llsd::Uuid(material.specular_map));
+    map.insert(
+        "SpecMap".to_owned(),
+        Llsd::Uuid(material.specular_map.uuid()),
+    );
     map.insert(
         "SpecOffsetX".to_owned(),
         fixed_llsd(material.specular_offset.0),

@@ -73,11 +73,11 @@ pub use sl_proto::{
     ScriptControl, ScriptControlAction, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
     ScriptTeleportRequest, SculptData, SequenceNumber, SimulatorFeatures, SoundFlags, SoundPreload,
     StartLocation, StartLocationParseError, TerrainLayerType, TerrainPatch, Texture,
-    TextureAnimation, TextureEntry, TextureFace, Throttle, ThrottleBuilder, ThrottleError,
-    TransferId, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest,
-    Wearable, WearableType, XferId, avatar_texture, decode_particle_system, decode_texture_anim,
-    decode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
-    particle_pattern, pcode, sim_access, texture_anim_mode,
+    TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder,
+    ThrottleError, TransferId, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo,
+    VoiceProvisionRequest, Wearable, WearableType, XferId, avatar_texture, decode_particle_system,
+    decode_texture_anim, decode_texture_entry, grid_to_handle, group_powers, handle_to_global,
+    handle_to_grid, particle_pattern, pcode, sim_access, texture_anim_mode,
 };
 
 mod appearance;
