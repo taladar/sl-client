@@ -80,9 +80,9 @@ Every estate may publish a **covenant** — a notecard of terms that a buyer
 agrees to before purchasing land in it. `Command::RequestEstateCovenant` asks
 for the summary; the reply is `Event::EstateCovenant(EstateCovenant)`, carrying
 the estate **name** and **owner** id, the covenant's last-changed **timestamp**,
-and the covenant notecard's **`covenant_id`**. The covenant text itself is an
-asset — fetch it separately with that id when it is non-nil (a nil id means the
-estate has no covenant).
+and the covenant notecard's **`covenant_id`** (an `Option`: `None` when the
+estate has no covenant). The covenant text itself is an asset — fetch it
+separately with that id when it is `Some`.
 
 ### Telehub
 

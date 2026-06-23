@@ -2445,7 +2445,7 @@ impl SimSession {
         }
         let message = AnyMessage::EstateCovenantReply(EstateCovenantReply {
             data: EstateCovenantReplyDataBlock {
-                covenant_id: covenant.covenant_id,
+                covenant_id: covenant.covenant_id.unwrap_or_else(Uuid::nil),
                 covenant_timestamp: covenant.covenant_timestamp,
                 estate_name: with_nul(&covenant.estate_name),
                 estate_owner_id: covenant.estate_owner_id,

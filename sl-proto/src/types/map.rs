@@ -83,8 +83,8 @@ pub struct EstateInfo {
     pub sun_position: u32,
     /// The parent estate id.
     pub parent_estate: u32,
-    /// The estate covenant's notecard id (nil if none).
-    pub covenant_id: Uuid,
+    /// The estate covenant's notecard id (`None` if there is no covenant).
+    pub covenant_id: Option<Uuid>,
     /// When the covenant last changed (Unix timestamp).
     pub covenant_timestamp: u32,
     /// The estate's abuse-report email address.
@@ -97,8 +97,8 @@ pub struct EstateInfo {
 /// separately via the notecard [`covenant_id`](EstateCovenant::covenant_id).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EstateCovenant {
-    /// The covenant notecard's asset id (nil if the estate has no covenant).
-    pub covenant_id: Uuid,
+    /// The covenant notecard's asset id (`None` if the estate has no covenant).
+    pub covenant_id: Option<Uuid>,
     /// When the covenant last changed (Unix timestamp).
     pub covenant_timestamp: u32,
     /// The estate name.

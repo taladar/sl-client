@@ -1352,7 +1352,7 @@ mod test {
         // Sim -> client: the two reply encoders.
         sim.send_estate_covenant_reply(
             &EstateCovenant {
-                covenant_id: uuid::Uuid::from_u128(0xC0FE),
+                covenant_id: Some(uuid::Uuid::from_u128(0xC0FE)),
                 covenant_timestamp: 1_700_000_000,
                 estate_name: "My Estate".to_owned(),
                 estate_owner_id: uuid::Uuid::from_u128(0x42),
@@ -1393,7 +1393,7 @@ mod test {
             })
             .ok_or("expected an EstateCovenant client event")?;
         assert_eq!(covenant.estate_name, "My Estate");
-        assert_eq!(covenant.covenant_id, uuid::Uuid::from_u128(0xC0FE));
+        assert_eq!(covenant.covenant_id, Some(uuid::Uuid::from_u128(0xC0FE)));
         let telehub = client_events
             .iter()
             .find_map(|e| match e {
