@@ -626,11 +626,11 @@ pub struct ParticleSystem {
     pub angular_velocity: Vector,
     /// The acceleration applied to each particle, in metres/second² per axis.
     pub acceleration: Vector,
-    /// The particle texture asset id (nil for the default).
-    pub texture_id: TextureKey,
+    /// The particle texture asset id (`None` for the viewer default).
+    pub texture_id: Option<TextureKey>,
     /// The target object the particles follow/aim at (for the target patterns and
-    /// the `TARGET_POS`/`TARGET_LINEAR` particle flags); nil if none.
-    pub target_id: ObjectKey,
+    /// the `TARGET_POS`/`TARGET_LINEAR` particle flags); `None` if none.
+    pub target_id: Option<ObjectKey>,
     /// The per-particle flags (`LL_PART_*_MASK` — interpolation, bounce, wind,
     /// follow, emissive, beam, ribbon, and the glow/blend system-set bits).
     pub part_flags: u32,
