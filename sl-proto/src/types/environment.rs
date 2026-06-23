@@ -149,18 +149,18 @@ pub struct SkySettings {
     pub sky_bottom_radius: f32,
     /// The planet radius.
     pub planet_radius: f32,
-    /// The sun disc texture (nil for the default).
-    pub sun_texture: TextureKey,
-    /// The moon disc texture (nil for the default).
-    pub moon_texture: TextureKey,
-    /// The cloud texture (nil for the default).
-    pub cloud_texture: TextureKey,
-    /// The bloom texture (nil for the default).
-    pub bloom_texture: TextureKey,
-    /// The halo texture (nil for the default).
-    pub halo_texture: TextureKey,
-    /// The rainbow texture (nil for the default).
-    pub rainbow_texture: TextureKey,
+    /// The sun disc texture (`None` for the viewer default).
+    pub sun_texture: Option<TextureKey>,
+    /// The moon disc texture (`None` for the viewer default).
+    pub moon_texture: Option<TextureKey>,
+    /// The cloud texture (`None` for the viewer default).
+    pub cloud_texture: Option<TextureKey>,
+    /// The bloom texture (`None` for the viewer default).
+    pub bloom_texture: Option<TextureKey>,
+    /// The halo texture (`None` for the viewer default).
+    pub halo_texture: Option<TextureKey>,
+    /// The rainbow texture (`None` for the viewer default).
+    pub rainbow_texture: Option<TextureKey>,
 }
 
 /// A single water frame (`LLSettingsWater`): the surface and underwater state at
@@ -179,14 +179,14 @@ pub struct WaterSettings {
     pub fresnel_scale: f32,
     /// The normal-map (wavelet) scale (X, Y, Z).
     pub normal_scale: [f32; 3],
-    /// The normal/wave texture.
-    pub normal_map: TextureKey,
+    /// The normal/wave texture (`None` for the viewer default).
+    pub normal_map: Option<TextureKey>,
     /// The refraction scale above the surface.
     pub scale_above: f32,
     /// The refraction scale below the surface.
     pub scale_below: f32,
-    /// The transparent-water texture.
-    pub transparent_texture: TextureKey,
+    /// The transparent-water texture (`None` for the viewer default).
+    pub transparent_texture: Option<TextureKey>,
     /// The underwater fog modifier.
     pub underwater_fog_mod: f32,
     /// The water fog colour, RGB.

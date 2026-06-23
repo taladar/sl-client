@@ -404,8 +404,8 @@ mod test {
 
         let source = uuid::Uuid::from_u128(0xA00);
         let data = ViewerEffectData::PointAt {
-            source: AgentKey::from(source),
-            target: ObjectKey::from(uuid::Uuid::from_u128(0xA01)),
+            source: Some(AgentKey::from(source)),
+            target: Some(ObjectKey::from(uuid::Uuid::from_u128(0xA01))),
             target_position: [1.0, 2.0, 3.0],
             point_at_type: PointAtType::Grab,
         };
