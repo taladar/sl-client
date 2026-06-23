@@ -39,4 +39,15 @@ pub enum WireError {
         /// The maximum length representable by the prefix.
         max: usize,
     },
+    /// A decoded field held a value outside the range its typed representation
+    /// permits — for example a negative L$ amount in a field a conforming peer
+    /// only ever sends non-negative, or an amount too large for its signed
+    /// 32-bit wire slot. The message is rejected rather than silently coerced.
+    #[error("field {field} carried out-of-range value {value}")]
+    ValueOutOfRange {
+        /// A short static label identifying the offending field.
+        field: &'static str,
+        /// The out-of-range value, rendered for diagnostics.
+        value: i64,
+    },
 }

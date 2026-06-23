@@ -1748,15 +1748,20 @@ impl SimSession {
             query_data: DirClassifiedReplyQueryDataBlock { query_id },
             query_replies: results
                 .iter()
-                .map(|result| DirClassifiedReplyQueryRepliesBlock {
-                    classified_id: result.classified_id.uuid(),
-                    name: with_nul(&result.name),
-                    classified_flags: result.classified_flags,
-                    creation_date: result.creation_date,
-                    expiration_date: result.expiration_date,
-                    price_for_listing: result.price_for_listing,
+                .map(|result| {
+                    Ok(DirClassifiedReplyQueryRepliesBlock {
+                        classified_id: result.classified_id.uuid(),
+                        name: with_nul(&result.name),
+                        classified_flags: result.classified_flags,
+                        creation_date: result.creation_date,
+                        expiration_date: result.expiration_date,
+                        price_for_listing: crate::types::linden_to_wire(
+                            "PriceForListing",
+                            &result.price_for_listing,
+                        )?,
+                    })
                 })
-                .collect(),
+                .collect::<Result<_, sl_wire::WireError>>()?,
             status_data: vec![DirClassifiedReplyStatusDataBlock { status }],
         });
         self.send(&message, Reliability::Reliable, now)?;
@@ -1825,15 +1830,23 @@ impl SimSession {
             query_data: DirLandReplyQueryDataBlock { query_id },
             query_replies: results
                 .iter()
-                .map(|result| DirLandReplyQueryRepliesBlock {
-                    parcel_id: result.parcel_id.uuid(),
-                    name: with_nul(&result.name),
-                    auction: result.auction,
-                    for_sale: result.for_sale,
-                    sale_price: result.sale_price,
-                    actual_area: result.actual_area,
+                .map(|result| {
+                    Ok(DirLandReplyQueryRepliesBlock {
+                        parcel_id: result.parcel_id.uuid(),
+                        name: with_nul(&result.name),
+                        auction: result.auction,
+                        for_sale: result.for_sale,
+                        sale_price: crate::types::linden_price_to_wire(
+                            "SalePrice",
+                            result.sale_price.as_ref(),
+                        )?,
+                        actual_area: crate::types::land_area_to_wire(
+                            "ActualArea",
+                            &result.actual_area,
+                        )?,
+                    })
                 })
-                .collect(),
+                .collect::<Result<_, sl_wire::WireError>>()?,
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
@@ -1900,22 +1913,30 @@ impl SimSession {
             transaction_data: PlacesReplyTransactionDataBlock { transaction_id },
             query_data: results
                 .iter()
-                .map(|result| PlacesReplyQueryDataBlock {
-                    owner_id: result.owner_id,
-                    name: with_nul(&result.name),
-                    desc: with_nul(&result.description),
-                    actual_area: result.actual_area,
-                    billable_area: result.billable_area,
-                    flags: result.flags,
-                    global_x: result.global_position.0,
-                    global_y: result.global_position.1,
-                    global_z: result.global_position.2,
-                    sim_name: with_nul(&result.sim_name),
-                    snapshot_id: result.snapshot_id.uuid(),
-                    dwell: result.dwell,
-                    price: result.price,
+                .map(|result| {
+                    Ok(PlacesReplyQueryDataBlock {
+                        owner_id: result.owner_id,
+                        name: with_nul(&result.name),
+                        desc: with_nul(&result.description),
+                        actual_area: crate::types::land_area_to_wire(
+                            "ActualArea",
+                            &result.actual_area,
+                        )?,
+                        billable_area: crate::types::land_area_to_wire(
+                            "BillableArea",
+                            &result.billable_area,
+                        )?,
+                        flags: result.flags,
+                        global_x: result.global_position.0,
+                        global_y: result.global_position.1,
+                        global_z: result.global_position.2,
+                        sim_name: with_nul(&result.sim_name),
+                        snapshot_id: result.snapshot_id.uuid(),
+                        dwell: result.dwell,
+                        price: crate::types::linden_to_wire("Price", &result.price)?,
+                    })
                 })
-                .collect(),
+                .collect::<Result<_, sl_wire::WireError>>()?,
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
@@ -2033,6 +2054,7 @@ impl SimSession {
         summary: &GroupAccountSummary,
         now: Instant,
     ) -> Result<(), Error> {
+        use crate::types::linden_to_wire;
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
@@ -2047,18 +2069,36 @@ impl SimSession {
                 current_interval: summary.current_interval,
                 start_date: with_nul(&summary.start_date),
                 balance: summary.balance,
-                total_credits: summary.total_credits,
-                total_debits: summary.total_debits,
-                object_tax_current: summary.object_tax_current,
-                light_tax_current: summary.light_tax_current,
-                land_tax_current: summary.land_tax_current,
-                group_tax_current: summary.group_tax_current,
-                parcel_dir_fee_current: summary.parcel_dir_fee_current,
-                object_tax_estimate: summary.object_tax_estimate,
-                light_tax_estimate: summary.light_tax_estimate,
-                land_tax_estimate: summary.land_tax_estimate,
-                group_tax_estimate: summary.group_tax_estimate,
-                parcel_dir_fee_estimate: summary.parcel_dir_fee_estimate,
+                total_credits: linden_to_wire("TotalCredits", &summary.total_credits)?,
+                total_debits: linden_to_wire("TotalDebits", &summary.total_debits)?,
+                object_tax_current: linden_to_wire(
+                    "ObjectTaxCurrent",
+                    &summary.object_tax_current,
+                )?,
+                light_tax_current: linden_to_wire("LightTaxCurrent", &summary.light_tax_current)?,
+                land_tax_current: linden_to_wire("LandTaxCurrent", &summary.land_tax_current)?,
+                group_tax_current: linden_to_wire("GroupTaxCurrent", &summary.group_tax_current)?,
+                parcel_dir_fee_current: linden_to_wire(
+                    "ParcelDirFeeCurrent",
+                    &summary.parcel_dir_fee_current,
+                )?,
+                object_tax_estimate: linden_to_wire(
+                    "ObjectTaxEstimate",
+                    &summary.object_tax_estimate,
+                )?,
+                light_tax_estimate: linden_to_wire(
+                    "LightTaxEstimate",
+                    &summary.light_tax_estimate,
+                )?,
+                land_tax_estimate: linden_to_wire("LandTaxEstimate", &summary.land_tax_estimate)?,
+                group_tax_estimate: linden_to_wire(
+                    "GroupTaxEstimate",
+                    &summary.group_tax_estimate,
+                )?,
+                parcel_dir_fee_estimate: linden_to_wire(
+                    "ParcelDirFeeEstimate",
+                    &summary.parcel_dir_fee_estimate,
+                )?,
                 non_exempt_members: summary.non_exempt_members,
                 last_tax_date: with_nul(&summary.last_tax_date),
                 tax_date: with_nul(&summary.tax_date),
@@ -2282,9 +2322,15 @@ impl SimSession {
                 group_mask: properties.permissions.group.bits(),
                 everyone_mask: properties.permissions.everyone.bits(),
                 next_owner_mask: properties.permissions.next_owner.bits(),
-                ownership_cost: properties.ownership_cost,
+                ownership_cost: crate::types::linden_to_wire(
+                    "OwnershipCost",
+                    &properties.ownership_cost,
+                )?,
                 sale_type: properties.sale_type,
-                sale_price: properties.sale_price,
+                sale_price: crate::types::linden_price_to_wire(
+                    "SalePrice",
+                    properties.sale_price.as_ref(),
+                )?,
                 category: properties.category,
                 last_owner_id: properties.last_owner_id,
                 name: with_nul(&properties.name),
@@ -2352,8 +2398,11 @@ impl SimSession {
                 owner_id: details.owner_id,
                 name: with_nul(&details.name),
                 desc: with_nul(&details.description),
-                actual_area: details.actual_area,
-                billable_area: details.billable_area,
+                actual_area: crate::types::land_area_to_wire("ActualArea", &details.actual_area)?,
+                billable_area: crate::types::land_area_to_wire(
+                    "BillableArea",
+                    &details.billable_area,
+                )?,
                 flags: details.flags,
                 global_x: details.global_x,
                 global_y: details.global_y,
@@ -2361,7 +2410,10 @@ impl SimSession {
                 sim_name: with_nul(&details.sim_name),
                 snapshot_id: details.snapshot_id.uuid(),
                 dwell: details.dwell,
-                sale_price: details.sale_price,
+                sale_price: crate::types::linden_price_to_wire(
+                    "SalePrice",
+                    details.sale_price.as_ref(),
+                )?,
                 auction_id: details.auction_id,
             },
         });
@@ -2942,12 +2994,17 @@ impl SimSession {
                     objects: buy
                         .object_data
                         .iter()
-                        .map(|item| ObjectBuyItem {
-                            local_id: RegionLocalObjectId(item.object_local_id),
-                            sale_type: SaleType::from_code(item.sale_type),
-                            sale_price: item.sale_price,
+                        .map(|item| {
+                            Ok(ObjectBuyItem {
+                                local_id: RegionLocalObjectId(item.object_local_id),
+                                sale_type: SaleType::from_code(item.sale_type),
+                                sale_price: crate::types::linden_from_wire(
+                                    "SalePrice",
+                                    item.sale_price,
+                                )?,
+                            })
                         })
-                        .collect(),
+                        .collect::<Result<_, sl_wire::WireError>>()?,
                 });
             }
             AnyMessage::BuyObjectInventory(buy) => {
@@ -3029,7 +3086,11 @@ impl SimSession {
                         inv_type: data.inv_type,
                         flags: data.flags,
                         sale_type: SaleType::from_code(data.sale_type),
-                        sale_price: data.sale_price,
+                        sale_price: crate::types::linden_price_from_wire(
+                            data.sale_type != 0,
+                            "SalePrice",
+                            data.sale_price,
+                        )?,
                         name: trimmed_string(&data.name),
                         description: trimmed_string(&data.description),
                         creation_date: data.creation_date,

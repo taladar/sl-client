@@ -26,6 +26,7 @@ use sl_types::key::{
     AgentKey, ClassifiedKey, FriendKey, GroupKey, ObjectKey, ParcelKey, TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
+use sl_types::money::LindenAmount;
 use sl_wire::AbuseReport;
 use sl_wire::messages::{
     AcceptFriendship, AcceptFriendshipAgentDataBlock, AcceptFriendshipFolderDataBlock,
@@ -905,7 +906,10 @@ impl Circuit {
                 snapshot_id: update.snapshot_id.uuid(),
                 pos_global: [x, y, z],
                 classified_flags: update.classified_flags,
-                price_for_listing: update.price_for_listing,
+                price_for_listing: crate::types::linden_to_wire(
+                    "PriceForListing",
+                    &update.price_for_listing,
+                )?,
             },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -1188,7 +1192,10 @@ impl Circuit {
                 charter: with_nul(&params.charter),
                 show_in_list: params.show_in_list,
                 insignia_id: params.insignia_id.uuid(),
-                membership_fee: params.membership_fee,
+                membership_fee: crate::types::linden_to_wire(
+                    "MembershipFee",
+                    &params.membership_fee,
+                )?,
                 open_enrollment: params.open_enrollment,
                 allow_publish: params.allow_publish,
                 mature_publish: params.mature_publish,
@@ -2764,11 +2771,14 @@ impl Circuit {
                 inv_type: item.inv_type,
                 flags: item.flags,
                 sale_type: item.sale_type,
-                sale_price: item.sale_price,
+                sale_price: crate::types::linden_price_to_wire(
+                    "SalePrice",
+                    item.sale_price.as_ref(),
+                )?,
                 name: with_nul(&item.name),
                 description: with_nul(&item.description),
                 creation_date: item.creation_date,
-                crc: inventory_item_crc(item),
+                crc: inventory_item_crc(item)?,
             }],
         });
         self.send(&message, Reliability::Reliable, now)
@@ -3048,7 +3058,10 @@ impl Circuit {
                 // The message-level flag the reference viewer sends (0x01).
                 flags: 0x1,
                 parcel_flags: update.parcel_flags.bits(),
-                sale_price: update.sale_price,
+                sale_price: crate::types::linden_price_to_wire(
+                    "SalePrice",
+                    update.sale_price.as_ref(),
+                )?,
                 name: with_nul(&update.name),
                 desc: with_nul(&update.description),
                 music_url: with_nul(&update.music_url),
@@ -3056,7 +3069,7 @@ impl Circuit {
                 media_id: update.media_id.uuid(),
                 media_auto_scale: u8::from(update.media_auto_scale),
                 group_id: update.group_id.uuid(),
-                pass_price: update.pass_price,
+                pass_price: crate::types::linden_to_wire("PassPrice", &update.pass_price)?,
                 pass_hours: update.pass_hours,
                 category: update.category.to_u8(),
                 auth_buyer_id: update.auth_buyer_id,
@@ -4137,7 +4150,7 @@ impl Circuit {
         &mut self,
         local_id: RegionLocalObjectId,
         sale_type: SaleType,
-        sale_price: i32,
+        sale_price: Option<LindenAmount>,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectSaleInfo(ObjectSaleInfo {
@@ -4148,7 +4161,7 @@ impl Circuit {
             object_data: vec![ObjectSaleInfoObjectDataBlock {
                 local_id: local_id.0,
                 sale_type: sale_type.to_code(),
-                sale_price,
+                sale_price: crate::types::linden_price_to_wire("SalePrice", sale_price.as_ref())?,
             }],
         });
         self.send(&message, Reliability::Reliable, now)
@@ -4254,12 +4267,14 @@ impl Circuit {
             },
             object_data: objects
                 .iter()
-                .map(|item| ObjectBuyObjectDataBlock {
-                    object_local_id: item.local_id.0,
-                    sale_type: item.sale_type.to_code(),
-                    sale_price: item.sale_price,
+                .map(|item| {
+                    Ok(ObjectBuyObjectDataBlock {
+                        object_local_id: item.local_id.0,
+                        sale_type: item.sale_type.to_code(),
+                        sale_price: crate::types::linden_to_wire("SalePrice", &item.sale_price)?,
+                    })
                 })
-                .collect(),
+                .collect::<Result<_, WireError>>()?,
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -4512,7 +4527,10 @@ impl Circuit {
                 inv_type: item.inv_type,
                 flags: item.flags,
                 sale_type: item.sale_type.to_code(),
-                sale_price: item.sale_price,
+                sale_price: crate::types::linden_price_to_wire(
+                    "SalePrice",
+                    item.sale_price.as_ref(),
+                )?,
                 name: with_nul(&item.name),
                 description: with_nul(&item.description),
                 creation_date: item.creation_date,

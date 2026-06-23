@@ -4,9 +4,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write as _;
 
 use sl_client_tokio::{
-    Client, Command, Event, LoginParams, LoginRequest, Maturity, ParcelInfo, ProductType,
-    RegionHandle, RegionIdentity, RegionLimits, StartLocation, Vector, grid_to_handle,
-    handle_to_grid,
+    Client, Command, Event, LandArea, LindenAmount, LoginParams, LoginRequest, Maturity,
+    ParcelInfo, ProductType, RegionHandle, RegionIdentity, RegionLimits, StartLocation, Vector,
+    grid_to_handle, handle_to_grid,
 };
 use tokio::sync::mpsc;
 use tracing::{instrument, warn};
@@ -223,10 +223,11 @@ struct ParcelRecord {
     owner_id: String,
     /// Whether `owner_id` names a group rather than an agent.
     is_group_owned: bool,
-    /// The parcel's sale price, in L$ (`0` if not for sale).
-    sale_price: i32,
+    /// The parcel's asking price in L$, or `null` when the parcel is not for
+    /// sale (a for-sale parcel may still be free).
+    sale_price: Option<LindenAmount>,
     /// The parcel area in square metres.
-    area: i32,
+    area: LandArea,
     /// The minimum corner of the parcel bounding box.
     aabb_min: [f32; 3],
     /// The maximum corner of the parcel bounding box.
@@ -258,7 +259,7 @@ impl ParcelRecord {
             description: info.description.clone(),
             owner_id: info.owner.uuid().to_string(),
             is_group_owned: info.owner.is_group(),
-            sale_price: info.sale_price,
+            sale_price: info.sale_price.clone(),
             area: info.area,
             aabb_min: [info.aabb_min.0, info.aabb_min.1, info.aabb_min.2],
             aabb_max: [info.aabb_max.0, info.aabb_max.1, info.aabb_max.2],

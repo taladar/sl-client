@@ -17,10 +17,10 @@ mod test {
         FollowCamProperty, FriendKey, FriendRights, GestureActivation, GroupKey,
         GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
         GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate, InventoryCallbackId,
-        InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, LandingType,
-        LindenAmount, LoginAccount, LoginParams, LookAtType, MapItemType, Material, Maturity,
-        MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
-        NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey,
+        InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, LandArea,
+        LandingType, LindenAmount, LoginAccount, LoginParams, LookAtType, MapItemType, Material,
+        Maturity, MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags,
+        MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey,
         ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
         ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType,
         ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate,
@@ -1666,7 +1666,7 @@ mod test {
         assert_eq!(info.description, "prime waterfront");
         assert_eq!(info.parcel_name, "Beach Parcel");
         assert_eq!(info.category, 3);
-        assert_eq!(info.price_for_listing, 50);
+        assert_eq!(info.price_for_listing, LindenAmount(50));
         assert_eq!(info.classified_flags, 0x4);
         Ok(())
     }
@@ -1769,7 +1769,7 @@ mod test {
                 category: 3,
                 name: "New classified".to_owned(),
                 description: "for sale".to_owned(),
-                price_for_listing: 100,
+                price_for_listing: LindenAmount(100),
                 classified_flags: 0x4,
                 ..ClassifiedUpdate::default()
             },
@@ -2189,7 +2189,7 @@ mod test {
         assert_eq!(first.group_id, GroupKey::from(group));
         assert_eq!(first.group_name, "Test Group");
         assert!(first.accept_notices);
-        assert_eq!(first.contribution, 50);
+        assert_eq!(first.contribution, LandArea(50));
         Ok(())
     }
 
@@ -2530,7 +2530,7 @@ mod test {
                 charter: "hi".to_owned(),
                 show_in_list: true,
                 insignia_id: TextureKey::from(uuid::Uuid::nil()),
-                membership_fee: 0,
+                membership_fee: LindenAmount(0),
                 open_enrollment: true,
                 allow_publish: false,
                 mature_publish: false,
@@ -3215,7 +3215,7 @@ mod test {
         assert_eq!(first.group_name, "CAPS Group");
         assert_eq!(first.group_powers, 4660);
         assert!(first.accept_notices);
-        assert_eq!(first.contribution, 25);
+        assert_eq!(first.contribution, LandArea(25));
         Ok(())
     }
 
@@ -3263,7 +3263,7 @@ mod test {
         assert_eq!(first.title, "Owner");
         assert_eq!(first.agent_powers, 0xabcd);
         assert_eq!(first.online_status, "Online");
-        assert_eq!(first.contribution, 512);
+        assert_eq!(first.contribution, LandArea(512));
         assert!(first.is_owner);
         Ok(())
     }
@@ -4649,7 +4649,7 @@ mod test {
             &[ObjectBuyItem {
                 local_id: sl_proto::RegionLocalObjectId(99),
                 sale_type: SaleType::Copy,
-                sale_price: 250,
+                sale_price: LindenAmount(250),
             }],
             now,
         )?;
@@ -4797,7 +4797,7 @@ mod test {
                 inv_type: 6,
                 flags: 0,
                 sale_type: SaleType::NotForSale,
-                sale_price: 0,
+                sale_price: Some(LindenAmount(0)),
                 name: "Cube".to_owned(),
                 description: "a cube".to_owned(),
                 creation_date: 1_750_000_000,
@@ -5222,7 +5222,7 @@ mod test {
         );
         assert_eq!(properties.group, None);
         assert_eq!(properties.sale_type, SaleType::Copy.to_code());
-        assert_eq!(properties.sale_price, 250);
+        assert_eq!(properties.sale_price, Some(LindenAmount(250)));
         assert_eq!(properties.name, "Vendor");
         assert_eq!(properties.description, "A vendor");
         Ok(())
@@ -6778,7 +6778,7 @@ mod test {
             .ok_or("expected a ParcelProperties event")?;
         assert_eq!(parcel.sequence_id, 42);
         assert_eq!(parcel.local_id, sl_proto::RegionLocalParcelId(7));
-        assert_eq!(parcel.area, 4096);
+        assert_eq!(parcel.area, LandArea(4096));
         assert_eq!(parcel.aabb_max.0.to_bits(), 64.0_f32.to_bits());
         assert_eq!(parcel.aabb_max.1.to_bits(), 64.0_f32.to_bits());
         assert_eq!(parcel.aabb_max.2.to_bits(), 0.0_f32.to_bits());
@@ -6862,6 +6862,8 @@ mod test {
             data.selected_prims = 4;
             data.parcel_prim_bonus = 1.5;
             data.other_clean_time = 15;
+            // FOR_SALE (0x04), so the sale price decodes as `Some`.
+            data.parcel_flags = 0x04;
             data.sale_price = 9999;
             data.auth_buyer_id = buyer;
             data.snapshot_id = snapshot;
@@ -6902,8 +6904,8 @@ mod test {
         assert_eq!(parcel.group, Some(GroupKey::from(group)));
         assert_eq!(parcel.auction_id, 7);
         assert_eq!(parcel.claim_date, 1_700_000_000);
-        assert_eq!(parcel.claim_price, 512);
-        assert_eq!(parcel.rent_price, 30);
+        assert_eq!(parcel.claim_price, LindenAmount(512));
+        assert_eq!(parcel.rent_price, LindenAmount(30));
         assert_eq!(parcel.status, ParcelStatus::Abandoned);
         assert_eq!(parcel.category, ParcelCategory::Residential);
         assert_eq!(parcel.total_prims, 150);
@@ -6913,10 +6915,10 @@ mod test {
         assert_eq!(parcel.selected_prims, 4);
         assert_eq!(parcel.parcel_prim_bonus.to_bits(), 1.5_f32.to_bits());
         assert_eq!(parcel.other_clean_time, 15);
-        assert_eq!(parcel.sale_price, 9999);
+        assert_eq!(parcel.sale_price, Some(LindenAmount(9999)));
         assert_eq!(parcel.auth_buyer_id, buyer);
         assert_eq!(parcel.snapshot_id, TextureKey::from(snapshot));
-        assert_eq!(parcel.pass_price, 25);
+        assert_eq!(parcel.pass_price, LindenAmount(25));
         assert_eq!(parcel.pass_hours.to_bits(), 4.0_f32.to_bits());
         assert_eq!(parcel.user_location.0.to_bits(), 12.0_f32.to_bits());
         assert_eq!(parcel.user_look_at.0.to_bits(), 1.0_f32.to_bits());
@@ -6984,6 +6986,7 @@ mod test {
             <key>IsGroupOwned</key><boolean>true</boolean>\
             <key>GroupID</key><uuid>00000000-0000-0000-0000-000000000222</uuid>\
             <key>ClaimDate</key><date>2023-11-14T22:13:20Z</date>\
+            <key>ParcelFlags</key><integer>4</integer>\
             <key>SalePrice</key><integer>4500</integer>\
             <key>Status</key><integer>1</integer>\
             <key>Category</key><integer>3</integer>\
@@ -7031,7 +7034,7 @@ mod test {
         );
         // 2023-11-14T22:13:20Z == 1_700_000_000 Unix seconds.
         assert_eq!(parcel.claim_date, 1_700_000_000);
-        assert_eq!(parcel.sale_price, 4500);
+        assert_eq!(parcel.sale_price, Some(LindenAmount(4500)));
         assert_eq!(parcel.status, ParcelStatus::LeasePending);
         assert_eq!(parcel.category, ParcelCategory::Commercial);
         assert_eq!(parcel.total_prims, 77);
@@ -7467,8 +7470,8 @@ mod test {
         assert_eq!(balance.agent_id, AgentKey::from(uuid::Uuid::from_u128(1)));
         assert!(balance.success);
         assert_eq!(balance.balance, LindenAmount(1234));
-        assert_eq!(balance.square_meters_credit, 512);
-        assert_eq!(balance.square_meters_committed, 128);
+        assert_eq!(balance.square_meters_credit, LandArea(512));
+        assert_eq!(balance.square_meters_committed, LandArea(128));
         // A plain poll carries no transaction metadata and a nil transaction id.
         assert_eq!(balance.transaction_id, uuid::Uuid::nil());
         assert!(balance.transaction.is_none());
@@ -7571,9 +7574,9 @@ mod test {
             })
             .ok_or("expected an EconomyData event")?;
         assert_eq!(economy.object_capacity, 15000);
-        assert_eq!(economy.price_upload, 0);
-        assert_eq!(economy.price_energy_unit, 100);
-        assert_eq!(economy.teleport_min_price, 2);
+        assert_eq!(economy.price_upload, LindenAmount(0));
+        assert_eq!(economy.price_energy_unit, LindenAmount(100));
+        assert_eq!(economy.teleport_min_price, LindenAmount(2));
         Ok(())
     }
 
@@ -7682,7 +7685,7 @@ mod test {
             name: "My Parcel".to_owned(),
             description: "A test parcel".to_owned(),
             category: ParcelCategory::Residential,
-            sale_price: 100,
+            sale_price: Some(LindenAmount(100)),
             ..ParcelUpdate::default()
         };
         session.update_parcel(&update, now)?;
@@ -8078,8 +8081,8 @@ mod test {
         );
         assert_eq!(details.name, "Sunny Plaza");
         assert_eq!(details.sim_name, "Default Region");
-        assert_eq!(details.actual_area, 512);
-        assert_eq!(details.sale_price, 1000);
+        assert_eq!(details.actual_area, LandArea(512));
+        assert_eq!(details.sale_price, Some(LindenAmount(1000)));
         assert_eq!(details.global_z.to_bits(), 23.5_f32.to_bits());
         Ok(())
     }
@@ -8699,7 +8702,7 @@ mod test {
             .ok_or("expected a ParcelProperties event")?;
         assert_eq!(parcel.local_id, sl_proto::RegionLocalParcelId(3));
         assert_eq!(parcel.sequence_id, 9);
-        assert_eq!(parcel.area, 2048);
+        assert_eq!(parcel.area, LandArea(2048));
         assert_eq!(parcel.max_prims, 750);
         assert_eq!(parcel.aabb_max.0.to_bits(), 32.0_f32.to_bits());
         assert_eq!(parcel.bitmap, vec![1u8, 2, 3]);
@@ -10743,7 +10746,7 @@ mod test {
         session.set_object_for_sale(
             ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(1)),
             SaleType::Copy,
-            250,
+            Some(LindenAmount(250)),
             now,
         )?;
         session.set_object_flags(
@@ -11946,7 +11949,7 @@ mod test {
             inv_type: 0,
             flags: 0,
             sale_type: 0,
-            sale_price: 0,
+            sale_price: Some(LindenAmount(0)),
             creation_date: 0,
             owner: sl_proto::OwnerKey::Agent(AgentKey::from(uuid::Uuid::nil())),
             last_owner_id: uuid::Uuid::nil(),

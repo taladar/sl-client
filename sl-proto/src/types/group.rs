@@ -1,6 +1,9 @@
 //! Groups: membership, roles, notices, and management.
 
 use sl_types::key::{AgentKey, GroupKey, InventoryKey, TextureKey};
+use sl_types::money::LindenAmount;
+
+use crate::types::LandArea;
 use uuid::Uuid;
 
 /// A Second Life group *role* id — the UUID that identifies one role within a
@@ -68,8 +71,10 @@ pub struct GroupMembership {
     pub accept_notices: bool,
     /// The group's insignia (texture id).
     pub group_insignia_id: TextureKey,
-    /// The agent's L$ contribution to the group.
-    pub contribution: i32,
+    /// The agent's land-tier contribution to the group, in square metres (NOT
+    /// L$ — the wire `Contribution` is land area, surfaced by the viewer as
+    /// `[AREA]`).
+    pub contribution: LandArea,
     /// The group name.
     pub group_name: String,
 }
@@ -79,8 +84,9 @@ pub struct GroupMembership {
 pub struct GroupMember {
     /// The member's agent id.
     pub agent_id: AgentKey,
-    /// The member's L$ contribution.
-    pub contribution: i32,
+    /// The member's land-tier contribution, in square metres (NOT L$ — the wire
+    /// `Contribution` is land area, surfaced by the viewer as `[AREA]`).
+    pub contribution: LandArea,
     /// The member's online status string (grid-formatted, e.g. `"Online"`).
     pub online_status: String,
     /// The member's powers bitfield.
@@ -152,7 +158,7 @@ pub struct GroupProfile {
     /// The group founder's agent id.
     pub founder_id: AgentKey,
     /// The L$ fee to join.
-    pub membership_fee: i32,
+    pub membership_fee: LindenAmount,
     /// Whether enrollment is open (no invitation needed).
     pub open_enrollment: bool,
     /// The group's L$ balance (owners only; otherwise 0).
@@ -187,7 +193,7 @@ pub struct CreateGroupParams {
     /// The group insignia (texture id); nil for none.
     pub insignia_id: TextureKey,
     /// The L$ fee to join.
-    pub membership_fee: i32,
+    pub membership_fee: LindenAmount,
     /// Whether enrollment is open (no invitation needed).
     pub open_enrollment: bool,
     /// Whether the group allows publishing on the web.
@@ -338,29 +344,29 @@ pub struct GroupAccountSummary {
     /// The group's current L$ balance.
     pub balance: i32,
     /// Total L$ credited over the interval.
-    pub total_credits: i32,
+    pub total_credits: LindenAmount,
     /// Total L$ debited over the interval.
-    pub total_debits: i32,
+    pub total_debits: LindenAmount,
     /// Current object tax.
-    pub object_tax_current: i32,
+    pub object_tax_current: LindenAmount,
     /// Current light tax.
-    pub light_tax_current: i32,
+    pub light_tax_current: LindenAmount,
     /// Current land tax.
-    pub land_tax_current: i32,
+    pub land_tax_current: LindenAmount,
     /// Current group tax.
-    pub group_tax_current: i32,
+    pub group_tax_current: LindenAmount,
     /// Current parcel-directory listing fee.
-    pub parcel_dir_fee_current: i32,
+    pub parcel_dir_fee_current: LindenAmount,
     /// Estimated object tax for the next interval.
-    pub object_tax_estimate: i32,
+    pub object_tax_estimate: LindenAmount,
     /// Estimated light tax for the next interval.
-    pub light_tax_estimate: i32,
+    pub light_tax_estimate: LindenAmount,
     /// Estimated land tax for the next interval.
-    pub land_tax_estimate: i32,
+    pub land_tax_estimate: LindenAmount,
     /// Estimated group tax for the next interval.
-    pub group_tax_estimate: i32,
+    pub group_tax_estimate: LindenAmount,
     /// Estimated parcel-directory listing fee for the next interval.
-    pub parcel_dir_fee_estimate: i32,
+    pub parcel_dir_fee_estimate: LindenAmount,
     /// The number of members that count toward tax (non-exempt).
     pub non_exempt_members: i32,
     /// The date of the last tax assessment (grid-formatted string).

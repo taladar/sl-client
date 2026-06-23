@@ -1,6 +1,7 @@
 //! Region identity, limits, chat and combat settings.
 
 use super::{Maturity, ProductType};
+use sl_types::money::LindenAmount;
 use sl_wire::RegionHandle;
 use uuid::Uuid;
 
@@ -101,7 +102,7 @@ pub struct RegionLimits {
     /// value, in metres.
     pub terrain_lower_limit: f32,
     /// The land price per square metre, in L$.
-    pub price_per_meter: i32,
+    pub price_per_meter: LindenAmount,
     /// The grid X this region redirects to, or `0` for none.
     pub redirect_grid_x: i32,
     /// The grid Y this region redirects to, or `0` for none.

@@ -16,6 +16,7 @@ categories = ["network-programming", "game-development"]
 exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
 [dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
 sl-types = { version = "0.4.0", path = "../../sl-map-tools/sl-types" }
 sl-wire = { version = "0.1.0", path = "../sl-wire" }
 thiserror = { version = "2.0.18" }

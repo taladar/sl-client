@@ -1176,8 +1176,11 @@ pub enum Command {
         local_id: ScopedObjectId,
         /// The sale type.
         sale_type: SaleType,
-        /// The sale price in L$.
-        sale_price: i32,
+        /// The asking price in L$ when putting the object up for sale, or `None`
+        /// when taking it off sale (`sale_type == SaleType::NotForSale`); encoded
+        /// as `0` on the wire. A for-sale object may still be free
+        /// (`Some(LindenAmount(0))`).
+        sale_price: Option<LindenAmount>,
     },
     /// Set an object's category code (`ObjectCategory`).
     SetObjectCategory {

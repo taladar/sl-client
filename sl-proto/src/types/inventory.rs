@@ -1,6 +1,7 @@
 //! Inventory structure and region-handle coordinate helpers.
 
 use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, OwnerKey};
+use sl_types::money::LindenAmount;
 use sl_wire::{Permissions5, RegionHandle};
 use uuid::Uuid;
 
@@ -42,8 +43,10 @@ pub struct InventoryItem {
     pub flags: u32,
     /// The sale type (not for sale / original / copy / contents).
     pub sale_type: u8,
-    /// The sale price, in L$.
-    pub sale_price: i32,
+    /// The asking price in L$ when the item is for sale, or `None` when it is
+    /// not (`sale_type == SALE_TYPE_NOT`). A for-sale item may still be free
+    /// (`Some(LindenAmount(0))`).
+    pub sale_price: Option<LindenAmount>,
     /// The creation date (Unix seconds).
     pub creation_date: i32,
     /// The current owner — an agent, or a group when the item is group-owned

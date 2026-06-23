@@ -20,8 +20,8 @@
 use std::time::Duration;
 
 use sl_client_tokio::{
-    AgentKey, ClassifiedUpdate, Client, Command, DisconnectReason, Error, Event, LoginParams,
-    LoginRequest, PickUpdate, ProfileUpdate, Throttle, Uuid,
+    AgentKey, ClassifiedUpdate, Client, Command, DisconnectReason, Error, Event, LindenAmount,
+    LoginParams, LoginRequest, PickUpdate, ProfileUpdate, Throttle, Uuid,
 };
 use sl_proto::ClassifiedKey;
 use tokio::sync::mpsc;
@@ -139,7 +139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             category: 1,
                             name: "sl-client test classified".to_owned(),
                             description: "created then deleted by #29".to_owned(),
-                            price_for_listing: 50,
+                            price_for_listing: LindenAmount(50),
                             ..ClassifiedUpdate::default()
                         }))
                         .await

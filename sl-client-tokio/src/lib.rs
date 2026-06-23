@@ -55,7 +55,7 @@ pub use sl_proto::{
     GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
     HomeLocation, IceCandidate, ImDialog, ImageCodec, InstantMessage, InterestsUpdate,
     InventoryCallbackId, InventoryFolder, InventoryFolderKey, InventoryItem,
-    InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryType, Key, Kilobits,
+    InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryType, Key, Kilobits, LandArea,
     LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LoadUrlRequest, LoginAccount,
     LoginParams, LoginRequest, LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
     MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,

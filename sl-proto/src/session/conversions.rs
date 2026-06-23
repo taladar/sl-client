@@ -30,7 +30,6 @@ use sl_types::key::ObjectKey;
 use sl_types::key::ParcelKey;
 use sl_types::key::TextureKey;
 use sl_types::lsl::{Rotation, Vector};
-use sl_types::money::LindenAmount;
 use sl_wire::RegionHandle;
 use sl_wire::messages::{
     AgentDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
@@ -452,7 +451,9 @@ fn water_settings_from_llsd(name: &str, water: &Llsd) -> WaterSettings {
 /// 64-bit flags come from the optional `RegionInfo3` block, and the chat / combat
 /// settings from the optional `RegionInfo5` / `CombatSettings` blocks (all absent
 /// on OpenSim and older grids).
-pub(crate) fn region_limits(message: &sl_wire::messages::RegionInfo) -> RegionLimits {
+pub(crate) fn region_limits(
+    message: &sl_wire::messages::RegionInfo,
+) -> Result<RegionLimits, sl_wire::WireError> {
     let info = &message.region_info;
     let info2 = &message.region_info2;
     // Prefer the 32-bit agent cap; fall back to the legacy 8-bit field when the
@@ -489,7 +490,7 @@ pub(crate) fn region_limits(message: &sl_wire::messages::RegionInfo) -> RegionLi
             invulnerability_time: combat.invulnerabily_time,
             damage_limit: combat.damage_limit,
         });
-    RegionLimits {
+    Ok(RegionLimits {
         sim_name: trimmed_string(&info.sim_name),
         max_agents,
         hard_max_agents: info2.hard_max_agents,
@@ -504,39 +505,49 @@ pub(crate) fn region_limits(message: &sl_wire::messages::RegionInfo) -> RegionLi
         object_bonus_factor: info.object_bonus_factor,
         terrain_raise_limit: info.terrain_raise_limit,
         terrain_lower_limit: info.terrain_lower_limit,
-        price_per_meter: info.price_per_meter,
+        price_per_meter: crate::types::linden_from_wire("PricePerMeter", info.price_per_meter)?,
         redirect_grid_x: info.redirect_grid_x,
         redirect_grid_y: info.redirect_grid_y,
         use_estate_sun: info.use_estate_sun,
         sun_hour: info.sun_hour,
         chat_settings,
         combat_settings,
-    }
+    })
 }
 
 /// Builds a [`MoneyBalance`] from a `MoneyBalanceReply`. The optional
 /// `TransactionInfo` block is all-zero for a plain balance poll; it is surfaced
 /// only when it describes a real transaction (non-zero type).
-pub(crate) fn money_balance(reply: &sl_wire::messages::MoneyBalanceReply) -> MoneyBalance {
+pub(crate) fn money_balance(
+    reply: &sl_wire::messages::MoneyBalanceReply,
+) -> Result<MoneyBalance, sl_wire::WireError> {
+    use crate::types::{land_area_from_wire, linden_from_wire};
     let data = &reply.money_data;
     let info = &reply.transaction_info;
-    let transaction = (info.transaction_type != 0).then(|| MoneyTransaction {
-        transaction_type: info.transaction_type,
-        source: crate::types::owner_key_from_wire(info.source_id, info.is_source_group),
-        dest: crate::types::owner_key_from_wire(info.dest_id, info.is_dest_group),
-        amount: LindenAmount(u64::try_from(info.amount).unwrap_or(0)),
-        item_description: trimmed_string(&info.item_description),
-    });
-    MoneyBalance {
+    let transaction = if info.transaction_type == 0 {
+        None
+    } else {
+        Some(MoneyTransaction {
+            transaction_type: info.transaction_type,
+            source: crate::types::owner_key_from_wire(info.source_id, info.is_source_group),
+            dest: crate::types::owner_key_from_wire(info.dest_id, info.is_dest_group),
+            amount: linden_from_wire("Amount", info.amount)?,
+            item_description: trimmed_string(&info.item_description),
+        })
+    };
+    Ok(MoneyBalance {
         agent_id: AgentKey::from(data.agent_id),
         transaction_id: data.transaction_id,
         success: data.transaction_success,
-        balance: LindenAmount(u64::try_from(data.money_balance).unwrap_or(0)),
-        square_meters_credit: data.square_meters_credit,
-        square_meters_committed: data.square_meters_committed,
+        balance: linden_from_wire("MoneyBalance", data.money_balance)?,
+        square_meters_credit: land_area_from_wire("SquareMetersCredit", data.square_meters_credit)?,
+        square_meters_committed: land_area_from_wire(
+            "SquareMetersCommitted",
+            data.square_meters_committed,
+        )?,
         description: trimmed_string(&data.description),
         transaction,
-    }
+    })
 }
 
 /// Builds an [`AvatarAppearance`] from an `AvatarAppearance` message: decodes the
@@ -611,27 +622,41 @@ pub(crate) fn server_appearance_update_from_llsd(body: &Llsd) -> Event {
 }
 
 /// Builds [`EconomyData`] from an `EconomyData` message's info block.
-pub(crate) const fn economy_data(data: &sl_wire::messages::EconomyData) -> EconomyData {
+///
+/// The L$ price fields are decoded at the codec boundary
+/// ([`linden_from_wire`](crate::types::linden_from_wire)); a negative price
+/// (which a conforming simulator never sends) rejects the whole message with
+/// [`WireError::ValueOutOfRange`].
+pub(crate) fn economy_data(
+    data: &sl_wire::messages::EconomyData,
+) -> Result<EconomyData, sl_wire::WireError> {
+    use crate::types::linden_from_wire;
     let info = &data.info;
-    EconomyData {
+    Ok(EconomyData {
         object_capacity: info.object_capacity,
         object_count: info.object_count,
-        price_energy_unit: info.price_energy_unit,
-        price_object_claim: info.price_object_claim,
-        price_public_object_decay: info.price_public_object_decay,
-        price_public_object_delete: info.price_public_object_delete,
-        price_parcel_claim: info.price_parcel_claim,
+        price_energy_unit: linden_from_wire("PriceEnergyUnit", info.price_energy_unit)?,
+        price_object_claim: linden_from_wire("PriceObjectClaim", info.price_object_claim)?,
+        price_public_object_decay: linden_from_wire(
+            "PricePublicObjectDecay",
+            info.price_public_object_decay,
+        )?,
+        price_public_object_delete: linden_from_wire(
+            "PricePublicObjectDelete",
+            info.price_public_object_delete,
+        )?,
+        price_parcel_claim: linden_from_wire("PriceParcelClaim", info.price_parcel_claim)?,
         price_parcel_claim_factor: info.price_parcel_claim_factor,
-        price_upload: info.price_upload,
-        price_rent_light: info.price_rent_light,
-        teleport_min_price: info.teleport_min_price,
+        price_upload: linden_from_wire("PriceUpload", info.price_upload)?,
+        price_rent_light: linden_from_wire("PriceRentLight", info.price_rent_light)?,
+        teleport_min_price: linden_from_wire("TeleportMinPrice", info.teleport_min_price)?,
         teleport_price_exponent: info.teleport_price_exponent,
         energy_efficiency: info.energy_efficiency,
         price_object_rent: info.price_object_rent,
         price_object_scale_factor: info.price_object_scale_factor,
-        price_parcel_rent: info.price_parcel_rent,
-        price_group_create: info.price_group_create,
-    }
+        price_parcel_rent: linden_from_wire("PriceParcelRent", info.price_parcel_rent)?,
+        price_group_create: linden_from_wire("PriceGroupCreate", info.price_group_create)?,
+    })
 }
 
 /// Builds a [`ParcelInfo`] from a `ParcelProperties` message. The `ParcelData`
@@ -639,9 +664,9 @@ pub(crate) const fn economy_data(data: &sl_wire::messages::EconomyData) -> Econo
 /// the age-verification, access-override and environment-override settings. The
 /// `SeeAVs`/`AnyAVSounds`/`GroupAVSounds` booleans are only sent over the CAPS
 /// LLSD form, so they are `None` here (see `parcel_info_from_llsd`).
-pub(crate) fn parcel_info(msg: &ParcelProperties) -> ParcelInfo {
+pub(crate) fn parcel_info(msg: &ParcelProperties) -> Result<ParcelInfo, sl_wire::WireError> {
     let data = &msg.parcel_data;
-    ParcelInfo {
+    Ok(ParcelInfo {
         sequence_id: data.sequence_id,
         request_result: ParcelRequestResult::from_i32(data.request_result),
         snap_selection: data.snap_selection,
@@ -653,11 +678,11 @@ pub(crate) fn parcel_info(msg: &ParcelProperties) -> ParcelInfo {
         group: crate::types::group_from_wire(data.group_id),
         auction_id: data.auction_id,
         claim_date: data.claim_date,
-        claim_price: data.claim_price,
-        rent_price: data.rent_price,
+        claim_price: crate::types::linden_from_wire("ClaimPrice", data.claim_price)?,
+        rent_price: crate::types::linden_from_wire("RentPrice", data.rent_price)?,
         aabb_min: (data.aabb_min.x, data.aabb_min.y, data.aabb_min.z),
         aabb_max: (data.aabb_max.x, data.aabb_max.y, data.aabb_max.z),
-        area: data.area,
+        area: crate::types::land_area_from_wire("Area", data.area)?,
         bitmap: data.bitmap.clone(),
         status: ParcelStatus::from_i32(i32::from(data.status)),
         category: ParcelCategory::from_u8(data.category),
@@ -672,7 +697,12 @@ pub(crate) fn parcel_info(msg: &ParcelProperties) -> ParcelInfo {
         parcel_prim_bonus: data.parcel_prim_bonus,
         other_clean_time: data.other_clean_time,
         raw_parcel_flags: data.parcel_flags,
-        sale_price: data.sale_price,
+        sale_price: crate::types::linden_price_from_wire(
+            sl_wire::ParcelFlags::from_bits(data.parcel_flags)
+                .contains(sl_wire::ParcelFlags::FOR_SALE),
+            "SalePrice",
+            data.sale_price,
+        )?,
         name: trimmed_string(&data.name),
         description: trimmed_string(&data.desc),
         music_url: trimmed_string(&data.music_url),
@@ -681,7 +711,7 @@ pub(crate) fn parcel_info(msg: &ParcelProperties) -> ParcelInfo {
         media_auto_scale: data.media_auto_scale != 0,
         auth_buyer_id: data.auth_buyer_id,
         snapshot_id: TextureKey::from(data.snapshot_id),
-        pass_price: data.pass_price,
+        pass_price: crate::types::linden_from_wire("PassPrice", data.pass_price)?,
         pass_hours: data.pass_hours,
         user_location: (
             data.user_location.x,
@@ -707,7 +737,7 @@ pub(crate) fn parcel_info(msg: &ParcelProperties) -> ParcelInfo {
         see_avs: None,
         any_av_sounds: None,
         group_av_sounds: None,
-    }
+    })
 }
 
 /// Builds a [`ChatMessage`] from a `ChatFromSimulator` chat-data block. The
@@ -837,9 +867,11 @@ pub(crate) fn pick_info(data: &PickInfoReplyDataBlock) -> PickInfo {
 }
 
 /// Builds [`ClassifiedInfo`] from a `ClassifiedInfoReply` data block (#29).
-pub(crate) fn classified_info(data: &ClassifiedInfoReplyDataBlock) -> ClassifiedInfo {
+pub(crate) fn classified_info(
+    data: &ClassifiedInfoReplyDataBlock,
+) -> Result<ClassifiedInfo, sl_wire::WireError> {
     let [x, y, z] = data.pos_global;
-    ClassifiedInfo {
+    Ok(ClassifiedInfo {
         classified_id: ClassifiedKey::from(data.classified_id),
         creator_id: AgentKey::from(data.creator_id),
         creation_date: data.creation_date,
@@ -854,8 +886,11 @@ pub(crate) fn classified_info(data: &ClassifiedInfoReplyDataBlock) -> Classified
         pos_global: (x, y, z),
         parcel_name: trimmed_string(&data.parcel_name),
         classified_flags: data.classified_flags,
-        price_for_listing: data.price_for_listing,
-    }
+        price_for_listing: crate::types::linden_from_wire(
+            "PriceForListing",
+            data.price_for_listing,
+        )?,
+    })
 }
 
 /// Converts a login [`SkeletonFolder`] into an [`InventoryFolder`].
@@ -892,27 +927,31 @@ pub(crate) fn active_group(data: &AgentDataUpdateAgentDataBlock) -> ActiveGroup 
 }
 
 /// Builds [`GroupMembership`] from an `AgentGroupDataUpdate` entry.
-pub(crate) fn group_membership(data: &AgentGroupDataUpdateGroupDataBlock) -> GroupMembership {
-    GroupMembership {
+pub(crate) fn group_membership(
+    data: &AgentGroupDataUpdateGroupDataBlock,
+) -> Result<GroupMembership, sl_wire::WireError> {
+    Ok(GroupMembership {
         group_id: GroupKey::from(data.group_id),
         group_powers: data.group_powers,
         accept_notices: data.accept_notices,
         group_insignia_id: TextureKey::from(data.group_insignia_id),
-        contribution: data.contribution,
+        contribution: crate::types::land_area_from_wire("Contribution", data.contribution)?,
         group_name: trimmed_string(&data.group_name),
-    }
+    })
 }
 
 /// Builds [`GroupMember`] from a `GroupMembersReply` entry.
-pub(crate) fn group_member(data: &GroupMembersReplyMemberDataBlock) -> GroupMember {
-    GroupMember {
+pub(crate) fn group_member(
+    data: &GroupMembersReplyMemberDataBlock,
+) -> Result<GroupMember, sl_wire::WireError> {
+    Ok(GroupMember {
         agent_id: AgentKey::from(data.agent_id),
-        contribution: data.contribution,
+        contribution: crate::types::land_area_from_wire("Contribution", data.contribution)?,
         online_status: trimmed_string(&data.online_status),
         agent_powers: data.agent_powers,
         title: trimmed_string(&data.title),
         is_owner: data.is_owner,
-    }
+    })
 }
 
 /// Builds [`GroupRole`] from a `GroupRoleDataReply` entry.
@@ -937,8 +976,10 @@ pub(crate) fn group_title(data: &GroupTitlesReplyGroupDataBlock) -> GroupTitle {
 }
 
 /// Builds [`GroupProfile`] from a `GroupProfileReply` block.
-pub(crate) fn group_profile(data: &GroupProfileReplyGroupDataBlock) -> GroupProfile {
-    GroupProfile {
+pub(crate) fn group_profile(
+    data: &GroupProfileReplyGroupDataBlock,
+) -> Result<GroupProfile, sl_wire::WireError> {
+    Ok(GroupProfile {
         group_id: GroupKey::from(data.group_id),
         name: trimmed_string(&data.name),
         charter: trimmed_string(&data.charter),
@@ -947,7 +988,7 @@ pub(crate) fn group_profile(data: &GroupProfileReplyGroupDataBlock) -> GroupProf
         powers: data.powers_mask,
         insignia_id: TextureKey::from(data.insignia_id),
         founder_id: AgentKey::from(data.founder_id),
-        membership_fee: data.membership_fee,
+        membership_fee: crate::types::linden_from_wire("MembershipFee", data.membership_fee)?,
         open_enrollment: data.open_enrollment,
         money: data.money,
         member_count: data.group_membership_count,
@@ -955,7 +996,7 @@ pub(crate) fn group_profile(data: &GroupProfileReplyGroupDataBlock) -> GroupProf
         allow_publish: data.allow_publish,
         mature_publish: data.mature_publish,
         owner_role: GroupRoleKey::from(data.owner_role),
-    }
+    })
 }
 
 /// Builds [`GroupNotice`] from a `GroupNoticesListReply` entry.
@@ -971,31 +1012,40 @@ pub(crate) fn group_notice(data: &GroupNoticesListReplyDataBlock) -> GroupNotice
 }
 
 /// Builds [`GroupAccountSummary`] from a `GroupAccountSummaryReply`.
-pub(crate) fn group_account_summary(reply: &GroupAccountSummaryReply) -> GroupAccountSummary {
+pub(crate) fn group_account_summary(
+    reply: &GroupAccountSummaryReply,
+) -> Result<GroupAccountSummary, sl_wire::WireError> {
+    use crate::types::linden_from_wire;
     let money = &reply.money_data;
-    GroupAccountSummary {
+    Ok(GroupAccountSummary {
         group_id: GroupKey::from(reply.agent_data.group_id),
         request_id: money.request_id,
         interval_days: money.interval_days,
         current_interval: money.current_interval,
         start_date: trimmed_string(&money.start_date),
         balance: money.balance,
-        total_credits: money.total_credits,
-        total_debits: money.total_debits,
-        object_tax_current: money.object_tax_current,
-        light_tax_current: money.light_tax_current,
-        land_tax_current: money.land_tax_current,
-        group_tax_current: money.group_tax_current,
-        parcel_dir_fee_current: money.parcel_dir_fee_current,
-        object_tax_estimate: money.object_tax_estimate,
-        light_tax_estimate: money.light_tax_estimate,
-        land_tax_estimate: money.land_tax_estimate,
-        group_tax_estimate: money.group_tax_estimate,
-        parcel_dir_fee_estimate: money.parcel_dir_fee_estimate,
+        total_credits: linden_from_wire("TotalCredits", money.total_credits)?,
+        total_debits: linden_from_wire("TotalDebits", money.total_debits)?,
+        object_tax_current: linden_from_wire("ObjectTaxCurrent", money.object_tax_current)?,
+        light_tax_current: linden_from_wire("LightTaxCurrent", money.light_tax_current)?,
+        land_tax_current: linden_from_wire("LandTaxCurrent", money.land_tax_current)?,
+        group_tax_current: linden_from_wire("GroupTaxCurrent", money.group_tax_current)?,
+        parcel_dir_fee_current: linden_from_wire(
+            "ParcelDirFeeCurrent",
+            money.parcel_dir_fee_current,
+        )?,
+        object_tax_estimate: linden_from_wire("ObjectTaxEstimate", money.object_tax_estimate)?,
+        light_tax_estimate: linden_from_wire("LightTaxEstimate", money.light_tax_estimate)?,
+        land_tax_estimate: linden_from_wire("LandTaxEstimate", money.land_tax_estimate)?,
+        group_tax_estimate: linden_from_wire("GroupTaxEstimate", money.group_tax_estimate)?,
+        parcel_dir_fee_estimate: linden_from_wire(
+            "ParcelDirFeeEstimate",
+            money.parcel_dir_fee_estimate,
+        )?,
         non_exempt_members: money.non_exempt_members,
         last_tax_date: trimmed_string(&money.last_tax_date),
         tax_date: trimmed_string(&money.tax_date),
-    }
+    })
 }
 
 /// Builds [`GroupAccountDetails`] from a `GroupAccountDetailsReply`.
@@ -1162,7 +1212,7 @@ pub(crate) fn uuid_crc(id: Uuid) -> u32 {
 /// `LLInventoryItem::getCRC32` (with `LLPermissions::getCRC32` and
 /// `LLSaleInfo::getCRC32`). The simulator uses it to detect a no-op update; an
 /// `i8` asset/inventory type is sign-extended to `u32` as in the C++ promotion.
-pub(crate) fn inventory_item_crc(item: &InventoryItem) -> u32 {
+pub(crate) fn inventory_item_crc(item: &InventoryItem) -> Result<u32, sl_wire::WireError> {
     let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
     let permissions_crc = uuid_crc(item.creator_id.uuid())
         .wrapping_add(uuid_crc(owner_id))
@@ -1176,11 +1226,10 @@ pub(crate) fn inventory_item_crc(item: &InventoryItem) -> u32 {
                 .wrapping_add(item.permissions.everyone.bits())
                 .wrapping_add(item.permissions.group.bits()),
         );
-    let sale_info_crc = item
-        .sale_price
+    let sale_info_crc = crate::types::linden_price_to_wire("SalePrice", item.sale_price.as_ref())?
         .cast_unsigned()
         .wrapping_add(u32::from(item.sale_type).wrapping_mul(0x0707_3096));
-    uuid_crc(item.item_id.uuid())
+    Ok(uuid_crc(item.item_id.uuid())
         .wrapping_add(uuid_crc(item.folder_id.uuid()))
         .wrapping_add(permissions_crc)
         .wrapping_add(uuid_crc(item.asset_id))
@@ -1188,13 +1237,15 @@ pub(crate) fn inventory_item_crc(item: &InventoryItem) -> u32 {
         .wrapping_add(i32::from(item.inv_type).cast_unsigned())
         .wrapping_add(item.flags)
         .wrapping_add(sale_info_crc)
-        .wrapping_add(item.creation_date.cast_unsigned())
+        .wrapping_add(item.creation_date.cast_unsigned()))
     // The thumbnail UUID (nil here) contributes 0 and is omitted.
 }
 
 /// Builds an [`InventoryItem`] from an `InventoryDescendents` item entry.
-pub(crate) fn inventory_item(data: &InventoryDescendentsItemDataBlock) -> InventoryItem {
-    InventoryItem {
+pub(crate) fn inventory_item(
+    data: &InventoryDescendentsItemDataBlock,
+) -> Result<InventoryItem, sl_wire::WireError> {
+    Ok(InventoryItem {
         item_id: InventoryKey::from(data.item_id),
         folder_id: InventoryFolderKey::from(data.folder_id),
         name: trimmed_string(&data.name),
@@ -1204,7 +1255,11 @@ pub(crate) fn inventory_item(data: &InventoryDescendentsItemDataBlock) -> Invent
         inv_type: data.inv_type,
         flags: data.flags,
         sale_type: data.sale_type,
-        sale_price: data.sale_price,
+        sale_price: crate::types::linden_price_from_wire(
+            data.sale_type != 0,
+            "SalePrice",
+            data.sale_price,
+        )?,
         creation_date: data.creation_date,
         owner: crate::types::inventory_owner_from_wire(
             data.owner_id,
@@ -1222,15 +1277,15 @@ pub(crate) fn inventory_item(data: &InventoryDescendentsItemDataBlock) -> Invent
             everyone: Permissions::from_bits(data.everyone_mask),
             next_owner: Permissions::from_bits(data.next_owner_mask),
         },
-    }
+    })
 }
 
 /// Builds an [`InventoryItem`] from an `UpdateCreateInventoryItem` entry (the
 /// reply to a `CreateInventoryItem`, carrying the new asset id).
 pub(crate) fn inventory_item_from_create(
     data: &UpdateCreateInventoryItemInventoryDataBlock,
-) -> InventoryItem {
-    InventoryItem {
+) -> Result<InventoryItem, sl_wire::WireError> {
+    Ok(InventoryItem {
         item_id: InventoryKey::from(data.item_id),
         folder_id: InventoryFolderKey::from(data.folder_id),
         name: trimmed_string(&data.name),
@@ -1240,7 +1295,11 @@ pub(crate) fn inventory_item_from_create(
         inv_type: data.inv_type,
         flags: data.flags,
         sale_type: data.sale_type,
-        sale_price: data.sale_price,
+        sale_price: crate::types::linden_price_from_wire(
+            data.sale_type != 0,
+            "SalePrice",
+            data.sale_price,
+        )?,
         creation_date: data.creation_date,
         owner: crate::types::inventory_owner_from_wire(
             data.owner_id,
@@ -1257,7 +1316,7 @@ pub(crate) fn inventory_item_from_create(
             everyone: Permissions::from_bits(data.everyone_mask),
             next_owner: Permissions::from_bits(data.next_owner_mask),
         },
-    }
+    })
 }
 
 /// Builds an [`InventoryFolder`] from a `BulkUpdateInventory` folder entry.
@@ -1272,8 +1331,10 @@ pub(crate) fn bulk_update_folder(data: &BulkUpdateInventoryFolderDataBlock) -> I
 }
 
 /// Builds an [`InventoryItem`] from a `BulkUpdateInventory` item entry.
-pub(crate) fn bulk_update_item(data: &BulkUpdateInventoryItemDataBlock) -> InventoryItem {
-    InventoryItem {
+pub(crate) fn bulk_update_item(
+    data: &BulkUpdateInventoryItemDataBlock,
+) -> Result<InventoryItem, sl_wire::WireError> {
+    Ok(InventoryItem {
         item_id: InventoryKey::from(data.item_id),
         folder_id: InventoryFolderKey::from(data.folder_id),
         name: trimmed_string(&data.name),
@@ -1283,7 +1344,11 @@ pub(crate) fn bulk_update_item(data: &BulkUpdateInventoryItemDataBlock) -> Inven
         inv_type: data.inv_type,
         flags: data.flags,
         sale_type: data.sale_type,
-        sale_price: data.sale_price,
+        sale_price: crate::types::linden_price_from_wire(
+            data.sale_type != 0,
+            "SalePrice",
+            data.sale_price,
+        )?,
         creation_date: data.creation_date,
         owner: crate::types::inventory_owner_from_wire(
             data.owner_id,
@@ -1300,7 +1365,7 @@ pub(crate) fn bulk_update_item(data: &BulkUpdateInventoryItemDataBlock) -> Inven
             everyone: Permissions::from_bits(data.everyone_mask),
             next_owner: Permissions::from_bits(data.next_owner_mask),
         },
-    }
+    })
 }
 
 /// Builds a [`NeighborInfo`] from an `EnableSimulator` simulator-info block.
@@ -1727,11 +1792,11 @@ pub(crate) fn parcel_info_from_llsd(body: &Llsd) -> Option<ParcelInfo> {
         // OpenSim sends ClaimDate as an LLSD `date`; the SL/UDP form is an integer
         // `time_t`. Accept either.
         claim_date: llsd_unix_time(data.get("ClaimDate")),
-        claim_price: i32_field("ClaimPrice"),
-        rent_price: i32_field("RentPrice"),
+        claim_price: crate::types::linden_from_wire("ClaimPrice", i32_field("ClaimPrice")).ok()?,
+        rent_price: crate::types::linden_from_wire("RentPrice", i32_field("RentPrice")).ok()?,
         aabb_min: vec3_from_llsd(data.get("AABBMin")),
         aabb_max: vec3_from_llsd(data.get("AABBMax")),
-        area: i32_field("Area"),
+        area: crate::types::land_area_from_wire("Area", i32_field("Area")).ok()?,
         bitmap: data
             .get("Bitmap")
             .and_then(Llsd::as_binary)
@@ -1755,7 +1820,17 @@ pub(crate) fn parcel_info_from_llsd(body: &Llsd) -> Option<ParcelInfo> {
         // OpenSim encodes the `uint` ParcelFlags as a 4-byte binary LLSD element,
         // so read it tolerantly (binary / integer / string).
         raw_parcel_flags: data.get("ParcelFlags").map_or(0, llsd_u32),
-        sale_price: i32_field("SalePrice"),
+        // `None` unless the parcel is for sale. A negative L$ price on a
+        // for-sale parcel (which a conforming peer never sends) collapses the
+        // whole CAPS decode to `None` — surfaced as a `CapsDecodeFailed`
+        // diagnostic — rather than masquerading as `0`.
+        sale_price: crate::types::linden_price_from_wire(
+            sl_wire::ParcelFlags::from_bits(data.get("ParcelFlags").map_or(0, llsd_u32))
+                .contains(sl_wire::ParcelFlags::FOR_SALE),
+            "SalePrice",
+            i32_field("SalePrice"),
+        )
+        .ok()?,
         name: str_field("Name"),
         description: str_field("Desc"),
         music_url: str_field("MusicURL"),
@@ -1766,7 +1841,7 @@ pub(crate) fn parcel_info_from_llsd(body: &Llsd) -> Option<ParcelInfo> {
         media_auto_scale: bool_field("MediaAutoScale"),
         auth_buyer_id: uuid_field("AuthBuyerID"),
         snapshot_id: TextureKey::from(uuid_field("SnapshotID")),
-        pass_price: i32_field("PassPrice"),
+        pass_price: crate::types::linden_from_wire("PassPrice", i32_field("PassPrice")).ok()?,
         pass_hours: data.get("PassHours").and_then(Llsd::as_f32).unwrap_or(0.0),
         user_location: vec3_from_llsd(data.get("UserLocation")),
         user_look_at: vec3_from_llsd(data.get("UserLookAt")),
@@ -2169,10 +2244,14 @@ pub(crate) fn group_memberships_from_caps_llsd(body: &Llsd) -> Option<Event> {
                         .and_then(Llsd::as_uuid)
                         .unwrap_or_else(Uuid::nil),
                 ),
-                contribution: group
-                    .get("Contribution")
-                    .and_then(Llsd::as_i32)
-                    .unwrap_or(0),
+                contribution: crate::types::land_area_from_wire(
+                    "Contribution",
+                    group
+                        .get("Contribution")
+                        .and_then(Llsd::as_i32)
+                        .unwrap_or(0),
+                )
+                .ok()?,
                 group_name: group
                     .get("GroupName")
                     .and_then(Llsd::as_str)
@@ -2215,10 +2294,13 @@ pub(crate) fn group_members_from_caps_llsd(body: &Llsd) -> Option<Event> {
                 .to_owned();
             Some(GroupMember {
                 agent_id,
-                contribution: info
-                    .get("donated_square_meters")
-                    .and_then(Llsd::as_i32)
-                    .unwrap_or(0),
+                contribution: crate::types::land_area_from_wire(
+                    "donated_square_meters",
+                    info.get("donated_square_meters")
+                        .and_then(Llsd::as_i32)
+                        .unwrap_or(0),
+                )
+                .ok()?,
                 online_status: info
                     .get("last_login")
                     .and_then(Llsd::as_str)
@@ -2261,7 +2343,7 @@ pub(crate) fn inventory_descendents_from_llsd(body: &Llsd) -> Vec<Event> {
                 version: i32_member(folder, "version"),
                 descendents: i32_member(folder, "descendents"),
                 folders: categories.iter().map(inventory_folder_from_llsd).collect(),
-                items: items.iter().map(inventory_item_from_llsd).collect(),
+                items: items.iter().filter_map(inventory_item_from_llsd).collect(),
             }
         })
         .collect()
@@ -2299,7 +2381,7 @@ pub(crate) fn bulk_update_inventory_from_llsd(
         .and_then(Llsd::as_array)
         .unwrap_or(&[])
         .iter()
-        .map(bulk_update_item_from_llsd)
+        .filter_map(bulk_update_item_from_llsd)
         .filter(|item| !item.item_id.uuid().is_nil())
         .collect();
     Some((transaction_id, folders, items))
@@ -2307,8 +2389,8 @@ pub(crate) fn bulk_update_inventory_from_llsd(
 
 /// Builds an [`InventoryItem`] from a `BulkUpdateInventory` CAPS `ItemData`
 /// entry (`CamelCase` keys, flat — permissions are not nested as in AIS).
-pub(crate) fn bulk_update_item_from_llsd(item: &Llsd) -> InventoryItem {
-    InventoryItem {
+pub(crate) fn bulk_update_item_from_llsd(item: &Llsd) -> Option<InventoryItem> {
+    Some(InventoryItem {
         item_id: InventoryKey::from(uuid_member(item, "ItemID")),
         folder_id: InventoryFolderKey::from(uuid_member(item, "FolderID")),
         name: string_member(item, "Name"),
@@ -2318,7 +2400,12 @@ pub(crate) fn bulk_update_item_from_llsd(item: &Llsd) -> InventoryItem {
         inv_type: i8::try_from(i32_member(item, "InvType")).unwrap_or(-1),
         flags: i32_member(item, "Flags").cast_unsigned(),
         sale_type: u8::try_from(i32_member(item, "SaleType")).unwrap_or(0),
-        sale_price: i32_member(item, "SalePrice"),
+        sale_price: crate::types::linden_price_from_wire(
+            i32_member(item, "SaleType") != 0,
+            "SalePrice",
+            i32_member(item, "SalePrice"),
+        )
+        .ok()?,
         creation_date: i32_member(item, "CreationDate"),
         owner: crate::types::inventory_owner_from_wire(
             uuid_member(item, "OwnerID"),
@@ -2337,7 +2424,7 @@ pub(crate) fn bulk_update_item_from_llsd(item: &Llsd) -> InventoryItem {
             everyone: Permissions::from_bits(i32_member(item, "EveryoneMask").cast_unsigned()),
             next_owner: Permissions::from_bits(i32_member(item, "NextOwnerMask").cast_unsigned()),
         },
-    }
+    })
 }
 
 /// Parses an AIS3 (`InventoryAPIv3`) response into the folders and items it
@@ -2352,7 +2439,7 @@ pub(crate) fn ais_inventory_update_from_llsd(
     let mut items = Vec::new();
     // Top-level single object (e.g. a GET /item/<id> or GET /category/<id>).
     if body.get("item_id").is_some() {
-        items.push(inventory_item_from_llsd(body));
+        items.extend(inventory_item_from_llsd(body));
     }
     if body.get("category_id").is_some() {
         folders.push(inventory_folder_from_llsd(body));
@@ -2363,10 +2450,10 @@ pub(crate) fn ais_inventory_update_from_llsd(
             folders.extend(categories.values().map(inventory_folder_from_llsd));
         }
         if let Some(embedded_items) = embedded.get("items").and_then(Llsd::as_map) {
-            items.extend(embedded_items.values().map(inventory_item_from_llsd));
+            items.extend(embedded_items.values().filter_map(inventory_item_from_llsd));
         }
         if let Some(links) = embedded.get("links").and_then(Llsd::as_map) {
-            items.extend(links.values().map(inventory_item_from_llsd));
+            items.extend(links.values().filter_map(inventory_item_from_llsd));
         }
     }
     folders.retain(|folder| !folder.folder_id.uuid().is_nil());
@@ -2403,7 +2490,7 @@ pub(crate) fn inventory_folder_from_llsd(category: &Llsd) -> InventoryFolder {
 
 /// Builds an [`InventoryItem`] from a CAPS `items` entry (with nested
 /// `permissions` and `sale_info` maps).
-pub(crate) fn inventory_item_from_llsd(item: &Llsd) -> InventoryItem {
+pub(crate) fn inventory_item_from_llsd(item: &Llsd) -> Option<InventoryItem> {
     let permissions = item.get("permissions");
     let sale_info = item.get("sale_info");
     let perm = |key: &str| {
@@ -2412,7 +2499,7 @@ pub(crate) fn inventory_item_from_llsd(item: &Llsd) -> InventoryItem {
             .cast_unsigned()
     };
     let perm_uuid = |key: &str| permissions.map_or_else(Uuid::nil, |p| uuid_member(p, key));
-    InventoryItem {
+    Some(InventoryItem {
         item_id: InventoryKey::from(uuid_member(item, "item_id")),
         folder_id: InventoryFolderKey::from(uuid_member(item, "parent_id")),
         name: string_member(item, "name"),
@@ -2422,7 +2509,12 @@ pub(crate) fn inventory_item_from_llsd(item: &Llsd) -> InventoryItem {
         inv_type: i8::try_from(i32_member(item, "inv_type")).unwrap_or(-1),
         flags: i32_member(item, "flags").cast_unsigned(),
         sale_type: sale_info.map_or(0, |s| u8::try_from(i32_member(s, "sale_type")).unwrap_or(0)),
-        sale_price: sale_info.map_or(0, |s| i32_member(s, "sale_price")),
+        sale_price: crate::types::linden_price_from_wire(
+            sale_info.map_or(0, |s| i32_member(s, "sale_type")) != 0,
+            "sale_price",
+            sale_info.map_or(0, |s| i32_member(s, "sale_price")),
+        )
+        .ok()?,
         creation_date: i32_member(item, "created_at"),
         owner: crate::types::inventory_owner_from_wire(
             perm_uuid("owner_id"),
@@ -2442,7 +2534,7 @@ pub(crate) fn inventory_item_from_llsd(item: &Llsd) -> InventoryItem {
             everyone: Permissions::from_bits(perm("everyone_mask")),
             next_owner: Permissions::from_bits(perm("next_owner_mask")),
         },
-    }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -2784,12 +2876,16 @@ pub fn environment_to_llsd(env: &EnvironmentSettings) -> Llsd {
 /// of `parcel_info_from_llsd`). The three trailing single-blocks the parser
 /// reads are emitted as one-element arrays, and the CAPS-only `SeeAVs` /
 /// `AnyAVSounds` / `GroupAVSounds` booleans only when present.
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) if
+/// the L$ sale price exceeds the signed 32-bit range the wire field can hold.
 #[expect(
     clippy::too_many_lines,
     reason = "one entry per ParcelProperties field — a flat inverse of the parser"
 )]
-#[must_use]
-pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Llsd {
+pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Result<Llsd, sl_wire::WireError> {
     let mut data = vec![
         ("SequenceID", Llsd::Integer(info.sequence_id)),
         ("RequestResult", Llsd::Integer(info.request_result.to_i32())),
@@ -2806,11 +2902,23 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Llsd {
         ),
         ("AuctionID", u32_to_llsd(info.auction_id)),
         ("ClaimDate", Llsd::Integer(info.claim_date)),
-        ("ClaimPrice", Llsd::Integer(info.claim_price)),
-        ("RentPrice", Llsd::Integer(info.rent_price)),
+        (
+            "ClaimPrice",
+            Llsd::Integer(crate::types::linden_to_wire(
+                "ClaimPrice",
+                &info.claim_price,
+            )?),
+        ),
+        (
+            "RentPrice",
+            Llsd::Integer(crate::types::linden_to_wire("RentPrice", &info.rent_price)?),
+        ),
         ("AABBMin", vec3_to_llsd(info.aabb_min)),
         ("AABBMax", vec3_to_llsd(info.aabb_max)),
-        ("Area", Llsd::Integer(info.area)),
+        (
+            "Area",
+            Llsd::Integer(crate::types::land_area_to_wire("Area", &info.area)?),
+        ),
         ("Bitmap", Llsd::Binary(info.bitmap.clone())),
         ("Status", Llsd::Integer(info.status.to_i32())),
         ("Category", Llsd::Integer(i32::from(info.category.to_u8()))),
@@ -2831,7 +2939,13 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Llsd {
         ),
         ("OtherCleanTime", Llsd::Integer(info.other_clean_time)),
         ("ParcelFlags", u32_to_llsd(info.raw_parcel_flags)),
-        ("SalePrice", Llsd::Integer(info.sale_price)),
+        (
+            "SalePrice",
+            Llsd::Integer(crate::types::linden_price_to_wire(
+                "SalePrice",
+                info.sale_price.as_ref(),
+            )?),
+        ),
         ("Name", Llsd::String(info.name.clone())),
         ("Desc", Llsd::String(info.description.clone())),
         ("MusicURL", Llsd::String(info.music_url.clone())),
@@ -2840,7 +2954,10 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Llsd {
         ("MediaAutoScale", Llsd::Boolean(info.media_auto_scale)),
         ("AuthBuyerID", Llsd::Uuid(info.auth_buyer_id)),
         ("SnapshotID", Llsd::Uuid(info.snapshot_id.uuid())),
-        ("PassPrice", Llsd::Integer(info.pass_price)),
+        (
+            "PassPrice",
+            Llsd::Integer(crate::types::linden_to_wire("PassPrice", &info.pass_price)?),
+        ),
         ("PassHours", Llsd::Real(f64::from(info.pass_hours))),
         ("UserLocation", vec3_to_llsd(info.user_location)),
         ("UserLookAt", vec3_to_llsd(info.user_look_at)),
@@ -2892,7 +3009,7 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Llsd {
             Llsd::Boolean(info.region_allow_environment_override),
         ),
     ]);
-    llsd_map(vec![
+    Ok(llsd_map(vec![
         ("ParcelData", Llsd::Array(vec![llsd_map(data)])),
         ("AgeVerificationBlock", Llsd::Array(vec![age_verification])),
         (
@@ -2903,7 +3020,7 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Llsd {
             "ParcelEnvironmentBlock",
             Llsd::Array(vec![parcel_environment]),
         ),
-    ])
+    ]))
 }
 
 /// Serializes offline IMs as a `ReadOfflineMsgs` capability reply body — an
@@ -2980,15 +3097,19 @@ pub fn chatterbox_invitation_to_llsd(event: &Event) -> Llsd {
 
 /// Serializes an [`Event::GroupMemberships`] as the CAPS event-queue
 /// `AgentGroupDataUpdate` body (inverse of `group_memberships_from_caps_llsd`).
-#[must_use]
-pub fn group_memberships_to_caps_llsd(event: &Event) -> Llsd {
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) if
+/// a membership's land contribution exceeds the signed 32-bit wire range.
+pub fn group_memberships_to_caps_llsd(event: &Event) -> Result<Llsd, sl_wire::WireError> {
     let Event::GroupMemberships(memberships) = event else {
-        return Llsd::Undef;
+        return Ok(Llsd::Undef);
     };
     let groups = memberships
         .iter()
         .map(|membership| {
-            llsd_map(vec![
+            Ok(llsd_map(vec![
                 ("GroupID", Llsd::Uuid(membership.group_id.uuid())),
                 ("GroupPowers", u64_to_llsd(membership.group_powers)),
                 ("AcceptNotices", Llsd::Boolean(membership.accept_notices)),
@@ -2996,12 +3117,18 @@ pub fn group_memberships_to_caps_llsd(event: &Event) -> Llsd {
                     "GroupInsigniaID",
                     Llsd::Uuid(membership.group_insignia_id.uuid()),
                 ),
-                ("Contribution", Llsd::Integer(membership.contribution)),
+                (
+                    "Contribution",
+                    Llsd::Integer(crate::types::land_area_to_wire(
+                        "Contribution",
+                        &membership.contribution,
+                    )?),
+                ),
                 ("GroupName", Llsd::String(membership.group_name.clone())),
-            ])
+            ]))
         })
-        .collect();
-    llsd_map(vec![("GroupData", Llsd::Array(groups))])
+        .collect::<Result<_, sl_wire::WireError>>()?;
+    Ok(llsd_map(vec![("GroupData", Llsd::Array(groups))]))
 }
 
 /// Serializes an [`Event::GroupMembers`] as a `GroupMemberData` capability
@@ -3009,13 +3136,17 @@ pub fn group_memberships_to_caps_llsd(event: &Event) -> Llsd {
 /// title is emitted inline by index into the `titles` array, and `request_id` /
 /// `member_count` are dropped (the parser sets them itself: nil and the roster
 /// length).
-#[must_use]
-pub fn group_members_to_caps_llsd(event: &Event) -> Llsd {
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) if
+/// a member's land contribution exceeds the signed 32-bit wire range.
+pub fn group_members_to_caps_llsd(event: &Event) -> Result<Llsd, sl_wire::WireError> {
     let Event::GroupMembers {
         group_id, members, ..
     } = event
     else {
-        return Llsd::Undef;
+        return Ok(Llsd::Undef);
     };
     let mut titles = Vec::with_capacity(members.len());
     let mut roster = HashMap::with_capacity(members.len());
@@ -3023,7 +3154,13 @@ pub fn group_members_to_caps_llsd(event: &Event) -> Llsd {
         let title_index = i32::try_from(index).unwrap_or(0);
         titles.push(Llsd::String(member.title.clone()));
         let mut entries = vec![
-            ("donated_square_meters", Llsd::Integer(member.contribution)),
+            (
+                "donated_square_meters",
+                Llsd::Integer(crate::types::land_area_to_wire(
+                    "donated_square_meters",
+                    &member.contribution,
+                )?),
+            ),
             ("last_login", Llsd::String(member.online_status.clone())),
             ("powers", u64_to_llsd(member.agent_powers)),
             ("title", Llsd::Integer(title_index)),
@@ -3033,7 +3170,7 @@ pub fn group_members_to_caps_llsd(event: &Event) -> Llsd {
         }
         roster.insert(member.agent_id.to_string(), llsd_map(entries));
     }
-    llsd_map(vec![
+    Ok(llsd_map(vec![
         ("group_id", Llsd::Uuid(group_id.uuid())),
         ("members", Llsd::Map(roster)),
         ("titles", Llsd::Array(titles)),
@@ -3041,53 +3178,62 @@ pub fn group_members_to_caps_llsd(event: &Event) -> Llsd {
             "defaults",
             llsd_map(vec![("default_powers", Llsd::Integer(0))]),
         ),
-    ])
+    ]))
 }
 
 /// Serializes `InventoryDescendents` events as a `FetchInventoryDescendents2`
 /// capability response body (inverse of `inventory_descendents_from_llsd`):
 /// one `folders` entry per event, each carrying its `categories` and `items`.
-#[must_use]
-pub fn inventory_descendents_to_llsd(events: &[Event]) -> Llsd {
-    let folders = events
-        .iter()
-        .filter_map(|event| {
-            let Event::InventoryDescendents {
-                folder_id,
-                version,
-                descendents,
-                folders,
-                items,
-            } = event
-            else {
-                return None;
-            };
-            Some(llsd_map(vec![
-                ("folder_id", Llsd::Uuid(folder_id.uuid())),
-                ("version", Llsd::Integer(*version)),
-                ("descendents", Llsd::Integer(*descendents)),
-                (
-                    "categories",
-                    Llsd::Array(folders.iter().map(inventory_folder_to_llsd).collect()),
-                ),
-                (
-                    "items",
-                    Llsd::Array(items.iter().map(inventory_item_to_llsd).collect()),
-                ),
-            ]))
-        })
-        .collect();
-    llsd_map(vec![("folders", Llsd::Array(folders))])
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) if
+/// an item's L$ sale price exceeds the signed 32-bit range the wire field can
+/// hold.
+pub fn inventory_descendents_to_llsd(events: &[Event]) -> Result<Llsd, sl_wire::WireError> {
+    let mut folders = Vec::new();
+    for event in events {
+        let Event::InventoryDescendents {
+            folder_id,
+            version,
+            descendents,
+            folders: event_folders,
+            items,
+        } = event
+        else {
+            continue;
+        };
+        let items_llsd = items
+            .iter()
+            .map(inventory_item_to_llsd)
+            .collect::<Result<Vec<_>, _>>()?;
+        folders.push(llsd_map(vec![
+            ("folder_id", Llsd::Uuid(folder_id.uuid())),
+            ("version", Llsd::Integer(*version)),
+            ("descendents", Llsd::Integer(*descendents)),
+            (
+                "categories",
+                Llsd::Array(event_folders.iter().map(inventory_folder_to_llsd).collect()),
+            ),
+            ("items", Llsd::Array(items_llsd)),
+        ]));
+    }
+    Ok(llsd_map(vec![("folders", Llsd::Array(folders))]))
 }
 
 /// Serializes a `BulkUpdateInventory` CAPS event-queue body (inverse of
 /// `bulk_update_inventory_from_llsd`).
-#[must_use]
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) if
+/// an item's L$ sale price exceeds the signed 32-bit range the wire field can
+/// hold.
 pub fn bulk_update_inventory_to_llsd(
     transaction_id: Uuid,
     folders: &[InventoryFolder],
     items: &[InventoryItem],
-) -> Llsd {
+) -> Result<Llsd, sl_wire::WireError> {
     let agent = llsd_map(vec![("TransactionID", Llsd::Uuid(transaction_id))]);
     let folder_data = folders
         .iter()
@@ -3100,20 +3246,23 @@ pub fn bulk_update_inventory_to_llsd(
             ])
         })
         .collect();
-    let item_data = items.iter().map(bulk_update_item_to_llsd).collect();
-    llsd_map(vec![
+    let item_data = items
+        .iter()
+        .map(bulk_update_item_to_llsd)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(llsd_map(vec![
         ("AgentData", Llsd::Array(vec![agent])),
         ("FolderData", Llsd::Array(folder_data)),
         ("ItemData", Llsd::Array(item_data)),
-    ])
+    ]))
 }
 
 /// Serializes an [`InventoryItem`] as a flat `BulkUpdateInventory` `ItemData`
 /// entry (inverse of [`bulk_update_item_from_llsd`]). `last_owner_id` has no
 /// place in this wire form (the parser leaves it nil), so it is not emitted.
-pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Llsd {
+pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Result<Llsd, sl_wire::WireError> {
     let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
-    llsd_map(vec![
+    Ok(llsd_map(vec![
         ("ItemID", Llsd::Uuid(item.item_id.uuid())),
         ("FolderID", Llsd::Uuid(item.folder_id.uuid())),
         ("Name", Llsd::String(item.name.clone())),
@@ -3123,7 +3272,13 @@ pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Llsd {
         ("InvType", Llsd::Integer(i32::from(item.inv_type))),
         ("Flags", Llsd::Integer(item.flags.cast_signed())),
         ("SaleType", Llsd::Integer(i32::from(item.sale_type))),
-        ("SalePrice", Llsd::Integer(item.sale_price)),
+        (
+            "SalePrice",
+            Llsd::Integer(crate::types::linden_price_to_wire(
+                "SalePrice",
+                item.sale_price.as_ref(),
+            )?),
+        ),
         ("CreationDate", Llsd::Integer(item.creation_date)),
         ("OwnerID", Llsd::Uuid(owner_id)),
         ("CreatorID", Llsd::Uuid(item.creator_id.uuid())),
@@ -3149,14 +3304,22 @@ pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Llsd {
             "NextOwnerMask",
             Llsd::Integer(item.permissions.next_owner.bits().cast_signed()),
         ),
-    ])
+    ]))
 }
 
 /// Serializes folders and items as an AIS3 (`InventoryAPIv3`) response body
 /// (inverse of `ais_inventory_update_from_llsd`): the affected objects nest
 /// under `_embedded` as uuid-keyed maps.
-#[must_use]
-pub fn ais_inventory_update_to_llsd(folders: &[InventoryFolder], items: &[InventoryItem]) -> Llsd {
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) if
+/// an item's L$ sale price exceeds the signed 32-bit range the wire field can
+/// hold.
+pub fn ais_inventory_update_to_llsd(
+    folders: &[InventoryFolder],
+    items: &[InventoryItem],
+) -> Result<Llsd, sl_wire::WireError> {
     let categories = folders
         .iter()
         .map(|folder| {
@@ -3168,15 +3331,15 @@ pub fn ais_inventory_update_to_llsd(folders: &[InventoryFolder], items: &[Invent
         .collect();
     let item_map = items
         .iter()
-        .map(|item| (item.item_id.to_string(), inventory_item_to_llsd(item)))
-        .collect();
-    llsd_map(vec![(
+        .map(|item| Ok((item.item_id.to_string(), inventory_item_to_llsd(item)?)))
+        .collect::<Result<_, sl_wire::WireError>>()?;
+    Ok(llsd_map(vec![(
         "_embedded",
         llsd_map(vec![
             ("categories", Llsd::Map(categories)),
             ("items", Llsd::Map(item_map)),
         ]),
-    )])
+    )]))
 }
 
 /// Serializes an [`InventoryFolder`] as a `CreateInventoryCategory` reply body
@@ -3206,7 +3369,7 @@ pub(crate) fn inventory_folder_to_llsd(folder: &InventoryFolder) -> Llsd {
 
 /// Serializes an [`InventoryItem`] as an AIS-shaped `items` entry with the nested
 /// `permissions` and `sale_info` maps (inverse of [`inventory_item_from_llsd`]).
-pub(crate) fn inventory_item_to_llsd(item: &InventoryItem) -> Llsd {
+pub(crate) fn inventory_item_to_llsd(item: &InventoryItem) -> Result<Llsd, sl_wire::WireError> {
     let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
     let permissions = llsd_map(vec![
         (
@@ -3237,9 +3400,15 @@ pub(crate) fn inventory_item_to_llsd(item: &InventoryItem) -> Llsd {
     ]);
     let sale_info = llsd_map(vec![
         ("sale_type", Llsd::Integer(i32::from(item.sale_type))),
-        ("sale_price", Llsd::Integer(item.sale_price)),
+        (
+            "sale_price",
+            Llsd::Integer(crate::types::linden_price_to_wire(
+                "sale_price",
+                item.sale_price.as_ref(),
+            )?),
+        ),
     ]);
-    llsd_map(vec![
+    Ok(llsd_map(vec![
         ("item_id", Llsd::Uuid(item.item_id.uuid())),
         ("parent_id", Llsd::Uuid(item.folder_id.uuid())),
         ("name", Llsd::String(item.name.clone())),
@@ -3251,7 +3420,7 @@ pub(crate) fn inventory_item_to_llsd(item: &InventoryItem) -> Llsd {
         ("created_at", Llsd::Integer(item.creation_date)),
         ("permissions", permissions),
         ("sale_info", sale_info),
-    ])
+    ]))
 }
 
 // ---------------------------------------------------------------------------
@@ -3360,8 +3529,10 @@ pub(crate) const fn shape_from_full_block(block: &ObjectUpdateObjectDataBlock) -
 }
 
 /// Builds an [`ObjectProperties`] from an `ObjectProperties` object-data block.
-pub(crate) fn object_properties(block: &ObjectPropertiesObjectDataBlock) -> ObjectProperties {
-    ObjectProperties {
+pub(crate) fn object_properties(
+    block: &ObjectPropertiesObjectDataBlock,
+) -> Result<ObjectProperties, sl_wire::WireError> {
+    Ok(ObjectProperties {
         object_id: ObjectKey::from(block.object_id),
         creator_id: AgentKey::from(block.creator_id),
         owner: crate::types::object_owner_from_wire(block.owner_id, block.group_id),
@@ -3375,9 +3546,13 @@ pub(crate) fn object_properties(block: &ObjectPropertiesObjectDataBlock) -> Obje
             everyone: Permissions::from_bits(block.everyone_mask),
             next_owner: Permissions::from_bits(block.next_owner_mask),
         },
-        ownership_cost: block.ownership_cost,
+        ownership_cost: crate::types::linden_from_wire("OwnershipCost", block.ownership_cost)?,
         sale_type: block.sale_type,
-        sale_price: block.sale_price,
+        sale_price: crate::types::linden_price_from_wire(
+            block.sale_type != 0,
+            "SalePrice",
+            block.sale_price,
+        )?,
         category: block.category,
         inventory_serial: block.inventory_serial,
         item_id: InventoryKey::from(block.item_id),
@@ -3394,7 +3569,7 @@ pub(crate) fn object_properties(block: &ObjectPropertiesObjectDataBlock) -> Obje
             .into_iter()
             .map(TextureKey::from)
             .collect(),
-    }
+    })
 }
 
 /// Splits a wire blob of back-to-back 16-byte UUIDs into a vector of ids,
@@ -3416,7 +3591,10 @@ mod caps_serializer_tests {
     use sl_types::key::InventoryFolderKey;
     use sl_types::key::InventoryKey;
     use sl_types::key::TextureKey;
+    use sl_types::money::LindenAmount;
     use uuid::Uuid;
+
+    use crate::types::LandArea;
 
     use super::{
         CapsTeleportFinish, ais_inventory_update_from_llsd, ais_inventory_update_to_llsd,
@@ -3509,7 +3687,7 @@ mod caps_serializer_tests {
     }
 
     #[test]
-    fn parcel_info_round_trips() {
+    fn parcel_info_round_trips() -> Result<(), sl_wire::WireError> {
         let info = ParcelInfo {
             sequence_id: 7,
             request_result: ParcelRequestResult::Multiple,
@@ -3522,11 +3700,11 @@ mod caps_serializer_tests {
             group: Some(GroupKey::from(Uuid::from_u128(0x22))),
             auction_id: 0xdead_beef,
             claim_date: 1_700_000_000,
-            claim_price: 100,
-            rent_price: 5,
+            claim_price: LindenAmount(100),
+            rent_price: LindenAmount(5),
             aabb_min: (1.0, 2.0, 3.0),
             aabb_max: (4.0, 5.0, 6.0),
-            area: 1024,
+            area: LandArea(1024),
             bitmap: vec![1, 2, 3, 4],
             status: ParcelStatus::Abandoned,
             category: ParcelCategory::Commercial,
@@ -3540,8 +3718,9 @@ mod caps_serializer_tests {
             selected_prims: 2,
             parcel_prim_bonus: 1.5,
             other_clean_time: 60,
-            raw_parcel_flags: 0x8000_0001,
-            sale_price: 999,
+            // 0x04 is FOR_SALE, so the sale price survives the round trip.
+            raw_parcel_flags: 0x8000_0005,
+            sale_price: Some(LindenAmount(999)),
             name: "Test Parcel".to_owned(),
             description: "A description".to_owned(),
             music_url: "http://music".to_owned(),
@@ -3550,7 +3729,7 @@ mod caps_serializer_tests {
             media_auto_scale: true,
             auth_buyer_id: Uuid::from_u128(0x44),
             snapshot_id: TextureKey::from(Uuid::from_u128(0x55)),
-            pass_price: 25,
+            pass_price: LindenAmount(25),
             pass_hours: 2.0,
             user_location: (10.0, 20.0, 30.0),
             user_look_at: (0.0, 1.0, 0.0),
@@ -3568,9 +3747,10 @@ mod caps_serializer_tests {
             group_av_sounds: Some(true),
         };
         assert_eq!(
-            parcel_info_from_llsd(&parcel_info_to_llsd(&info)),
+            parcel_info_from_llsd(&parcel_info_to_llsd(&info)?),
             Some(info)
         );
+        Ok(())
     }
 
     #[test]
@@ -3619,23 +3799,24 @@ mod caps_serializer_tests {
     }
 
     #[test]
-    fn group_memberships_round_trip() {
+    fn group_memberships_round_trip() -> Result<(), sl_wire::WireError> {
         let event = Event::GroupMemberships(vec![GroupMembership {
             group_id: GroupKey::from(Uuid::from_u128(0xc1)),
             group_powers: 0x0000_0001_0000_00ff,
             accept_notices: true,
             group_insignia_id: TextureKey::from(Uuid::from_u128(0xc2)),
-            contribution: 128,
+            contribution: LandArea(128),
             group_name: "Test Group".to_owned(),
         }]);
         assert_eq!(
-            group_memberships_from_caps_llsd(&group_memberships_to_caps_llsd(&event)),
+            group_memberships_from_caps_llsd(&group_memberships_to_caps_llsd(&event)?),
             Some(event)
         );
+        Ok(())
     }
 
     #[test]
-    fn group_members_round_trip() {
+    fn group_members_round_trip() -> Result<(), sl_wire::WireError> {
         // Members already sorted by agent id, request id nil, count == roster
         // length — the shape the parser reconstructs.
         let event = Event::GroupMembers {
@@ -3645,7 +3826,7 @@ mod caps_serializer_tests {
             members: vec![
                 GroupMember {
                     agent_id: AgentKey::from(Uuid::from_u128(0xd1)),
-                    contribution: 10,
+                    contribution: LandArea(10),
                     online_status: "Online".to_owned(),
                     agent_powers: 0x0000_0002_0000_0000,
                     title: "Owner".to_owned(),
@@ -3653,7 +3834,7 @@ mod caps_serializer_tests {
                 },
                 GroupMember {
                     agent_id: AgentKey::from(Uuid::from_u128(0xd2)),
-                    contribution: 0,
+                    contribution: LandArea(0),
                     online_status: "Offline".to_owned(),
                     agent_powers: 7,
                     title: "Member".to_owned(),
@@ -3662,9 +3843,10 @@ mod caps_serializer_tests {
             ],
         };
         assert_eq!(
-            group_members_from_caps_llsd(&group_members_to_caps_llsd(&event)),
+            group_members_from_caps_llsd(&group_members_to_caps_llsd(&event)?),
             Some(event)
         );
+        Ok(())
     }
 
     /// A fully-populated inventory item in the AIS/CAPS shape (nested
@@ -3680,7 +3862,7 @@ mod caps_serializer_tests {
             inv_type: 6,
             flags: 0x8000_0001,
             sale_type: 2,
-            sale_price: 50,
+            sale_price: Some(LindenAmount(50)),
             creation_date: 1_700_002_000,
             owner: sl_types::key::OwnerKey::Agent(AgentKey::from(Uuid::from_u128(
                 seed.wrapping_add(0x300),
@@ -3699,7 +3881,7 @@ mod caps_serializer_tests {
     }
 
     #[test]
-    fn inventory_descendents_round_trip() {
+    fn inventory_descendents_round_trip() -> Result<(), sl_wire::WireError> {
         let events = vec![Event::InventoryDescendents {
             folder_id: InventoryFolderKey::from(Uuid::from_u128(0xe0)),
             version: 4,
@@ -3714,13 +3896,14 @@ mod caps_serializer_tests {
             items: vec![sample_item(0xe2)],
         }];
         assert_eq!(
-            inventory_descendents_from_llsd(&inventory_descendents_to_llsd(&events)),
+            inventory_descendents_from_llsd(&inventory_descendents_to_llsd(&events)?),
             events
         );
+        Ok(())
     }
 
     #[test]
-    fn bulk_update_inventory_round_trip() {
+    fn bulk_update_inventory_round_trip() -> Result<(), sl_wire::WireError> {
         let transaction_id = Uuid::from_u128(0xf0);
         // The bulk wire form carries no folder version (parser defaults 0) and no
         // last-owner id (parser defaults nil).
@@ -3739,13 +3922,14 @@ mod caps_serializer_tests {
                 transaction_id,
                 &folders,
                 &items
-            )),
+            )?),
             Some((transaction_id, folders, items))
         );
+        Ok(())
     }
 
     #[test]
-    fn ais_inventory_update_round_trip() {
+    fn ais_inventory_update_round_trip() -> Result<(), sl_wire::WireError> {
         let folders = vec![InventoryFolder {
             folder_id: InventoryFolderKey::from(Uuid::from_u128(0x1a1)),
             parent_id: InventoryFolderKey::from(Uuid::from_u128(0x1a2)),
@@ -3755,12 +3939,13 @@ mod caps_serializer_tests {
         }];
         let items = vec![sample_item(0x1b1)];
         let (mut got_folders, mut got_items) =
-            ais_inventory_update_from_llsd(&ais_inventory_update_to_llsd(&folders, &items));
+            ais_inventory_update_from_llsd(&ais_inventory_update_to_llsd(&folders, &items)?);
         // The `_embedded` maps are uuid-keyed and unordered; sort for comparison.
         got_folders.sort_by_key(|folder| folder.folder_id.uuid());
         got_items.sort_by_key(|item| item.item_id.uuid());
         assert_eq!(got_folders, folders);
         assert_eq!(got_items, items);
+        Ok(())
     }
 
     #[test]

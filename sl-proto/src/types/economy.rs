@@ -4,6 +4,8 @@ use sl_types::key::{AgentKey, OwnerKey};
 use sl_types::money::LindenAmount;
 use uuid::Uuid;
 
+use crate::types::LandArea;
+
 /// The agent's L$ balance and land-tier accounting, parsed from a
 /// `MoneyBalanceReply` (a reply to
 /// [`Session::request_money_balance`](crate::Session::request_money_balance), or
@@ -23,9 +25,9 @@ pub struct MoneyBalance {
     /// The current L$ balance.
     pub balance: LindenAmount,
     /// Land credit in square metres (owned-land tier accounting).
-    pub square_meters_credit: i32,
+    pub square_meters_credit: LandArea,
     /// Land committed in square metres.
-    pub square_meters_committed: i32,
+    pub square_meters_committed: LandArea,
     /// A human-readable description of the triggering transaction (empty for a
     /// plain balance poll).
     pub description: String,
@@ -104,23 +106,23 @@ pub struct EconomyData {
     /// The region's current object/prim count.
     pub object_count: i32,
     /// Price per energy unit.
-    pub price_energy_unit: i32,
+    pub price_energy_unit: LindenAmount,
     /// Price to claim an object.
-    pub price_object_claim: i32,
+    pub price_object_claim: LindenAmount,
     /// Price charged for a public object decaying.
-    pub price_public_object_decay: i32,
+    pub price_public_object_decay: LindenAmount,
     /// Price charged for deleting a public object.
-    pub price_public_object_delete: i32,
+    pub price_public_object_delete: LindenAmount,
     /// Price to claim a parcel.
-    pub price_parcel_claim: i32,
+    pub price_parcel_claim: LindenAmount,
     /// Multiplier applied to the parcel-claim price.
     pub price_parcel_claim_factor: f32,
     /// Price to upload an asset (texture, sound, animation, mesh).
-    pub price_upload: i32,
+    pub price_upload: LindenAmount,
     /// Price to rent a light source.
-    pub price_rent_light: i32,
+    pub price_rent_light: LindenAmount,
     /// Minimum L$ charged for a teleport.
-    pub teleport_min_price: i32,
+    pub teleport_min_price: LindenAmount,
     /// Exponent applied to teleport distance for pricing.
     pub teleport_price_exponent: f32,
     /// Energy-efficiency scalar.
@@ -130,7 +132,7 @@ pub struct EconomyData {
     /// Scale factor applied to object rent.
     pub price_object_scale_factor: f32,
     /// Weekly parcel-rent price.
-    pub price_parcel_rent: i32,
+    pub price_parcel_rent: LindenAmount,
     /// Price to create a group.
-    pub price_group_create: i32,
+    pub price_group_create: LindenAmount,
 }
