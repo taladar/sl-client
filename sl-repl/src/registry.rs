@@ -18,6 +18,7 @@
 use std::collections::BTreeMap;
 
 use sl_proto::AgentKey;
+use sl_proto::ChatChannel;
 use sl_proto::CircuitId;
 use sl_proto::ClassifiedKey;
 use sl_proto::EventId;
@@ -1316,7 +1317,7 @@ fn all_specs() -> Vec<CommandSpec> {
                 Ok(Command::Chat {
                     message: args.req_str(ctx, "message", 0)?,
                     chat_type,
-                    channel: args.parse_or(ctx, "channel", 2, "i32", 0)?,
+                    channel: ChatChannel(args.parse_or(ctx, "channel", 2, "i32", 0)?),
                 })
             },
         },
@@ -2204,7 +2205,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::ReplyScriptDialog {
                     object_id: args.req_object(ctx, "object_id", 0)?,
-                    chat_channel: args.req_parse(ctx, "chat_channel", 1, "i32")?,
+                    chat_channel: ChatChannel(args.req_parse(ctx, "chat_channel", 1, "i32")?),
                     button_index: args.req_parse(ctx, "button_index", 2, "i32")?,
                     button_label: args.req_str(ctx, "button_label", 3)?,
                 })
@@ -4392,10 +4393,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use sl_proto::{
-        AbuseReportType, AgentPreferences, AssetType, ChatType, CircuitId, Command, ControlFlags,
-        FriendRights, GroupKey, InventoryKey, LandStatReportType, MapItemType, MovementMode,
-        ObjectBuyItem, ObjectKey, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SaleType,
-        ScopedObjectId, ScopedParcelId, Uuid,
+        AbuseReportType, AgentPreferences, AssetType, ChatChannel, ChatType, CircuitId, Command,
+        ControlFlags, FriendRights, GroupKey, InventoryKey, LandStatReportType, MapItemType,
+        MovementMode, ObjectBuyItem, ObjectKey, RegionHandle, RegionLocalObjectId,
+        RegionLocalParcelId, SaleType, ScopedObjectId, ScopedParcelId, Uuid,
     };
 
     use super::Registry;
@@ -4474,7 +4475,7 @@ mod tests {
     fn string_and_enum_by_name_and_i32() {
         assert!(matches!(
             build(r#"chat "hi there" shout 5"#),
-            Ok(Command::Chat { message, chat_type: ChatType::Shout, channel: 5 }) if message == "hi there"
+            Ok(Command::Chat { message, chat_type: ChatType::Shout, channel: ChatChannel(5) }) if message == "hi there"
         ));
     }
 

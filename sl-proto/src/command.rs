@@ -7,10 +7,10 @@
 use crate::scoped_id::{ScopedObjectId, ScopedParcelId};
 use crate::{
     AbuseReport, AgentKey, AgentPreferences, AnyMessage, AssetType, AttachmentMode,
-    AttachmentPoint, Camera, ChatType, ClassifiedKey, ClassifiedUpdate, ClickAction, ControlFlags,
-    CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, EstateAccessDelta, EventId,
-    ExperienceKey, ExperiencePermission, ExperienceUpdate, FriendKey, FriendRights,
-    GestureActivation, GroupKey, GroupNoticeAttachment, GroupRoleEdit, GroupRoleKey,
+    AttachmentPoint, Camera, ChatChannel, ChatType, ClassifiedKey, ClassifiedUpdate, ClickAction,
+    ControlFlags, CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags,
+    EstateAccessDelta, EventId, ExperienceKey, ExperiencePermission, ExperienceUpdate, FriendKey,
+    FriendRights, GestureActivation, GroupKey, GroupNoticeAttachment, GroupRoleEdit, GroupRoleKey,
     GroupRoleMemberChange, IceCandidate, InterestsUpdate, InventoryFolderKey, InventoryItem,
     InventoryKey, InventoryOffer, InventoryType, LandSearchType, LandStatReportType, LindenAmount,
     MapItemType, Material, MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MovementMode,
@@ -40,7 +40,7 @@ pub enum Command {
         /// The chat type (whisper / normal / shout / …).
         chat_type: ChatType,
         /// The chat channel (`0` for ordinary local chat).
-        channel: i32,
+        channel: ChatChannel,
     },
     /// Broadcast a local-chat typing indicator (`true` = start, `false` = stop).
     /// Other clients see it as an [`Event::ChatTyping`](crate::Event::ChatTyping).
@@ -549,7 +549,7 @@ pub enum Command {
         /// The object that raised the dialog.
         object_id: ObjectKey,
         /// The dialog's hidden chat channel.
-        chat_channel: i32,
+        chat_channel: ChatChannel,
         /// The chosen button index.
         button_index: i32,
         /// The chosen button label (or the typed text for an `llTextBox`).

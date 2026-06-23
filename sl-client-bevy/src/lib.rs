@@ -49,8 +49,8 @@ use sl_proto::{
 pub use sl_proto::{
     ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnyMessage,
     AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, Camera,
-    CameraError, ChatAudible, ChatMessage, ChatSource, ChatSourceType, ChatType, CircuitCode,
-    CircuitId, ClassifiedInfo, ClassifiedUpdate, ClickAction, Command, ControlFlags,
+    CameraError, ChatAudible, ChatChannel, ChatMessage, ChatSource, ChatSourceType, ChatType,
+    CircuitCode, CircuitId, ClassifiedInfo, ClassifiedUpdate, ClickAction, Command, ControlFlags,
     CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic, DisconnectReason, EconomyData,
     EstateAccessDelta, EstateAccessKind, EstateInfo, ExperienceInfo, ExperiencePermission,
     ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights,

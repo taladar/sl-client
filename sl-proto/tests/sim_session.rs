@@ -11,11 +11,11 @@ mod test {
     use pretty_assertions::assert_eq;
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AlertInfo, AttachmentMode, AttachmentPoint,
-        AvatarName, AvatarPickerResult, ChatSource, ChatType, ClassifiedKey, CoarseLocation,
-        ControlFlags, DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags,
-        DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant, Event,
-        EventId, EventInfo, FollowCamProperty, FollowCamPropertyValue, GestureActivation,
-        GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
+        AvatarName, AvatarPickerResult, ChatChannel, ChatSource, ChatType, ClassifiedKey,
+        CoarseLocation, ControlFlags, DetachOrder, DirClassifiedResult, DirEventResult,
+        DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
+        EstateCovenant, Event, EventId, EventInfo, FollowCamProperty, FollowCamPropertyValue,
+        GestureActivation, GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
         GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupKey,
         GroupName, GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryKey,
         LandSearchType, LandStatItem, LandStatReportType, LoginParams, MapItem, MapItemType,
@@ -227,7 +227,7 @@ mod test {
         let (mut client, mut sim) = setup(now)?;
         drain_server(&mut sim);
 
-        client.say("hello sim", ChatType::Shout, 7, now)?;
+        client.say("hello sim", ChatType::Shout, ChatChannel(7), now)?;
         pump(&mut client, &mut sim, now)?;
 
         let events = drain_server(&mut sim);
@@ -242,7 +242,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a Chat server event")?;
-        assert_eq!(chat, ("hello sim".to_owned(), 7, ChatType::Shout));
+        assert_eq!(
+            chat,
+            ("hello sim".to_owned(), ChatChannel(7), ChatType::Shout)
+        );
         Ok(())
     }
 

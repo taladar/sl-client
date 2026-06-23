@@ -61,6 +61,7 @@ use crate::types::{
     TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
     ViewerEffectType, Wearable, WearableType,
 };
+use sl_types::chat::ChatChannel;
 use sl_types::key::{
     AgentKey, ClassifiedKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
     ParcelKey, TextureKey,
@@ -3068,7 +3069,7 @@ impl Session {
         &mut self,
         message: &str,
         chat_type: ChatType,
-        channel: i32,
+        channel: ChatChannel,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -3092,7 +3093,7 @@ impl Session {
             ChatType::StopTyping
         };
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_chat_from_viewer("", chat_type, 0, now)?;
+        circuit.send_chat_from_viewer("", chat_type, ChatChannel(0), now)?;
         Ok(())
     }
 
@@ -4708,7 +4709,7 @@ impl Session {
     pub fn reply_script_dialog(
         &mut self,
         object_id: ObjectKey,
-        chat_channel: i32,
+        chat_channel: ChatChannel,
         button_index: i32,
         button_label: &str,
         now: Instant,

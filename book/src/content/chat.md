@@ -16,8 +16,9 @@ carries:
   the typing-indicator pseudo-types (start/stop typing) and special channels
   (debug, region, owner, direct),
 - an **audibility** level (fully / barely / not audible) derived from distance,
-- the **channel** — channel `0` is what users see; scripts listen and speak on
-  other integer channels, which is how in-world devices communicate.
+- the **channel** — a typed `ChatChannel(i32)`; channel `0` is what users see;
+  scripts listen and speak on other integer channels, which is how in-world
+  devices communicate.
 
 Sending is `Command::Chat { message, chat_type, channel }`; a typing indicator
 is `Command::Typing(bool)`. Incoming chat arrives as `Event::ChatReceived(..)`,
