@@ -169,7 +169,7 @@ pub use sl_types::chat::ChatChannel;
 // Re-export the region-name and map-geometry types used by the region/map/
 // teleport reply types. `GridCoordinates` carries a region's grid index pair;
 // `RegionCoordinates` carries a region-local position (the teleport target).
-pub use sl_types::map::{GridCoordinates, RegionCoordinates, RegionName};
+pub use sl_types::map::{Distance, GridCoordinates, RegionCoordinates, RegionName};
 // Re-export the vector and rotation types used by the teleport and movement APIs.
 pub use sl_types::lsl::{Rotation, Vector};
 // Re-export the L$ amount type used by the money balance/transfer APIs.

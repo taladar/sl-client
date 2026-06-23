@@ -15,6 +15,7 @@ use crate::types::{LandArea, ParcelCategory};
 use sl_types::key::{AgentKey, ClassifiedKey, GroupKey, ParcelKey, TextureKey};
 use sl_types::map::RegionName;
 use sl_types::money::LindenAmount;
+use sl_types::search::EventId;
 use uuid::Uuid;
 
 /// The directory-query flags (`DFQ_*`), shared by every `Dir*Query` and
@@ -196,39 +197,6 @@ pub struct DirGroupResult {
     pub members: i32,
     /// The search-ranking score the dataserver assigned the match.
     pub search_order: f32,
-}
-
-/// The id of an in-world scheduled **event** in the Second Life *events
-/// directory* (Search → Events) — the numeric handle a `DirEventResult` carries
-/// and `EventInfoRequest`/`EventNotificationAddRequest` reference.
-///
-/// Unlike the UUID-based ids elsewhere this is a 32-bit integer on the wire (the
-/// reference viewer's event `U32`, *not* an `LLUUID`), so the shared
-/// `sl_types::key::EventKey` (a UUID wrapper) does not fit. It lives here as a
-/// repo-local newtype rather than a bare `u32` so an events-directory id can't be
-/// transposed with any other 32-bit field. Not to be confused with the
-/// [`Event`](crate::Event) dispatch enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub struct EventId(pub u32);
-
-impl EventId {
-    /// Builds an event-directory id from its raw `u32` wire value.
-    #[must_use]
-    pub const fn new(id: u32) -> Self {
-        Self(id)
-    }
-
-    /// Returns the raw `u32` wire value.
-    #[must_use]
-    pub const fn get(self) -> u32 {
-        self.0
-    }
-}
-
-impl core::fmt::Display for EventId {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.0)
-    }
 }
 
 /// One event matched by a `DirFindQuery` with [`DirFindFlags::EVENTS`], carried

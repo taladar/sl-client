@@ -10,7 +10,7 @@ use super::{
 use crate::GroupRoleKey;
 use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
 use crate::scoped_id::CircuitId;
-use crate::types::directory::EventId;
+use crate::types::EventId;
 use crate::types::directory::category_to_wire;
 use crate::types::{
     AssetType, AttachmentMode, AttachmentPoint, Camera, ChatType, ClassifiedCategory,
@@ -27,6 +27,7 @@ use sl_types::key::{
     AgentKey, ClassifiedKey, FriendKey, GroupKey, ObjectKey, ParcelKey, TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
+use sl_types::map::Distance;
 use sl_types::money::LindenAmount;
 use sl_wire::AbuseReport;
 use sl_wire::messages::{
@@ -236,6 +237,18 @@ use std::net::SocketAddr;
 use std::time::Instant;
 use uuid::Uuid;
 
+/// Converts a draw-distance [`Distance`] to the `f32` the `AgentUpdate` `Far`
+/// wire field carries. The conversion is the codec boundary for draw distance:
+/// a `Distance` is `f64`-backed but the wire field is an `F32`.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    reason = "the AgentUpdate Far field is an F32; draw distance is a small, in-range metre value"
+)]
+const fn far_from_distance(distance: &Distance) -> f32 {
+    distance.meters() as f32
+}
+
 impl Circuit {
     /// Creates a circuit and arms the inactivity timer. `id` is the freshly
     /// minted [`CircuitId`] for this circuit instance, used to scope the
@@ -246,7 +259,7 @@ impl Circuit {
         agent_id: AgentKey,
         session_id: Uuid,
         circuit_code: CircuitCode,
-        draw_distance: f32,
+        draw_distance: Distance,
         now: Instant,
     ) -> Self {
         Self {
@@ -643,7 +656,7 @@ impl Circuit {
                 camera_at_axis: camera.at_axis.clone(),
                 camera_left_axis: camera.left_axis.clone(),
                 camera_up_axis: camera.up_axis.clone(),
-                far: self.draw_distance,
+                far: far_from_distance(&self.draw_distance),
                 control_flags,
                 flags: 0,
             },

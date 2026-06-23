@@ -97,7 +97,8 @@ use crate::session::{
     build_map_block_reply, build_map_item_reply, build_map_layer_reply, instant_message,
     region_handshake_message,
 };
-use crate::types::directory::{EventId, category_from_wire};
+use crate::types::EventId;
+use crate::types::directory::category_from_wire;
 use crate::types::{
     AlertInfo, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatSource,
     ChatType, ClassifiedCategory, CoarseLocation, DetachOrder, DirClassifiedResult, DirEventResult,

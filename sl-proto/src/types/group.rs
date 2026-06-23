@@ -1,43 +1,10 @@
 //! Groups: membership, roles, notices, and management.
 
-use sl_types::key::{AgentKey, GroupKey, InventoryKey, TextureKey};
+use sl_types::key::{AgentKey, GroupKey, GroupRoleKey, InventoryKey, TextureKey};
 use sl_types::money::LindenAmount;
 
 use crate::types::{LandArea, LindenBalance};
 use uuid::Uuid;
-
-/// A Second Life group *role* id — the UUID that identifies one role within a
-/// group (e.g. the "Owners" role, or the nil-keyed default "Everyone" role), as
-/// distinct from the group's own [`GroupKey`]. A group carries a set of named
-/// roles, each with its own id, powers bitfield, title, and member list.
-///
-/// This is a client-only newtype (it lives in `sl-proto`, not `sl-types`):
-/// group-role ids never surface in the user-facing tooling the shared
-/// `sl-types` crate serves, only in the LLUDP group-management messages. Its
-/// shape mirrors the `sl-types` `*Key` newtypes — `from(uuid)` to construct at
-/// the codec boundary, [`uuid`](Self::uuid) to extract.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct GroupRoleKey(pub Uuid);
-
-impl GroupRoleKey {
-    /// The wrapped raw UUID.
-    #[must_use]
-    pub const fn uuid(&self) -> Uuid {
-        self.0
-    }
-}
-
-impl From<Uuid> for GroupRoleKey {
-    fn from(value: Uuid) -> Self {
-        Self(value)
-    }
-}
-
-impl std::fmt::Display for GroupRoleKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
 
 /// The agent's active group and title, parsed from `AgentDataUpdate` (pushed on
 /// login and whenever the active group changes via

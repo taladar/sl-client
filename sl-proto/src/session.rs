@@ -9,6 +9,7 @@ use crate::types::{
 };
 use sl_types::key::{AgentKey, InventoryFolderKey};
 use sl_types::lsl::Rotation;
+use sl_types::map::Distance;
 use sl_wire::CircuitCode;
 use sl_wire::ControlFlags;
 use sl_wire::RegionHandle;
@@ -44,7 +45,7 @@ const TELEPORT_TIMEOUT: Duration = Duration::from_secs(30);
 const SIT_TIMEOUT: Duration = Duration::from_secs(15);
 /// The default draw distance (metres) advertised in keep-alive `AgentUpdate`s,
 /// large enough that the simulator enables the neighbouring regions.
-const DEFAULT_DRAW_DISTANCE: f32 = 256.0;
+const DEFAULT_DRAW_DISTANCE: Distance = Distance::new(256.0);
 /// The identity (no-op) rotation: the default body/head facing.
 pub(crate) const IDENTITY_ROTATION: Rotation = Rotation {
     x: 0.0,
@@ -693,7 +694,7 @@ struct Circuit {
     /// Datagrams ready to be transmitted.
     out: VecDeque<Vec<u8>>,
     /// The draw distance (metres) advertised in keep-alive `AgentUpdate`s.
-    draw_distance: f32,
+    draw_distance: Distance,
     /// The connection timers.
     timers: Timers,
 }
@@ -749,7 +750,7 @@ pub struct Session {
     /// instance is established (never zero — zero is the "no circuit" sentinel).
     next_circuit_id: u64,
     /// The draw distance (metres) advertised in keep-alive `AgentUpdate`s.
-    draw_distance: f32,
+    draw_distance: Distance,
     /// The agent control flags advertised in keep-alive `AgentUpdate`s; the
     /// simulator moves the agent accordingly.
     controls: ControlFlags,

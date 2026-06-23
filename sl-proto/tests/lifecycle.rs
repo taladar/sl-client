@@ -13,7 +13,7 @@ mod test {
         ChatAudible, ChatChannel, ChatSource, ChatType, ClassifiedCategory, ClassifiedKey,
         ClassifiedUpdate, ClickAction, CoarseLocation, ControlFlags, CreateGroupParams, DayCycle,
         DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, DisconnectReason,
-        EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, EventId,
+        Distance, EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, EventId,
         FollowCamProperty, FriendKey, FriendRights, GestureActivation, GroupKey,
         GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
         GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate, InventoryCallbackId,
@@ -8659,7 +8659,7 @@ mod test {
         let mut session = established(now)?;
         drain(&mut session)?;
 
-        session.set_draw_distance(512.0);
+        session.set_draw_distance(Distance::new(512.0));
         session.handle_timeout(after(now, 1100)?);
         let sent = drain(&mut session)?;
         let update = sent

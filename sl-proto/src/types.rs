@@ -17,9 +17,7 @@ mod environment;
 mod event;
 mod group;
 mod inventory;
-mod land_area;
 mod map;
-mod money;
 mod name;
 mod nearby;
 mod object;
@@ -29,7 +27,6 @@ mod report;
 mod script;
 mod session;
 mod terrain;
-mod union_key;
 
 /// Build an [`OwnerKey`](sl_types::key::OwnerKey) from the wire's raw owner UUID
 /// and its accompanying group flag.
@@ -305,8 +302,8 @@ pub use appearance::{
 pub use asset::{Asset, AssetType, ImageCodec, InventoryType, Texture, TransferStatus};
 pub use avatar_profile::{
     AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,
-    ClassifiedCategory, ClassifiedInfo, ClassifiedUpdate, Friend, FriendRights, InterestsUpdate,
-    LoginAccount, PickInfo, PickUpdate, ProfileUpdate,
+    ClassifiedInfo, ClassifiedUpdate, Friend, FriendRights, InterestsUpdate, LoginAccount,
+    PickInfo, PickUpdate, ProfileUpdate,
 };
 pub use chat::{
     ChatAudible, ChatMessage, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, ImDialog,
@@ -315,8 +312,7 @@ pub use chat::{
 pub use diagnostic::Diagnostic;
 pub use directory::{
     AvatarPickerResult, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
-    DirLandResult, DirPeopleResult, DirPlaceResult, EventId, EventInfo, LandSearchType,
-    PlacesResult,
+    DirLandResult, DirPeopleResult, DirPlaceResult, EventInfo, LandSearchType, PlacesResult,
 };
 pub use economy::{EconomyData, MoneyBalance, MoneyTransaction, MoneyTransactionType};
 pub use editing::{
@@ -330,7 +326,7 @@ pub use group::{
     ActiveGroup, CreateGroupParams, GroupAccountDetails, GroupAccountDetailsEntry,
     GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
     GroupActiveProposalItem, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
-    GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
+    GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleMember,
     GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, GroupVote, GroupVoteHistoryItem,
     group_powers,
 };
@@ -338,12 +334,10 @@ pub use inventory::{
     GestureActivation, InventoryFolder, InventoryItem, NewInventoryItem, global_to_handle,
     grid_to_handle, handle_to_global, handle_to_grid,
 };
-pub use land_area::LandArea;
 pub use map::{
     EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, MapItem, MapItemType,
     MapLayer, MapRegionInfo, MapRequestFlags, NeighborInfo, RegionInfoUpdate, TelehubInfo,
 };
-pub use money::{LindenBalance, NegativeBalanceError};
 pub use name::{AvatarName, GroupName};
 pub use nearby::{
     CoarseLocation, LookAtType, PointAtType, ViewerEffect, ViewerEffectData, ViewerEffectType,
@@ -372,7 +366,16 @@ pub use session::{
     Reliability, Throttle, ThrottleBuilder, ThrottleError, Transmit,
 };
 pub use terrain::{TerrainLayerType, TerrainPatch};
-pub use union_key::{AgentOrObjectKey, InventoryItemOrFolderKey, MeshKey, SculptOrMeshKey};
+
+// Value types migrated to the shared `sl-types` crate, re-exported here so the
+// flat `crate::types::*` surface (and the in-crate `crate::types::X` references)
+// keep resolving after the move.
+pub use sl_types::key::{
+    AgentOrObjectKey, GroupRoleKey, InventoryItemOrFolderKey, MeshKey, SculptOrMeshKey,
+};
+pub use sl_types::map::LandArea;
+pub use sl_types::money::{LindenBalance, NegativeBalanceError};
+pub use sl_types::search::{ClassifiedCategory, EventId};
 
 #[cfg(test)]
 mod owner_codec_tests {

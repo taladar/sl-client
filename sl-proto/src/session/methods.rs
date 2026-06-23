@@ -39,7 +39,7 @@ use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
 use crate::error::Error;
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::terrain;
-use crate::types::directory::EventId;
+use crate::types::EventId;
 use crate::types::{
     AlertInfo, Asset, AssetType, AttachmentMode, AttachmentPoint, AvatarClassified, AvatarPick,
     AvatarPickerResult, Camera, ChatType, ClassifiedCategory, ClassifiedUpdate, ClickAction,
@@ -67,7 +67,7 @@ use sl_types::key::{
     ParcelKey, TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
-use sl_types::map::RegionCoordinates;
+use sl_types::map::{Distance, RegionCoordinates};
 use sl_types::money::LindenAmount;
 use sl_wire::{
     AbuseReport, AnyMessage, CircuitCode, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd,
@@ -205,11 +205,11 @@ impl Session {
     /// A larger value makes the simulator enable more neighbouring regions
     /// (surfaced as [`Event::NeighborDiscovered`]). Takes effect on the next
     /// keep-alive, including for the current circuit.
-    pub const fn set_draw_distance(&mut self, draw_distance: f32) {
-        self.draw_distance = draw_distance;
+    pub fn set_draw_distance(&mut self, draw_distance: Distance) {
         if let Some(circuit) = self.circuit.as_mut() {
-            circuit.draw_distance = draw_distance;
+            circuit.draw_distance = draw_distance.clone();
         }
+        self.draw_distance = draw_distance;
     }
 
     /// The current region's capability-seed URL, once login (or a teleport) has
@@ -728,7 +728,7 @@ impl Session {
             agent_id,
             session_id,
             code,
-            self.draw_distance,
+            self.draw_distance.clone(),
             now,
         );
         child.send_use_circuit_code(now)?;
@@ -784,7 +784,7 @@ impl Session {
                 agent_id,
                 session_id,
                 code,
-                self.draw_distance,
+                self.draw_distance.clone(),
                 now,
             )
         });
@@ -860,7 +860,7 @@ impl Session {
                     success.agent_id,
                     success.session_id,
                     success.circuit_code,
-                    self.draw_distance,
+                    self.draw_distance.clone(),
                     now,
                 );
                 circuit.send_use_circuit_code(now)?;

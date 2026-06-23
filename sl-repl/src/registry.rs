@@ -21,6 +21,7 @@ use sl_proto::AgentKey;
 use sl_proto::ChatChannel;
 use sl_proto::CircuitId;
 use sl_proto::ClassifiedKey;
+use sl_proto::Distance;
 use sl_proto::EventId;
 use sl_proto::ExperienceKey;
 use sl_proto::FriendKey;
@@ -2788,9 +2789,9 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "set_draw_distance",
             usage: "<metres>",
             build: |args, ctx| {
-                Ok(Command::SetDrawDistance(
-                    args.req_parse(ctx, "metres", 0, "f32")?,
-                ))
+                Ok(Command::SetDrawDistance(Distance::new(f64::from(
+                    args.req_parse::<f32>(ctx, "metres", 0, "f32")?,
+                ))))
             },
         },
         CommandSpec {
@@ -4551,7 +4552,7 @@ mod tests {
     fn f32_argument() {
         assert!(matches!(
             build("set_draw_distance 128.5"),
-            Ok(Command::SetDrawDistance(d)) if d.to_bits() == 128.5_f32.to_bits()
+            Ok(Command::SetDrawDistance(d)) if d.meters().to_bits() == f64::from(128.5_f32).to_bits()
         ));
     }
 

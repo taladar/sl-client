@@ -9,7 +9,7 @@ use crate::{
     AbuseReport, AgentKey, AgentPreferences, AnyMessage, AssetType, AttachmentMode,
     AttachmentPoint, Camera, ChatChannel, ChatType, ClassifiedCategory, ClassifiedKey,
     ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, DeRezDestination, DetachOrder,
-    DirFindFlags, EstateAccessDelta, EventId, ExperienceKey, ExperiencePermission,
+    DirFindFlags, Distance, EstateAccessDelta, EventId, ExperienceKey, ExperiencePermission,
     ExperienceUpdate, FriendKey, FriendRights, GestureActivation, GroupKey, GroupNoticeAttachment,
     GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, InterestsUpdate,
     InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandSearchType,
@@ -974,7 +974,7 @@ pub enum Command {
         description: String,
     },
     /// Set the draw distance advertised in keep-alive `AgentUpdate`s.
-    SetDrawDistance(f32),
+    SetDrawDistance(Distance),
     /// Request world-map blocks for a grid-coordinate rectangle (region
     /// indices); each region arrives as an [`Event::MapBlock`](crate::Event::MapBlock).
     RequestMapBlocks {

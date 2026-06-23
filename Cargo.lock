@@ -1785,7 +1785,6 @@ name = "sl-proto"
 version = "0.1.0"
 dependencies = [
  "pretty_assertions",
- "serde",
  "sl-types",
  "sl-wire",
  "thiserror",
@@ -1868,7 +1867,7 @@ dependencies = [
 
 [[package]]
 name = "sl-types"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "nutype",
  "percent-encoding",
