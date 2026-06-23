@@ -7,14 +7,14 @@
 //! *display names* are a separate CAPS lookup and are deliberately not conflated
 //! with these.
 
-use uuid::Uuid;
+use sl_types::key::{AgentKey, GroupKey};
 
 /// A legacy avatar name resolved from a `UUIDNameReply` — the reply to
 /// [`Session::request_avatar_names`](crate::Session::request_avatar_names).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AvatarName {
     /// The agent id that was looked up.
-    pub id: Uuid,
+    pub id: AgentKey,
     /// The agent's legacy first name.
     pub first_name: String,
     /// The agent's legacy last name. Modern single-name accounts use the
@@ -41,7 +41,7 @@ impl AvatarName {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupName {
     /// The group id that was looked up.
-    pub id: Uuid,
+    pub id: GroupKey,
     /// The group's name.
     pub name: String,
 }

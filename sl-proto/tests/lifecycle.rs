@@ -6647,10 +6647,10 @@ mod test {
             })
             .ok_or("expected an AvatarNames event")?;
         assert_eq!(names.len(), 2);
-        let alice_name = names.iter().find(|n| n.id == alice).ok_or("alice")?;
+        let alice_name = names.iter().find(|n| n.id.uuid() == alice).ok_or("alice")?;
         assert_eq!(alice_name.legacy_name(), "Alice Liddell");
         // The "Resident" placeholder last name collapses to the first name.
-        let bob_name = names.iter().find(|n| n.id == bob).ok_or("bob")?;
+        let bob_name = names.iter().find(|n| n.id.uuid() == bob).ok_or("bob")?;
         assert_eq!(bob_name.legacy_name(), "Bob");
         Ok(())
     }

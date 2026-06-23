@@ -1159,7 +1159,7 @@ impl SimSession {
                 uuid_name_block: batch
                     .iter()
                     .map(|name| UUIDNameReplyUUIDNameBlockBlock {
-                        id: name.id,
+                        id: name.id.uuid(),
                         first_name: with_nul(&name.first_name),
                         last_name: with_nul(&name.last_name),
                     })
@@ -1187,7 +1187,7 @@ impl SimSession {
                 uuid_name_block: batch
                     .iter()
                     .map(|name| UUIDGroupNameReplyUUIDNameBlockBlock {
-                        id: name.id,
+                        id: name.id.uuid(),
                         group_name: with_nul(&name.name),
                     })
                     .collect(),

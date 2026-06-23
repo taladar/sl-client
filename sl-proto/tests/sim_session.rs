@@ -2655,7 +2655,7 @@ mod test {
         // The simulator answers; the client decodes the names.
         sim.send_avatar_names(
             &[AvatarName {
-                id: alice,
+                id: alice.into(),
                 first_name: "Alice".to_owned(),
                 last_name: "Liddell".to_owned(),
             }],
@@ -2663,7 +2663,7 @@ mod test {
         )?;
         sim.send_group_names(
             &[GroupName {
-                id: club,
+                id: club.into(),
                 name: "The Club".to_owned(),
             }],
             now,
@@ -2674,7 +2674,7 @@ mod test {
         let avatar = client_events
             .iter()
             .find_map(|event| match event {
-                Event::AvatarNames(names) => names.iter().find(|name| name.id == alice),
+                Event::AvatarNames(names) => names.iter().find(|name| name.id.uuid() == alice),
                 _ => None,
             })
             .ok_or("expected the avatar name on the client")?;
@@ -2682,7 +2682,7 @@ mod test {
         let group = client_events
             .iter()
             .find_map(|event| match event {
-                Event::GroupNames(names) => names.iter().find(|name| name.id == club),
+                Event::GroupNames(names) => names.iter().find(|name| name.id.uuid() == club),
                 _ => None,
             })
             .ok_or("expected the group name on the client")?;
