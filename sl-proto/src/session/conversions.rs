@@ -5,19 +5,18 @@ use crate::GroupRoleKey;
 use crate::appearance;
 use crate::types::{
     ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment, AvatarGroupMembership,
-    AvatarInterests, AvatarName, AvatarProperties, ChatAudible, ChatMessage, ChatSourceType,
-    ChatType, ClassifiedInfo, DayCycle, DayCycleFrame, EconomyData, EnvironmentSettings,
-    EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupAccountDetails,
-    GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
-    GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
-    GroupNotice, GroupProfile, GroupRole, GroupTitle, GroupVote, GroupVoteHistoryItem, ImDialog,
-    InstantMessage, InventoryFolder, InventoryItem, LandingType, MapItem, MapItemType, MapLayer,
-    MapRegionInfo, MapRequestFlags, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags,
-    MuteType, NeighborInfo, Object, ObjectProperties, ParcelCategory, ParcelInfo,
-    ParcelRequestResult, ParcelStatus, PickInfo, PlayingAnimation, PrimShapeParams, ProductType,
-    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, SkySettings, WaterSettings, avatar_texture,
-    handle_to_grid,
+    AvatarInterests, AvatarName, AvatarProperties, ChatAudible, ChatMessage, ChatSource, ChatType,
+    ClassifiedInfo, DayCycle, DayCycleFrame, EconomyData, EnvironmentSettings, EstateAccessKind,
+    EstateInfo, Event, Friend, FriendRights, GroupAccountDetails, GroupAccountDetailsEntry,
+    GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
+    GroupActiveProposalItem, GroupMember, GroupMembership, GroupName, GroupNotice, GroupProfile,
+    GroupRole, GroupTitle, GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage,
+    InventoryFolder, InventoryItem, LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo,
+    MapRequestFlags, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType,
+    NeighborInfo, Object, ObjectProperties, ParcelCategory, ParcelInfo, ParcelRequestResult,
+    ParcelStatus, PickInfo, PlayingAnimation, PrimShapeParams, ProductType, RegionChatSettings,
+    RegionCombatSettings, RegionIdentity, RegionLimits, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, SkySettings, WaterSettings, avatar_texture, handle_to_grid,
 };
 use sl_types::key::AgentKey;
 use sl_types::key::ClassifiedKey;
@@ -715,9 +714,8 @@ pub(crate) fn parcel_info(msg: &ParcelProperties) -> ParcelInfo {
 pub(crate) fn chat_message(data: &ChatFromSimulatorChatDataBlock) -> ChatMessage {
     ChatMessage {
         from_name: trimmed_string(&data.from_name),
-        source_id: data.source_id,
+        source: ChatSource::from_wire(data.source_type, data.source_id),
         owner_id: data.owner_id,
-        source_type: ChatSourceType::from_u8(data.source_type),
         chat_type: ChatType::from_u8(data.chat_type),
         audible: ChatAudible::from_u8(data.audible),
         position: (data.position.x, data.position.y, data.position.z),

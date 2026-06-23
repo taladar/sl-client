@@ -181,29 +181,36 @@ impl SaleType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DeRezDestination {
-    /// Save into agent inventory, leaving a copy in world (`DRD_SAVE_INTO_AGENT_INVENTORY`).
-    SaveIntoAgentInventory,
-    /// Acquire into agent inventory, trying to leave a copy (`DRD_ACQUIRE_TO_AGENT_INVENTORY`).
-    AcquireToAgentInventory,
+    /// Save into agent inventory, leaving a copy in world
+    /// (`DRD_SAVE_INTO_AGENT_INVENTORY`); the id is the existing inventory item
+    /// to save over.
+    SaveIntoAgentInventory(InventoryKey),
+    /// Acquire into agent inventory, trying to leave a copy
+    /// (`DRD_ACQUIRE_TO_AGENT_INVENTORY`); the id is the destination folder.
+    AcquireToAgentInventory(InventoryFolderKey),
     /// Save into a task's (prim's) inventory (`DRD_SAVE_INTO_TASK_INVENTORY`); the
-    /// destination id is the target task's id.
-    SaveIntoTaskInventory,
-    /// Wear as an attachment (`DRD_ATTACHMENT`).
+    /// id is the target task's (object's) id.
+    SaveIntoTaskInventory(ObjectKey),
+    /// Wear as an attachment (`DRD_ATTACHMENT`); carries no destination id.
     Attachment,
-    /// Take into agent inventory, deleting from the world (`DRD_TAKE_INTO_AGENT_INVENTORY`);
-    /// the destination id is the inventory folder.
-    TakeIntoAgentInventory,
-    /// Force take a copy to the god inventory (`DRD_FORCE_TO_GOD_INVENTORY`).
-    ForceToGodInventory,
-    /// Delete to the trash (`DRD_TRASH`); the destination id is the trash folder.
-    Trash,
-    /// Detach an attachment to inventory (`DRD_ATTACHMENT_TO_INV`).
+    /// Take into agent inventory, deleting from the world
+    /// (`DRD_TAKE_INTO_AGENT_INVENTORY`); the id is the destination folder.
+    TakeIntoAgentInventory(InventoryFolderKey),
+    /// Force take a copy to the god inventory (`DRD_FORCE_TO_GOD_INVENTORY`); the
+    /// id is the destination folder.
+    ForceToGodInventory(InventoryFolderKey),
+    /// Delete to the trash (`DRD_TRASH`); the id is the trash folder.
+    Trash(InventoryFolderKey),
+    /// Detach an attachment to inventory (`DRD_ATTACHMENT_TO_INV`); carries no
+    /// destination id.
     AttachmentToInventory,
-    /// An existing attachment (`DRD_ATTACHMENT_EXISTS`).
+    /// An existing attachment (`DRD_ATTACHMENT_EXISTS`); carries no destination id.
     AttachmentExists,
-    /// Return to the owner's inventory (`DRD_RETURN_TO_OWNER`).
+    /// Return to the owner's inventory (`DRD_RETURN_TO_OWNER`); carries no
+    /// destination id.
     ReturnToOwner,
-    /// Return a deeded object to the last owner's inventory (`DRD_RETURN_TO_LAST_OWNER`).
+    /// Return a deeded object to the last owner's inventory
+    /// (`DRD_RETURN_TO_LAST_OWNER`); carries no destination id.
     ReturnToLastOwner,
 }
 
@@ -212,17 +219,37 @@ impl DeRezDestination {
     #[must_use]
     pub const fn to_code(self) -> u8 {
         match self {
-            Self::SaveIntoAgentInventory => 0,
-            Self::AcquireToAgentInventory => 1,
-            Self::SaveIntoTaskInventory => 2,
+            Self::SaveIntoAgentInventory(_) => 0,
+            Self::AcquireToAgentInventory(_) => 1,
+            Self::SaveIntoTaskInventory(_) => 2,
             Self::Attachment => 3,
-            Self::TakeIntoAgentInventory => 4,
-            Self::ForceToGodInventory => 5,
-            Self::Trash => 6,
+            Self::TakeIntoAgentInventory(_) => 4,
+            Self::ForceToGodInventory(_) => 5,
+            Self::Trash(_) => 6,
             Self::AttachmentToInventory => 7,
             Self::AttachmentExists => 8,
             Self::ReturnToOwner => 9,
             Self::ReturnToLastOwner => 10,
+        }
+    }
+
+    /// The `DestinationID` wire UUID for this destination — the folder, item, or
+    /// task id the destination carries, or [`Uuid::nil`] for the destinations
+    /// that take no id.
+    #[must_use]
+    pub const fn destination_id(self) -> Uuid {
+        match self {
+            Self::SaveIntoAgentInventory(item) => item.uuid(),
+            Self::AcquireToAgentInventory(folder)
+            | Self::TakeIntoAgentInventory(folder)
+            | Self::ForceToGodInventory(folder)
+            | Self::Trash(folder) => folder.uuid(),
+            Self::SaveIntoTaskInventory(task) => task.uuid(),
+            Self::Attachment
+            | Self::AttachmentToInventory
+            | Self::AttachmentExists
+            | Self::ReturnToOwner
+            | Self::ReturnToLastOwner => Uuid::nil(),
         }
     }
 }
@@ -693,4 +720,46 @@ pub struct RestoreItem {
     pub creation_date: i32,
     /// The item's CRC.
     pub crc: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+    use sl_types::key::{InventoryFolderKey, InventoryKey, ObjectKey};
+    use uuid::Uuid;
+
+    use super::DeRezDestination;
+
+    /// Each [`DeRezDestination`] reports the `DRD_*` wire byte and surfaces the
+    /// folder/item/task id it carries (or [`Uuid::nil`] for the id-less ones).
+    #[test]
+    fn derez_destination_codes_and_ids() {
+        let id = Uuid::from_u128(0xDE_5717);
+        assert_eq!(
+            DeRezDestination::SaveIntoAgentInventory(InventoryKey::from(id)).to_code(),
+            0
+        );
+        assert_eq!(
+            DeRezDestination::SaveIntoAgentInventory(InventoryKey::from(id)).destination_id(),
+            id
+        );
+        assert_eq!(
+            DeRezDestination::SaveIntoTaskInventory(ObjectKey::from(id)).to_code(),
+            2
+        );
+        assert_eq!(
+            DeRezDestination::SaveIntoTaskInventory(ObjectKey::from(id)).destination_id(),
+            id
+        );
+        let folder = DeRezDestination::Trash(InventoryFolderKey::from(id));
+        assert_eq!(folder.to_code(), 6);
+        assert_eq!(folder.destination_id(), id);
+        // The id-less destinations report a nil id.
+        assert_eq!(DeRezDestination::ReturnToOwner.to_code(), 9);
+        assert_eq!(
+            DeRezDestination::ReturnToOwner.destination_id(),
+            Uuid::nil()
+        );
+        assert_eq!(DeRezDestination::Attachment.destination_id(), Uuid::nil());
+    }
 }

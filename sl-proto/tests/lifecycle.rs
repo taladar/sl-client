@@ -10,25 +10,26 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AssetType, AttachmentMode, AttachmentPoint, Camera,
-        ChatAudible, ChatSourceType, ChatType, ClassifiedKey, ClassifiedUpdate, ClickAction,
+        ChatAudible, ChatSource, ChatType, ClassifiedKey, ClassifiedUpdate, ClickAction,
         CoarseLocation, ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination,
         DetachOrder, Diagnostic, DirFindFlags, DisconnectReason, EnvironmentSettings,
         EstateAccessDelta, EstateAccessKind, Event, EventId, FollowCamProperty, FriendKey,
         FriendRights, GestureActivation, GroupKey, GroupNoticeAttachment, GroupRoleChange,
         GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog,
         ImageCodec, InterestsUpdate, InventoryCallbackId, InventoryFolderKey, InventoryItem,
-        InventoryKey, LandingType, LindenAmount, LoginAccount, LoginParams, LookAtType,
-        MapItemType, Material, Maturity, MeanCollisionType, MoneyTransactionType, MovementMode,
-        MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
-        ObjectKey, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-        ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
-        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5,
-        PickUpdate, PointAtType, Postcard, PrimShape, ProductType, ProfileUpdate,
-        ReflectionProbeFlags, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem,
-        RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ScriptControlAction,
-        ScriptPermissions, Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType,
-        TextureKey, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, WaterSettings, WearableType, avatar_texture, group_powers, pcode,
+        InventoryItemOrFolderKey, InventoryKey, LandingType, LindenAmount, LoginAccount,
+        LoginParams, LookAtType, MapItemType, Material, Maturity, MeanCollisionType, MeshKey,
+        MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
+        ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform, ParcelAccessEntry,
+        ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey,
+        ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
+        PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
+        ProductType, ProfileUpdate, ReflectionProbeFlags, RegionHandle, RegionInfoUpdate,
+        Reliability, RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId,
+        ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session, SkySettings, SoundFlags,
+        TeleportFlags, TerrainLayerType, TextureKey, Throttle, TransferStatus, Transmit,
+        ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
+        avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -623,9 +624,11 @@ mod test {
         // Trailing NUL padding is stripped from both strings.
         assert_eq!(received.from_name, "Resident Tester");
         assert_eq!(received.message, "hello world");
-        assert_eq!(received.source_id, uuid::Uuid::from_u128(0x42));
+        assert_eq!(
+            received.source,
+            ChatSource::Agent(AgentKey::from(uuid::Uuid::from_u128(0x42)))
+        );
         assert_eq!(received.owner_id, uuid::Uuid::from_u128(0x43));
-        assert_eq!(received.source_type, ChatSourceType::Agent);
         assert_eq!(received.chat_type, ChatType::Normal);
         assert_eq!(received.audible, ChatAudible::Fully);
         assert_eq!(received.position, (10.0, 20.0, 30.0));
@@ -9426,7 +9429,12 @@ mod test {
         assert!((light.radius - 5.0).abs() < f32::EPSILON);
 
         let sculpt = extra.sculpt.ok_or("expected sculpt")?;
-        assert_eq!(sculpt.texture, sculpt_tex);
+        // The sculpt-type byte is `0x05` (`LL_SCULPT_TYPE_MESH`), so the id is
+        // typed as a mesh asset.
+        assert_eq!(
+            sculpt.texture,
+            SculptOrMeshKey::Mesh(MeshKey::from(sculpt_tex))
+        );
         assert_eq!(sculpt.sculpt_type, 0x05);
 
         assert_eq!(
@@ -10632,8 +10640,7 @@ mod test {
                 circuit,
                 sl_proto::RegionLocalObjectId(21),
             )],
-            DeRezDestination::TakeIntoAgentInventory,
-            folder,
+            DeRezDestination::TakeIntoAgentInventory(InventoryFolderKey::from(folder)),
             uuid::Uuid::from_u128(0x7),
             GroupKey::from(uuid::Uuid::nil()),
             now,
@@ -11689,7 +11696,10 @@ mod test {
             .inventory_offer()
             .ok_or("expected a decoded inventory offer")?;
         assert_eq!(offer.asset_type, AssetType::Notecard);
-        assert_eq!(offer.item_id, item);
+        assert_eq!(
+            offer.item_id,
+            InventoryItemOrFolderKey::Item(InventoryKey::from(item))
+        );
         assert_eq!(offer.transaction_id, tx);
         assert_eq!(offer.from_agent_id, AgentKey::from(from));
         assert!(!offer.from_task);

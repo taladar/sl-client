@@ -3949,7 +3949,6 @@ impl Circuit {
         &mut self,
         local_ids: &[RegionLocalObjectId],
         destination: DeRezDestination,
-        destination_id: Uuid,
         transaction_id: Uuid,
         group_id: GroupKey,
         now: Instant,
@@ -3962,7 +3961,7 @@ impl Circuit {
             agent_block: DeRezObjectAgentBlockBlock {
                 group_id: group_id.uuid(),
                 destination: destination.to_code(),
-                destination_id,
+                destination_id: destination.destination_id(),
                 transaction_id,
                 // The whole selection fits in one packet.
                 packet_count: 1,

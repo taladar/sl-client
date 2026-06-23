@@ -26,7 +26,9 @@ use sl_proto::FriendKey;
 use sl_proto::GroupKey;
 use sl_proto::GroupRoleKey;
 use sl_proto::InventoryFolderKey;
+use sl_proto::InventoryItemOrFolderKey;
 use sl_proto::InventoryKey;
+use sl_proto::ObjectKey;
 use sl_proto::OwnerKey;
 use sl_proto::ParcelKey;
 use sl_proto::TextureKey;
@@ -405,16 +407,30 @@ fn parse_mute_type(field: &str, value: &str) -> Result<MuteType, ReplError> {
     })
 }
 
-/// Parse a [`DeRezDestination`] from its name.
-fn parse_derez_destination(field: &str, value: &str) -> Result<DeRezDestination, ReplError> {
+/// Parse a [`DeRezDestination`] from its name and the destination id `id` (a
+/// folder, item, or task id, depending on the destination; ignored by the
+/// destinations that take no id).
+fn parse_derez_destination(
+    field: &str,
+    value: &str,
+    id: Uuid,
+) -> Result<DeRezDestination, ReplError> {
     Ok(match norm(value).as_str() {
-        "saveintoagentinventory" => DeRezDestination::SaveIntoAgentInventory,
-        "acquiretoagentinventory" => DeRezDestination::AcquireToAgentInventory,
-        "saveintotaskinventory" => DeRezDestination::SaveIntoTaskInventory,
+        "saveintoagentinventory" => {
+            DeRezDestination::SaveIntoAgentInventory(InventoryKey::from(id))
+        }
+        "acquiretoagentinventory" => {
+            DeRezDestination::AcquireToAgentInventory(InventoryFolderKey::from(id))
+        }
+        "saveintotaskinventory" => DeRezDestination::SaveIntoTaskInventory(ObjectKey::from(id)),
         "attachment" => DeRezDestination::Attachment,
-        "takeintoagentinventory" | "take" => DeRezDestination::TakeIntoAgentInventory,
-        "forcetogodinventory" => DeRezDestination::ForceToGodInventory,
-        "trash" => DeRezDestination::Trash,
+        "takeintoagentinventory" | "take" => {
+            DeRezDestination::TakeIntoAgentInventory(InventoryFolderKey::from(id))
+        }
+        "forcetogodinventory" => {
+            DeRezDestination::ForceToGodInventory(InventoryFolderKey::from(id))
+        }
+        "trash" => DeRezDestination::Trash(InventoryFolderKey::from(id)),
         "attachmenttoinventory" => DeRezDestination::AttachmentToInventory,
         "attachmentexists" => DeRezDestination::AttachmentExists,
         "returntoowner" | "return" => DeRezDestination::ReturnToOwner,
@@ -1227,9 +1243,17 @@ fn build_experience_update(
 
 /// Build an [`InventoryOffer`] from keyword fields.
 fn build_inventory_offer(args: &Args, ctx: &dyn ReplContext) -> Result<InventoryOffer, ReplError> {
+    let asset_type = enum_arg(args, ctx, "asset_type", 0, parse_asset_type)?;
+    let id = args.req_uuid(ctx, "item_id", 1)?;
+    // A folder offer types the id as a folder; any other asset class as an item.
+    let item_id = if matches!(asset_type, AssetType::Folder) {
+        InventoryItemOrFolderKey::Folder(InventoryFolderKey::from(id))
+    } else {
+        InventoryItemOrFolderKey::Item(InventoryKey::from(id))
+    };
     Ok(InventoryOffer {
-        asset_type: enum_arg(args, ctx, "asset_type", 0, parse_asset_type)?,
-        item_id: args.req_uuid(ctx, "item_id", 1)?,
+        asset_type,
+        item_id,
         transaction_id: args.uuid_or_nil(ctx, "transaction_id", 2)?,
         from_agent_id: AgentKey::from(args.uuid_or_nil(ctx, "from_agent_id", 3)?),
         from_task: args.bool_or(ctx, "from_task", 4, false)?,
@@ -2949,8 +2973,11 @@ fn all_specs() -> Vec<CommandSpec> {
                         ctx,
                         args.vec_parse::<u32>(ctx, "local_ids", 0, "u32")?,
                     )?,
-                    destination: enum_arg(args, ctx, "destination", 1, parse_derez_destination)?,
-                    destination_id: args.uuid_or_nil(ctx, "destination_id", 2)?,
+                    destination: {
+                        let id = args.uuid_or_nil(ctx, "destination_id", 2)?;
+                        let value = args.req_str(ctx, "destination", 1)?;
+                        parse_derez_destination("destination", &value, id)?
+                    },
                     transaction_id: args.uuid_or_nil(ctx, "transaction_id", 3)?,
                     group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 4)?),
                 })

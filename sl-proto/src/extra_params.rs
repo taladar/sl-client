@@ -15,9 +15,19 @@ use sl_types::lsl::Vector;
 use sl_wire::{Reader, ReflectionProbeFlags, Writer};
 
 use crate::types::{
-    ExtendedMesh, FlexibleData, LightData, LightImage, ObjectExtraParams, ReflectionProbe,
-    RenderMaterialRef, SculptData,
+    ExtendedMesh, FlexibleData, LightData, LightImage, MeshKey, ObjectExtraParams, ReflectionProbe,
+    RenderMaterialRef, SculptData, SculptOrMeshKey,
 };
+
+/// The low-bit mask of an `LLSculptParams` sculpt-type byte that selects the
+/// shape kind (`LL_SCULPT_TYPE_MASK`); the remaining high bits carry
+/// invert/mirror/animesh flags.
+const LL_SCULPT_TYPE_MASK: u8 = 0x07;
+
+/// The sculpt-type value (within [`LL_SCULPT_TYPE_MASK`]) meaning the prim's
+/// shape comes from a mesh asset rather than a sculpt texture
+/// (`LL_SCULPT_TYPE_MESH`).
+const LL_SCULPT_TYPE_MESH: u8 = 5;
 
 /// A single `ExtraParams` parameter's `u16` type code (Linden's `LLNetworkData`
 /// subtype tag, the leading `u16` of each container entry). Unlike a bitfield
@@ -247,7 +257,7 @@ fn encode_light(data: &LightData) -> Vec<u8> {
 /// inverse of [`decode_sculpt`].
 fn encode_sculpt(data: &SculptData) -> Vec<u8> {
     let mut writer = Writer::new();
-    writer.put_uuid(data.texture);
+    writer.put_uuid(data.texture.uuid());
     writer.put_u8(data.sculpt_type);
     writer.into_bytes()
 }
@@ -346,6 +356,13 @@ fn decode_light(reader: &mut Reader<'_>) -> Option<LightData> {
 fn decode_sculpt(reader: &mut Reader<'_>) -> Option<SculptData> {
     let texture = reader.uuid().ok()?;
     let sculpt_type = reader.u8().ok()?;
+    // The low bits of the type byte select the shape kind: a mesh asset when
+    // they equal `LL_SCULPT_TYPE_MESH`, a sculpt texture otherwise.
+    let texture = if sculpt_type & LL_SCULPT_TYPE_MASK == LL_SCULPT_TYPE_MESH {
+        SculptOrMeshKey::Mesh(MeshKey::from(texture))
+    } else {
+        SculptOrMeshKey::Sculpt(TextureKey::from(texture))
+    };
     Some(SculptData {
         texture,
         sculpt_type,
@@ -403,12 +420,12 @@ mod encode_tests {
     use sl_types::lsl::Vector;
     use uuid::Uuid;
 
-    use sl_wire::ReflectionProbeFlags;
+    use sl_wire::{Reader, ReflectionProbeFlags};
 
     use super::{decode_extra_params, encode_extra_params};
     use crate::types::{
-        ExtendedMesh, FlexibleData, LightData, LightImage, ObjectExtraParams, ReflectionProbe,
-        RenderMaterialRef, SculptData,
+        ExtendedMesh, FlexibleData, LightData, LightImage, MeshKey, ObjectExtraParams,
+        ReflectionProbe, RenderMaterialRef, SculptData, SculptOrMeshKey,
     };
 
     /// A fully-populated [`ObjectExtraParams`] whose floating-point fields are in
@@ -438,7 +455,9 @@ mod encode_tests {
                 falloff: 1.0,
             }),
             sculpt: Some(SculptData {
-                texture: Uuid::from_u128(0x1111_2222_3333_4444_5555_6666_7777_8888),
+                texture: SculptOrMeshKey::Mesh(MeshKey::from(Uuid::from_u128(
+                    0x1111_2222_3333_4444_5555_6666_7777_8888,
+                ))),
                 sculpt_type: 5,
             }),
             light_image: Some(LightImage {
@@ -530,6 +549,34 @@ mod encode_tests {
             Some(decoded.render_material.as_slice()),
             params.render_material.get(..14)
         );
+    }
+
+    /// `decode_sculpt` types the id by the low bits of the sculpt-type byte: a
+    /// `LL_SCULPT_TYPE_MESH` (incl. the high invert/mirror flag bits) is a mesh
+    /// asset, any other shape kind a sculpt texture. `encode_sculpt` writes the
+    /// id and type byte back unchanged.
+    #[test]
+    fn sculpt_type_byte_discriminates_mesh_from_texture() -> Result<(), String> {
+        let raw = Uuid::from_u128(0x5C01_7E84);
+        let block = |sculpt_type: u8| {
+            let mut bytes = raw.as_bytes().to_vec();
+            bytes.push(sculpt_type);
+            bytes
+        };
+        // Type 3 (`PLANE`) → a sculpt texture.
+        let sculpt = super::decode_sculpt(&mut Reader::new(&block(3)))
+            .ok_or("expected to decode a sculpt block")?;
+        assert_eq!(
+            sculpt.texture,
+            SculptOrMeshKey::Sculpt(TextureKey::from(raw))
+        );
+        assert_eq!(super::encode_sculpt(&sculpt), block(3));
+        // Type 5 (`MESH`) with the invert flag (0x40) set → a mesh asset.
+        let mesh = super::decode_sculpt(&mut Reader::new(&block(0x45)))
+            .ok_or("expected to decode a mesh block")?;
+        assert_eq!(mesh.texture, SculptOrMeshKey::Mesh(MeshKey::from(raw)));
+        assert_eq!(super::encode_sculpt(&mesh), block(0x45));
+        Ok(())
     }
 }
 

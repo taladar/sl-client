@@ -1102,10 +1102,9 @@ pub enum Command {
     DerezObjects {
         /// The region-local ids to derez.
         local_ids: Vec<ScopedObjectId>,
-        /// Where the objects should go.
+        /// Where the objects should go — the destination carries its own folder,
+        /// item, or task id where applicable.
         destination: DeRezDestination,
-        /// The destination folder/task id (meaning depends on `destination`).
-        destination_id: Uuid,
         /// A caller-chosen id correlating the resulting inventory update.
         transaction_id: Uuid,
         /// The active group ([`Uuid::nil`] for none).

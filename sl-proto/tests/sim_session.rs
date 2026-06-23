@@ -11,22 +11,23 @@ mod test {
     use pretty_assertions::assert_eq;
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AlertInfo, AttachmentMode, AttachmentPoint,
-        AvatarName, AvatarPickerResult, ChatType, ClassifiedKey, CoarseLocation, ControlFlags,
-        DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
-        DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventId, EventInfo,
-        FollowCamProperty, FollowCamPropertyValue, GestureActivation, GroupAccountDetails,
-        GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
-        GroupAccountTransactions, GroupActiveProposalItem, GroupKey, GroupName, GroupVote,
-        GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryKey, LandSearchType,
-        LandStatItem, LandStatReportType, LoginParams, MapItem, MapItemType, MapLayer,
-        MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType, MovementMode,
-        NotecardRez, ObjectBuyItem, ObjectKey, ObjectPropertiesFamily, ParcelCategory,
-        ParcelDetails, ParcelKey, ParcelObjectOwner, ParcelReturnType, Permissions5, PingId,
-        PlacesResult, PointAtType, Postcard, ProductType, RegionHandle, RegionIdentity,
-        RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment, SaleType,
-        ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ServerEvent, Session,
-        SimSession, TelehubInfo, TextureKey, Throttle, Transmit, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
+        AvatarName, AvatarPickerResult, ChatSource, ChatType, ClassifiedKey, CoarseLocation,
+        ControlFlags, DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags,
+        DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant, Event,
+        EventId, EventInfo, FollowCamProperty, FollowCamPropertyValue, GestureActivation,
+        GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
+        GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupKey,
+        GroupName, GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryKey,
+        LandSearchType, LandStatItem, LandStatReportType, LoginParams, MapItem, MapItemType,
+        MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
+        MovementMode, NotecardRez, ObjectBuyItem, ObjectKey, ObjectPropertiesFamily,
+        ParcelCategory, ParcelDetails, ParcelKey, ParcelObjectOwner, ParcelReturnType,
+        Permissions5, PingId, PlacesResult, PointAtType, Postcard, ProductType, RegionHandle,
+        RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment,
+        SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ServerEvent,
+        Session, SimSession, TelehubInfo, TextureKey, Throttle, Transmit, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
+        parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -2026,9 +2027,8 @@ mod test {
 
         sim.send_chat_from_simulator(
             "Region",
+            ChatSource::System,
             uuid::Uuid::nil(),
-            uuid::Uuid::nil(),
-            0,
             ChatType::Normal,
             1,
             sl_types::lsl::Vector {

@@ -27,6 +27,7 @@ mod report;
 mod script;
 mod session;
 mod terrain;
+mod union_key;
 
 /// Build an [`OwnerKey`](sl_types::key::OwnerKey) from the wire's raw owner UUID
 /// and its accompanying group flag.
@@ -121,7 +122,8 @@ pub use avatar_profile::{
     PickInfo, PickUpdate, ProfileUpdate,
 };
 pub use chat::{
-    ChatAudible, ChatMessage, ChatSourceType, ChatType, ImDialog, InstantMessage, InventoryOffer,
+    ChatAudible, ChatMessage, ChatSource, ChatSourceType, ChatType, ImDialog, InstantMessage,
+    InventoryOffer,
 };
 pub use diagnostic::Diagnostic;
 pub use directory::{
@@ -181,6 +183,7 @@ pub use session::{
     Reliability, Throttle, ThrottleBuilder, ThrottleError, Transmit,
 };
 pub use terrain::{TerrainLayerType, TerrainPatch};
+pub use union_key::{AgentOrObjectKey, InventoryItemOrFolderKey, MeshKey, SculptOrMeshKey};
 
 #[cfg(test)]
 mod owner_codec_tests {

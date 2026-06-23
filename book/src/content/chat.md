@@ -71,7 +71,11 @@ over UDP.
 >
 > - Chat/IM types are in `sl-proto/src/types/chat.rs`: `ChatMessage`,
 >   `ChatType`, `ChatAudible`, `ChatSourceType`, `InstantMessage`, `ImDialog`,
->   and `InventoryOffer` (decoded from the IM binary bucket).
+>   and `InventoryOffer` (decoded from the IM binary bucket). A `ChatMessage`
+>   carries its speaker as a typed `ChatSource` (system / agent / object /
+>   unknown), folding the wire `SourceID` + `SourceType`; an `InventoryOffer`'s
+>   `item_id` is a typed `InventoryItemOrFolderKey` (a folder offer is a folder
+>   id, otherwise an item id).
 > - Commands (`Chat`, `Typing`, `InstantMessage`, `ImTyping`,
 >   `StartGroupSession`, `SendGroupMessage`, `LeaveGroupSession`,
 >   `StartConference`, `SendConferenceMessage`, `LeaveConference`,

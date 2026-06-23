@@ -7332,8 +7332,8 @@ impl Session {
     }
 
     /// Derezzes the objects `local_ids` (a `DeRezObject`) to `destination` (take
-    /// to inventory, return, trash, …). `destination_id` is the target folder or
-    /// task id (its meaning depends on `destination`); `transaction_id` is a
+    /// to inventory, return, trash, …). The `destination` carries its own target
+    /// folder, item, or task id where one applies; `transaction_id` is a
     /// caller-chosen id correlating any resulting inventory update; `group_id` is
     /// the active group (use [`Uuid::nil`] for none).
     ///
@@ -7345,7 +7345,6 @@ impl Session {
         &mut self,
         local_ids: &[ScopedObjectId],
         destination: DeRezDestination,
-        destination_id: Uuid,
         transaction_id: Uuid,
         group_id: GroupKey,
         now: Instant,
@@ -7354,14 +7353,7 @@ impl Session {
             return Ok(());
         };
         let circuit = self.circuit_for_scope(scope)?;
-        circuit.send_derez_object(
-            &local_ids,
-            destination,
-            destination_id,
-            transaction_id,
-            group_id,
-            now,
-        )?;
+        circuit.send_derez_object(&local_ids, destination, transaction_id, group_id, now)?;
         Ok(())
     }
 

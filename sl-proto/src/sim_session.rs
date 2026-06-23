@@ -98,9 +98,9 @@ use crate::session::{
 };
 use crate::types::directory::{EventId, category_from_wire};
 use crate::types::{
-    AlertInfo, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatType,
-    CoarseLocation, DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
-    DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant, EventInfo,
+    AlertInfo, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatSource,
+    ChatType, CoarseLocation, DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags,
+    DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant, EventInfo,
     FollowCamPropertyValue, GestureActivation, GroupAccountDetails, GroupAccountSummary,
     GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem,
     InstantMessage, LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType,
@@ -1012,9 +1012,8 @@ impl SimSession {
     pub fn send_chat_from_simulator(
         &mut self,
         from_name: &str,
-        source_id: Uuid,
+        source: ChatSource,
         owner_id: Uuid,
-        source_type: u8,
         chat_type: ChatType,
         audible: u8,
         position: Vector,
@@ -1027,9 +1026,9 @@ impl SimSession {
         let message = AnyMessage::ChatFromSimulator(ChatFromSimulator {
             chat_data: ChatFromSimulatorChatDataBlock {
                 from_name: with_nul(from_name),
-                source_id,
+                source_id: source.source_id(),
                 owner_id,
-                source_type,
+                source_type: source.source_type_byte(),
                 chat_type: chat_type.to_u8(),
                 audible,
                 position,
