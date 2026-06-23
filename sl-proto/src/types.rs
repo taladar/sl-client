@@ -303,7 +303,7 @@ pub use asset::{Asset, AssetType, ImageCodec, InventoryType, Texture, TransferSt
 pub use avatar_profile::{
     AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,
     ClassifiedInfo, ClassifiedUpdate, Friend, FriendRights, InterestsUpdate, LoginAccount,
-    PickInfo, PickUpdate, ProfileUpdate,
+    PickInfo, PickKey, PickUpdate, ProfileUpdate,
 };
 pub use chat::{
     ChatAudible, ChatMessage, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, ImDialog,
@@ -326,9 +326,9 @@ pub use group::{
     ActiveGroup, CreateGroupParams, GroupAccountDetails, GroupAccountDetailsEntry,
     GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
     GroupActiveProposalItem, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
-    GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleMember,
+    GroupNoticeKey, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleMember,
     GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, GroupVote, GroupVoteHistoryItem,
-    group_powers,
+    ProposalCandidateId, ProposalVoteId, group_powers,
 };
 pub use inventory::{
     GestureActivation, InventoryFolder, InventoryItem, NewInventoryItem, global_to_handle,

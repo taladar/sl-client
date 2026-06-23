@@ -10,11 +10,12 @@ use crate::types::{
     EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupAccountDetails,
     GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
     GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
-    GroupNotice, GroupProfile, GroupRole, GroupTitle, GroupVote, GroupVoteHistoryItem, ImDialog,
-    InstantMessage, InventoryFolder, InventoryItem, LandingType, MapItem, MapItemType, MapLayer,
-    MapRegionInfo, MapRequestFlags, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags,
-    MuteType, NeighborInfo, Object, ObjectProperties, ParcelCategory, ParcelInfo,
-    ParcelRequestResult, ParcelStatus, PickInfo, PlayingAnimation, PrimShapeParams, ProductType,
+    GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle, GroupVote,
+    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem, LandingType,
+    MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MoneyBalance,
+    MoneyTransaction, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectProperties,
+    ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey,
+    PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
     RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits, ScriptDialog,
     ScriptPermissionRequest, ScriptPermissions, SkySettings, WaterSettings, avatar_texture,
 };
@@ -867,7 +868,7 @@ pub(crate) fn avatar_group(data: &AvatarGroupsReplyGroupDataBlock) -> AvatarGrou
 pub(crate) fn pick_info(data: &PickInfoReplyDataBlock) -> Result<PickInfo, sl_wire::WireError> {
     let [x, y, z] = data.pos_global;
     Ok(PickInfo {
-        pick_id: data.pick_id,
+        pick_id: PickKey::from(data.pick_id),
         creator_id: AgentKey::from(data.creator_id),
         top_pick: data.top_pick,
         parcel_id: ParcelKey::from(data.parcel_id),
@@ -1019,7 +1020,7 @@ pub(crate) fn group_profile(
 /// Builds [`GroupNotice`] from a `GroupNoticesListReply` entry.
 pub(crate) fn group_notice(data: &GroupNoticesListReplyDataBlock) -> GroupNotice {
     GroupNotice {
-        notice_id: data.notice_id,
+        notice_id: GroupNoticeKey::from(data.notice_id),
         timestamp: data.timestamp,
         from_name: trimmed_string(&data.from_name),
         subject: trimmed_string(&data.subject),
@@ -1116,7 +1117,7 @@ pub(crate) fn group_active_proposal_item(
     data: &GroupActiveProposalItemReplyProposalDataBlock,
 ) -> GroupActiveProposalItem {
     GroupActiveProposalItem {
-        vote_id: data.vote_id,
+        vote_id: ProposalVoteId::from(data.vote_id),
         vote_initiator: AgentKey::from(data.vote_initiator),
         terse_date_id: trimmed_string(&data.terse_date_id),
         start_date_time: trimmed_string(&data.start_date_time),
@@ -1134,7 +1135,7 @@ pub(crate) fn group_active_proposal_item(
 pub(crate) fn group_vote_history_item(reply: &GroupVoteHistoryItemReply) -> GroupVoteHistoryItem {
     let item = &reply.history_item_data;
     GroupVoteHistoryItem {
-        vote_id: item.vote_id,
+        vote_id: ProposalVoteId::from(item.vote_id),
         terse_date_id: trimmed_string(&item.terse_date_id),
         start_date_time: trimmed_string(&item.start_date_time),
         end_date_time: trimmed_string(&item.end_date_time),
@@ -1148,7 +1149,7 @@ pub(crate) fn group_vote_history_item(reply: &GroupVoteHistoryItemReply) -> Grou
             .vote_item
             .iter()
             .map(|vote| GroupVote {
-                candidate_id: vote.candidate_id,
+                candidate_id: ProposalCandidateId::from(vote.candidate_id),
                 vote_cast: trimmed_string(&vote.vote_cast),
                 num_votes: vote.num_votes,
             })

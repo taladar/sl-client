@@ -18,10 +18,11 @@ use crate::types::{
     GestureActivation, GroupRoleEdit, GroupRoleMemberChange, ImDialog, InterestsUpdate,
     InventoryItem, LandSearchType, MapRequestFlags, Material, MovementMode, NewInventoryItem,
     NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
-    ParcelCategory, ParcelUpdate, PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate,
-    Reliability, RestoreItem, RezAttachment, SaleType, TeleportFlags, Throttle, ViewerEffect,
-    Wearable,
+    ParcelCategory, ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape,
+    ProfileUpdate, Reliability, RestoreItem, RezAttachment, SaleType, TeleportFlags, Throttle,
+    ViewerEffect, Wearable,
 };
+use crate::types::{GroupNoticeKey, ProposalVoteId};
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
     AgentKey, ClassifiedKey, FriendKey, GroupKey, ObjectKey, ParcelKey, TextureKey,
@@ -841,7 +842,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             data: PickInfoUpdateDataBlock {
-                pick_id: update.pick_id,
+                pick_id: update.pick_id.uuid(),
                 creator_id: self.agent_id.uuid(),
                 // Only gods may set the legacy "top pick" flag; the viewer
                 // always sends false.
@@ -863,7 +864,7 @@ impl Circuit {
     /// Queues a `PickDelete` reliably, removing one of the agent's picks (#29).
     pub(crate) fn send_pick_delete(
         &mut self,
-        pick_id: Uuid,
+        pick_id: PickKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::PickDelete(PickDelete {
@@ -871,7 +872,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            data: PickDeleteDataBlock { pick_id },
+            data: PickDeleteDataBlock {
+                pick_id: pick_id.uuid(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -880,7 +883,7 @@ impl Circuit {
     /// dataserver resend the affected agent's pick list) (#29).
     pub(crate) fn send_pick_god_delete(
         &mut self,
-        pick_id: Uuid,
+        pick_id: PickKey,
         query_id: Uuid,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -889,7 +892,10 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            data: PickGodDeleteDataBlock { pick_id, query_id },
+            data: PickGodDeleteDataBlock {
+                pick_id: pick_id.uuid(),
+                query_id,
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -1175,7 +1181,7 @@ impl Circuit {
     /// Queues a `GroupNoticeRequest` reliably for the notice `notice_id`.
     pub(crate) fn send_group_notice_request(
         &mut self,
-        notice_id: Uuid,
+        notice_id: GroupNoticeKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::GroupNoticeRequest(GroupNoticeRequest {
@@ -1184,7 +1190,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             data: GroupNoticeRequestDataBlock {
-                group_notice_id: notice_id,
+                group_notice_id: notice_id.uuid(),
             },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -1711,7 +1717,7 @@ impl Circuit {
     /// of `group_id`).
     pub(crate) fn send_group_proposal_ballot(
         &mut self,
-        proposal_id: Uuid,
+        proposal_id: ProposalVoteId,
         group_id: GroupKey,
         vote_cast: &str,
         now: Instant,
@@ -1722,7 +1728,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             proposal_data: GroupProposalBallotProposalDataBlock {
-                proposal_id,
+                proposal_id: proposal_id.uuid(),
                 group_id: group_id.uuid(),
                 vote_cast: with_nul(vote_cast),
             },

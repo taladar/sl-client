@@ -6,6 +6,98 @@ use sl_types::money::LindenAmount;
 use crate::types::{LandArea, LindenBalance};
 use uuid::Uuid;
 
+/// A group **notice** id (the viewer's group-notice `mNoticeID`).
+///
+/// A notice is one posting in a group's notice list; this id fetches its full
+/// body/attachment
+/// ([`Session::request_group_notice`](crate::Session::request_group_notice)).
+/// Kept client-local in `sl-proto` (per the standing "new types go local first,
+/// batch-migrate to `sl-types` later" rule); mirrors the `sl-types` key
+/// ergonomics (`From<Uuid>`/[`uuid`](Self::uuid)/`Display`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GroupNoticeKey(pub Uuid);
+
+impl From<Uuid> for GroupNoticeKey {
+    fn from(id: Uuid) -> Self {
+        Self(id)
+    }
+}
+
+impl GroupNoticeKey {
+    /// Returns the wrapped raw `Uuid`.
+    #[must_use]
+    pub const fn uuid(self) -> Uuid {
+        self.0
+    }
+}
+
+impl core::fmt::Display for GroupNoticeKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// A group **proposal** id (the viewer's `mVoteID` / a ballot's `proposal_id`).
+///
+/// Identifies one group proposal both while it is open
+/// ([`GroupActiveProposalItem`]) and in the vote history
+/// ([`GroupVoteHistoryItem`]); it is the id a ballot
+/// ([`Command::GroupProposalBallot`](crate::Command::GroupProposalBallot)) votes
+/// against. Distinct from [`ProposalCandidateId`] (an option *within* a
+/// proposal), so the two can't be transposed. Kept client-local in `sl-proto`;
+/// mirrors the `sl-types` key ergonomics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ProposalVoteId(pub Uuid);
+
+impl From<Uuid> for ProposalVoteId {
+    fn from(id: Uuid) -> Self {
+        Self(id)
+    }
+}
+
+impl ProposalVoteId {
+    /// Returns the wrapped raw `Uuid`.
+    #[must_use]
+    pub const fn uuid(self) -> Uuid {
+        self.0
+    }
+}
+
+impl core::fmt::Display for ProposalVoteId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// A proposal **candidate/option** id (the viewer's per-`VoteItem` `mCandidateID`
+/// in a finished proposal's tally — or the voter for a yes/no proposal).
+///
+/// Identifies one option within a proposal's vote history ([`GroupVote`]).
+/// Distinct from [`ProposalVoteId`] (the proposal itself). Kept client-local in
+/// `sl-proto`; mirrors the `sl-types` key ergonomics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ProposalCandidateId(pub Uuid);
+
+impl From<Uuid> for ProposalCandidateId {
+    fn from(id: Uuid) -> Self {
+        Self(id)
+    }
+}
+
+impl ProposalCandidateId {
+    /// Returns the wrapped raw `Uuid`.
+    #[must_use]
+    pub const fn uuid(self) -> Uuid {
+        self.0
+    }
+}
+
+impl core::fmt::Display for ProposalCandidateId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// The agent's active group and title, parsed from `AgentDataUpdate` (pushed on
 /// login and whenever the active group changes via
 /// [`Session::activate_group`](crate::Session::activate_group)).
@@ -175,7 +267,7 @@ pub struct CreateGroupParams {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupNotice {
     /// The notice id.
-    pub notice_id: Uuid,
+    pub notice_id: GroupNoticeKey,
     /// The Unix timestamp the notice was posted.
     pub timestamp: u32,
     /// The poster's name.
@@ -413,7 +505,7 @@ pub struct GroupAccountTransactions {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupActiveProposalItem {
     /// The proposal's id (used as the ballot's `proposal_id`).
-    pub vote_id: Uuid,
+    pub vote_id: ProposalVoteId,
     /// The agent that started the proposal.
     pub vote_initiator: AgentKey,
     /// A terse date id (grid-internal string).
@@ -439,7 +531,7 @@ pub struct GroupActiveProposalItem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupVote {
     /// The candidate/option id (or the voter for a yes/no proposal).
-    pub candidate_id: Uuid,
+    pub candidate_id: ProposalCandidateId,
     /// The vote text cast (e.g. `"yes"`/`"no"`).
     pub vote_cast: String,
     /// How many votes this candidate received.
@@ -452,7 +544,7 @@ pub struct GroupVote {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupVoteHistoryItem {
     /// The proposal's id.
-    pub vote_id: Uuid,
+    pub vote_id: ProposalVoteId,
     /// A terse date id (grid-internal string).
     pub terse_date_id: String,
     /// When voting opened (grid-formatted string).
@@ -516,7 +608,7 @@ pub mod group_powers {
 
 #[cfg(test)]
 mod tests {
-    use super::GroupRoleKey;
+    use super::{GroupNoticeKey, GroupRoleKey, ProposalCandidateId, ProposalVoteId};
     use pretty_assertions::assert_eq;
     use sl_types::key::GroupKey;
     use uuid::Uuid;
@@ -542,5 +634,30 @@ mod tests {
         let group = GroupKey::from(raw);
         let role = GroupRoleKey::from(raw);
         assert_eq!(group.uuid(), role.uuid());
+    }
+
+    /// The three new client-local group ids (`GroupNoticeKey`, `ProposalVoteId`,
+    /// `ProposalCandidateId`) are transparent wrappers over the wire `Uuid`:
+    /// wrapping then extracting is the identity, and `Display` matches the raw
+    /// id's.
+    #[test]
+    fn new_group_ids_round_trip_raw_uuid() {
+        let raw = Uuid::from_u128(0x1111_2222_3333_4444_5555_6666_7777_8888);
+        assert_eq!(GroupNoticeKey::from(raw).uuid(), raw);
+        assert_eq!(ProposalVoteId::from(raw).uuid(), raw);
+        assert_eq!(ProposalCandidateId::from(raw).uuid(), raw);
+        assert_eq!(GroupNoticeKey::from(raw).to_string(), raw.to_string());
+        assert_eq!(ProposalVoteId::from(Uuid::nil()).uuid(), Uuid::nil());
+    }
+
+    /// A proposal id and a candidate (option-within-proposal) id are distinct
+    /// types over the same UUID space, so the two can never be transposed (the
+    /// point of the split — enforced at compile time).
+    #[test]
+    fn proposal_and_candidate_ids_are_distinct_types() {
+        let raw = Uuid::from_u128(0xb01d_face);
+        let vote = ProposalVoteId::from(raw);
+        let candidate = ProposalCandidateId::from(raw);
+        assert_eq!(vote.uuid(), candidate.uuid());
     }
 }

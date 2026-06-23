@@ -9,6 +9,37 @@ use sl_types::money::LindenAmount;
 use sl_types::search::ClassifiedCategory;
 use uuid::Uuid;
 
+/// A profile **pick** id (the viewer's `LLPickData::mPickID`).
+///
+/// A pick is a profile-listed place; this id fetches its full details
+/// ([`Session::request_pick_info`](crate::Session::request_pick_info)) and
+/// deletes it. It is the picks-side parallel of [`ClassifiedKey`], so the two
+/// can't be transposed. Kept client-local in `sl-proto` (per the standing "new
+/// types go local first, batch-migrate to `sl-types` later" rule); mirrors the
+/// `sl-types` key ergonomics (`From<Uuid>`/[`uuid`](Self::uuid)/`Display`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PickKey(pub Uuid);
+
+impl From<Uuid> for PickKey {
+    fn from(id: Uuid) -> Self {
+        Self(id)
+    }
+}
+
+impl PickKey {
+    /// Returns the wrapped raw `Uuid`.
+    #[must_use]
+    pub const fn uuid(self) -> Uuid {
+        self.0
+    }
+}
+
+impl core::fmt::Display for PickKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// An avatar's profile properties, parsed from `AvatarPropertiesReply`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AvatarProperties {
@@ -72,7 +103,7 @@ pub struct AvatarGroupMembership {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AvatarPick {
     /// The pick id (use to fetch full details).
-    pub pick_id: Uuid,
+    pub pick_id: PickKey,
     /// The pick name.
     pub name: String,
 }
@@ -93,7 +124,7 @@ pub struct AvatarClassified {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PickInfo {
     /// The pick id.
-    pub pick_id: Uuid,
+    pub pick_id: PickKey,
     /// The avatar that created the pick.
     pub creator_id: AgentKey,
     /// Whether this is a "top pick" (a god-only legacy flag, normally `false`).
@@ -222,7 +253,7 @@ pub struct InterestsUpdate {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PickUpdate {
     /// The pick id (a fresh id to create; an existing id to edit).
-    pub pick_id: Uuid,
+    pub pick_id: PickKey,
     /// The parcel the pick points at, or `None` to let the simulator fill in the
     /// agent's current parcel.
     pub parcel_id: Option<ParcelKey>,
@@ -243,7 +274,7 @@ pub struct PickUpdate {
 impl Default for PickUpdate {
     fn default() -> Self {
         Self {
-            pick_id: Uuid::nil(),
+            pick_id: PickKey(Uuid::nil()),
             parcel_id: None,
             name: String::new(),
             description: String::new(),
@@ -382,7 +413,7 @@ pub struct LoginAccount {
 mod tests {
     use super::{
         AvatarClassified, ClassifiedCategory, ClassifiedKey, Friend, FriendKey, FriendRights,
-        ParcelKey, PickUpdate, Uuid,
+        ParcelKey, PickKey, PickUpdate, Uuid,
     };
     use pretty_assertions::assert_eq;
 
@@ -419,6 +450,20 @@ mod tests {
 
         // The nil default round-trips too.
         assert_eq!(ParcelKey::from(Uuid::nil()).uuid(), Uuid::nil());
+    }
+
+    /// The new client-local `PickKey` is a transparent wrapper over the wire
+    /// `Uuid`, distinct from the existing `ClassifiedKey` (so a pick id and a
+    /// classified id can't be transposed), and its `Display` matches the raw
+    /// id's.
+    #[test]
+    fn pick_key_round_trips_raw_uuid() {
+        let raw = Uuid::from_u128(0x0bad_f00d_0bad_f00d_0bad_f00d_0bad_f00d);
+        assert_eq!(PickKey::from(raw).uuid(), raw);
+        assert_eq!(PickKey::from(raw).to_string(), raw.to_string());
+        // The create-new sentinel (nil) round-trips too.
+        assert_eq!(PickKey::from(Uuid::nil()).uuid(), Uuid::nil());
+        assert_eq!(PickUpdate::default().pick_id, PickKey(Uuid::nil()));
     }
 
     /// [`ClassifiedCategory`] maps every named classified-directory code to its

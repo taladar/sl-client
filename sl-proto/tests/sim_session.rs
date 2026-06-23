@@ -1484,7 +1484,7 @@ mod test {
         let group_id = uuid::Uuid::from_u128(0x6A0D);
         let request_id = uuid::Uuid::from_u128(0xF00D);
         let transaction_id = uuid::Uuid::from_u128(0x7AC7);
-        let proposal_id = uuid::Uuid::from_u128(0x9A0E);
+        let proposal_id = sl_proto::ProposalVoteId::from(uuid::Uuid::from_u128(0x9A0E));
 
         // Client -> sim: every G10 request surfaces a matching server event.
         client.request_group_account_summary(GroupKey::from(group_id), request_id, 60, 0, now)?;
@@ -1644,7 +1644,7 @@ mod test {
             quorum: 3,
             proposal_text: "Past proposal".to_owned(),
             votes: vec![GroupVote {
-                candidate_id: uuid::Uuid::from_u128(0xC0DE),
+                candidate_id: sl_proto::ProposalCandidateId::from(uuid::Uuid::from_u128(0xC0DE)),
                 vote_cast: "yes".to_owned(),
                 num_votes: 7,
             }],

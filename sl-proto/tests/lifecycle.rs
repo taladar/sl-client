@@ -1439,7 +1439,7 @@ mod test {
             .ok_or("expected an AvatarPicks event")?;
         assert_eq!(picks.len(), 1);
         let pick = picks.first().ok_or("expected one pick")?;
-        assert_eq!(pick.pick_id, uuid::Uuid::from_u128(0xC1));
+        assert_eq!(pick.pick_id.uuid(), uuid::Uuid::from_u128(0xC1));
         assert_eq!(pick.name, "My favourite spot");
         Ok(())
     }
@@ -1546,7 +1546,7 @@ mod test {
 
         let creator = uuid::Uuid::from_u128(0xA1);
         let pick = uuid::Uuid::from_u128(0xC1);
-        session.request_pick_info(AgentKey::from(creator), pick, now)?;
+        session.request_pick_info(AgentKey::from(creator), sl_proto::PickKey::from(pick), now)?;
         let sent = drain(&mut session)?;
         let generic = sent
             .iter()
@@ -1601,7 +1601,7 @@ mod test {
         let info = drain_events(&mut session)
             .into_iter()
             .find_map(|event| match event {
-                Event::PickInfo(info) if info.pick_id == pick => Some(info),
+                Event::PickInfo(info) if info.pick_id.uuid() == pick => Some(info),
                 _ => None,
             })
             .ok_or("expected a PickInfo event")?;
@@ -1759,7 +1759,7 @@ mod test {
         let pick = uuid::Uuid::from_u128(0xC1);
         session.update_pick(
             &PickUpdate {
-                pick_id: pick,
+                pick_id: sl_proto::PickKey::from(pick),
                 name: "New pick".to_owned(),
                 description: "a place".to_owned(),
                 pos_global: (256_000.0, 256_128.0, 25.5),
@@ -1767,7 +1767,7 @@ mod test {
             },
             now,
         )?;
-        session.delete_pick(pick, now)?;
+        session.delete_pick(sl_proto::PickKey::from(pick), now)?;
 
         let classified = uuid::Uuid::from_u128(0xD1);
         session.update_classified(
@@ -4981,7 +4981,12 @@ mod test {
             "Adopt the bylaws?",
             now,
         )?;
-        session.cast_group_proposal_ballot(proposal_id, GroupKey::from(group_id), "yes", now)?;
+        session.cast_group_proposal_ballot(
+            sl_proto::ProposalVoteId::from(proposal_id),
+            GroupKey::from(group_id),
+            "yes",
+            now,
+        )?;
         let sent = drain(&mut session)?;
 
         let summary = sent
@@ -5140,7 +5145,7 @@ mod test {
         assert_eq!(active.1, transaction_id);
         assert_eq!(active.2, 1);
         let proposal = active.3.first().ok_or("expected one proposal")?;
-        assert_eq!(proposal.vote_id, vote_id);
+        assert_eq!(proposal.vote_id.uuid(), vote_id);
         assert_eq!(proposal.quorum, 3);
         assert_eq!(proposal.proposal_text, "Adopt the bylaws?");
         assert!((proposal.majority - 0.5).abs() < f32::EPSILON);

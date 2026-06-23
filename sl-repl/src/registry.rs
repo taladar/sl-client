@@ -40,17 +40,17 @@ use sl_proto::{
     Camera, ChatType, ClassifiedCategory, ClassifiedUpdate, Command, ControlFlags,
     CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, EstateAccessDelta,
     ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation, GroupNoticeAttachment,
-    GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange, InterestsUpdate, InventoryItem,
-    InventoryOffer, InventoryType, LandSearchType, LandStatReportType, LindenAmount, LookAtType,
-    MapItemType, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType,
-    MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem,
-    ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate,
-    PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
-    ProfileUpdate, RegionHandle, RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId,
-    RestoreItem, RezAttachment, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
-    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    VoiceProvisionRequest, Wearable, WearableType,
+    GroupNoticeKey, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange, InterestsUpdate,
+    InventoryItem, InventoryOffer, InventoryType, LandSearchType, LandStatReportType, LindenAmount,
+    LookAtType, MapItemType, Material, MaterialOverrideUpdate, Maturity, MediaEntry,
+    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
+    ObjectBuyItem, ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
+    ParcelUpdate, PermissionField, Permissions, Permissions5, PickKey, PickUpdate, PointAtType,
+    Postcard, PrimShape, ProfileUpdate, ProposalVoteId, RegionHandle, RegionInfoUpdate,
+    RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment, Rotation, SaleType,
+    ScopedObjectId, ScopedParcelId, ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect,
+    ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -962,7 +962,7 @@ fn build_interests_update(
 /// Build a [`PickUpdate`] from keyword fields.
 fn build_pick_update(args: &Args, ctx: &dyn ReplContext) -> Result<PickUpdate, ReplError> {
     Ok(PickUpdate {
-        pick_id: args.uuid_or_nil(ctx, "pick_id", 0)?,
+        pick_id: PickKey::from(args.uuid_or_nil(ctx, "pick_id", 0)?),
         parcel_id: {
             // A nil/absent parcel id means "use the agent's current parcel".
             let parcel = args.uuid_or_nil(ctx, "parcel_id", 1)?;
@@ -1480,7 +1480,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::RequestPickInfo {
                     creator_id: AgentKey::from(args.req_uuid(ctx, "creator_id", 0)?),
-                    pick_id: args.req_uuid(ctx, "pick_id", 1)?,
+                    pick_id: PickKey::from(args.req_uuid(ctx, "pick_id", 1)?),
                 })
             },
         },
@@ -1521,14 +1521,18 @@ fn all_specs() -> Vec<CommandSpec> {
         CommandSpec {
             name: "delete_pick",
             usage: "<pick_id>",
-            build: |args, ctx| Ok(Command::DeletePick(args.req_uuid(ctx, "pick_id", 0)?)),
+            build: |args, ctx| {
+                Ok(Command::DeletePick(PickKey::from(
+                    args.req_uuid(ctx, "pick_id", 0)?,
+                )))
+            },
         },
         CommandSpec {
             name: "god_delete_pick",
             usage: "<pick_id> <query_id>",
             build: |args, ctx| {
                 Ok(Command::GodDeletePick {
-                    pick_id: args.req_uuid(ctx, "pick_id", 0)?,
+                    pick_id: PickKey::from(args.req_uuid(ctx, "pick_id", 0)?),
                     query_id: args.req_uuid(ctx, "query_id", 1)?,
                 })
             },
@@ -1962,11 +1966,9 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "request_group_notice",
             usage: "<notice_id>",
             build: |args, ctx| {
-                Ok(Command::RequestGroupNotice(args.req_uuid(
-                    ctx,
-                    "notice_id",
-                    0,
-                )?))
+                Ok(Command::RequestGroupNotice(GroupNoticeKey::from(
+                    args.req_uuid(ctx, "notice_id", 0)?,
+                )))
             },
         },
         CommandSpec {
@@ -2217,7 +2219,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<proposal_id> <group_id> <vote_cast>",
             build: |args, ctx| {
                 Ok(Command::GroupProposalBallot {
-                    proposal_id: args.req_uuid(ctx, "proposal_id", 0)?,
+                    proposal_id: ProposalVoteId::from(args.req_uuid(ctx, "proposal_id", 0)?),
                     group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 1)?),
                     vote_cast: args.req_str(ctx, "vote_cast", 2)?,
                 })
@@ -4589,7 +4591,7 @@ mod tests {
     fn uuid_argument() {
         assert!(matches!(
             build(&format!("delete_pick {ONE}")),
-            Ok(Command::DeletePick(id)) if id == uuid(ONE)
+            Ok(Command::DeletePick(id)) if id.uuid() == uuid(ONE)
         ));
     }
 
@@ -4842,7 +4844,7 @@ mod tests {
         let ctx = MapContext(map);
         assert!(matches!(
             build_ctx("delete_pick $self", &ctx),
-            Ok(Command::DeletePick(id)) if id == uuid(ONE)
+            Ok(Command::DeletePick(id)) if id.uuid() == uuid(ONE)
         ));
     }
 
@@ -5191,7 +5193,7 @@ mod tests {
                  22222222-2222-2222-2222-222222222222 yes"
             ),
             Ok(Command::GroupProposalBallot { proposal_id, group_id, vote_cast })
-                if proposal_id == Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111)
+                if proposal_id.uuid() == Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111)
                     && group_id == GroupKey::from(Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222))
                     && vote_cast == "yes"
         ));
