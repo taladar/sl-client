@@ -3,7 +3,7 @@
 use sl_types::key::{AgentKey, GroupKey, InventoryKey, TextureKey};
 use sl_types::money::LindenAmount;
 
-use crate::types::LandArea;
+use crate::types::{LandArea, LindenBalance};
 use uuid::Uuid;
 
 /// A Second Life group *role* id — the UUID that identifies one role within a
@@ -341,8 +341,8 @@ pub struct GroupAccountSummary {
     pub current_interval: i32,
     /// The interval's start date (grid-formatted string).
     pub start_date: String,
-    /// The group's current L$ balance.
-    pub balance: i32,
+    /// The group's current L$ balance (signed — a group can be in the red).
+    pub balance: LindenBalance,
     /// Total L$ credited over the interval.
     pub total_credits: LindenAmount,
     /// Total L$ debited over the interval.
@@ -381,8 +381,9 @@ pub struct GroupAccountSummary {
 pub struct GroupAccountDetailsEntry {
     /// What the charge is for (grid-formatted string).
     pub description: String,
-    /// The L$ amount of the charge.
-    pub amount: i32,
+    /// The L$ amount of the charge (signed — a credit is positive, a debit
+    /// negative).
+    pub amount: LindenBalance,
 }
 
 /// A group's itemised accounting detail for an interval, parsed from
@@ -417,7 +418,7 @@ pub struct GroupAccountTransaction {
     /// A description of the item/reason (grid-formatted string).
     pub item: String,
     /// The L$ amount (positive credit, negative debit).
-    pub amount: i32,
+    pub amount: LindenBalance,
 }
 
 /// A group's transaction log for an interval, parsed from

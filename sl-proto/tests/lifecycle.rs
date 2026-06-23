@@ -18,18 +18,19 @@ mod test {
         GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
         GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate, InventoryCallbackId,
         InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, LandArea,
-        LandingType, LindenAmount, LoginAccount, LoginParams, LookAtType, MapItemType, Material,
-        Maturity, MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags,
-        MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey,
-        ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-        ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType,
-        ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate,
-        PointAtType, Postcard, PrimShape, ProductType, ProfileUpdate, ReflectionProbeFlags,
-        RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType,
-        ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissions, SculptOrMeshKey,
-        Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType, TextureKey, Throttle,
-        TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings,
-        WearableType, avatar_texture, group_powers, pcode,
+        LandingType, LindenAmount, LindenBalance, LoginAccount, LoginParams, LookAtType,
+        MapItemType, Material, Maturity, MeanCollisionType, MeshKey, MoneyTransactionType,
+        MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem,
+        ObjectFlagSettings, ObjectKey, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+        ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand,
+        ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField,
+        Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape, ProductType,
+        ProfileUpdate, ReflectionProbeFlags, RegionHandle, RegionInfoUpdate, Reliability,
+        RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ScriptControlAction,
+        ScriptPermissions, SculptOrMeshKey, Session, SkySettings, SoundFlags, TeleportFlags,
+        TerrainLayerType, TextureKey, Throttle, TransferStatus, Transmit, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
+        group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -5087,7 +5088,7 @@ mod test {
             .ok_or("expected a GroupAccountSummary event")?;
         assert_eq!(got.group_id, GroupKey::from(group_id));
         assert_eq!(got.request_id, request_id);
-        assert_eq!(got.balance, 1234);
+        assert_eq!(got.balance, LindenBalance::from_i32(1234));
         assert_eq!(got.start_date, "2026-06-01");
         assert_eq!(got.non_exempt_members, 11);
 

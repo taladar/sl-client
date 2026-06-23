@@ -2054,7 +2054,7 @@ impl SimSession {
         summary: &GroupAccountSummary,
         now: Instant,
     ) -> Result<(), Error> {
-        use crate::types::linden_to_wire;
+        use crate::types::{linden_balance_to_wire, linden_to_wire};
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
@@ -2068,7 +2068,7 @@ impl SimSession {
                 interval_days: summary.interval_days,
                 current_interval: summary.current_interval,
                 start_date: with_nul(&summary.start_date),
-                balance: summary.balance,
+                balance: linden_balance_to_wire("Balance", &summary.balance)?,
                 total_credits: linden_to_wire("TotalCredits", &summary.total_credits)?,
                 total_debits: linden_to_wire("TotalDebits", &summary.total_debits)?,
                 object_tax_current: linden_to_wire(
@@ -2138,11 +2138,13 @@ impl SimSession {
             history_data: details
                 .entries
                 .iter()
-                .map(|entry| GroupAccountDetailsReplyHistoryDataBlock {
-                    description: with_nul(&entry.description),
-                    amount: entry.amount,
+                .map(|entry| {
+                    Ok(GroupAccountDetailsReplyHistoryDataBlock {
+                        description: with_nul(&entry.description),
+                        amount: crate::types::linden_balance_to_wire("Amount", &entry.amount)?,
+                    })
                 })
-                .collect(),
+                .collect::<Result<Vec<_>, sl_wire::WireError>>()?,
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
@@ -2178,14 +2180,16 @@ impl SimSession {
             history_data: transactions
                 .entries
                 .iter()
-                .map(|entry| GroupAccountTransactionsReplyHistoryDataBlock {
-                    time: with_nul(&entry.time),
-                    user: with_nul(&entry.user),
-                    r#type: entry.transaction_type,
-                    item: with_nul(&entry.item),
-                    amount: entry.amount,
+                .map(|entry| {
+                    Ok(GroupAccountTransactionsReplyHistoryDataBlock {
+                        time: with_nul(&entry.time),
+                        user: with_nul(&entry.user),
+                        r#type: entry.transaction_type,
+                        item: with_nul(&entry.item),
+                        amount: crate::types::linden_balance_to_wire("Amount", &entry.amount)?,
+                    })
                 })
-                .collect(),
+                .collect::<Result<Vec<_>, sl_wire::WireError>>()?,
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())

@@ -970,18 +970,43 @@ attachment::*}`. Adopt these more, selectively by semantic role:
   `sl_wire::WireError` along — same reason `LindenAmount`'s converter is a free
   fn. +2 focused unit
   tests (`LandArea` round-trip + reject-negative; sale-price for-sale gating).
-- [ ] **`LindenBalance` (new signed-money type in `sl-types/src/money.rs`)** —
-      for legitimately signed fields: group `balance`/`amount`
-      (`group.rs:304,344`) and any transaction delta/refund. Do not leave these
-      raw `i32`. Shape: a sign + a `LindenAmount` magnitude
-      (`struct LindenBalance { negative: bool, magnitude: LindenAmount }`) with
-      standard arithmetic traits so balances and amounts compose by type:
-      `Add`/`Sub<LindenAmount>` (+ assign) → `LindenBalance`,
-      `Add`/`Sub<LindenBalance>`, `Neg`, `PartialOrd`/`Ord`,
-      `From<LindenAmount>`, `TryFrom<LindenBalance> for LindenAmount` (errors
-      when negative), plus a signed `i32`/`i64` wire codec. Add the type + tests
-      in `sl-types` (minor version bump), then consume it here. (Sanctioned
-      `sl-types` addition — general money concept, not client-only.)
+- [x] **`LindenBalance` (new signed-money type)** — for the legitimately signed
+      fields: group `balance`/`amount` and transaction deltas.
+      **Kept client-local in `sl-proto` (NOT `sl-types`)** per the user (this
+      session's standing rule: new types go local first, batch-migrated to
+      `sl-types` later to avoid version churn) — same precedent as
+      `LandArea`/the union keys, overriding the roadmap's original "add to
+      `sl-types`" note. New public `LindenBalance` in
+      `sl-proto/src/types/money.rs`: shape
+      `{ negative: bool, magnitude: LindenAmount }` with **private** fields and
+      a normalising `new` (zero is canonically non-negative → no negative-zero,
+      so derived `Eq`/`Hash` stay consistent with the manual sign-aware
+      `Ord`/`PartialOrd`). Arithmetic composes balances and amounts by type:
+      `Add`/`Sub<LindenAmount>` and `Add`/`Sub<LindenBalance>` (+ the four
+      assign variants), `Neg`, `From<LindenAmount>`, and
+      `TryFrom<LindenBalance> for LindenAmount` (errors with a new
+      `NegativeBalanceError` when negative). Wire codec is pure inherent methods
+      (`from_i32`/`to_i32`/`from_i64`/ `to_i64`; decode is total, encode
+      fallible on `i32` overflow) so the type migrates to `sl-types` cleanly
+      without dragging `sl_wire::WireError`; the thin `WireError`-wrapping
+      boundary helper `linden_balance_to_wire` lives in `sl-proto/src/types.rs`
+      next to `land_area_to_wire`. Typed the three signed L$ fields —
+      `GroupAccountSummary.balance`, `GroupAccountDetailsEntry.amount`,
+      `GroupAccountTransaction.amount` — wrapping at the codec boundary only
+      (decode `LindenBalance::from_i32`, encode `linden_balance_to_wire`) so the
+      wire i32 is byte-identical. LEFT RAW (deliberately, NOT signed L$):
+      `EventInfo.amount` (u32 cover charge), the `MoneyTransaction` wire amount
+      (`LindenAmount` family), `ResourceAmount.amount` (script memory/url
+      count). Re-exported `LindenBalance`+`NegativeBalanceError` through
+      `sl-proto`/`sl-client-tokio`/`sl-client-bevy` (parity). REPL/survey only
+      label these events (no field access) → no downstream change. Book
+      `content/economy.md` updated (replaced the "awaiting a `LindenBalance`
+      type" note with the realised description). +6 focused unit tests (i32 wire
+      round-trip incl. `i32::MIN`/`MAX`, negative-zero normalisation, sign-aware
+      ordering, by-type arithmetic, `LindenAmount` interconvert,
+      out-of-`i32`-range encode → `None`); lifecycle + `sim_session` round-trip
+      suites updated. Build+clippy(`--workspace --all-targets`, 0 warnings)+all
+      tests+`cargo doc -D warnings`+mdbook green. NO `sl-types` touched.
 - [ ] `map::RegionName(String)` — only for genuine *region* name fields (region
   info / map block replies / teleport). Audit each `name: String` site first; do
   NOT touch person/object/inventory names.
