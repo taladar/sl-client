@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write as _;
 
 use sl_client_tokio::{
-    Client, Command, Event, LandArea, LindenAmount, LoginParams, LoginRequest, Maturity,
+    Client, Command, Distance, Event, LandArea, LindenAmount, LoginParams, LoginRequest, Maturity,
     ParcelInfo, ProductType, RegionCoordinates, RegionHandle, RegionIdentity, RegionLimits,
     StartLocation, Vector, grid_to_handle, handle_to_grid,
 };
@@ -501,7 +501,9 @@ impl Survey {
         self.pending_teleport = None;
         self.relog_target = None;
         commands
-            .send(Command::SetDrawDistance(self.draw_distance))
+            .send(Command::SetDrawDistance(Distance::new(f64::from(
+                self.draw_distance,
+            ))))
             .await
             .ok();
         loop {

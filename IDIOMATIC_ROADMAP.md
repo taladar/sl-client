@@ -1086,10 +1086,12 @@ attachment::*}`. Adopt these more, selectively by semantic role:
       +2 focused unit tests (grid/handle consistency,
       `RegionCoordinates`⇄`Vector` round-trip); lifecycle + `sim_session` suites
       updated; `book/src/content/region.md` updated.
-      **`map::Distance` (`draw_distance`/`far`): DEFERRED** (user decision) —
-      left raw `f32`; `sl_types::map::Distance` has no public constructor (only
-      a `chumsky` parser), so consuming it needs an `sl-types` addition, folded
-      into the later batched `sl-types` work.
+      **`map::Distance` (`draw_distance`/`far`): DONE** in the later batched
+      `sl-types` migration (see "Batched `sl-types` migration" below) —
+      `sl_types::map::Distance` gained a public `new`/`meters` constructor in
+      `sl-types 0.5.0`, and `draw_distance` (`Session`/`Circuit` state,
+      `set_draw_distance`, `Command::SetDrawDistance`) now carries it, converted
+      to the wire `Far` `f32` at the single `AgentUpdate` encode site.
       **`map::Location` and `map::ZoomLevel`: NOT ADOPTED** (user decision, see
       "considered, not adopted") — no matching LLUDP wire field (no map-zoom
       field exists; `Location`'s integer-coord + mandatory-name shape matches
@@ -1171,6 +1173,31 @@ attachment::*}`. Adopt these more, selectively by semantic role:
       matches no wire field — teleport positions are float region-local coords,
       map blocks carry grid coords), `map::ZoomLevel` (no map-zoom field in the
       LLUDP protocol) (no matching protocol field). `map::Distance`
-      (`draw_distance`/`far`) is deferred, not rejected — it needs an `sl-types`
-      constructor (see the `map` geometry item) and is folded into the later
-      batched `sl-types` work.
+      (`draw_distance`/`far`) was deferred, not rejected — it needed an
+      `sl-types` constructor; that constructor was added and `Distance` adopted
+      in the batched migration below.
+
+### Batched `sl-types` migration (post-roadmap follow-up)
+
+The value types created **client-local in `sl-proto`** during this pass (under
+the standing "new types go local first, batch-migrate later to avoid version
+churn" rule) were moved into the shared `sl-types` crate in one release
+(`sl-types 0.5.0`), and `sl-proto` now consumes them:
+
+- Moved to `sl-types`: `LindenBalance`/`NegativeBalanceError` (→ `money.rs`),
+  `LandArea` (→ `map.rs`), `EventId` + `ClassifiedCategory` (→ `search.rs`),
+  `GroupRoleKey`, `MeshKey`, and the three union keys `AgentOrObjectKey`/
+  `InventoryItemOrFolderKey`/`SculptOrMeshKey` (→ `key.rs`). Each gained the
+  conventions of its sibling (chumsky parsers; serde on `LindenBalance`; the
+  single-UUID keys reshaped to wrap `Key`).
+- `sl_types::map::Distance` gained a public `new(meters)`/`meters()`
+  constructor, and `draw_distance` adopted it (the wire `Far` `f32` conversion
+  lives at the single `AgentUpdate` encode site in `sl-proto`).
+- Removed the misfit `sl_types::key::EventKey` (the SL event id is a numeric
+  `U32`, not a UUID — verified against the viewer); `ViewerUri::EventAbout` now
+  carries `EventId`.
+- `sl-proto` keeps only the `sl_wire::WireError` codec boundary helpers
+  (`land_area_*`/`linden_*`); it re-exports the moved types via
+  `pub use sl_types::…` so the flat `sl_proto::…` surface and downstream crates
+  are unchanged. `sl-proto`'s `serde` dependency was dropped (its only user,
+  `LandArea`, left).

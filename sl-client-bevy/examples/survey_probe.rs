@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::prelude::*;
 use sl_client_bevy::{
-    Command, LoginParams, LoginRequest, SessionDisconnectReason, SlClientPlugin, SlCommand,
-    SlEvent, SlSessionEvent,
+    Command, Distance, LoginParams, LoginRequest, SessionDisconnectReason, SlClientPlugin,
+    SlCommand, SlEvent, SlSessionEvent,
 };
 use tracing::{info, warn};
 
@@ -95,7 +95,7 @@ fn on_events(
                 // Draw distance, then the three survey requests. The parcel
                 // query covers the whole 256m region so at least one parcel
                 // overlaps it.
-                commands.write(SlCommand(Command::SetDrawDistance(128.0)));
+                commands.write(SlCommand(Command::SetDrawDistance(Distance::new(128.0))));
                 commands.write(SlCommand(Command::RequestRegionInfo));
                 commands.write(SlCommand(Command::RequestParcelProperties {
                     west: 0.0,
