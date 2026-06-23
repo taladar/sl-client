@@ -1969,7 +1969,7 @@ impl SimSession {
                 date_utc: info.date_utc,
                 duration: info.duration,
                 cover: info.cover,
-                amount: info.amount,
+                amount: crate::types::linden_cover_to_wire("Amount", info.amount.as_ref())?,
                 sim_name: with_nul(&info.sim_name),
                 global_pos: [global_x, global_y, global_z],
                 event_flags: info.flags,

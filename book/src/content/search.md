@@ -84,8 +84,9 @@ summary; its `event_id` keys the rest. `EventInfoRequest` fetches the full
 listing, which arrives as `Event::EventInfoReply` carrying an `EventInfo`: the
 running avatar (`creator`), name, category, description, the human-readable
 `date` plus a Unix `date_utc`, the `duration` in minutes, the cover charge
-(`cover` non-zero, with the L$ `amount`), the region name, the global position
-and the `EVENT_FLAG_*` maturity flags.
+(`cover` non-zero, with the L$ `amount` as `Some(LindenAmount)` — `None` when no
+cover charge applies), the region name, the global position and the
+`EVENT_FLAG_*` maturity flags.
 
 ```rust,ignore
 session.event_info_request(event_id, now)?;

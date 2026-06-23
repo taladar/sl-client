@@ -2535,7 +2535,7 @@ impl Session {
                         date_utc: data.date_utc,
                         duration: data.duration,
                         cover: data.cover,
-                        amount: data.amount,
+                        amount: crate::types::linden_cover_from_wire(data.cover, data.amount),
                         sim_name: trimmed_string(&data.sim_name),
                         global_position: (global_x, global_y, global_z),
                         flags: data.event_flags,

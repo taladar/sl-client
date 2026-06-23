@@ -4630,7 +4630,7 @@ mod test {
         assert_eq!(info.date_utc, 1_750_000_000);
         assert_eq!(info.duration, 60);
         assert_eq!(info.cover, 1);
-        assert_eq!(info.amount, 50);
+        assert_eq!(info.amount, Some(LindenAmount(50)));
         assert_eq!(info.sim_name, "Sandbox");
         assert_eq!(info.global_position, (256_000.0, 257_000.0, 30.0));
         Ok(())

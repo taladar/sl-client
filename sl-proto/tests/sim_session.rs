@@ -898,7 +898,7 @@ mod test {
                 date_utc: 1_750_000_000,
                 duration: 60,
                 cover: 1,
-                amount: 50,
+                amount: Some(LindenAmount(50)),
                 sim_name: "Sandbox".to_owned(),
                 global_position: (256_000.0, 257_000.0, 30.0),
                 flags: 0,
@@ -917,7 +917,7 @@ mod test {
         assert_eq!(info.event_id, EventId::new(42));
         assert_eq!(info.creator, AgentKey::from(creator));
         assert_eq!(info.name, "Beach Party");
-        assert_eq!(info.amount, 50);
+        assert_eq!(info.amount, Some(LindenAmount(50)));
         assert_eq!(info.global_position, (256_000.0, 257_000.0, 30.0));
         Ok(())
     }
