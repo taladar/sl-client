@@ -1,7 +1,7 @@
 //! Round-trip tests for the experience cap codecs.
 
 use pretty_assertions::assert_eq;
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, ExperienceKey, GroupKey, OwnerKey};
 use uuid::Uuid;
 
 use super::{
@@ -24,12 +24,17 @@ fn uuid(text: &str) -> Result<Uuid, String> {
     Uuid::parse_str(text).map_err(|error| error.to_string())
 }
 
+/// Parses a UUID as an [`ExperienceKey`] in a test.
+fn experience_key(text: &str) -> Result<ExperienceKey, String> {
+    Ok(ExperienceKey::from(uuid(text)?))
+}
+
 /// `GetExperienceInfo` batches every id as a `public_id` query parameter under
 /// the `id/` path, and its `experience_keys` decode into full records while
 /// `error_ids` become `missing` placeholders.
 #[test]
 fn experience_info_query_and_decode() -> Result<(), String> {
-    let id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").map_err(|e| e.to_string())?;
+    let id = experience_key("11111111-1111-1111-1111-111111111111")?;
     let suffix = experience_info_query(&[id]);
     assert_eq!(
         suffix,
@@ -102,7 +107,7 @@ fn id_list_and_permission_decode() -> Result<(), String> {
 /// The `Allow` permission PUT body nests the permission under the id key.
 #[test]
 fn set_permission_body() -> Result<(), String> {
-    let id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").map_err(|e| e.to_string())?;
+    let id = experience_key("11111111-1111-1111-1111-111111111111")?;
     let body = build_set_experience_permission_request(id, ExperiencePermission::Allow);
     assert_eq!(
         body,
@@ -115,7 +120,7 @@ fn set_permission_body() -> Result<(), String> {
 /// the reply back through the info decoder (a bare experience map).
 #[test]
 fn update_experience_round_trip() -> Result<(), String> {
-    let id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").map_err(|e| e.to_string())?;
+    let id = experience_key("11111111-1111-1111-1111-111111111111")?;
     let update = ExperienceUpdate {
         public_id: id,
         name: "Renamed".to_owned(),
@@ -150,10 +155,8 @@ fn update_experience_round_trip() -> Result<(), String> {
 /// and the reply decoder.
 #[test]
 fn region_experiences_round_trip() -> Result<(), String> {
-    let allowed =
-        [Uuid::parse_str("11111111-1111-1111-1111-111111111111").map_err(|e| e.to_string())?];
-    let trusted =
-        [Uuid::parse_str("22222222-2222-2222-2222-222222222222").map_err(|e| e.to_string())?];
+    let allowed = [experience_key("11111111-1111-1111-1111-111111111111")?];
+    let trusted = [experience_key("22222222-2222-2222-2222-222222222222")?];
     let body = build_region_experiences_request(&allowed, &[], &trusted);
     assert!(body.contains(
         "<key>allowed</key><array><uuid>11111111-1111-1111-1111-111111111111</uuid></array>"
@@ -198,8 +201,8 @@ fn status_and_properties() -> Result<(), String> {
 #[test]
 fn experience_info_query_round_trip() -> Result<(), String> {
     let ids = [
-        uuid("11111111-1111-1111-1111-111111111111")?,
-        uuid("22222222-2222-2222-2222-222222222222")?,
+        experience_key("11111111-1111-1111-1111-111111111111")?,
+        experience_key("22222222-2222-2222-2222-222222222222")?,
     ];
     let suffix = experience_info_query(&ids);
     assert_eq!(parse_experience_info_query(&suffix), ids);
@@ -221,17 +224,18 @@ fn find_experience_query_round_trip() {
 #[test]
 fn uuid_query_round_trips() -> Result<(), String> {
     let id = uuid("11111111-1111-1111-1111-111111111111")?;
+    let key = ExperienceKey::from(id);
     assert_eq!(
         parse_group_experiences_query(&group_experiences_query(id)),
         Some(id)
     );
     assert_eq!(
-        parse_forget_experience_query(&forget_experience_query(id)),
-        Some(id)
+        parse_forget_experience_query(&forget_experience_query(key)),
+        Some(key)
     );
     assert_eq!(
-        parse_experience_id_query(&experience_id_query(id)),
-        Some(id)
+        parse_experience_id_query(&experience_id_query(key)),
+        Some(key)
     );
     Ok(())
 }
@@ -240,14 +244,14 @@ fn uuid_query_round_trips() -> Result<(), String> {
 /// `{ experiences, blocked }` reply round-trips builder → parser.
 #[test]
 fn permission_request_and_reply_round_trip() -> Result<(), String> {
-    let id = uuid("11111111-1111-1111-1111-111111111111")?;
+    let id = experience_key("11111111-1111-1111-1111-111111111111")?;
     let body = build_set_experience_permission_request(id, ExperiencePermission::Block);
     let parsed =
         parse_set_experience_permission_request(&body).map_err(|error| format!("{error:?}"))?;
     assert_eq!(parsed, Some((id, ExperiencePermission::Block)));
 
     let allowed = [id];
-    let blocked = [uuid("22222222-2222-2222-2222-222222222222")?];
+    let blocked = [experience_key("22222222-2222-2222-2222-222222222222")?];
     let reply = build_experience_permissions_response(&allowed, &blocked);
     let parsed = parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?;
     let (allowed_out, blocked_out) = parse_experience_permissions(&parsed);
@@ -260,7 +264,7 @@ fn permission_request_and_reply_round_trip() -> Result<(), String> {
 #[test]
 fn update_experience_request_round_trip() -> Result<(), String> {
     let update = ExperienceUpdate {
-        public_id: uuid("11111111-1111-1111-1111-111111111111")?,
+        public_id: experience_key("11111111-1111-1111-1111-111111111111")?,
         name: "Renamed".to_owned(),
         description: "desc & more".to_owned(),
         maturity: 13,
@@ -278,8 +282,8 @@ fn update_experience_request_round_trip() -> Result<(), String> {
 /// request parser / response builder.
 #[test]
 fn region_experiences_service_round_trip() -> Result<(), String> {
-    let allowed = [uuid("11111111-1111-1111-1111-111111111111")?];
-    let trusted = [uuid("22222222-2222-2222-2222-222222222222")?];
+    let allowed = [experience_key("11111111-1111-1111-1111-111111111111")?];
+    let trusted = [experience_key("22222222-2222-2222-2222-222222222222")?];
     let request = build_region_experiences_request(&allowed, &[], &trusted);
     let (allowed_out, blocked_out, trusted_out) =
         parse_region_experiences_request(&request).map_err(|error| format!("{error:?}"))?;
@@ -300,8 +304,8 @@ fn region_experiences_service_round_trip() -> Result<(), String> {
 #[test]
 fn experience_ids_response_round_trip() -> Result<(), String> {
     let ids = [
-        uuid("11111111-1111-1111-1111-111111111111")?,
-        uuid("22222222-2222-2222-2222-222222222222")?,
+        experience_key("11111111-1111-1111-1111-111111111111")?,
+        experience_key("22222222-2222-2222-2222-222222222222")?,
     ];
     let reply = build_experience_ids_response(&ids);
     let parsed =
@@ -315,9 +319,11 @@ fn experience_ids_response_round_trip() -> Result<(), String> {
 #[test]
 fn experience_infos_response_round_trip() -> Result<(), String> {
     let real = ExperienceInfo {
-        public_id: uuid("11111111-1111-1111-1111-111111111111")?,
+        public_id: experience_key("11111111-1111-1111-1111-111111111111")?,
         name: "My Experience".to_owned(),
-        agent_id: AgentKey::from(uuid("22222222-2222-2222-2222-222222222222")?),
+        owner: Some(OwnerKey::Agent(AgentKey::from(uuid(
+            "22222222-2222-2222-2222-222222222222",
+        )?))),
         description: "fun & games".to_owned(),
         properties: ExperienceProperties(PROPERTY_GRID),
         maturity: 13,
@@ -325,7 +331,7 @@ fn experience_infos_response_round_trip() -> Result<(), String> {
         ..ExperienceInfo::default()
     };
     let missing = ExperienceInfo {
-        public_id: uuid("33333333-3333-3333-3333-333333333333")?,
+        public_id: experience_key("33333333-3333-3333-3333-333333333333")?,
         properties: ExperienceProperties(PROPERTY_INVALID),
         missing: true,
         ..ExperienceInfo::default()
@@ -338,6 +344,36 @@ fn experience_infos_response_round_trip() -> Result<(), String> {
     };
     assert_eq!(*first, real);
     assert_eq!(*second, missing);
+    Ok(())
+}
+
+/// The `ExperienceInfo` owner — collapsed from the wire `(agent_id, group_id)`
+/// pair into one `Option<OwnerKey>` — round-trips through `to_llsd`/`from_llsd`
+/// for an agent owner, a group owner, and an unowned (placeholder) record, so
+/// the codec split is byte-identical in both directions.
+#[test]
+fn experience_owner_round_trips() -> Result<(), String> {
+    let base = ExperienceInfo {
+        public_id: experience_key("11111111-1111-1111-1111-111111111111")?,
+        name: "X".to_owned(),
+        ..ExperienceInfo::default()
+    };
+    let cases = [
+        Some(OwnerKey::Agent(AgentKey::from(uuid(
+            "22222222-2222-2222-2222-222222222222",
+        )?))),
+        Some(OwnerKey::Group(GroupKey::from(uuid(
+            "33333333-3333-3333-3333-333333333333",
+        )?))),
+        None,
+    ];
+    for owner in cases {
+        let info = ExperienceInfo {
+            owner,
+            ..base.clone()
+        };
+        assert_eq!(ExperienceInfo::from_llsd(&info.to_llsd()).owner, owner);
+    }
     Ok(())
 }
 

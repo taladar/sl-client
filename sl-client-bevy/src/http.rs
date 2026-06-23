@@ -6,10 +6,9 @@ use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::{
-    CAP_LAND_RESOURCES, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, Llsd,
+    CAP_LAND_RESOURCES, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, Llsd, ParcelKey,
     build_land_resources_request, parse_land_resources_reply, parse_llsd_xml,
 };
-use uuid::Uuid;
 
 /// GETs `url` and parses the LLSD-XML reply, returning `None` on any
 /// transport/parse failure. Shared by the experience capability fetches.
@@ -64,7 +63,11 @@ pub(crate) fn run_get_caps_llsd(url: &str, cap: &'static str, caps_tx: &Sender<(
 /// decode into [`SlSessionEvent::LandResourcesUrls`](sl_proto::Event::LandResourcesUrls),
 /// [`SlSessionEvent::LandResourceSummary`](sl_proto::Event::LandResourceSummary), and
 /// [`SlSessionEvent::LandResourceDetail`](sl_proto::Event::LandResourceDetail).
-pub(crate) fn run_land_resources(cap_url: &str, parcel_id: Uuid, caps_tx: &Sender<(String, Llsd)>) {
+pub(crate) fn run_land_resources(
+    cap_url: &str,
+    parcel_id: ParcelKey,
+    caps_tx: &Sender<(String, Llsd)>,
+) {
     let Ok(http) = ReqwestBlockingClient::builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()

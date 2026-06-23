@@ -1,6 +1,6 @@
 //! Parcels and land management: properties, access lists, media, overlays.
 
-use sl_types::key::{GroupKey, ObjectKey, OwnerKey, TextureKey};
+use sl_types::key::{GroupKey, ObjectKey, OwnerKey, ParcelKey, TextureKey};
 use sl_types::lsl::Vector;
 use sl_wire::ParcelFlags;
 use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
@@ -757,7 +757,7 @@ pub struct LandStatItem {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParcelDetails {
     /// The parcel's grid-wide id (the `parcel_id` the lookup resolves).
-    pub parcel_id: Uuid,
+    pub parcel_id: ParcelKey,
     /// The parcel owner's agent (or group) id.
     pub owner_id: Uuid,
     /// The parcel name.
@@ -792,7 +792,7 @@ pub struct ParcelDetails {
 impl Default for ParcelDetails {
     fn default() -> Self {
         Self {
-            parcel_id: Uuid::nil(),
+            parcel_id: ParcelKey::from(Uuid::nil()),
             owner_id: Uuid::nil(),
             name: String::new(),
             description: String::new(),

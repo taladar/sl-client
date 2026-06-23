@@ -2,7 +2,7 @@
 
 use crate::http::get_llsd;
 use reqwest::Client as ReqwestClient;
-use sl_proto::{Event, GroupKey, Uuid, parse_experience_ids, parse_experience_status};
+use sl_proto::{Event, ExperienceKey, GroupKey, parse_experience_ids, parse_experience_status};
 use tokio::sync::mpsc;
 
 /// GETs the `GroupExperiences` capability and forwards an [`Event::GroupExperiences`]
@@ -28,7 +28,7 @@ pub(crate) async fn fetch_group_experiences(
 /// [`Event::ExperienceAdminStatus`] over `events`, echoing the queried experience.
 pub(crate) async fn fetch_experience_admin(
     url: String,
-    experience_id: Uuid,
+    experience_id: ExperienceKey,
     http: ReqwestClient,
     events: mpsc::Sender<Event>,
 ) {
@@ -48,7 +48,7 @@ pub(crate) async fn fetch_experience_admin(
 /// experience.
 pub(crate) async fn fetch_experience_contributor(
     url: String,
-    experience_id: Uuid,
+    experience_id: ExperienceKey,
     http: ReqwestClient,
     events: mpsc::Sender<Event>,
 ) {

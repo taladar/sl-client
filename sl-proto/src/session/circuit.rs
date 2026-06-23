@@ -10,6 +10,7 @@ use super::{
 use crate::GroupRoleKey;
 use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
 use crate::scoped_id::CircuitId;
+use crate::types::directory::EventId;
 use crate::types::directory::category_to_wire;
 use crate::types::{
     AssetType, AttachmentMode, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction,
@@ -20,7 +21,9 @@ use crate::types::{
     PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate, Reliability, RestoreItem,
     RezAttachment, SaleType, TeleportFlags, Throttle, ViewerEffect, Wearable,
 };
-use sl_types::key::{AgentKey, GroupKey, ObjectKey, TextureKey};
+use sl_types::key::{
+    AgentKey, ClassifiedKey, FriendKey, GroupKey, ObjectKey, ParcelKey, TextureKey,
+};
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::AbuseReport;
 use sl_wire::messages::{
@@ -793,7 +796,7 @@ impl Circuit {
     /// `classified_id` (#29).
     pub(crate) fn send_classified_info_request(
         &mut self,
-        classified_id: Uuid,
+        classified_id: ClassifiedKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ClassifiedInfoRequest(ClassifiedInfoRequest {
@@ -801,7 +804,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            data: ClassifiedInfoRequestDataBlock { classified_id },
+            data: ClassifiedInfoRequestDataBlock {
+                classified_id: classified_id.uuid(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -825,7 +830,9 @@ impl Circuit {
                 // Only gods may set the legacy "top pick" flag; the viewer
                 // always sends false.
                 top_pick: false,
-                parcel_id: update.parcel_id,
+                parcel_id: update
+                    .parcel_id
+                    .map_or_else(Uuid::nil, |parcel| parcel.uuid()),
                 name: with_nul(&update.name),
                 desc: with_nul(&update.description),
                 snapshot_id: update.snapshot_id.uuid(),
@@ -885,11 +892,13 @@ impl Circuit {
                 session_id: self.session_id,
             },
             data: ClassifiedInfoUpdateDataBlock {
-                classified_id: update.classified_id,
+                classified_id: update.classified_id.uuid(),
                 category: update.category,
                 name: with_nul(&update.name),
                 desc: with_nul(&update.description),
-                parcel_id: update.parcel_id,
+                parcel_id: update
+                    .parcel_id
+                    .map_or_else(Uuid::nil, |parcel| parcel.uuid()),
                 // Set on the simulator as the message passes through.
                 parent_estate: 0,
                 snapshot_id: update.snapshot_id.uuid(),
@@ -905,7 +914,7 @@ impl Circuit {
     /// classifieds (#29).
     pub(crate) fn send_classified_delete(
         &mut self,
-        classified_id: Uuid,
+        classified_id: ClassifiedKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ClassifiedDelete(ClassifiedDelete {
@@ -913,7 +922,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            data: ClassifiedDeleteDataBlock { classified_id },
+            data: ClassifiedDeleteDataBlock {
+                classified_id: classified_id.uuid(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -922,7 +933,7 @@ impl Circuit {
     /// dataserver resend the affected agent's classified list) (#29).
     pub(crate) fn send_classified_god_delete(
         &mut self,
-        classified_id: Uuid,
+        classified_id: ClassifiedKey,
         query_id: Uuid,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -932,7 +943,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             data: ClassifiedGodDeleteDataBlock {
-                classified_id,
+                classified_id: classified_id.uuid(),
                 query_id,
             },
         });
@@ -943,7 +954,7 @@ impl Circuit {
     /// the friend `target` to `rights`.
     pub(crate) fn send_grant_user_rights(
         &mut self,
-        target: Uuid,
+        target: FriendKey,
         rights: i32,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -953,7 +964,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             rights: vec![GrantUserRightsRightsBlock {
-                agent_related: target,
+                agent_related: target.uuid(),
                 related_rights: rights,
             }],
         });
@@ -964,7 +975,7 @@ impl Circuit {
     /// `other`.
     pub(crate) fn send_terminate_friendship(
         &mut self,
-        other: Uuid,
+        other: FriendKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::TerminateFriendship(TerminateFriendship {
@@ -972,7 +983,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            ex_block: TerminateFriendshipExBlockBlock { other_id: other },
+            ex_block: TerminateFriendshipExBlockBlock {
+                other_id: other.uuid(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -2417,7 +2430,7 @@ impl Circuit {
     /// in-world event by id.
     pub(crate) fn send_event_info_request(
         &mut self,
-        event_id: u32,
+        event_id: EventId,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::EventInfoRequest(EventInfoRequest {
@@ -2425,7 +2438,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            event_data: EventInfoRequestEventDataBlock { event_id },
+            event_data: EventInfoRequestEventDataBlock {
+                event_id: event_id.get(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -2434,7 +2449,7 @@ impl Circuit {
     /// for an in-world event.
     pub(crate) fn send_event_notification_add_request(
         &mut self,
-        event_id: u32,
+        event_id: EventId,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::EventNotificationAddRequest(EventNotificationAddRequest {
@@ -2442,7 +2457,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            event_data: EventNotificationAddRequestEventDataBlock { event_id },
+            event_data: EventNotificationAddRequestEventDataBlock {
+                event_id: event_id.get(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -2451,7 +2468,7 @@ impl Circuit {
     /// added event reminder.
     pub(crate) fn send_event_notification_remove_request(
         &mut self,
-        event_id: u32,
+        event_id: EventId,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::EventNotificationRemoveRequest(EventNotificationRemoveRequest {
@@ -2459,7 +2476,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            event_data: EventNotificationRemoveRequestEventDataBlock { event_id },
+            event_data: EventNotificationRemoveRequestEventDataBlock {
+                event_id: event_id.get(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -3399,7 +3418,7 @@ impl Circuit {
     /// parcel id).
     pub(crate) fn send_parcel_info_request(
         &mut self,
-        parcel_id: Uuid,
+        parcel_id: ParcelKey,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelInfoRequest(ParcelInfoRequest {
@@ -3407,7 +3426,9 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            data: ParcelInfoRequestDataBlock { parcel_id },
+            data: ParcelInfoRequestDataBlock {
+                parcel_id: parcel_id.uuid(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }

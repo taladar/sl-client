@@ -27,6 +27,7 @@ use uuid::Uuid;
 use crate::endian::{u64_from_be, u64_to_be};
 use crate::llsd::Llsd;
 use crate::region_handle::RegionHandle;
+use sl_types::key::ParcelKey;
 
 /// A decoded `RemoteParcelRequest` body: the region location to resolve, plus the
 /// region identity the grid uses to find it. Exactly one of
@@ -80,8 +81,10 @@ pub fn build_remote_parcel_request(
 /// parcel id, or [`None`] when the body lacks a `parcel_id` (the grid could not
 /// resolve the location).
 #[must_use]
-pub fn parse_remote_parcel_reply(body: &Llsd) -> Option<Uuid> {
-    body.get("parcel_id").and_then(Llsd::as_uuid)
+pub fn parse_remote_parcel_reply(body: &Llsd) -> Option<ParcelKey> {
+    body.get("parcel_id")
+        .and_then(Llsd::as_uuid)
+        .map(ParcelKey::from)
 }
 
 // ---------------------------------------------------------------------------
@@ -124,10 +127,10 @@ pub fn parse_remote_parcel_request(body: &Llsd) -> RemoteParcelRequest {
 /// [`Llsd::to_llsd_xml`], so it round-trips through
 /// [`parse_llsd_xml`](crate::parse_llsd_xml).
 #[must_use]
-pub fn build_remote_parcel_response(parcel_id: Uuid) -> String {
+pub fn build_remote_parcel_response(parcel_id: ParcelKey) -> String {
     Llsd::Map(HashMap::from([(
         "parcel_id".to_owned(),
-        Llsd::Uuid(parcel_id),
+        Llsd::Uuid(parcel_id.uuid()),
     )]))
     .to_llsd_xml()
 }
@@ -138,8 +141,8 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        build_remote_parcel_request, build_remote_parcel_response, parse_remote_parcel_reply,
-        parse_remote_parcel_request,
+        ParcelKey, build_remote_parcel_request, build_remote_parcel_response,
+        parse_remote_parcel_reply, parse_remote_parcel_request,
     };
     use crate::llsd::parse_llsd_xml;
     use crate::region_handle::RegionHandle;
@@ -182,7 +185,7 @@ mod tests {
     /// The reply builder round-trips through the client parser.
     #[test]
     fn reply_round_trips() -> Result<(), String> {
-        let parcel = uuid("22222222-2222-2222-2222-222222222222")?;
+        let parcel = ParcelKey::from(uuid("22222222-2222-2222-2222-222222222222")?);
         let xml = build_remote_parcel_response(parcel);
         let parsed =
             parse_remote_parcel_reply(&parse_llsd_xml(&xml).map_err(|e| format!("{e:?}"))?);

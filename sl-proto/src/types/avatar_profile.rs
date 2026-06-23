@@ -1,7 +1,9 @@
 //! Avatar profile and relationships: properties, picks, classifieds, friends.
 
 use super::Maturity;
-use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, TextureKey};
+use sl_types::key::{
+    AgentKey, ClassifiedKey, FriendKey, GroupKey, InventoryFolderKey, ParcelKey, TextureKey,
+};
 use uuid::Uuid;
 
 /// An avatar's profile properties, parsed from `AvatarPropertiesReply`.
@@ -13,8 +15,8 @@ pub struct AvatarProperties {
     pub image_id: TextureKey,
     /// The "first life" profile image (texture id).
     pub fl_image_id: TextureKey,
-    /// The avatar's partner, or nil if none.
-    pub partner_id: AgentKey,
+    /// The avatar's partner, or `None` if they have none.
+    pub partner_id: Option<AgentKey>,
     /// The "second life" about text.
     pub about_text: String,
     /// The "first life" about text.
@@ -78,7 +80,7 @@ pub struct AvatarPick {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AvatarClassified {
     /// The classified id (use to fetch full details).
-    pub classified_id: Uuid,
+    pub classified_id: ClassifiedKey,
     /// The classified name.
     pub name: String,
 }
@@ -94,7 +96,7 @@ pub struct PickInfo {
     /// Whether this is a "top pick" (a god-only legacy flag, normally `false`).
     pub top_pick: bool,
     /// The parcel the pick points at.
-    pub parcel_id: Uuid,
+    pub parcel_id: ParcelKey,
     /// The pick name.
     pub name: String,
     /// The pick description.
@@ -121,7 +123,7 @@ pub struct PickInfo {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassifiedInfo {
     /// The classified id.
-    pub classified_id: Uuid,
+    pub classified_id: ClassifiedKey,
     /// The avatar that created the classified.
     pub creator_id: AgentKey,
     /// The creation date (Unix timestamp, seconds).
@@ -135,7 +137,7 @@ pub struct ClassifiedInfo {
     /// The classified description.
     pub description: String,
     /// The parcel the classified points at.
-    pub parcel_id: Uuid,
+    pub parcel_id: ParcelKey,
     /// The parent estate id.
     pub parent_estate: u32,
     /// The classified snapshot texture id.
@@ -216,8 +218,9 @@ pub struct InterestsUpdate {
 pub struct PickUpdate {
     /// The pick id (a fresh id to create; an existing id to edit).
     pub pick_id: Uuid,
-    /// The parcel the pick points at (nil to use the agent's current parcel).
-    pub parcel_id: Uuid,
+    /// The parcel the pick points at, or `None` to let the simulator fill in the
+    /// agent's current parcel.
+    pub parcel_id: Option<ParcelKey>,
     /// The pick name.
     pub name: String,
     /// The pick description.
@@ -236,7 +239,7 @@ impl Default for PickUpdate {
     fn default() -> Self {
         Self {
             pick_id: Uuid::nil(),
-            parcel_id: Uuid::nil(),
+            parcel_id: None,
             name: String::new(),
             description: String::new(),
             snapshot_id: TextureKey::from(Uuid::nil()),
@@ -257,15 +260,16 @@ impl Default for PickUpdate {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassifiedUpdate {
     /// The classified id (a fresh id to create; an existing id to edit).
-    pub classified_id: Uuid,
+    pub classified_id: ClassifiedKey,
     /// The classified's search category.
     pub category: u32,
     /// The classified name.
     pub name: String,
     /// The classified description.
     pub description: String,
-    /// The parcel the classified points at (nil to use the agent's current).
-    pub parcel_id: Uuid,
+    /// The parcel the classified points at, or `None` to let the simulator fill
+    /// in the agent's current parcel.
+    pub parcel_id: Option<ParcelKey>,
     /// The classified snapshot texture id.
     pub snapshot_id: TextureKey,
     /// The classified's global position (metres; nil/zero to use the agent's).
@@ -279,11 +283,11 @@ pub struct ClassifiedUpdate {
 impl Default for ClassifiedUpdate {
     fn default() -> Self {
         Self {
-            classified_id: Uuid::nil(),
+            classified_id: ClassifiedKey::from(Uuid::nil()),
             category: 0,
             name: String::new(),
             description: String::new(),
-            parcel_id: Uuid::nil(),
+            parcel_id: None,
             snapshot_id: TextureKey::from(Uuid::nil()),
             pos_global: (0.0, 0.0, 0.0),
             classified_flags: 0,
@@ -332,7 +336,7 @@ impl FriendRights {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Friend {
     /// The friend's agent id.
-    pub id: Uuid,
+    pub id: FriendKey,
     /// The rights this agent grants the friend.
     pub rights_granted: FriendRights,
     /// The rights the friend grants this agent.
@@ -367,4 +371,48 @@ pub struct LoginAccount {
     /// The agent id owning the shared Library (`inventory-lib-owner`), if
     /// provided. Library folder contents are fetched as this owner's inventory.
     pub library_owner: Option<Uuid>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        AvatarClassified, ClassifiedKey, Friend, FriendKey, FriendRights, ParcelKey, PickUpdate,
+        Uuid,
+    };
+    use pretty_assertions::assert_eq;
+
+    /// The Phase 5 profile/directory keys (`ClassifiedKey`/`ParcelKey`/
+    /// `FriendKey`) are transparent wrappers over the wire `Uuid`: wrapping a raw
+    /// id and reading it back is the identity, so a carrier keyed by them puts
+    /// the exact same 16 bytes on the wire the old raw `Uuid` field did.
+    #[test]
+    fn profile_keys_round_trip_raw_uuid() {
+        let raw = Uuid::from_u128(0x1234_5678_9abc_def0_1122_3344_5566_7788);
+        assert_eq!(ClassifiedKey::from(raw).uuid(), raw);
+        assert_eq!(ParcelKey::from(raw).uuid(), raw);
+        assert_eq!(FriendKey::from(raw).uuid(), raw);
+
+        let classified = AvatarClassified {
+            classified_id: ClassifiedKey::from(raw),
+            name: "ad".to_owned(),
+        };
+        assert_eq!(classified.classified_id.uuid(), raw);
+
+        let friend = Friend {
+            id: FriendKey::from(raw),
+            rights_granted: FriendRights(FriendRights::CAN_SEE_ONLINE),
+            rights_received: FriendRights::default(),
+        };
+        assert_eq!(friend.id.uuid(), raw);
+
+        let pick = PickUpdate {
+            parcel_id: Some(ParcelKey::from(raw)),
+            ..PickUpdate::default()
+        };
+        assert_eq!(pick.parcel_id.map(|parcel| parcel.uuid()), Some(raw));
+        assert_eq!(PickUpdate::default().parcel_id, None);
+
+        // The nil default round-trips too.
+        assert_eq!(ParcelKey::from(Uuid::nil()).uuid(), Uuid::nil());
+    }
 }

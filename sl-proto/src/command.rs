@@ -7,19 +7,19 @@
 use crate::scoped_id::{ScopedObjectId, ScopedParcelId};
 use crate::{
     AbuseReport, AgentKey, AgentPreferences, AnyMessage, AssetType, AttachmentMode,
-    AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction, ControlFlags,
-    CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, EstateAccessDelta,
-    ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation, GroupKey,
-    GroupNoticeAttachment, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate,
-    InterestsUpdate, InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer,
-    InventoryType, LandSearchType, LandStatReportType, LindenAmount, MapItemType, Material,
-    MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
-    NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform,
-    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelReturnType, ParcelUpdate,
-    PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate, RegionHandle,
-    RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, Rotation, SaleType,
-    ScriptPermissions, TextureKey, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
-    Wearable,
+    AttachmentPoint, Camera, ChatType, ClassifiedKey, ClassifiedUpdate, ClickAction, ControlFlags,
+    CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, EstateAccessDelta, EventId,
+    ExperienceKey, ExperiencePermission, ExperienceUpdate, FriendKey, FriendRights,
+    GestureActivation, GroupKey, GroupNoticeAttachment, GroupRoleEdit, GroupRoleKey,
+    GroupRoleMemberChange, IceCandidate, InterestsUpdate, InventoryFolderKey, InventoryItem,
+    InventoryKey, InventoryOffer, InventoryType, LandSearchType, LandStatReportType, LindenAmount,
+    MapItemType, Material, MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MovementMode,
+    MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
+    ObjectKey, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey,
+    ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, Postcard, PrimShape,
+    ProfileUpdate, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment,
+    Rotation, SaleType, ScriptPermissions, TextureKey, Throttle, Uuid, Vector, ViewerEffect,
+    VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -122,7 +122,7 @@ pub enum Command {
     },
     /// Request the full details of one classified ad. The reply arrives as
     /// [`Event::ClassifiedInfo`](crate::Event::ClassifiedInfo).
-    RequestClassifiedInfo(Uuid),
+    RequestClassifiedInfo(ClassifiedKey),
     /// Replace the agent's own profile (`AvatarPropertiesUpdate`).
     UpdateProfile(ProfileUpdate),
     /// Replace the agent's own interests (`AvatarInterestsUpdate`).
@@ -148,11 +148,11 @@ pub enum Command {
     /// Create or edit one of the agent's classifieds (`ClassifiedInfoUpdate`).
     UpdateClassified(ClassifiedUpdate),
     /// Delete one of the agent's classifieds (`ClassifiedDelete`).
-    DeleteClassified(Uuid),
+    DeleteClassified(ClassifiedKey),
     /// Delete any agent's classified (`ClassifiedGodDelete`, god-only).
     GodDeleteClassified {
         /// The classified id.
-        classified_id: Uuid,
+        classified_id: ClassifiedKey,
         /// The query id for the dataserver to resend the classified list under.
         query_id: Uuid,
     },
@@ -329,7 +329,7 @@ pub enum Command {
     /// is echoed back as an [`Event::FriendRightsChanged`](crate::Event::FriendRightsChanged).
     GrantUserRights {
         /// The friend whose granted rights to set.
-        target: Uuid,
+        target: FriendKey,
         /// The new rights bitfield (combine `FriendRights::CAN_*`).
         rights: FriendRights,
     },
@@ -343,7 +343,7 @@ pub enum Command {
         message: String,
     },
     /// End the friendship with an agent (`TerminateFriendship`).
-    TerminateFriendship(Uuid),
+    TerminateFriendship(FriendKey),
     /// Accept a friendship offer (`AcceptFriendship`). The `transaction_id` is
     /// the [`InstantMessage::id`](crate::InstantMessage::id) of the incoming friendship-offer IM; the
     /// calling card goes into `calling_card_folder`.
@@ -685,7 +685,7 @@ pub enum Command {
     /// the region seed omits the capability.
     RequestLandResources {
         /// The grid-wide ("fake") parcel id to report on.
-        parcel_id: Uuid,
+        parcel_id: ParcelKey,
     },
     /// Request a region's **top-scripts / top-colliders report** via a UDP
     /// `LandStatRequest`; the reply arrives as
@@ -860,7 +860,7 @@ pub enum Command {
     /// id from a region location first with [`RequestRemoteParcelId`](Self::RequestRemoteParcelId).
     RequestParcelInfo {
         /// The parcel's grid-wide id.
-        parcel_id: Uuid,
+        parcel_id: ParcelKey,
     },
     /// Resolve a region location to a grid-wide parcel id via the
     /// `RemoteParcelRequest` capability; the reply arrives as
@@ -1663,20 +1663,20 @@ pub enum Command {
     /// [`Event::EventInfoReply`](crate::Event::EventInfoReply).
     EventInfoRequest {
         /// The event to look up.
-        event_id: u32,
+        event_id: EventId,
     },
     /// Subscribe to a reminder for an in-world event
     /// (`EventNotificationAddRequest`): the simulator will notify the agent as
     /// the event approaches. There is no direct reply.
     EventNotificationAddRequest {
         /// The event to be reminded about.
-        event_id: u32,
+        event_id: EventId,
     },
     /// Cancel a previously-added event reminder
     /// (`EventNotificationRemoveRequest`). There is no direct reply.
     EventNotificationRemoveRequest {
         /// The event whose reminder to cancel.
-        event_id: u32,
+        event_id: EventId,
     },
     /// Upload a new asset over the legacy UDP path (`AssetUploadRequest`): stores
     /// the asset bytes (small assets inline, larger ones over `Xfer`) without
@@ -1823,7 +1823,7 @@ pub enum Command {
     /// every id into one request. The reply arrives as [`Event::ExperienceInfo`](crate::Event::ExperienceInfo).
     RequestExperienceInfo {
         /// The experiences whose metadata to fetch.
-        experience_ids: Vec<Uuid>,
+        experience_ids: Vec<ExperienceKey>,
     },
     /// Search experiences by name over the `FindExperienceByName` capability. The
     /// reply (one page) arrives as [`Event::ExperienceSearchResults`](crate::Event::ExperienceSearchResults).
@@ -1841,7 +1841,7 @@ pub enum Command {
     /// DELETE). The updated lists arrive as [`Event::ExperiencePermissions`](crate::Event::ExperiencePermissions).
     SetExperiencePermission {
         /// The experience to set the preference for.
-        experience_id: Uuid,
+        experience_id: ExperienceKey,
         /// The preference to apply.
         permission: ExperiencePermission,
     },
@@ -1865,14 +1865,14 @@ pub enum Command {
     /// [`Event::ExperienceAdminStatus`](crate::Event::ExperienceAdminStatus).
     RequestExperienceAdmin {
         /// The experience to test.
-        experience_id: Uuid,
+        experience_id: ExperienceKey,
     },
     /// Test whether the agent contributes to an experience over the
     /// `IsExperienceContributor` capability. The reply arrives as
     /// [`Event::ExperienceContributorStatus`](crate::Event::ExperienceContributorStatus).
     RequestExperienceContributor {
         /// The experience to test.
-        experience_id: Uuid,
+        experience_id: ExperienceKey,
     },
     /// Edit an experience's metadata over the `UpdateExperience` capability. The
     /// updated experience arrives as [`Event::ExperienceUpdated`](crate::Event::ExperienceUpdated).
@@ -1889,11 +1889,11 @@ pub enum Command {
     /// [`Event::RegionExperiences`](crate::Event::RegionExperiences).
     SetRegionExperiences {
         /// The experiences the region allows.
-        allowed: Vec<Uuid>,
+        allowed: Vec<ExperienceKey>,
         /// The experiences the region blocks.
-        blocked: Vec<Uuid>,
+        blocked: Vec<ExperienceKey>,
         /// The experiences the region trusts.
-        trusted: Vec<Uuid>,
+        trusted: Vec<ExperienceKey>,
     },
     /// Offer a teleport ("lure") to each `targets` agent (`StartLure`, #28). Each
     /// recipient receives an [`Event::InstantMessageReceived`](crate::Event::InstantMessageReceived) with

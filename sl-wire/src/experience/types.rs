@@ -2,7 +2,7 @@
 
 use super::llsd_uuid;
 use crate::llsd::Llsd;
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, ExperienceKey, GroupKey, OwnerKey};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -121,18 +121,31 @@ impl ExperiencePermission {
     }
 }
 
+/// Resolves an experience's owner from the wire `(agent_id, group_id)` pair: a
+/// non-nil `agent_id` is an agent owner, else a non-nil `group_id` is a group
+/// owner, else `None` (e.g. a placeholder record carries neither).
+fn experience_owner(agent_id: Uuid, group_id: Uuid) -> Option<OwnerKey> {
+    if !agent_id.is_nil() {
+        Some(OwnerKey::Agent(AgentKey::from(agent_id)))
+    } else if !group_id.is_nil() {
+        Some(OwnerKey::Group(GroupKey::from(group_id)))
+    } else {
+        None
+    }
+}
+
 /// A single experience's metadata record, as carried in a cap reply's
 /// `experience_keys` array (and decoded by [`ExperienceInfo::from_llsd`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExperienceInfo {
     /// The experience's public id (`public_id`) — the key used everywhere else.
-    pub public_id: Uuid,
+    pub public_id: ExperienceKey,
     /// The experience's display name.
     pub name: String,
-    /// The owning agent (`agent_id`); nil when group-owned.
-    pub agent_id: AgentKey,
-    /// The owning group (`group_id`); nil when agent-owned.
-    pub group_id: Uuid,
+    /// The experience's owner — an agent or a group — decoded from the wire
+    /// `(agent_id, group_id)` pair (exactly one is set), or `None` when neither
+    /// is (e.g. a [`missing`](Self::missing) placeholder).
+    pub owner: Option<OwnerKey>,
     /// The free-text description.
     pub description: String,
     /// The [`ExperienceProperties`] bitfield.
@@ -156,10 +169,9 @@ pub struct ExperienceInfo {
 impl Default for ExperienceInfo {
     fn default() -> Self {
         Self {
-            public_id: Uuid::default(),
+            public_id: ExperienceKey::from(Uuid::default()),
             name: String::default(),
-            agent_id: AgentKey::from(Uuid::default()),
-            group_id: Uuid::default(),
+            owner: None,
             description: String::default(),
             properties: ExperienceProperties::default(),
             quota: i32::default(),
@@ -184,10 +196,14 @@ impl ExperienceInfo {
                 .to_owned()
         };
         Self {
-            public_id: map.get("public_id").and_then(llsd_uuid).unwrap_or_default(),
+            public_id: ExperienceKey::from(
+                map.get("public_id").and_then(llsd_uuid).unwrap_or_default(),
+            ),
             name: string("name"),
-            agent_id: AgentKey::from(map.get("agent_id").and_then(llsd_uuid).unwrap_or_default()),
-            group_id: map.get("group_id").and_then(llsd_uuid).unwrap_or_default(),
+            owner: experience_owner(
+                map.get("agent_id").and_then(llsd_uuid).unwrap_or_default(),
+                map.get("group_id").and_then(llsd_uuid).unwrap_or_default(),
+            ),
             description: string("description"),
             properties: ExperienceProperties(
                 map.get("properties").and_then(Llsd::as_i32).unwrap_or(0),
@@ -211,11 +227,16 @@ impl ExperienceInfo {
     /// reply's `error_ids` array (which decodes to the same placeholder).
     #[must_use]
     pub fn to_llsd(&self) -> Llsd {
+        let (agent_id, group_id) = match self.owner {
+            Some(OwnerKey::Agent(agent)) => (agent.uuid(), Uuid::nil()),
+            Some(OwnerKey::Group(group)) => (Uuid::nil(), group.uuid()),
+            None => (Uuid::nil(), Uuid::nil()),
+        };
         let mut map: HashMap<String, Llsd> = HashMap::from([
-            ("public_id".to_owned(), Llsd::Uuid(self.public_id)),
+            ("public_id".to_owned(), Llsd::Uuid(self.public_id.uuid())),
             ("name".to_owned(), Llsd::String(self.name.clone())),
-            ("agent_id".to_owned(), Llsd::Uuid(self.agent_id.uuid())),
-            ("group_id".to_owned(), Llsd::Uuid(self.group_id)),
+            ("agent_id".to_owned(), Llsd::Uuid(agent_id)),
+            ("group_id".to_owned(), Llsd::Uuid(group_id)),
             (
                 "description".to_owned(),
                 Llsd::String(self.description.clone()),
@@ -240,10 +261,10 @@ impl ExperienceInfo {
 /// The editable metadata sent to the `UpdateExperience` cap (see
 /// [`build_update_experience_request`](crate::build_update_experience_request)). The viewer omits `quota`, `expiration`
 /// and `agent_id` (server-controlled), so this carries only the editable fields.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExperienceUpdate {
     /// The experience to update (`public_id`).
-    pub public_id: Uuid,
+    pub public_id: ExperienceKey,
     /// The new display name.
     pub name: String,
     /// The new description.
@@ -256,4 +277,18 @@ pub struct ExperienceUpdate {
     pub slurl: String,
     /// The new extended-metadata XML.
     pub extended_metadata: String,
+}
+
+impl Default for ExperienceUpdate {
+    fn default() -> Self {
+        Self {
+            public_id: ExperienceKey::from(Uuid::default()),
+            name: String::default(),
+            description: String::default(),
+            maturity: i32::default(),
+            properties: i32::default(),
+            slurl: String::default(),
+            extended_metadata: String::default(),
+        }
+    }
 }

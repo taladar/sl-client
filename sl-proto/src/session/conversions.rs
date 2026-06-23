@@ -20,10 +20,14 @@ use crate::types::{
     handle_to_grid,
 };
 use sl_types::key::AgentKey;
+use sl_types::key::ClassifiedKey;
+use sl_types::key::ExperienceKey;
+use sl_types::key::FriendKey;
 use sl_types::key::GroupKey;
 use sl_types::key::InventoryFolderKey;
 use sl_types::key::InventoryKey;
 use sl_types::key::ObjectKey;
+use sl_types::key::ParcelKey;
 use sl_types::key::TextureKey;
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
@@ -775,7 +779,8 @@ pub(crate) fn avatar_properties(
         avatar_id: AgentKey::from(avatar_id),
         image_id: TextureKey::from(data.image_id),
         fl_image_id: TextureKey::from(data.fl_image_id),
-        partner_id: AgentKey::from(data.partner_id),
+        // A nil partner id means the avatar has no partner.
+        partner_id: (!data.partner_id.is_nil()).then(|| AgentKey::from(data.partner_id)),
         about_text: trimmed_string(&data.about_text),
         fl_about_text: trimmed_string(&data.fl_about_text),
         born_on: trimmed_string(&data.born_on),
@@ -819,7 +824,7 @@ pub(crate) fn pick_info(data: &PickInfoReplyDataBlock) -> PickInfo {
         pick_id: data.pick_id,
         creator_id: AgentKey::from(data.creator_id),
         top_pick: data.top_pick,
-        parcel_id: data.parcel_id,
+        parcel_id: ParcelKey::from(data.parcel_id),
         name: trimmed_string(&data.name),
         description: trimmed_string(&data.desc),
         snapshot_id: TextureKey::from(data.snapshot_id),
@@ -836,14 +841,14 @@ pub(crate) fn pick_info(data: &PickInfoReplyDataBlock) -> PickInfo {
 pub(crate) fn classified_info(data: &ClassifiedInfoReplyDataBlock) -> ClassifiedInfo {
     let [x, y, z] = data.pos_global;
     ClassifiedInfo {
-        classified_id: data.classified_id,
+        classified_id: ClassifiedKey::from(data.classified_id),
         creator_id: AgentKey::from(data.creator_id),
         creation_date: data.creation_date,
         expiration_date: data.expiration_date,
         category: data.category,
         name: trimmed_string(&data.name),
         description: trimmed_string(&data.desc),
-        parcel_id: data.parcel_id,
+        parcel_id: ParcelKey::from(data.parcel_id),
         parent_estate: data.parent_estate,
         snapshot_id: TextureKey::from(data.snapshot_id),
         sim_name: trimmed_string(&data.sim_name),
@@ -866,9 +871,9 @@ pub(crate) fn skeleton_folder(folder: &SkeletonFolder) -> InventoryFolder {
 }
 
 /// Builds a [`Friend`] from a login `buddy-list` entry.
-pub(crate) const fn friend(entry: &sl_wire::BuddyListEntry) -> Friend {
+pub(crate) fn friend(entry: &sl_wire::BuddyListEntry) -> Friend {
     Friend {
-        id: entry.buddy_id,
+        id: FriendKey::from(entry.buddy_id),
         rights_granted: FriendRights(entry.rights_granted),
         rights_received: FriendRights(entry.rights_has),
     }
@@ -1118,7 +1123,11 @@ pub(crate) fn script_permission_request(
         item_id: InventoryKey::from(data.item_id),
         object_name: trimmed_string(&data.object_name),
         object_owner: trimmed_string(&data.object_owner),
-        experience_id: message.experience.experience_id,
+        experience_id: {
+            // A nil `experience_id` means the request is not under an experience.
+            let raw = message.experience.experience_id;
+            (!raw.is_nil()).then(|| ExperienceKey::from(raw))
+        },
         permissions: ScriptPermissions(data.questions),
     }
 }

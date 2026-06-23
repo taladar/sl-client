@@ -11,22 +11,22 @@ mod test {
     use pretty_assertions::assert_eq;
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AlertInfo, AttachmentMode, AttachmentPoint,
-        AvatarName, AvatarPickerResult, ChatType, CoarseLocation, ControlFlags, DetachOrder,
-        DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-        DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventInfo, FollowCamProperty,
-        FollowCamPropertyValue, GestureActivation, GroupAccountDetails, GroupAccountDetailsEntry,
-        GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
-        GroupActiveProposalItem, GroupKey, GroupName, GroupVote, GroupVoteHistoryItem, ImDialog,
-        InventoryFolderKey, InventoryKey, LandSearchType, LandStatItem, LandStatReportType,
-        LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
-        MeanCollision, MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem, ObjectKey,
-        ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner, ParcelReturnType,
-        Permissions5, PingId, PlacesResult, PointAtType, Postcard, ProductType, RegionHandle,
-        RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment,
-        SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ServerEvent,
-        Session, SimSession, TelehubInfo, TextureKey, Throttle, Transmit, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
-        parse_event_queue_response,
+        AvatarName, AvatarPickerResult, ChatType, ClassifiedKey, CoarseLocation, ControlFlags,
+        DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
+        DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventId, EventInfo,
+        FollowCamProperty, FollowCamPropertyValue, GestureActivation, GroupAccountDetails,
+        GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
+        GroupAccountTransactions, GroupActiveProposalItem, GroupKey, GroupName, GroupVote,
+        GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryKey, LandSearchType,
+        LandStatItem, LandStatReportType, LoginParams, MapItem, MapItemType, MapLayer,
+        MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType, MovementMode,
+        NotecardRez, ObjectBuyItem, ObjectKey, ObjectPropertiesFamily, ParcelCategory,
+        ParcelDetails, ParcelKey, ParcelObjectOwner, ParcelReturnType, Permissions5, PingId,
+        PlacesResult, PointAtType, Postcard, ProductType, RegionHandle, RegionIdentity,
+        RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment, SaleType,
+        ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ServerEvent, Session,
+        SimSession, TelehubInfo, TextureKey, Throttle, Transmit, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -683,7 +683,7 @@ mod test {
             &[DirEventResult {
                 owner_id: uuid::Uuid::from_u128(0xF12),
                 name: "Party".to_owned(),
-                event_id: 7,
+                event_id: EventId::new(7),
                 date: "2026-06-20".to_owned(),
                 unix_time: 1_750_000_000,
                 event_flags: 0,
@@ -694,7 +694,7 @@ mod test {
         sim.send_dir_classified_reply(
             qid,
             &[DirClassifiedResult {
-                classified_id: uuid::Uuid::from_u128(0xF13),
+                classified_id: ClassifiedKey::from(uuid::Uuid::from_u128(0xF13)),
                 name: "Shoes".to_owned(),
                 classified_flags: 0,
                 creation_date: 1,
@@ -707,7 +707,7 @@ mod test {
         sim.send_dir_places_reply(
             qid,
             &[DirPlaceResult {
-                parcel_id: uuid::Uuid::from_u128(0xF14),
+                parcel_id: ParcelKey::from(uuid::Uuid::from_u128(0xF14)),
                 name: "Sandbox".to_owned(),
                 for_sale: false,
                 auction: false,
@@ -719,7 +719,7 @@ mod test {
         sim.send_dir_land_reply(
             qid,
             &[DirLandResult {
-                parcel_id: uuid::Uuid::from_u128(0xF15),
+                parcel_id: ParcelKey::from(uuid::Uuid::from_u128(0xF15)),
                 name: "For Sale".to_owned(),
                 auction: false,
                 for_sale: true,
@@ -783,7 +783,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a DirEventsReply client event")?;
-        assert_eq!(dir_events.first().ok_or("event")?.event_id, 7);
+        assert_eq!(dir_events.first().ok_or("event")?.event_id, EventId::new(7));
 
         let classifieds = events
             .iter()
@@ -847,9 +847,9 @@ mod test {
         drain_client(&mut client);
 
         // Client -> sim: the three events-directory requests.
-        client.event_info_request(42, now)?;
-        client.event_notification_add_request(42, now)?;
-        client.event_notification_remove_request(7, now)?;
+        client.event_info_request(EventId::new(42), now)?;
+        client.event_notification_add_request(EventId::new(42), now)?;
+        client.event_notification_remove_request(EventId::new(7), now)?;
         pump(&mut client, &mut sim, now)?;
 
         let server_events = drain_server(&mut sim);
@@ -860,7 +860,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an EventInfoRequest server event")?;
-        assert_eq!(info_event, 42);
+        assert_eq!(info_event, EventId::new(42));
         let added = server_events
             .iter()
             .find_map(|e| match e {
@@ -868,7 +868,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an EventNotificationAddRequest server event")?;
-        assert_eq!(added, 42);
+        assert_eq!(added, EventId::new(42));
         let removed = server_events
             .iter()
             .find_map(|e| match e {
@@ -876,13 +876,13 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an EventNotificationRemoveRequest server event")?;
-        assert_eq!(removed, 7);
+        assert_eq!(removed, EventId::new(7));
 
         // Sim -> client: the filled-in reply.
         let creator = uuid::Uuid::from_u128(0xE0E);
         sim.send_event_info_reply(
             &EventInfo {
-                event_id: 42,
+                event_id: EventId::new(42),
                 creator: AgentKey::from(creator),
                 name: "Beach Party".to_owned(),
                 category: "Discussion".to_owned(),
@@ -907,7 +907,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an EventInfoReply client event")?;
-        assert_eq!(info.event_id, 42);
+        assert_eq!(info.event_id, EventId::new(42));
         assert_eq!(info.creator, AgentKey::from(creator));
         assert_eq!(info.name, "Beach Party");
         assert_eq!(info.amount, 50);
@@ -1147,7 +1147,7 @@ mod test {
             &[ObjectKey::from(uuid::Uuid::from_u128(0xAB))],
             now,
         )?;
-        client.request_parcel_info(uuid::Uuid::from_u128(0x00C0_FFEE), now)?;
+        client.request_parcel_info(ParcelKey::from(uuid::Uuid::from_u128(0x00C0_FFEE)), now)?;
         pump(&mut client, &mut sim, now)?;
 
         let server_events = drain_server(&mut sim);
@@ -1203,7 +1203,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a RequestParcelInfo server event")?;
-        assert_eq!(info, uuid::Uuid::from_u128(0x00C0_FFEE));
+        assert_eq!(info.uuid(), uuid::Uuid::from_u128(0x00C0_FFEE));
 
         // Sim -> client: the two reply encoders.
         sim.send_parcel_object_owners_reply(
@@ -1218,7 +1218,7 @@ mod test {
         )?;
         sim.send_parcel_info_reply(
             &ParcelDetails {
-                parcel_id: uuid::Uuid::from_u128(0x00C0_FFEE),
+                parcel_id: ParcelKey::from(uuid::Uuid::from_u128(0x00C0_FFEE)),
                 owner_id: uuid::Uuid::from_u128(0x55),
                 name: "Sunny Plaza".to_owned(),
                 description: "A nice spot".to_owned(),
@@ -1255,7 +1255,10 @@ mod test {
             })
             .ok_or("expected a ParcelDetails client event")?;
         assert_eq!(details.name, "Sunny Plaza");
-        assert_eq!(details.parcel_id, uuid::Uuid::from_u128(0x00C0_FFEE));
+        assert_eq!(
+            details.parcel_id,
+            ParcelKey::from(uuid::Uuid::from_u128(0x00C0_FFEE))
+        );
         assert_eq!(details.sale_price, 1000);
         Ok(())
     }

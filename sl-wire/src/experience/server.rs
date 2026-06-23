@@ -4,6 +4,7 @@ use super::{
     ExperienceInfo, ExperiencePermission, ExperienceUpdate, llsd_uuid, parse_region_experiences,
 };
 use crate::llsd::{Llsd, parse_llsd_xml};
+use sl_types::key::ExperienceKey;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -76,7 +77,7 @@ fn percent_decode(text: &str) -> String {
 /// (every `public_id` query parameter). Unparsable ids are skipped; an absent
 /// query yields an empty list.
 #[must_use]
-pub fn parse_experience_info_query(suffix: &str) -> Vec<Uuid> {
+pub fn parse_experience_info_query(suffix: &str) -> Vec<ExperienceKey> {
     let Some(query) = url_query(suffix) else {
         return Vec::new();
     };
@@ -85,6 +86,7 @@ pub fn parse_experience_info_query(suffix: &str) -> Vec<Uuid> {
         .filter_map(|pair| pair.split_once('='))
         .filter(|(key, _value)| *key == "public_id")
         .filter_map(|(_key, value)| Uuid::parse_str(value).ok())
+        .map(ExperienceKey::from)
         .collect()
 }
 
@@ -116,16 +118,18 @@ pub fn parse_group_experiences_query(suffix: &str) -> Option<Uuid> {
 /// (the `Forget` DELETE target, `?<experience_id>`), or `None` if it does not
 /// match.
 #[must_use]
-pub fn parse_forget_experience_query(suffix: &str) -> Option<Uuid> {
-    parse_bare_uuid_query(suffix)
+pub fn parse_forget_experience_query(suffix: &str) -> Option<ExperienceKey> {
+    parse_bare_uuid_query(suffix).map(ExperienceKey::from)
 }
 
 /// Parses the [`experience_id_query`](crate::experience_id_query) URL suffix back into its experience id
 /// (`?experience_id=<id>`), or `None` if it does not match.
 #[must_use]
-pub fn parse_experience_id_query(suffix: &str) -> Option<Uuid> {
+pub fn parse_experience_id_query(suffix: &str) -> Option<ExperienceKey> {
     let query = url_query(suffix)?;
-    Uuid::parse_str(query_param(query, "experience_id")?).ok()
+    Uuid::parse_str(query_param(query, "experience_id")?)
+        .ok()
+        .map(ExperienceKey::from)
 }
 
 /// Parses an `ExperiencePreferences` PUT body
@@ -139,7 +143,7 @@ pub fn parse_experience_id_query(suffix: &str) -> Option<Uuid> {
 /// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
 pub fn parse_set_experience_permission_request(
     xml: &str,
-) -> Result<Option<(Uuid, ExperiencePermission)>, roxmltree::Error> {
+) -> Result<Option<(ExperienceKey, ExperiencePermission)>, roxmltree::Error> {
     let root = parse_llsd_xml(xml)?;
     let Some(map) = root.as_map() else {
         return Ok(None);
@@ -154,7 +158,7 @@ pub fn parse_set_experience_permission_request(
         .get("permission")
         .and_then(Llsd::as_str)
         .and_then(ExperiencePermission::from_wire);
-    Ok(permission.map(|permission| (id, permission)))
+    Ok(permission.map(|permission| (ExperienceKey::from(id), permission)))
 }
 
 /// Parses an `UpdateExperience` POST body back into an [`ExperienceUpdate`] — the
@@ -173,10 +177,11 @@ pub fn parse_update_experience_request(xml: &str) -> Result<ExperienceUpdate, ro
             .to_owned()
     };
     Ok(ExperienceUpdate {
-        public_id: root
-            .get("public_id")
-            .and_then(llsd_uuid)
-            .unwrap_or_default(),
+        public_id: ExperienceKey::from(
+            root.get("public_id")
+                .and_then(llsd_uuid)
+                .unwrap_or_default(),
+        ),
         name: string("name"),
         description: string("description"),
         maturity: root.get("maturity").and_then(Llsd::as_i32).unwrap_or(0),
@@ -200,13 +205,13 @@ pub fn parse_update_experience_request(xml: &str) -> Result<ExperienceUpdate, ro
 )]
 pub fn parse_region_experiences_request(
     xml: &str,
-) -> Result<(Vec<Uuid>, Vec<Uuid>, Vec<Uuid>), roxmltree::Error> {
+) -> Result<(Vec<ExperienceKey>, Vec<ExperienceKey>, Vec<ExperienceKey>), roxmltree::Error> {
     Ok(parse_region_experiences(&parse_llsd_xml(xml)?))
 }
 
-/// Builds an array-of-UUIDs LLSD value.
-fn uuid_array_llsd(ids: &[Uuid]) -> Llsd {
-    Llsd::Array(ids.iter().copied().map(Llsd::Uuid).collect())
+/// Builds an array-of-UUIDs LLSD value from experience ids.
+fn uuid_array_llsd(ids: &[ExperienceKey]) -> Llsd {
+    Llsd::Array(ids.iter().map(|id| Llsd::Uuid(id.uuid())).collect())
 }
 
 /// Builds a `GetExperienceInfo` / `FindExperienceByName` reply
@@ -221,7 +226,7 @@ pub fn build_experience_infos_response(infos: &[ExperienceInfo]) -> String {
     let mut errors = Vec::new();
     for info in infos {
         if info.missing {
-            errors.push(Llsd::Uuid(info.public_id));
+            errors.push(Llsd::Uuid(info.public_id.uuid()));
         } else {
             keys.push(info.to_llsd());
         }
@@ -238,7 +243,7 @@ pub fn build_experience_infos_response(infos: &[ExperienceInfo]) -> String {
 /// / `GroupExperiences` reply (`{ experience_ids }`) — the inverse of
 /// [`parse_experience_ids`](crate::parse_experience_ids).
 #[must_use]
-pub fn build_experience_ids_response(ids: &[Uuid]) -> String {
+pub fn build_experience_ids_response(ids: &[ExperienceKey]) -> String {
     Llsd::Map(HashMap::from([(
         "experience_ids".to_owned(),
         uuid_array_llsd(ids),
@@ -250,7 +255,10 @@ pub fn build_experience_ids_response(ids: &[Uuid]) -> String {
 /// (`{ experiences, blocked }`) — the inverse of
 /// [`parse_experience_permissions`](crate::parse_experience_permissions).
 #[must_use]
-pub fn build_experience_permissions_response(allowed: &[Uuid], blocked: &[Uuid]) -> String {
+pub fn build_experience_permissions_response(
+    allowed: &[ExperienceKey],
+    blocked: &[ExperienceKey],
+) -> String {
     Llsd::Map(HashMap::from([
         ("experiences".to_owned(), uuid_array_llsd(allowed)),
         ("blocked".to_owned(), uuid_array_llsd(blocked)),
@@ -263,9 +271,9 @@ pub fn build_experience_permissions_response(allowed: &[Uuid], blocked: &[Uuid])
 /// POST body that [`build_region_experiences_request`](crate::build_region_experiences_request) writes.)
 #[must_use]
 pub fn build_region_experiences_response(
-    allowed: &[Uuid],
-    blocked: &[Uuid],
-    trusted: &[Uuid],
+    allowed: &[ExperienceKey],
+    blocked: &[ExperienceKey],
+    trusted: &[ExperienceKey],
 ) -> String {
     Llsd::Map(HashMap::from([
         ("allowed".to_owned(), uuid_array_llsd(allowed)),
