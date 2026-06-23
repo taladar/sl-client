@@ -836,14 +836,14 @@ fn parse_effect_data(
     let selector = args.str_or(ctx, "data", 200, default_effect_data_kind(effect_type))?;
     match norm(&selector).as_str() {
         "lookat" => Ok(ViewerEffectData::LookAt {
-            source: AgentKey::from(args.uuid_or_nil(ctx, "source", 201)?),
-            target: args.object_or_nil(ctx, "target", 202)?,
+            source: args.opt_agent(ctx, "source", 201)?,
+            target: args.opt_object(ctx, "target", 202)?,
             target_position: position_or_zero(args, ctx, "position", 203)?,
             look_at_type: parse_lookat_type("look_at", &args.str_or(ctx, "look_at", 204, "none")?)?,
         }),
         "pointat" => Ok(ViewerEffectData::PointAt {
-            source: AgentKey::from(args.uuid_or_nil(ctx, "source", 201)?),
-            target: args.object_or_nil(ctx, "target", 202)?,
+            source: args.opt_agent(ctx, "source", 201)?,
+            target: args.opt_object(ctx, "target", 202)?,
             target_position: position_or_zero(args, ctx, "position", 203)?,
             point_at_type: parse_pointat_type(
                 "point_at",
@@ -851,8 +851,8 @@ fn parse_effect_data(
             )?,
         }),
         "spiral" => Ok(ViewerEffectData::Spiral {
-            source: args.object_or_nil(ctx, "source", 201)?,
-            target: args.object_or_nil(ctx, "target", 202)?,
+            source: args.opt_object(ctx, "source", 201)?,
+            target: args.opt_object(ctx, "target", 202)?,
             position: position_or_zero(args, ctx, "position", 203)?,
         }),
         "raw" => Ok(ViewerEffectData::Raw(args.bytes_or_empty(ctx, "raw", 206)?)),

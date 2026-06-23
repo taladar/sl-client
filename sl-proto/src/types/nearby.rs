@@ -272,10 +272,10 @@ pub enum ViewerEffectData {
     /// offset, or an offset from the target object when one is set), and the
     /// look-at kind.
     LookAt {
-        /// The avatar the gaze belongs to (nil if absent).
-        source: AgentKey,
-        /// The object being looked at (nil for none).
-        target: ObjectKey,
+        /// The avatar the gaze belongs to (`None` if absent).
+        source: Option<AgentKey>,
+        /// The object being looked at (`None` for none).
+        target: Option<ObjectKey>,
         /// The global target position, in metres.
         target_position: [f64; 3],
         /// What the gaze is directed at.
@@ -283,10 +283,10 @@ pub enum ViewerEffectData {
     },
     /// An avatar's pointing gesture (the 57-byte `LLHUDEffectPointAt` layout).
     PointAt {
-        /// The avatar doing the pointing (nil if absent).
-        source: AgentKey,
-        /// The object being pointed at (nil for none).
-        target: ObjectKey,
+        /// The avatar doing the pointing (`None` if absent).
+        source: Option<AgentKey>,
+        /// The object being pointed at (`None` for none).
+        target: Option<ObjectKey>,
         /// The global target position, in metres.
         target_position: [f64; 3],
         /// What the gesture is directed at.
@@ -296,10 +296,10 @@ pub enum ViewerEffectData {
     /// `LLHUDEffectSpiral` layout): a source object, an optional target object,
     /// and a global position.
     Spiral {
-        /// The object the effect emanates from (nil if absent).
-        source: ObjectKey,
-        /// The object the effect points to (nil for none).
-        target: ObjectKey,
+        /// The object the effect emanates from (`None` if absent).
+        source: Option<ObjectKey>,
+        /// The object the effect points to (`None` for none).
+        target: Option<ObjectKey>,
         /// The global position, in metres (zero when unused).
         position: [f64; 3],
     },
@@ -330,8 +330,8 @@ impl ViewerEffectData {
     /// Decodes a 57-byte look-at `TypeData` blob (`None` on a short read).
     fn decode_lookat(bytes: &[u8]) -> Option<Self> {
         let mut reader = Reader::new(bytes);
-        let source = AgentKey::from(reader.uuid().ok()?);
-        let target = ObjectKey::from(reader.uuid().ok()?);
+        let source = optional_agent(reader.uuid().ok()?);
+        let target = optional_object(reader.uuid().ok()?);
         let target_position = reader.vector3d().ok()?;
         let look_at_type = LookAtType::from_code(reader.u8().ok()?);
         Some(Self::LookAt {
@@ -345,8 +345,8 @@ impl ViewerEffectData {
     /// Decodes a 57-byte point-at `TypeData` blob (`None` on a short read).
     fn decode_pointat(bytes: &[u8]) -> Option<Self> {
         let mut reader = Reader::new(bytes);
-        let source = AgentKey::from(reader.uuid().ok()?);
-        let target = ObjectKey::from(reader.uuid().ok()?);
+        let source = optional_agent(reader.uuid().ok()?);
+        let target = optional_object(reader.uuid().ok()?);
         let target_position = reader.vector3d().ok()?;
         let point_at_type = PointAtType::from_code(reader.u8().ok()?);
         Some(Self::PointAt {
@@ -360,8 +360,8 @@ impl ViewerEffectData {
     /// Decodes a 56-byte spiral-family `TypeData` blob (`None` on a short read).
     fn decode_spiral(bytes: &[u8]) -> Option<Self> {
         let mut reader = Reader::new(bytes);
-        let source = ObjectKey::from(reader.uuid().ok()?);
-        let target = ObjectKey::from(reader.uuid().ok()?);
+        let source = optional_object(reader.uuid().ok()?);
+        let target = optional_object(reader.uuid().ok()?);
         let position = reader.vector3d().ok()?;
         Some(Self::Spiral {
             source,
@@ -382,8 +382,8 @@ impl ViewerEffectData {
                 target_position,
                 look_at_type,
             } => {
-                writer.put_uuid(source.uuid());
-                writer.put_uuid(target.uuid());
+                writer.put_uuid(source.map_or_else(Uuid::nil, |key| key.uuid()));
+                writer.put_uuid(target.map_or_else(Uuid::nil, |key| key.uuid()));
                 writer.put_vector3d(*target_position);
                 writer.put_u8(look_at_type.to_code());
             }
@@ -393,8 +393,8 @@ impl ViewerEffectData {
                 target_position,
                 point_at_type,
             } => {
-                writer.put_uuid(source.uuid());
-                writer.put_uuid(target.uuid());
+                writer.put_uuid(source.map_or_else(Uuid::nil, |key| key.uuid()));
+                writer.put_uuid(target.map_or_else(Uuid::nil, |key| key.uuid()));
                 writer.put_vector3d(*target_position);
                 writer.put_u8(point_at_type.to_code());
             }
@@ -403,8 +403,8 @@ impl ViewerEffectData {
                 target,
                 position,
             } => {
-                writer.put_uuid(source.uuid());
-                writer.put_uuid(target.uuid());
+                writer.put_uuid(source.map_or_else(Uuid::nil, |key| key.uuid()));
+                writer.put_uuid(target.map_or_else(Uuid::nil, |key| key.uuid()));
                 writer.put_vector3d(*position);
             }
             Self::Raw(bytes) => return bytes.clone(),
@@ -417,6 +417,18 @@ impl ViewerEffectData {
 const LOOKAT_SIZE: usize = 57;
 /// The 56-byte `TypeData` size of the spiral-family effects.
 const SPIRAL_SIZE: usize = 56;
+
+/// Wraps a wire UUID as an optional agent key: a nil id is the "absent"
+/// sentinel and decodes to `None`.
+fn optional_agent(raw: Uuid) -> Option<AgentKey> {
+    (!raw.is_nil()).then(|| AgentKey::from(raw))
+}
+
+/// Wraps a wire UUID as an optional object key: a nil id is the "none"
+/// sentinel and decodes to `None`.
+fn optional_object(raw: Uuid) -> Option<ObjectKey> {
+    (!raw.is_nil()).then(|| ObjectKey::from(raw))
+}
 
 /// A single viewer effect, as sent with [`Command::ViewerEffect`](crate::Command::ViewerEffect)
 /// or received as [`Event::ViewerEffect`](crate::Event::ViewerEffect) (one entry
@@ -457,8 +469,8 @@ mod tests {
     #[test]
     fn lookat_round_trips() {
         let data = ViewerEffectData::LookAt {
-            source: AgentKey::from(Uuid::from_u128(1)),
-            target: ObjectKey::from(Uuid::from_u128(2)),
+            source: Some(AgentKey::from(Uuid::from_u128(1))),
+            target: Some(ObjectKey::from(Uuid::from_u128(2))),
             target_position: [1.5, -2.5, 3.5],
             look_at_type: LookAtType::Focus,
         };
@@ -474,8 +486,8 @@ mod tests {
     #[test]
     fn pointat_round_trips() {
         let data = ViewerEffectData::PointAt {
-            source: AgentKey::from(Uuid::from_u128(3)),
-            target: ObjectKey::from(Uuid::from_u128(4)),
+            source: Some(AgentKey::from(Uuid::from_u128(3))),
+            target: Some(ObjectKey::from(Uuid::from_u128(4))),
             target_position: [0.0, 0.0, 0.0],
             point_at_type: PointAtType::Grab,
         };
@@ -491,14 +503,33 @@ mod tests {
     #[test]
     fn spiral_round_trips() {
         let data = ViewerEffectData::Spiral {
-            source: ObjectKey::from(Uuid::from_u128(5)),
-            target: ObjectKey::from(Uuid::from_u128(6)),
+            source: Some(ObjectKey::from(Uuid::from_u128(5))),
+            target: Some(ObjectKey::from(Uuid::from_u128(6))),
             position: [10.0, 20.0, 30.0],
         };
         let bytes = data.to_wire();
         assert_eq!(bytes.len(), 56);
         assert_eq!(
             ViewerEffectData::from_wire(ViewerEffectType::Beam, &bytes),
+            data
+        );
+    }
+
+    /// An absent source/target (`None`) encodes as the nil wire id and decodes
+    /// back to `None` — the in-band "absent" sentinel is modelled by `Option`.
+    #[test]
+    fn absent_source_and_target_round_trip_as_none() {
+        let data = ViewerEffectData::LookAt {
+            source: None,
+            target: None,
+            target_position: [0.0, 0.0, 0.0],
+            look_at_type: LookAtType::None,
+        };
+        let bytes = data.to_wire();
+        // The two leading 16-byte ids are the nil UUID (all-zero).
+        assert!(bytes.iter().take(32).all(|&byte| byte == 0));
+        assert_eq!(
+            ViewerEffectData::from_wire(ViewerEffectType::LookAt, &bytes),
             data
         );
     }

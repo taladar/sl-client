@@ -4280,8 +4280,8 @@ mod test {
                 duration: 2.0,
                 color: [255, 0, 0, 255],
                 data: ViewerEffectData::LookAt {
-                    source: AgentKey::from(self_id),
-                    target: ObjectKey::from(target),
+                    source: Some(AgentKey::from(self_id)),
+                    target: Some(ObjectKey::from(target)),
                     target_position: [1.0, 2.0, 3.0],
                     look_at_type: LookAtType::Focus,
                 },
@@ -4303,8 +4303,8 @@ mod test {
         assert_eq!(
             ViewerEffectData::from_wire(ViewerEffectType::LookAt, &block.type_data),
             ViewerEffectData::LookAt {
-                source: AgentKey::from(self_id),
-                target: ObjectKey::from(target),
+                source: Some(AgentKey::from(self_id)),
+                target: Some(ObjectKey::from(target)),
                 target_position: [1.0, 2.0, 3.0],
                 look_at_type: LookAtType::Focus,
             },
@@ -4411,8 +4411,8 @@ mod test {
         let source = uuid::Uuid::from_u128(0x10);
         let target = uuid::Uuid::from_u128(0x11);
         let data = ViewerEffectData::PointAt {
-            source: AgentKey::from(source),
-            target: ObjectKey::from(target),
+            source: Some(AgentKey::from(source)),
+            target: Some(ObjectKey::from(target)),
             target_position: [4.0, 5.0, 6.0],
             point_at_type: PointAtType::Grab,
         };
@@ -6461,7 +6461,7 @@ mod test {
         assert!((sky.sun_rotation.s - 1.0).abs() < f32::EPSILON);
         assert_eq!(
             sky.cloud_texture,
-            TextureKey::from(uuid::Uuid::from_u128(0xcc))
+            Some(TextureKey::from(uuid::Uuid::from_u128(0xcc)))
         );
         // Haze colours/scalars come from the `legacy_haze` sub-map.
         assert!(
@@ -6475,7 +6475,7 @@ mod test {
         assert!((water.water_fog_density - 2.0).abs() < f32::EPSILON);
         assert_eq!(
             water.normal_map,
-            TextureKey::from(uuid::Uuid::from_u128(0xaa))
+            Some(TextureKey::from(uuid::Uuid::from_u128(0xaa)))
         );
         assert!(
             water
@@ -6533,12 +6533,12 @@ mod test {
             sky_top_radius: 6400.0,
             sky_bottom_radius: 6360.0,
             planet_radius: 6360.0,
-            sun_texture: TextureKey::from(uuid::Uuid::from_u128(0x511)),
-            moon_texture: TextureKey::from(uuid::Uuid::from_u128(0x110)),
-            cloud_texture: TextureKey::from(uuid::Uuid::from_u128(0xc10)),
-            bloom_texture: TextureKey::from(uuid::Uuid::from_u128(0xb1)),
-            halo_texture: TextureKey::from(uuid::Uuid::from_u128(0xa10)),
-            rainbow_texture: TextureKey::from(uuid::Uuid::from_u128(0x4a1)),
+            sun_texture: Some(TextureKey::from(uuid::Uuid::from_u128(0x511))),
+            moon_texture: Some(TextureKey::from(uuid::Uuid::from_u128(0x110))),
+            cloud_texture: Some(TextureKey::from(uuid::Uuid::from_u128(0xc10))),
+            bloom_texture: Some(TextureKey::from(uuid::Uuid::from_u128(0xb1))),
+            halo_texture: Some(TextureKey::from(uuid::Uuid::from_u128(0xa10))),
+            rainbow_texture: Some(TextureKey::from(uuid::Uuid::from_u128(0x4a1))),
         }
     }
 
@@ -6550,10 +6550,10 @@ mod test {
             fresnel_offset: 0.5,
             fresnel_scale: 0.75,
             normal_scale: [2.0, 2.0, 2.0],
-            normal_map: TextureKey::from(uuid::Uuid::from_u128(0x404)),
+            normal_map: Some(TextureKey::from(uuid::Uuid::from_u128(0x404))),
             scale_above: 0.125,
             scale_below: 0.25,
-            transparent_texture: TextureKey::from(uuid::Uuid::from_u128(0x7a)),
+            transparent_texture: Some(TextureKey::from(uuid::Uuid::from_u128(0x7a))),
             underwater_fog_mod: 0.25,
             water_fog_color: [0.0, 0.25, 0.5],
             water_fog_density: 16.0,

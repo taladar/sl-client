@@ -431,12 +431,12 @@ fn sky_settings_from_llsd(name: &str, sky: &Llsd) -> SkySettings {
         sky_top_radius: f32_member(sky, "sky_top_radius"),
         sky_bottom_radius: f32_member(sky, "sky_bottom_radius"),
         planet_radius: f32_member(sky, "planet_radius"),
-        sun_texture: TextureKey::from(uuid_member(sky, "sun_id")),
-        moon_texture: TextureKey::from(uuid_member(sky, "moon_id")),
-        cloud_texture: TextureKey::from(uuid_member(sky, "cloud_id")),
-        bloom_texture: TextureKey::from(uuid_member(sky, "bloom_id")),
-        halo_texture: TextureKey::from(uuid_member(sky, "halo_id")),
-        rainbow_texture: TextureKey::from(uuid_member(sky, "rainbow_id")),
+        sun_texture: optional_texture_member(sky, "sun_id"),
+        moon_texture: optional_texture_member(sky, "moon_id"),
+        cloud_texture: optional_texture_member(sky, "cloud_id"),
+        bloom_texture: optional_texture_member(sky, "bloom_id"),
+        halo_texture: optional_texture_member(sky, "halo_id"),
+        rainbow_texture: optional_texture_member(sky, "rainbow_id"),
     }
 }
 
@@ -448,10 +448,10 @@ fn water_settings_from_llsd(name: &str, water: &Llsd) -> WaterSettings {
         fresnel_offset: f32_member(water, "fresnel_offset"),
         fresnel_scale: f32_member(water, "fresnel_scale"),
         normal_scale: color3_from_llsd(water.get("normal_scale")),
-        normal_map: TextureKey::from(uuid_member(water, "normal_map")),
+        normal_map: optional_texture_member(water, "normal_map"),
         scale_above: f32_member(water, "scale_above"),
         scale_below: f32_member(water, "scale_below"),
-        transparent_texture: TextureKey::from(uuid_member(water, "transparent_texture")),
+        transparent_texture: optional_texture_member(water, "transparent_texture"),
         underwater_fog_mod: f32_member(water, "underwater_fog_mod"),
         water_fog_color: color3_from_llsd(water.get("water_fog_color")),
         water_fog_density: f32_member(water, "water_fog_density"),
@@ -2045,6 +2045,21 @@ pub(crate) fn uuid_member(map: &Llsd, key: &str) -> Uuid {
         .unwrap_or_else(Uuid::nil)
 }
 
+/// Reads an optional texture id from an LLSD map member: a nil or absent id
+/// becomes `None` — the "use the viewer default" sentinel for the EEP
+/// sky/water texture slots.
+pub(crate) fn optional_texture_member(map: &Llsd, key: &str) -> Option<TextureKey> {
+    let raw = uuid_member(map, key);
+    (!raw.is_nil()).then(|| TextureKey::from(raw))
+}
+
+/// Encodes an optional texture id as an LLSD UUID: `None` emits the nil
+/// "use the viewer default" sentinel (the inverse of
+/// [`optional_texture_member`]).
+pub(crate) fn optional_texture_to_llsd(texture: Option<TextureKey>) -> Llsd {
+    Llsd::Uuid(texture.map_or_else(Uuid::nil, |key| key.uuid()))
+}
+
 /// Reads an `i32` from an LLSD map member, defaulting to `0`.
 pub(crate) fn i32_member(map: &Llsd, key: &str) -> i32 {
     map.get(key).and_then(Llsd::as_i32).unwrap_or(0)
@@ -2803,12 +2818,12 @@ fn sky_settings_to_llsd(sky: &SkySettings) -> Llsd {
         ("sky_top_radius", real(sky.sky_top_radius)),
         ("sky_bottom_radius", real(sky.sky_bottom_radius)),
         ("planet_radius", real(sky.planet_radius)),
-        ("sun_id", Llsd::Uuid(sky.sun_texture.uuid())),
-        ("moon_id", Llsd::Uuid(sky.moon_texture.uuid())),
-        ("cloud_id", Llsd::Uuid(sky.cloud_texture.uuid())),
-        ("bloom_id", Llsd::Uuid(sky.bloom_texture.uuid())),
-        ("halo_id", Llsd::Uuid(sky.halo_texture.uuid())),
-        ("rainbow_id", Llsd::Uuid(sky.rainbow_texture.uuid())),
+        ("sun_id", optional_texture_to_llsd(sky.sun_texture)),
+        ("moon_id", optional_texture_to_llsd(sky.moon_texture)),
+        ("cloud_id", optional_texture_to_llsd(sky.cloud_texture)),
+        ("bloom_id", optional_texture_to_llsd(sky.bloom_texture)),
+        ("halo_id", optional_texture_to_llsd(sky.halo_texture)),
+        ("rainbow_id", optional_texture_to_llsd(sky.rainbow_texture)),
     ])
 }
 
@@ -2822,12 +2837,12 @@ fn water_settings_to_llsd(water: &WaterSettings) -> Llsd {
         ("fresnel_offset", real(water.fresnel_offset)),
         ("fresnel_scale", real(water.fresnel_scale)),
         ("normal_scale", reals_to_llsd(&water.normal_scale)),
-        ("normal_map", Llsd::Uuid(water.normal_map.uuid())),
+        ("normal_map", optional_texture_to_llsd(water.normal_map)),
         ("scale_above", real(water.scale_above)),
         ("scale_below", real(water.scale_below)),
         (
             "transparent_texture",
-            Llsd::Uuid(water.transparent_texture.uuid()),
+            optional_texture_to_llsd(water.transparent_texture),
         ),
         ("underwater_fog_mod", real(water.underwater_fog_mod)),
         ("water_fog_color", reals_to_llsd(&water.water_fog_color)),
