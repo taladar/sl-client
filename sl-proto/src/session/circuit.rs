@@ -13,13 +13,14 @@ use crate::scoped_id::CircuitId;
 use crate::types::directory::EventId;
 use crate::types::directory::category_to_wire;
 use crate::types::{
-    AssetType, AttachmentMode, AttachmentPoint, Camera, ChatType, ClassifiedUpdate, ClickAction,
-    CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, GestureActivation,
-    GroupRoleEdit, GroupRoleMemberChange, ImDialog, InterestsUpdate, InventoryItem, LandSearchType,
-    MapRequestFlags, Material, MovementMode, NewInventoryItem, NotecardRez, ObjectBuyItem,
-    ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelCategory, ParcelUpdate,
-    PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate, Reliability, RestoreItem,
-    RezAttachment, SaleType, TeleportFlags, Throttle, ViewerEffect, Wearable,
+    AssetType, AttachmentMode, AttachmentPoint, Camera, ChatType, ClassifiedCategory,
+    ClassifiedUpdate, ClickAction, CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags,
+    GestureActivation, GroupRoleEdit, GroupRoleMemberChange, ImDialog, InterestsUpdate,
+    InventoryItem, LandSearchType, MapRequestFlags, Material, MovementMode, NewInventoryItem,
+    NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
+    ParcelCategory, ParcelUpdate, PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate,
+    Reliability, RestoreItem, RezAttachment, SaleType, TeleportFlags, Throttle, ViewerEffect,
+    Wearable,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -895,7 +896,7 @@ impl Circuit {
             },
             data: ClassifiedInfoUpdateDataBlock {
                 classified_id: update.classified_id.uuid(),
-                category: update.category,
+                category: update.category.to_u32(),
                 name: with_nul(&update.name),
                 desc: with_nul(&update.description),
                 parcel_id: update
@@ -2365,7 +2366,7 @@ impl Circuit {
         query_id: Uuid,
         query_text: &str,
         flags: DirFindFlags,
-        category: u32,
+        category: ClassifiedCategory,
         query_start: i32,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -2378,7 +2379,7 @@ impl Circuit {
                 query_id,
                 query_text: with_nul(query_text),
                 query_flags: flags.bits(),
-                category,
+                category: category.to_u32(),
                 query_start,
             },
         });

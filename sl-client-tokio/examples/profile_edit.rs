@@ -20,8 +20,8 @@
 use std::time::Duration;
 
 use sl_client_tokio::{
-    AgentKey, ClassifiedUpdate, Client, Command, DisconnectReason, Error, Event, LindenAmount,
-    LoginParams, LoginRequest, PickUpdate, ProfileUpdate, Throttle, Uuid,
+    AgentKey, ClassifiedCategory, ClassifiedUpdate, Client, Command, DisconnectReason, Error,
+    Event, LindenAmount, LoginParams, LoginRequest, PickUpdate, ProfileUpdate, Throttle, Uuid,
 };
 use sl_proto::ClassifiedKey;
 use tokio::sync::mpsc;
@@ -136,7 +136,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     command_tx
                         .send(Command::UpdateClassified(ClassifiedUpdate {
                             classified_id,
-                            category: 1,
+                            category: ClassifiedCategory::Shopping,
                             name: "sl-client test classified".to_owned(),
                             description: "created then deleted by #29".to_owned(),
                             price_for_listing: LindenAmount(50),
@@ -212,7 +212,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     classified.name,
                     classified.description,
                     classified.price_for_listing,
-                    classified.category
+                    classified.category.to_u32()
                 );
             }
             Event::LoggedOut => {

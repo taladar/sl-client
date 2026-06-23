@@ -69,7 +69,8 @@ Three dedicated queries cover the remaining directory tabs:
   filtered by `LandSearchType`, price and area. Results (`DirLandResult`) give
   the parcel id, name, auction/for-sale flags, sale price and area.
 - **`DirClassifiedQuery`** → `Event::DirClassifiedReply` — classified ads,
-  filtered by a classified category. Results (`DirClassifiedResult`) give the
+  filtered by a `ClassifiedCategory` (`AnyCategory` for any). Results
+  (`DirClassifiedResult`) give the
   classified id, name, flags, creation/expiration dates and weekly listing
   price. Fetch the full ad with `ClassifiedInfoRequest` (see
   [Profiles, Picks & Classifieds](profiles.md)).

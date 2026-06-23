@@ -120,6 +120,81 @@ pub struct PickInfo {
     pub enabled: bool,
 }
 
+/// A classified-ad search category, the `Category` of a [`ClassifiedInfo`],
+/// [`ClassifiedUpdate`] or
+/// [`DirClassifiedQuery`](crate::Command::DirClassifiedQuery) — the listing's
+/// classified-directory classification. The wire value is a `u32` (the viewer's
+/// classified category combo: `0` for "any category").
+///
+/// Not to be confused with [`ParcelCategory`](crate::types::ParcelCategory) (a
+/// parcel's land classification) or `sl_types::search::SearchCategory` (the
+/// Search-floater tab — a viewer UI concept with no wire field).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum ClassifiedCategory {
+    /// Any category (`0`); the "any" filter in a query, or an unset listing.
+    #[default]
+    AnyCategory,
+    /// Shopping (`1`).
+    Shopping,
+    /// Land rental (`2`).
+    LandRental,
+    /// Property rental (`3`).
+    PropertyRental,
+    /// A special attraction (`4`).
+    SpecialAttraction,
+    /// New products (`5`).
+    NewProducts,
+    /// Employment (`6`).
+    Employment,
+    /// Wanted (`7`).
+    Wanted,
+    /// A service (`8`).
+    Service,
+    /// Personal (`9`).
+    Personal,
+    /// An unrecognised category value, preserved verbatim.
+    Unknown(u32),
+}
+
+impl ClassifiedCategory {
+    /// Classifies a classified-category wire value.
+    #[must_use]
+    pub const fn from_u32(value: u32) -> Self {
+        match value {
+            0 => Self::AnyCategory,
+            1 => Self::Shopping,
+            2 => Self::LandRental,
+            3 => Self::PropertyRental,
+            4 => Self::SpecialAttraction,
+            5 => Self::NewProducts,
+            6 => Self::Employment,
+            7 => Self::Wanted,
+            8 => Self::Service,
+            9 => Self::Personal,
+            other => Self::Unknown(other),
+        }
+    }
+
+    /// The wire value for this category.
+    #[must_use]
+    pub const fn to_u32(self) -> u32 {
+        match self {
+            Self::AnyCategory => 0,
+            Self::Shopping => 1,
+            Self::LandRental => 2,
+            Self::PropertyRental => 3,
+            Self::SpecialAttraction => 4,
+            Self::NewProducts => 5,
+            Self::Employment => 6,
+            Self::Wanted => 7,
+            Self::Service => 8,
+            Self::Personal => 9,
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
 /// The full details of one classified ad, parsed from `ClassifiedInfoReply` in
 /// response to
 /// [`Session::request_classified_info`](crate::Session::request_classified_info).
@@ -134,7 +209,7 @@ pub struct ClassifiedInfo {
     /// The expiration date (Unix timestamp, seconds).
     pub expiration_date: u32,
     /// The classified's search category.
-    pub category: u32,
+    pub category: ClassifiedCategory,
     /// The classified name.
     pub name: String,
     /// The classified description.
@@ -266,7 +341,7 @@ pub struct ClassifiedUpdate {
     /// The classified id (a fresh id to create; an existing id to edit).
     pub classified_id: ClassifiedKey,
     /// The classified's search category.
-    pub category: u32,
+    pub category: ClassifiedCategory,
     /// The classified name.
     pub name: String,
     /// The classified description.
@@ -288,7 +363,7 @@ impl Default for ClassifiedUpdate {
     fn default() -> Self {
         Self {
             classified_id: ClassifiedKey::from(Uuid::nil()),
-            category: 0,
+            category: ClassifiedCategory::AnyCategory,
             name: String::new(),
             description: String::new(),
             parcel_id: None,
@@ -380,8 +455,8 @@ pub struct LoginAccount {
 #[cfg(test)]
 mod tests {
     use super::{
-        AvatarClassified, ClassifiedKey, Friend, FriendKey, FriendRights, ParcelKey, PickUpdate,
-        Uuid,
+        AvatarClassified, ClassifiedCategory, ClassifiedKey, Friend, FriendKey, FriendRights,
+        ParcelKey, PickUpdate, Uuid,
     };
     use pretty_assertions::assert_eq;
 
@@ -418,5 +493,41 @@ mod tests {
 
         // The nil default round-trips too.
         assert_eq!(ParcelKey::from(Uuid::nil()).uuid(), Uuid::nil());
+    }
+
+    /// [`ClassifiedCategory`] maps every named classified-directory code to its
+    /// exact `u32` wire value and back, so the typed `category` field puts the
+    /// same bytes on the wire the old raw `u32` did. Unrecognised codes survive
+    /// verbatim through [`ClassifiedCategory::Unknown`], and the default is the
+    /// `0` "any category" sentinel.
+    #[test]
+    fn classified_category_round_trips_raw_u32() {
+        for (code, category) in [
+            (0, ClassifiedCategory::AnyCategory),
+            (1, ClassifiedCategory::Shopping),
+            (2, ClassifiedCategory::LandRental),
+            (3, ClassifiedCategory::PropertyRental),
+            (4, ClassifiedCategory::SpecialAttraction),
+            (5, ClassifiedCategory::NewProducts),
+            (6, ClassifiedCategory::Employment),
+            (7, ClassifiedCategory::Wanted),
+            (8, ClassifiedCategory::Service),
+            (9, ClassifiedCategory::Personal),
+        ] {
+            assert_eq!(ClassifiedCategory::from_u32(code), category);
+            assert_eq!(category.to_u32(), code);
+        }
+
+        // An unrecognised code is preserved verbatim, and the default is "any".
+        assert_eq!(
+            ClassifiedCategory::from_u32(42),
+            ClassifiedCategory::Unknown(42)
+        );
+        assert_eq!(ClassifiedCategory::Unknown(42).to_u32(), 42);
+        assert_eq!(
+            ClassifiedCategory::default(),
+            ClassifiedCategory::AnyCategory
+        );
+        assert_eq!(ClassifiedCategory::default().to_u32(), 0);
     }
 }

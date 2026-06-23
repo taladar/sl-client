@@ -11,23 +11,23 @@ mod test {
     use pretty_assertions::assert_eq;
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AlertInfo, AttachmentMode, AttachmentPoint,
-        AvatarName, AvatarPickerResult, ChatChannel, ChatSource, ChatType, ClassifiedKey,
-        CoarseLocation, ControlFlags, DetachOrder, DirClassifiedResult, DirEventResult,
-        DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
-        EstateCovenant, Event, EventId, EventInfo, FollowCamProperty, FollowCamPropertyValue,
-        GestureActivation, GridCoordinates, GroupAccountDetails, GroupAccountDetailsEntry,
-        GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
-        GroupActiveProposalItem, GroupKey, GroupName, GroupVote, GroupVoteHistoryItem, ImDialog,
-        InventoryFolderKey, InventoryKey, LandArea, LandSearchType, LandStatItem,
-        LandStatReportType, LindenAmount, LindenBalance, LoginParams, MapItem, MapItemType,
-        MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
-        MovementMode, NotecardRez, ObjectBuyItem, ObjectKey, ObjectPropertiesFamily,
-        ParcelCategory, ParcelDetails, ParcelKey, ParcelObjectOwner, ParcelReturnType,
-        Permissions5, PingId, PlacesResult, PointAtType, Postcard, ProductType, RegionHandle,
-        RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment,
-        SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ServerEvent,
-        Session, SimSession, TelehubInfo, TextureKey, Throttle, Transmit, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
+        AvatarName, AvatarPickerResult, ChatChannel, ChatSource, ChatType, ClassifiedCategory,
+        ClassifiedKey, CoarseLocation, ControlFlags, DetachOrder, DirClassifiedResult,
+        DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult,
+        DirPlaceResult, EstateCovenant, Event, EventId, EventInfo, FollowCamProperty,
+        FollowCamPropertyValue, GestureActivation, GridCoordinates, GroupAccountDetails,
+        GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
+        GroupAccountTransactions, GroupActiveProposalItem, GroupKey, GroupName, GroupVote,
+        GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryKey, LandArea, LandSearchType,
+        LandStatItem, LandStatReportType, LindenAmount, LindenBalance, LoginParams, MapItem,
+        MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision,
+        MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem, ObjectKey,
+        ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelKey, ParcelObjectOwner,
+        ParcelReturnType, Permissions5, PingId, PlacesResult, PointAtType, Postcard, ProductType,
+        RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RestoreItem,
+        RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
+        ScriptControlAction, ServerEvent, Session, SimSession, TelehubInfo, TextureKey, Throttle,
+        Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
         parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
@@ -573,7 +573,14 @@ mod test {
             0,
             now,
         )?;
-        client.dir_classified_query(qid, "shoes", DirFindFlags::INC_MATURE, 3, 0, now)?;
+        client.dir_classified_query(
+            qid,
+            "shoes",
+            DirFindFlags::INC_MATURE,
+            ClassifiedCategory::PropertyRental,
+            0,
+            now,
+        )?;
         client.avatar_picker_request(qid, "bob", now)?;
         client.places_query(
             qid,
@@ -637,7 +644,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a DirClassifiedQuery server event")?;
-        assert_eq!(classified, ("shoes".to_owned(), 3));
+        assert_eq!(
+            classified,
+            ("shoes".to_owned(), ClassifiedCategory::PropertyRental)
+        );
 
         let picker = events
             .iter()

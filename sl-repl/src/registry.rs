@@ -36,19 +36,20 @@ use sl_proto::RegionCoordinates;
 use sl_proto::TextureKey;
 use sl_proto::{
     AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentMode, AttachmentPoint,
-    Camera, ChatType, ClassifiedUpdate, Command, ControlFlags, CreateGroupParams, DeRezDestination,
-    DetachOrder, DirFindFlags, EstateAccessDelta, ExperiencePermission, ExperienceUpdate,
-    FriendRights, GestureActivation, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit,
-    GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType,
-    LandSearchType, LandStatReportType, LindenAmount, LookAtType, MapItemType, Material,
-    MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MovementMode, MuteFlags,
-    MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectPermMasks,
-    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, Permissions, Permissions5,
-    PickUpdate, PointAtType, Postcard, PrimShape, ProfileUpdate, RegionHandle, RegionInfoUpdate,
-    RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment, Rotation, SaleType,
-    ScopedObjectId, ScopedParcelId, ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
+    Camera, ChatType, ClassifiedCategory, ClassifiedUpdate, Command, ControlFlags,
+    CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, EstateAccessDelta,
+    ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation, GroupNoticeAttachment,
+    GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange, InterestsUpdate, InventoryItem,
+    InventoryOffer, InventoryType, LandSearchType, LandStatReportType, LindenAmount, LookAtType,
+    MapItemType, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType,
+    MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem,
+    ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate,
+    PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
+    ProfileUpdate, RegionHandle, RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId,
+    RestoreItem, RezAttachment, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
+    ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -982,7 +983,7 @@ fn build_classified_update(
 ) -> Result<ClassifiedUpdate, ReplError> {
     Ok(ClassifiedUpdate {
         classified_id: ClassifiedKey::from(args.uuid_or_nil(ctx, "classified_id", 0)?),
-        category: args.parse_or(ctx, "category", 1, "u32", 0)?,
+        category: ClassifiedCategory::from_u32(args.parse_or(ctx, "category", 1, "u32", 0)?),
         name: args.str_or(ctx, "name", 2, "")?,
         description: args.str_or(ctx, "description", 3, "")?,
         parcel_id: {
@@ -3751,7 +3752,9 @@ fn all_specs() -> Vec<CommandSpec> {
                     query_id: args.req_uuid(ctx, "query_id", 0)?,
                     query_text: args.req_str(ctx, "query_text", 1)?,
                     flags: DirFindFlags::from_bits(args.req_parse(ctx, "flags", 2, "u32")?),
-                    category: args.parse_or(ctx, "category", 3, "u32", 0)?,
+                    category: ClassifiedCategory::from_u32(
+                        args.parse_or(ctx, "category", 3, "u32", 0)?,
+                    ),
                     query_start: args.parse_or(ctx, "query_start", 4, "i32", 0)?,
                 })
             },
