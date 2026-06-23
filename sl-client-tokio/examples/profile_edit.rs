@@ -202,7 +202,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Event::PickInfo(pick) => {
                 info!(
-                    "pick details: \"{}\" — {} (parcel {}, {})",
+                    "pick details: \"{}\" — {} (parcel {}, {:?})",
                     pick.name, pick.description, pick.parcel_id, pick.sim_name
                 );
             }

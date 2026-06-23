@@ -359,7 +359,16 @@ fn abuse_report_from_args(
         screenshot_id: Uuid::nil(),
         object_id: args.object_or_nil(ctx, "object_id", 5)?,
         abuser_id: args.uuid_or_nil(ctx, "abuser_id", 1)?,
-        abuse_region_name: args.opt_str(ctx, "region_name", 2)?.unwrap_or_default(),
+        abuse_region_name: {
+            let raw = args.opt_str(ctx, "region_name", 2)?.unwrap_or_default();
+            sl_proto::region_name_from_wire("region_name", &raw).map_err(|err| {
+                ReplError::InvalidArg {
+                    field: "region_name".to_owned(),
+                    value: err.to_string(),
+                    expected: "a valid region name (2-35 chars)".to_owned(),
+                }
+            })?
+        },
         abuse_region_id: Uuid::nil(),
         summary: args.req_str(ctx, "summary", 0)?,
         details: String::new(),
@@ -4638,7 +4647,8 @@ mod tests {
             Ok(Command::SendAbuseReport(report))
                 if report.summary == "Griefing"
                     && report.abuser_id == uuid(ONE)
-                    && report.abuse_region_name == "TestRegion"
+                    && report.abuse_region_name
+                        == sl_proto::region_name_from_wire("region_name", "TestRegion").ok().flatten()
                     && report.category == 66
                     && report.report_type == AbuseReportType::Bug
         ));

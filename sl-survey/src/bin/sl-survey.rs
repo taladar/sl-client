@@ -570,8 +570,14 @@ impl Survey {
                 }
             }
             Event::MapBlock(region) => {
-                self.names
-                    .insert(region.region_handle.0, region.name.clone());
+                self.names.insert(
+                    region.region_handle.0,
+                    region
+                        .name
+                        .as_ref()
+                        .map(ToString::to_string)
+                        .unwrap_or_default(),
+                );
                 self.queue_region(region.region_handle.0, region.grid_x, region.grid_y);
             }
             Event::TeleportFailed { reason, .. } => {
@@ -871,8 +877,9 @@ impl Survey {
             grid_y,
             sim_name: identity
                 .as_ref()
-                .map(|identity| identity.sim_name.clone())
-                .or_else(|| limits.as_ref().map(|limits| limits.sim_name.clone()))
+                .and_then(|identity| identity.sim_name.as_ref())
+                .or_else(|| limits.as_ref().and_then(|limits| limits.sim_name.as_ref()))
+                .map(ToString::to_string)
                 .unwrap_or_default(),
             maturity: maturity_str(
                 identity

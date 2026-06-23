@@ -13,6 +13,7 @@
 
 use crate::types::{LandArea, ParcelCategory};
 use sl_types::key::{AgentKey, ClassifiedKey, GroupKey, ParcelKey, TextureKey};
+use sl_types::map::RegionName;
 use sl_types::money::LindenAmount;
 use uuid::Uuid;
 
@@ -334,8 +335,9 @@ pub struct PlacesResult {
     pub flags: u8,
     /// The parcel's global position, in metres (`(x, y, z)`).
     pub global_position: (f32, f32, f32),
-    /// The name of the region the parcel is in.
-    pub sim_name: String,
+    /// The name of the region the parcel is in, or `None` when the grid sent an
+    /// empty (unknown) name.
+    pub sim_name: Option<RegionName>,
     /// The parcel's snapshot texture.
     pub snapshot_id: TextureKey,
     /// The parcel's dwell (traffic) score.
@@ -376,8 +378,9 @@ pub struct EventInfo {
     /// [`cover`](Self::cover) is non-zero), `None` otherwise. On the wire `None`
     /// is the `0` no-cover sentinel.
     pub amount: Option<LindenAmount>,
-    /// The name of the region the event is in.
-    pub sim_name: String,
+    /// The name of the region the event is in, or `None` when the grid sent an
+    /// empty (unknown) name.
+    pub sim_name: Option<RegionName>,
     /// The event's global position, in metres (`(x, y, z)`).
     pub global_position: (f64, f64, f64),
     /// The event flags (e.g. mature/adult; `EVENT_FLAG_*`).

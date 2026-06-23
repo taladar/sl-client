@@ -38,6 +38,12 @@ mod test {
     /// A boxed test error.
     type TestError = Box<dyn Error>;
 
+    /// Wrap a (valid) region name for a test fixture (`None` if it does not
+    /// satisfy the region-name grammar, which the fixtures never trip).
+    fn region(name: &str) -> Option<sl_proto::RegionName> {
+        sl_proto::region_name_from_wire("test", name).ok().flatten()
+    }
+
     /// The region handle the simulator serves throughout these tests.
     const REGION_HANDLE: u64 = 0x0000_03e8_0000_03e8;
 
@@ -752,7 +758,7 @@ mod test {
                 billable_area: LandArea(512),
                 flags: 0,
                 global_position: (1000.0, 2000.0, 30.0),
-                sim_name: "Region".to_owned(),
+                sim_name: region("Region"),
                 snapshot_id: TextureKey::from(uuid::Uuid::nil()),
                 dwell: 3.0,
                 price: LindenAmount(0),
@@ -842,7 +848,7 @@ mod test {
         assert_eq!(reply_txn, txn);
         let holding = holdings.first().ok_or("holding")?;
         assert_eq!(holding.global_position, (1000.0, 2000.0, 30.0));
-        assert_eq!(holding.sim_name, "Region");
+        assert_eq!(holding.sim_name, region("Region"));
         Ok(())
     }
 
@@ -899,7 +905,7 @@ mod test {
                 duration: 60,
                 cover: 1,
                 amount: Some(LindenAmount(50)),
-                sim_name: "Sandbox".to_owned(),
+                sim_name: region("Sandbox"),
                 global_position: (256_000.0, 257_000.0, 30.0),
                 flags: 0,
             },
@@ -1235,7 +1241,7 @@ mod test {
                 global_x: 256_000.0,
                 global_y: 257_024.0,
                 global_z: 23.5,
-                sim_name: "Default Region".to_owned(),
+                sim_name: region("Default Region"),
                 snapshot_id: TextureKey::from(uuid::Uuid::from_u128(0x77)),
                 dwell: 88.0,
                 sale_price: Some(LindenAmount(1000)),
@@ -2361,7 +2367,7 @@ mod test {
         // forces the parallel Size block to be emitted for both entries.
         let regions = vec![
             MapRegionInfo {
-                name: "Standard".to_owned(),
+                name: region("Standard"),
                 grid_x: 1000,
                 grid_y: 1000,
                 region_handle: RegionHandle::from_grid(1000, 1000),
@@ -2374,7 +2380,7 @@ mod test {
                 map_image_id: TextureKey::from(uuid::Uuid::from_u128(0xABCD)),
             },
             MapRegionInfo {
-                name: "Variable".to_owned(),
+                name: region("Variable"),
                 grid_x: 1100,
                 grid_y: 1200,
                 region_handle: RegionHandle::from_grid(1100, 1200),
@@ -2500,7 +2506,7 @@ mod test {
             screenshot_id: uuid::Uuid::nil(),
             object_id: ObjectKey::from(uuid::Uuid::from_u128(0x22)),
             abuser_id: uuid::Uuid::from_u128(0x33),
-            abuse_region_name: "TestRegion".to_owned(),
+            abuse_region_name: region("TestRegion"),
             abuse_region_id: uuid::Uuid::nil(),
             summary: "Griefing".to_owned(),
             details: "Detail".to_owned(),
@@ -2557,7 +2563,7 @@ mod test {
         let (_client, mut sim) = setup(now)?;
 
         let identity = RegionIdentity {
-            sim_name: "Server Region".to_owned(),
+            sim_name: region("Server Region"),
             region_id: uuid::Uuid::from_u128(0xBEEF),
             // Grid coordinates / handle are not wire fields of the handshake.
             region_handle: RegionHandle(0),

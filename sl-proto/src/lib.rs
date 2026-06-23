@@ -161,10 +161,13 @@ pub use sl_wire::{
     parse_remote_parcel_request, parse_render_materials_response, parse_resource_cost_selected,
     parse_resource_cost_selected_request, parse_seed_response, parse_send_user_report,
     parse_set_experience_permission_request, parse_simulator_features,
-    parse_update_experience_request, parse_voice_signaling_request, sim_access,
+    parse_update_experience_request, parse_voice_signaling_request, region_name_from_wire,
+    region_name_to_wire, sim_access,
 };
 // Re-export the chat channel type used by the local-chat / script-dialog APIs.
 pub use sl_types::chat::ChatChannel;
+// Re-export the region-name type used by the region/map/teleport reply types.
+pub use sl_types::map::RegionName;
 // Re-export the vector and rotation types used by the teleport and movement APIs.
 pub use sl_types::lsl::{Rotation, Vector};
 // Re-export the L$ amount type used by the money balance/transfer APIs.

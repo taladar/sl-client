@@ -1,6 +1,7 @@
 //! Region identity, limits, chat and combat settings.
 
 use super::{Maturity, ProductType};
+use sl_types::map::RegionName;
 use sl_types::money::LindenAmount;
 use sl_wire::RegionHandle;
 use uuid::Uuid;
@@ -10,8 +11,9 @@ use uuid::Uuid;
 /// (Not `Eq`: `water_height` / `billable_factor` are `f32`.)
 #[derive(Debug, Clone, PartialEq)]
 pub struct RegionIdentity {
-    /// The region (simulator) name.
-    pub sim_name: String,
+    /// The region (simulator) name, or `None` when the grid sent an empty
+    /// (unknown) name.
+    pub sim_name: Option<RegionName>,
     /// The region's globally-unique id (`RegionID`, from the `RegionInfo2` block).
     pub region_id: Uuid,
     /// The region handle: its global south-west corner packed as
@@ -67,8 +69,9 @@ pub struct RegionIdentity {
 /// (Not `Eq`: several fields are `f32`.)
 #[derive(Debug, Clone, PartialEq)]
 pub struct RegionLimits {
-    /// The region (simulator) name.
-    pub sim_name: String,
+    /// The region (simulator) name, or `None` when the grid sent an empty
+    /// (unknown) name.
+    pub sim_name: Option<RegionName>,
     /// The maximum concurrent agents (prefers the 32-bit field, falling back to
     /// the legacy 8-bit `MaxAgents`).
     pub max_agents: u32,

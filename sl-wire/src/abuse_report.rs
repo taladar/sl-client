@@ -85,8 +85,9 @@ pub struct AbuseReport {
     pub object_id: ObjectKey,
     /// The reported (abusing) avatar's id, or nil if unknown.
     pub abuser_id: Uuid,
-    /// The name of the region the abuse occurred in.
-    pub abuse_region_name: String,
+    /// The name of the region the abuse occurred in, or `None` when no region
+    /// name was set.
+    pub abuse_region_name: Option<sl_types::map::RegionName>,
     /// The id of the region the abuse occurred in (often nil; the grid fills it).
     pub abuse_region_id: Uuid,
     /// A one-line summary headline.
@@ -111,7 +112,7 @@ impl Default for AbuseReport {
             screenshot_id: Uuid::nil(),
             object_id: ObjectKey::from(Uuid::nil()),
             abuser_id: Uuid::nil(),
-            abuse_region_name: String::new(),
+            abuse_region_name: None,
             abuse_region_id: Uuid::nil(),
             summary: String::new(),
             details: String::new(),
@@ -131,8 +132,13 @@ pub fn build_send_user_report(report: &AbuseReport) -> String {
 /// Decodes a `SendUserReport` capability body back into an [`AbuseReport`]
 /// (server side) — the inverse of [`build_send_user_report`]. Absent keys
 /// default, so a partial body still decodes.
-#[must_use]
-pub fn parse_send_user_report(body: &Llsd) -> AbuseReport {
+///
+/// # Errors
+///
+/// Returns [`WireError::InvalidRegionName`](crate::WireError::InvalidRegionName)
+/// when the `abuse-region-name` field carries a non-empty value that is not a
+/// valid region name (an empty value decodes to `None`).
+pub fn parse_send_user_report(body: &Llsd) -> Result<AbuseReport, crate::WireError> {
     let read_uuid = |key: &str| {
         body.get(key)
             .and_then(Llsd::as_uuid)
@@ -150,7 +156,7 @@ pub fn parse_send_user_report(body: &Llsd) -> AbuseReport {
             .and_then(|value| u8::try_from(value).ok())
             .unwrap_or(0)
     };
-    AbuseReport {
+    Ok(AbuseReport {
         report_type: AbuseReportType::from_u8(read_u8("report-type")),
         category: read_u8("category"),
         position: vector_from_llsd(body.get("position")),
@@ -158,12 +164,15 @@ pub fn parse_send_user_report(body: &Llsd) -> AbuseReport {
         screenshot_id: read_uuid("screenshot-id"),
         object_id: ObjectKey::from(read_uuid("object-id")),
         abuser_id: read_uuid("abuser-id"),
-        abuse_region_name: read_str("abuse-region-name"),
+        abuse_region_name: crate::region_name_from_wire(
+            "abuse-region-name",
+            &read_str("abuse-region-name"),
+        )?,
         abuse_region_id: read_uuid("abuse-region-id"),
         summary: read_str("summary"),
         details: read_str("details"),
         version_string: read_str("version-string"),
-    }
+    })
 }
 
 /// Serialises an [`AbuseReport`] to the `SendUserReport` LLSD map.
@@ -187,7 +196,9 @@ fn abuse_report_to_llsd(report: &AbuseReport) -> Llsd {
         ("abuser-id".to_owned(), Llsd::Uuid(report.abuser_id)),
         (
             "abuse-region-name".to_owned(),
-            Llsd::String(report.abuse_region_name.clone()),
+            Llsd::String(crate::region_name_to_wire(
+                report.abuse_region_name.as_ref(),
+            )),
         ),
         (
             "abuse-region-id".to_owned(),
@@ -253,7 +264,8 @@ mod tests {
             screenshot_id: Uuid::from_u128(0x11),
             object_id: ObjectKey::from(Uuid::from_u128(0x22)),
             abuser_id: Uuid::from_u128(0x33),
-            abuse_region_name: "Test Region".to_owned(),
+            abuse_region_name: crate::region_name_from_wire("abuse-region-name", "Test Region")
+                .map_err(|error| format!("{error:?}"))?,
             abuse_region_id: Uuid::from_u128(0x44),
             summary: "Griefing".to_owned(),
             details: "Detailed account of the abuse.".to_owned(),
@@ -261,7 +273,8 @@ mod tests {
         };
         let xml = build_send_user_report(&report);
         let parsed =
-            parse_send_user_report(&parse_llsd_xml(&xml).map_err(|error| format!("{error:?}"))?);
+            parse_send_user_report(&parse_llsd_xml(&xml).map_err(|error| format!("{error:?}"))?)
+                .map_err(|error| format!("{error:?}"))?;
         assert_eq!(parsed, report);
         Ok(())
     }

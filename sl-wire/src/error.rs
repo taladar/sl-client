@@ -50,4 +50,16 @@ pub enum WireError {
         /// The out-of-range value, rendered for diagnostics.
         value: i64,
     },
+    /// A field that should carry a Second Life region name held a non-empty value
+    /// that does not satisfy the region-name grammar (its length is outside the
+    /// 2–35 character range the SL wiki documents). An empty value is the
+    /// "unknown region" sentinel and decodes to `None`, not this error; only a
+    /// non-empty but invalid name is rejected rather than silently coerced.
+    #[error("field {field} carried invalid region name {value:?}")]
+    InvalidRegionName {
+        /// A short static label identifying the offending field.
+        field: &'static str,
+        /// The offending region name, rendered for diagnostics.
+        value: String,
+    },
 }
