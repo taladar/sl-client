@@ -1,7 +1,7 @@
 //! Chat and instant messaging value types.
 
-use super::AssetType;
-use sl_types::key::AgentKey;
+use super::{AgentOrObjectKey, AssetType, InventoryItemOrFolderKey};
+use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey};
 use uuid::Uuid;
 
 /// The kind of a chat message, from the `Type`/`ChatType` byte shared by
@@ -95,6 +95,81 @@ impl ChatSourceType {
     }
 }
 
+/// The source of a chat message — the `SourceID` and `SourceType` bytes of
+/// `ChatFromSimulator` folded into one discriminated value, so the id is typed
+/// by its kind and an illegal `(type, id)` pairing cannot be represented.
+///
+/// The system case carries no id (the wire `SourceID` is nil); an unrecognised
+/// source-type byte preserves both the raw type byte and the raw id verbatim so
+/// a decode/encode round trip is lossless.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatSource {
+    /// The system / region (no avatar or object); the wire `SourceID` is nil.
+    System,
+    /// An avatar spoke.
+    Agent(AgentKey),
+    /// An in-world object spoke.
+    Object(ObjectKey),
+    /// An unrecognised source-type byte, with its raw `SourceType` and `SourceID`
+    /// preserved verbatim.
+    Unknown {
+        /// The raw, unrecognised `SourceType` byte.
+        source_type: u8,
+        /// The raw `SourceID` UUID.
+        source_id: Uuid,
+    },
+}
+
+impl ChatSource {
+    /// Builds a [`ChatSource`] from the wire's `SourceType` byte and `SourceID`,
+    /// typing the id by its kind (see [`ChatSourceType`]).
+    #[must_use]
+    pub fn from_wire(source_type: u8, source_id: Uuid) -> Self {
+        match ChatSourceType::from_u8(source_type) {
+            ChatSourceType::System => Self::System,
+            ChatSourceType::Agent => Self::Agent(AgentKey::from(source_id)),
+            ChatSourceType::Object => Self::Object(ObjectKey::from(source_id)),
+            ChatSourceType::Unknown(byte) => Self::Unknown {
+                source_type: byte,
+                source_id,
+            },
+        }
+    }
+
+    /// The `SourceType` wire byte for this source.
+    #[must_use]
+    pub const fn source_type_byte(&self) -> u8 {
+        match self {
+            Self::System => 0,
+            Self::Agent(_) => 1,
+            Self::Object(_) => 2,
+            Self::Unknown { source_type, .. } => *source_type,
+        }
+    }
+
+    /// The `SourceID` wire UUID for this source ([`Uuid::nil`] for the system).
+    #[must_use]
+    pub const fn source_id(&self) -> Uuid {
+        match self {
+            Self::System => Uuid::nil(),
+            Self::Agent(agent) => agent.uuid(),
+            Self::Object(object) => object.uuid(),
+            Self::Unknown { source_id, .. } => *source_id,
+        }
+    }
+
+    /// The typed agent-or-object key when the source is a recognised avatar or
+    /// object, or `None` for the system or an unrecognised source type.
+    #[must_use]
+    pub const fn agent_or_object(&self) -> Option<AgentOrObjectKey> {
+        match self {
+            Self::Agent(agent) => Some(AgentOrObjectKey::Agent(*agent)),
+            Self::Object(object) => Some(AgentOrObjectKey::Object(*object)),
+            Self::System | Self::Unknown { .. } => None,
+        }
+    }
+}
+
 /// Whether a chat message was audible at the listener, from the `Audible` byte
 /// of `ChatFromSimulator` (a signed value: `-1`/`255` means not audible).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,12 +203,11 @@ impl ChatAudible {
 pub struct ChatMessage {
     /// The display name of the speaker (avatar legacy name or object name).
     pub from_name: String,
-    /// The speaker's id (agent id or object id), or nil for the system.
-    pub source_id: Uuid,
+    /// The speaker — the source id and source-type folded into one typed value
+    /// (an avatar, an object, the system, or an unrecognised source type).
+    pub source: ChatSource,
     /// For an object speaker, its owner's agent id; nil otherwise.
     pub owner_id: Uuid,
-    /// What kind of source produced the message.
-    pub source_type: ChatSourceType,
     /// The chat type (whisper / normal / shout / …).
     pub chat_type: ChatType,
     /// Whether the message was audible at the listener.
@@ -330,9 +404,18 @@ impl InstantMessage {
         }
         let type_byte = *self.binary_bucket.first()?;
         let id_bytes: [u8; 16] = self.binary_bucket.get(1..17)?.try_into().ok()?;
+        let asset_type = AssetType::from_code(i32::from(type_byte));
+        let id = Uuid::from_bytes(id_bytes);
+        // A whole-folder offer leads with `AssetType::Folder`; otherwise the id
+        // is a single inventory item.
+        let item_id = if matches!(asset_type, AssetType::Folder) {
+            InventoryItemOrFolderKey::Folder(InventoryFolderKey::from(id))
+        } else {
+            InventoryItemOrFolderKey::Item(InventoryKey::from(id))
+        };
         Some(InventoryOffer {
-            asset_type: AssetType::from_code(i32::from(type_byte)),
-            item_id: Uuid::from_bytes(id_bytes),
+            asset_type,
+            item_id,
             transaction_id: self.id,
             from_agent_id: self.from_agent_id,
             from_task: matches!(self.dialog, ImDialog::TaskInventoryOffered),
@@ -349,8 +432,9 @@ impl InstantMessage {
 pub struct InventoryOffer {
     /// The offered asset's class ([`AssetType::Folder`] for a whole folder).
     pub asset_type: AssetType,
-    /// The offered item's (or folder's) id.
-    pub item_id: Uuid,
+    /// The offered item's id, or — for a folder offer ([`AssetType::Folder`]) —
+    /// the offered folder's id, typed accordingly.
+    pub item_id: InventoryItemOrFolderKey,
     /// The offer's transaction id (the IM's `id`), echoed back when replying.
     pub transaction_id: Uuid,
     /// The agent (or, for a task offer, the object owner) that made the offer.
@@ -362,10 +446,12 @@ pub struct InventoryOffer {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use sl_types::key::AgentKey;
+    use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey};
     use uuid::Uuid;
 
-    use super::{AssetType, ImDialog, InstantMessage};
+    use super::{
+        AgentOrObjectKey, AssetType, ChatSource, ImDialog, InstantMessage, InventoryItemOrFolderKey,
+    };
 
     /// An [`AgentKey`] is a transparent wrapper over its [`Uuid`]: wrapping a raw
     /// id and unwrapping it again yields the identical bytes, so the on-wire
@@ -411,8 +497,79 @@ mod tests {
             .ok_or_else(|| "expected a valid inventory offer".to_owned())?;
         assert_eq!(offer.from_agent_id, im.from_agent_id);
         assert_eq!(offer.from_agent_id.uuid(), sender);
-        assert_eq!(offer.item_id, item);
+        // The bucket leads with `7` (`Notecard`), so the id is typed as an item.
+        assert_eq!(
+            offer.item_id,
+            InventoryItemOrFolderKey::Item(InventoryKey::from(item))
+        );
         assert_eq!(offer.asset_type, AssetType::Notecard);
         Ok(())
+    }
+
+    /// A whole-folder offer leads its bucket with [`AssetType::Folder`], so the
+    /// id is typed as a folder rather than an item.
+    #[test]
+    fn folder_inventory_offer_types_id_as_folder() -> Result<(), String> {
+        let folder = Uuid::from_u128(0x00F0_1DE2);
+        // `8` is `AssetType::Folder`.
+        let mut bucket = vec![8_u8];
+        bucket.extend_from_slice(folder.as_bytes());
+        let im = InstantMessage {
+            from_agent_id: AgentKey::from(Uuid::from_u128(0xa11)),
+            from_agent_name: "Giver Resident".to_owned(),
+            to_agent_id: AgentKey::from(Uuid::from_u128(0xa12)),
+            dialog: ImDialog::InventoryOffered,
+            from_group: false,
+            region_id: Uuid::nil(),
+            position: (0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: 0,
+            id: Uuid::from_u128(0xcc33),
+            parent_estate_id: 0,
+            message: "a whole folder".to_owned(),
+            binary_bucket: bucket,
+        };
+        let offer = im
+            .inventory_offer()
+            .ok_or_else(|| "expected a valid inventory offer".to_owned())?;
+        assert_eq!(offer.asset_type, AssetType::Folder);
+        assert_eq!(
+            offer.item_id,
+            InventoryItemOrFolderKey::Folder(InventoryFolderKey::from(folder))
+        );
+        Ok(())
+    }
+
+    /// A [`ChatSource`] round-trips through the wire `(SourceType, SourceID)`
+    /// pair: each kind decodes from its byte and id, then re-emits them
+    /// unchanged.
+    #[test]
+    fn chat_source_round_trips_wire_pair() {
+        let agent = Uuid::from_u128(0x000A_9E47);
+        let object = Uuid::from_u128(0x000B_7EC7);
+        for (source_type, source_id, expected) in [
+            (0_u8, Uuid::nil(), ChatSource::System),
+            (1, agent, ChatSource::Agent(AgentKey::from(agent))),
+            (2, object, ChatSource::Object(ObjectKey::from(object))),
+            (
+                9,
+                object,
+                ChatSource::Unknown {
+                    source_type: 9,
+                    source_id: object,
+                },
+            ),
+        ] {
+            let source = ChatSource::from_wire(source_type, source_id);
+            assert_eq!(source, expected);
+            assert_eq!(source.source_type_byte(), source_type);
+            assert_eq!(source.source_id(), source_id);
+        }
+        // The recognised kinds project to an `AgentOrObjectKey`; the rest do not.
+        assert_eq!(
+            ChatSource::Agent(AgentKey::from(agent)).agent_or_object(),
+            Some(AgentOrObjectKey::Agent(AgentKey::from(agent)))
+        );
+        assert_eq!(ChatSource::System.agent_or_object(), None);
     }
 }

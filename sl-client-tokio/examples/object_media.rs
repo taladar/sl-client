@@ -12,8 +12,8 @@
 use std::time::Duration;
 
 use sl_client_tokio::{
-    Client, Command, DeRezDestination, DisconnectReason, Event, LoginParams, LoginRequest,
-    MediaEntry, PrimShape, ScopedObjectId, Throttle, Uuid, Vector, pcode,
+    Client, Command, DeRezDestination, DisconnectReason, Event, InventoryFolderKey, LoginParams,
+    LoginRequest, MediaEntry, PrimShape, ScopedObjectId, Throttle, Uuid, Vector, pcode,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -145,8 +145,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             command_tx
                                 .send(Command::DerezObjects {
                                     local_ids: vec![local_id],
-                                    destination: DeRezDestination::Trash,
-                                    destination_id: trash,
+                                    destination: DeRezDestination::Trash(InventoryFolderKey::from(
+                                        trash,
+                                    )),
                                     transaction_id: Uuid::from_u128(0x0024_3DE7),
                                     group_id: Uuid::nil().into(),
                                 })

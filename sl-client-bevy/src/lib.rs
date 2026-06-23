@@ -47,21 +47,22 @@ use sl_proto::{
 // survey commands, and read events. `Event` is aliased to avoid clashing with
 // Bevy's `Event` derive.
 pub use sl_proto::{
-    ActiveGroup, AgentKey, AgentPreferences, AnimatedObjects, AnyMessage, AvatarClassified,
-    AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, Camera, CameraError,
-    ChatAudible, ChatMessage, ChatSourceType, ChatType, CircuitCode, CircuitId, ClassifiedInfo,
-    ClassifiedUpdate, ClickAction, Command, ControlFlags, CreateGroupParams, DeRezDestination,
-    DetachOrder, Diagnostic, DisconnectReason, EconomyData, EstateAccessDelta, EstateAccessKind,
-    EstateInfo, ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate,
-    ExtendedMesh, FlexibleData, Friend, FriendRights, GltfMaterialOverride, GroupMember,
-    GroupMembership, GroupNotice, GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleChange,
-    GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
-    HomeLocation, IceCandidate, ImDialog, InstantMessage, InterestsUpdate, InventoryCallbackId,
-    InventoryFolder, InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer,
-    InventoryType, Key, Kilobits, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount,
-    LoadUrlRequest, LoginAccount, LoginParams, LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE,
-    MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
-    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge, MoneyBalance,
+    ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnyMessage,
+    AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, Camera,
+    CameraError, ChatAudible, ChatMessage, ChatSource, ChatSourceType, ChatType, CircuitCode,
+    CircuitId, ClassifiedInfo, ClassifiedUpdate, ClickAction, Command, ControlFlags,
+    CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic, DisconnectReason, EconomyData,
+    EstateAccessDelta, EstateAccessKind, EstateInfo, ExperienceInfo, ExperiencePermission,
+    ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights,
+    GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
+    GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleMember,
+    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
+    InstantMessage, InterestsUpdate, InventoryCallbackId, InventoryFolder, InventoryFolderKey,
+    InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryType, Key,
+    Kilobits, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LoadUrlRequest,
+    LoginAccount, LoginParams, LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
+    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
+    MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance,
     MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
     NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings,
     ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties, ObjectTransform,
@@ -75,7 +76,7 @@ pub use sl_proto::{
     RegionLocalObjectId, RegionLocalParcelId, Reliability, RenderMaterialEntry, RenderMaterialRef,
     Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction,
     ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData,
-    SequenceNumber, SimulatorFeatures, SoundFlags, SoundPreload, StartLocation,
+    SculptOrMeshKey, SequenceNumber, SimulatorFeatures, SoundFlags, SoundPreload, StartLocation,
     StartLocationParseError, TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry,
     TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TransferId, Transmit, Uuid,
     Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, XferId,
@@ -1328,19 +1329,11 @@ fn advance_running(
             Command::DerezObjects {
                 local_ids,
                 destination,
-                destination_id,
                 transaction_id,
                 group_id,
             } => {
                 session
-                    .derez_objects(
-                        local_ids,
-                        *destination,
-                        *destination_id,
-                        *transaction_id,
-                        *group_id,
-                        now,
-                    )
+                    .derez_objects(local_ids, *destination, *transaction_id, *group_id, now)
                     .ok();
             }
             Command::UpdateObject {

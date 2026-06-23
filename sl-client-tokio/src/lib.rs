@@ -43,22 +43,23 @@ use sl_proto::{
 // Re-export the core types a consumer needs so they can depend on this crate
 // alone.
 pub use sl_proto::{
-    ActiveGroup, AgentKey, AgentPreferences, AnimatedObjects, AnyMessage, Asset, AssetType,
-    AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, Camera,
-    CameraError, ChatAudible, ChatMessage, ChatSourceType, ChatType, CircuitCode, CircuitId,
-    ClassifiedInfo, ClassifiedUpdate, ClickAction, Command, ControlFlags, CreateGroupParams,
-    DeRezDestination, DetachOrder, Diagnostic, DisconnectReason, EconomyData, EstateAccessDelta,
-    EstateAccessKind, EstateInfo, Event, ExperienceInfo, ExperiencePermission,
-    ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights,
-    GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
-    GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleMember,
-    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
-    ImageCodec, InstantMessage, InterestsUpdate, InventoryCallbackId, InventoryFolder,
-    InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, Key, Kilobits,
-    LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LoadUrlRequest, LoginAccount,
-    LoginParams, LoginRequest, LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
-    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
-    MaterialOverrideUpdate, Maturity, MediaEntry, MfaChallenge, MoneyBalance, MoneyTransaction,
+    ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnyMessage, Asset,
+    AssetType, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick,
+    AvatarProperties, Camera, CameraError, ChatAudible, ChatMessage, ChatSource, ChatSourceType,
+    ChatType, CircuitCode, CircuitId, ClassifiedInfo, ClassifiedUpdate, ClickAction, Command,
+    ControlFlags, CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic, DisconnectReason,
+    EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, Event, ExperienceInfo,
+    ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData,
+    Friend, FriendRights, GltfMaterialOverride, GroupMember, GroupMembership, GroupNotice,
+    GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit,
+    GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation,
+    IceCandidate, ImDialog, ImageCodec, InstantMessage, InterestsUpdate, InventoryCallbackId,
+    InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey,
+    InventoryOffer, InventoryType, Key, Kilobits, LandingType, LegacyMaterial, LightData,
+    LightImage, LindenAmount, LoadUrlRequest, LoginAccount, LoginParams, LoginRequest,
+    LoginResponse, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
+    MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate,
+    Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance, MoneyTransaction,
     MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType, NeighborInfo,
     NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse,
     ObjectMotion, ObjectPermMasks, ObjectProperties, ObjectTransform, OpenSimExtras, OwnerKey,
@@ -71,13 +72,14 @@ pub use sl_proto::{
     RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, Reliability,
     RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
     ScriptControl, ScriptControlAction, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, SculptData, SequenceNumber, SimulatorFeatures, SoundFlags, SoundPreload,
-    StartLocation, StartLocationParseError, TerrainLayerType, TerrainPatch, Texture,
-    TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder,
-    ThrottleError, TransferId, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo,
-    VoiceProvisionRequest, Wearable, WearableType, XferId, avatar_texture, decode_particle_system,
-    decode_texture_anim, decode_texture_entry, grid_to_handle, group_powers, handle_to_global,
-    handle_to_grid, particle_pattern, pcode, sim_access, texture_anim_mode,
+    ScriptTeleportRequest, SculptData, SculptOrMeshKey, SequenceNumber, SimulatorFeatures,
+    SoundFlags, SoundPreload, StartLocation, StartLocationParseError, TerrainLayerType,
+    TerrainPatch, Texture, TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle,
+    ThrottleBuilder, ThrottleError, TransferId, TransferStatus, Transmit, Uuid, Vector,
+    VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, XferId, avatar_texture,
+    decode_particle_system, decode_texture_anim, decode_texture_entry, grid_to_handle,
+    group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode, sim_access,
+    texture_anim_mode,
 };
 
 mod appearance;
@@ -855,8 +857,8 @@ impl Client {
                         Some(Command::DeleteObjects { local_ids }) => {
                             self.session.delete_objects(&local_ids, Instant::now())?;
                         }
-                        Some(Command::DerezObjects { local_ids, destination, destination_id, transaction_id, group_id }) => {
-                            self.session.derez_objects(&local_ids, destination, destination_id, transaction_id, group_id, Instant::now())?;
+                        Some(Command::DerezObjects { local_ids, destination, transaction_id, group_id }) => {
+                            self.session.derez_objects(&local_ids, destination, transaction_id, group_id, Instant::now())?;
                         }
                         Some(Command::UpdateObject { local_id, transform }) => {
                             self.session.update_object(local_id, &transform, Instant::now())?;

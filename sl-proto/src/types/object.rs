@@ -13,6 +13,7 @@ use sl_wire::RegionLocalObjectId;
 use uuid::Uuid;
 
 use crate::scoped_id::{CircuitId, ScopedObjectId};
+use crate::types::SculptOrMeshKey;
 
 /// Linden `PCode` constants: the object-class byte (`p_code`) in an object
 /// update, identifying what kind of entity an object is.
@@ -466,8 +467,11 @@ pub struct LightData {
 /// sculpt texture or a mesh asset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SculptData {
-    /// The sculpt texture or mesh asset id.
-    pub texture: Uuid,
+    /// The sculpt texture or mesh asset id, typed by the low bits of
+    /// [`sculpt_type`](Self::sculpt_type): a [`SculptOrMeshKey::Mesh`] when they
+    /// equal `LL_SCULPT_TYPE_MESH`, a [`SculptOrMeshKey::Sculpt`] texture
+    /// otherwise.
+    pub texture: SculptOrMeshKey,
     /// The sculpt type byte (`LL_SCULPT_TYPE_*` in the low bits — sphere/torus/
     /// plane/cylinder/mesh — plus invert/mirror/animesh flag bits).
     pub sculpt_type: u8,
