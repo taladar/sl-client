@@ -47,8 +47,17 @@ echoed back, and a fresh `Event::MoneyBalance` reflects the new balance.
 >   codec boundary decodes them with `linden_from_wire`, which *rejects* a
 >   negative wire value (one no conforming simulator ever sends) rather than
 >   masking it to `0`, so a malformed price drops the message instead of being
->   silently misread. (The genuinely *signed* group `balance`/`amount` fields
->   stay raw, awaiting a dedicated signed `LindenBalance` type.)
+>   silently misread.
+> - The genuinely *signed* L$ fields — a group's current `balance` and the
+>   signed `amount` of a group-accounting detail line or transaction (a credit
+>   is positive, a debit negative) — use the dedicated `LindenBalance` type: a
+>   sign plus a non-negative `LindenAmount` magnitude, with arithmetic that
+>   composes balances and amounts by type (`LindenBalance + LindenAmount`,
+>   `From<LindenAmount>`, and a fallible `LindenAmount: TryFrom<LindenBalance>`
+>   that rejects a negative balance). Zero is canonically non-negative, so there
+>   is no negative-zero. Like `LandArea`, `LindenBalance` is kept client-local
+>   in `sl-proto` for now, slated to move to `sl-types` with the other value
+>   types in one later update.
 > - A *sale* price is an `Option<LindenAmount>`: `None` when the item/parcel is
 >   not for sale (the for-sale state is the separate `sale_type` / `FOR_SALE`
 >   flag / `for_sale` field) — a for-sale item may still be free

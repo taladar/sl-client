@@ -18,9 +18,9 @@ mod test {
         GestureActivation, GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
         GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupKey,
         GroupName, GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryKey,
-        LandArea, LandSearchType, LandStatItem, LandStatReportType, LindenAmount, LoginParams,
-        MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision,
-        MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem, ObjectKey,
+        LandArea, LandSearchType, LandStatItem, LandStatReportType, LindenAmount, LindenBalance,
+        LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
+        MeanCollision, MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem, ObjectKey,
         ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelKey, ParcelObjectOwner,
         ParcelReturnType, Permissions5, PingId, PlacesResult, PointAtType, Postcard, ProductType,
         RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RestoreItem,
@@ -1551,7 +1551,7 @@ mod test {
             interval_days: 7,
             current_interval: 0,
             start_date: "2026-06-01".to_owned(),
-            balance: 1234,
+            balance: LindenBalance::from_i32(1234),
             total_credits: LindenAmount(50),
             total_debits: LindenAmount(20),
             object_tax_current: LindenAmount(1),
@@ -1577,7 +1577,7 @@ mod test {
             start_date: "2026-06-01".to_owned(),
             entries: vec![GroupAccountDetailsEntry {
                 description: "Object tax".to_owned(),
-                amount: -3,
+                amount: LindenBalance::from_i32(-3),
             }],
         };
         sim.send_group_account_details_reply(&details, now)?;
@@ -1592,7 +1592,7 @@ mod test {
                 user: "Resident Tester".to_owned(),
                 transaction_type: 5,
                 item: "Group dues".to_owned(),
-                amount: 10,
+                amount: LindenBalance::from_i32(10),
             }],
         };
         sim.send_group_account_transactions_reply(&transactions, now)?;

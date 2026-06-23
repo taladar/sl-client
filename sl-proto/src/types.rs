@@ -19,6 +19,7 @@ mod group;
 mod inventory;
 mod land_area;
 mod map;
+mod money;
 mod name;
 mod nearby;
 mod object;
@@ -230,6 +231,28 @@ pub(crate) fn land_area_to_wire(
     }
 }
 
+/// Encode a [`LindenBalance`] back into a signed 32-bit L$ wire field.
+///
+/// This is the encode boundary for the legitimately *signed* L$ fields (a
+/// group's current balance, a group-accounting transaction delta). The decode
+/// direction is total — every `i32` is a valid balance — so it is just
+/// [`LindenBalance::from_i32`] at the call site; the encode direction can fail
+/// when a balance exceeds the signed 32-bit range the wire field holds, and is
+/// rejected with
+/// [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) rather
+/// than clamped, so an out-of-range value fails the send loudly.
+pub(crate) fn linden_balance_to_wire(
+    field: &'static str,
+    balance: &LindenBalance,
+) -> Result<i32, sl_wire::WireError> {
+    balance
+        .to_i32()
+        .ok_or_else(|| sl_wire::WireError::ValueOutOfRange {
+            field,
+            value: balance.to_i64().unwrap_or(i64::MAX),
+        })
+}
+
 pub use alert::{MeanCollision, MeanCollisionType};
 pub use appearance::{
     AttachmentMode, AttachmentPoint, AvatarAppearance, AvatarAttachment, DetachOrder,
@@ -277,6 +300,7 @@ pub use map::{
     EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, MapItem, MapItemType,
     MapLayer, MapRegionInfo, MapRequestFlags, NeighborInfo, RegionInfoUpdate, TelehubInfo,
 };
+pub use money::{LindenBalance, NegativeBalanceError};
 pub use name::{AvatarName, GroupName};
 pub use nearby::{
     CoarseLocation, LookAtType, PointAtType, ViewerEffect, ViewerEffectData, ViewerEffectType,

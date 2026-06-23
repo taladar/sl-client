@@ -1015,7 +1015,7 @@ pub(crate) fn group_notice(data: &GroupNoticesListReplyDataBlock) -> GroupNotice
 pub(crate) fn group_account_summary(
     reply: &GroupAccountSummaryReply,
 ) -> Result<GroupAccountSummary, sl_wire::WireError> {
-    use crate::types::linden_from_wire;
+    use crate::types::{LindenBalance, linden_from_wire};
     let money = &reply.money_data;
     Ok(GroupAccountSummary {
         group_id: GroupKey::from(reply.agent_data.group_id),
@@ -1023,7 +1023,7 @@ pub(crate) fn group_account_summary(
         interval_days: money.interval_days,
         current_interval: money.current_interval,
         start_date: trimmed_string(&money.start_date),
-        balance: money.balance,
+        balance: LindenBalance::from_i32(money.balance),
         total_credits: linden_from_wire("TotalCredits", money.total_credits)?,
         total_debits: linden_from_wire("TotalDebits", money.total_debits)?,
         object_tax_current: linden_from_wire("ObjectTaxCurrent", money.object_tax_current)?,
@@ -1062,7 +1062,7 @@ pub(crate) fn group_account_details(reply: &GroupAccountDetailsReply) -> GroupAc
             .iter()
             .map(|entry| GroupAccountDetailsEntry {
                 description: trimmed_string(&entry.description),
-                amount: entry.amount,
+                amount: crate::types::LindenBalance::from_i32(entry.amount),
             })
             .collect(),
     }
@@ -1087,7 +1087,7 @@ pub(crate) fn group_account_transactions(
                 user: trimmed_string(&entry.user),
                 transaction_type: entry.r#type,
                 item: trimmed_string(&entry.item),
-                amount: entry.amount,
+                amount: crate::types::LindenBalance::from_i32(entry.amount),
             })
             .collect(),
     }
