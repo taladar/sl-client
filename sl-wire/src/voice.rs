@@ -409,8 +409,9 @@ pub fn build_provision_voice_account_response(info: &VoiceAccountInfo) -> String
 pub struct ParcelVoiceInfo {
     /// The parcel the channel belongs to (`-1` if the reply omitted it).
     pub parcel_local_id: crate::RegionLocalParcelId,
-    /// The region's name.
-    pub region_name: String,
+    /// The region's name, or `None` when the reply carried an empty (unknown)
+    /// name.
+    pub region_name: Option<sl_types::map::RegionName>,
     /// The channel URI to connect to (a `sip:` URI for Vivox/FreeSWITCH), or
     /// `None`/empty when the parcel has no voice (the viewer then drops out of
     /// spatial voice).
@@ -440,17 +441,23 @@ impl ParcelVoiceInfo {
             .and_then(Llsd::as_str)
             .filter(|value| !value.is_empty())
             .map(str::to_owned);
+        // An empty region name is the "unknown region" sentinel (`None`); a
+        // non-empty but invalid name rejects the whole reply (the `?` returns
+        // `None` from this function).
+        let region_name = crate::region_name_from_wire(
+            "region_name",
+            body.get("region_name")
+                .and_then(Llsd::as_str)
+                .unwrap_or_default(),
+        )
+        .ok()?;
         Some(Self {
             parcel_local_id: crate::RegionLocalParcelId(
                 body.get("parcel_local_id")
                     .and_then(Llsd::as_i32)
                     .unwrap_or(-1),
             ),
-            region_name: body
-                .get("region_name")
-                .and_then(Llsd::as_str)
-                .unwrap_or_default()
-                .to_owned(),
+            region_name,
             channel_uri,
             channel_credentials,
         })
@@ -483,7 +490,7 @@ impl ParcelVoiceInfo {
             ),
             (
                 "region_name".to_owned(),
-                Llsd::String(self.region_name.clone()),
+                Llsd::String(crate::region_name_to_wire(self.region_name.as_ref())),
             ),
             ("voice_credentials".to_owned(), Llsd::Map(credentials)),
         ]))
@@ -592,7 +599,10 @@ mod tests {
         .map_err(|error| format!("{error:?}"))?;
         let info = ParcelVoiceInfo::from_llsd(&reply).ok_or("expected a parcel voice info")?;
         assert_eq!(info.parcel_local_id, crate::RegionLocalParcelId(42));
-        assert_eq!(info.region_name, "Default Region");
+        assert_eq!(
+            crate::region_name_to_wire(info.region_name.as_ref()),
+            "Default Region"
+        );
         assert_eq!(
             info.channel_uri.as_deref(),
             Some("sip:Region@sip.example.com")
@@ -732,7 +742,8 @@ mod tests {
     fn parcel_voice_response_round_trip() -> Result<(), String> {
         let info = ParcelVoiceInfo {
             parcel_local_id: crate::RegionLocalParcelId(42),
-            region_name: "Default Region".to_owned(),
+            region_name: crate::region_name_from_wire("region_name", "Default Region")
+                .map_err(|error| format!("{error:?}"))?,
             channel_uri: Some("sip:Region@sip.example.com".to_owned()),
             channel_credentials: Some("creds".to_owned()),
         };
@@ -745,7 +756,8 @@ mod tests {
 
         let no_voice = ParcelVoiceInfo {
             parcel_local_id: crate::RegionLocalParcelId(1),
-            region_name: "Quiet".to_owned(),
+            region_name: crate::region_name_from_wire("region_name", "Quiet")
+                .map_err(|error| format!("{error:?}"))?,
             channel_uri: None,
             channel_credentials: None,
         };

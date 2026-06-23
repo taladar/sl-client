@@ -176,10 +176,15 @@ pub(crate) fn parse_mute_line(line: &str) -> Option<MuteEntry> {
 /// `RegionHandshake` does not carry the region handle, so `region_handle` is
 /// passed in by the caller (the handle the session has learned for the
 /// simulator); its grid coordinates are derived from it.
+///
+/// # Errors
+///
+/// Returns a [`WireError`](sl_wire::WireError) when the region name is non-empty
+/// but invalid.
 pub(crate) fn region_identity(
     handshake: &sl_wire::messages::RegionHandshake,
     region_handle: RegionHandle,
-) -> RegionIdentity {
+) -> Result<RegionIdentity, sl_wire::WireError> {
     let info = &handshake.region_info;
     let info3 = &handshake.region_info3;
     let product_sku = trimmed_string(&info3.product_sku);
@@ -191,8 +196,8 @@ pub(crate) fn region_identity(
     );
     let region_protocols = info4.map_or(0, |i4| i4.region_protocols);
     let (grid_x, grid_y) = region_handle.grid_coordinates();
-    RegionIdentity {
-        sim_name: trimmed_string(&info.sim_name),
+    Ok(RegionIdentity {
+        sim_name: sl_wire::region_name_from_wire("SimName", &trimmed_string(&info.sim_name))?,
         region_id: handshake.region_info2.region_id,
         region_handle,
         grid_x,
@@ -210,7 +215,7 @@ pub(crate) fn region_identity(
         is_estate_manager: info.is_estate_manager,
         water_height: info.water_height,
         billable_factor: info.billable_factor,
-    }
+    })
 }
 
 /// Builds a `RegionHandshake` message from a [`RegionIdentity`] — the server-side
@@ -230,7 +235,7 @@ pub(crate) fn region_handshake_message(
         region_info: RegionHandshakeRegionInfoBlock {
             region_flags: identity.region_flags,
             sim_access: identity.maturity.to_sim_access(),
-            sim_name: with_nul(&identity.sim_name),
+            sim_name: with_nul(&sl_wire::region_name_to_wire(identity.sim_name.as_ref())),
             sim_owner: identity.sim_owner,
             is_estate_manager: identity.is_estate_manager,
             water_height: identity.water_height,
@@ -491,7 +496,7 @@ pub(crate) fn region_limits(
             damage_limit: combat.damage_limit,
         });
     Ok(RegionLimits {
-        sim_name: trimmed_string(&info.sim_name),
+        sim_name: sl_wire::region_name_from_wire("SimName", &trimmed_string(&info.sim_name))?,
         max_agents,
         hard_max_agents: info2.hard_max_agents,
         hard_max_objects: info2.hard_max_objects,
@@ -847,9 +852,14 @@ pub(crate) fn avatar_group(data: &AvatarGroupsReplyGroupDataBlock) -> AvatarGrou
 }
 
 /// Builds [`PickInfo`] from a `PickInfoReply` data block (#29).
-pub(crate) fn pick_info(data: &PickInfoReplyDataBlock) -> PickInfo {
+///
+/// # Errors
+///
+/// Returns a [`WireError`](sl_wire::WireError) when the region name is non-empty
+/// but invalid.
+pub(crate) fn pick_info(data: &PickInfoReplyDataBlock) -> Result<PickInfo, sl_wire::WireError> {
     let [x, y, z] = data.pos_global;
-    PickInfo {
+    Ok(PickInfo {
         pick_id: data.pick_id,
         creator_id: AgentKey::from(data.creator_id),
         top_pick: data.top_pick,
@@ -859,11 +869,11 @@ pub(crate) fn pick_info(data: &PickInfoReplyDataBlock) -> PickInfo {
         snapshot_id: TextureKey::from(data.snapshot_id),
         user: trimmed_string(&data.user),
         original_name: trimmed_string(&data.original_name),
-        sim_name: trimmed_string(&data.sim_name),
+        sim_name: sl_wire::region_name_from_wire("SimName", &trimmed_string(&data.sim_name))?,
         pos_global: (x, y, z),
         sort_order: data.sort_order,
         enabled: data.enabled,
-    }
+    })
 }
 
 /// Builds [`ClassifiedInfo`] from a `ClassifiedInfoReply` data block (#29).
@@ -882,7 +892,7 @@ pub(crate) fn classified_info(
         parcel_id: ParcelKey::from(data.parcel_id),
         parent_estate: data.parent_estate,
         snapshot_id: TextureKey::from(data.snapshot_id),
-        sim_name: trimmed_string(&data.sim_name),
+        sim_name: sl_wire::region_name_from_wire("SimName", &trimmed_string(&data.sim_name))?,
         pos_global: (x, y, z),
         parcel_name: trimmed_string(&data.parcel_name),
         classified_flags: data.classified_flags,
@@ -1385,23 +1395,30 @@ pub(crate) fn neighbor_info(info: &EnableSimulatorSimulatorInfoBlock) -> Neighbo
 }
 
 /// Builds a [`MapRegionInfo`] from a `MapBlockReply` data block (with its
-/// optional size block), or `None` for a sentinel/empty entry.
+/// optional size block), or `Ok(None)` for a sentinel/empty entry.
+///
+/// # Errors
+///
+/// Returns a [`WireError`](sl_wire::WireError) when the entry carries a
+/// non-empty but invalid region name (so the datagram is rejected as a hard
+/// error rather than silently dropping the entry).
 pub(crate) fn map_region_info(
     data: &MapBlockReplyDataBlock,
     size: Option<&MapBlockReplySizeBlock>,
-) -> Option<MapRegionInfo> {
+) -> Result<Option<MapRegionInfo>, sl_wire::WireError> {
     // The map sends a sentinel block (0,0 / empty name) for "not found".
     if data.x == 0 && data.y == 0 {
-        return None;
+        return Ok(None);
     }
-    let name = trimmed_string(&data.name);
-    if name.is_empty() {
-        return None;
-    }
+    // An empty name is also a sentinel (→ `Ok(None)`, skipped); a non-empty but
+    // invalid name rejects the datagram (a hard error, not a silent drop).
+    let Some(name) = sl_wire::region_name_from_wire("Name", &trimmed_string(&data.name))? else {
+        return Ok(None);
+    };
     let grid_x = u32::from(data.x);
     let grid_y = u32::from(data.y);
-    Some(MapRegionInfo {
-        name,
+    Ok(Some(MapRegionInfo {
+        name: Some(name),
         grid_x,
         grid_y,
         region_handle: RegionHandle::from_grid(grid_x, grid_y),
@@ -1418,7 +1435,7 @@ pub(crate) fn map_region_info(
         agents: data.agents,
         water_height: data.water_height,
         map_image_id: TextureKey::from(data.map_image_id),
-    })
+    }))
 }
 
 /// Builds a [`MapItem`] from a `MapItemReply` data block. Coordinates are global
@@ -1444,7 +1461,7 @@ pub(crate) fn map_region_info_to_data_block(info: &MapRegionInfo) -> MapBlockRep
     MapBlockReplyDataBlock {
         x: u16::try_from(info.grid_x).unwrap_or(u16::MAX),
         y: u16::try_from(info.grid_y).unwrap_or(u16::MAX),
-        name: with_nul(&info.name),
+        name: with_nul(&sl_wire::region_name_to_wire(info.name.as_ref())),
         access: info.maturity.to_sim_access(),
         region_flags: info.region_flags,
         water_height: info.water_height,

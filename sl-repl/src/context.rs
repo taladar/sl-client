@@ -202,8 +202,9 @@ impl SessionContext {
                 bind(&mut self.circuit_id, *circuit, "circuitid");
             }
             Event::RegionInfoHandshake(identity) => {
-                if self.region_name.as_deref() != Some(identity.sim_name.as_str()) {
-                    self.region_name = Some(identity.sim_name.clone());
+                let name = identity.sim_name.as_ref().map(ToString::to_string);
+                if self.region_name != name {
+                    self.region_name = name;
                 }
             }
             Event::ParcelProperties(parcel) => {

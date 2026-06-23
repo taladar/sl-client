@@ -136,6 +136,12 @@ mod test {
     /// A boxed test error.
     type TestError = Box<dyn Error>;
 
+    /// Wrap a (valid) region name for a test fixture or assertion (`None` if it
+    /// does not satisfy the region-name grammar, which the fixtures never trip).
+    fn region_name(name: &str) -> Option<sl_proto::RegionName> {
+        sl_proto::region_name_from_wire("test", name).ok().flatten()
+    }
+
     /// Decodes a NUL-terminated wire string field for assertions.
     fn trimmed(bytes: &[u8]) -> String {
         String::from_utf8_lossy(bytes)
@@ -1601,7 +1607,7 @@ mod test {
             .ok_or("expected a PickInfo event")?;
         assert_eq!(info.name, "My favourite spot");
         assert_eq!(info.description, "a lovely beach");
-        assert_eq!(info.sim_name, "Sandbox");
+        assert_eq!(info.sim_name, region_name("Sandbox"));
         let (px, py, pz) = info.pos_global;
         assert!((px - 256_000.0).abs() < f64::EPSILON);
         assert!((py - 256_128.0).abs() < f64::EPSILON);
@@ -4631,7 +4637,7 @@ mod test {
         assert_eq!(info.duration, 60);
         assert_eq!(info.cover, 1);
         assert_eq!(info.amount, Some(LindenAmount(50)));
-        assert_eq!(info.sim_name, "Sandbox");
+        assert_eq!(info.sim_name, region_name("Sandbox"));
         assert_eq!(info.global_position, (256_000.0, 257_000.0, 30.0));
         Ok(())
     }
@@ -6264,7 +6270,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a RegionInfoHandshake event")?;
-        assert_eq!(identity.sim_name, "TestRegion");
+        assert_eq!(identity.sim_name, region_name("TestRegion"));
         assert_eq!(identity.maturity, Maturity::Mature);
         assert_eq!(identity.product, ProductType::Homestead);
         assert_eq!(identity.region_flags, 0x40);
@@ -8081,7 +8087,7 @@ mod test {
             ParcelKey::from(uuid::Uuid::from_u128(0x00C0_FFEE))
         );
         assert_eq!(details.name, "Sunny Plaza");
-        assert_eq!(details.sim_name, "Default Region");
+        assert_eq!(details.sim_name, region_name("Default Region"));
         assert_eq!(details.actual_area, LandArea(512));
         assert_eq!(details.sale_price, Some(LindenAmount(1000)));
         assert_eq!(details.global_z.to_bits(), 23.5_f32.to_bits());
@@ -8818,7 +8824,7 @@ mod test {
             .collect();
         assert_eq!(regions.len(), 1, "sentinel block should be filtered");
         let region = regions.first().ok_or("one region")?;
-        assert_eq!(region.name, "TestRegion");
+        assert_eq!(region.name, region_name("TestRegion"));
         assert_eq!(region.grid_x, 1000);
         assert_eq!(region.grid_y, 1001);
         assert_eq!(region.maturity, Maturity::Mature);
@@ -8900,7 +8906,7 @@ mod test {
             screenshot_id: uuid::Uuid::nil(),
             object_id: ObjectKey::from(uuid::Uuid::from_u128(0x22)),
             abuser_id: uuid::Uuid::from_u128(0x33),
-            abuse_region_name: "TestRegion".to_owned(),
+            abuse_region_name: region_name("TestRegion"),
             abuse_region_id: uuid::Uuid::nil(),
             summary: "Griefing".to_owned(),
             details: "Detail".to_owned(),
@@ -9644,7 +9650,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a ScriptTeleport event")?;
-        assert_eq!(request.region_name, "Foo");
+        assert_eq!(request.region_name, region_name("Foo"));
         assert_eq!(request.object_name, "Beacon");
         assert_eq!(request.flags, 7);
         Ok(())
@@ -11024,7 +11030,7 @@ mod test {
             return Err("expected ParcelVoiceInfo".into());
         };
         assert_eq!(info.parcel_local_id, sl_proto::RegionLocalParcelId(7));
-        assert_eq!(info.region_name, "Default Region");
+        assert_eq!(info.region_name, region_name("Default Region"));
         assert_eq!(
             info.channel_uri.as_deref(),
             Some("sip:Region@sip.example.com")

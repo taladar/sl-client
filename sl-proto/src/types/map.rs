@@ -6,6 +6,7 @@ use super::Maturity;
 use sl_types::key::{ObjectKey, TextureKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
+use sl_types::map::RegionName;
 use sl_wire::RegionHandle;
 use uuid::Uuid;
 
@@ -175,8 +176,8 @@ impl Default for RegionInfoUpdate {
 /// A region reported by the world map (one `MapBlockReply` `Data` entry).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MapRegionInfo {
-    /// The region name.
-    pub name: String,
+    /// The region name, or `None` when the grid sent an empty (unknown) name.
+    pub name: Option<RegionName>,
     /// The region's grid x coordinate (region index).
     pub grid_x: u32,
     /// The region's grid y coordinate (region index).

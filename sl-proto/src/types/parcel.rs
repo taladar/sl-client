@@ -2,6 +2,7 @@
 
 use sl_types::key::{GroupKey, ObjectKey, OwnerKey, ParcelKey, TextureKey};
 use sl_types::lsl::Vector;
+use sl_types::map::RegionName;
 use sl_types::money::LindenAmount;
 use sl_wire::ParcelFlags;
 use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
@@ -780,8 +781,9 @@ pub struct ParcelDetails {
     pub global_y: f32,
     /// The parcel anchor's global Z coordinate, in metres.
     pub global_z: f32,
-    /// The containing region's name.
-    pub sim_name: String,
+    /// The containing region's name, or `None` when the grid sent an empty
+    /// (unknown) name.
+    pub sim_name: Option<RegionName>,
     /// The parcel snapshot texture id.
     pub snapshot_id: TextureKey,
     /// The parcel's dwell (traffic) value.
@@ -805,7 +807,7 @@ impl Default for ParcelDetails {
             global_x: 0.0,
             global_y: 0.0,
             global_z: 0.0,
-            sim_name: String::new(),
+            sim_name: None,
             snapshot_id: TextureKey::from(Uuid::nil()),
             dwell: 0.0,
             sale_price: None,

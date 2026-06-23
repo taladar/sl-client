@@ -4,6 +4,7 @@ use super::Maturity;
 use sl_types::key::{
     AgentKey, ClassifiedKey, FriendKey, GroupKey, InventoryFolderKey, ParcelKey, TextureKey,
 };
+use sl_types::map::RegionName;
 use sl_types::money::LindenAmount;
 use uuid::Uuid;
 
@@ -108,8 +109,9 @@ pub struct PickInfo {
     pub user: String,
     /// The parcel's original name.
     pub original_name: String,
-    /// The region name the pick is in.
-    pub sim_name: String,
+    /// The region name the pick is in, or `None` when the grid sent an empty
+    /// (unknown) name.
+    pub sim_name: Option<RegionName>,
     /// The pick's global position (metres, grid-wide coordinates).
     pub pos_global: (f64, f64, f64),
     /// The sort order (only meaningful for top picks).
@@ -143,8 +145,9 @@ pub struct ClassifiedInfo {
     pub parent_estate: u32,
     /// The classified snapshot texture id.
     pub snapshot_id: TextureKey,
-    /// The region name the classified is in.
-    pub sim_name: String,
+    /// The region name the classified is in, or `None` when the grid sent an
+    /// empty (unknown) name.
+    pub sim_name: Option<RegionName>,
     /// The classified's global position (metres, grid-wide coordinates).
     pub pos_global: (f64, f64, f64),
     /// The parcel name.

@@ -2,6 +2,7 @@
 
 use sl_types::chat::ChatChannel;
 use sl_types::key::{ExperienceKey, InventoryKey, ObjectKey, OwnerKey, TextureKey};
+use sl_types::map::RegionName;
 use sl_wire::ControlFlags;
 use uuid::Uuid;
 
@@ -131,8 +132,9 @@ pub struct LoadUrlRequest {
 pub struct ScriptTeleportRequest {
     /// The requesting object's name.
     pub object_name: String,
-    /// The destination region (simulator) name.
-    pub region_name: String,
+    /// The destination region (simulator) name, or `None` when the request
+    /// carried an empty (unknown) name.
+    pub region_name: Option<RegionName>,
     /// The destination position within the region, in metres.
     pub position: (f32, f32, f32),
     /// The look-at direction on arrival.

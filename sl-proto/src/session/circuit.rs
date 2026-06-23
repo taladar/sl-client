@@ -3688,7 +3688,9 @@ impl Circuit {
                 screenshot_id: report.screenshot_id,
                 object_id: report.object_id.uuid(),
                 abuser_id: report.abuser_id,
-                abuse_region_name: with_nul(&report.abuse_region_name),
+                abuse_region_name: with_nul(&sl_wire::region_name_to_wire(
+                    report.abuse_region_name.as_ref(),
+                )),
                 abuse_region_id: report.abuse_region_id,
                 summary: with_nul(&report.summary),
                 details: with_nul(&report.details),

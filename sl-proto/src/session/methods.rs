@@ -1453,7 +1453,7 @@ impl Session {
                         .push_back(Event::RegionInfoHandshake(Box::new(region_identity(
                             handshake,
                             region_handle,
-                        ))));
+                        )?)));
                     self.complete_arrival(now);
                 }
             }
@@ -1605,7 +1605,10 @@ impl Session {
                     global_x: data.global_x,
                     global_y: data.global_y,
                     global_z: data.global_z,
-                    sim_name: trimmed_string(&data.sim_name),
+                    sim_name: sl_wire::region_name_from_wire(
+                        "SimName",
+                        &trimmed_string(&data.sim_name),
+                    )?,
                     snapshot_id: TextureKey::from(data.snapshot_id),
                     dwell: data.dwell,
                     // The packed parcel flags byte carries PARCEL_FOR_SALE (0x04).
@@ -1805,7 +1808,7 @@ impl Session {
             }
             AnyMessage::PickInfoReply(reply) => {
                 self.events
-                    .push_back(Event::PickInfo(Box::new(pick_info(&reply.data))));
+                    .push_back(Event::PickInfo(Box::new(pick_info(&reply.data)?)));
             }
             AnyMessage::ClassifiedInfoReply(reply) => {
                 self.events
@@ -1891,7 +1894,7 @@ impl Session {
             }
             AnyMessage::MapBlockReply(reply) => {
                 for (index, data) in reply.data.iter().enumerate() {
-                    if let Some(region) = map_region_info(data, reply.size.get(index)) {
+                    if let Some(region) = map_region_info(data, reply.size.get(index))? {
                         self.events.push_back(Event::MapBlock(Box::new(region)));
                     }
                 }
@@ -2511,7 +2514,10 @@ impl Session {
                                 )?,
                                 flags: block.flags,
                                 global_position: (block.global_x, block.global_y, block.global_z),
-                                sim_name: trimmed_string(&block.sim_name),
+                                sim_name: sl_wire::region_name_from_wire(
+                                    "SimName",
+                                    &trimmed_string(&block.sim_name),
+                                )?,
                                 snapshot_id: TextureKey::from(block.snapshot_id),
                                 dwell: block.dwell,
                                 price: crate::types::linden_from_wire("Price", block.price)?,
@@ -2536,7 +2542,10 @@ impl Session {
                         duration: data.duration,
                         cover: data.cover,
                         amount: crate::types::linden_cover_from_wire(data.cover, data.amount),
-                        sim_name: trimmed_string(&data.sim_name),
+                        sim_name: sl_wire::region_name_from_wire(
+                            "SimName",
+                            &trimmed_string(&data.sim_name),
+                        )?,
                         global_position: (global_x, global_y, global_z),
                         flags: data.event_flags,
                     },
@@ -2717,7 +2726,10 @@ impl Session {
                 self.events
                     .push_back(Event::ScriptTeleport(Box::new(ScriptTeleportRequest {
                         object_name: trimmed_string(&data.object_name),
-                        region_name: trimmed_string(&data.sim_name),
+                        region_name: sl_wire::region_name_from_wire(
+                            "SimName",
+                            &trimmed_string(&data.sim_name),
+                        )?,
                         position: (
                             data.sim_position.x,
                             data.sim_position.y,
