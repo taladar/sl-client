@@ -1145,13 +1145,22 @@ attachment::*}`. Adopt these more, selectively by semantic role:
       `sim_session` round-trip suites updated. Build + clippy
       (`--workspace --all-targets`) + tests + `cargo doc` (`-D warnings`) +
       mdbook green. NO `sl-types` touched.
-- [ ] `ChatVolume` ⇄ `ChatType` interop (we keep the richer `ChatType`, don't
-  adopt `ChatVolume`). In `types/chat.rs` (orphan-rule-legal — `ChatType` is
-  local): `impl From<sl_types::chat::ChatVolume> for ChatType` (total:
-  `Whisper→Whisper`, `Say→Normal`, `Shout→Shout`, `RegionSay→Region`) and
-  `impl TryFrom<ChatType> for sl_types::chat::ChatVolume` (fallible; non-volume
-  types → a new `ChatTypeNotAVolume` error). Round-trip test: `ChatVolume →
-  ChatType → ChatVolume` is identity for all four volume variants.
+- [x] `ChatVolume` ⇄ `ChatType` interop (we keep the richer `ChatType`, don't
+  adopt `ChatVolume`). Implemented in `sl-proto/src/types/chat.rs`
+  (orphan-rule-legal — `ChatType` is local): `impl
+  From<sl_types::chat::ChatVolume> for ChatType` (total, lossless widening:
+  `Whisper→Whisper`, `Say→Normal`, `Shout→Shout`, `RegionSay→Region`) and the
+  fallible inverse `impl TryFrom<ChatType> for sl_types::chat::ChatVolume`
+  (`Whisper→Whisper`, `Normal→Say`, `Shout→Shout`, `Region→RegionSay`; every
+  non-volume type — the typing triggers, debug channel, owner, direct, and
+  `Unknown(_)` — yields the new public `ChatTypeNotAVolume { chat_type }` error,
+  modelled on `NegativeBalanceError`: `thiserror`, `#[non_exhaustive]`).
+  `ChatTypeNotAVolume` re-exported through `sl-proto`/`sl-client-tokio`/
+  `sl-client-bevy` (parity). +2 unit tests (the four volumes round-trip
+  `ChatVolume → ChatType → ChatVolume` identically; the six non-volume types
+  each narrow to `ChatTypeNotAVolume`). Consume-only — NO `sl-types` change. No
+  downstream/book change (a pure conversion API, no wire field). **Phase 6
+  COMPLETE.**
 - [ ] Considered, not adopted: `chat::ChatVolume` (richer `ChatType` kept — see
       interop above), `search::SearchCategory` (Search-floater tab / search-URI
       concept with no LLUDP wire field; the raw `category` directory fields are

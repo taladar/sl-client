@@ -67,6 +67,56 @@ impl ChatType {
     }
 }
 
+/// The error from converting a [`ChatType`] that is not a chat *volume* into an
+/// [`sl_types::chat::ChatVolume`]. Only [`ChatType::Whisper`],
+/// [`ChatType::Normal`], [`ChatType::Shout`], and [`ChatType::Region`] are
+/// volumes; the typing/debug/owner/direct/unknown types have no volume.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("chat type {chat_type:?} is not a chat volume")]
+#[non_exhaustive]
+pub struct ChatTypeNotAVolume {
+    /// The chat type that has no [`sl_types::chat::ChatVolume`] equivalent.
+    pub chat_type: ChatType,
+}
+
+/// A [`sl_types::chat::ChatVolume`] is a strict subset of the richer
+/// [`ChatType`] — every volume maps to exactly one chat type. We keep
+/// [`ChatType`] (it also models the typing/debug/owner/direct types a volume
+/// cannot express) and provide this lossless widening conversion.
+impl From<sl_types::chat::ChatVolume> for ChatType {
+    fn from(volume: sl_types::chat::ChatVolume) -> Self {
+        match volume {
+            sl_types::chat::ChatVolume::Whisper => Self::Whisper,
+            sl_types::chat::ChatVolume::Say => Self::Normal,
+            sl_types::chat::ChatVolume::Shout => Self::Shout,
+            sl_types::chat::ChatVolume::RegionSay => Self::Region,
+        }
+    }
+}
+
+/// Narrowing a [`ChatType`] back to an [`sl_types::chat::ChatVolume`] is
+/// fallible: only the four volume types ([`ChatType::Whisper`],
+/// [`ChatType::Normal`], [`ChatType::Shout`], [`ChatType::Region`]) have a
+/// volume; every other type yields [`ChatTypeNotAVolume`].
+impl TryFrom<ChatType> for sl_types::chat::ChatVolume {
+    type Error = ChatTypeNotAVolume;
+
+    fn try_from(chat_type: ChatType) -> Result<Self, Self::Error> {
+        match chat_type {
+            ChatType::Whisper => Ok(Self::Whisper),
+            ChatType::Normal => Ok(Self::Say),
+            ChatType::Shout => Ok(Self::Shout),
+            ChatType::Region => Ok(Self::RegionSay),
+            ChatType::StartTyping
+            | ChatType::StopTyping
+            | ChatType::DebugChannel
+            | ChatType::Owner
+            | ChatType::Direct
+            | ChatType::Unknown(_) => Err(ChatTypeNotAVolume { chat_type }),
+        }
+    }
+}
+
 /// What kind of source produced a chat message, from the `SourceType` byte of
 /// `ChatFromSimulator`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -450,7 +500,8 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        AgentOrObjectKey, AssetType, ChatSource, ImDialog, InstantMessage, InventoryItemOrFolderKey,
+        AgentOrObjectKey, AssetType, ChatSource, ChatType, ChatTypeNotAVolume, ImDialog,
+        InstantMessage, InventoryItemOrFolderKey,
     };
 
     /// An [`AgentKey`] is a transparent wrapper over its [`Uuid`]: wrapping a raw
@@ -571,5 +622,42 @@ mod tests {
             Some(AgentOrObjectKey::Agent(AgentKey::from(agent)))
         );
         assert_eq!(ChatSource::System.agent_or_object(), None);
+    }
+
+    /// Every [`sl_types::chat::ChatVolume`] widens to a [`ChatType`] and narrows
+    /// back to the identical volume — the conversion is a lossless round trip
+    /// for all four volume variants.
+    #[test]
+    fn chat_volume_round_trips_through_chat_type() -> Result<(), ChatTypeNotAVolume> {
+        for volume in [
+            sl_types::chat::ChatVolume::Whisper,
+            sl_types::chat::ChatVolume::Say,
+            sl_types::chat::ChatVolume::Shout,
+            sl_types::chat::ChatVolume::RegionSay,
+        ] {
+            let chat_type = ChatType::from(volume);
+            assert_eq!(sl_types::chat::ChatVolume::try_from(chat_type)?, volume);
+        }
+        Ok(())
+    }
+
+    /// The non-volume chat types (typing triggers, debug channel, owner, direct,
+    /// and unknown bytes) have no [`sl_types::chat::ChatVolume`] equivalent and
+    /// narrow to a [`ChatTypeNotAVolume`] error.
+    #[test]
+    fn non_volume_chat_types_have_no_volume() {
+        for chat_type in [
+            ChatType::StartTyping,
+            ChatType::StopTyping,
+            ChatType::DebugChannel,
+            ChatType::Owner,
+            ChatType::Direct,
+            ChatType::Unknown(42),
+        ] {
+            assert_eq!(
+                sl_types::chat::ChatVolume::try_from(chat_type),
+                Err(ChatTypeNotAVolume { chat_type })
+            );
+        }
     }
 }
