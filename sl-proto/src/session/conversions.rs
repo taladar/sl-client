@@ -76,10 +76,14 @@ pub(crate) fn grid_coordinates_from_handle(handle: RegionHandle) -> GridCoordina
 
 /// Parses a UUID from a wire string field that carries a UUID in text form
 /// (e.g. the `Creator` of an `EventInfoReply`), dropping any trailing NUL
-/// padding. A value that does not parse becomes [`Uuid::nil`], matching the
-/// viewer's `LLUUID(buffer)` behaviour.
-pub(crate) fn parse_uuid_string(bytes: &[u8]) -> Uuid {
-    Uuid::parse_str(trimmed_string(bytes).trim()).unwrap_or_else(|_err| Uuid::nil())
+/// padding. A present-but-unparsable value is a hard
+/// [`WireError::InvalidUuid`] rather than the silently-coerced nil UUID the
+/// viewer's `LLUUID(buffer)` would produce.
+pub(crate) fn parse_uuid_string(
+    field: &'static str,
+    bytes: &[u8],
+) -> Result<Uuid, sl_wire::WireError> {
+    parse_uuid_field(field, trimmed_string(bytes).trim())
 }
 
 /// Converts a wire array index that uses a negative value to mean "absent"
@@ -99,12 +103,22 @@ pub(crate) fn with_nul(s: &str) -> Vec<u8> {
 
 /// Builds an inventory-offer binary bucket: the asset-type byte followed by the
 /// item's (or folder's) 16 raw id bytes, as the viewer's give-inventory path
-/// packs it (#28).
-pub(crate) fn inventory_offer_bucket(asset_type: AssetType, id: Uuid) -> Vec<u8> {
+/// packs it (#28). An asset type whose code does not fit the single wire byte is
+/// a hard [`WireError::ValueOutOfRange`] rather than a silently-written `0`
+/// (which would mistag the offer as a texture).
+pub(crate) fn inventory_offer_bucket(
+    asset_type: AssetType,
+    id: Uuid,
+) -> Result<Vec<u8>, sl_wire::WireError> {
+    let code =
+        u8::try_from(asset_type.to_code()).map_err(|_err| sl_wire::WireError::ValueOutOfRange {
+            field: "inventory_offer_asset_type",
+            value: i64::from(asset_type.to_code()),
+        })?;
     let mut bucket = Vec::with_capacity(17);
-    bucket.push(u8::try_from(asset_type.to_code()).unwrap_or(0));
+    bucket.push(code);
     bucket.extend_from_slice(id.as_bytes());
-    bucket
+    Ok(bucket)
 }
 
 /// Concatenates the raw 16-byte ids of `uuids` (the conference-start invitee
@@ -151,33 +165,46 @@ pub(crate) struct OutgoingIm<'a> {
 
 /// Parses a downloaded mute-list file into [`MuteEntry`] values. Each non-empty
 /// line is `<type> <uuid> <name>|<flags>` (the viewer's on-disk format).
-pub(crate) fn parse_mute_list(bytes: &[u8]) -> Vec<MuteEntry> {
+pub(crate) fn parse_mute_list(bytes: &[u8]) -> Result<Vec<MuteEntry>, sl_wire::WireError> {
     String::from_utf8_lossy(bytes)
         .lines()
-        .filter_map(parse_mute_line)
+        .filter_map(|line| parse_mute_line(line).transpose())
         .collect()
 }
 
-/// Parses one mute-list line, or `None` if it is blank/malformed.
-pub(crate) fn parse_mute_line(line: &str) -> Option<MuteEntry> {
+/// Parses one mute-list line: `Ok(None)` for a blank line, `Ok(Some(_))` for a
+/// well-formed entry, and a hard [`WireError`] for a present-but-malformed line
+/// (a non-numeric type/flags or an unparsable UUID) — rather than silently
+/// coercing the type/flags to `0` or the id to the nil UUID (which would mute
+/// nobody, or the wrong avatar).
+pub(crate) fn parse_mute_line(line: &str) -> Result<Option<MuteEntry>, sl_wire::WireError> {
     let line = line.trim();
     if line.is_empty() {
-        return None;
+        return Ok(None);
     }
     // The flags follow the last '|'; everything before is "<type> <uuid> <name>".
-    let (head, flags) = line.rsplit_once('|').map_or((line, 0), |(head, tail)| {
-        (head, tail.trim().parse().unwrap_or(0))
-    });
+    // A line with no flags suffix carries no flags (the viewer omits it).
+    let (head, flags) = match line.rsplit_once('|') {
+        Some((head, tail)) => (head, parse_u32_field("mute_flags", tail)?),
+        None => (line, 0),
+    };
     let mut parts = head.splitn(3, ' ');
-    let mute_type = parts.next()?.trim().parse::<i32>().ok()?;
-    let id = Uuid::parse_str(parts.next()?.trim()).unwrap_or_else(|_| Uuid::nil());
+    let type_text = parts.next().unwrap_or("").trim();
+    let mute_type =
+        type_text
+            .parse::<i32>()
+            .map_err(|_err| sl_wire::WireError::MalformedField {
+                field: "mute_type",
+                value: type_text.to_owned(),
+            })?;
+    let id = parse_uuid_field("mute_id", parts.next().unwrap_or("").trim())?;
     let name = parts.next().unwrap_or("").trim().to_owned();
-    Some(MuteEntry {
+    Ok(Some(MuteEntry {
         id,
         name,
         mute_type: MuteType::from_i32(mute_type),
         flags: MuteFlags(flags),
-    })
+    }))
 }
 
 /// Builds a [`RegionIdentity`] from a `RegionHandshake`'s region-info blocks. The
@@ -1603,9 +1630,9 @@ pub fn build_map_layer_reply(
 /// covenant timestamp, "1", abuse email).
 pub(crate) fn estate_info_from_params(
     params: &[EstateOwnerMessageParamListBlock],
-) -> Option<EstateInfo> {
+) -> Result<Option<EstateInfo>, sl_wire::WireError> {
     if params.len() < 8 {
-        return None;
+        return Ok(None);
     }
     let text = |index: usize| {
         params
@@ -1613,17 +1640,21 @@ pub(crate) fn estate_info_from_params(
             .map(|block| trimmed_string(&block.parameter))
             .unwrap_or_default()
     };
-    Some(EstateInfo {
+    // A present-but-malformed parameter is a hard error (rejecting the whole
+    // `EstateInfo`) rather than a silently-coerced nil/`0`. The covenant id is
+    // an optional notecard (`None` for "no covenant"); every other field is
+    // required, so an unparsable value is `MalformedField`/`InvalidUuid`.
+    Ok(Some(EstateInfo {
         estate_name: text(0),
-        estate_owner: Uuid::parse_str(&text(1)).unwrap_or_else(|_| Uuid::nil()),
-        estate_id: text(2).parse().unwrap_or(0),
-        estate_flags: text(3).parse().unwrap_or(0),
-        sun_position: text(4).parse().unwrap_or(0),
-        parent_estate: text(5).parse().unwrap_or(0),
-        covenant_id: Uuid::parse_str(&text(6)).unwrap_or_else(|_| Uuid::nil()),
-        covenant_timestamp: text(7).parse().unwrap_or(0),
+        estate_owner: parse_uuid_field("estate_owner", &text(1))?,
+        estate_id: parse_u32_field("estate_id", &text(2))?,
+        estate_flags: parse_u32_field("estate_flags", &text(3))?,
+        sun_position: parse_u32_field("sun_position", &text(4))?,
+        parent_estate: parse_u32_field("parent_estate", &text(5))?,
+        covenant_id: parse_optional_uuid_field("covenant_id", &text(6))?,
+        covenant_timestamp: parse_u32_field("covenant_timestamp", &text(7))?,
         abuse_email: text(9),
-    })
+    }))
 }
 
 /// Builds an [`Event::EstateAccessList`] from a `setaccess` `EstateOwnerMessage`.
@@ -2058,6 +2089,45 @@ pub(crate) fn optional_texture_member(map: &Llsd, key: &str) -> Option<TextureKe
 /// [`optional_texture_member`]).
 pub(crate) fn optional_texture_to_llsd(texture: Option<TextureKey>) -> Llsd {
     Llsd::Uuid(texture.map_or_else(Uuid::nil, |key| key.uuid()))
+}
+
+/// Parses a text-form UUID strictly: a value that does not parse is a hard
+/// [`WireError::InvalidUuid`] rather than the silently-coerced nil UUID. Used
+/// where the wire carries an id as a string (e.g. an `EstateOwnerMessage`
+/// parameter or an `EventInfoReply` creator).
+pub(crate) fn parse_uuid_field(
+    field: &'static str,
+    value: &str,
+) -> Result<Uuid, sl_wire::WireError> {
+    Uuid::parse_str(value.trim()).map_err(|_err| sl_wire::WireError::InvalidUuid {
+        field,
+        value: value.to_owned(),
+    })
+}
+
+/// Parses an optional text-form UUID: an empty/whitespace value is the "absent"
+/// sentinel and yields `None`; a present value parses strictly (a malformed id
+/// is a hard [`WireError::InvalidUuid`], never silently the nil UUID).
+pub(crate) fn parse_optional_uuid_field(
+    field: &'static str,
+    value: &str,
+) -> Result<Option<Uuid>, sl_wire::WireError> {
+    if value.trim().is_empty() {
+        return Ok(None);
+    }
+    parse_uuid_field(field, value).map(Some)
+}
+
+/// Parses a text-form integer strictly: a value that does not parse is a hard
+/// [`WireError::MalformedField`] rather than a silently-coerced `0`.
+pub(crate) fn parse_u32_field(field: &'static str, value: &str) -> Result<u32, sl_wire::WireError> {
+    value
+        .trim()
+        .parse()
+        .map_err(|_err| sl_wire::WireError::MalformedField {
+            field,
+            value: value.to_owned(),
+        })
 }
 
 /// Reads an `i32` from an LLSD map member, defaulting to `0`.
@@ -3656,6 +3726,54 @@ mod caps_serializer_tests {
     /// A V4 socket address for the given octets and port.
     fn addr(a: u8, b: u8, c: u8, d: u8, port: u16) -> SocketAddr {
         SocketAddr::new(IpAddr::V4(Ipv4Addr::new(a, b, c, d)), port)
+    }
+
+    /// The strict text-field parsers reject a present-but-malformed value with a
+    /// hard `WireError` instead of silently coercing it to nil/`0`, while an
+    /// empty optional value is the documented "absent" sentinel (`None`).
+    #[test]
+    fn strict_field_parsers_reject_malformed_values() {
+        let good = "11111111-1111-1111-1111-111111111111";
+        // A valid id parses; rendering it back matches the input verbatim.
+        assert_eq!(
+            super::parse_uuid_field("f", good).map(|id| id.to_string()),
+            Ok(good.to_owned())
+        );
+        assert!(matches!(
+            super::parse_uuid_field("f", "not-a-uuid"),
+            Err(sl_wire::WireError::InvalidUuid { .. })
+        ));
+        // Empty optional id is the "absent" sentinel; a present bad one rejects.
+        assert_eq!(super::parse_optional_uuid_field("f", "   "), Ok(None));
+        assert!(matches!(
+            super::parse_optional_uuid_field("f", "bad"),
+            Err(sl_wire::WireError::InvalidUuid { .. })
+        ));
+        assert_eq!(super::parse_u32_field("f", "42"), Ok(42));
+        assert!(matches!(
+            super::parse_u32_field("f", "-1"),
+            Err(sl_wire::WireError::MalformedField { .. })
+        ));
+    }
+
+    /// A mute-list line with an unparsable UUID or flags is a hard error rather
+    /// than a silent nil-mute / zero-flags; a blank line is skipped (`Ok(None)`).
+    #[test]
+    fn parse_mute_line_rejects_malformed_lines() {
+        // A well-formed line yields an entry with the parsed name and flags.
+        assert!(matches!(
+            super::parse_mute_line("1 11111111-1111-1111-1111-111111111111 Bob|5"),
+            Ok(Some(ref entry)) if entry.name == "Bob" && entry.flags.0 == 5
+        ));
+        assert_eq!(super::parse_mute_line("   "), Ok(None));
+        assert!(matches!(
+            super::parse_mute_line("1 not-a-uuid Bob|5"),
+            Err(sl_wire::WireError::InvalidUuid { .. })
+        ));
+        assert!(matches!(
+            super::parse_mute_line("1 11111111-1111-1111-1111-111111111111 Bob|notflags"),
+            Err(sl_wire::WireError::MalformedField { .. })
+        ));
     }
 
     #[test]

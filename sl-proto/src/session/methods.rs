@@ -1623,7 +1623,7 @@ impl Session {
             AnyMessage::EstateOwnerMessage(message) => {
                 match trimmed_string(&message.method_data.method).as_str() {
                     "estateupdateinfo" => {
-                        if let Some(info) = estate_info_from_params(&message.param_list) {
+                        if let Some(info) = estate_info_from_params(&message.param_list)? {
                             self.events.push_back(Event::EstateInfo(Box::new(info)));
                         }
                     }
@@ -1638,7 +1638,7 @@ impl Session {
             AnyMessage::EstateCovenantReply(reply) => {
                 let data = &reply.data;
                 self.events.push_back(Event::EstateCovenant(EstateCovenant {
-                    covenant_id: data.covenant_id,
+                    covenant_id: (!data.covenant_id.is_nil()).then_some(data.covenant_id),
                     covenant_timestamp: data.covenant_timestamp,
                     estate_name: trimmed_string(&data.estate_name),
                     estate_owner_id: data.estate_owner_id,
@@ -2072,7 +2072,7 @@ impl Session {
                     }
                     if is_last && let Some(buffer) = self.mute_xfers.remove(&xfer_id) {
                         self.events
-                            .push_back(Event::MuteList(parse_mute_list(&buffer)));
+                            .push_back(Event::MuteList(parse_mute_list(&buffer)?));
                     }
                 }
             }
@@ -2533,7 +2533,7 @@ impl Session {
                 self.events.push_back(Event::EventInfoReply {
                     info: EventInfo {
                         event_id: EventId::new(data.event_id),
-                        creator: AgentKey::from(parse_uuid_string(&data.creator)),
+                        creator: AgentKey::from(parse_uuid_string("Creator", &data.creator)?),
                         name: trimmed_string(&data.name),
                         category: trimmed_string(&data.category),
                         description: trimmed_string(&data.desc),
@@ -4539,7 +4539,7 @@ impl Session {
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
-        let bucket = inventory_offer_bucket(asset_type, item_id);
+        let bucket = inventory_offer_bucket(asset_type, item_id)?;
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
@@ -4573,7 +4573,7 @@ impl Session {
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
-        let bucket = inventory_offer_bucket(AssetType::Folder, folder_id);
+        let bucket = inventory_offer_bucket(AssetType::Folder, folder_id)?;
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {

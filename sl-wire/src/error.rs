@@ -62,4 +62,28 @@ pub enum WireError {
         /// The offending region name, rendered for diagnostics.
         value: String,
     },
+    /// A field that should carry a UUID (often as text, e.g. an
+    /// `EstateOwnerMessage` parameter or a string-encoded id) held a non-empty
+    /// value that does not parse as one. An empty value, where the field treats
+    /// it as an "absent" sentinel, decodes to `None` rather than this error;
+    /// only a present-but-unparsable id is rejected rather than silently
+    /// coerced to the nil UUID.
+    #[error("field {field} carried invalid UUID {value:?}")]
+    InvalidUuid {
+        /// A short static label identifying the offending field.
+        field: &'static str,
+        /// The offending value, rendered for diagnostics.
+        value: String,
+    },
+    /// A field that should carry a parseable scalar (e.g. an integer rendered as
+    /// text in an `EstateOwnerMessage` parameter or a downloaded list file) held
+    /// a value that could not be decoded. The message is rejected rather than
+    /// silently coerced to a default (e.g. `0`).
+    #[error("field {field} carried malformed value {value:?}")]
+    MalformedField {
+        /// A short static label identifying the offending field.
+        field: &'static str,
+        /// The offending value, rendered for diagnostics.
+        value: String,
+    },
 }
