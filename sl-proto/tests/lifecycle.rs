@@ -9557,8 +9557,8 @@ mod test {
         assert!((ps.outer_angle - 1.0).abs() < f32::EPSILON);
         assert!((ps.burst_speed_max - 2.0).abs() < f32::EPSILON);
         assert_eq!(ps.burst_part_count, 20);
-        assert_eq!(ps.texture_id, TextureKey::from(part_image));
-        assert_eq!(ps.target_id, ObjectKey::from(target));
+        assert_eq!(ps.texture_id, Some(TextureKey::from(part_image)));
+        assert_eq!(ps.target_id, Some(ObjectKey::from(target)));
         assert_eq!(ps.part_flags, 0x40);
         assert!((ps.part_max_age - 10.0).abs() < f32::EPSILON);
         assert_eq!(ps.part_start_color, [255, 255, 255, 255]);

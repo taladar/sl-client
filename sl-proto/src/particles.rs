@@ -172,8 +172,8 @@ fn decode_system(reader: &mut Reader<'_>) -> Option<ParticleSystem> {
         burst_part_count,
         angular_velocity,
         acceleration,
-        texture_id: TextureKey::from(texture_id),
-        target_id: ObjectKey::from(target_id),
+        texture_id: (!texture_id.is_nil()).then(|| TextureKey::from(texture_id)),
+        target_id: (!target_id.is_nil()).then(|| ObjectKey::from(target_id)),
         part_flags: 0,
         part_max_age: 0.0,
         part_start_color: [255; 4],
@@ -340,8 +340,16 @@ fn encode_system(writer: &mut Writer, system: &ParticleSystem) {
     writer.put_u8(system.burst_part_count);
     pack_fixed_vector_signed(writer, &system.angular_velocity, 8, 7);
     pack_fixed_vector_signed(writer, &system.acceleration, 8, 7);
-    writer.put_uuid(system.texture_id.uuid());
-    writer.put_uuid(system.target_id.uuid());
+    writer.put_uuid(
+        system
+            .texture_id
+            .map_or_else(uuid::Uuid::nil, |key| key.uuid()),
+    );
+    writer.put_uuid(
+        system
+            .target_id
+            .map_or_else(uuid::Uuid::nil, |key| key.uuid()),
+    );
 }
 
 /// Encodes the 18-byte legacy particle-template block (the inverse of
@@ -565,8 +573,8 @@ mod tests {
         assert_eq!(ps.burst_part_count, 10);
         close(ps.angular_velocity.x, 0.0)?;
         close(ps.acceleration.z, 0.0)?;
-        assert_eq!(ps.texture_id, TextureKey::from(image));
-        assert_eq!(ps.target_id, ObjectKey::from(target));
+        assert_eq!(ps.texture_id, Some(TextureKey::from(image)));
+        assert_eq!(ps.target_id, Some(ObjectKey::from(target)));
         assert_eq!(ps.part_flags, 0x11);
         close(ps.part_max_age, 10.0)?;
         assert_eq!(ps.part_start_color, [255, 0, 0, 255]);
@@ -653,8 +661,8 @@ mod tests {
                 y: -0.5,
                 z: 3.0,
             },
-            texture_id: TextureKey::from(Uuid::from_u128(0x1234)),
-            target_id: ObjectKey::from(Uuid::from_u128(0x5678)),
+            texture_id: Some(TextureKey::from(Uuid::from_u128(0x1234))),
+            target_id: Some(ObjectKey::from(Uuid::from_u128(0x5678))),
             part_flags,
             part_max_age: 10.0,
             part_start_color: [255, 0, 0, 255],
