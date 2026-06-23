@@ -21,7 +21,8 @@ use std::time::Duration;
 
 use sl_client_tokio::{
     AgentKey, ClassifiedCategory, ClassifiedUpdate, Client, Command, DisconnectReason, Error,
-    Event, LindenAmount, LoginParams, LoginRequest, PickUpdate, ProfileUpdate, Throttle, Uuid,
+    Event, LindenAmount, LoginParams, LoginRequest, PickKey, PickUpdate, ProfileUpdate, Throttle,
+    Uuid,
 };
 use sl_proto::ClassifiedKey;
 use tokio::sync::mpsc;
@@ -110,7 +111,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .ok();
                     // A fixed id for this throwaway test pick (a real client
                     // would generate a fresh random UUID per new pick).
-                    let pick_id = Uuid::from_u128(0x5C11_0029_0000_0000_0000_0000_0000_0001);
+                    let pick_id =
+                        PickKey::from(Uuid::from_u128(0x5C11_0029_0000_0000_0000_0000_0000_0001));
                     command_tx
                         .send(Command::UpdatePick(PickUpdate {
                             pick_id,

@@ -108,9 +108,9 @@ use crate::types::{
     InstantMessage, LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType,
     MapLayer, MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NotecardRez,
     ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner,
-    PlacesResult, Postcard, RegionIdentity, Reliability, RestoreItem, RezAttachment, SaleType,
-    ScriptControl, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
-    ViewerEffectType,
+    PlacesResult, Postcard, ProposalVoteId, RegionIdentity, Reliability, RestoreItem,
+    RezAttachment, SaleType, ScriptControl, TelehubInfo, Throttle, Transmit, ViewerEffect,
+    ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
 
@@ -737,7 +737,7 @@ pub enum ServerEvent {
     /// (`GroupProposalBallot`).
     GroupProposalBallot {
         /// The proposal's id.
-        proposal_id: Uuid,
+        proposal_id: ProposalVoteId,
         /// The group the proposal belongs to.
         group_id: GroupKey,
         /// The vote cast (e.g. `"yes"`/`"no"`).
@@ -2228,7 +2228,7 @@ impl SimSession {
             proposal_data: proposals
                 .iter()
                 .map(|item| GroupActiveProposalItemReplyProposalDataBlock {
-                    vote_id: item.vote_id,
+                    vote_id: item.vote_id.uuid(),
                     vote_initiator: item.vote_initiator.uuid(),
                     terse_date_id: with_nul(&item.terse_date_id),
                     start_date_time: with_nul(&item.start_date_time),
@@ -2274,7 +2274,7 @@ impl SimSession {
                 total_num_items,
             },
             history_item_data: GroupVoteHistoryItemReplyHistoryItemDataBlock {
-                vote_id: item.vote_id,
+                vote_id: item.vote_id.uuid(),
                 terse_date_id: with_nul(&item.terse_date_id),
                 start_date_time: with_nul(&item.start_date_time),
                 end_date_time: with_nul(&item.end_date_time),
@@ -2289,7 +2289,7 @@ impl SimSession {
                 .votes
                 .iter()
                 .map(|vote| GroupVoteHistoryItemReplyVoteItemBlock {
-                    candidate_id: vote.candidate_id,
+                    candidate_id: vote.candidate_id.uuid(),
                     vote_cast: with_nul(&vote.vote_cast),
                     num_votes: vote.num_votes,
                 })
@@ -3251,7 +3251,7 @@ impl SimSession {
             }
             AnyMessage::GroupProposalBallot(request) => {
                 self.events.push_back(ServerEvent::GroupProposalBallot {
-                    proposal_id: request.proposal_data.proposal_id,
+                    proposal_id: ProposalVoteId::from(request.proposal_data.proposal_id),
                     group_id: GroupKey::from(request.proposal_data.group_id),
                     vote_cast: trimmed_string(&request.proposal_data.vote_cast),
                 });

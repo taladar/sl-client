@@ -11,16 +11,16 @@ use crate::{
     ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, DeRezDestination, DetachOrder,
     DirFindFlags, Distance, EstateAccessDelta, EventId, ExperienceKey, ExperiencePermission,
     ExperienceUpdate, FriendKey, FriendRights, GestureActivation, GroupKey, GroupNoticeAttachment,
-    GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, InterestsUpdate,
-    InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandSearchType,
-    LandStatReportType, LindenAmount, MapItemType, Material, MaterialOverrideUpdate, MediaEntry,
-    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
-    ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField,
-    PickUpdate, Postcard, PrimShape, ProfileUpdate, RegionCoordinates, RegionHandle,
-    RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, Rotation, SaleType,
-    ScriptPermissions, TextureKey, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
-    Wearable,
+    GroupNoticeKey, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate,
+    InterestsUpdate, InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer,
+    InventoryType, LandSearchType, LandStatReportType, LindenAmount, MapItemType, Material,
+    MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
+    NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform,
+    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
+    ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape, ProfileUpdate,
+    ProposalVoteId, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem,
+    RezAttachment, Rotation, SaleType, ScriptPermissions, TextureKey, Throttle, Uuid, Vector,
+    ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -119,7 +119,7 @@ pub enum Command {
         /// The avatar that owns the pick.
         creator_id: AgentKey,
         /// The pick id.
-        pick_id: Uuid,
+        pick_id: PickKey,
     },
     /// Request the full details of one classified ad. The reply arrives as
     /// [`Event::ClassifiedInfo`](crate::Event::ClassifiedInfo).
@@ -138,11 +138,11 @@ pub enum Command {
     /// Create or edit one of the agent's picks (`PickInfoUpdate`).
     UpdatePick(PickUpdate),
     /// Delete one of the agent's picks (`PickDelete`).
-    DeletePick(Uuid),
+    DeletePick(PickKey),
     /// Delete any agent's pick (`PickGodDelete`, god-only).
     GodDeletePick {
         /// The pick id.
-        pick_id: Uuid,
+        pick_id: PickKey,
         /// The query id for the dataserver to resend the pick list under.
         query_id: Uuid,
     },
@@ -382,7 +382,7 @@ pub enum Command {
     RequestGroupNotices(GroupKey),
     /// Request a single group notice's full body (by notice id). Delivered as an
     /// [`Event::InstantMessageReceived`](crate::Event::InstantMessageReceived) with the group-notice dialog.
-    RequestGroupNotice(Uuid),
+    RequestGroupNotice(GroupNoticeKey),
     /// Create a new group. The result arrives as [`Event::CreateGroupResult`](crate::Event::CreateGroupResult).
     CreateGroup(CreateGroupParams),
     /// Join an open-enrollment group. The result arrives as
@@ -526,7 +526,7 @@ pub enum Command {
     GroupProposalBallot {
         /// The proposal's id (the `vote_id` from
         /// [`Event::GroupActiveProposals`](crate::Event::GroupActiveProposals)).
-        proposal_id: Uuid,
+        proposal_id: ProposalVoteId,
         /// The group the proposal belongs to.
         group_id: GroupKey,
         /// The vote to cast (e.g. `"yes"`/`"no"`/`"abstain"`).

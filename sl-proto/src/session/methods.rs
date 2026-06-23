@@ -47,19 +47,20 @@ use crate::types::{
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
     DirPeopleResult, DirPlaceResult, DisconnectReason, EstateAccessDelta, EstateCovenant, Event,
     EventInfo, FollowCamProperty, FollowCamPropertyValue, FriendRights, GestureActivation,
-    GroupNoticeAttachment, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog,
-    ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer, LandSearchType,
-    LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams,
-    MapItemType, Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType,
-    MovementMode, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NotecardRez, Object,
-    ObjectBuyItem, ObjectFlagSettings, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
-    PermissionField, PickUpdate, PlacesResult, Postcard, PrimShape, ProfileUpdate,
-    RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl,
-    ScriptControlAction, ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload,
-    TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus,
-    Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
+    GroupNoticeAttachment, GroupNoticeKey, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange,
+    ImDialog, ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer,
+    LandSearchType, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
+    LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MeanCollision,
+    MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NeighborInfo,
+    NewInventoryItem, NotecardRez, Object, ObjectBuyItem, ObjectFlagSettings,
+    ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
+    PickUpdate, PlacesResult, Postcard, PrimShape, ProfileUpdate, ProposalVoteId, RegionInfoUpdate,
+    Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl, ScriptControlAction,
+    ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload, TelehubInfo, TeleportFlags,
+    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect,
+    ViewerEffectData, ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -1780,7 +1781,7 @@ impl Session {
                         .data
                         .iter()
                         .map(|pick| AvatarPick {
-                            pick_id: pick.pick_id,
+                            pick_id: PickKey::from(pick.pick_id),
                             name: trimmed_string(&pick.pick_name),
                         })
                         .collect(),
@@ -3494,7 +3495,7 @@ impl Session {
     pub fn request_pick_info(
         &mut self,
         creator_id: AgentKey,
-        pick_id: Uuid,
+        pick_id: PickKey,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -3593,7 +3594,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn delete_pick(&mut self, pick_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn delete_pick(&mut self, pick_id: PickKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_pick_delete(pick_id, now)?;
         Ok(())
@@ -3608,7 +3609,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn god_delete_pick(
         &mut self,
-        pick_id: Uuid,
+        pick_id: PickKey,
         query_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
@@ -3848,7 +3849,11 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn request_group_notice(&mut self, notice_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn request_group_notice(
+        &mut self,
+        notice_id: GroupNoticeKey,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_notice_request(notice_id, now)?;
         Ok(())
@@ -4348,7 +4353,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn cast_group_proposal_ballot(
         &mut self,
-        proposal_id: Uuid,
+        proposal_id: ProposalVoteId,
         group_id: GroupKey,
         vote_cast: &str,
         now: Instant,
