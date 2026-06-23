@@ -1,7 +1,7 @@
 //! Region identity, limits, chat and combat settings.
 
 use super::{Maturity, ProductType};
-use sl_types::map::RegionName;
+use sl_types::map::{GridCoordinates, RegionName};
 use sl_types::money::LindenAmount;
 use sl_wire::RegionHandle;
 use uuid::Uuid;
@@ -23,12 +23,10 @@ pub struct RegionIdentity {
     /// response's `region_x` / `region_y` for the start region, and otherwise from
     /// `EnableSimulator` / object updates.
     pub region_handle: RegionHandle,
-    /// The region's grid X coordinate (region index = the handle's global X metres
-    /// divided by 256), derived from [`Self::region_handle`]; `0` when the handle
-    /// is unknown.
-    pub grid_x: u32,
-    /// The region's grid Y coordinate; see [`Self::grid_x`].
-    pub grid_y: u32,
+    /// The region's grid coordinates (region index pair = the handle's global
+    /// metres divided by 256), derived from [`Self::region_handle`]; `(0, 0)`
+    /// when the handle is unknown.
+    pub grid_coordinates: GridCoordinates,
     /// The raw 32-bit `RegionFlags` bitfield (decode with [`sl_wire::RegionFlags`]).
     pub region_flags: u32,
     /// The full 64-bit `RegionFlagsExtended` (from the `RegionInfo4` block); falls

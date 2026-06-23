@@ -5,8 +5,8 @@ use std::io::Write as _;
 
 use sl_client_tokio::{
     Client, Command, Event, LandArea, LindenAmount, LoginParams, LoginRequest, Maturity,
-    ParcelInfo, ProductType, RegionHandle, RegionIdentity, RegionLimits, StartLocation, Vector,
-    grid_to_handle, handle_to_grid,
+    ParcelInfo, ProductType, RegionCoordinates, RegionHandle, RegionIdentity, RegionLimits,
+    StartLocation, Vector, grid_to_handle, handle_to_grid,
 };
 use tokio::sync::mpsc;
 use tracing::{instrument, warn};
@@ -22,11 +22,7 @@ const TOTAL_SQUARES: usize = SQUARES_PER_SIDE * SQUARES_PER_SIDE;
 /// The edge length of one parcel grid square, in metres.
 const SQUARE_METRES: u16 = 4;
 /// The region-local position teleported to on arrival (region centre).
-const ARRIVAL_POSITION: Vector = Vector {
-    x: 128.0,
-    y: 128.0,
-    z: 30.0,
-};
+const ARRIVAL_POSITION: RegionCoordinates = RegionCoordinates::new(128.0, 128.0, 30.0);
 /// The look-at direction used on arrival.
 const ARRIVAL_LOOK_AT: Vector = Vector {
     x: 1.0,
@@ -562,7 +558,11 @@ impl Survey {
                 self.on_parcel(&parcel, commands).await;
             }
             Event::NeighborDiscovered(neighbor) => {
-                self.queue_region(neighbor.region_handle.0, neighbor.grid_x, neighbor.grid_y);
+                self.queue_region(
+                    neighbor.region_handle.0,
+                    u32::from(neighbor.grid_coordinates.x()),
+                    u32::from(neighbor.grid_coordinates.y()),
+                );
                 if let Some(current) = self.current.as_mut()
                     && !current.neighbors.contains(&neighbor.region_handle.0)
                 {
@@ -578,7 +578,11 @@ impl Survey {
                         .map(ToString::to_string)
                         .unwrap_or_default(),
                 );
-                self.queue_region(region.region_handle.0, region.grid_x, region.grid_y);
+                self.queue_region(
+                    region.region_handle.0,
+                    u32::from(region.grid_coordinates.x()),
+                    u32::from(region.grid_coordinates.y()),
+                );
             }
             Event::TeleportFailed { reason, .. } => {
                 // Ignore stray/duplicate failures (a teleport that times out also

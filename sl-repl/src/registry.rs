@@ -32,6 +32,7 @@ use sl_proto::InventoryKey;
 use sl_proto::ObjectKey;
 use sl_proto::OwnerKey;
 use sl_proto::ParcelKey;
+use sl_proto::RegionCoordinates;
 use sl_proto::TextureKey;
 use sl_proto::{
     AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentMode, AttachmentPoint,
@@ -2286,7 +2287,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::Teleport {
                     region_handle: RegionHandle(args.req_parse(ctx, "region_handle", 0, "u64")?),
-                    position: args.req_vector(ctx, "position", 1)?,
+                    position: RegionCoordinates::from(args.req_vector(ctx, "position", 1)?),
                     look_at: args.opt_vector(ctx, "look_at", 2)?.unwrap_or(Vector {
                         x: 1.0,
                         y: 0.0,

@@ -6,7 +6,7 @@ use super::Maturity;
 use sl_types::key::{ObjectKey, TextureKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
-use sl_types::map::RegionName;
+use sl_types::map::{GridCoordinates, RegionName};
 use sl_wire::RegionHandle;
 use uuid::Uuid;
 
@@ -178,10 +178,8 @@ impl Default for RegionInfoUpdate {
 pub struct MapRegionInfo {
     /// The region name, or `None` when the grid sent an empty (unknown) name.
     pub name: Option<RegionName>,
-    /// The region's grid x coordinate (region index).
-    pub grid_x: u32,
-    /// The region's grid y coordinate (region index).
-    pub grid_y: u32,
+    /// The region's grid coordinates (region index pair).
+    pub grid_coordinates: GridCoordinates,
     /// The region handle (derived from the grid coordinates).
     pub region_handle: RegionHandle,
     /// The maturity rating, from the map's access byte.
@@ -369,16 +367,17 @@ pub struct NeighborInfo {
     pub region_handle: RegionHandle,
     /// The neighbour's UDP address.
     pub sim: SocketAddr,
-    /// The neighbour's grid x coordinate (region index, i.e. global metres / 256).
-    pub grid_x: u32,
-    /// The neighbour's grid y coordinate (region index, i.e. global metres / 256).
-    pub grid_y: u32,
+    /// The neighbour's grid coordinates (region index pair, i.e. global metres
+    /// / 256), derived from [`Self::region_handle`].
+    pub grid_coordinates: GridCoordinates,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::MapRequestFlags;
+    use super::{MapRequestFlags, Vector};
     use pretty_assertions::assert_eq;
+    use sl_types::map::{GridCoordinates, RegionCoordinates};
+    use sl_wire::RegionHandle;
 
     #[test]
     fn map_request_flag_constants_match_the_viewer() {
@@ -409,5 +408,34 @@ mod tests {
 
         // An all-clear value (what `MapBlockRequest` carries) contains nothing.
         assert!(!MapRequestFlags(0).contains(MapRequestFlags::LAYER));
+    }
+
+    #[test]
+    fn map_region_grid_coordinates_match_their_handle() {
+        // The typed grid coordinates and the region handle are mutually
+        // consistent: the handle is the typed inverse of the coordinates, and
+        // decoding the handle's grid index reproduces the original `u16` pair.
+        let grid_coordinates = GridCoordinates::new(1000, 1001);
+        let region_handle = RegionHandle::from(grid_coordinates);
+        assert_eq!(grid_coordinates.x(), 1000);
+        assert_eq!(grid_coordinates.y(), 1001);
+        assert_eq!(
+            GridCoordinates::try_from(region_handle),
+            Ok(grid_coordinates)
+        );
+    }
+
+    #[test]
+    fn region_coordinates_round_trip_through_a_vector() {
+        // The teleport codec boundary unwraps the typed region-local position
+        // into the plain wire `Vector` and back; every component survives
+        // bit-identically (the same f32 values, in the same order).
+        let position = RegionCoordinates::new(128.5, 64.25, 30.0);
+        let wire = Vector {
+            x: position.x(),
+            y: position.y(),
+            z: position.z(),
+        };
+        assert_eq!(RegionCoordinates::from(wire), position);
     }
 }

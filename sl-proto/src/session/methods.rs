@@ -7,8 +7,8 @@ use super::conversions::{
     chatterbox_invitation_from_llsd, classified_info, created_category_from_llsd,
     crossed_region_from_caps_llsd, economy_data, enable_simulator_from_caps_llsd,
     environment_from_llsd, establish_agent_communication_from_llsd, estate_access_from_params,
-    estate_info_from_params, friend, group_account_details, group_account_summary,
-    group_account_transactions, group_active_proposal_item, group_member,
+    estate_info_from_params, friend, grid_coordinates_from_handle, group_account_details,
+    group_account_summary, group_account_transactions, group_active_proposal_item, group_member,
     group_members_from_caps_llsd, group_membership, group_memberships_from_caps_llsd, group_names,
     group_notice, group_profile, group_role, group_title, group_vote_history_item, index_into,
     instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
@@ -67,6 +67,7 @@ use sl_types::key::{
     ParcelKey, TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
+use sl_types::map::RegionCoordinates;
 use sl_types::money::LindenAmount;
 use sl_wire::{
     AbuseReport, AnyMessage, CircuitCode, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd,
@@ -280,13 +281,11 @@ impl Session {
                     if let Some(circuit_id) = self.circuit_id_for(sim) {
                         self.regions.insert(circuit_id, handle);
                     }
-                    let (grid_x, grid_y) = handle.grid_coordinates();
                     self.events
                         .push_back(Event::NeighborDiscovered(NeighborInfo {
                             region_handle: handle,
                             sim,
-                            grid_x,
-                            grid_y,
+                            grid_coordinates: grid_coordinates_from_handle(handle),
                         }));
                 } else {
                     self.caps_decode_failed(message);
@@ -2730,7 +2729,7 @@ impl Session {
                             "SimName",
                             &trimmed_string(&data.sim_name),
                         )?,
-                        position: (
+                        position: RegionCoordinates::new(
                             data.sim_position.x,
                             data.sim_position.y,
                             data.sim_position.z,
@@ -7769,7 +7768,7 @@ impl Session {
     pub fn teleport_to(
         &mut self,
         region_handle: RegionHandle,
-        position: Vector,
+        position: RegionCoordinates,
         look_at: Vector,
         now: Instant,
     ) -> Result<(), Error> {
@@ -7777,6 +7776,13 @@ impl Session {
             return Err(Error::NotActive);
         }
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        // The wire `TeleportLocationRequest` carries a plain vector; unwrap the
+        // typed region-local coordinates at the codec boundary.
+        let position = Vector {
+            x: position.x(),
+            y: position.y(),
+            z: position.z(),
+        };
         circuit.send_teleport_location_request(region_handle.0, position, look_at, now)?;
         circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
         self.teleport_target = Some(region_handle);

@@ -1061,10 +1061,40 @@ attachment::*}`. Adopt these more, selectively by semantic role:
   `{:?}`. +3 boundary unit tests (`region_name.rs`: empty→`None` round-trip,
   valid round-trip, non-empty invalid rejected); lifecycle + `sim_session` +
   voice/abuse round-trip suites updated. NO `sl-types` touched.
-- [ ] `map` geometry — pairs with `RegionHandle`: decode handles to
-  `GridCoordinates`/`RegionCoordinates`; `map::Location` for map-block/teleport
-  coordinates; `map::Distance` for `draw_distance`/`far` metres
-  (`session.rs:692,745`, `sim_session.rs:221`); `map::ZoomLevel` for map zoom.
+- [x] `map` geometry — pairs with `RegionHandle`. Consume-only (no `sl-types`
+      change). **`GridCoordinates`:** the redundant `grid_x: u32` /
+      `grid_y: u32` pair on `RegionIdentity`, `NeighborInfo`, and
+      `MapRegionInfo` collapses to one typed `grid_coordinates: GridCoordinates`
+      field. For the two handle-derived carriers a new private
+      `grid_coordinates_from_handle` decodes the handle via the Phase-4
+      `TryFrom<RegionHandle>` (falling back to the `(0,0)` unknown sentinel);
+      for `MapRegionInfo` the wire `u16` pair is primary and the region handle
+      is the typed `RegionHandle::from(grid_coordinates)` inverse. Codec wraps
+      at the boundary (`map_region_info` decode /
+      `map_region_info_to_data_block` encode use `.x()`/`.y()` directly — no
+      more `u16::try_from` narrowing) so the `MapBlockReply` `Data` block is
+      byte-identical. **`RegionCoordinates`:** the region-local teleport
+      *position* (`Command::Teleport.position`, `Session::teleport_to`, and
+      `ScriptTeleportRequest.position` — the look-at stays a direction
+      `Vector`/tuple) is now `RegionCoordinates`; `teleport_to` unwraps it to
+      the wire `Vector` at the `TeleportLocationRequest` boundary, the
+      `ScriptTeleportRequest` decode wraps the wire vector, so wire bytes are
+      unchanged. Both types re-exported through `sl-proto`/`sl-client-tokio`/
+      `sl-client-bevy` (parity); REPL `teleport` wraps the parsed position
+      (`RegionCoordinates::from`), `sl-survey` typed its `ARRIVAL_POSITION`
+      const + `grid_coordinates.x()`/`.y()` reads (widened to its `u32` bounds).
+      +2 focused unit tests (grid/handle consistency,
+      `RegionCoordinates`⇄`Vector` round-trip); lifecycle + `sim_session` suites
+      updated; `book/src/content/region.md` updated.
+      **`map::Distance` (`draw_distance`/`far`): DEFERRED** (user decision) —
+      left raw `f32`; `sl_types::map::Distance` has no public constructor (only
+      a `chumsky` parser), so consuming it needs an `sl-types` addition, folded
+      into the later batched `sl-types` work.
+      **`map::Location` and `map::ZoomLevel`: NOT ADOPTED** (user decision, see
+      "considered, not adopted") — no matching LLUDP wire field (no map-zoom
+      field exists; `Location`'s integer-coord + mandatory-name shape matches
+      neither the float region-local teleport positions nor the grid-coord map
+      blocks).
 - [ ] `search::SearchCategory` — for directory category *codes* (note
       `directory.rs` already uses the local `ParcelCategory`;
       `EventInfo.category` is free text and stays `String`).
@@ -1076,5 +1106,11 @@ attachment::*}`. Adopt these more, selectively by semantic role:
   types → a new `ChatTypeNotAVolume` error). Round-trip test: `ChatVolume →
   ChatType → ChatVolume` is identity for all four volume variants.
 - [ ] Considered, not adopted: `chat::ChatVolume` (richer `ChatType` kept — see
-  interop above), `pathfinding::PathfindingType`, `viewer_uri::ViewerUri`,
-  `radar::Area` (no matching protocol field).
+      interop above), `pathfinding::PathfindingType`, `viewer_uri::ViewerUri`,
+      `radar::Area`, `map::Location` (integer-coord + mandatory-name shape
+      matches no wire field — teleport positions are float region-local coords,
+      map blocks carry grid coords), `map::ZoomLevel` (no map-zoom field in the
+      LLUDP protocol) (no matching protocol field). `map::Distance`
+      (`draw_distance`/`far`) is deferred, not rejected — it needs an `sl-types`
+      constructor (see the `map` geometry item) and is folded into the later
+      batched `sl-types` work.
