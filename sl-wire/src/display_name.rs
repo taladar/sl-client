@@ -22,6 +22,7 @@
 
 use std::collections::HashMap;
 
+use sl_types::key::AgentKey;
 use uuid::Uuid;
 
 use crate::llsd::Llsd;
@@ -32,10 +33,10 @@ use crate::llsd::Llsd;
 /// Unresolved ids come back in the reply's `bad_ids` array instead; those decode
 /// into records with only [`id`](Self::id) set and [`missing`](Self::missing)
 /// `true`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DisplayName {
     /// The agent id that was looked up (`id`).
-    pub id: Uuid,
+    pub id: AgentKey,
     /// The agent's username / SLID (`username`), e.g. `"james.linden"` or the
     /// single-word `"bobsmith123"`. This is the immutable login identity in
     /// lowercase-dotted form.
@@ -61,6 +62,25 @@ pub struct DisplayName {
     /// `true` when this is a placeholder for a `bad_ids` entry — the grid could
     /// not resolve the id.
     pub missing: bool,
+}
+
+impl Default for DisplayName {
+    /// A placeholder record with a nil [`id`](Self::id) — the base for a
+    /// `bad_ids` entry, whose `id` is then overwritten. [`AgentKey`] has no
+    /// `Default`, so this is hand-written rather than derived.
+    fn default() -> Self {
+        Self {
+            id: AgentKey::from(Uuid::nil()),
+            username: String::new(),
+            display_name: String::new(),
+            legacy_first_name: String::new(),
+            legacy_last_name: String::new(),
+            is_display_name_default: false,
+            display_name_expires: String::new(),
+            display_name_next_update: String::new(),
+            missing: false,
+        }
+    }
 }
 
 impl DisplayName {
@@ -90,10 +110,11 @@ impl DisplayName {
                 .to_owned()
         };
         Self {
-            id: map
-                .get("id")
-                .and_then(Llsd::as_uuid)
-                .unwrap_or_else(Uuid::nil),
+            id: AgentKey::from(
+                map.get("id")
+                    .and_then(Llsd::as_uuid)
+                    .unwrap_or_else(Uuid::nil),
+            ),
             username: string("username"),
             display_name: string("display_name"),
             legacy_first_name: string("legacy_first_name"),
@@ -116,7 +137,7 @@ impl DisplayName {
     #[must_use]
     pub fn to_llsd(&self) -> Llsd {
         Llsd::Map(HashMap::from([
-            ("id".to_owned(), Llsd::Uuid(self.id)),
+            ("id".to_owned(), Llsd::Uuid(self.id.uuid())),
             ("username".to_owned(), Llsd::String(self.username.clone())),
             (
                 "display_name".to_owned(),
@@ -182,7 +203,7 @@ pub fn parse_display_names(body: &Llsd) -> Vec<DisplayName> {
     }
     if let Some(bad) = body.get("bad_ids").and_then(Llsd::as_array) {
         names.extend(bad.iter().filter_map(Llsd::as_uuid).map(|id| DisplayName {
-            id,
+            id: AgentKey::from(id),
             missing: true,
             ..DisplayName::default()
         }));
@@ -227,7 +248,7 @@ pub fn build_display_names_response(names: &[DisplayName]) -> String {
     let mut bad = Vec::new();
     for name in names {
         if name.missing {
-            bad.push(Llsd::Uuid(name.id));
+            bad.push(Llsd::Uuid(name.id.uuid()));
         } else {
             agents.push(name.to_llsd());
         }
@@ -243,6 +264,7 @@ pub fn build_display_names_response(names: &[DisplayName]) -> String {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+    use sl_types::key::AgentKey;
     use uuid::Uuid;
 
     use super::{
@@ -289,14 +311,17 @@ mod tests {
         let [first, second] = names.as_slice() else {
             return Err(format!("expected 2 names, got {}", names.len()));
         };
-        assert_eq!(first.id, id);
+        assert_eq!(first.id.uuid(), id);
         assert_eq!(first.username, "james.linden");
         assert_eq!(first.display_name, "James the Great");
         assert_eq!(first.legacy_name(), "James Linden");
         assert!(!first.is_display_name_default);
         assert_eq!(first.display_name_expires, "2010-04-16T21:32:26Z");
         assert!(!first.missing);
-        assert_eq!(second.id, uuid("33333333-3333-3333-3333-333333333333")?);
+        assert_eq!(
+            second.id.uuid(),
+            uuid("33333333-3333-3333-3333-333333333333")?
+        );
         assert!(second.missing);
         Ok(())
     }
@@ -311,7 +336,7 @@ mod tests {
         assert_eq!(parse_display_names_query(&suffix), vec![id, bad]);
 
         let name = DisplayName {
-            id,
+            id: AgentKey::from(id),
             username: "bobsmith123".to_owned(),
             display_name: "bobsmith123".to_owned(),
             legacy_first_name: "Bobsmith123".to_owned(),
@@ -322,7 +347,7 @@ mod tests {
             missing: false,
         };
         let missing = DisplayName {
-            id: bad,
+            id: AgentKey::from(bad),
             missing: true,
             ..DisplayName::default()
         };
@@ -336,7 +361,7 @@ mod tests {
         assert_eq!(first.legacy_name(), "Bobsmith123");
         assert!(first.is_display_name_default);
         assert_eq!(first, &name);
-        assert_eq!(second.id, bad);
+        assert_eq!(second.id.uuid(), bad);
         assert!(second.missing);
         Ok(())
     }

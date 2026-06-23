@@ -288,7 +288,7 @@ pub(crate) fn avatar_names(reply: &UUIDNameReply) -> Vec<AvatarName> {
         .uuid_name_block
         .iter()
         .map(|block| AvatarName {
-            id: block.id,
+            id: AgentKey::from(block.id),
             first_name: trimmed_string(&block.first_name),
             last_name: trimmed_string(&block.last_name),
         })
@@ -301,7 +301,7 @@ pub(crate) fn group_names(reply: &UUIDGroupNameReply) -> Vec<GroupName> {
         .uuid_name_block
         .iter()
         .map(|block| GroupName {
-            id: block.id,
+            id: GroupKey::from(block.id),
             name: trimmed_string(&block.group_name),
         })
         .collect()
