@@ -25,12 +25,12 @@ mod test {
         ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand,
         ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField,
         Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape, ProductType,
-        ProfileUpdate, ReflectionProbeFlags, RegionHandle, RegionInfoUpdate, Reliability,
-        RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ScriptControlAction,
-        ScriptPermissions, SculptOrMeshKey, Session, SkySettings, SoundFlags, TeleportFlags,
-        TerrainLayerType, TextureKey, Throttle, TransferStatus, Transmit, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
-        group_powers, pcode,
+        ProfileUpdate, ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate,
+        Reliability, RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId,
+        ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session, SkySettings, SoundFlags,
+        TeleportFlags, TerrainLayerType, TextureKey, Throttle, TransferStatus, Transmit,
+        ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
+        avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -1128,7 +1128,7 @@ mod test {
         let handle = 0x0003_E900_0003_E800;
         session.teleport_to(
             RegionHandle(handle),
-            vec3(128.0, 128.0, 30.0),
+            region_coords(128.0, 128.0, 30.0),
             vec3(1.0, 0.0, 0.0),
             now,
         )?;
@@ -6068,6 +6068,11 @@ mod test {
         Vector { x, y, z }
     }
 
+    /// A short region-local coordinate constructor for teleport test fixtures.
+    fn region_coords(x: f32, y: f32, z: f32) -> RegionCoordinates {
+        RegionCoordinates::new(x, y, z)
+    }
+
     /// Drives a session to the awaiting-handshake state (login answered, but no
     /// `RegionHandshake` received yet), draining the bootstrap traffic/events.
     fn awaiting_handshake(now: Instant) -> Result<Session, TestError> {
@@ -6359,8 +6364,8 @@ mod test {
             identity.region_handle,
             RegionHandle(sl_proto::global_to_handle(256_000, 256_512))
         );
-        assert_eq!(identity.grid_x, 1000);
-        assert_eq!(identity.grid_y, 1002);
+        assert_eq!(identity.grid_coordinates.x(), 1000);
+        assert_eq!(identity.grid_coordinates.y(), 1002);
         Ok(())
     }
 
@@ -7083,8 +7088,8 @@ mod test {
             })
             .ok_or("expected a NeighborDiscovered event")?;
         assert_eq!(neighbor.region_handle, RegionHandle(0x0003_E800_0003_E900));
-        assert_eq!(neighbor.grid_x, 1000);
-        assert_eq!(neighbor.grid_y, 1001);
+        assert_eq!(neighbor.grid_coordinates.x(), 1000);
+        assert_eq!(neighbor.grid_coordinates.y(), 1001);
         assert_eq!(neighbor.sim.port(), 13000);
         assert_eq!(neighbor.sim.ip(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
         Ok(())
@@ -8518,7 +8523,7 @@ mod test {
         let handle = 0x0003_E800_0003_E900;
         session.teleport_to(
             RegionHandle(handle),
-            vec3(128.0, 128.0, 30.0),
+            region_coords(128.0, 128.0, 30.0),
             vec3(1.0, 0.0, 0.0),
             now,
         )?;
@@ -8574,7 +8579,7 @@ mod test {
         let handle = 0x0003_E800_0003_E900;
         session.teleport_to(
             RegionHandle(handle),
-            vec3(128.0, 128.0, 30.0),
+            region_coords(128.0, 128.0, 30.0),
             vec3(1.0, 0.0, 0.0),
             now,
         )?;
@@ -8613,7 +8618,7 @@ mod test {
         // Back in the active state, a second teleport is accepted.
         session.teleport_to(
             RegionHandle(handle),
-            vec3(128.0, 128.0, 30.0),
+            region_coords(128.0, 128.0, 30.0),
             vec3(1.0, 0.0, 0.0),
             now,
         )?;
@@ -8629,7 +8634,7 @@ mod test {
 
         session.teleport_to(
             RegionHandle(0x0003_E800_0003_E900),
-            vec3(128.0, 128.0, 30.0),
+            region_coords(128.0, 128.0, 30.0),
             vec3(1.0, 0.0, 0.0),
             now,
         )?;
@@ -8825,8 +8830,8 @@ mod test {
         assert_eq!(regions.len(), 1, "sentinel block should be filtered");
         let region = regions.first().ok_or("one region")?;
         assert_eq!(region.name, region_name("TestRegion"));
-        assert_eq!(region.grid_x, 1000);
-        assert_eq!(region.grid_y, 1001);
+        assert_eq!(region.grid_coordinates.x(), 1000);
+        assert_eq!(region.grid_coordinates.y(), 1001);
         assert_eq!(region.maturity, Maturity::Mature);
         assert_eq!(region.water_height, 20);
         assert_eq!(region.agents, 3);
@@ -8988,7 +8993,7 @@ mod test {
         let handle = 0x0003_E800_0003_E900;
         session.teleport_to(
             RegionHandle(handle),
-            vec3(128.0, 128.0, 30.0),
+            region_coords(128.0, 128.0, 30.0),
             vec3(1.0, 0.0, 0.0),
             now,
         )?;
@@ -9073,7 +9078,7 @@ mod test {
         let handle = 0x0003_E800_0003_E900;
         session.teleport_to(
             RegionHandle(handle),
-            vec3(128.0, 128.0, 30.0),
+            region_coords(128.0, 128.0, 30.0),
             vec3(1.0, 0.0, 0.0),
             now,
         )?;

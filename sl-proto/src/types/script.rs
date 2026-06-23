@@ -2,7 +2,7 @@
 
 use sl_types::chat::ChatChannel;
 use sl_types::key::{ExperienceKey, InventoryKey, ObjectKey, OwnerKey, TextureKey};
-use sl_types::map::RegionName;
+use sl_types::map::{RegionCoordinates, RegionName};
 use sl_wire::ControlFlags;
 use uuid::Uuid;
 
@@ -136,7 +136,7 @@ pub struct ScriptTeleportRequest {
     /// carried an empty (unknown) name.
     pub region_name: Option<RegionName>,
     /// The destination position within the region, in metres.
-    pub position: (f32, f32, f32),
+    pub position: RegionCoordinates,
     /// The look-at direction on arrival.
     pub look_at: (f32, f32, f32),
     /// The request's option flags (`Options.Flags`). Reserved by the protocol;

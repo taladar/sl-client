@@ -16,7 +16,7 @@ use crate::types::{
     NeighborInfo, Object, ObjectProperties, ParcelCategory, ParcelInfo, ParcelRequestResult,
     ParcelStatus, PickInfo, PlayingAnimation, PrimShapeParams, ProductType, RegionChatSettings,
     RegionCombatSettings, RegionIdentity, RegionLimits, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, SkySettings, WaterSettings, avatar_texture, handle_to_grid,
+    ScriptPermissions, SkySettings, WaterSettings, avatar_texture,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
@@ -30,6 +30,7 @@ use sl_types::key::ObjectKey;
 use sl_types::key::ParcelKey;
 use sl_types::key::TextureKey;
 use sl_types::lsl::{Rotation, Vector};
+use sl_types::map::GridCoordinates;
 use sl_wire::RegionHandle;
 use sl_wire::messages::{
     AgentDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
@@ -62,6 +63,14 @@ pub(crate) fn trimmed_string(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes)
         .trim_end_matches('\0')
         .to_owned()
+}
+
+/// Decodes a region handle's grid coordinates (region index pair) into the typed
+/// [`GridCoordinates`]. A real grid index always fits the `u16` the type holds;
+/// the only way [`GridCoordinates::try_from`] can fail is a malformed handle, in
+/// which case we fall back to the `(0, 0)` "unknown" sentinel.
+pub(crate) fn grid_coordinates_from_handle(handle: RegionHandle) -> GridCoordinates {
+    GridCoordinates::try_from(handle).unwrap_or_else(|_| GridCoordinates::new(0, 0))
 }
 
 /// Parses a UUID from a wire string field that carries a UUID in text form
@@ -195,13 +204,11 @@ pub(crate) fn region_identity(
         |i4| i4.region_flags_extended,
     );
     let region_protocols = info4.map_or(0, |i4| i4.region_protocols);
-    let (grid_x, grid_y) = region_handle.grid_coordinates();
     Ok(RegionIdentity {
         sim_name: sl_wire::region_name_from_wire("SimName", &trimmed_string(&info.sim_name))?,
         region_id: handshake.region_info2.region_id,
         region_handle,
-        grid_x,
-        grid_y,
+        grid_coordinates: grid_coordinates_from_handle(region_handle),
         region_flags: info.region_flags,
         region_flags_extended,
         region_protocols,
@@ -1385,12 +1392,11 @@ pub(crate) fn neighbor_info(info: &EnableSimulatorSimulatorInfoBlock) -> Neighbo
     // order here. (IPADDR is raw octets in order and needs no swap.)
     let port = info.port.swap_bytes();
     let sim = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(info.ip)), port);
-    let (grid_x, grid_y) = handle_to_grid(info.handle);
+    let region_handle = RegionHandle(info.handle);
     NeighborInfo {
-        region_handle: RegionHandle(info.handle),
+        region_handle,
         sim,
-        grid_x,
-        grid_y,
+        grid_coordinates: grid_coordinates_from_handle(region_handle),
     }
 }
 
@@ -1415,13 +1421,13 @@ pub(crate) fn map_region_info(
     let Some(name) = sl_wire::region_name_from_wire("Name", &trimmed_string(&data.name))? else {
         return Ok(None);
     };
-    let grid_x = u32::from(data.x);
-    let grid_y = u32::from(data.y);
+    // The wire carries the grid index pair as `u16`; the region handle is the
+    // typed inverse of those coordinates.
+    let grid_coordinates = GridCoordinates::new(data.x, data.y);
     Ok(Some(MapRegionInfo {
         name: Some(name),
-        grid_x,
-        grid_y,
-        region_handle: RegionHandle::from_grid(grid_x, grid_y),
+        grid_coordinates,
+        region_handle: RegionHandle::from(grid_coordinates),
         maturity: Maturity::from_sim_access(data.access),
         region_flags: data.region_flags,
         size_x: size
@@ -1452,15 +1458,14 @@ pub(crate) fn map_item(data: &sl_wire::messages::MapItemReplyDataBlock) -> MapIt
 }
 
 /// Encodes a [`MapRegionInfo`] into a `MapBlockReply` `Data` block — the
-/// simulator-side inverse of [`map_region_info`]. The grid coordinates are
-/// truncated to the `u16` the wire carries (region indices are small), and the
-/// name is NUL-terminated as a map server sends it. The region size is *not*
-/// carried here; it travels in the parallel `Size` block (see
-/// [`build_map_block_reply`]).
+/// simulator-side inverse of [`map_region_info`]. The grid coordinates are the
+/// `u16` the wire carries, and the name is NUL-terminated as a map server sends
+/// it. The region size is *not* carried here; it travels in the parallel `Size`
+/// block (see [`build_map_block_reply`]).
 pub(crate) fn map_region_info_to_data_block(info: &MapRegionInfo) -> MapBlockReplyDataBlock {
     MapBlockReplyDataBlock {
-        x: u16::try_from(info.grid_x).unwrap_or(u16::MAX),
-        y: u16::try_from(info.grid_y).unwrap_or(u16::MAX),
+        x: info.grid_coordinates.x(),
+        y: info.grid_coordinates.y(),
         name: with_nul(&sl_wire::region_name_to_wire(info.name.as_ref())),
         access: info.maturity.to_sim_access(),
         region_flags: info.region_flags,

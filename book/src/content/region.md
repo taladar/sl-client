@@ -24,8 +24,9 @@ identity as `Event::RegionInfoHandshake(RegionIdentity)`.
 `RegionIdentity` carries:
 
 - **name** and **region id** (the region's globally-unique `RegionID`);
-- **grid coordinates** — `grid_x` / `grid_y` (the region's index on the world
-  map) and the full 64-bit `region_handle` they pack into. The handshake message
+- **grid coordinates** — `grid_coordinates` (the region's typed
+  `GridCoordinates` index pair on the world map) and the full 64-bit
+  `region_handle` they pack into. The handshake message
   does not itself carry the handle, so it is taken from the handle the session
   already knows for the simulator (seeded from the login response's `region_x` /
   `region_y` for the start region, and otherwise learned from `EnableSimulator`

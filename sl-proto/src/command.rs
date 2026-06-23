@@ -17,9 +17,9 @@ use crate::{
     MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
     ObjectKey, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey,
     ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, Postcard, PrimShape,
-    ProfileUpdate, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment,
-    Rotation, SaleType, ScriptPermissions, TextureKey, Throttle, Uuid, Vector, ViewerEffect,
-    VoiceProvisionRequest, Wearable,
+    ProfileUpdate, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem,
+    RezAttachment, Rotation, SaleType, ScriptPermissions, TextureKey, Throttle, Uuid, Vector,
+    ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -592,7 +592,7 @@ pub enum Command {
         /// The destination region handle.
         region_handle: RegionHandle,
         /// The destination position within the region.
-        position: Vector,
+        position: RegionCoordinates,
         /// The look-at direction on arrival.
         look_at: Vector,
     },
