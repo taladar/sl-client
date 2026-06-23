@@ -23,6 +23,7 @@ use sl_client_tokio::{
     AgentKey, ClassifiedUpdate, Client, Command, DisconnectReason, Error, Event, LoginParams,
     LoginRequest, PickUpdate, ProfileUpdate, Throttle, Uuid,
 };
+use sl_proto::ClassifiedKey;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tracing::{info, warn};
@@ -129,7 +130,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     // The same create → read-detail → delete cycle for a
                     // classified ad.
-                    let classified_id = Uuid::from_u128(0x5C11_0029_0000_0000_0000_0000_0000_0002);
+                    let classified_id = ClassifiedKey::from(Uuid::from_u128(
+                        0x5C11_0029_0000_0000_0000_0000_0000_0002,
+                    ));
                     command_tx
                         .send(Command::UpdateClassified(ClassifiedUpdate {
                             classified_id,

@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
-use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey};
+use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey, ParcelKey};
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
     AgentAlertMessage, AgentAlertMessageAgentDataBlock, AgentAlertMessageAlertDataBlock,
@@ -96,7 +96,7 @@ use crate::session::{
     build_map_block_reply, build_map_item_reply, build_map_layer_reply, instant_message,
     region_handshake_message,
 };
-use crate::types::directory::category_from_wire;
+use crate::types::directory::{EventId, category_from_wire};
 use crate::types::{
     AlertInfo, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatType,
     CoarseLocation, DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
@@ -479,19 +479,19 @@ pub enum ServerEvent {
     /// the simulator answers with [`SimSession::send_event_info_reply`].
     EventInfoRequest {
         /// The event to look up.
-        event_id: u32,
+        event_id: EventId,
     },
     /// The client subscribed to a reminder for an in-world event
     /// (`EventNotificationAddRequest`). There is no direct reply.
     EventNotificationAddRequest {
         /// The event to be reminded about.
-        event_id: u32,
+        event_id: EventId,
     },
     /// The client cancelled an event reminder (`EventNotificationRemoveRequest`).
     /// There is no direct reply.
     EventNotificationRemoveRequest {
         /// The event whose reminder to cancel.
-        event_id: u32,
+        event_id: EventId,
     },
     /// The client wants to buy in-world objects (`ObjectBuy`).
     BuyObject {
@@ -634,7 +634,7 @@ pub enum ServerEvent {
     /// [`SimSession::send_parcel_info_reply`].
     RequestParcelInfo {
         /// The parcel's grid-wide id.
-        parcel_id: Uuid,
+        parcel_id: ParcelKey,
     },
     /// The client asked whether a task's script is running (`GetScriptRunning`);
     /// the simulator answers with [`SimSession::send_script_running_reply`].
@@ -1710,7 +1710,7 @@ impl SimSession {
                 .map(|result| DirEventsReplyQueryRepliesBlock {
                     owner_id: result.owner_id,
                     name: with_nul(&result.name),
-                    event_id: result.event_id,
+                    event_id: result.event_id.get(),
                     date: with_nul(&result.date),
                     unix_time: result.unix_time,
                     event_flags: result.event_flags,
@@ -1749,7 +1749,7 @@ impl SimSession {
             query_replies: results
                 .iter()
                 .map(|result| DirClassifiedReplyQueryRepliesBlock {
-                    classified_id: result.classified_id,
+                    classified_id: result.classified_id.uuid(),
                     name: with_nul(&result.name),
                     classified_flags: result.classified_flags,
                     creation_date: result.creation_date,
@@ -1789,7 +1789,7 @@ impl SimSession {
             query_replies: results
                 .iter()
                 .map(|result| DirPlacesReplyQueryRepliesBlock {
-                    parcel_id: result.parcel_id,
+                    parcel_id: result.parcel_id.uuid(),
                     name: with_nul(&result.name),
                     for_sale: result.for_sale,
                     auction: result.auction,
@@ -1826,7 +1826,7 @@ impl SimSession {
             query_replies: results
                 .iter()
                 .map(|result| DirLandReplyQueryRepliesBlock {
-                    parcel_id: result.parcel_id,
+                    parcel_id: result.parcel_id.uuid(),
                     name: with_nul(&result.name),
                     auction: result.auction,
                     for_sale: result.for_sale,
@@ -1939,7 +1939,7 @@ impl SimSession {
                 agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
             },
             event_data: EventInfoReplyEventDataBlock {
-                event_id: info.event_id,
+                event_id: info.event_id.get(),
                 creator: with_nul(&info.creator.to_string()),
                 name: with_nul(&info.name),
                 category: with_nul(&info.category),
@@ -2348,7 +2348,7 @@ impl SimSession {
                 agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
             },
             data: ParcelInfoReplyDataBlock {
-                parcel_id: details.parcel_id,
+                parcel_id: details.parcel_id.uuid(),
                 owner_id: details.owner_id,
                 name: with_nul(&details.name),
                 desc: with_nul(&details.description),
@@ -2920,19 +2920,19 @@ impl SimSession {
             }
             AnyMessage::EventInfoRequest(request) => {
                 self.events.push_back(ServerEvent::EventInfoRequest {
-                    event_id: request.event_data.event_id,
+                    event_id: EventId::new(request.event_data.event_id),
                 });
             }
             AnyMessage::EventNotificationAddRequest(request) => {
                 self.events
                     .push_back(ServerEvent::EventNotificationAddRequest {
-                        event_id: request.event_data.event_id,
+                        event_id: EventId::new(request.event_data.event_id),
                     });
             }
             AnyMessage::EventNotificationRemoveRequest(request) => {
                 self.events
                     .push_back(ServerEvent::EventNotificationRemoveRequest {
-                        event_id: request.event_data.event_id,
+                        event_id: EventId::new(request.event_data.event_id),
                     });
             }
             AnyMessage::ObjectBuy(buy) => {
@@ -3111,7 +3111,7 @@ impl SimSession {
             }
             AnyMessage::ParcelInfoRequest(request) => {
                 self.events.push_back(ServerEvent::RequestParcelInfo {
-                    parcel_id: request.data.parcel_id,
+                    parcel_id: ParcelKey::from(request.data.parcel_id),
                 });
             }
             AnyMessage::GetScriptRunning(request) => {

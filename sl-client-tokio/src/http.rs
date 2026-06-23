@@ -2,11 +2,10 @@
 
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
-    CAP_LAND_RESOURCES, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, Llsd,
+    CAP_LAND_RESOURCES, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, Llsd, ParcelKey,
     build_land_resources_request, parse_land_resources_reply, parse_llsd_xml,
 };
 use tokio::sync::mpsc;
-use uuid::Uuid;
 
 use crate::caps::report_caps_failure;
 
@@ -63,7 +62,7 @@ pub(crate) async fn get_caps_llsd(
 /// [`Event::LandResourceDetail`](sl_proto::Event::LandResourceDetail).
 pub(crate) async fn fetch_land_resources(
     cap_url: String,
-    parcel_id: Uuid,
+    parcel_id: ParcelKey,
     http: ReqwestClient,
     caps_tx: mpsc::Sender<(String, Llsd)>,
 ) {

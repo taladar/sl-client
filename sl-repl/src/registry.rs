@@ -19,11 +19,16 @@ use std::collections::BTreeMap;
 
 use sl_proto::AgentKey;
 use sl_proto::CircuitId;
+use sl_proto::ClassifiedKey;
+use sl_proto::EventId;
+use sl_proto::ExperienceKey;
+use sl_proto::FriendKey;
 use sl_proto::GroupKey;
 use sl_proto::GroupRoleKey;
 use sl_proto::InventoryFolderKey;
 use sl_proto::InventoryKey;
 use sl_proto::OwnerKey;
+use sl_proto::ParcelKey;
 use sl_proto::TextureKey;
 use sl_proto::{
     AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentMode, AttachmentPoint,
@@ -929,7 +934,11 @@ fn build_interests_update(
 fn build_pick_update(args: &Args, ctx: &dyn ReplContext) -> Result<PickUpdate, ReplError> {
     Ok(PickUpdate {
         pick_id: args.uuid_or_nil(ctx, "pick_id", 0)?,
-        parcel_id: args.uuid_or_nil(ctx, "parcel_id", 1)?,
+        parcel_id: {
+            // A nil/absent parcel id means "use the agent's current parcel".
+            let parcel = args.uuid_or_nil(ctx, "parcel_id", 1)?;
+            (!parcel.is_nil()).then(|| ParcelKey::from(parcel))
+        },
         name: args.str_or(ctx, "name", 2, "")?,
         description: args.str_or(ctx, "description", 3, "")?,
         snapshot_id: TextureKey::from(args.uuid_or_nil(ctx, "snapshot_id", 4)?),
@@ -945,11 +954,15 @@ fn build_classified_update(
     ctx: &dyn ReplContext,
 ) -> Result<ClassifiedUpdate, ReplError> {
     Ok(ClassifiedUpdate {
-        classified_id: args.uuid_or_nil(ctx, "classified_id", 0)?,
+        classified_id: ClassifiedKey::from(args.uuid_or_nil(ctx, "classified_id", 0)?),
         category: args.parse_or(ctx, "category", 1, "u32", 0)?,
         name: args.str_or(ctx, "name", 2, "")?,
         description: args.str_or(ctx, "description", 3, "")?,
-        parcel_id: args.uuid_or_nil(ctx, "parcel_id", 4)?,
+        parcel_id: {
+            // A nil/absent parcel id means "use the agent's current parcel".
+            let parcel = args.uuid_or_nil(ctx, "parcel_id", 4)?;
+            (!parcel.is_nil()).then(|| ParcelKey::from(parcel))
+        },
         snapshot_id: TextureKey::from(args.uuid_or_nil(ctx, "snapshot_id", 5)?),
         pos_global: global_or_zero(args, ctx, "pos_global", 6)?,
         classified_flags: args.parse_or(ctx, "classified_flags", 7, "u8", 0)?,
@@ -1202,7 +1215,7 @@ fn build_experience_update(
     ctx: &dyn ReplContext,
 ) -> Result<ExperienceUpdate, ReplError> {
     Ok(ExperienceUpdate {
-        public_id: args.req_uuid(ctx, "public_id", 0)?,
+        public_id: ExperienceKey::from(args.req_uuid(ctx, "public_id", 0)?),
         name: args.str_or(ctx, "name", 1, "")?,
         description: args.str_or(ctx, "description", 2, "")?,
         maturity: args.parse_or(ctx, "maturity", 3, "i32", 0)?,
@@ -1426,11 +1439,9 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "request_classified_info",
             usage: "<classified_id>",
             build: |args, ctx| {
-                Ok(Command::RequestClassifiedInfo(args.req_uuid(
-                    ctx,
-                    "classified_id",
-                    0,
-                )?))
+                Ok(Command::RequestClassifiedInfo(ClassifiedKey::from(
+                    args.req_uuid(ctx, "classified_id", 0)?,
+                )))
             },
         },
         CommandSpec {
@@ -1486,11 +1497,9 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "delete_classified",
             usage: "<classified_id>",
             build: |args, ctx| {
-                Ok(Command::DeleteClassified(args.req_uuid(
-                    ctx,
-                    "classified_id",
-                    0,
-                )?))
+                Ok(Command::DeleteClassified(ClassifiedKey::from(
+                    args.req_uuid(ctx, "classified_id", 0)?,
+                )))
             },
         },
         CommandSpec {
@@ -1498,7 +1507,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<classified_id> <query_id>",
             build: |args, ctx| {
                 Ok(Command::GodDeleteClassified {
-                    classified_id: args.req_uuid(ctx, "classified_id", 0)?,
+                    classified_id: ClassifiedKey::from(args.req_uuid(ctx, "classified_id", 0)?),
                     query_id: args.req_uuid(ctx, "query_id", 1)?,
                 })
             },
@@ -1779,7 +1788,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<target> <rights-i32>",
             build: |args, ctx| {
                 Ok(Command::GrantUserRights {
-                    target: args.req_uuid(ctx, "target", 0)?,
+                    target: FriendKey::from(args.req_uuid(ctx, "target", 0)?),
                     rights: FriendRights(args.req_parse(ctx, "rights", 1, "i32")?),
                 })
             },
@@ -1798,9 +1807,9 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "terminate_friendship",
             usage: "<agent_id>",
             build: |args, ctx| {
-                Ok(Command::TerminateFriendship(
+                Ok(Command::TerminateFriendship(FriendKey::from(
                     args.req_uuid(ctx, "agent_id", 0)?,
-                ))
+                )))
             },
         },
         CommandSpec {
@@ -2466,7 +2475,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<parcel_id>",
             build: |args, ctx| {
                 Ok(Command::RequestParcelInfo {
-                    parcel_id: args.req_uuid(ctx, "parcel_id", 0)?,
+                    parcel_id: ParcelKey::from(args.req_uuid(ctx, "parcel_id", 0)?),
                 })
             },
         },
@@ -2545,7 +2554,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<parcel_id>",
             build: |args, ctx| {
                 Ok(Command::RequestLandResources {
-                    parcel_id: args.req_uuid(ctx, "parcel_id", 0)?,
+                    parcel_id: ParcelKey::from(args.req_uuid(ctx, "parcel_id", 0)?),
                 })
             },
         },
@@ -3720,7 +3729,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<event_id-u32>",
             build: |args, ctx| {
                 Ok(Command::EventInfoRequest {
-                    event_id: args.req_parse(ctx, "event_id", 0, "u32")?,
+                    event_id: EventId::new(args.req_parse(ctx, "event_id", 0, "u32")?),
                 })
             },
         },
@@ -3729,7 +3738,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<event_id-u32>",
             build: |args, ctx| {
                 Ok(Command::EventNotificationAddRequest {
-                    event_id: args.req_parse(ctx, "event_id", 0, "u32")?,
+                    event_id: EventId::new(args.req_parse(ctx, "event_id", 0, "u32")?),
                 })
             },
         },
@@ -3738,7 +3747,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<event_id-u32>",
             build: |args, ctx| {
                 Ok(Command::EventNotificationRemoveRequest {
-                    event_id: args.req_parse(ctx, "event_id", 0, "u32")?,
+                    event_id: EventId::new(args.req_parse(ctx, "event_id", 0, "u32")?),
                 })
             },
         },
@@ -4044,7 +4053,11 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<experience_id,experience_id,…>",
             build: |args, ctx| {
                 Ok(Command::RequestExperienceInfo {
-                    experience_ids: args.vec_uuid(ctx, "experience_ids", 0)?,
+                    experience_ids: args
+                        .vec_uuid(ctx, "experience_ids", 0)?
+                        .into_iter()
+                        .map(ExperienceKey::from)
+                        .collect(),
                 })
             },
         },
@@ -4068,7 +4081,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<experience_id> <allow|block|forget>",
             build: |args, ctx| {
                 Ok(Command::SetExperiencePermission {
-                    experience_id: args.req_uuid(ctx, "experience_id", 0)?,
+                    experience_id: ExperienceKey::from(args.req_uuid(ctx, "experience_id", 0)?),
                     permission: enum_arg(args, ctx, "permission", 1, parse_experience_permission)?,
                 })
             },
@@ -4102,7 +4115,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<experience_id>",
             build: |args, ctx| {
                 Ok(Command::RequestExperienceAdmin {
-                    experience_id: args.req_uuid(ctx, "experience_id", 0)?,
+                    experience_id: ExperienceKey::from(args.req_uuid(ctx, "experience_id", 0)?),
                 })
             },
         },
@@ -4111,7 +4124,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<experience_id>",
             build: |args, ctx| {
                 Ok(Command::RequestExperienceContributor {
-                    experience_id: args.req_uuid(ctx, "experience_id", 0)?,
+                    experience_id: ExperienceKey::from(args.req_uuid(ctx, "experience_id", 0)?),
                 })
             },
         },
@@ -4134,9 +4147,21 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "[allowed=…] [blocked=…] [trusted=…]",
             build: |args, ctx| {
                 Ok(Command::SetRegionExperiences {
-                    allowed: args.vec_uuid(ctx, "allowed", 0)?,
-                    blocked: args.vec_uuid(ctx, "blocked", 1)?,
-                    trusted: args.vec_uuid(ctx, "trusted", 2)?,
+                    allowed: args
+                        .vec_uuid(ctx, "allowed", 0)?
+                        .into_iter()
+                        .map(ExperienceKey::from)
+                        .collect(),
+                    blocked: args
+                        .vec_uuid(ctx, "blocked", 1)?
+                        .into_iter()
+                        .map(ExperienceKey::from)
+                        .collect(),
+                    trusted: args
+                        .vec_uuid(ctx, "trusted", 2)?
+                        .into_iter()
+                        .map(ExperienceKey::from)
+                        .collect(),
                 })
             },
         },
@@ -4845,7 +4870,7 @@ mod tests {
     fn request_parcel_info_parses_id() {
         assert!(matches!(
             build(&format!("request_parcel_info {ONE}")),
-            Ok(Command::RequestParcelInfo { parcel_id }) if parcel_id == uuid(ONE)
+            Ok(Command::RequestParcelInfo { parcel_id }) if parcel_id.uuid() == uuid(ONE)
         ));
     }
 
@@ -4946,7 +4971,7 @@ mod tests {
     fn request_land_resources_parses_parcel_id() {
         assert!(matches!(
             build(&format!("request_land_resources {ONE}")),
-            Ok(Command::RequestLandResources { parcel_id }) if parcel_id == uuid(ONE)
+            Ok(Command::RequestLandResources { parcel_id }) if parcel_id.uuid() == uuid(ONE)
         ));
     }
 

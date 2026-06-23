@@ -3,7 +3,7 @@
 use crate::http::blocking_get_llsd;
 use crossbeam_channel::Sender;
 use sl_proto::Event as SessionEvent;
-use sl_proto::{GroupKey, Uuid, parse_experience_ids, parse_experience_status};
+use sl_proto::{ExperienceKey, GroupKey, parse_experience_ids, parse_experience_status};
 
 /// GETs the `GroupExperiences` capability and forwards an
 /// [`SlSessionEvent::GroupExperiences`] over `asset_tx`, echoing the queried
@@ -28,7 +28,7 @@ pub(crate) fn run_group_experiences(
 /// `asset_tx`, echoing the queried `experience_id`.
 pub(crate) fn run_experience_status(
     url: &str,
-    experience_id: Uuid,
+    experience_id: ExperienceKey,
     admin: bool,
     asset_tx: &Sender<SessionEvent>,
 ) {

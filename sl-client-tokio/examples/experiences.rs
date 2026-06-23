@@ -19,6 +19,7 @@ use std::time::Duration;
 use sl_client_tokio::{
     Client, Command, DisconnectReason, Event, LoginParams, LoginRequest, Throttle,
 };
+use sl_proto::ExperienceKey;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tracing::{info, warn};
@@ -161,10 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Requests the metadata for `experience_ids` over `GetExperienceInfo` (a no-op
 /// for an empty list).
-async fn request_info(
-    command_tx: &mpsc::Sender<Command>,
-    experience_ids: Vec<sl_client_tokio::Uuid>,
-) {
+async fn request_info(command_tx: &mpsc::Sender<Command>, experience_ids: Vec<ExperienceKey>) {
     if !experience_ids.is_empty() {
         command_tx
             .send(Command::RequestExperienceInfo { experience_ids })

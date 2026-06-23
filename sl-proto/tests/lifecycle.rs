@@ -10,21 +10,22 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AssetType, AttachmentMode, AttachmentPoint, Camera,
-        ChatAudible, ChatSourceType, ChatType, ClassifiedUpdate, ClickAction, CoarseLocation,
-        ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, DetachOrder,
-        Diagnostic, DirFindFlags, DisconnectReason, EnvironmentSettings, EstateAccessDelta,
-        EstateAccessKind, Event, FollowCamProperty, FriendRights, GestureActivation, GroupKey,
-        GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
-        GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate, InventoryCallbackId,
-        InventoryFolderKey, InventoryItem, InventoryKey, LandingType, LindenAmount, LoginAccount,
-        LoginParams, LookAtType, MapItemType, Material, Maturity, MeanCollisionType,
-        MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
-        ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform, ParcelAccessEntry,
-        ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelMediaCommand,
-        ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField,
-        Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape, ProductType,
-        ProfileUpdate, ReflectionProbeFlags, RegionHandle, RegionInfoUpdate, Reliability,
-        RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ScriptControlAction,
+        ChatAudible, ChatSourceType, ChatType, ClassifiedKey, ClassifiedUpdate, ClickAction,
+        CoarseLocation, ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination,
+        DetachOrder, Diagnostic, DirFindFlags, DisconnectReason, EnvironmentSettings,
+        EstateAccessDelta, EstateAccessKind, Event, EventId, FollowCamProperty, FriendKey,
+        FriendRights, GestureActivation, GroupKey, GroupNoticeAttachment, GroupRoleChange,
+        GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog,
+        ImageCodec, InterestsUpdate, InventoryCallbackId, InventoryFolderKey, InventoryItem,
+        InventoryKey, LandingType, LindenAmount, LoginAccount, LoginParams, LookAtType,
+        MapItemType, Material, Maturity, MeanCollisionType, MoneyTransactionType, MovementMode,
+        MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
+        ObjectKey, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+        ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
+        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5,
+        PickUpdate, PointAtType, Postcard, PrimShape, ProductType, ProfileUpdate,
+        ReflectionProbeFlags, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem,
+        RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ScriptControlAction,
         ScriptPermissions, Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType,
         TextureKey, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
         ViewerEffectType, WaterSettings, WearableType, avatar_texture, group_powers, pcode,
@@ -1369,7 +1370,7 @@ mod test {
         assert_eq!(props.born_on, "2008-01-15");
         assert_eq!(
             props.partner_id,
-            AgentKey::from(uuid::Uuid::from_u128(0xB3))
+            Some(AgentKey::from(uuid::Uuid::from_u128(0xB3)))
         );
         assert_eq!(props.flags, 0x10);
         Ok(())
@@ -1519,7 +1520,10 @@ mod test {
             .ok_or("expected an AvatarClassifieds event")?;
         assert_eq!(classifieds.len(), 1);
         let classified = classifieds.first().ok_or("expected one classified")?;
-        assert_eq!(classified.classified_id, uuid::Uuid::from_u128(0xD1));
+        assert_eq!(
+            classified.classified_id,
+            ClassifiedKey::from(uuid::Uuid::from_u128(0xD1))
+        );
         assert_eq!(classified.name, "Land for rent");
         Ok(())
     }
@@ -1609,7 +1613,7 @@ mod test {
         drain(&mut session)?;
 
         let classified = uuid::Uuid::from_u128(0xD1);
-        session.request_classified_info(classified, now)?;
+        session.request_classified_info(ClassifiedKey::from(classified), now)?;
         let sent = drain(&mut session)?;
         let request = sent
             .iter()
@@ -1649,7 +1653,9 @@ mod test {
         let info = drain_events(&mut session)
             .into_iter()
             .find_map(|event| match event {
-                Event::ClassifiedInfo(info) if info.classified_id == classified => Some(info),
+                Event::ClassifiedInfo(info) if info.classified_id.uuid() == classified => {
+                    Some(info)
+                }
                 _ => None,
             })
             .ok_or("expected a ClassifiedInfo event")?;
@@ -1756,7 +1762,7 @@ mod test {
         let classified = uuid::Uuid::from_u128(0xD1);
         session.update_classified(
             &ClassifiedUpdate {
-                classified_id: classified,
+                classified_id: ClassifiedKey::from(classified),
                 category: 3,
                 name: "New classified".to_owned(),
                 description: "for sale".to_owned(),
@@ -1766,7 +1772,7 @@ mod test {
             },
             now,
         )?;
-        session.delete_classified(classified, now)?;
+        session.delete_classified(ClassifiedKey::from(classified), now)?;
         let sent = drain(&mut session)?;
 
         let pick_update = sent
@@ -1854,13 +1860,13 @@ mod test {
             .ok_or("expected a FriendList event")?;
         assert_eq!(friends.len(), 2);
         let first = friends.first().ok_or("first friend")?;
-        assert_eq!(first.id, friend_a);
+        assert_eq!(first.id, FriendKey::from(friend_a));
         assert!(first.rights_granted.can_see_online());
         assert!(first.rights_granted.can_see_on_map());
         assert!(first.rights_received.can_see_online());
         assert!(!first.rights_received.can_modify_objects());
         let second = friends.get(1).ok_or("second friend")?;
-        assert_eq!(second.id, friend_b);
+        assert_eq!(second.id, FriendKey::from(friend_b));
         assert!(second.rights_received.can_modify_objects());
         Ok(())
     }
@@ -1889,7 +1895,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a FriendsOnline event")?;
-        assert_eq!(ids, vec![friend_a, friend_b]);
+        assert_eq!(
+            ids,
+            vec![FriendKey::from(friend_a), FriendKey::from(friend_b)]
+        );
         Ok(())
     }
 
@@ -1913,7 +1922,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a FriendsOffline event")?;
-        assert_eq!(ids, vec![friend]);
+        assert_eq!(ids, vec![FriendKey::from(friend)]);
         Ok(())
     }
 
@@ -1949,7 +1958,7 @@ mod test {
                 rights,
                 granted_to_us,
             } => {
-                assert_eq!(friend_id, friend);
+                assert_eq!(friend_id, FriendKey::from(friend));
                 assert!(granted_to_us);
                 assert!(rights.can_see_online());
                 assert!(rights.can_see_on_map());
@@ -1993,7 +2002,7 @@ mod test {
                 rights,
                 granted_to_us,
             } => {
-                assert_eq!(friend_id, friend);
+                assert_eq!(friend_id, FriendKey::from(friend));
                 assert!(!granted_to_us);
                 assert!(rights.can_modify_objects());
             }
@@ -2032,7 +2041,7 @@ mod test {
 
         let friend = uuid::Uuid::from_u128(0xA7);
         session.grant_user_rights(
-            friend,
+            FriendKey::from(friend),
             FriendRights(FriendRights::CAN_SEE_ONLINE | FriendRights::CAN_SEE_ON_MAP),
             now,
         )?;
@@ -2057,7 +2066,7 @@ mod test {
         drain(&mut session)?;
 
         let friend = uuid::Uuid::from_u128(0xA8);
-        session.terminate_friendship(friend, now)?;
+        session.terminate_friendship(FriendKey::from(friend), now)?;
         let sent = drain(&mut session)?;
         let terminate = sent
             .iter()
@@ -4539,9 +4548,9 @@ mod test {
         let mut session = established(now)?;
         drain(&mut session)?;
 
-        session.event_info_request(42, now)?;
-        session.event_notification_add_request(42, now)?;
-        session.event_notification_remove_request(7, now)?;
+        session.event_info_request(EventId::new(42), now)?;
+        session.event_notification_add_request(EventId::new(42), now)?;
+        session.event_notification_remove_request(EventId::new(7), now)?;
         let sent = drain(&mut session)?;
 
         let info = sent
@@ -4609,7 +4618,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an EventInfoReply event")?;
-        assert_eq!(info.event_id, 42);
+        assert_eq!(info.event_id, EventId::new(42));
         assert_eq!(info.creator, AgentKey::from(creator));
         assert_eq!(info.name, "Beach Party");
         assert_eq!(info.category, "Discussion");
@@ -7828,7 +7837,7 @@ mod test {
             })
             .ok_or("expected a ParcelDwell event")?;
         assert_eq!(dwell.0.id, sl_proto::RegionLocalParcelId(7));
-        assert_eq!(dwell.1, uuid::Uuid::from_u128(0xABC));
+        assert_eq!(dwell.1, ParcelKey::from(uuid::Uuid::from_u128(0xABC)));
         assert_eq!(dwell.2.to_bits(), 42.5_f32.to_bits());
         Ok(())
     }
@@ -7915,7 +7924,7 @@ mod test {
             &[ObjectKey::from(uuid::Uuid::from_u128(0xAB))],
             now,
         )?;
-        session.request_parcel_info(uuid::Uuid::from_u128(0x00C0_FFEE), now)?;
+        session.request_parcel_info(ParcelKey::from(uuid::Uuid::from_u128(0x00C0_FFEE)), now)?;
         let sent = drain(&mut session)?;
 
         let join = sent
@@ -8060,7 +8069,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a ParcelDetails event")?;
-        assert_eq!(details.parcel_id, uuid::Uuid::from_u128(0x00C0_FFEE));
+        assert_eq!(
+            details.parcel_id,
+            ParcelKey::from(uuid::Uuid::from_u128(0x00C0_FFEE))
+        );
         assert_eq!(details.name, "Sunny Plaza");
         assert_eq!(details.sim_name, "Default Region");
         assert_eq!(details.actual_area, 512);
@@ -8089,7 +8101,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a RemoteParcelId event")?;
-        assert_eq!(parcel_id, uuid::Uuid::from_u128(0x00C0_FFEE));
+        assert_eq!(
+            parcel_id,
+            ParcelKey::from(uuid::Uuid::from_u128(0x00C0_FFEE))
+        );
         Ok(())
     }
 

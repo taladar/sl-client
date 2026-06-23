@@ -39,6 +39,7 @@ use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
 use crate::error::Error;
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::terrain;
+use crate::types::directory::EventId;
 use crate::types::{
     AlertInfo, Asset, AssetType, AttachmentMode, AttachmentPoint, AvatarClassified, AvatarPick,
     AvatarPickerResult, Camera, ChatType, ClassifiedUpdate, ClickAction, CoarseLocation,
@@ -60,7 +61,10 @@ use crate::types::{
     TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
     ViewerEffectType, Wearable, WearableType,
 };
-use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey, TextureKey};
+use sl_types::key::{
+    AgentKey, ClassifiedKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
+    ParcelKey, TextureKey,
+};
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::money::LindenAmount;
 use sl_wire::{
@@ -1526,7 +1530,7 @@ impl Session {
                         circuit,
                         RegionLocalParcelId(reply.data.local_id),
                     ),
-                    parcel_id: reply.data.parcel_id,
+                    parcel_id: ParcelKey::from(reply.data.parcel_id),
                     dwell: reply.data.dwell,
                 });
             }
@@ -1587,7 +1591,7 @@ impl Session {
             AnyMessage::ParcelInfoReply(reply) => {
                 let data = &reply.data;
                 self.events.push_back(Event::ParcelDetails(ParcelDetails {
-                    parcel_id: data.parcel_id,
+                    parcel_id: ParcelKey::from(data.parcel_id),
                     owner_id: data.owner_id,
                     name: trimmed_string(&data.name),
                     description: trimmed_string(&data.desc),
@@ -1784,7 +1788,7 @@ impl Session {
                         .data
                         .iter()
                         .map(|classified| AvatarClassified {
-                            classified_id: classified.classified_id,
+                            classified_id: ClassifiedKey::from(classified.classified_id),
                             name: trimmed_string(&classified.name),
                         })
                         .collect(),
@@ -2364,7 +2368,7 @@ impl Session {
                         .map(|block| DirEventResult {
                             owner_id: block.owner_id,
                             name: trimmed_string(&block.name),
-                            event_id: block.event_id,
+                            event_id: EventId::new(block.event_id),
                             date: trimmed_string(&block.date),
                             unix_time: block.unix_time,
                             event_flags: block.event_flags,
@@ -2384,7 +2388,7 @@ impl Session {
                         .query_replies
                         .iter()
                         .map(|block| DirClassifiedResult {
-                            classified_id: block.classified_id,
+                            classified_id: ClassifiedKey::from(block.classified_id),
                             name: trimmed_string(&block.name),
                             classified_flags: block.classified_flags,
                             creation_date: block.creation_date,
@@ -2409,7 +2413,7 @@ impl Session {
                         .query_replies
                         .iter()
                         .map(|block| DirPlaceResult {
-                            parcel_id: block.parcel_id,
+                            parcel_id: ParcelKey::from(block.parcel_id),
                             name: trimmed_string(&block.name),
                             for_sale: block.for_sale,
                             auction: block.auction,
@@ -2430,7 +2434,7 @@ impl Session {
                         .query_replies
                         .iter()
                         .map(|block| DirLandResult {
-                            parcel_id: block.parcel_id,
+                            parcel_id: ParcelKey::from(block.parcel_id),
                             name: trimmed_string(&block.name),
                             auction: block.auction,
                             for_sale: block.for_sale,
@@ -2485,7 +2489,7 @@ impl Session {
                 let [global_x, global_y, global_z] = data.global_pos;
                 self.events.push_back(Event::EventInfoReply {
                     info: EventInfo {
-                        event_id: data.event_id,
+                        event_id: EventId::new(data.event_id),
                         creator: AgentKey::from(parse_uuid_string(&data.creator)),
                         name: trimmed_string(&data.name),
                         category: trimmed_string(&data.category),
@@ -2808,7 +2812,7 @@ impl Session {
                 let ids = notification
                     .agent_block
                     .iter()
-                    .map(|block| block.agent_id)
+                    .map(|block| FriendKey::from(block.agent_id))
                     .collect::<Vec<_>>();
                 if !ids.is_empty() {
                     self.events.push_back(Event::FriendsOnline(ids));
@@ -2818,7 +2822,7 @@ impl Session {
                 let ids = notification
                     .agent_block
                     .iter()
-                    .map(|block| block.agent_id)
+                    .map(|block| FriendKey::from(block.agent_id))
                     .collect::<Vec<_>>();
                 if !ids.is_empty() {
                     self.events.push_back(Event::FriendsOffline(ids));
@@ -2836,11 +2840,11 @@ impl Session {
                     .map_or_else(Uuid::nil, |circuit| circuit.agent_id.uuid());
                 for block in &change.rights {
                     let granted_to_us = change.agent_data.agent_id != own;
-                    let friend_id = if granted_to_us {
+                    let friend_id = FriendKey::from(if granted_to_us {
                         change.agent_data.agent_id
                     } else {
                         block.agent_related
-                    };
+                    });
                     self.events.push_back(Event::FriendRightsChanged {
                         friend_id,
                         rights: FriendRights(block.related_rights),
@@ -3448,7 +3452,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_classified_info(
         &mut self,
-        classified_id: Uuid,
+        classified_id: ClassifiedKey,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -3575,7 +3579,11 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn delete_classified(&mut self, classified_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn delete_classified(
+        &mut self,
+        classified_id: ClassifiedKey,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_classified_delete(classified_id, now)?;
         Ok(())
@@ -3591,7 +3599,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn god_delete_classified(
         &mut self,
-        classified_id: Uuid,
+        classified_id: ClassifiedKey,
         query_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
@@ -3614,7 +3622,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn grant_user_rights(
         &mut self,
-        target: Uuid,
+        target: FriendKey,
         rights: FriendRights,
         now: Instant,
     ) -> Result<(), Error> {
@@ -3629,7 +3637,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn terminate_friendship(&mut self, other: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn terminate_friendship(&mut self, other: FriendKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_terminate_friendship(other, now)?;
         Ok(())
@@ -5314,7 +5322,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn event_info_request(&mut self, event_id: u32, now: Instant) -> Result<(), Error> {
+    pub fn event_info_request(&mut self, event_id: EventId, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_event_info_request(event_id, now)?;
         Ok(())
@@ -5329,7 +5337,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn event_notification_add_request(
         &mut self,
-        event_id: u32,
+        event_id: EventId,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -5346,7 +5354,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn event_notification_remove_request(
         &mut self,
-        event_id: u32,
+        event_id: EventId,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -6616,7 +6624,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn request_parcel_info(&mut self, parcel_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn request_parcel_info(&mut self, parcel_id: ParcelKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_parcel_info_request(parcel_id, now)?;
         Ok(())

@@ -62,7 +62,7 @@ pub use types::{
     CoarseLocation, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, DetachOrder,
     Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
     DirPeopleResult, DirPlaceResult, DisconnectReason, EconomyData, EnvironmentSettings,
-    EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, Event, EventInfo,
+    EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, Event, EventId, EventInfo,
     ExtendedMesh, FlexibleData, FollowCamProperty, FollowCamPropertyValue, Friend, FriendRights,
     GestureActivation, GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
     GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupMember,
@@ -165,6 +165,7 @@ pub use sl_wire::{
 pub use sl_types::lsl::{Rotation, Vector};
 // Re-export the L$ amount type used by the money balance/transfer APIs.
 pub use sl_types::key::{
-    AgentKey, GroupKey, InventoryFolderKey, InventoryKey, Key, ObjectKey, OwnerKey, TextureKey,
+    AgentKey, ClassifiedKey, ExperienceKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey,
+    Key, ObjectKey, OwnerKey, ParcelKey, TextureKey,
 };
 pub use sl_types::money::LindenAmount;

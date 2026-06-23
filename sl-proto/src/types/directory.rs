@@ -12,7 +12,7 @@
 //! directory) lists an agent's or group's land holdings.
 
 use crate::types::ParcelCategory;
-use sl_types::key::{AgentKey, GroupKey, TextureKey};
+use sl_types::key::{AgentKey, ClassifiedKey, GroupKey, ParcelKey, TextureKey};
 use uuid::Uuid;
 
 /// The directory-query flags (`DFQ_*`), shared by every `Dir*Query` and
@@ -196,6 +196,39 @@ pub struct DirGroupResult {
     pub search_order: f32,
 }
 
+/// The id of an in-world scheduled **event** in the Second Life *events
+/// directory* (Search → Events) — the numeric handle a `DirEventResult` carries
+/// and `EventInfoRequest`/`EventNotificationAddRequest` reference.
+///
+/// Unlike the UUID-based ids elsewhere this is a 32-bit integer on the wire (the
+/// reference viewer's event `U32`, *not* an `LLUUID`), so the shared
+/// `sl_types::key::EventKey` (a UUID wrapper) does not fit. It lives here as a
+/// repo-local newtype rather than a bare `u32` so an events-directory id can't be
+/// transposed with any other 32-bit field. Not to be confused with the
+/// [`Event`](crate::Event) dispatch enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub struct EventId(pub u32);
+
+impl EventId {
+    /// Builds an event-directory id from its raw `u32` wire value.
+    #[must_use]
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    /// Returns the raw `u32` wire value.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+impl core::fmt::Display for EventId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// One event matched by a `DirFindQuery` with [`DirFindFlags::EVENTS`], carried
 /// in a [`DirEventsReply`](crate::Event::DirEventsReply).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -205,7 +238,7 @@ pub struct DirEventResult {
     /// The event's name.
     pub name: String,
     /// The event id (used with the events directory, e.g. `EventInfoRequest`).
-    pub event_id: u32,
+    pub event_id: EventId,
     /// The event's date, as the human-readable string the dataserver formats.
     pub date: String,
     /// The event's start time, as a Unix timestamp (seconds).
@@ -219,7 +252,7 @@ pub struct DirEventResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirClassifiedResult {
     /// The classified ad's id (use with `ClassifiedInfoRequest` for full detail).
-    pub classified_id: Uuid,
+    pub classified_id: ClassifiedKey,
     /// The classified's name.
     pub name: String,
     /// The classified flags (e.g. mature; `CLASSIFIED_FLAG_*`).
@@ -237,7 +270,7 @@ pub struct DirClassifiedResult {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DirPlaceResult {
     /// The matched parcel.
-    pub parcel_id: Uuid,
+    pub parcel_id: ParcelKey,
     /// The parcel's name.
     pub name: String,
     /// Whether the parcel is for sale.
@@ -253,7 +286,7 @@ pub struct DirPlaceResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirLandResult {
     /// The matched parcel.
-    pub parcel_id: Uuid,
+    pub parcel_id: ParcelKey,
     /// The parcel's name.
     pub name: String,
     /// Whether the parcel is being auctioned.
@@ -316,7 +349,7 @@ pub struct PlacesResult {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventInfo {
     /// The event id (the same id passed to `EventInfoRequest`).
-    pub event_id: u32,
+    pub event_id: EventId,
     /// The avatar running the event (the viewer parses the `Creator` string as a
     /// UUID; a non-UUID value reads as [`Uuid::nil`](uuid::Uuid::nil)).
     pub creator: AgentKey,
@@ -363,9 +396,19 @@ pub(crate) const fn category_from_wire(value: i8) -> ParcelCategory {
 
 #[cfg(test)]
 mod tests {
-    use super::{DirFindFlags, LandSearchType, category_from_wire, category_to_wire};
+    use super::{DirFindFlags, EventId, LandSearchType, category_from_wire, category_to_wire};
     use crate::types::ParcelCategory;
     use pretty_assertions::assert_eq;
+
+    /// The events-directory [`EventId`] is a transparent `u32` wrapper:
+    /// `new`/`get` round-trip the raw wire value and `Display` matches the bare
+    /// integer, so the typed id puts the exact same bytes on the wire.
+    #[test]
+    fn event_id_round_trips_raw_u32() {
+        assert_eq!(EventId::new(424_242).get(), 424_242);
+        assert_eq!(EventId::default(), EventId::new(0));
+        assert_eq!(EventId::new(7).to_string(), "7");
+    }
 
     /// The find-flag bitfield combines and tests bits as expected.
     #[test]

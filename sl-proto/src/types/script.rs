@@ -1,6 +1,6 @@
 //! Scripts and notifications: dialogs, permissions, alerts, mutes.
 
-use sl_types::key::{InventoryKey, ObjectKey, OwnerKey, TextureKey};
+use sl_types::key::{ExperienceKey, InventoryKey, ObjectKey, OwnerKey, TextureKey};
 use sl_wire::ControlFlags;
 use uuid::Uuid;
 
@@ -100,8 +100,9 @@ pub struct ScriptPermissionRequest {
     pub object_name: String,
     /// The object owner's name.
     pub object_owner: String,
-    /// The experience id requesting, or nil if not an experience.
-    pub experience_id: Uuid,
+    /// The experience requesting, or `None` if the request is not made under an
+    /// experience.
+    pub experience_id: Option<ExperienceKey>,
     /// The permissions requested.
     pub permissions: ScriptPermissions,
 }

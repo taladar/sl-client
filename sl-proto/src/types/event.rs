@@ -20,7 +20,10 @@ use super::{
     ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload,
     TelehubInfo, TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
 };
-use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey, TextureKey};
+use sl_types::key::{
+    AgentKey, ExperienceKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
+    ParcelKey, TextureKey,
+};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_wire::AgentPreferences;
@@ -125,7 +128,7 @@ pub enum Event {
         /// The parcel's region-local id, scoped to the circuit it belongs to.
         local_id: ScopedParcelId,
         /// The parcel's persistent id.
-        parcel_id: Uuid,
+        parcel_id: ParcelKey,
         /// The dwell (accumulated traffic) value.
         dwell: f32,
     },
@@ -154,7 +157,7 @@ pub enum Event {
     /// `RemoteParcelRequest` capability reply to the runtimes'
     /// [`Command::RequestRemoteParcelId`](crate::Command::RequestRemoteParcelId).
     /// Feed it to [`Session::request_parcel_info`](crate::Session::request_parcel_info).
-    RemoteParcelId(Uuid),
+    RemoteParcelId(ParcelKey),
     /// The region's feature flags and limits, from a `SimulatorFeatures`
     /// capability GET. The runtimes fetch this automatically once the capability
     /// map is known (at login and on each region change), and on demand via
@@ -483,16 +486,16 @@ pub enum Event {
     FriendList(Vec<Friend>),
     /// One or more friends came online (`OnlineNotification`). Only friends who
     /// grant this agent the see-online right are reported.
-    FriendsOnline(Vec<Uuid>),
+    FriendsOnline(Vec<FriendKey>),
     /// One or more friends went offline (`OfflineNotification`).
-    FriendsOffline(Vec<Uuid>),
+    FriendsOffline(Vec<FriendKey>),
     /// A friendship's rights changed (`ChangeUserRights`): either a friend
     /// changed the rights they grant this agent, or the simulator echoed a
     /// change this agent made to the rights it grants a friend (see
     /// [`granted_to_us`](Event::FriendRightsChanged::granted_to_us)).
     FriendRightsChanged {
         /// The friend the rights pertain to.
-        friend_id: Uuid,
+        friend_id: FriendKey,
         /// The new rights bitfield.
         rights: FriendRights,
         /// `true` when these are the rights the *friend* now grants this agent;
@@ -954,19 +957,19 @@ pub enum Event {
     /// — the experiences it has `allowed` and those it has `blocked`.
     ExperiencePermissions {
         /// The experiences the agent admits.
-        allowed: Vec<Uuid>,
+        allowed: Vec<ExperienceKey>,
         /// The experiences the agent blocks.
-        blocked: Vec<Uuid>,
+        blocked: Vec<ExperienceKey>,
     },
     /// The reply to an `AgentExperiences` capability GET (the runtime
     /// `RequestOwnedExperiences` command): the experiences the agent owns.
-    OwnedExperiences(Vec<Uuid>),
+    OwnedExperiences(Vec<ExperienceKey>),
     /// The reply to a `GetAdminExperiences` capability GET (the runtime
     /// `RequestAdminExperiences` command): the experiences the agent administers.
-    AdminExperiences(Vec<Uuid>),
+    AdminExperiences(Vec<ExperienceKey>),
     /// The reply to a `GetCreatorExperiences` capability GET (the runtime
     /// `RequestCreatorExperiences` command): the experiences the agent created.
-    CreatorExperiences(Vec<Uuid>),
+    CreatorExperiences(Vec<ExperienceKey>),
     /// The reply to a `GroupExperiences` capability GET (the runtime
     /// `RequestGroupExperiences` command): the experiences the queried
     /// [`group_id`](Self::GroupExperiences::group_id) owns.
@@ -975,14 +978,14 @@ pub enum Event {
         /// runtime since the cap reply does not carry it).
         group_id: GroupKey,
         /// The experiences the group owns.
-        experience_ids: Vec<Uuid>,
+        experience_ids: Vec<ExperienceKey>,
     },
     /// The reply to an `IsExperienceAdmin` capability GET (the runtime
     /// `RequestExperienceAdmin` command): whether the agent administers the
     /// queried experience.
     ExperienceAdminStatus {
         /// The queried experience (echoed by the runtime).
-        experience_id: Uuid,
+        experience_id: ExperienceKey,
         /// Whether the agent is an admin of it.
         is_admin: bool,
     },
@@ -991,7 +994,7 @@ pub enum Event {
     /// the queried experience.
     ExperienceContributorStatus {
         /// The queried experience (echoed by the runtime).
-        experience_id: Uuid,
+        experience_id: ExperienceKey,
         /// Whether the agent is a contributor to it.
         is_contributor: bool,
     },
@@ -1003,11 +1006,11 @@ pub enum Event {
     /// experience allow / block / trust lists.
     RegionExperiences {
         /// The experiences the region allows.
-        allowed: Vec<Uuid>,
+        allowed: Vec<ExperienceKey>,
         /// The experiences the region blocks.
-        blocked: Vec<Uuid>,
+        blocked: Vec<ExperienceKey>,
         /// The experiences the region trusts (privileged, key-grid scope).
-        trusted: Vec<Uuid>,
+        trusted: Vec<ExperienceKey>,
     },
     /// A decoded terrain (or wind/cloud/water) patch arrived in a `LayerData`
     /// message and was added to or refreshed in the terrain cache. For a

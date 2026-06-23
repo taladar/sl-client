@@ -22,7 +22,7 @@
 
 use std::collections::HashMap;
 
-use sl_types::key::{AgentKey, OwnerKey};
+use sl_types::key::{AgentKey, OwnerKey, ParcelKey};
 use uuid::Uuid;
 
 use crate::llsd::Llsd;
@@ -343,18 +343,20 @@ pub struct LandResourcesUrls {
 /// Builds the LLSD body for a `LandResources` POST (`{ parcel_id: uuid }`). The
 /// `parcel_id` is the region's "fake" parcel id (see `RemoteParcelRequest`).
 #[must_use]
-pub fn build_land_resources_request(parcel_id: Uuid) -> String {
+pub fn build_land_resources_request(parcel_id: ParcelKey) -> String {
     Llsd::Map(HashMap::from([(
         "parcel_id".to_owned(),
-        Llsd::Uuid(parcel_id),
+        Llsd::Uuid(parcel_id.uuid()),
     )]))
     .to_llsd_xml()
 }
 
 /// Decodes a `LandResources` request: the requested parcel id.
 #[must_use]
-pub fn parse_land_resources_request(body: &Llsd) -> Option<Uuid> {
-    body.get("parcel_id").and_then(Llsd::as_uuid)
+pub fn parse_land_resources_request(body: &Llsd) -> Option<ParcelKey> {
+    body.get("parcel_id")
+        .and_then(Llsd::as_uuid)
+        .map(ParcelKey::from)
 }
 
 /// Decodes a `LandResources` reply: the follow-up capability URLs.
@@ -495,7 +497,7 @@ mod tests {
         parse_land_resource_summary, parse_land_resources_reply, parse_land_resources_request,
     };
     use crate::llsd::parse_llsd_xml;
-    use sl_types::key::{AgentKey, OwnerKey};
+    use sl_types::key::{AgentKey, OwnerKey, ParcelKey};
 
     fn sample_object() -> ScriptedObjectInfo {
         ScriptedObjectInfo {
@@ -542,7 +544,7 @@ mod tests {
     /// round-trips the follow-up URLs (with detail present).
     #[test]
     fn land_resources_handoff_round_trips() -> Result<(), String> {
-        let parcel_id = Uuid::from_u128(0x1234);
+        let parcel_id = ParcelKey::from(Uuid::from_u128(0x1234));
         let body = build_land_resources_request(parcel_id);
         let parsed = parse_land_resources_request(
             &parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?,
