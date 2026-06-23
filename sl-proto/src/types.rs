@@ -17,6 +17,7 @@ mod environment;
 mod event;
 mod group;
 mod inventory;
+mod land_area;
 mod map;
 mod name;
 mod nearby;
@@ -109,6 +110,126 @@ pub(crate) fn object_owner_to_wire(
     }
 }
 
+/// Decode a non-negative L$ wire field (a signed 32-bit integer) into a
+/// [`LindenAmount`](sl_types::money::LindenAmount).
+///
+/// This is the codec boundary for the L$ *price* fields a conforming peer only
+/// ever sends non-negative (sale prices, upload/claim/rent prices, the listing
+/// fee, the per-metre land price, …). A negative value is rejected with
+/// [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) rather
+/// than silently coerced, so a malformed message is dropped (and surfaced as a
+/// diagnostic) instead of masquerading as `0`. The inverse on encode is
+/// [`linden_to_wire`].
+pub(crate) fn linden_from_wire(
+    field: &'static str,
+    value: i32,
+) -> Result<sl_types::money::LindenAmount, sl_wire::WireError> {
+    match u64::try_from(value) {
+        Ok(magnitude) => Ok(sl_types::money::LindenAmount(magnitude)),
+        Err(_negative) => Err(sl_wire::WireError::ValueOutOfRange {
+            field,
+            value: i64::from(value),
+        }),
+    }
+}
+
+/// Encode a [`LindenAmount`](sl_types::money::LindenAmount) back into a signed
+/// 32-bit L$ wire field, the inverse of [`linden_from_wire`].
+///
+/// An amount that exceeds the signed 32-bit range a wire price field can hold
+/// is rejected with
+/// [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) rather
+/// than clamped, so an out-of-range value fails the send loudly instead of
+/// silently changing on the wire.
+pub(crate) fn linden_to_wire(
+    field: &'static str,
+    amount: &sl_types::money::LindenAmount,
+) -> Result<i32, sl_wire::WireError> {
+    let sl_types::money::LindenAmount(value) = *amount;
+    match i32::try_from(value) {
+        Ok(wire) => Ok(wire),
+        Err(_too_large) => Err(sl_wire::WireError::ValueOutOfRange {
+            field,
+            value: i64::try_from(value).unwrap_or(i64::MAX),
+        }),
+    }
+}
+
+/// Decode an optional L$ *sale* price: `Some` (validated) when the companion
+/// for-sale field says the item is for sale, `None` otherwise.
+///
+/// The for-sale state lives in its own wire field (a `sale_type`, the parcel
+/// `FOR_SALE` flag, …); a not-for-sale item carries no meaningful price, so it
+/// maps to `None` (a for-sale item may still be free → `Some(LindenAmount(0))`).
+/// On a for-sale item a negative price is still rejected via [`linden_from_wire`].
+pub(crate) fn linden_price_from_wire(
+    for_sale: bool,
+    field: &'static str,
+    value: i32,
+) -> Result<Option<sl_types::money::LindenAmount>, sl_wire::WireError> {
+    if for_sale {
+        Ok(Some(linden_from_wire(field, value)?))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Encode an optional L$ *sale* price back to its signed 32-bit wire field: the
+/// amount when `Some`, or `0` (the not-for-sale wire sentinel) when `None`.
+pub(crate) fn linden_price_to_wire(
+    field: &'static str,
+    price: Option<&sl_types::money::LindenAmount>,
+) -> Result<i32, sl_wire::WireError> {
+    match price {
+        Some(amount) => linden_to_wire(field, amount),
+        None => Ok(0),
+    }
+}
+
+/// Decode a non-negative land-area wire field (a signed 32-bit count of square
+/// metres) into a [`LandArea`].
+///
+/// This is the codec boundary for the land-area fields a conforming peer only
+/// ever sends non-negative (a group land contribution, a parcel's
+/// actual/billable area, an avatar's land credit/commitment). A negative value
+/// is rejected with
+/// [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) rather
+/// than masked, so a malformed message is dropped (and surfaced as a diagnostic)
+/// instead of reading as `0`. The inverse on encode is [`land_area_to_wire`].
+pub(crate) fn land_area_from_wire(
+    field: &'static str,
+    value: i32,
+) -> Result<LandArea, sl_wire::WireError> {
+    match u32::try_from(value) {
+        Ok(square_metres) => Ok(LandArea(square_metres)),
+        Err(_negative) => Err(sl_wire::WireError::ValueOutOfRange {
+            field,
+            value: i64::from(value),
+        }),
+    }
+}
+
+/// Encode a [`LandArea`] back into a signed 32-bit square-metre wire field, the
+/// inverse of [`land_area_from_wire`].
+///
+/// An area that exceeds the signed 32-bit range a wire field can hold is
+/// rejected with
+/// [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) rather
+/// than clamped, so an out-of-range value fails the send loudly.
+pub(crate) fn land_area_to_wire(
+    field: &'static str,
+    area: &LandArea,
+) -> Result<i32, sl_wire::WireError> {
+    let LandArea(square_metres) = *area;
+    match i32::try_from(square_metres) {
+        Ok(wire) => Ok(wire),
+        Err(_too_large) => Err(sl_wire::WireError::ValueOutOfRange {
+            field,
+            value: i64::from(square_metres),
+        }),
+    }
+}
+
 pub use alert::{MeanCollision, MeanCollisionType};
 pub use appearance::{
     AttachmentMode, AttachmentPoint, AvatarAppearance, AvatarAttachment, DetachOrder,
@@ -151,6 +272,7 @@ pub use inventory::{
     GestureActivation, InventoryFolder, InventoryItem, NewInventoryItem, global_to_handle,
     grid_to_handle, handle_to_global, handle_to_grid,
 };
+pub use land_area::LandArea;
 pub use map::{
     EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, MapItem, MapItemType,
     MapLayer, MapRegionInfo, MapRequestFlags, NeighborInfo, RegionInfoUpdate, TelehubInfo,
@@ -188,12 +310,98 @@ pub use union_key::{AgentOrObjectKey, InventoryItemOrFolderKey, MeshKey, SculptO
 #[cfg(test)]
 mod owner_codec_tests {
     use super::{
-        group_from_wire, group_to_wire, inventory_owner_from_wire, object_owner_from_wire,
-        object_owner_to_wire, owner_key_from_wire,
+        group_from_wire, group_to_wire, inventory_owner_from_wire, land_area_from_wire,
+        land_area_to_wire, linden_from_wire, linden_price_from_wire, linden_price_to_wire,
+        linden_to_wire, object_owner_from_wire, object_owner_to_wire, owner_key_from_wire,
     };
     use pretty_assertions::assert_eq;
     use sl_types::key::{AgentKey, GroupKey, OwnerKey};
+    use sl_types::money::LindenAmount;
     use uuid::Uuid;
+
+    #[test]
+    fn land_area_wire_round_trips_and_rejects_negative() -> Result<(), sl_wire::WireError> {
+        // Non-negative square-metre counts round-trip bit-identically.
+        for wire in [0_i32, 512, 0x1_0000, i32::MAX] {
+            let area = land_area_from_wire("Test", wire)?;
+            assert_eq!(land_area_to_wire("Test", &area)?, wire);
+        }
+        // A negative land area (which a conforming peer never sends) is rejected,
+        // not masked to `0`.
+        assert_eq!(
+            land_area_from_wire("Test", -1),
+            Err(sl_wire::WireError::ValueOutOfRange {
+                field: "Test",
+                value: -1,
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn linden_price_gates_on_for_sale() -> Result<(), sl_wire::WireError> {
+        // Not for sale → `None`, regardless of the (meaningless) wire price.
+        assert_eq!(linden_price_from_wire(false, "SalePrice", 999)?, None);
+        // For sale → `Some` (a for-sale item may still be free).
+        assert_eq!(
+            linden_price_from_wire(true, "SalePrice", 0)?,
+            Some(LindenAmount(0))
+        );
+        assert_eq!(
+            linden_price_from_wire(true, "SalePrice", 250)?,
+            Some(LindenAmount(250))
+        );
+        // Encode: `None` writes the `0` not-for-sale wire sentinel; `Some` writes
+        // the amount.
+        assert_eq!(linden_price_to_wire("SalePrice", None)?, 0);
+        assert_eq!(
+            linden_price_to_wire("SalePrice", Some(&LindenAmount(250)))?,
+            250
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn linden_wire_round_trips_non_negative_values() -> Result<(), sl_wire::WireError> {
+        // Every non-negative wire price decodes losslessly and re-encodes to the
+        // exact same `i32`, so the codec boundary is byte-identical.
+        for wire in [0_i32, 1, 50, 1000, i32::MAX] {
+            let amount = linden_from_wire("Test", wire)?;
+            assert_eq!(linden_to_wire("Test", &amount)?, wire);
+        }
+        // The `0` price (off-sale sentinel) decodes to the zero amount.
+        assert_eq!(linden_from_wire("Test", 0)?, LindenAmount(0));
+        Ok(())
+    }
+
+    #[test]
+    fn linden_from_wire_rejects_negative() {
+        // A negative L$ value (which a conforming peer never sends) is rejected
+        // rather than masked to `0`.
+        for wire in [-1_i32, -1000, i32::MIN] {
+            assert_eq!(
+                linden_from_wire("Test", wire),
+                Err(sl_wire::WireError::ValueOutOfRange {
+                    field: "Test",
+                    value: i64::from(wire),
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn linden_to_wire_rejects_values_above_the_wire_range() {
+        // An amount larger than the signed 32-bit wire field can hold fails the
+        // encode loudly instead of silently clamping.
+        let too_large = LindenAmount(u64::from(u32::MAX));
+        assert_eq!(
+            linden_to_wire("Test", &too_large),
+            Err(sl_wire::WireError::ValueOutOfRange {
+                field: "Test",
+                value: i64::from(u32::MAX),
+            })
+        );
+    }
 
     #[test]
     fn owner_key_from_wire_tags_by_group_flag() {

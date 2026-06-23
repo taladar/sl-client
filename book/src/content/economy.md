@@ -38,3 +38,29 @@ echoed back, and a fresh `Event::MoneyBalance` reflects the new balance.
 > - Commands `RequestMoneyBalance`, `RequestEconomyData`, `SendMoneyTransfer`
 >   are in `sl-proto/src/command.rs`; events `MoneyBalance`, `EconomyData` are
 >   in `sl-proto/src/types/event.rs`.
+> - Every non-negative L$ *price/fee* field across the protocol is typed
+>   `LindenAmount` too: the `EconomyData` price list; object/inventory
+>   `sale_price` and `ownership_cost`; the parcel `sale_price`, `claim_price`,
+>   `rent_price`, `pass_price`, and per-metre land price; the classified
+>   `price_for_listing`; the group `membership_fee`; the `GroupAccountSummary`
+>   tax/fee/credit/debit totals; and the directory `PlacesResult.price`. The
+>   codec boundary decodes them with `linden_from_wire`, which *rejects* a
+>   negative wire value (one no conforming simulator ever sends) rather than
+>   masking it to `0`, so a malformed price drops the message instead of being
+>   silently misread. (The genuinely *signed* group `balance`/`amount` fields
+>   stay raw, awaiting a dedicated signed `LindenBalance` type.)
+> - A *sale* price is an `Option<LindenAmount>`: `None` when the item/parcel is
+>   not for sale (the for-sale state is the separate `sale_type` / `FOR_SALE`
+>   flag / `for_sale` field) — a for-sale item may still be free
+>   (`Some(LindenAmount(0))`). On the wire `None` is the `0` not-for-sale
+>   sentinel. This covers `ObjectProperties`/`ObjectPropertiesFamily`,
+>   `InventoryItem`, `RestoreItem`, `ParcelInfo`/`ParcelUpdate`/`ParcelDetails`,
+>   `DirLandResult`, and `Command::SetObjectForSale`; `ObjectBuyItem`'s price is
+>   a plain `LindenAmount` (the bid you must match).
+> - Land *area* (square metres, distinct from L$) is its own `LandArea(u32)`
+>   newtype — the group land `contribution`, a parcel's `area`/`actual_area`/
+>   `billable_area`, and the avatar's `square_meters_credit`/`_committed` — so a
+>   land area and an L$ amount can't be transposed. (Group `contribution` is
+>   land area, *not* L$, despite the wire field name — the viewer renders it as
+>   `[AREA]`.) `LandArea` is kept client-local in `sl-proto` for now, slated to
+>   move to `sl-types` with the other value types in one later update.

@@ -1031,7 +1031,7 @@ impl Session {
     ) -> Result<(), Error> {
         // A child agent still receives the neighbour region's object stream;
         // cache it so a roaming/proximity bot sees adjacent regions too.
-        if self.try_dispatch_object(from, message, now) {
+        if self.try_dispatch_object(from, message, now)? {
             return Ok(());
         }
         match message {
@@ -1083,7 +1083,7 @@ impl Session {
         from: SocketAddr,
         message: &AnyMessage,
         now: Instant,
-    ) -> bool {
+    ) -> Result<bool, Error> {
         match message {
             AnyMessage::ObjectUpdate(update) => {
                 let region_handle = RegionHandle(update.region_data.region_handle);
@@ -1153,7 +1153,7 @@ impl Session {
             }
             AnyMessage::KillObject(kill) => {
                 let Some(circuit_id) = self.circuit_id_for(from) else {
-                    return true;
+                    return Ok(true);
                 };
                 for block in &kill.object_data {
                     let region_handle = self
@@ -1170,7 +1170,7 @@ impl Session {
             AnyMessage::ObjectProperties(props) => {
                 let circuit_id = self.circuit_id_for(from);
                 for block in &props.object_data {
-                    let properties = object_properties(block);
+                    let properties = object_properties(block)?;
                     if let Some(object) = circuit_id
                         .and_then(|circuit_id| self.objects.get_mut(&circuit_id))
                         .and_then(|sim| {
@@ -1208,9 +1208,9 @@ impl Session {
                     });
                 }
             }
-            _ => return false,
+            _ => return Ok(false),
         }
-        true
+        Ok(true)
     }
 
     /// Decodes a `LayerData` payload received from simulator `from`, caching each
@@ -1436,7 +1436,7 @@ impl Session {
     ) -> Result<(), Error> {
         // Object/scene-graph updates arrive on the root *and* child circuits;
         // handle them uniformly, keyed by the source sim.
-        if self.try_dispatch_object(from, message, now) {
+        if self.try_dispatch_object(from, message, now)? {
             return Ok(());
         }
         match message {
@@ -1465,7 +1465,7 @@ impl Session {
             }
             AnyMessage::RegionInfo(info) => {
                 self.events
-                    .push_back(Event::RegionLimits(region_limits(info)));
+                    .push_back(Event::RegionLimits(region_limits(info)?));
             }
             AnyMessage::UUIDNameReply(reply) => {
                 self.events
@@ -1477,15 +1477,15 @@ impl Session {
             }
             AnyMessage::MoneyBalanceReply(reply) => {
                 self.events
-                    .push_back(Event::MoneyBalance(money_balance(reply)));
+                    .push_back(Event::MoneyBalance(money_balance(reply)?));
             }
             AnyMessage::EconomyData(data) => {
                 self.events
-                    .push_back(Event::EconomyData(Box::new(economy_data(data))));
+                    .push_back(Event::EconomyData(Box::new(economy_data(data)?)));
             }
             AnyMessage::ParcelProperties(props) => {
                 self.events
-                    .push_back(Event::ParcelProperties(Box::new(parcel_info(props))));
+                    .push_back(Event::ParcelProperties(Box::new(parcel_info(props)?)));
             }
             AnyMessage::ParcelOverlay(overlay) => {
                 self.events
@@ -1596,8 +1596,11 @@ impl Session {
                     owner_id: data.owner_id,
                     name: trimmed_string(&data.name),
                     description: trimmed_string(&data.desc),
-                    actual_area: data.actual_area,
-                    billable_area: data.billable_area,
+                    actual_area: crate::types::land_area_from_wire("ActualArea", data.actual_area)?,
+                    billable_area: crate::types::land_area_from_wire(
+                        "BillableArea",
+                        data.billable_area,
+                    )?,
                     flags: data.flags,
                     global_x: data.global_x,
                     global_y: data.global_y,
@@ -1605,7 +1608,12 @@ impl Session {
                     sim_name: trimmed_string(&data.sim_name),
                     snapshot_id: TextureKey::from(data.snapshot_id),
                     dwell: data.dwell,
-                    sale_price: data.sale_price,
+                    // The packed parcel flags byte carries PARCEL_FOR_SALE (0x04).
+                    sale_price: crate::types::linden_price_from_wire(
+                        data.flags & 0x04 != 0,
+                        "SalePrice",
+                        data.sale_price,
+                    )?,
                     auction_id: data.auction_id,
                 }));
             }
@@ -1801,13 +1809,16 @@ impl Session {
             }
             AnyMessage::ClassifiedInfoReply(reply) => {
                 self.events
-                    .push_back(Event::ClassifiedInfo(Box::new(classified_info(&reply.data))));
+                    .push_back(Event::ClassifiedInfo(Box::new(classified_info(&reply.data)?)));
             }
             AnyMessage::InventoryDescendents(reply) => {
                 let folders: Vec<InventoryFolder> =
                     reply.folder_data.iter().map(inventory_folder).collect();
-                let items: Vec<InventoryItem> =
-                    reply.item_data.iter().map(inventory_item).collect();
+                let items: Vec<InventoryItem> = reply
+                    .item_data
+                    .iter()
+                    .map(inventory_item)
+                    .collect::<Result<_, _>>()?;
                 self.cache_inventory(&folders, &items);
                 self.events.push_back(Event::InventoryDescendents {
                     folder_id: InventoryFolderKey::from(reply.agent_data.folder_id),
@@ -1825,7 +1836,7 @@ impl Session {
                 // several created/updated items into one message, so surface every
                 // entry (and cache each), not just the first.
                 for data in &reply.inventory_data {
-                    let item = inventory_item_from_create(data);
+                    let item = inventory_item_from_create(data)?;
                     self.cache_inventory_item(item.clone());
                     self.events.push_back(Event::InventoryItemCreated {
                         sim_approved: reply.agent_data.sim_approved,
@@ -1840,8 +1851,11 @@ impl Session {
             AnyMessage::BulkUpdateInventory(update) => {
                 let folders: Vec<InventoryFolder> =
                     update.folder_data.iter().map(bulk_update_folder).collect();
-                let items: Vec<InventoryItem> =
-                    update.item_data.iter().map(bulk_update_item).collect();
+                let items: Vec<InventoryItem> = update
+                    .item_data
+                    .iter()
+                    .map(bulk_update_item)
+                    .collect::<Result<_, _>>()?;
                 // Carry each item's async `CallbackID` (when non-zero) so a client
                 // that issued a create/copy can correlate the returned callback id
                 // to the resulting item even though the reply arrived here rather
@@ -2388,15 +2402,20 @@ impl Session {
                     results: reply
                         .query_replies
                         .iter()
-                        .map(|block| DirClassifiedResult {
-                            classified_id: ClassifiedKey::from(block.classified_id),
-                            name: trimmed_string(&block.name),
-                            classified_flags: block.classified_flags,
-                            creation_date: block.creation_date,
-                            expiration_date: block.expiration_date,
-                            price_for_listing: block.price_for_listing,
+                        .map(|block| {
+                            Ok(DirClassifiedResult {
+                                classified_id: ClassifiedKey::from(block.classified_id),
+                                name: trimmed_string(&block.name),
+                                classified_flags: block.classified_flags,
+                                creation_date: block.creation_date,
+                                expiration_date: block.expiration_date,
+                                price_for_listing: crate::types::linden_from_wire(
+                                    "PriceForListing",
+                                    block.price_for_listing,
+                                )?,
+                            })
                         })
-                        .collect(),
+                        .collect::<Result<_, sl_wire::WireError>>()?,
                     status: reply
                         .status_data
                         .first()
@@ -2434,15 +2453,24 @@ impl Session {
                     results: reply
                         .query_replies
                         .iter()
-                        .map(|block| DirLandResult {
-                            parcel_id: ParcelKey::from(block.parcel_id),
-                            name: trimmed_string(&block.name),
-                            auction: block.auction,
-                            for_sale: block.for_sale,
-                            sale_price: block.sale_price,
-                            actual_area: block.actual_area,
+                        .map(|block| {
+                            Ok(DirLandResult {
+                                parcel_id: ParcelKey::from(block.parcel_id),
+                                name: trimmed_string(&block.name),
+                                auction: block.auction,
+                                for_sale: block.for_sale,
+                                sale_price: crate::types::linden_price_from_wire(
+                                    block.for_sale,
+                                    "SalePrice",
+                                    block.sale_price,
+                                )?,
+                                actual_area: crate::types::land_area_from_wire(
+                                    "ActualArea",
+                                    block.actual_area,
+                                )?,
+                            })
                         })
-                        .collect(),
+                        .collect::<Result<_, sl_wire::WireError>>()?,
                 });
             }
             // The results of an `AvatarPickerRequest` (name autocomplete).
@@ -2468,20 +2496,28 @@ impl Session {
                     results: reply
                         .query_data
                         .iter()
-                        .map(|block| PlacesResult {
-                            owner_id: block.owner_id,
-                            name: trimmed_string(&block.name),
-                            description: trimmed_string(&block.desc),
-                            actual_area: block.actual_area,
-                            billable_area: block.billable_area,
-                            flags: block.flags,
-                            global_position: (block.global_x, block.global_y, block.global_z),
-                            sim_name: trimmed_string(&block.sim_name),
-                            snapshot_id: TextureKey::from(block.snapshot_id),
-                            dwell: block.dwell,
-                            price: block.price,
+                        .map(|block| {
+                            Ok(PlacesResult {
+                                owner_id: block.owner_id,
+                                name: trimmed_string(&block.name),
+                                description: trimmed_string(&block.desc),
+                                actual_area: crate::types::land_area_from_wire(
+                                    "ActualArea",
+                                    block.actual_area,
+                                )?,
+                                billable_area: crate::types::land_area_from_wire(
+                                    "BillableArea",
+                                    block.billable_area,
+                                )?,
+                                flags: block.flags,
+                                global_position: (block.global_x, block.global_y, block.global_z),
+                                sim_name: trimmed_string(&block.sim_name),
+                                snapshot_id: TextureKey::from(block.snapshot_id),
+                                dwell: block.dwell,
+                                price: crate::types::linden_from_wire("Price", block.price)?,
+                            })
                         })
-                        .collect(),
+                        .collect::<Result<_, sl_wire::WireError>>()?,
                 });
             }
             // The full detail of an event, in reply to an `EventInfoRequest`.
@@ -2535,9 +2571,16 @@ impl Session {
                             everyone: Permissions::from_bits(data.everyone_mask),
                             next_owner: Permissions::from_bits(data.next_owner_mask),
                         },
-                        ownership_cost: data.ownership_cost,
+                        ownership_cost: crate::types::linden_from_wire(
+                            "OwnershipCost",
+                            data.ownership_cost,
+                        )?,
                         sale_type: data.sale_type,
-                        sale_price: data.sale_price,
+                        sale_price: crate::types::linden_price_from_wire(
+                            data.sale_type != 0,
+                            "SalePrice",
+                            data.sale_price,
+                        )?,
                         category: data.category,
                         last_owner_id: data.last_owner_id,
                         name: trimmed_string(&data.name),
@@ -2692,7 +2735,11 @@ impl Session {
             }
             AnyMessage::AgentGroupDataUpdate(update) => {
                 self.events.push_back(Event::GroupMemberships(
-                    update.group_data.iter().map(group_membership).collect(),
+                    update
+                        .group_data
+                        .iter()
+                        .map(group_membership)
+                        .collect::<Result<_, _>>()?,
                 ));
             }
             AnyMessage::GroupMembersReply(reply) => {
@@ -2700,7 +2747,11 @@ impl Session {
                     group_id: GroupKey::from(reply.group_data.group_id),
                     request_id: reply.group_data.request_id,
                     member_count: reply.group_data.member_count,
-                    members: reply.member_data.iter().map(group_member).collect(),
+                    members: reply
+                        .member_data
+                        .iter()
+                        .map(group_member)
+                        .collect::<Result<_, _>>()?,
                 });
             }
             AnyMessage::GroupRoleDataReply(reply) => {
@@ -2737,7 +2788,7 @@ impl Session {
                 self.events
                     .push_back(Event::GroupProfileReceived(Box::new(group_profile(
                         &reply.group_data,
-                    ))));
+                    )?)));
             }
             AnyMessage::GroupNoticesListReply(reply) => {
                 self.events.push_back(Event::GroupNotices {
@@ -2747,7 +2798,7 @@ impl Session {
             }
             AnyMessage::GroupAccountSummaryReply(reply) => {
                 self.events
-                    .push_back(Event::GroupAccountSummary(group_account_summary(reply)));
+                    .push_back(Event::GroupAccountSummary(group_account_summary(reply)?));
             }
             AnyMessage::GroupAccountDetailsReply(reply) => {
                 self.events
@@ -7606,7 +7657,7 @@ impl Session {
         &mut self,
         local_id: ScopedObjectId,
         sale_type: SaleType,
-        sale_price: i32,
+        sale_price: Option<LindenAmount>,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit_for_scope(local_id.circuit)?;

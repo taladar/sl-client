@@ -22,8 +22,8 @@ use std::time::Duration;
 
 use sl_client_tokio::{
     AgentKey, Client, Command, CreateGroupParams, DisconnectReason, Error, Event, GroupRoleChange,
-    GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, LoginParams, LoginRequest,
-    TextureKey, Throttle, Uuid, group_powers,
+    GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, LindenAmount, LoginParams,
+    LoginRequest, TextureKey, Throttle, Uuid, group_powers,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -99,7 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         charter: "throwaway group for #31 testing".to_owned(),
                         show_in_list: false,
                         insignia_id: TextureKey::from(Uuid::nil()),
-                        membership_fee: 0,
+                        membership_fee: LindenAmount(0),
                         open_enrollment: true,
                         allow_publish: false,
                         mature_publish: false,

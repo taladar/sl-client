@@ -2,9 +2,12 @@
 
 use sl_types::key::{GroupKey, ObjectKey, OwnerKey, ParcelKey, TextureKey};
 use sl_types::lsl::Vector;
+use sl_types::money::LindenAmount;
 use sl_wire::ParcelFlags;
 use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
 use uuid::Uuid;
+
+use crate::types::LandArea;
 
 /// How many parcels a `ParcelProperties` reply describes, the `RequestResult`
 /// field. A "not found / no access" reply arrives as [`NoData`](Self::NoData)
@@ -183,15 +186,15 @@ pub struct ParcelInfo {
     /// When the parcel was claimed, as a Unix timestamp (`time_t`).
     pub claim_date: i32,
     /// The price paid to claim the parcel, in L$.
-    pub claim_price: i32,
+    pub claim_price: LindenAmount,
     /// The parcel's rent price, in L$.
-    pub rent_price: i32,
+    pub rent_price: LindenAmount,
     /// The minimum corner of the parcel's axis-aligned bounding box, in metres.
     pub aabb_min: (f32, f32, f32),
     /// The maximum corner of the parcel's axis-aligned bounding box, in metres.
     pub aabb_max: (f32, f32, f32),
     /// The parcel area in square metres.
-    pub area: i32,
+    pub area: LandArea,
     /// One bit per 4×4 m region square, marking which squares belong to this
     /// parcel (row-major, least-significant-bit first).
     pub bitmap: Vec<u8>,
@@ -222,7 +225,7 @@ pub struct ParcelInfo {
     /// The raw `ParcelFlags` bitfield (decode with [`sl_wire::ParcelFlags`]).
     pub raw_parcel_flags: u32,
     /// The parcel's sale price, in L$.
-    pub sale_price: i32,
+    pub sale_price: Option<LindenAmount>,
     /// The parcel's name.
     pub name: String,
     /// The parcel's description.
@@ -243,7 +246,7 @@ pub struct ParcelInfo {
     /// The parcel's snapshot texture id (nil if none).
     pub snapshot_id: TextureKey,
     /// The price of a parcel pass, in L$.
-    pub pass_price: i32,
+    pub pass_price: LindenAmount,
     /// How many hours a parcel pass lasts.
     pub pass_hours: f32,
     /// The teleport-landing location within the parcel, in region metres.
@@ -607,7 +610,7 @@ pub struct ParcelUpdate {
     /// The parcel flags bitfield to set.
     pub parcel_flags: ParcelFlags,
     /// The sale price in L$ (when [`ParcelFlags::FOR_SALE`] is set).
-    pub sale_price: i32,
+    pub sale_price: Option<LindenAmount>,
     /// The parcel name.
     pub name: String,
     /// The parcel description.
@@ -623,7 +626,7 @@ pub struct ParcelUpdate {
     /// The group the parcel is set to.
     pub group_id: GroupKey,
     /// The price of a parcel pass in L$.
-    pub pass_price: i32,
+    pub pass_price: LindenAmount,
     /// How many hours a parcel pass lasts.
     pub pass_hours: f32,
     /// The parcel's search category.
@@ -645,7 +648,7 @@ impl Default for ParcelUpdate {
         Self {
             local_id: RegionLocalParcelId(0),
             parcel_flags: ParcelFlags::from_bits(0),
-            sale_price: 0,
+            sale_price: None,
             name: String::new(),
             description: String::new(),
             music_url: String::new(),
@@ -653,7 +656,7 @@ impl Default for ParcelUpdate {
             media_id: TextureKey::from(Uuid::nil()),
             media_auto_scale: false,
             group_id: GroupKey::from(Uuid::nil()),
-            pass_price: 0,
+            pass_price: LindenAmount(0),
             pass_hours: 0.0,
             category: ParcelCategory::None,
             auth_buyer_id: Uuid::nil(),
@@ -765,9 +768,9 @@ pub struct ParcelDetails {
     /// The parcel description.
     pub description: String,
     /// The actual area in m².
-    pub actual_area: i32,
+    pub actual_area: LandArea,
     /// The billable area in m².
-    pub billable_area: i32,
+    pub billable_area: LandArea,
     /// The packed parcel flags byte (a condensed subset of the full
     /// [`ParcelFlags`](sl_wire::ParcelFlags)).
     pub flags: u8,
@@ -784,7 +787,7 @@ pub struct ParcelDetails {
     /// The parcel's dwell (traffic) value.
     pub dwell: f32,
     /// The sale price in L$ (when for sale).
-    pub sale_price: i32,
+    pub sale_price: Option<LindenAmount>,
     /// The auction id (non-zero when the parcel is up for auction).
     pub auction_id: i32,
 }
@@ -796,8 +799,8 @@ impl Default for ParcelDetails {
             owner_id: Uuid::nil(),
             name: String::new(),
             description: String::new(),
-            actual_area: 0,
-            billable_area: 0,
+            actual_area: LandArea(0),
+            billable_area: LandArea(0),
             flags: 0,
             global_x: 0.0,
             global_y: 0.0,
@@ -805,7 +808,7 @@ impl Default for ParcelDetails {
             sim_name: String::new(),
             snapshot_id: TextureKey::from(Uuid::nil()),
             dwell: 0.0,
-            sale_price: 0,
+            sale_price: None,
             auction_id: 0,
         }
     }

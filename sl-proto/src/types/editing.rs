@@ -4,6 +4,7 @@ use super::pcode;
 use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
+use sl_types::money::LindenAmount;
 use sl_wire::Permissions5;
 use sl_wire::RegionLocalObjectId;
 use uuid::Uuid;
@@ -618,14 +619,14 @@ impl ProductType {
 /// [`ObjectPropertiesFamily`](crate::ObjectPropertiesFamily) or
 /// [`ObjectProperties`](crate::ObjectProperties)); the simulator rejects a
 /// mismatch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObjectBuyItem {
     /// The object's region-local id (the root prim).
     pub local_id: RegionLocalObjectId,
     /// How the object is offered for sale.
     pub sale_type: SaleType,
-    /// The advertised sale price, in L$.
-    pub sale_price: i32,
+    /// The advertised sale price, in L$ (must match what the object advertises).
+    pub sale_price: LindenAmount,
 }
 
 /// The parameters for rezzing an in-world object out of an embedded notecard
@@ -710,8 +711,10 @@ pub struct RestoreItem {
     pub flags: u32,
     /// How the item is offered for sale.
     pub sale_type: SaleType,
-    /// The sale price, in L$.
-    pub sale_price: i32,
+    /// The asking price in L$ when the item is for sale, or `None` when it is
+    /// not (`sale_type == SaleType::NotForSale`). A for-sale item may still be
+    /// free (`Some(LindenAmount(0))`).
+    pub sale_price: Option<LindenAmount>,
     /// The item name.
     pub name: String,
     /// The item description.

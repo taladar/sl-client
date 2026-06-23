@@ -59,10 +59,10 @@ pub use sl_proto::{
     GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
     InstantMessage, InterestsUpdate, InventoryCallbackId, InventoryFolder, InventoryFolderKey,
     InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryType, Key,
-    Kilobits, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LoadUrlRequest,
-    LoginAccount, LoginParams, LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
-    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
-    MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance,
+    Kilobits, LandArea, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount,
+    LoadUrlRequest, LoginAccount, LoginParams, LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE,
+    MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
+    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance,
     MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
     NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings,
     ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties, ObjectTransform,
@@ -1386,7 +1386,7 @@ fn advance_running(
                 sale_price,
             } => {
                 session
-                    .set_object_for_sale(*local_id, *sale_type, *sale_price, now)
+                    .set_object_for_sale(*local_id, *sale_type, sale_price.clone(), now)
                     .ok();
             }
             Command::SetObjectCategory { local_id, category } => {

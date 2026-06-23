@@ -70,7 +70,7 @@ pub use types::{
     GroupNoticeAttachment, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey,
     GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, GroupVote,
     GroupVoteHistoryItem, ImDialog, ImageCodec, InstantMessage, InterestsUpdate, InventoryFolder,
-    InventoryItem, InventoryItemOrFolderKey, InventoryOffer, InventoryType, Kilobits,
+    InventoryItem, InventoryItemOrFolderKey, InventoryOffer, InventoryType, Kilobits, LandArea,
     LandSearchType, LandStatItem, LandStatReportType, LandingType, LightData, LightImage,
     LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, LookAtType, MapItem, MapItemType,
     MapLayer, MapRegionInfo, MapRequestFlags, Material, Maturity, MeanCollision, MeanCollisionType,

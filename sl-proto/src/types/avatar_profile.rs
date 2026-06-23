@@ -4,6 +4,7 @@ use super::Maturity;
 use sl_types::key::{
     AgentKey, ClassifiedKey, FriendKey, GroupKey, InventoryFolderKey, ParcelKey, TextureKey,
 };
+use sl_types::money::LindenAmount;
 use uuid::Uuid;
 
 /// An avatar's profile properties, parsed from `AvatarPropertiesReply`.
@@ -151,7 +152,7 @@ pub struct ClassifiedInfo {
     /// The classified flags bitfield (e.g. mature, auto-renew).
     pub classified_flags: u8,
     /// The amount paid to list this classified (L$).
-    pub price_for_listing: i32,
+    pub price_for_listing: LindenAmount,
 }
 
 /// An update to the agent's own profile, sent via
@@ -277,7 +278,7 @@ pub struct ClassifiedUpdate {
     /// The classified flags bitfield (e.g. mature, auto-renew).
     pub classified_flags: u8,
     /// The amount to pay to list this classified (L$).
-    pub price_for_listing: i32,
+    pub price_for_listing: LindenAmount,
 }
 
 impl Default for ClassifiedUpdate {
@@ -291,7 +292,7 @@ impl Default for ClassifiedUpdate {
             snapshot_id: TextureKey::from(Uuid::nil()),
             pos_global: (0.0, 0.0, 0.0),
             classified_flags: 0,
-            price_for_listing: 0,
+            price_for_listing: LindenAmount(0),
         }
     }
 }

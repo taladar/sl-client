@@ -6,6 +6,7 @@ use sl_types::key::{
 };
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
+use sl_types::money::LindenAmount;
 use sl_wire::Permissions5;
 use sl_wire::ReflectionProbeFlags;
 use sl_wire::RegionHandle;
@@ -677,11 +678,13 @@ pub struct ObjectProperties {
     /// The base / owner / group / everyone / next-owner permission masks.
     pub permissions: Permissions5,
     /// The ownership cost, in L$.
-    pub ownership_cost: i32,
+    pub ownership_cost: LindenAmount,
     /// The sale type (`SALE_TYPE_*`).
     pub sale_type: u8,
-    /// The sale price, in L$.
-    pub sale_price: i32,
+    /// The asking price in L$ when the object is for sale, or `None` when it is
+    /// not (`sale_type == SALE_TYPE_NOT`). A for-sale object may still be free
+    /// (`Some(LindenAmount(0))`).
+    pub sale_price: Option<LindenAmount>,
     /// The object category code.
     pub category: u32,
     /// The task-inventory serial; bumps whenever the object's contents change,
@@ -738,11 +741,13 @@ pub struct ObjectPropertiesFamily {
     /// The base / owner / group / everyone / next-owner permission masks.
     pub permissions: Permissions5,
     /// The ownership cost, in L$.
-    pub ownership_cost: i32,
+    pub ownership_cost: LindenAmount,
     /// The sale type (`SALE_TYPE_*`).
     pub sale_type: u8,
-    /// The sale price, in L$.
-    pub sale_price: i32,
+    /// The asking price in L$ when the object is for sale, or `None` when it is
+    /// not (`sale_type == SALE_TYPE_NOT`). A for-sale object may still be free
+    /// (`Some(LindenAmount(0))`).
+    pub sale_price: Option<LindenAmount>,
     /// The object category code.
     pub category: u32,
     /// The previous owner's id.

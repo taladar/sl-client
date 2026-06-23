@@ -11,8 +11,9 @@
 //! autocomplete behind the avatar picker, and `PlacesQuery` (distinct from the
 //! directory) lists an agent's or group's land holdings.
 
-use crate::types::ParcelCategory;
+use crate::types::{LandArea, ParcelCategory};
 use sl_types::key::{AgentKey, ClassifiedKey, GroupKey, ParcelKey, TextureKey};
+use sl_types::money::LindenAmount;
 use uuid::Uuid;
 
 /// The directory-query flags (`DFQ_*`), shared by every `Dir*Query` and
@@ -262,7 +263,7 @@ pub struct DirClassifiedResult {
     /// When the classified expires, as a Unix timestamp (seconds).
     pub expiration_date: u32,
     /// The weekly L$ the owner pays to list the classified.
-    pub price_for_listing: i32,
+    pub price_for_listing: LindenAmount,
 }
 
 /// One place matched by a [`DirPlacesQuery`](crate::Command::DirPlacesQuery),
@@ -293,10 +294,12 @@ pub struct DirLandResult {
     pub auction: bool,
     /// Whether the parcel is for sale.
     pub for_sale: bool,
-    /// The parcel's sale price, in L$.
-    pub sale_price: i32,
+    /// The parcel's asking price in L$ when [`for_sale`](Self::for_sale), or
+    /// `None` when it is not for sale. A for-sale parcel may still be free
+    /// (`Some(LindenAmount(0))`).
+    pub sale_price: Option<LindenAmount>,
     /// The parcel's area, in square metres.
-    pub actual_area: i32,
+    pub actual_area: LandArea,
 }
 
 /// One name matched by an [`AvatarPickerRequest`](crate::Command::AvatarPickerRequest),
@@ -324,9 +327,9 @@ pub struct PlacesResult {
     /// The parcel's description.
     pub description: String,
     /// The parcel's actual area, in square metres.
-    pub actual_area: i32,
+    pub actual_area: LandArea,
     /// The parcel's billable area, in square metres.
-    pub billable_area: i32,
+    pub billable_area: LandArea,
     /// The parcel flags byte.
     pub flags: u8,
     /// The parcel's global position, in metres (`(x, y, z)`).
@@ -338,7 +341,7 @@ pub struct PlacesResult {
     /// The parcel's dwell (traffic) score.
     pub dwell: f32,
     /// The parcel's price, in L$.
-    pub price: i32,
+    pub price: LindenAmount,
 }
 
 /// The full detail of a single in-world event, carried in an

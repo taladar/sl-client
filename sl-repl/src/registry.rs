@@ -983,7 +983,7 @@ fn build_classified_update(
         snapshot_id: TextureKey::from(args.uuid_or_nil(ctx, "snapshot_id", 5)?),
         pos_global: global_or_zero(args, ctx, "pos_global", 6)?,
         classified_flags: args.parse_or(ctx, "classified_flags", 7, "u8", 0)?,
-        price_for_listing: args.parse_or(ctx, "price_for_listing", 8, "i32", 0)?,
+        price_for_listing: LindenAmount(args.parse_or(ctx, "price_for_listing", 8, "u64", 0)?),
     })
 }
 
@@ -997,7 +997,7 @@ fn build_create_group_params(
         charter: args.str_or(ctx, "charter", 1, "")?,
         show_in_list: args.bool_or(ctx, "show_in_list", 2, true)?,
         insignia_id: TextureKey::from(args.uuid_or_nil(ctx, "insignia_id", 3)?),
-        membership_fee: args.parse_or(ctx, "membership_fee", 4, "i32", 0)?,
+        membership_fee: LindenAmount(args.parse_or(ctx, "membership_fee", 4, "u64", 0)?),
         open_enrollment: args.bool_or(ctx, "open_enrollment", 5, false)?,
         allow_publish: args.bool_or(ctx, "allow_publish", 6, false)?,
         mature_publish: args.bool_or(ctx, "mature_publish", 7, false)?,
@@ -1046,7 +1046,13 @@ fn build_inventory_item(args: &Args, ctx: &dyn ReplContext) -> Result<InventoryI
         inv_type: args.parse_or(ctx, "inv_type", 6, "i8", 0)?,
         flags: args.parse_or(ctx, "flags", 7, "u32", 0)?,
         sale_type: args.parse_or(ctx, "sale_type", 8, "u8", 0)?,
-        sale_price: args.parse_or(ctx, "sale_price", 9, "i32", 0)?,
+        sale_price: Some(LindenAmount(args.parse_or(
+            ctx,
+            "sale_price",
+            9,
+            "u64",
+            0,
+        )?)),
         creation_date: args.parse_or(ctx, "creation_date", 10, "i32", 0)?,
         owner,
         last_owner_id: args.uuid_or_nil(ctx, "last_owner_id", 12)?,
@@ -1073,7 +1079,13 @@ fn build_parcel_update(args: &Args, ctx: &dyn ReplContext) -> Result<ParcelUpdat
     Ok(ParcelUpdate {
         local_id: RegionLocalParcelId(args.req_parse(ctx, "local_id", 0, "i32")?),
         parcel_flags: ParcelFlags::from_bits(args.parse_or(ctx, "parcel_flags", 1, "u32", 0)?),
-        sale_price: args.parse_or(ctx, "sale_price", 2, "i32", 0)?,
+        sale_price: Some(LindenAmount(args.parse_or(
+            ctx,
+            "sale_price",
+            2,
+            "u64",
+            0,
+        )?)),
         name: args.str_or(ctx, "name", 3, "")?,
         description: args.str_or(ctx, "description", 4, "")?,
         music_url: args.str_or(ctx, "music_url", 5, "")?,
@@ -1081,7 +1093,7 @@ fn build_parcel_update(args: &Args, ctx: &dyn ReplContext) -> Result<ParcelUpdat
         media_id: TextureKey::from(args.uuid_or_nil(ctx, "media_id", 7)?),
         media_auto_scale: args.bool_or(ctx, "media_auto_scale", 8, false)?,
         group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 9)?),
-        pass_price: args.parse_or(ctx, "pass_price", 10, "i32", 0)?,
+        pass_price: LindenAmount(args.parse_or(ctx, "pass_price", 10, "u64", 0)?),
         pass_hours: args.parse_or(ctx, "pass_hours", 11, "f32", 0.0)?,
         category: ParcelCategory::from_u8(args.parse_or(ctx, "category", 12, "u8", 0)?),
         auth_buyer_id: args.uuid_or_nil(ctx, "auth_buyer_id", 13)?,
@@ -3079,7 +3091,7 @@ fn all_specs() -> Vec<CommandSpec> {
                 Ok(Command::SetObjectForSale {
                     local_id: scoped_object(ctx, args.req_parse(ctx, "local_id", 0, "u32")?)?,
                     sale_type: enum_arg(args, ctx, "sale_type", 1, parse_sale_type)?,
-                    sale_price: args.req_parse(ctx, "sale_price", 2, "i32")?,
+                    sale_price: Some(LindenAmount(args.req_parse(ctx, "sale_price", 2, "u64")?)),
                 })
             },
         },
@@ -3145,11 +3157,11 @@ fn all_specs() -> Vec<CommandSpec> {
                             "objects",
                             record_field("objects", &record, 1)?,
                         )?,
-                        sale_price: args::literal(
+                        sale_price: LindenAmount(args::literal(
                             "objects",
                             record_field("objects", &record, 2)?,
-                            "i32",
-                        )?,
+                            "u64",
+                        )?),
                     });
                 }
                 Ok(Command::BuyObject {
@@ -3325,7 +3337,13 @@ fn all_specs() -> Vec<CommandSpec> {
                             parse_sale_type,
                             SaleType::NotForSale,
                         )?,
-                        sale_price: args.parse_or(ctx, "sale_price", 115, "i32", 0)?,
+                        sale_price: Some(LindenAmount(args.parse_or(
+                            ctx,
+                            "sale_price",
+                            115,
+                            "u64",
+                            0,
+                        )?)),
                         name: args.str_or(ctx, "name", 116, "")?,
                         description: args.str_or(ctx, "description", 117, "")?,
                         creation_date: args.parse_or(ctx, "creation_date", 118, "i32", 0)?,
@@ -4394,8 +4412,8 @@ mod tests {
 
     use sl_proto::{
         AbuseReportType, AgentPreferences, AssetType, ChatChannel, ChatType, CircuitId, Command,
-        ControlFlags, FriendRights, GroupKey, InventoryKey, LandStatReportType, MapItemType,
-        MovementMode, ObjectBuyItem, ObjectKey, RegionHandle, RegionLocalObjectId,
+        ControlFlags, FriendRights, GroupKey, InventoryKey, LandStatReportType, LindenAmount,
+        MapItemType, MovementMode, ObjectBuyItem, ObjectKey, RegionHandle, RegionLocalObjectId,
         RegionLocalParcelId, SaleType, ScopedObjectId, ScopedParcelId, Uuid,
     };
 
@@ -4841,7 +4859,7 @@ mod tests {
             Ok(Command::BuyObject { objects, .. })
                 if matches!(
                     objects.first(),
-                    Some(ObjectBuyItem { local_id: RegionLocalObjectId(99), sale_type: SaleType::Copy, sale_price: 250 })
+                    Some(ObjectBuyItem { local_id: RegionLocalObjectId(99), sale_type: SaleType::Copy, sale_price: LindenAmount(250) })
                 )
         ));
     }

@@ -10,9 +10,9 @@
 use std::time::Duration;
 
 use sl_client_tokio::{
-    Client, Command, DeRezDestination, DisconnectReason, Event, InventoryFolderKey, LoginParams,
-    LoginRequest, ObjectTransform, PrimShape, SaleType, ScopedObjectId, Throttle, Uuid, Vector,
-    pcode,
+    Client, Command, DeRezDestination, DisconnectReason, Event, InventoryFolderKey, LindenAmount,
+    LoginParams, LoginRequest, ObjectTransform, PrimShape, SaleType, ScopedObjectId, Throttle,
+    Uuid, Vector, pcode,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -121,7 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .send(Command::SetObjectForSale {
                             local_id,
                             sale_type: SaleType::Copy,
-                            sale_price: 10,
+                            sale_price: Some(LindenAmount(10)),
                         })
                         .await
                         .ok();
@@ -174,7 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Event::ObjectProperties(props) => {
                 info!(
-                    "object properties: name={:?} desc={:?} sale_type={} price={}",
+                    "object properties: name={:?} desc={:?} sale_type={} price={:?}",
                     props.name, props.description, props.sale_type, props.sale_price
                 );
                 info!(

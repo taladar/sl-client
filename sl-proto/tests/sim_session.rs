@@ -18,15 +18,15 @@ mod test {
         GestureActivation, GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
         GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupKey,
         GroupName, GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryKey,
-        LandSearchType, LandStatItem, LandStatReportType, LoginParams, MapItem, MapItemType,
-        MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
-        MovementMode, NotecardRez, ObjectBuyItem, ObjectKey, ObjectPropertiesFamily,
-        ParcelCategory, ParcelDetails, ParcelKey, ParcelObjectOwner, ParcelReturnType,
-        Permissions5, PingId, PlacesResult, PointAtType, Postcard, ProductType, RegionHandle,
-        RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment,
-        SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ServerEvent,
-        Session, SimSession, TelehubInfo, TextureKey, Throttle, Transmit, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
+        LandArea, LandSearchType, LandStatItem, LandStatReportType, LindenAmount, LoginParams,
+        MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision,
+        MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem, ObjectKey,
+        ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelKey, ParcelObjectOwner,
+        ParcelReturnType, Permissions5, PingId, PlacesResult, PointAtType, Postcard, ProductType,
+        RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RestoreItem,
+        RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
+        ScriptControlAction, ServerEvent, Session, SimSession, TelehubInfo, TextureKey, Throttle,
+        Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
         parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
@@ -703,7 +703,7 @@ mod test {
                 classified_flags: 0,
                 creation_date: 1,
                 expiration_date: 2,
-                price_for_listing: 50,
+                price_for_listing: LindenAmount(50),
             }],
             0,
             now,
@@ -727,8 +727,8 @@ mod test {
                 name: "For Sale".to_owned(),
                 auction: false,
                 for_sale: true,
-                sale_price: 1000,
-                actual_area: 1024,
+                sale_price: Some(LindenAmount(1000)),
+                actual_area: LandArea(1024),
             }],
             now,
         )?;
@@ -748,14 +748,14 @@ mod test {
                 owner_id: uuid::Uuid::from_u128(0xF17),
                 name: "Holding".to_owned(),
                 description: "mine".to_owned(),
-                actual_area: 512,
-                billable_area: 512,
+                actual_area: LandArea(512),
+                billable_area: LandArea(512),
                 flags: 0,
                 global_position: (1000.0, 2000.0, 30.0),
                 sim_name: "Region".to_owned(),
                 snapshot_id: TextureKey::from(uuid::Uuid::nil()),
                 dwell: 3.0,
-                price: 0,
+                price: LindenAmount(0),
             }],
             now,
         )?;
@@ -814,7 +814,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a DirLandReply client event")?;
-        assert_eq!(land.first().ok_or("land")?.sale_price, 1000);
+        assert_eq!(
+            land.first().ok_or("land")?.sale_price,
+            Some(LindenAmount(1000))
+        );
 
         let picker = events
             .iter()
@@ -935,7 +938,7 @@ mod test {
             &[ObjectBuyItem {
                 local_id: RegionLocalObjectId(99),
                 sale_type: SaleType::Copy,
-                sale_price: 250,
+                sale_price: LindenAmount(250),
             }],
             now,
         )?;
@@ -962,7 +965,7 @@ mod test {
                 inv_type: 6,
                 flags: 0,
                 sale_type: SaleType::NotForSale,
-                sale_price: 0,
+                sale_price: Some(LindenAmount(0)),
                 name: "Cube".to_owned(),
                 description: String::new(),
                 creation_date: 0,
@@ -1084,9 +1087,9 @@ mod test {
                 ))),
                 group: None,
                 permissions: Permissions5::empty(),
-                ownership_cost: 0,
+                ownership_cost: LindenAmount(0),
                 sale_type: SaleType::Copy.to_code(),
-                sale_price: 250,
+                sale_price: Some(LindenAmount(250)),
                 category: 0,
                 last_owner_id: uuid::Uuid::nil(),
                 name: "Vendor".to_owned(),
@@ -1123,7 +1126,7 @@ mod test {
             sl_proto::OwnerKey::Agent(sl_proto::AgentKey::from(uuid::Uuid::from_u128(0x0E)))
         );
         assert_eq!(properties.group, None);
-        assert_eq!(properties.sale_price, 250);
+        assert_eq!(properties.sale_price, Some(LindenAmount(250)));
         assert_eq!(properties.name, "Vendor");
         Ok(())
     }
@@ -1226,8 +1229,8 @@ mod test {
                 owner_id: uuid::Uuid::from_u128(0x55),
                 name: "Sunny Plaza".to_owned(),
                 description: "A nice spot".to_owned(),
-                actual_area: 512,
-                billable_area: 480,
+                actual_area: LandArea(512),
+                billable_area: LandArea(480),
                 flags: 0x4,
                 global_x: 256_000.0,
                 global_y: 257_024.0,
@@ -1235,7 +1238,7 @@ mod test {
                 sim_name: "Default Region".to_owned(),
                 snapshot_id: TextureKey::from(uuid::Uuid::from_u128(0x77)),
                 dwell: 88.0,
-                sale_price: 1000,
+                sale_price: Some(LindenAmount(1000)),
                 auction_id: 0,
             },
             now,
@@ -1263,7 +1266,7 @@ mod test {
             details.parcel_id,
             ParcelKey::from(uuid::Uuid::from_u128(0x00C0_FFEE))
         );
-        assert_eq!(details.sale_price, 1000);
+        assert_eq!(details.sale_price, Some(LindenAmount(1000)));
         Ok(())
     }
 
@@ -1549,18 +1552,18 @@ mod test {
             current_interval: 0,
             start_date: "2026-06-01".to_owned(),
             balance: 1234,
-            total_credits: 50,
-            total_debits: 20,
-            object_tax_current: 1,
-            light_tax_current: 2,
-            land_tax_current: 3,
-            group_tax_current: 4,
-            parcel_dir_fee_current: 5,
-            object_tax_estimate: 6,
-            light_tax_estimate: 7,
-            land_tax_estimate: 8,
-            group_tax_estimate: 9,
-            parcel_dir_fee_estimate: 10,
+            total_credits: LindenAmount(50),
+            total_debits: LindenAmount(20),
+            object_tax_current: LindenAmount(1),
+            light_tax_current: LindenAmount(2),
+            land_tax_current: LindenAmount(3),
+            group_tax_current: LindenAmount(4),
+            parcel_dir_fee_current: LindenAmount(5),
+            object_tax_estimate: LindenAmount(6),
+            light_tax_estimate: LindenAmount(7),
+            land_tax_estimate: LindenAmount(8),
+            group_tax_estimate: LindenAmount(9),
+            parcel_dir_fee_estimate: LindenAmount(10),
             non_exempt_members: 11,
             last_tax_date: "2026-05-25".to_owned(),
             tax_date: "2026-06-08".to_owned(),
