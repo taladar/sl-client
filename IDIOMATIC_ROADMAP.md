@@ -995,9 +995,11 @@ attachment::*}`. Adopt these more, selectively by semantic role:
       `GroupAccountTransaction.amount` — wrapping at the codec boundary only
       (decode `LindenBalance::from_i32`, encode `linden_balance_to_wire`) so the
       wire i32 is byte-identical. LEFT RAW (deliberately, NOT signed L$):
-      `EventInfo.amount` (u32 cover charge), the `MoneyTransaction` wire amount
-      (`LindenAmount` family), `ResourceAmount.amount` (script memory/url
-      count). Re-exported `LindenBalance`+`NegativeBalanceError` through
+      the `MoneyTransaction` wire-block amount (the typed
+      `MoneyTransaction.amount` is already `LindenAmount`; only the raw
+      wire-block integer stays raw, like every wire field) and
+      `ResourceAmount.amount` (script memory/url count, not money). Re-exported
+      `LindenBalance`+`NegativeBalanceError` through
       `sl-proto`/`sl-client-tokio`/`sl-client-bevy` (parity). REPL/survey only
       label these events (no field access) → no downstream change. Book
       `content/economy.md` updated (replaced the "awaiting a `LindenBalance`
@@ -1007,6 +1009,19 @@ attachment::*}`. Adopt these more, selectively by semantic role:
       out-of-`i32`-range encode → `None`); lifecycle + `sim_session` round-trip
       suites updated. Build+clippy(`--workspace --all-targets`, 0 warnings)+all
       tests+`cargo doc -D warnings`+mdbook green. NO `sl-types` touched.
+      **Follow-up (same session, user-spotted `LindenAmount`-sweep MISS):**
+      `EventInfo.amount` was raw `u32` but is documented as the event cover
+      charge in L$ (wire `Amount` is `U32`, non-negative). Typed it
+      `Option<LindenAmount>` gated on the companion `cover` flag (user picked
+      the `Option`-gating shape, mirroring the `sale_price` precedent): `Some`
+      iff `cover != 0`, `None` otherwise, `None` ⇒ the `0` no-cover wire
+      sentinel. New `pub(crate)` boundary helpers
+      `linden_cover_from_wire(cover, amount)` (total — `U32` is always in range)
+      / `linden_cover_to_wire(field, amount)` (rejects an amount above the `u32`
+      wire range) in `types.rs`; wire bytes byte-identical. Book
+      `content/search.md` updated; +1 unit test
+      (`linden_cover_gates_on_cover_flag`); lifecycle + `sim_session` suites
+      updated. No downstream change (REPL/survey only label `EventInfoReply`).
 - [ ] `map::RegionName(String)` — only for genuine *region* name fields (region
   info / map block replies / teleport). Audit each `name: String` site first; do
   NOT touch person/object/inventory names.

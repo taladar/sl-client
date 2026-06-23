@@ -372,9 +372,10 @@ pub struct EventInfo {
     /// Whether a cover charge applies (non-zero) and, with it, the legacy cover
     /// flag the dataserver sets.
     pub cover: u32,
-    /// The cover charge, in L$ (meaningful only when [`cover`](Self::cover) is
-    /// non-zero).
-    pub amount: u32,
+    /// The cover charge, in L$: `Some` when a cover charge applies (i.e.
+    /// [`cover`](Self::cover) is non-zero), `None` otherwise. On the wire `None`
+    /// is the `0` no-cover sentinel.
+    pub amount: Option<LindenAmount>,
     /// The name of the region the event is in.
     pub sim_name: String,
     /// The event's global position, in metres (`(x, y, z)`).

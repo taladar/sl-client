@@ -187,6 +187,49 @@ pub(crate) fn linden_price_to_wire(
     }
 }
 
+/// Decode an optional L$ event *cover charge* from its unsigned 32-bit wire
+/// field, gated on the companion `cover` flag.
+///
+/// An event carries a cover charge only when its `cover` field is non-zero; a
+/// zero `cover` means no charge, so the amount maps to `None` regardless of the
+/// wire value (the dataserver sends `0`). The wire field is unsigned, so — unlike
+/// the signed price fields — every value is in range and the decode is total.
+/// The inverse on encode is [`linden_cover_to_wire`].
+pub(crate) fn linden_cover_from_wire(
+    cover: u32,
+    amount: u32,
+) -> Option<sl_types::money::LindenAmount> {
+    if cover == 0 {
+        None
+    } else {
+        Some(sl_types::money::LindenAmount(u64::from(amount)))
+    }
+}
+
+/// Encode an optional L$ event cover charge back to its unsigned 32-bit wire
+/// field: the amount when `Some`, or `0` (the no-cover wire sentinel) when
+/// `None`.
+///
+/// An amount that exceeds the unsigned 32-bit range the wire field can hold is
+/// rejected with
+/// [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) rather
+/// than clamped, so an out-of-range value fails the send loudly.
+pub(crate) fn linden_cover_to_wire(
+    field: &'static str,
+    amount: Option<&sl_types::money::LindenAmount>,
+) -> Result<u32, sl_wire::WireError> {
+    match amount {
+        Some(charge) => {
+            let sl_types::money::LindenAmount(value) = *charge;
+            u32::try_from(value).map_err(|_too_large| sl_wire::WireError::ValueOutOfRange {
+                field,
+                value: i64::try_from(value).unwrap_or(i64::MAX),
+            })
+        }
+        None => Ok(0),
+    }
+}
+
 /// Decode a non-negative land-area wire field (a signed 32-bit count of square
 /// metres) into a [`LandArea`].
 ///
@@ -335,8 +378,9 @@ pub use union_key::{AgentOrObjectKey, InventoryItemOrFolderKey, MeshKey, SculptO
 mod owner_codec_tests {
     use super::{
         group_from_wire, group_to_wire, inventory_owner_from_wire, land_area_from_wire,
-        land_area_to_wire, linden_from_wire, linden_price_from_wire, linden_price_to_wire,
-        linden_to_wire, object_owner_from_wire, object_owner_to_wire, owner_key_from_wire,
+        land_area_to_wire, linden_cover_from_wire, linden_cover_to_wire, linden_from_wire,
+        linden_price_from_wire, linden_price_to_wire, linden_to_wire, object_owner_from_wire,
+        object_owner_to_wire, owner_key_from_wire,
     };
     use pretty_assertions::assert_eq;
     use sl_types::key::{AgentKey, GroupKey, OwnerKey};
@@ -382,6 +426,25 @@ mod owner_codec_tests {
             linden_price_to_wire("SalePrice", Some(&LindenAmount(250)))?,
             250
         );
+        Ok(())
+    }
+
+    #[test]
+    fn linden_cover_gates_on_cover_flag() -> Result<(), sl_wire::WireError> {
+        // No cover charge (`cover == 0`) → `None`, regardless of the wire amount.
+        assert_eq!(linden_cover_from_wire(0, 999), None);
+        // A cover charge applies → `Some` (the U32 wire is always in range).
+        assert_eq!(linden_cover_from_wire(1, 0), Some(LindenAmount(0)));
+        assert_eq!(linden_cover_from_wire(1, 50), Some(LindenAmount(50)));
+        // Encode: `None` writes the `0` no-cover sentinel; `Some` writes the
+        // amount.
+        assert_eq!(linden_cover_to_wire("Amount", None)?, 0);
+        assert_eq!(linden_cover_to_wire("Amount", Some(&LindenAmount(50)))?, 50);
+        // An amount beyond the unsigned 32-bit wire range is rejected.
+        assert!(matches!(
+            linden_cover_to_wire("Amount", Some(&LindenAmount(u64::from(u32::MAX) + 1))),
+            Err(sl_wire::WireError::ValueOutOfRange { .. })
+        ));
         Ok(())
     }
 
