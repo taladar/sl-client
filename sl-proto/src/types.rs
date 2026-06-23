@@ -305,8 +305,8 @@ pub use appearance::{
 pub use asset::{Asset, AssetType, ImageCodec, InventoryType, Texture, TransferStatus};
 pub use avatar_profile::{
     AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,
-    ClassifiedInfo, ClassifiedUpdate, Friend, FriendRights, InterestsUpdate, LoginAccount,
-    PickInfo, PickUpdate, ProfileUpdate,
+    ClassifiedCategory, ClassifiedInfo, ClassifiedUpdate, Friend, FriendRights, InterestsUpdate,
+    LoginAccount, PickInfo, PickUpdate, ProfileUpdate,
 };
 pub use chat::{
     ChatAudible, ChatMessage, ChatSource, ChatSourceType, ChatType, ImDialog, InstantMessage,

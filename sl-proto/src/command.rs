@@ -7,19 +7,20 @@
 use crate::scoped_id::{ScopedObjectId, ScopedParcelId};
 use crate::{
     AbuseReport, AgentKey, AgentPreferences, AnyMessage, AssetType, AttachmentMode,
-    AttachmentPoint, Camera, ChatChannel, ChatType, ClassifiedKey, ClassifiedUpdate, ClickAction,
-    ControlFlags, CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags,
-    EstateAccessDelta, EventId, ExperienceKey, ExperiencePermission, ExperienceUpdate, FriendKey,
-    FriendRights, GestureActivation, GroupKey, GroupNoticeAttachment, GroupRoleEdit, GroupRoleKey,
-    GroupRoleMemberChange, IceCandidate, InterestsUpdate, InventoryFolderKey, InventoryItem,
-    InventoryKey, InventoryOffer, InventoryType, LandSearchType, LandStatReportType, LindenAmount,
-    MapItemType, Material, MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MovementMode,
-    MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings,
-    ObjectKey, ObjectTransform, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey,
-    ParcelReturnType, ParcelUpdate, PermissionField, PickUpdate, Postcard, PrimShape,
-    ProfileUpdate, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem,
-    RezAttachment, Rotation, SaleType, ScriptPermissions, TextureKey, Throttle, Uuid, Vector,
-    ViewerEffect, VoiceProvisionRequest, Wearable,
+    AttachmentPoint, Camera, ChatChannel, ChatType, ClassifiedCategory, ClassifiedKey,
+    ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, DeRezDestination, DetachOrder,
+    DirFindFlags, EstateAccessDelta, EventId, ExperienceKey, ExperiencePermission,
+    ExperienceUpdate, FriendKey, FriendRights, GestureActivation, GroupKey, GroupNoticeAttachment,
+    GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, InterestsUpdate,
+    InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandSearchType,
+    LandStatReportType, LindenAmount, MapItemType, Material, MaterialOverrideUpdate, MediaEntry,
+    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
+    ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField,
+    PickUpdate, Postcard, PrimShape, ProfileUpdate, RegionCoordinates, RegionHandle,
+    RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, Rotation, SaleType,
+    ScriptPermissions, TextureKey, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
+    Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1626,8 +1627,9 @@ pub enum Command {
         query_text: String,
         /// Result inclusion/sort flags (the maturity-inclusion and sort bits).
         flags: DirFindFlags,
-        /// The classified category to filter by (`0` for any).
-        category: u32,
+        /// The classified category to filter by
+        /// ([`ClassifiedCategory::AnyCategory`] for any).
+        category: ClassifiedCategory,
         /// The 0-based index of the first result to return (for paging).
         query_start: i32,
     },

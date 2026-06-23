@@ -10,9 +10,9 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AssetType, AttachmentMode, AttachmentPoint, Camera,
-        ChatAudible, ChatChannel, ChatSource, ChatType, ClassifiedKey, ClassifiedUpdate,
-        ClickAction, CoarseLocation, ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame,
-        DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, DisconnectReason,
+        ChatAudible, ChatChannel, ChatSource, ChatType, ClassifiedCategory, ClassifiedKey,
+        ClassifiedUpdate, ClickAction, CoarseLocation, ControlFlags, CreateGroupParams, DayCycle,
+        DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, DisconnectReason,
         EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, EventId,
         FollowCamProperty, FriendKey, FriendRights, GestureActivation, GroupKey,
         GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
@@ -1672,7 +1672,7 @@ mod test {
         assert_eq!(info.name, "Land for rent");
         assert_eq!(info.description, "prime waterfront");
         assert_eq!(info.parcel_name, "Beach Parcel");
-        assert_eq!(info.category, 3);
+        assert_eq!(info.category, ClassifiedCategory::PropertyRental);
         assert_eq!(info.price_for_listing, LindenAmount(50));
         assert_eq!(info.classified_flags, 0x4);
         Ok(())
@@ -1773,7 +1773,7 @@ mod test {
         session.update_classified(
             &ClassifiedUpdate {
                 classified_id: ClassifiedKey::from(classified),
-                category: 3,
+                category: ClassifiedCategory::PropertyRental,
                 name: "New classified".to_owned(),
                 description: "for sale".to_owned(),
                 price_for_listing: LindenAmount(100),

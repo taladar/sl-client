@@ -100,9 +100,9 @@ use crate::session::{
 use crate::types::directory::{EventId, category_from_wire};
 use crate::types::{
     AlertInfo, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatSource,
-    ChatType, CoarseLocation, DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags,
-    DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant, EventInfo,
-    FollowCamPropertyValue, GestureActivation, GroupAccountDetails, GroupAccountSummary,
+    ChatType, ClassifiedCategory, CoarseLocation, DetachOrder, DirClassifiedResult, DirEventResult,
+    DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant,
+    EventInfo, FollowCamPropertyValue, GestureActivation, GroupAccountDetails, GroupAccountSummary,
     GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem,
     InstantMessage, LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType,
     MapLayer, MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NotecardRez,
@@ -447,8 +447,9 @@ pub enum ServerEvent {
         query_text: String,
         /// Result inclusion/sort flags.
         flags: DirFindFlags,
-        /// The classified category to filter by (`0` for any).
-        category: u32,
+        /// The classified category to filter by
+        /// ([`ClassifiedCategory::AnyCategory`] for any).
+        category: ClassifiedCategory,
         /// The 0-based index of the first result the client wants.
         query_start: i32,
     },
@@ -2954,7 +2955,7 @@ impl SimSession {
                     query_id: query.query_data.query_id,
                     query_text: trimmed_string(&query.query_data.query_text),
                     flags: DirFindFlags::from_bits(query.query_data.query_flags),
-                    category: query.query_data.category,
+                    category: ClassifiedCategory::from_u32(query.query_data.category),
                     query_start: query.query_data.query_start,
                 });
             }
