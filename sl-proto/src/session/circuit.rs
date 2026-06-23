@@ -21,6 +21,7 @@ use crate::types::{
     PermissionField, PickUpdate, Postcard, PrimShape, ProfileUpdate, Reliability, RestoreItem,
     RezAttachment, SaleType, TeleportFlags, Throttle, ViewerEffect, Wearable,
 };
+use sl_types::chat::ChatChannel;
 use sl_types::key::{
     AgentKey, ClassifiedKey, FriendKey, GroupKey, ObjectKey, ParcelKey, TextureKey,
 };
@@ -415,7 +416,7 @@ impl Circuit {
         &mut self,
         message: &str,
         chat_type: ChatType,
-        channel: i32,
+        channel: ChatChannel,
         now: Instant,
     ) -> Result<(), WireError> {
         let mut bytes = message.as_bytes().to_vec();
@@ -428,7 +429,7 @@ impl Circuit {
             chat_data: ChatFromViewerChatDataBlock {
                 message: bytes,
                 r#type: chat_type.to_u8(),
-                channel,
+                channel: channel.0,
             },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -1752,7 +1753,7 @@ impl Circuit {
     pub(crate) fn send_script_dialog_reply(
         &mut self,
         object_id: ObjectKey,
-        chat_channel: i32,
+        chat_channel: ChatChannel,
         button_index: i32,
         button_label: &str,
         now: Instant,
@@ -1764,7 +1765,7 @@ impl Circuit {
             },
             data: ScriptDialogReplyDataBlock {
                 object_id: object_id.uuid(),
-                chat_channel,
+                chat_channel: chat_channel.0,
                 button_index,
                 button_label: with_nul(button_label),
             },

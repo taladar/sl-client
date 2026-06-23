@@ -162,6 +162,8 @@ pub use sl_wire::{
     parse_set_experience_permission_request, parse_simulator_features,
     parse_update_experience_request, parse_voice_signaling_request, sim_access,
 };
+// Re-export the chat channel type used by the local-chat / script-dialog APIs.
+pub use sl_types::chat::ChatChannel;
 // Re-export the vector and rotation types used by the teleport and movement APIs.
 pub use sl_types::lsl::{Rotation, Vector};
 // Re-export the L$ amount type used by the money balance/transfer APIs.

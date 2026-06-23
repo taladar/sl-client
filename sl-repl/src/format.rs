@@ -759,7 +759,7 @@ mod tests {
             &Command::Chat {
                 message: "hi there".to_owned(),
                 chat_type: sl_proto::ChatType::Normal,
-                channel: 0,
+                channel: sl_proto::ChatChannel(0),
             },
             &NoContext,
         );

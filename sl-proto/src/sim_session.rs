@@ -23,6 +23,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
+use sl_types::chat::ChatChannel;
 use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey, ParcelKey};
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
@@ -271,7 +272,7 @@ pub enum ServerEvent {
         /// The chat text (NUL terminator stripped).
         message: String,
         /// The chat channel (0 = public local chat).
-        channel: i32,
+        channel: ChatChannel,
         /// The chat type (whisper/normal/shout/typing/…).
         chat_type: ChatType,
     },
@@ -2688,7 +2689,7 @@ impl SimSession {
             AnyMessage::ChatFromViewer(chat) => {
                 self.events.push_back(ServerEvent::Chat {
                     message: trimmed_string(&chat.chat_data.message),
-                    channel: chat.chat_data.channel,
+                    channel: ChatChannel(chat.chat_data.channel),
                     chat_type: ChatType::from_u8(chat.chat_data.r#type),
                 });
             }

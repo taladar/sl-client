@@ -18,6 +18,7 @@ use crate::types::{
     RegionCombatSettings, RegionIdentity, RegionLimits, ScriptDialog, ScriptPermissionRequest,
     ScriptPermissions, SkySettings, WaterSettings, avatar_texture, handle_to_grid,
 };
+use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
 use sl_types::key::ClassifiedKey;
 use sl_types::key::ExperienceKey;
@@ -1101,7 +1102,7 @@ pub(crate) fn script_dialog(message: &sl_wire::messages::ScriptDialog) -> Script
             .first()
             .map_or_else(Uuid::nil, |owner| owner.owner_id),
         message: trimmed_string(&data.message),
-        chat_channel: data.chat_channel,
+        chat_channel: ChatChannel(data.chat_channel),
         image_id: TextureKey::from(data.image_id),
         buttons: message
             .buttons

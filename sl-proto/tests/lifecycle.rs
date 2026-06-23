@@ -10,26 +10,26 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AssetType, AttachmentMode, AttachmentPoint, Camera,
-        ChatAudible, ChatSource, ChatType, ClassifiedKey, ClassifiedUpdate, ClickAction,
-        CoarseLocation, ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination,
-        DetachOrder, Diagnostic, DirFindFlags, DisconnectReason, EnvironmentSettings,
-        EstateAccessDelta, EstateAccessKind, Event, EventId, FollowCamProperty, FriendKey,
-        FriendRights, GestureActivation, GroupKey, GroupNoticeAttachment, GroupRoleChange,
-        GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog,
-        ImageCodec, InterestsUpdate, InventoryCallbackId, InventoryFolderKey, InventoryItem,
-        InventoryItemOrFolderKey, InventoryKey, LandingType, LindenAmount, LoginAccount,
-        LoginParams, LookAtType, MapItemType, Material, Maturity, MeanCollisionType, MeshKey,
-        MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
-        ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform, ParcelAccessEntry,
-        ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey,
-        ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
-        PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
-        ProductType, ProfileUpdate, ReflectionProbeFlags, RegionHandle, RegionInfoUpdate,
-        Reliability, RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId,
-        ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session, SkySettings, SoundFlags,
-        TeleportFlags, TerrainLayerType, TextureKey, Throttle, TransferStatus, Transmit,
-        ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
-        avatar_texture, group_powers, pcode,
+        ChatAudible, ChatChannel, ChatSource, ChatType, ClassifiedKey, ClassifiedUpdate,
+        ClickAction, CoarseLocation, ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame,
+        DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, DisconnectReason,
+        EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, EventId,
+        FollowCamProperty, FriendKey, FriendRights, GestureActivation, GroupKey,
+        GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
+        GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate, InventoryCallbackId,
+        InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, LandingType,
+        LindenAmount, LoginAccount, LoginParams, LookAtType, MapItemType, Material, Maturity,
+        MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
+        NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey,
+        ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+        ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType,
+        ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate,
+        PointAtType, Postcard, PrimShape, ProductType, ProfileUpdate, ReflectionProbeFlags,
+        RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType,
+        ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissions, SculptOrMeshKey,
+        Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType, TextureKey, Throttle,
+        TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings,
+        WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -577,7 +577,7 @@ mod test {
         let mut session = established(now)?;
         drain(&mut session)?;
 
-        session.say("hi there", ChatType::Shout, 0, now)?;
+        session.say("hi there", ChatType::Shout, ChatChannel(0), now)?;
         let sent = drain(&mut session)?;
         let chat = sent
             .iter()
@@ -3310,7 +3310,7 @@ mod test {
         assert_eq!(dialog.owner_id, owner);
         assert_eq!(dialog.object_name, "Vendor");
         assert_eq!(dialog.message, "Pick one");
-        assert_eq!(dialog.chat_channel, -1234);
+        assert_eq!(dialog.chat_channel, ChatChannel(-1234));
         assert_eq!(dialog.buttons, vec!["Yes".to_owned(), "No".to_owned()]);
         assert!(!dialog.is_text_box());
         Ok(())
@@ -3368,7 +3368,7 @@ mod test {
         drain(&mut session)?;
 
         let object = uuid::Uuid::from_u128(0x8005);
-        session.reply_script_dialog(ObjectKey::from(object), -1234, 1, "No", now)?;
+        session.reply_script_dialog(ObjectKey::from(object), ChatChannel(-1234), 1, "No", now)?;
         let sent = drain(&mut session)?;
         let reply = sent
             .iter()

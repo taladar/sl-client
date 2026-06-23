@@ -1,5 +1,6 @@
 //! Scripts and notifications: dialogs, permissions, alerts, mutes.
 
+use sl_types::chat::ChatChannel;
 use sl_types::key::{ExperienceKey, InventoryKey, ObjectKey, OwnerKey, TextureKey};
 use sl_wire::ControlFlags;
 use uuid::Uuid;
@@ -23,7 +24,7 @@ pub struct ScriptDialog {
     /// The dialog message text.
     pub message: String,
     /// The hidden chat channel the button reply is sent on.
-    pub chat_channel: i32,
+    pub chat_channel: ChatChannel,
     /// The dialog's icon (texture id).
     pub image_id: TextureKey,
     /// The button labels, in order (the reply carries the chosen index/label).
@@ -427,7 +428,7 @@ pub struct MuteEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::ScriptControlAction;
+    use super::{ChatChannel, ScriptControlAction};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -448,6 +449,15 @@ mod tests {
                 ScriptControlAction::from_take_controls(action.takes_controls()),
                 action
             );
+        }
+    }
+
+    #[test]
+    fn chat_channel_round_trips_raw_i32() {
+        // The typed channel wraps the raw wire `i32` bit-identically, including
+        // the negative hidden channels scripts use for dialog replies.
+        for raw in [0_i32, 5, -1234, i32::MIN, i32::MAX] {
+            assert_eq!(ChatChannel(raw).0, raw);
         }
     }
 }
