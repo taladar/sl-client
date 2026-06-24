@@ -31,8 +31,8 @@ use super::{
     CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, Circuit, DEFAULT_DRAW_DISTANCE,
     IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
-    MAX_INLINE_ASSET, SIT_TIMEOUT, Session, SessionState, TELEPORT_TIMEOUT, TeleportPhase,
-    TextureDownload, deadline, merge_deadline,
+    MAX_INLINE_ASSET, SIT_TIMEOUT, Session, SessionState, SitState, TELEPORT_TIMEOUT,
+    TeleportPhase, TextureDownload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -135,7 +135,7 @@ impl Session {
             body_rotation: IDENTITY_ROTATION,
             head_rotation: IDENTITY_ROTATION,
             camera: Camera::region_center(),
-            sit_requested: false,
+            sit: SitState::NotSitting,
             teleport: TeleportPhase::Idle,
             seed_capability: None,
             inventory_root: None,
@@ -689,6 +689,11 @@ impl Session {
         if seed_capability.is_some() {
             self.seed_capability = seed_capability;
         }
+        // A teleport unseats the agent: any prior object-sit no longer holds at
+        // the destination, so drop it rather than report a stale seat. (A plain
+        // region *crossing* — `promote_child_to_root` — keeps the seat, since a
+        // vehicle the agent sits on carries it across the border.)
+        self.sit = SitState::NotSitting;
         self.teleport = TeleportPhase::Handover { region_handle };
         self.state = SessionState::AwaitingHandshake;
         Ok(())
@@ -1761,15 +1766,16 @@ impl Session {
             AnyMessage::AvatarSitResponse(response) => {
                 // Only act on a response to our own AgentRequestSit; complete the
                 // sit with an AgentSit and surface the result.
-                if self.sit_requested {
-                    self.sit_requested = false;
+                if matches!(self.sit, SitState::AwaitingResponse) {
+                    let sit_object = ObjectKey::from(response.sit_object.id);
+                    self.sit = SitState::Seated { on: sit_object };
                     if let Some(circuit) = self.circuit.as_mut() {
                         circuit.timers.sit = None;
                         circuit.send_agent_sit(now)?;
                     }
                     let transform = &response.sit_transform;
                     self.events.push_back(Event::SitResult {
-                        sit_object: ObjectKey::from(response.sit_object.id),
+                        sit_object,
                         autopilot: transform.auto_pilot,
                         sit_position: transform.sit_position.clone(),
                         sit_rotation: transform.sit_rotation.clone(),
@@ -1950,6 +1956,8 @@ impl Session {
                 // An intra-region teleport: no new circuit, just resume activity.
                 if matches!(self.state, SessionState::Teleporting) {
                     self.state = SessionState::Active;
+                    // A teleport (even a local one) unseats the agent.
+                    self.sit = SitState::NotSitting;
                     if let Some(circuit) = self.circuit.as_mut() {
                         circuit.timers.teleport = None;
                     }
@@ -3061,7 +3069,7 @@ impl Session {
             .and_then(|c| c.timers.sit)
             .is_some_and(|d| now >= d)
         {
-            self.sit_requested = false;
+            self.sit = SitState::NotSitting;
             if let Some(circuit) = self.circuit.as_mut() {
                 circuit.timers.sit = None;
             }
@@ -3416,7 +3424,20 @@ impl Session {
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the message fails to encode.
     pub fn stand(&mut self, now: Instant) -> Result<(), Error> {
+        self.sit = SitState::NotSitting;
         self.send_agent_update_now(ControlFlags::STAND_UP, now)
+    }
+
+    /// The object the agent is currently seated on, or [`None`] if it is not
+    /// seated on an object (standing, ground-sitting, or a sit request still
+    /// awaiting its `AvatarSitResponse`). Set once a [`sit_on`](Self::sit_on)
+    /// completes and cleared by [`stand`](Self::stand).
+    #[must_use]
+    pub const fn seat(&self) -> Option<ObjectKey> {
+        match self.sit {
+            SitState::Seated { on } => Some(on),
+            SitState::NotSitting | SitState::AwaitingResponse => None,
+        }
     }
 
     /// Sits the agent on the ground where it stands, sending one `AgentUpdate`
@@ -3443,7 +3464,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_agent_request_sit(target.uuid(), offset, now)?;
         circuit.timers.sit = Some(deadline(now, SIT_TIMEOUT));
-        self.sit_requested = true;
+        self.sit = SitState::AwaitingResponse;
         Ok(())
     }
 

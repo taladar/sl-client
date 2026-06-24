@@ -1262,6 +1262,64 @@ mod test {
         assert_eq!(camera_eye_offset, vec3(1.0, 2.0, 3.0));
         assert_eq!(camera_at_offset, vec3(4.0, 5.0, 6.0));
         assert!(force_mouselook);
+        // The completed sit is now recorded and queryable via `seat`.
+        assert_eq!(session.seat(), Some(ObjectKey::from(target)));
+        Ok(())
+    }
+
+    #[test]
+    fn teleport_clears_seat() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Sit on an object and let the sit complete.
+        let target = uuid::Uuid::from_u128(0x5EA7);
+        session.sit_on(ObjectKey::from(target), vec3(0.0, 0.0, 0.0), now)?;
+        drain(&mut session)?;
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&sit_response(target), 9, false)?,
+            now,
+        )?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        assert_eq!(
+            session.seat(),
+            Some(ObjectKey::from(target)),
+            "the agent should be seated once the sit completes"
+        );
+
+        // Teleporting unseats the agent: the recorded seat must clear so it does
+        // not dangle pointing at an object in the region just left.
+        let handle = 0x0003_E900_0003_E800;
+        session.teleport_to(
+            RegionHandle(handle),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let finish = AnyMessage::TeleportFinish(TeleportFinish {
+            info: TeleportFinishInfoBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                location_id: 4,
+                sim_ip: [127, 0, 0, 1],
+                sim_port: 9100u16.swap_bytes(),
+                region_handle: handle,
+                seed_capability: b"http://x/seatTP\0".to_vec(),
+                sim_access: sl_wire::sim_access::MATURE,
+                teleport_flags: TeleportFlags::VIA_LURE,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&finish, 10, true)?, now)?;
+        assert_eq!(
+            session.seat(),
+            None,
+            "the teleport should have cleared the recorded seat"
+        );
         Ok(())
     }
 
