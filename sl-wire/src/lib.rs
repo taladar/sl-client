@@ -9,6 +9,7 @@ mod endian;
 mod error;
 mod experience;
 mod field;
+mod geometry;
 mod header;
 mod inventory;
 mod llsd;
@@ -63,6 +64,7 @@ pub use experience::{
     parse_set_experience_permission_request, parse_update_experience_request,
 };
 pub use field::{Reader, Writer};
+pub use geometry::{Direction, GlobalCoordinates};
 pub use header::{PacketFlags, ParsedDatagram, encode_datagram, parse_datagram};
 pub use inventory::{
     AIS_MAX_FOLDER_DEPTH, AisCategoryCreate, AisItemUpdate, AisUpdate,

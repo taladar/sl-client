@@ -6,8 +6,8 @@ use super::Maturity;
 use sl_types::key::{ObjectKey, TextureKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
-use sl_types::map::{GridCoordinates, RegionName};
-use sl_wire::RegionHandle;
+use sl_types::map::{GridCoordinates, RegionCoordinates, RegionName};
+use sl_wire::{GlobalCoordinates, RegionHandle};
 use uuid::Uuid;
 
 /// A change to one of an estate's access lists, applied via
@@ -269,12 +269,12 @@ impl MapItemType {
 /// - [`MapItemType::LandForSale`] / [`MapItemType::AdultLandForSale`]: `extra` is
 ///   the parcel area in m², `extra2` the sale price in L$.
 /// - event types: `extra` is the event id, `extra2` packs the event flags.
-#[derive(Debug, Clone, PartialEq, Eq)]
+// Not `Eq`: `position` ([`GlobalCoordinates`]) holds `f64` components.
+#[derive(Debug, Clone, PartialEq)]
 pub struct MapItem {
-    /// The item's global x coordinate in metres.
-    pub global_x: u32,
-    /// The item's global y coordinate in metres.
-    pub global_y: u32,
+    /// The item's global position in metres (the wire carries integer metres;
+    /// the altitude component is unused — the map is 2-D — and is `0`).
+    pub position: GlobalCoordinates,
     /// The item's identifier (a parcel/event id, or `None` for avatar dots).
     pub id: Option<Uuid>,
     /// Type-specific context (count, area, event id — see [`MapItem`]).
@@ -287,22 +287,21 @@ pub struct MapItem {
 
 impl MapItem {
     /// The handle of the region this item sits in, derived from its global
-    /// coordinates (the global position with the in-region offset masked off).
+    /// position by [splitting](GlobalCoordinates::split) off the in-region
+    /// offset (the typed replacement for masking the 256 m region boundary).
+    /// `None` only if the global position lies outside the representable grid,
+    /// which never happens for a position the grid actually sent.
     #[must_use]
-    pub fn region_handle(&self) -> RegionHandle {
-        RegionHandle::from_global(self.global_x & !0xFF, self.global_y & !0xFF)
+    pub fn region_handle(&self) -> Option<RegionHandle> {
+        Some(RegionHandle::from(self.position.split()?.0))
     }
 
-    /// The item's x offset within its region (0–255 metres).
+    /// The item's position within its region (0–256 metres on each axis),
+    /// derived from its global position. `None` under the same out-of-grid
+    /// condition as [`region_handle`](Self::region_handle).
     #[must_use]
-    pub const fn local_x(&self) -> u32 {
-        self.global_x & 0xFF
-    }
-
-    /// The item's y offset within its region (0–255 metres).
-    #[must_use]
-    pub const fn local_y(&self) -> u32 {
-        self.global_y & 0xFF
+    pub fn region_position(&self) -> Option<RegionCoordinates> {
+        Some(self.position.split()?.1)
     }
 }
 

@@ -4,6 +4,7 @@ use sl_types::chat::ChatChannel;
 use sl_types::key::{ExperienceKey, InventoryKey, ObjectKey, OwnerKey, TextureKey};
 use sl_types::map::{RegionCoordinates, RegionName};
 use sl_wire::ControlFlags;
+use sl_wire::Direction;
 use uuid::Uuid;
 
 /// A scripted-object dialog (`llDialog`/`llTextBox`), parsed from a
@@ -138,7 +139,7 @@ pub struct ScriptTeleportRequest {
     /// The destination position within the region, in metres.
     pub position: RegionCoordinates,
     /// The look-at direction on arrival.
-    pub look_at: (f32, f32, f32),
+    pub look_at: Direction,
     /// The request's option flags (`Options.Flags`). Reserved by the protocol;
     /// usually zero. The wire message carries a variable list of option blocks —
     /// this is the first block's flags (the only one a simulator sends).

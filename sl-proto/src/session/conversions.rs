@@ -6,17 +6,17 @@ use crate::appearance;
 use crate::types::{
     ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment, AvatarGroupMembership,
     AvatarInterests, AvatarName, AvatarProperties, ChatAudible, ChatMessage, ChatSource, ChatType,
-    ClassifiedCategory, ClassifiedInfo, DayCycle, DayCycleFrame, EconomyData, EnvironmentSettings,
-    EstateAccessKind, EstateInfo, Event, Friend, FriendRights, GroupAccountDetails,
-    GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
-    GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
-    GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle, GroupVote,
-    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem, LandingType,
-    MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MoneyBalance,
-    MoneyTransaction, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object, ObjectProperties,
-    ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey,
-    PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
-    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits, ScriptDialog,
+    ClassifiedCategory, ClassifiedInfo, CloudPosDensity, Color, ColorAlpha, DayCycle,
+    DayCycleFrame, EconomyData, EnvironmentSettings, EstateAccessKind, EstateInfo, Event, Friend,
+    FriendRights, Glow, GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
+    GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupMember,
+    GroupMembership, GroupName, GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle,
+    GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
+    LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
+    MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object,
+    ObjectProperties, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo,
+    PickKey, PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
+    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits, Scale, ScriptDialog,
     ScriptPermissionRequest, ScriptPermissions, SkySettings, WaterSettings, avatar_texture,
 };
 use sl_types::chat::ChatChannel;
@@ -32,6 +32,7 @@ use sl_types::key::ParcelKey;
 use sl_types::key::TextureKey;
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::map::GridCoordinates;
+use sl_types::map::RegionCoordinates;
 use sl_wire::RegionHandle;
 use sl_wire::messages::{
     AgentDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
@@ -51,6 +52,7 @@ use sl_wire::messages::{
     ObjectUpdateObjectDataBlock, ParcelProperties, PickInfoReplyDataBlock, UUIDGroupNameReply,
     UUIDNameReply, UpdateCreateInventoryItemInventoryDataBlock,
 };
+use sl_wire::{Direction, GlobalCoordinates};
 use sl_wire::{Llsd, SkeletonFolder};
 use sl_wire::{Permissions, Permissions5};
 use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
@@ -424,12 +426,12 @@ fn track_from_llsd(track: &Llsd) -> Vec<DayCycleFrame> {
 fn sky_settings_from_llsd(name: &str, sky: &Llsd) -> SkySettings {
     let haze = sky.get("legacy_haze");
     let haze_f32 = |key: &str| haze.map_or(0.0, |block| f32_member(block, key));
-    let haze_color = |key: &str| color3_from_llsd(haze.and_then(|block| block.get(key)));
+    let haze_color = |key: &str| color_from_llsd(haze.and_then(|block| block.get(key)));
     SkySettings {
         name: name.to_owned(),
         sun_rotation: rotation_from_llsd(sky.get("sun_rotation")),
         moon_rotation: rotation_from_llsd(sky.get("moon_rotation")),
-        sunlight_color: vec4_from_llsd(sky.get("sunlight_color")),
+        sunlight_color: color_alpha_from_llsd(sky.get("sunlight_color")),
         ambient: haze_color("ambient"),
         blue_horizon: haze_color("blue_horizon"),
         blue_density: haze_color("blue_density"),
@@ -439,14 +441,14 @@ fn sky_settings_from_llsd(name: &str, sky: &Llsd) -> SkySettings {
         distance_multiplier: haze_f32("distance_multiplier"),
         max_y: f32_member(sky, "max_y"),
         gamma: f32_member(sky, "gamma"),
-        cloud_color: color3_from_llsd(sky.get("cloud_color")),
-        cloud_pos_density1: color3_from_llsd(sky.get("cloud_pos_density1")),
-        cloud_pos_density2: color3_from_llsd(sky.get("cloud_pos_density2")),
+        cloud_color: color_from_llsd(sky.get("cloud_color")),
+        cloud_pos_density1: cloud_pos_density_from_llsd(sky.get("cloud_pos_density1")),
+        cloud_pos_density2: cloud_pos_density_from_llsd(sky.get("cloud_pos_density2")),
         cloud_scale: f32_member(sky, "cloud_scale"),
         cloud_scroll_rate: vec2_from_llsd(sky.get("cloud_scroll_rate")),
         cloud_shadow: f32_member(sky, "cloud_shadow"),
         cloud_variance: f32_member(sky, "cloud_variance"),
-        glow: color3_from_llsd(sky.get("glow")),
+        glow: glow_from_llsd(sky.get("glow")),
         star_brightness: f32_member(sky, "star_brightness"),
         sun_scale: f32_member(sky, "sun_scale"),
         moon_scale: f32_member(sky, "moon_scale"),
@@ -474,13 +476,13 @@ fn water_settings_from_llsd(name: &str, water: &Llsd) -> WaterSettings {
         blur_multiplier: f32_member(water, "blur_multiplier"),
         fresnel_offset: f32_member(water, "fresnel_offset"),
         fresnel_scale: f32_member(water, "fresnel_scale"),
-        normal_scale: color3_from_llsd(water.get("normal_scale")),
+        normal_scale: scale_from_llsd(water.get("normal_scale")),
         normal_map: optional_texture_member(water, "normal_map"),
         scale_above: f32_member(water, "scale_above"),
         scale_below: f32_member(water, "scale_below"),
         transparent_texture: optional_texture_member(water, "transparent_texture"),
         underwater_fog_mod: f32_member(water, "underwater_fog_mod"),
-        water_fog_color: color3_from_llsd(water.get("water_fog_color")),
+        water_fog_color: color_from_llsd(water.get("water_fog_color")),
         water_fog_density: f32_member(water, "water_fog_density"),
         wave1_direction: vec2_from_llsd(water.get("wave1_direction")),
         wave2_direction: vec2_from_llsd(water.get("wave2_direction")),
@@ -720,8 +722,8 @@ pub(crate) fn parcel_info(msg: &ParcelProperties) -> Result<ParcelInfo, sl_wire:
         claim_date: data.claim_date,
         claim_price: crate::types::linden_from_wire("ClaimPrice", data.claim_price)?,
         rent_price: crate::types::linden_from_wire("RentPrice", data.rent_price)?,
-        aabb_min: (data.aabb_min.x, data.aabb_min.y, data.aabb_min.z),
-        aabb_max: (data.aabb_max.x, data.aabb_max.y, data.aabb_max.z),
+        aabb_min: RegionCoordinates::new(data.aabb_min.x, data.aabb_min.y, data.aabb_min.z),
+        aabb_max: RegionCoordinates::new(data.aabb_max.x, data.aabb_max.y, data.aabb_max.z),
         area: crate::types::land_area_from_wire("Area", data.area)?,
         bitmap: data.bitmap.clone(),
         status: ParcelStatus::from_i32(i32::from(data.status)),
@@ -753,12 +755,12 @@ pub(crate) fn parcel_info(msg: &ParcelProperties) -> Result<ParcelInfo, sl_wire:
         snapshot_id: crate::types::optional_key_from_wire(data.snapshot_id),
         pass_price: crate::types::linden_from_wire("PassPrice", data.pass_price)?,
         pass_hours: data.pass_hours,
-        user_location: (
+        user_location: RegionCoordinates::new(
             data.user_location.x,
             data.user_location.y,
             data.user_location.z,
         ),
-        user_look_at: (
+        user_look_at: Direction::new(
             data.user_look_at.x,
             data.user_look_at.y,
             data.user_look_at.z,
@@ -789,7 +791,7 @@ pub(crate) fn chat_message(data: &ChatFromSimulatorChatDataBlock) -> ChatMessage
         owner_id: crate::types::optional_uuid_from_wire(data.owner_id),
         chat_type: ChatType::from_u8(data.chat_type),
         audible: ChatAudible::from_u8(data.audible),
-        position: (data.position.x, data.position.y, data.position.z),
+        position: RegionCoordinates::new(data.position.x, data.position.y, data.position.z),
         message: trimmed_string(&data.message),
     }
 }
@@ -829,7 +831,7 @@ pub(crate) fn instant_message(
         dialog: ImDialog::from_u8(block.dialog),
         from_group: block.from_group,
         region_id: crate::types::optional_uuid_from_wire(block.region_id),
-        position: (block.position.x, block.position.y, block.position.z),
+        position: RegionCoordinates::new(block.position.x, block.position.y, block.position.z),
         offline: block.offline != 0,
         timestamp: crate::types::optional_u32_from_wire(block.timestamp),
         id: block.id,
@@ -905,7 +907,7 @@ pub(crate) fn pick_info(data: &PickInfoReplyDataBlock) -> Result<PickInfo, sl_wi
         user: trimmed_string(&data.user),
         original_name: trimmed_string(&data.original_name),
         sim_name: sl_wire::region_name_from_wire("SimName", &trimmed_string(&data.sim_name))?,
-        pos_global: (x, y, z),
+        pos_global: GlobalCoordinates::new(x, y, z),
         sort_order: data.sort_order,
         enabled: data.enabled,
     })
@@ -928,7 +930,7 @@ pub(crate) fn classified_info(
         parent_estate: data.parent_estate,
         snapshot_id: crate::types::optional_key_from_wire(data.snapshot_id),
         sim_name: sl_wire::region_name_from_wire("SimName", &trimmed_string(&data.sim_name))?,
-        pos_global: (x, y, z),
+        pos_global: GlobalCoordinates::new(x, y, z),
         parcel_name: trimmed_string(&data.parcel_name),
         classified_flags: data.classified_flags,
         price_for_listing: crate::types::linden_from_wire(
@@ -1478,13 +1480,25 @@ pub(crate) fn map_region_info(
 /// metres; `extra`/`extra2` are type-specific (see [`MapItem`]).
 pub(crate) fn map_item(data: &sl_wire::messages::MapItemReplyDataBlock) -> MapItem {
     MapItem {
-        global_x: data.x,
-        global_y: data.y,
+        position: GlobalCoordinates::new(f64::from(data.x), f64::from(data.y), 0.0),
         id: crate::types::optional_uuid_from_wire(data.id),
         extra: data.extra,
         extra2: data.extra2,
         name: trimmed_string(&data.name),
     }
+}
+
+/// Narrows a `MapItem`'s global-metre `f64` coordinate back to the `u32` the
+/// `MapItemReply` carries. A map-item coordinate is an integer metre value that
+/// originated as the wire `u32`, so the round trip is exact.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a map-item global coordinate is an integer u32 metre value widened to f64"
+)]
+const fn map_global_to_u32(meters: f64) -> u32 {
+    meters as u32
 }
 
 /// Encodes a [`MapRegionInfo`] into a `MapBlockReply` `Data` block — the
@@ -1551,8 +1565,8 @@ pub fn build_map_block_reply(
 /// NUL-terminated as a map server sends it.
 pub(crate) fn map_item_to_data_block(item: &MapItem) -> MapItemReplyDataBlock {
     MapItemReplyDataBlock {
-        x: item.global_x,
-        y: item.global_y,
+        x: map_global_to_u32(item.position.x()),
+        y: map_global_to_u32(item.position.y()),
         id: crate::types::optional_uuid_to_wire(item.id),
         extra: item.extra,
         extra2: item.extra2,
@@ -1850,8 +1864,8 @@ pub(crate) fn parcel_info_from_llsd(body: &Llsd) -> Option<ParcelInfo> {
         claim_date: llsd_unix_time(data.get("ClaimDate")),
         claim_price: crate::types::linden_from_wire("ClaimPrice", i32_field("ClaimPrice")).ok()?,
         rent_price: crate::types::linden_from_wire("RentPrice", i32_field("RentPrice")).ok()?,
-        aabb_min: vec3_from_llsd(data.get("AABBMin")),
-        aabb_max: vec3_from_llsd(data.get("AABBMax")),
+        aabb_min: region_coords_from_llsd(data.get("AABBMin")),
+        aabb_max: region_coords_from_llsd(data.get("AABBMax")),
         area: crate::types::land_area_from_wire("Area", i32_field("Area")).ok()?,
         bitmap: data
             .get("Bitmap")
@@ -1899,8 +1913,8 @@ pub(crate) fn parcel_info_from_llsd(body: &Llsd) -> Option<ParcelInfo> {
         snapshot_id: crate::types::optional_key_from_wire(uuid_field("SnapshotID")),
         pass_price: crate::types::linden_from_wire("PassPrice", i32_field("PassPrice")).ok()?,
         pass_hours: data.get("PassHours").and_then(Llsd::as_f32).unwrap_or(0.0),
-        user_location: vec3_from_llsd(data.get("UserLocation")),
-        user_look_at: vec3_from_llsd(data.get("UserLookAt")),
+        user_location: region_coords_from_llsd(data.get("UserLocation")),
+        user_look_at: direction_from_llsd(data.get("UserLookAt")),
         landing_type: LandingType::from_u8(u8::try_from(i32_field("LandingType")).unwrap_or(0)),
         region_push_override: bool_field("RegionPushOverride"),
         region_deny_anonymous: bool_field("RegionDenyAnonymous"),
@@ -2030,6 +2044,18 @@ pub(crate) fn vec3_from_llsd(value: Option<&Llsd>) -> (f32, f32, f32) {
     (component(0), component(1), component(2))
 }
 
+/// Reads region-local coordinates (`[x, y, z]` reals) from an LLSD array.
+pub(crate) fn region_coords_from_llsd(value: Option<&Llsd>) -> RegionCoordinates {
+    let (x, y, z) = vec3_from_llsd(value);
+    RegionCoordinates::new(x, y, z)
+}
+
+/// Reads a facing direction (`[x, y, z]` reals) from an LLSD array.
+pub(crate) fn direction_from_llsd(value: Option<&Llsd>) -> Direction {
+    let (x, y, z) = vec3_from_llsd(value);
+    Direction::new(x, y, z)
+}
+
 /// Reads a two-component vector (`[x, y]` reals) from an LLSD array as `[f32; 2]`.
 fn vec2_from_llsd(value: Option<&Llsd>) -> [f32; 2] {
     let component = |index: usize| {
@@ -2041,10 +2067,34 @@ fn vec2_from_llsd(value: Option<&Llsd>) -> [f32; 2] {
     [component(0), component(1)]
 }
 
-/// Reads a three-component colour/vector from an LLSD array as `[f32; 3]`.
-fn color3_from_llsd(value: Option<&Llsd>) -> [f32; 3] {
+/// Reads an RGBA [`ColorAlpha`] from an LLSD `[r, g, b, a]` real array.
+fn color_alpha_from_llsd(value: Option<&Llsd>) -> ColorAlpha {
+    let [red, green, blue, alpha] = vec4_from_llsd(value);
+    ColorAlpha::new(red, green, blue, alpha)
+}
+
+/// Reads an RGB [`Color`] from an LLSD `[r, g, b]` real array.
+fn color_from_llsd(value: Option<&Llsd>) -> Color {
+    let (red, green, blue) = vec3_from_llsd(value);
+    Color::new(red, green, blue)
+}
+
+/// Reads a [`Scale`] from an LLSD `[x, y, z]` real array.
+fn scale_from_llsd(value: Option<&Llsd>) -> Scale {
     let (x, y, z) = vec3_from_llsd(value);
-    [x, y, z]
+    Scale::new(x, y, z)
+}
+
+/// Reads a [`Glow`] from an LLSD `[size, reserved, focus]` real array.
+fn glow_from_llsd(value: Option<&Llsd>) -> Glow {
+    let (size, reserved, focus) = vec3_from_llsd(value);
+    Glow::new(size, reserved, focus)
+}
+
+/// Reads a [`CloudPosDensity`] from an LLSD `[x, y, density]` real array.
+fn cloud_pos_density_from_llsd(value: Option<&Llsd>) -> CloudPosDensity {
+    let (position_x, position_y, density) = vec3_from_llsd(value);
+    CloudPosDensity::new(position_x, position_y, density)
 }
 
 /// Reads a four-component vector (`[x, y, z, w]` reals) from an LLSD array as
@@ -2241,15 +2291,15 @@ pub(crate) fn offline_message_from_record(record: &Llsd) -> Option<InstantMessag
 
 /// Reads an offline-IM record's region-local position, from either a `position`
 /// `[x, y, z]` array or the `local_x`/`local_y`/`local_z` members.
-pub(crate) fn offline_message_position(record: &Llsd) -> (f32, f32, f32) {
+pub(crate) fn offline_message_position(record: &Llsd) -> RegionCoordinates {
     if let Some(array) = record.get("position").and_then(Llsd::as_array) {
-        return (
+        return RegionCoordinates::new(
             array.first().and_then(Llsd::as_f32).unwrap_or(0.0),
             array.get(1).and_then(Llsd::as_f32).unwrap_or(0.0),
             array.get(2).and_then(Llsd::as_f32).unwrap_or(0.0),
         );
     }
-    (
+    RegionCoordinates::new(
         record.get("local_x").and_then(Llsd::as_f32).unwrap_or(0.0),
         record.get("local_y").and_then(Llsd::as_f32).unwrap_or(0.0),
         record.get("local_z").and_then(Llsd::as_f32).unwrap_or(0.0),
@@ -2297,16 +2347,17 @@ pub(crate) fn chatterbox_invitation_from_llsd(body: &Llsd) -> Option<Event> {
 /// Reads a region-local position from an LLSD map's `position` member, encoded
 /// as a `[x, y, z]` real array (how the simulator encodes an LLSD `Vector3`).
 /// Defaults each missing component to `0.0`.
-pub(crate) fn llsd_position(map: &Llsd) -> (f32, f32, f32) {
-    map.get("position")
-        .and_then(Llsd::as_array)
-        .map_or((0.0, 0.0, 0.0), |array| {
-            (
+pub(crate) fn llsd_position(map: &Llsd) -> RegionCoordinates {
+    map.get("position").and_then(Llsd::as_array).map_or_else(
+        || RegionCoordinates::new(0.0, 0.0, 0.0),
+        |array| {
+            RegionCoordinates::new(
                 array.first().and_then(Llsd::as_f32).unwrap_or(0.0),
                 array.get(1).and_then(Llsd::as_f32).unwrap_or(0.0),
                 array.get(2).and_then(Llsd::as_f32).unwrap_or(0.0),
             )
-        })
+        },
+    )
 }
 
 /// Reads a `u64` from an LLSD value that may be an 8-byte big-endian binary
@@ -2734,6 +2785,18 @@ pub(crate) fn vec3_to_llsd(vector: (f32, f32, f32)) -> Llsd {
     ])
 }
 
+/// Encodes region-local coordinates as an LLSD `[x, y, z]` real array (the
+/// inverse of [`region_coords_from_llsd`]).
+pub(crate) fn region_coords_to_llsd(coords: RegionCoordinates) -> Llsd {
+    vec3_to_llsd((coords.x(), coords.y(), coords.z()))
+}
+
+/// Encodes a facing direction as an LLSD `[x, y, z]` real array (the inverse of
+/// [`direction_from_llsd`]).
+pub(crate) fn direction_to_llsd(direction: Direction) -> Llsd {
+    vec3_to_llsd((direction.x(), direction.y(), direction.z()))
+}
+
 /// The four IPv4 octets of a socket address (the only address family the wire
 /// uses); an IPv6 address degrades to zeroes.
 pub(crate) const fn ipv4_octets(addr: SocketAddr) -> [u8; 4] {
@@ -2827,6 +2890,31 @@ fn real(value: f32) -> Llsd {
     Llsd::Real(f64::from(value))
 }
 
+/// Encodes an RGB [`Color`] as an LLSD `[r, g, b]` real array.
+fn color_to_llsd(color: Color) -> Llsd {
+    reals_to_llsd(&[color.red(), color.green(), color.blue()])
+}
+
+/// Encodes an RGBA [`ColorAlpha`] as an LLSD `[r, g, b, a]` real array.
+fn color_alpha_to_llsd(color: ColorAlpha) -> Llsd {
+    reals_to_llsd(&[color.red(), color.green(), color.blue(), color.alpha()])
+}
+
+/// Encodes a [`Scale`] as an LLSD `[x, y, z]` real array.
+fn scale_to_llsd(scale: Scale) -> Llsd {
+    reals_to_llsd(&[scale.x(), scale.y(), scale.z()])
+}
+
+/// Encodes a [`Glow`] as an LLSD `[size, reserved, focus]` real array.
+fn glow_to_llsd(glow: Glow) -> Llsd {
+    reals_to_llsd(&[glow.size(), glow.reserved(), glow.focus()])
+}
+
+/// Encodes a [`CloudPosDensity`] as an LLSD `[x, y, density]` real array.
+fn cloud_pos_density_to_llsd(value: CloudPosDensity) -> Llsd {
+    reals_to_llsd(&[value.position_x(), value.position_y(), value.density()])
+}
+
 /// Encodes a slice of `f32` components as an LLSD array of reals (used for the
 /// colour / vector / rotation tuples in environment frames).
 fn reals_to_llsd(values: &[f32]) -> Llsd {
@@ -2838,9 +2926,9 @@ fn reals_to_llsd(values: &[f32]) -> Llsd {
 /// `legacy_haze` sub-map, as the viewer expects.
 fn sky_settings_to_llsd(sky: &SkySettings) -> Llsd {
     let legacy_haze = llsd_map(vec![
-        ("ambient", reals_to_llsd(&sky.ambient)),
-        ("blue_horizon", reals_to_llsd(&sky.blue_horizon)),
-        ("blue_density", reals_to_llsd(&sky.blue_density)),
+        ("ambient", color_to_llsd(sky.ambient)),
+        ("blue_horizon", color_to_llsd(sky.blue_horizon)),
+        ("blue_density", color_to_llsd(sky.blue_density)),
         ("haze_horizon", real(sky.haze_horizon)),
         ("haze_density", real(sky.haze_density)),
         ("density_multiplier", real(sky.density_multiplier)),
@@ -2867,18 +2955,24 @@ fn sky_settings_to_llsd(sky: &SkySettings) -> Llsd {
                 sky.moon_rotation.s,
             ]),
         ),
-        ("sunlight_color", reals_to_llsd(&sky.sunlight_color)),
+        ("sunlight_color", color_alpha_to_llsd(sky.sunlight_color)),
         ("legacy_haze", legacy_haze),
         ("max_y", real(sky.max_y)),
         ("gamma", real(sky.gamma)),
-        ("cloud_color", reals_to_llsd(&sky.cloud_color)),
-        ("cloud_pos_density1", reals_to_llsd(&sky.cloud_pos_density1)),
-        ("cloud_pos_density2", reals_to_llsd(&sky.cloud_pos_density2)),
+        ("cloud_color", color_to_llsd(sky.cloud_color)),
+        (
+            "cloud_pos_density1",
+            cloud_pos_density_to_llsd(sky.cloud_pos_density1),
+        ),
+        (
+            "cloud_pos_density2",
+            cloud_pos_density_to_llsd(sky.cloud_pos_density2),
+        ),
         ("cloud_scale", real(sky.cloud_scale)),
         ("cloud_scroll_rate", reals_to_llsd(&sky.cloud_scroll_rate)),
         ("cloud_shadow", real(sky.cloud_shadow)),
         ("cloud_variance", real(sky.cloud_variance)),
-        ("glow", reals_to_llsd(&sky.glow)),
+        ("glow", glow_to_llsd(sky.glow)),
         ("star_brightness", real(sky.star_brightness)),
         ("sun_scale", real(sky.sun_scale)),
         ("moon_scale", real(sky.moon_scale)),
@@ -2908,7 +3002,7 @@ fn water_settings_to_llsd(water: &WaterSettings) -> Llsd {
         ("blur_multiplier", real(water.blur_multiplier)),
         ("fresnel_offset", real(water.fresnel_offset)),
         ("fresnel_scale", real(water.fresnel_scale)),
-        ("normal_scale", reals_to_llsd(&water.normal_scale)),
+        ("normal_scale", scale_to_llsd(water.normal_scale)),
         ("normal_map", optional_texture_to_llsd(water.normal_map)),
         ("scale_above", real(water.scale_above)),
         ("scale_below", real(water.scale_below)),
@@ -2917,7 +3011,7 @@ fn water_settings_to_llsd(water: &WaterSettings) -> Llsd {
             optional_texture_to_llsd(water.transparent_texture),
         ),
         ("underwater_fog_mod", real(water.underwater_fog_mod)),
-        ("water_fog_color", reals_to_llsd(&water.water_fog_color)),
+        ("water_fog_color", color_to_llsd(water.water_fog_color)),
         ("water_fog_density", real(water.water_fog_density)),
         ("wave1_direction", reals_to_llsd(&water.wave1_direction)),
         ("wave2_direction", reals_to_llsd(&water.wave2_direction)),
@@ -3023,8 +3117,8 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Result<Llsd, sl_wire::WireError
             "RentPrice",
             Llsd::Integer(crate::types::linden_to_wire("RentPrice", &info.rent_price)?),
         ),
-        ("AABBMin", vec3_to_llsd(info.aabb_min)),
-        ("AABBMax", vec3_to_llsd(info.aabb_max)),
+        ("AABBMin", region_coords_to_llsd(info.aabb_min)),
+        ("AABBMax", region_coords_to_llsd(info.aabb_max)),
         (
             "Area",
             Llsd::Integer(crate::types::land_area_to_wire("Area", &info.area)?),
@@ -3085,8 +3179,8 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Result<Llsd, sl_wire::WireError
             Llsd::Integer(crate::types::linden_to_wire("PassPrice", &info.pass_price)?),
         ),
         ("PassHours", Llsd::Real(f64::from(info.pass_hours))),
-        ("UserLocation", vec3_to_llsd(info.user_location)),
-        ("UserLookAt", vec3_to_llsd(info.user_look_at)),
+        ("UserLocation", region_coords_to_llsd(info.user_location)),
+        ("UserLookAt", direction_to_llsd(info.user_look_at)),
         (
             "LandingType",
             Llsd::Integer(i32::from(info.landing_type.to_u8())),
@@ -3170,7 +3264,7 @@ pub(crate) fn offline_message_to_record(im: &InstantMessage) -> Llsd {
             "region_id",
             Llsd::Uuid(crate::types::optional_uuid_to_wire(im.region_id)),
         ),
-        ("position", vec3_to_llsd(im.position)),
+        ("position", region_coords_to_llsd(im.position)),
         (
             "timestamp",
             u32_to_llsd(crate::types::optional_u32_to_wire(im.timestamp)),
@@ -3213,7 +3307,7 @@ pub fn chatterbox_invitation_to_llsd(event: &Event) -> Llsd {
         ("from_group", Llsd::Boolean(*from_group)),
         ("message", Llsd::String(message.clone())),
         ("region_id", Llsd::Uuid(*region_id)),
-        ("position", vec3_to_llsd(*position)),
+        ("position", region_coords_to_llsd(*position)),
         ("parent_estate_id", u32_to_llsd(*parent_estate_id)),
         (
             "timestamp",
@@ -3741,10 +3835,12 @@ mod caps_serializer_tests {
     use sl_types::key::InventoryFolderKey;
     use sl_types::key::InventoryKey;
     use sl_types::key::TextureKey;
+    use sl_types::map::RegionCoordinates;
     use sl_types::money::LindenAmount;
     use uuid::Uuid;
 
     use crate::types::LandArea;
+    use sl_wire::Direction;
 
     use super::{
         CapsTeleportFinish, ais_inventory_update_from_llsd, ais_inventory_update_to_llsd,
@@ -3900,8 +3996,8 @@ mod caps_serializer_tests {
             claim_date: 1_700_000_000,
             claim_price: LindenAmount(100),
             rent_price: LindenAmount(5),
-            aabb_min: (1.0, 2.0, 3.0),
-            aabb_max: (4.0, 5.0, 6.0),
+            aabb_min: RegionCoordinates::new(1.0, 2.0, 3.0),
+            aabb_max: RegionCoordinates::new(4.0, 5.0, 6.0),
             area: LandArea(1024),
             bitmap: vec![1, 2, 3, 4],
             status: ParcelStatus::Abandoned,
@@ -3929,8 +4025,8 @@ mod caps_serializer_tests {
             snapshot_id: Some(TextureKey::from(Uuid::from_u128(0x55))),
             pass_price: LindenAmount(25),
             pass_hours: 2.0,
-            user_location: (10.0, 20.0, 30.0),
-            user_look_at: (0.0, 1.0, 0.0),
+            user_location: RegionCoordinates::new(10.0, 20.0, 30.0),
+            user_look_at: Direction::new(0.0, 1.0, 0.0),
             landing_type: LandingType::LandingPoint,
             region_push_override: true,
             region_deny_anonymous: false,
@@ -3960,7 +4056,7 @@ mod caps_serializer_tests {
             dialog: ImDialog::FromTask,
             from_group: false,
             region_id: Some(Uuid::from_u128(0xa3)),
-            position: (128.0, 64.0, 32.0),
+            position: RegionCoordinates::new(128.0, 64.0, 32.0),
             offline: true,
             timestamp: Some(1_700_000_500),
             id: Uuid::from_u128(0xa4),
@@ -3985,7 +4081,7 @@ mod caps_serializer_tests {
             session_name: "The Group".to_owned(),
             message: "join us".to_owned(),
             region_id: Uuid::from_u128(0xb3),
-            position: (12.0, 34.0, 56.0),
+            position: RegionCoordinates::new(12.0, 34.0, 56.0),
             parent_estate_id: 2,
             timestamp: Some(1_700_001_000),
             binary_bucket: vec![1, 2, 3, 4, 5],

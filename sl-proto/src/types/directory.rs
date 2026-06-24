@@ -16,6 +16,7 @@ use sl_types::key::{AgentKey, ClassifiedKey, GroupKey, ParcelKey, TextureKey};
 use sl_types::map::RegionName;
 use sl_types::money::LindenAmount;
 use sl_types::search::EventId;
+use sl_wire::GlobalCoordinates;
 use uuid::Uuid;
 
 /// The directory-query flags (`DFQ_*`), shared by every `Dir*Query` and
@@ -301,8 +302,8 @@ pub struct PlacesResult {
     pub billable_area: LandArea,
     /// The parcel flags byte.
     pub flags: u8,
-    /// The parcel's global position, in metres (`(x, y, z)`).
-    pub global_position: (f32, f32, f32),
+    /// The parcel's global position, in metres.
+    pub global_position: GlobalCoordinates,
     /// The name of the region the parcel is in, or `None` when the grid sent an
     /// empty (unknown) name.
     pub sim_name: Option<RegionName>,
@@ -349,8 +350,8 @@ pub struct EventInfo {
     /// The name of the region the event is in, or `None` when the grid sent an
     /// empty (unknown) name.
     pub sim_name: Option<RegionName>,
-    /// The event's global position, in metres (`(x, y, z)`).
-    pub global_position: (f64, f64, f64),
+    /// The event's global position, in metres.
+    pub global_position: GlobalCoordinates,
     /// The event flags (e.g. mature/adult; `EVENT_FLAG_*`).
     pub flags: u32,
 }

@@ -15,17 +15,17 @@ mod test {
         ClassifiedKey, CoarseLocation, ControlFlags, DetachOrder, DirClassifiedResult,
         DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult,
         DirPlaceResult, EstateCovenant, Event, EventId, EventInfo, FollowCamProperty,
-        FollowCamPropertyValue, GestureActivation, GridCoordinates, GroupAccountDetails,
-        GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
-        GroupAccountTransactions, GroupActiveProposalItem, GroupKey, GroupName, GroupVote,
-        GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryKey, LandArea, LandSearchType,
-        LandStatItem, LandStatReportType, LindenAmount, LindenBalance, LoginParams, MapItem,
-        MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision,
-        MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem, ObjectKey,
+        FollowCamPropertyValue, GestureActivation, GlobalCoordinates, GridCoordinates,
+        GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
+        GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupKey,
+        GroupName, GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryKey,
+        LandArea, LandSearchType, LandStatItem, LandStatReportType, LindenAmount, LindenBalance,
+        LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
+        MeanCollision, MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem, ObjectKey,
         ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelKey, ParcelObjectOwner,
         ParcelReturnType, Permissions5, PingId, PlacesResult, PointAtType, Postcard, ProductType,
-        RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RestoreItem,
-        RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
+        RegionCoordinates, RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId,
+        RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
         ScriptControlAction, ServerEvent, Session, SimSession, TelehubInfo, TextureKey, Throttle,
         Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
         parse_event_queue_response,
@@ -406,7 +406,7 @@ mod test {
         let data = ViewerEffectData::PointAt {
             source: Some(AgentKey::from(source)),
             target: Some(ObjectKey::from(uuid::Uuid::from_u128(0xA01))),
-            target_position: [1.0, 2.0, 3.0],
+            target_position: GlobalCoordinates::new(1.0, 2.0, 3.0),
             point_at_type: PointAtType::Grab,
         };
         client.send_viewer_effect(
@@ -768,7 +768,7 @@ mod test {
                 actual_area: LandArea(512),
                 billable_area: LandArea(512),
                 flags: 0,
-                global_position: (1000.0, 2000.0, 30.0),
+                global_position: GlobalCoordinates::new(1000.0, 2000.0, 30.0),
                 sim_name: region("Region"),
                 snapshot_id: None,
                 dwell: 3.0,
@@ -858,7 +858,10 @@ mod test {
             .ok_or("expected a PlacesReply client event")?;
         assert_eq!(reply_txn, txn);
         let holding = holdings.first().ok_or("holding")?;
-        assert_eq!(holding.global_position, (1000.0, 2000.0, 30.0));
+        assert_eq!(
+            holding.global_position,
+            GlobalCoordinates::new(1000.0, 2000.0, 30.0)
+        );
         assert_eq!(holding.sim_name, region("Region"));
         Ok(())
     }
@@ -917,7 +920,7 @@ mod test {
                 cover: 1,
                 amount: Some(LindenAmount(50)),
                 sim_name: region("Sandbox"),
-                global_position: (256_000.0, 257_000.0, 30.0),
+                global_position: GlobalCoordinates::new(256_000.0, 257_000.0, 30.0),
                 flags: 0,
             },
             now,
@@ -935,7 +938,10 @@ mod test {
         assert_eq!(info.creator, AgentKey::from(creator));
         assert_eq!(info.name, "Beach Party");
         assert_eq!(info.amount, Some(LindenAmount(50)));
-        assert_eq!(info.global_position, (256_000.0, 257_000.0, 30.0));
+        assert_eq!(
+            info.global_position,
+            GlobalCoordinates::new(256_000.0, 257_000.0, 30.0)
+        );
         Ok(())
     }
 
@@ -1249,9 +1255,7 @@ mod test {
                 actual_area: LandArea(512),
                 billable_area: LandArea(480),
                 flags: 0x4,
-                global_x: 256_000.0,
-                global_y: 257_024.0,
-                global_z: 23.5,
+                global_position: GlobalCoordinates::new(256_000.0, 257_024.0, 23.5),
                 sim_name: region("Default Region"),
                 snapshot_id: Some(TextureKey::from(uuid::Uuid::from_u128(0x77))),
                 dwell: 88.0,
@@ -2010,7 +2014,7 @@ mod test {
             &[LandStatItem {
                 task_local_id: RegionLocalObjectId(4_294_967_000),
                 task_id: task,
-                location: [128.0, 64.5, 25.0],
+                location: RegionCoordinates::new(128.0, 64.5, 25.0),
                 score: 0.85,
                 task_name: "busy script".to_owned(),
                 owner_name: "Test Resident".to_owned(),
@@ -2425,16 +2429,14 @@ mod test {
 
         let items = vec![
             MapItem {
-                global_x: 256_000,
-                global_y: 256_128,
+                position: GlobalCoordinates::new(256_000.0, 256_128.0, 0.0),
                 id: None,
                 extra: 4,
                 extra2: 0,
                 name: "dots".to_owned(),
             },
             MapItem {
-                global_x: 257_000,
-                global_y: 256_200,
+                position: GlobalCoordinates::new(257_000.0, 256_200.0, 0.0),
                 id: Some(uuid::Uuid::from_u128(0x55AA)),
                 extra: 1024,
                 extra2: 250,
@@ -2543,7 +2545,7 @@ mod test {
 
         let postcard = Postcard {
             asset_id: uuid::Uuid::from_u128(0x55),
-            pos_global: [256_128.0, 256_064.0, 22.0],
+            pos_global: GlobalCoordinates::new(256_128.0, 256_064.0, 22.0),
             to: "friend@example.com".to_owned(),
             from: "me@example.com".to_owned(),
             name: "Me".to_owned(),

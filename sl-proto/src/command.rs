@@ -871,7 +871,7 @@ pub enum Command {
     /// when it knows the region, the handle otherwise).
     RequestRemoteParcelId {
         /// The region-relative position whose parcel to resolve.
-        location: Vector,
+        location: RegionCoordinates,
         /// The region's grid-wide id (nil to send `region_handle` instead).
         region_id: Uuid,
         /// The 256 m region handle (used when `region_id` is nil).

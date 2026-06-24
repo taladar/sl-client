@@ -11,26 +11,26 @@ mod test {
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AssetType, AttachmentMode, AttachmentPoint, Camera,
         ChatAudible, ChatChannel, ChatSource, ChatType, ClassifiedCategory, ClassifiedKey,
-        ClassifiedUpdate, ClickAction, CoarseLocation, ControlFlags, CreateGroupParams, DayCycle,
-        DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, DisconnectReason,
-        Distance, EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, EventId,
-        FollowCamProperty, FriendKey, FriendRights, GestureActivation, GroupKey,
-        GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
-        GroupRoleUpdateType, ImDialog, ImageCodec, InterestsUpdate, InventoryCallbackId,
-        InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, LandArea,
-        LandingType, LindenAmount, LindenBalance, LoginAccount, LoginParams, LookAtType,
-        MapItemType, Material, Maturity, MeanCollisionType, MeshKey, MoneyTransactionType,
-        MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem,
-        ObjectFlagSettings, ObjectKey, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-        ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand,
-        ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField,
-        Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape, ProductType,
-        ProfileUpdate, ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate,
-        Reliability, RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId,
-        ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session, SkySettings, SoundFlags,
-        TeleportFlags, TerrainLayerType, TextureKey, Throttle, TransferStatus, Transmit,
-        ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
-        avatar_texture, group_powers, pcode,
+        ClassifiedUpdate, ClickAction, CloudPosDensity, CoarseLocation, Color, ColorAlpha,
+        ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, DetachOrder,
+        Diagnostic, DirFindFlags, Direction, DisconnectReason, Distance, EnvironmentSettings,
+        EstateAccessDelta, EstateAccessKind, Event, EventId, FollowCamProperty, FriendKey,
+        FriendRights, GestureActivation, GlobalCoordinates, Glow, GroupKey, GroupNoticeAttachment,
+        GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType,
+        ImDialog, ImageCodec, InterestsUpdate, InventoryCallbackId, InventoryFolderKey,
+        InventoryItem, InventoryItemOrFolderKey, InventoryKey, LandArea, LandingType, LindenAmount,
+        LindenBalance, LoginAccount, LoginParams, LookAtType, MapItemType, Material, Maturity,
+        MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
+        NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey,
+        ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+        ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType,
+        ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate,
+        PointAtType, Postcard, PrimShape, ProductType, ProfileUpdate, ReflectionProbeFlags,
+        RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment,
+        SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissions,
+        SculptOrMeshKey, Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType,
+        TextureKey, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, WaterSettings, WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -638,7 +638,7 @@ mod test {
         assert_eq!(received.owner_id, Some(uuid::Uuid::from_u128(0x43)));
         assert_eq!(received.chat_type, ChatType::Normal);
         assert_eq!(received.audible, ChatAudible::Fully);
-        assert_eq!(received.position, (10.0, 20.0, 30.0));
+        assert_eq!(received.position, RegionCoordinates::new(10.0, 20.0, 30.0));
         Ok(())
     }
 
@@ -1608,7 +1608,11 @@ mod test {
         assert_eq!(info.name, "My favourite spot");
         assert_eq!(info.description, "a lovely beach");
         assert_eq!(info.sim_name, region_name("Sandbox"));
-        let (px, py, pz) = info.pos_global;
+        let (px, py, pz) = (
+            info.pos_global.x(),
+            info.pos_global.y(),
+            info.pos_global.z(),
+        );
         assert!((px - 256_000.0).abs() < f64::EPSILON);
         assert!((py - 256_128.0).abs() < f64::EPSILON);
         assert!((pz - 25.5).abs() < f64::EPSILON);
@@ -1762,7 +1766,7 @@ mod test {
                 pick_id: sl_proto::PickKey::from(pick),
                 name: "New pick".to_owned(),
                 description: "a place".to_owned(),
-                pos_global: (256_000.0, 256_128.0, 25.5),
+                pos_global: GlobalCoordinates::new(256_000.0, 256_128.0, 25.5),
                 ..PickUpdate::default()
             },
             now,
@@ -4282,7 +4286,7 @@ mod test {
                 data: ViewerEffectData::LookAt {
                     source: Some(AgentKey::from(self_id)),
                     target: Some(ObjectKey::from(target)),
-                    target_position: [1.0, 2.0, 3.0],
+                    target_position: GlobalCoordinates::new(1.0, 2.0, 3.0),
                     look_at_type: LookAtType::Focus,
                 },
             }],
@@ -4305,7 +4309,7 @@ mod test {
             ViewerEffectData::LookAt {
                 source: Some(AgentKey::from(self_id)),
                 target: Some(ObjectKey::from(target)),
-                target_position: [1.0, 2.0, 3.0],
+                target_position: GlobalCoordinates::new(1.0, 2.0, 3.0),
                 look_at_type: LookAtType::Focus,
             },
         );
@@ -4413,7 +4417,7 @@ mod test {
         let data = ViewerEffectData::PointAt {
             source: Some(AgentKey::from(source)),
             target: Some(ObjectKey::from(target)),
-            target_position: [4.0, 5.0, 6.0],
+            target_position: GlobalCoordinates::new(4.0, 5.0, 6.0),
             point_at_type: PointAtType::Grab,
         };
         let message = AnyMessage::ViewerEffect(ViewerEffectMessage {
@@ -4638,7 +4642,10 @@ mod test {
         assert_eq!(info.cover, 1);
         assert_eq!(info.amount, Some(LindenAmount(50)));
         assert_eq!(info.sim_name, region_name("Sandbox"));
-        assert_eq!(info.global_position, (256_000.0, 257_000.0, 30.0));
+        assert_eq!(
+            info.global_position,
+            GlobalCoordinates::new(256_000.0, 257_000.0, 30.0)
+        );
         Ok(())
     }
 
@@ -5843,11 +5850,11 @@ mod test {
             inventory_skeleton: Vec::new(),
             buddy_list: Vec::new(),
             home: Some(HomeLocation {
-                region_handle: (256_000, 256_256),
-                position: [128.0, 127.0, 25.0],
-                look_at: [1.0, 0.0, 0.0],
+                region_handle: RegionHandle::from_global(256_000, 256_256),
+                position: RegionCoordinates::new(128.0, 127.0, 25.0),
+                look_at: Direction::new(1.0, 0.0, 0.0),
             }),
-            look_at: Some([0.5, 0.5, 0.0]),
+            look_at: Some(Direction::new(0.5, 0.5, 0.0)),
             region_x: Some(256_000),
             region_y: Some(256_256),
             agent_access: Some("M".to_owned()),
@@ -5872,7 +5879,10 @@ mod test {
         assert_eq!(stored.max_agent_groups, Some(42));
         assert_eq!(stored.library_root, Some(lib_root));
         assert_eq!(stored.library_owner, Some(lib_owner));
-        assert_eq!(stored.home.ok_or("home")?.region_handle, (256_000, 256_256));
+        assert_eq!(
+            stored.home.ok_or("home")?.region_handle,
+            RegionHandle::from_global(256_000, 256_256)
+        );
 
         // ...and also emitted as events.
         let events = drain_events(&mut session);
@@ -6464,11 +6474,9 @@ mod test {
             Some(TextureKey::from(uuid::Uuid::from_u128(0xcc)))
         );
         // Haze colours/scalars come from the `legacy_haze` sub-map.
-        assert!(
-            sky.ambient
-                .iter()
-                .all(|component| (component - 0.25).abs() < f32::EPSILON)
-        );
+        assert!((sky.ambient.red() - 0.25).abs() < f32::EPSILON);
+        assert!((sky.ambient.green() - 0.25).abs() < f32::EPSILON);
+        assert!((sky.ambient.blue() - 0.25).abs() < f32::EPSILON);
         assert!((sky.haze_density - 0.75).abs() < f32::EPSILON);
 
         let water = cycle.water_frames.get("Default").ok_or("water frame")?;
@@ -6504,24 +6512,24 @@ mod test {
                 z: 0.5,
                 s: 0.5,
             },
-            sunlight_color: [0.25, 0.5, 0.75, 1.0],
-            ambient: [0.125, 0.25, 0.5],
-            blue_horizon: [0.25, 0.5, 1.0],
-            blue_density: [0.5, 0.25, 0.125],
+            sunlight_color: ColorAlpha::new(0.25, 0.5, 0.75, 1.0),
+            ambient: Color::new(0.125, 0.25, 0.5),
+            blue_horizon: Color::new(0.25, 0.5, 1.0),
+            blue_density: Color::new(0.5, 0.25, 0.125),
             haze_horizon: 0.75,
             haze_density: 2.0,
             density_multiplier: 0.25,
             distance_multiplier: 4.0,
             max_y: 1605.0,
             gamma: 1.0,
-            cloud_color: [0.5, 0.5, 0.5],
-            cloud_pos_density1: [1.0, 0.5, 0.25],
-            cloud_pos_density2: [0.125, 0.25, 0.5],
+            cloud_color: Color::new(0.5, 0.5, 0.5),
+            cloud_pos_density1: CloudPosDensity::new(1.0, 0.5, 0.25),
+            cloud_pos_density2: CloudPosDensity::new(0.125, 0.25, 0.5),
             cloud_scale: 0.5,
             cloud_scroll_rate: [10.0, 10.25],
             cloud_shadow: 0.25,
             cloud_variance: 0.0,
-            glow: [5.0, 0.0, -2.5],
+            glow: Glow::new(5.0, 0.0, -2.5),
             star_brightness: 0.5,
             sun_scale: 1.0,
             moon_scale: 1.0,
@@ -6549,13 +6557,13 @@ mod test {
             blur_multiplier: 0.25,
             fresnel_offset: 0.5,
             fresnel_scale: 0.75,
-            normal_scale: [2.0, 2.0, 2.0],
+            normal_scale: Scale::new(2.0, 2.0, 2.0),
             normal_map: Some(TextureKey::from(uuid::Uuid::from_u128(0x404))),
             scale_above: 0.125,
             scale_below: 0.25,
             transparent_texture: Some(TextureKey::from(uuid::Uuid::from_u128(0x7a))),
             underwater_fog_mod: 0.25,
-            water_fog_color: [0.0, 0.25, 0.5],
+            water_fog_color: Color::new(0.0, 0.25, 0.5),
             water_fog_density: 16.0,
             wave1_direction: [1.5, -0.5],
             wave2_direction: [-1.0, 0.25],
@@ -6796,9 +6804,9 @@ mod test {
         assert_eq!(parcel.sequence_id, 42);
         assert_eq!(parcel.local_id, sl_proto::RegionLocalParcelId(7));
         assert_eq!(parcel.area, LandArea(4096));
-        assert_eq!(parcel.aabb_max.0.to_bits(), 64.0_f32.to_bits());
-        assert_eq!(parcel.aabb_max.1.to_bits(), 64.0_f32.to_bits());
-        assert_eq!(parcel.aabb_max.2.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(parcel.aabb_max.x().to_bits(), 64.0_f32.to_bits());
+        assert_eq!(parcel.aabb_max.y().to_bits(), 64.0_f32.to_bits());
+        assert_eq!(parcel.aabb_max.z().to_bits(), 0.0_f32.to_bits());
         assert_eq!(parcel.max_prims, 1000);
         assert_eq!(parcel.sim_wide_max_prims, 5000);
         assert_eq!(parcel.bitmap.len(), 512);
@@ -6937,8 +6945,8 @@ mod test {
         assert_eq!(parcel.snapshot_id, Some(TextureKey::from(snapshot)));
         assert_eq!(parcel.pass_price, LindenAmount(25));
         assert_eq!(parcel.pass_hours.to_bits(), 4.0_f32.to_bits());
-        assert_eq!(parcel.user_location.0.to_bits(), 12.0_f32.to_bits());
-        assert_eq!(parcel.user_look_at.0.to_bits(), 1.0_f32.to_bits());
+        assert_eq!(parcel.user_location.x().to_bits(), 12.0_f32.to_bits());
+        assert_eq!(parcel.user_look_at.x().to_bits(), 1.0_f32.to_bits());
         assert_eq!(parcel.landing_type, LandingType::Anywhere);
         assert!(parcel.region_push_override);
         assert!(parcel.region_deny_anonymous);
@@ -7679,12 +7687,19 @@ mod test {
         assert_eq!(item_type, MapItemType::AgentLocations);
         assert_eq!(items.len(), 2);
         let first = items.first().ok_or("expected at least one item")?;
-        assert_eq!(first.global_x, 256_128);
-        assert_eq!(first.global_y, 256_064);
-        // The region handle masks off the in-region offset; the locals recover it.
-        assert_eq!(first.region_handle(), RegionHandle(0x0003_E800_0003_E800));
-        assert_eq!(first.local_x(), 128);
-        assert_eq!(first.local_y(), 64);
+        assert_eq!(
+            first.position,
+            GlobalCoordinates::new(256_128.0, 256_064.0, 0.0)
+        );
+        // The region handle splits off the in-region offset; the region position
+        // recovers it (the typed replacement for the old `& 0xFF` masking).
+        assert_eq!(
+            first.region_handle(),
+            Some(RegionHandle(0x0003_E800_0003_E800))
+        );
+        let region_position = first.region_position().ok_or("region position")?;
+        assert_eq!(region_position.x().to_bits(), 128.0_f32.to_bits());
+        assert_eq!(region_position.y().to_bits(), 64.0_f32.to_bits());
         assert_eq!(first.extra, 1);
         assert_eq!(first.name, "hash");
         Ok(())
@@ -8100,7 +8115,7 @@ mod test {
         assert_eq!(details.sim_name, region_name("Default Region"));
         assert_eq!(details.actual_area, LandArea(512));
         assert_eq!(details.sale_price, Some(LindenAmount(1000)));
-        assert_eq!(details.global_z.to_bits(), 23.5_f32.to_bits());
+        assert_eq!(details.global_position.z().to_bits(), 23.5_f64.to_bits());
         Ok(())
     }
 
@@ -8721,7 +8736,7 @@ mod test {
         assert_eq!(parcel.sequence_id, 9);
         assert_eq!(parcel.area, LandArea(2048));
         assert_eq!(parcel.max_prims, 750);
-        assert_eq!(parcel.aabb_max.0.to_bits(), 32.0_f32.to_bits());
+        assert_eq!(parcel.aabb_max.x().to_bits(), 32.0_f32.to_bits());
         assert_eq!(parcel.bitmap, vec![1u8, 2, 3]);
         // ParcelFlags 64 = CREATE_OBJECTS, decoded from the binary element.
         assert_eq!(parcel.raw_parcel_flags, 64);
@@ -8948,7 +8963,7 @@ mod test {
 
         let postcard = Postcard {
             asset_id: uuid::Uuid::from_u128(0x55),
-            pos_global: [256_128.0, 256_064.0, 22.0],
+            pos_global: GlobalCoordinates::new(256_128.0, 256_064.0, 22.0),
             to: "friend@example.com".to_owned(),
             from: "me@example.com".to_owned(),
             name: "Me".to_owned(),
@@ -11326,7 +11341,7 @@ mod test {
                 location: "Right Hand".to_owned(),
                 objects: vec![sl_proto::ScriptedObjectInfo {
                     id: uuid::Uuid::from_u128(0xA77),
-                    location: [1.0, 2.0, 3.0],
+                    location: RegionCoordinates::new(1.0, 2.0, 3.0),
                     name: "HUD".to_owned(),
                     owner: sl_proto::OwnerKey::Agent(sl_proto::AgentKey::from(
                         uuid::Uuid::from_u128(0x0411),
@@ -11942,7 +11957,7 @@ mod test {
         assert_eq!(session_name, "My Group");
         assert_eq!(message, "join us");
         assert_eq!(region_id, region);
-        assert_eq!(position, (1.5, 2.5, 3.5));
+        assert_eq!(position, RegionCoordinates::new(1.5, 2.5, 3.5));
         assert_eq!(parent_estate_id, 101);
         assert_eq!(timestamp, Some(1_700_000_000));
         // "My Group" base64-decoded — the group/session label.

@@ -23,6 +23,7 @@
 use std::collections::HashMap;
 
 use sl_types::key::{AgentKey, OwnerKey, ParcelKey};
+use sl_types::map::RegionCoordinates;
 use uuid::Uuid;
 
 use crate::WireError;
@@ -66,8 +67,8 @@ pub struct ScriptedObjectResources {
 pub struct ScriptedObjectInfo {
     /// The object's id (`id`).
     pub id: Uuid,
-    /// The object's region position (`location`), as `[x, y, z]` metres.
-    pub location: [f32; 3],
+    /// The object's region position (`location`), in metres.
+    pub location: RegionCoordinates,
     /// The object's name (`name`).
     pub name: String,
     /// The object's owner (`owner_id` + `is_group_owned`) — an agent, or a group
@@ -92,7 +93,7 @@ impl Default for ScriptedObjectInfo {
     fn default() -> Self {
         Self {
             id: Uuid::nil(),
-            location: [0.0, 0.0, 0.0],
+            location: RegionCoordinates::new(0.0, 0.0, 0.0),
             name: String::new(),
             owner: OwnerKey::Agent(AgentKey::from(Uuid::nil())),
             resources: ScriptedObjectResources::default(),
@@ -219,7 +220,14 @@ fn scripted_object_to_llsd(object: &ScriptedObjectInfo) -> Llsd {
             "is_group_owned".to_owned(),
             Llsd::Integer(i32::from(object.owner.is_group())),
         ),
-        ("location".to_owned(), vector3_to_llsd(object.location)),
+        (
+            "location".to_owned(),
+            vector3_to_llsd([
+                object.location.x(),
+                object.location.y(),
+                object.location.z(),
+            ]),
+        ),
         ("name".to_owned(), Llsd::String(object.name.clone())),
         ("owner_id".to_owned(), Llsd::Uuid(object.owner.uuid())),
         ("resources".to_owned(), Llsd::Map(resources)),
@@ -254,7 +262,10 @@ fn scripted_object_from_llsd(value: &Llsd) -> Result<ScriptedObjectInfo, WireErr
     };
     Ok(ScriptedObjectInfo {
         id: value.require_uuid("id", "id")?,
-        location: vector3_from_llsd(value.get("location"), "location")?,
+        location: {
+            let [x, y, z] = vector3_from_llsd(value.get("location"), "location")?;
+            RegionCoordinates::new(x, y, z)
+        },
         name: value
             .field_str("name", "name")?
             .unwrap_or_default()
@@ -576,6 +587,7 @@ pub fn build_land_resource_detail_response(parcels: &[ParcelScriptResources]) ->
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+    use sl_types::map::RegionCoordinates;
     use uuid::Uuid;
 
     use super::{
@@ -592,7 +604,7 @@ mod tests {
     fn sample_object() -> ScriptedObjectInfo {
         ScriptedObjectInfo {
             id: Uuid::from_u128(0xabc),
-            location: [128.0, 64.5, 25.0],
+            location: RegionCoordinates::new(128.0, 64.5, 25.0),
             name: "Scripted thing".to_owned(),
             owner: OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0xdef))),
             resources: ScriptedObjectResources {

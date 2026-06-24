@@ -84,10 +84,10 @@ use sl_wire::messages::{
     TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock,
 };
 use sl_wire::{
-    AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, Llsd, MessageId, PacketFlags,
-    Permissions, Permissions5, Reader, RegionHandle, RegionLocalObjectId, RegionLocalParcelId,
-    SequenceNumber, WireError, Writer, build_event_queue_response, encode_datagram, parse_datagram,
-    zero_decode,
+    AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, GlobalCoordinates, Llsd, MessageId,
+    PacketFlags, Permissions, Permissions5, Reader, RegionHandle, RegionLocalObjectId,
+    RegionLocalParcelId, SequenceNumber, WireError, Writer, build_event_queue_response,
+    encode_datagram, parse_datagram, zero_decode,
 };
 use uuid::Uuid;
 
@@ -148,6 +148,18 @@ const MAX_ACKS_PER_PACKET: usize = 255;
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
 fn deadline(now: Instant, duration: Duration) -> Instant {
     now.checked_add(duration).unwrap_or(now)
+}
+
+/// Narrows a global-metre `f64` to the `f32` the `PlacesReply` `GlobalX/Y/Z`
+/// fields carry. Global positions are in-range metre values, so the narrowing
+/// is exact for the data the wire (an `F32`) round-trips.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    reason = "PlacesReply GlobalX/Y/Z are F32; a global metre value is within f32 range"
+)]
+const fn global_to_f32(meters: f64) -> f32 {
+    meters as f32
 }
 
 /// Updates `earliest` to the minimum of itself and `candidate`.
@@ -1507,9 +1519,9 @@ impl SimSession {
                 .map(|item| LandStatReplyReportDataBlock {
                     task_local_id: item.task_local_id.0,
                     task_id: item.task_id.uuid(),
-                    location_x: item.location[0],
-                    location_y: item.location[1],
-                    location_z: item.location[2],
+                    location_x: item.location.x(),
+                    location_y: item.location.y(),
+                    location_z: item.location.z(),
                     score: item.score,
                     task_name: with_nul(&item.task_name),
                     owner_name: with_nul(&item.owner_name),
@@ -1929,9 +1941,9 @@ impl SimSession {
                             &result.billable_area,
                         )?,
                         flags: result.flags,
-                        global_x: result.global_position.0,
-                        global_y: result.global_position.1,
-                        global_z: result.global_position.2,
+                        global_x: global_to_f32(result.global_position.x()),
+                        global_y: global_to_f32(result.global_position.y()),
+                        global_z: global_to_f32(result.global_position.z()),
                         sim_name: with_nul(&sl_wire::region_name_to_wire(result.sim_name.as_ref())),
                         snapshot_id: result.snapshot_id.map_or_else(Uuid::nil, |s| s.uuid()),
                         dwell: result.dwell,
@@ -1956,7 +1968,7 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let (global_x, global_y, global_z) = info.global_position;
+        let global = info.global_position;
         let message = AnyMessage::EventInfoReply(EventInfoReply {
             agent_data: EventInfoReplyAgentDataBlock {
                 agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
@@ -1973,7 +1985,7 @@ impl SimSession {
                 cover: info.cover,
                 amount: crate::types::linden_cover_to_wire("Amount", info.amount.as_ref())?,
                 sim_name: with_nul(&sl_wire::region_name_to_wire(info.sim_name.as_ref())),
-                global_pos: [global_x, global_y, global_z],
+                global_pos: [global.x(), global.y(), global.z()],
                 event_flags: info.flags,
             },
         });
@@ -2410,9 +2422,9 @@ impl SimSession {
                     &details.billable_area,
                 )?,
                 flags: details.flags,
-                global_x: details.global_x,
-                global_y: details.global_y,
-                global_z: details.global_z,
+                global_x: global_to_f32(details.global_position.x()),
+                global_y: global_to_f32(details.global_position.y()),
+                global_z: global_to_f32(details.global_position.z()),
                 sim_name: with_nul(&sl_wire::region_name_to_wire(details.sim_name.as_ref())),
                 snapshot_id: details.snapshot_id.map_or_else(Uuid::nil, |s| s.uuid()),
                 dwell: details.dwell,
@@ -3289,10 +3301,11 @@ impl SimSession {
             }
             AnyMessage::SendPostcard(postcard) => {
                 let data = &postcard.agent_data;
+                let [pos_x, pos_y, pos_z] = data.pos_global;
                 self.events
                     .push_back(ServerEvent::PostcardReceived(Box::new(Postcard {
                         asset_id: data.asset_id,
-                        pos_global: data.pos_global,
+                        pos_global: GlobalCoordinates::new(pos_x, pos_y, pos_z),
                         to: trimmed_string(&data.to),
                         from: trimmed_string(&data.from),
                         name: trimmed_string(&data.name),

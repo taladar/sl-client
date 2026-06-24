@@ -21,10 +21,12 @@ use sl_proto::AgentKey;
 use sl_proto::ChatChannel;
 use sl_proto::CircuitId;
 use sl_proto::ClassifiedKey;
+use sl_proto::Direction;
 use sl_proto::Distance;
 use sl_proto::EventId;
 use sl_proto::ExperienceKey;
 use sl_proto::FriendKey;
+use sl_proto::GlobalCoordinates;
 use sl_proto::GroupKey;
 use sl_proto::GroupRoleKey;
 use sl_proto::InventoryFolderKey;
@@ -257,10 +259,13 @@ fn global_or_zero(
     ctx: &dyn ReplContext,
     field: &str,
     pos: usize,
-) -> Result<(f64, f64, f64), ReplError> {
+) -> Result<GlobalCoordinates, ReplError> {
     match args.opt_str(ctx, field, pos)? {
-        Some(value) => parse_global(field, &value),
-        None => Ok((0.0, 0.0, 0.0)),
+        Some(value) => {
+            let (x, y, z) = parse_global(field, &value)?;
+            Ok(GlobalCoordinates::new(x, y, z))
+        }
+        None => Ok(GlobalCoordinates::new(0.0, 0.0, 0.0)),
     }
 }
 
@@ -796,18 +801,6 @@ fn color_or_white(
         .ok_or_else(|| invalid(field, &value, "RGBA colour (8 hex digits)"))
 }
 
-/// An optional global `<x,y,z>` position as a `[f64; 3]`, defaulting to the
-/// origin.
-fn position_or_zero(
-    args: &Args,
-    ctx: &dyn ReplContext,
-    field: &str,
-    pos: usize,
-) -> Result<[f64; 3], ReplError> {
-    let (x, y, z) = global_or_zero(args, ctx, field, pos)?;
-    Ok([x, y, z])
-}
-
 /// The default [`ViewerEffectData`] kind for an effect type: structured for the
 /// look-at / point-at / spiral-family types, `raw` otherwise.
 const fn default_effect_data_kind(effect_type: ViewerEffectType) -> &'static str {
@@ -838,13 +831,13 @@ fn parse_effect_data(
         "lookat" => Ok(ViewerEffectData::LookAt {
             source: args.opt_agent(ctx, "source", 201)?,
             target: args.opt_object(ctx, "target", 202)?,
-            target_position: position_or_zero(args, ctx, "position", 203)?,
+            target_position: global_or_zero(args, ctx, "position", 203)?,
             look_at_type: parse_lookat_type("look_at", &args.str_or(ctx, "look_at", 204, "none")?)?,
         }),
         "pointat" => Ok(ViewerEffectData::PointAt {
             source: args.opt_agent(ctx, "source", 201)?,
             target: args.opt_object(ctx, "target", 202)?,
-            target_position: position_or_zero(args, ctx, "position", 203)?,
+            target_position: global_or_zero(args, ctx, "position", 203)?,
             point_at_type: parse_pointat_type(
                 "point_at",
                 &args.str_or(ctx, "point_at", 205, "none")?,
@@ -853,7 +846,7 @@ fn parse_effect_data(
         "spiral" => Ok(ViewerEffectData::Spiral {
             source: args.opt_object(ctx, "source", 201)?,
             target: args.opt_object(ctx, "target", 202)?,
-            position: position_or_zero(args, ctx, "position", 203)?,
+            position: global_or_zero(args, ctx, "position", 203)?,
         }),
         "raw" => Ok(ViewerEffectData::Raw(args.bytes_or_empty(ctx, "raw", 206)?)),
         _ => Err(invalid("data", &selector, "lookat|pointat|spiral|raw")),
@@ -1110,18 +1103,13 @@ fn build_parcel_update(args: &Args, ctx: &dyn ReplContext) -> Result<ParcelUpdat
         category: ParcelCategory::from_u8(args.parse_or(ctx, "category", 12, "u8", 0)?),
         auth_buyer_id: args.opt_agent(ctx, "auth_buyer_id", 13)?,
         snapshot_id: args.opt_texture(ctx, "snapshot_id", 14)?,
-        user_location: args
-            .opt_vector(ctx, "user_location", 15)?
-            .unwrap_or(Vector {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            }),
-        user_look_at: args.opt_vector(ctx, "user_look_at", 16)?.unwrap_or(Vector {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        }),
+        user_location: args.opt_vector(ctx, "user_location", 15)?.map_or(
+            RegionCoordinates::new(0.0, 0.0, 0.0),
+            RegionCoordinates::from,
+        ),
+        user_look_at: args
+            .opt_vector(ctx, "user_look_at", 16)?
+            .map_or(Direction::ZERO, |v| Direction::new(v.x, v.y, v.z)),
         landing_type: args.parse_or(ctx, "landing_type", 17, "u8", 0)?,
     })
 }
@@ -2541,7 +2529,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<location-x,y,z> [region_id] [region_handle-u64]",
             build: |args, ctx| {
                 Ok(Command::RequestRemoteParcelId {
-                    location: args.req_vector(ctx, "location", 0)?,
+                    location: args.req_vector(ctx, "location", 0)?.into(),
                     region_id: args.uuid_or_nil(ctx, "region_id", 1)?,
                     region_handle: RegionHandle(args.parse_or(
                         ctx,
@@ -2874,7 +2862,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     .unwrap_or((0.0, 0.0, 0.0));
                 Ok(Command::SendPostcard(Box::new(Postcard {
                     asset_id: args.req_uuid(ctx, "asset_id", 0)?,
-                    pos_global: [pos_x, pos_y, pos_z],
+                    pos_global: GlobalCoordinates::new(pos_x, pos_y, pos_z),
                     to: args.req_str(ctx, "to", 1)?,
                     from: args.opt_str(ctx, "from", 5)?.unwrap_or_default(),
                     name: args.opt_str(ctx, "name", 4)?.unwrap_or_default(),
@@ -4951,7 +4939,7 @@ mod tests {
         assert!(matches!(
             build("request_remote_parcel_id <128,64,22> 00000000-0000-0000-0000-000000000000 281483566841976"),
             Ok(Command::RequestRemoteParcelId { location, region_id, region_handle })
-                if location.x.to_bits() == 128.0_f32.to_bits()
+                if location.x().to_bits() == 128.0_f32.to_bits()
                     && region_id == Uuid::nil()
                     && region_handle == RegionHandle(281_483_566_841_976)
         ));
