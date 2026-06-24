@@ -6,21 +6,22 @@
 
 use crate::scoped_id::{ScopedObjectId, ScopedParcelId};
 use crate::{
-    AbuseReport, AgentKey, AgentPreferences, AnyMessage, AssetType, AttachmentMode,
-    AttachmentPoint, Camera, ChatChannel, ChatType, ClassifiedCategory, ClassifiedKey,
-    ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, DeRezDestination, DetachOrder,
-    DirFindFlags, Distance, EstateAccessDelta, EventId, ExperienceKey, ExperiencePermission,
-    ExperienceUpdate, FriendKey, FriendRights, GestureActivation, GroupKey, GroupNoticeAttachment,
-    GroupNoticeKey, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate,
-    InterestsUpdate, InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer,
-    InventoryType, LandSearchType, LandStatReportType, LindenAmount, MapItemType, Material,
-    MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
-    NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform,
-    OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
-    ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape, ProfileUpdate,
-    ProposalVoteId, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem,
-    RezAttachment, Rotation, SaleType, ScriptPermissions, TextureKey, Throttle, Uuid, Vector,
-    ViewerEffect, VoiceProvisionRequest, Wearable,
+    AbuseReport, AgentKey, AgentPreferences, AnimationKey, AnyMessage, AssetKey, AssetType,
+    AttachmentMode, AttachmentPoint, Camera, ChatChannel, ChatType, ClassifiedCategory,
+    ClassifiedKey, ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams,
+    DeRezDestination, DetachOrder, DirFindFlags, Distance, EstateAccessDelta, EventId,
+    ExperienceKey, ExperiencePermission, ExperienceUpdate, FriendKey, FriendRights,
+    GestureActivation, GroupKey, GroupNoticeAttachment, GroupNoticeKey, GroupRoleEdit,
+    GroupRoleKey, GroupRoleMemberChange, IceCandidate, InterestsUpdate, InventoryFolderKey,
+    InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandSearchType, LandStatReportType,
+    LindenAmount, MapItemType, Material, MaterialOverrideUpdate, MediaEntry, MeshKey,
+    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
+    ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
+    ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField,
+    PickKey, PickUpdate, Postcard, PrimShape, ProfileUpdate, ProposalVoteId, RegionCoordinates,
+    RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, Rotation, SaleType,
+    ScriptPermissions, TextureKey, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
+    Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1345,7 +1346,7 @@ pub enum Command {
     /// [`Event::AssetTransferFailed`](crate::Event::AssetTransferFailed)).
     RequestAsset {
         /// The asset's id.
-        asset_id: Uuid,
+        asset_id: AssetKey,
         /// The asset's class.
         asset_type: AssetType,
         /// The transfer priority.
@@ -1368,7 +1369,7 @@ pub enum Command {
     /// from the mesh header. `None` fetches the whole asset.
     FetchMesh {
         /// The mesh asset's id.
-        mesh_id: Uuid,
+        mesh_id: MeshKey,
         /// Optional inclusive `(start, end)` byte range to fetch.
         byte_range: Option<(u32, u32)>,
     },
@@ -1379,7 +1380,7 @@ pub enum Command {
     /// whole asset.
     FetchAsset {
         /// The asset's id.
-        asset_id: Uuid,
+        asset_id: AssetKey,
         /// The asset's class (selects the cap query parameter).
         asset_type: AssetType,
         /// Optional inclusive `(start, end)` byte range to fetch.
@@ -1428,13 +1429,13 @@ pub enum Command {
     /// each `(anim_id, start)` pair starts (`true`) or stops (`false`) one
     /// animation. Other avatars observe the result as an
     /// [`Event::AvatarAnimation`](crate::Event::AvatarAnimation).
-    SetAnimations(Vec<(Uuid, bool)>),
+    SetAnimations(Vec<(AnimationKey, bool)>),
     /// Start one of the agent's own animations (`AgentAnimation`); convenience
     /// for a single-element [`Command::SetAnimations`].
-    PlayAnimation(Uuid),
+    PlayAnimation(AnimationKey),
     /// Stop one of the agent's own animations (`AgentAnimation`); convenience for
     /// a single-element [`Command::SetAnimations`].
-    StopAnimation(Uuid),
+    StopAnimation(AnimationKey),
     /// Mark one or more gestures active for this session (`ActivateGestures`),
     /// so the simulator preloads them and they fire on their trigger
     /// words/keys. The gesture assets themselves are uploaded separately (via

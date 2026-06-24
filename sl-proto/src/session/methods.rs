@@ -35,6 +35,7 @@ use super::{
     TextureDownload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
+use crate::asset_keys::{AnimationKey, AssetKey};
 use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
 use crate::error::Error;
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
@@ -4971,7 +4972,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_asset(
         &mut self,
-        asset_id: Uuid,
+        asset_id: AssetKey,
         asset_type: AssetType,
         priority: f32,
         now: Instant,
@@ -4981,13 +4982,13 @@ impl Session {
         self.asset_transfers.insert(
             transfer_id,
             AssetTransfer {
-                asset_id,
+                asset_id: asset_id.uuid(),
                 asset_type,
                 chunks: BTreeMap::new(),
             },
         );
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_transfer_request(transfer_id, asset_id, asset_type, priority, now)?;
+        circuit.send_transfer_request(transfer_id, asset_id.uuid(), asset_type, priority, now)?;
         Ok(())
     }
 
@@ -5790,11 +5791,15 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn set_animations(
         &mut self,
-        animations: &[(Uuid, bool)],
+        animations: &[(AnimationKey, bool)],
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_agent_animation(animations, now)?;
+        let wire: Vec<(Uuid, bool)> = animations
+            .iter()
+            .map(|(anim_id, start)| (anim_id.uuid(), *start))
+            .collect();
+        circuit.send_agent_animation(&wire, now)?;
         Ok(())
     }
 
@@ -5807,7 +5812,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn play_animation(&mut self, anim_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn play_animation(&mut self, anim_id: AnimationKey, now: Instant) -> Result<(), Error> {
         self.set_animations(&[(anim_id, true)], now)
     }
 
@@ -5819,7 +5824,7 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn stop_animation(&mut self, anim_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn stop_animation(&mut self, anim_id: AnimationKey, now: Instant) -> Result<(), Error> {
         self.set_animations(&[(anim_id, false)], now)
     }
 

@@ -12,8 +12,8 @@
 use std::time::Duration;
 
 use sl_client_tokio::{
-    Camera, Client, Command, DisconnectReason, Error, Event, LoginParams, LoginRequest, Throttle,
-    Uuid, Vector, avatar_texture, pcode,
+    AnimationKey, Camera, Client, Command, DisconnectReason, Error, Event, LoginParams,
+    LoginRequest, Throttle, Uuid, Vector, avatar_texture, pcode,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -124,9 +124,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // the agent's own animation set back as an
                 // `Event::AvatarAnimation` for this avatar.
                 command_tx
-                    .send(Command::PlayAnimation(Uuid::from_u128(
+                    .send(Command::PlayAnimation(AnimationKey::from(Uuid::from_u128(
                         0x9b0c_1c4e_8ac7_7969_1494_28c8_74c4_f668,
-                    )))
+                    ))))
                     .await
                     .ok();
                 let command_tx = command_tx.clone();

@@ -18,8 +18,8 @@
 use std::time::Duration;
 
 use sl_client_tokio::{
-    AssetType, Client, Command, DisconnectReason, Error, Event, LoginParams, LoginRequest,
-    TextureKey, Throttle, Uuid,
+    AssetKey, AssetType, Client, Command, DisconnectReason, Error, Event, LoginParams,
+    LoginRequest, TextureKey, Throttle, Uuid,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -129,7 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some((asset_id, asset_type)) = asset {
                     command_tx
                         .send(Command::FetchAsset {
-                            asset_id,
+                            asset_id: AssetKey::from(asset_id),
                             asset_type,
                             byte_range: None,
                         })
@@ -137,7 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .ok();
                     command_tx
                         .send(Command::RequestAsset {
-                            asset_id,
+                            asset_id: AssetKey::from(asset_id),
                             asset_type,
                             priority: 1.0,
                         })

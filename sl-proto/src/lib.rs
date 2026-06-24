@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 mod appearance;
+mod asset_keys;
 mod bookkeeping_ids;
 mod command;
 mod error;
@@ -15,6 +16,7 @@ mod terrain;
 mod types;
 
 pub use appearance::{MAX_FACES, decode_texture_entry, encode_texture_entry};
+pub use asset_keys::{AnimationKey, AssetKey};
 pub use bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
 pub use command::Command;
 pub use error::Error;

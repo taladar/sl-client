@@ -18,6 +18,8 @@
 use std::collections::BTreeMap;
 
 use sl_proto::AgentKey;
+use sl_proto::AnimationKey;
+use sl_proto::AssetKey;
 use sl_proto::ChatChannel;
 use sl_proto::CircuitId;
 use sl_proto::ClassifiedKey;
@@ -32,6 +34,7 @@ use sl_proto::GroupRoleKey;
 use sl_proto::InventoryFolderKey;
 use sl_proto::InventoryItemOrFolderKey;
 use sl_proto::InventoryKey;
+use sl_proto::MeshKey;
 use sl_proto::ObjectKey;
 use sl_proto::OwnerKey;
 use sl_proto::ParcelKey;
@@ -3449,7 +3452,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<asset_id> <asset_type-code> [priority=1.0]",
             build: |args, ctx| {
                 Ok(Command::RequestAsset {
-                    asset_id: args.req_uuid(ctx, "asset_id", 0)?,
+                    asset_id: AssetKey::from(args.req_uuid(ctx, "asset_id", 0)?),
                     asset_type: enum_arg(args, ctx, "asset_type", 1, parse_asset_type)?,
                     priority: args.parse_or(ctx, "priority", 2, "f32", 1.0)?,
                 })
@@ -3470,7 +3473,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<mesh_id> [start= end=]",
             build: |args, ctx| {
                 Ok(Command::FetchMesh {
-                    mesh_id: args.req_uuid(ctx, "mesh_id", 0)?,
+                    mesh_id: MeshKey::from(args.req_uuid(ctx, "mesh_id", 0)?),
                     byte_range: byte_range(args, ctx)?,
                 })
             },
@@ -3480,7 +3483,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<asset_id> <asset_type-code> [start= end=]",
             build: |args, ctx| {
                 Ok(Command::FetchAsset {
-                    asset_id: args.req_uuid(ctx, "asset_id", 0)?,
+                    asset_id: AssetKey::from(args.req_uuid(ctx, "asset_id", 0)?),
                     asset_type: enum_arg(args, ctx, "asset_type", 1, parse_asset_type)?,
                     byte_range: byte_range(args, ctx)?,
                 })
@@ -3846,23 +3849,31 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "set_animations",
             usage: "<anim_id:start,anim_id:start,…>",
             build: |args, ctx| {
-                Ok(Command::SetAnimations(uuid_bool_pairs(
-                    args,
-                    ctx,
-                    "animations",
-                    0,
-                )?))
+                Ok(Command::SetAnimations(
+                    uuid_bool_pairs(args, ctx, "animations", 0)?
+                        .into_iter()
+                        .map(|(id, start)| (AnimationKey::from(id), start))
+                        .collect(),
+                ))
             },
         },
         CommandSpec {
             name: "play_animation",
             usage: "<anim_id>",
-            build: |args, ctx| Ok(Command::PlayAnimation(args.req_uuid(ctx, "anim_id", 0)?)),
+            build: |args, ctx| {
+                Ok(Command::PlayAnimation(AnimationKey::from(
+                    args.req_uuid(ctx, "anim_id", 0)?,
+                )))
+            },
         },
         CommandSpec {
             name: "stop_animation",
             usage: "<anim_id>",
-            build: |args, ctx| Ok(Command::StopAnimation(args.req_uuid(ctx, "anim_id", 0)?)),
+            build: |args, ctx| {
+                Ok(Command::StopAnimation(AnimationKey::from(
+                    args.req_uuid(ctx, "anim_id", 0)?,
+                )))
+            },
         },
         CommandSpec {
             name: "activate_gestures",
