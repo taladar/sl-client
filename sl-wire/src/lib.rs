@@ -497,7 +497,7 @@ mod test {
         // decoding it back exercises the per-face serialize → parse round-trip.
         let parsed = parse_llsd_xml(&body)?;
         let response =
-            ObjectMediaResponse::from_llsd(&parsed).ok_or("object_media body should decode")?;
+            ObjectMediaResponse::from_llsd(&parsed).map_err(|error| format!("{error:?}"))?;
         assert_eq!(response.object_id, object);
         assert_eq!(response.faces.len(), 2);
         assert_eq!(response.faces.first(), Some(&Some(entry)));

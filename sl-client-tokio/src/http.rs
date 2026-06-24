@@ -85,7 +85,10 @@ pub(crate) async fn fetch_land_resources(
         report_caps_failure(&caps_tx, CAP_LAND_RESOURCES).await;
         return;
     };
-    let urls = parse_land_resources_reply(&reply);
+    let Ok(urls) = parse_land_resources_reply(&reply) else {
+        report_caps_failure(&caps_tx, CAP_LAND_RESOURCES).await;
+        return;
+    };
     caps_tx
         .send((CAP_LAND_RESOURCES.to_owned(), reply))
         .await

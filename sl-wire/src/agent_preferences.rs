@@ -28,6 +28,7 @@
 
 use std::collections::HashMap;
 
+use crate::WireError;
 use crate::llsd::Llsd;
 
 /// The default permission masks new objects are created with
@@ -110,29 +111,43 @@ fn agent_preferences_to_llsd(prefs: &AgentPreferences) -> Llsd {
 /// absent decodes to [`None`]; this parses both a request body (the partial set
 /// the viewer sends) and a reply body (the full set the grid echoes), since the
 /// two share the same key shape.
-#[must_use]
-pub fn parse_agent_preferences(body: &Llsd) -> AgentPreferences {
-    AgentPreferences {
-        hover_height: body.get("hover_height").and_then(Llsd::as_f64),
-        default_object_perm_masks: body.get("default_object_perm_masks").map(|masks| {
-            ObjectPermMasks {
-                group: masks.get("Group").and_then(Llsd::as_i32).unwrap_or(0),
-                everyone: masks.get("Everyone").and_then(Llsd::as_i32).unwrap_or(0),
-                next_owner: masks.get("NextOwner").and_then(Llsd::as_i32).unwrap_or(0),
-            }
+///
+/// # Errors
+/// Returns [`WireError::MalformedField`] if a decoded LLSD field is present but
+/// of the wrong kind.
+pub fn parse_agent_preferences(body: &Llsd) -> Result<AgentPreferences, WireError> {
+    let default_object_perm_masks = match body.get("default_object_perm_masks") {
+        None | Some(Llsd::Undef) => None,
+        Some(masks @ Llsd::Map(_)) => Some(ObjectPermMasks {
+            group: masks.field_i32("Group", "Group")?.unwrap_or(0),
+            everyone: masks.field_i32("Everyone", "Everyone")?.unwrap_or(0),
+            next_owner: masks.field_i32("NextOwner", "NextOwner")?.unwrap_or(0),
         }),
-        max_access_pref: body
-            .get("access_prefs")
-            .and_then(|prefs| prefs.get("max"))
-            .and_then(Llsd::as_str)
-            .map(str::to_owned),
-        language: body
-            .get("language")
-            .and_then(Llsd::as_str)
-            .map(str::to_owned),
-        language_is_public: body.get("language_is_public").and_then(Llsd::as_bool),
-        god_level: body.get("god_level").and_then(Llsd::as_i32),
-    }
+        Some(other) => {
+            return Err(WireError::MalformedField {
+                field: "default_object_perm_masks",
+                value: other.kind().to_owned(),
+            });
+        }
+    };
+    let max_access_pref = match body.get("access_prefs") {
+        None | Some(Llsd::Undef) => None,
+        Some(prefs @ Llsd::Map(_)) => prefs.field_str("max", "max")?.map(str::to_owned),
+        Some(other) => {
+            return Err(WireError::MalformedField {
+                field: "access_prefs",
+                value: other.kind().to_owned(),
+            });
+        }
+    };
+    Ok(AgentPreferences {
+        hover_height: body.field_f64("hover_height", "hover_height")?,
+        default_object_perm_masks,
+        max_access_pref,
+        language: body.field_str("language", "language")?.map(str::to_owned),
+        language_is_public: body.field_bool("language_is_public", "language_is_public")?,
+        god_level: body.field_i32("god_level", "god_level")?,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +202,8 @@ mod tests {
         };
         let body = build_agent_preferences_request(&request);
         let parsed =
-            parse_agent_preferences(&parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?);
+            parse_agent_preferences(&parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?)
+                .map_err(|error| format!("{error:?}"))?;
         assert_eq!(
             parsed.hover_height.map(f64::to_bits),
             Some(0.35_f64.to_bits())
@@ -202,7 +218,8 @@ mod tests {
     fn empty_request_is_a_get() -> Result<(), String> {
         let body = build_agent_preferences_request(&AgentPreferences::default());
         let parsed =
-            parse_agent_preferences(&parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?);
+            parse_agent_preferences(&parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?)
+                .map_err(|error| format!("{error:?}"))?;
         assert_eq!(parsed, AgentPreferences::default());
         Ok(())
     }
@@ -225,7 +242,8 @@ mod tests {
         };
         let xml = build_agent_preferences_response(&prefs);
         let parsed =
-            parse_agent_preferences(&parse_llsd_xml(&xml).map_err(|error| format!("{error:?}"))?);
+            parse_agent_preferences(&parse_llsd_xml(&xml).map_err(|error| format!("{error:?}"))?)
+                .map_err(|error| format!("{error:?}"))?;
         assert_eq!(parsed, prefs);
         Ok(())
     }

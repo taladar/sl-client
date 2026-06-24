@@ -30,6 +30,7 @@
 
 use uuid::Uuid;
 
+use crate::WireError;
 use crate::llsd::Llsd;
 
 mod client;
@@ -68,10 +69,12 @@ fn llsd_uuid(value: &Llsd) -> Option<Uuid> {
     })
 }
 
-/// Collects every UUID from an LLSD `array` value (skipping non-UUID elements).
-fn uuid_array(value: Option<&Llsd>) -> Vec<Uuid> {
-    value
-        .and_then(Llsd::as_array)
+/// Collects every UUID from the LLSD `array` at `map[key]` (skipping non-UUID
+/// elements). An absent or `Undef` value yields an empty list; a present value
+/// of the wrong LLSD kind is a [`WireError::MalformedField`] labelled `key`.
+fn uuid_array(map: &Llsd, key: &'static str) -> Result<Vec<Uuid>, WireError> {
+    Ok(map
+        .field_array(key, key)?
         .map(|array| array.iter().filter_map(llsd_uuid).collect())
-        .unwrap_or_default()
+        .unwrap_or_default())
 }

@@ -17,6 +17,7 @@ use super::{
     parse_region_experiences, parse_region_experiences_request,
     parse_set_experience_permission_request, parse_update_experience_request,
 };
+use crate::WireError;
 use crate::llsd::parse_llsd_xml;
 
 /// Parses a UUID in a test, surfacing a `String` error for the `?` operator.
@@ -56,7 +57,7 @@ fn experience_info_query_and_decode() -> Result<(), String> {
         "</map></llsd>"
     ))
     .map_err(|error| format!("{error:?}"))?;
-    let infos = parse_experience_infos(&reply);
+    let infos = parse_experience_infos(&reply).map_err(|error| format!("{error:?}"))?;
     let [first, second] = infos.as_slice() else {
         return Err(format!("expected 2 infos, got {}", infos.len()));
     };
@@ -67,6 +68,25 @@ fn experience_info_query_and_decode() -> Result<(), String> {
     assert!(!first.missing);
     assert!(second.missing);
     assert!(second.properties.is_invalid());
+    Ok(())
+}
+
+/// An `experience_keys` element without a `public_id` is rejected: `public_id`
+/// is the experience key every record is filed under (the only field the
+/// Firestorm cache guards), so a record lacking it is meaningless and decoding
+/// is a hard [`WireError::MissingField`].
+#[test]
+fn experience_info_missing_public_id_errors() -> Result<(), String> {
+    let reply = parse_llsd_xml(concat!(
+        "<llsd><map><key>experience_keys</key><array><map>",
+        "<key>name</key><string>No Id</string>",
+        "</map></array></map></llsd>"
+    ))
+    .map_err(|error| format!("{error:?}"))?;
+    assert_eq!(
+        parse_experience_infos(&reply),
+        Err(WireError::MissingField { field: "public_id" })
+    );
     Ok(())
 }
 
@@ -89,7 +109,12 @@ fn id_list_and_permission_decode() -> Result<(), String> {
         "</array></map></llsd>"
     ))
     .map_err(|error| format!("{error:?}"))?;
-    assert_eq!(parse_experience_ids(&ids_reply).len(), 2);
+    assert_eq!(
+        parse_experience_ids(&ids_reply)
+            .map_err(|error| format!("{error:?}"))?
+            .len(),
+        2
+    );
 
     let prefs = parse_llsd_xml(concat!(
         "<llsd><map>",
@@ -98,7 +123,8 @@ fn id_list_and_permission_decode() -> Result<(), String> {
         "</map></llsd>"
     ))
     .map_err(|error| format!("{error:?}"))?;
-    let (allowed, blocked) = parse_experience_permissions(&prefs);
+    let (allowed, blocked) =
+        parse_experience_permissions(&prefs).map_err(|error| format!("{error:?}"))?;
     assert_eq!(allowed.len(), 1);
     assert_eq!(blocked.len(), 1);
     Ok(())
@@ -143,7 +169,7 @@ fn update_experience_round_trip() -> Result<(), String> {
         "</map></llsd>"
     ))
     .map_err(|error| format!("{error:?}"))?;
-    let infos = parse_experience_infos(&reply);
+    let infos = parse_experience_infos(&reply).map_err(|error| format!("{error:?}"))?;
     let [info] = infos.as_slice() else {
         return Err(format!("expected 1 info, got {}", infos.len()));
     };
@@ -167,7 +193,8 @@ fn region_experiences_round_trip() -> Result<(), String> {
     ));
 
     let reply = parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?;
-    let (allowed_out, blocked_out, trusted_out) = parse_region_experiences(&reply);
+    let (allowed_out, blocked_out, trusted_out) =
+        parse_region_experiences(&reply).map_err(|error| format!("{error:?}"))?;
     assert_eq!(allowed_out, allowed);
     assert!(blocked_out.is_empty());
     assert_eq!(trusted_out, trusted);
@@ -179,7 +206,7 @@ fn region_experiences_round_trip() -> Result<(), String> {
 fn status_and_properties() -> Result<(), String> {
     let reply = parse_llsd_xml("<llsd><map><key>status</key><boolean>1</boolean></map></llsd>")
         .map_err(|error| format!("{error:?}"))?;
-    assert!(parse_experience_status(&reply));
+    assert!(parse_experience_status(&reply).map_err(|error| format!("{error:?}"))?);
 
     assert_eq!(
         build_experience_status_response(true),
@@ -254,7 +281,8 @@ fn permission_request_and_reply_round_trip() -> Result<(), String> {
     let blocked = [experience_key("22222222-2222-2222-2222-222222222222")?];
     let reply = build_experience_permissions_response(&allowed, &blocked);
     let parsed = parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?;
-    let (allowed_out, blocked_out) = parse_experience_permissions(&parsed);
+    let (allowed_out, blocked_out) =
+        parse_experience_permissions(&parsed).map_err(|error| format!("{error:?}"))?;
     assert_eq!(allowed_out, allowed);
     assert_eq!(blocked_out, blocked);
     Ok(())
@@ -293,7 +321,8 @@ fn region_experiences_service_round_trip() -> Result<(), String> {
 
     let reply = build_region_experiences_response(&allowed, &[], &trusted);
     let (allowed_out, blocked_out, trusted_out) =
-        parse_region_experiences(&parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?);
+        parse_region_experiences(&parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?)
+            .map_err(|error| format!("{error:?}"))?;
     assert_eq!(allowed_out, allowed);
     assert!(blocked_out.is_empty());
     assert_eq!(trusted_out, trusted);
@@ -309,7 +338,8 @@ fn experience_ids_response_round_trip() -> Result<(), String> {
     ];
     let reply = build_experience_ids_response(&ids);
     let parsed =
-        parse_experience_ids(&parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?);
+        parse_experience_ids(&parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?)
+            .map_err(|error| format!("{error:?}"))?;
     assert_eq!(parsed, ids);
     Ok(())
 }
@@ -338,7 +368,8 @@ fn experience_infos_response_round_trip() -> Result<(), String> {
     };
     let reply = build_experience_infos_response(&[real.clone(), missing.clone()]);
     let infos =
-        parse_experience_infos(&parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?);
+        parse_experience_infos(&parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?)
+            .map_err(|error| format!("{error:?}"))?;
     let [first, second] = infos.as_slice() else {
         return Err(format!("expected 2 infos, got {}", infos.len()));
     };
@@ -372,7 +403,12 @@ fn experience_owner_round_trips() -> Result<(), String> {
             owner,
             ..base.clone()
         };
-        assert_eq!(ExperienceInfo::from_llsd(&info.to_llsd()).owner, owner);
+        assert_eq!(
+            ExperienceInfo::from_llsd(&info.to_llsd())
+                .map_err(|error| format!("{error:?}"))?
+                .owner,
+            owner
+        );
     }
     Ok(())
 }
@@ -383,7 +419,8 @@ fn status_response_round_trip() -> Result<(), String> {
     for value in [true, false] {
         let reply = build_experience_status_response(value);
         let parsed =
-            parse_experience_status(&parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?);
+            parse_experience_status(&parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?)
+                .map_err(|error| format!("{error:?}"))?;
         assert_eq!(parsed, value);
     }
     Ok(())

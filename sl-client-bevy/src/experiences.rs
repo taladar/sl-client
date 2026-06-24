@@ -14,10 +14,13 @@ pub(crate) fn run_group_experiences(
     asset_tx: &Sender<SessionEvent>,
 ) {
     if let Some(llsd) = blocking_get_llsd(url) {
+        let Ok(experience_ids) = parse_experience_ids(&llsd) else {
+            return;
+        };
         asset_tx
             .send(SessionEvent::GroupExperiences {
                 group_id,
-                experience_ids: parse_experience_ids(&llsd),
+                experience_ids,
             })
             .ok();
     }
@@ -35,7 +38,9 @@ pub(crate) fn run_experience_status(
     let Some(llsd) = blocking_get_llsd(url) else {
         return;
     };
-    let status = parse_experience_status(&llsd);
+    let Ok(status) = parse_experience_status(&llsd) else {
+        return;
+    };
     let event = if admin {
         SessionEvent::ExperienceAdminStatus {
             experience_id,

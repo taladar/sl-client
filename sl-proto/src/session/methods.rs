@@ -74,7 +74,7 @@ use sl_wire::{
     AbuseReport, AnyMessage, CircuitCode, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd,
     MessageId, ObjectMediaResponse, PacketFlags, ParcelVoiceInfo, Permissions, Permissions5,
     Reader, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber,
-    VoiceAccountInfo, build_group_notice_bucket, build_login_request, message_name,
+    VoiceAccountInfo, WireError, build_group_notice_bucket, build_login_request, message_name,
     parse_agent_preferences, parse_attachment_resources, parse_datagram, parse_display_names,
     parse_experience_ids, parse_experience_infos, parse_experience_permissions,
     parse_get_object_cost, parse_get_object_physics_data, parse_gltf_material_override,
@@ -193,12 +193,30 @@ impl Session {
     }
 
     /// Records that a recognised CAPS event named `message` arrived but its LLSD
-    /// body failed to parse into the expected shape. Logs a warning and queues a
-    /// [`Diagnostic::CapsDecodeFailed`].
+    /// body failed to parse into the expected shape, for a legacy decoder that
+    /// reports no specific cause. Logs a warning and queues a
+    /// [`Diagnostic::CapsDecodeFailed`] with no `reason`.
     fn caps_decode_failed(&mut self, message: &str) {
         tracing::warn!(event = message, "CAPS event body failed to parse");
         self.push_diagnostic(Diagnostic::CapsDecodeFailed {
             message: message.to_owned(),
+            reason: None,
+        });
+    }
+
+    /// Like [`caps_decode_failed`](Self::caps_decode_failed) but records the
+    /// specific [`WireError`] that rejected the body (which field was missing or
+    /// malformed), logging it loudly and carrying it in the diagnostic's
+    /// `reason` so a drop can be debugged.
+    fn caps_decode_error(&mut self, message: &str, error: &WireError) {
+        tracing::warn!(
+            event = message,
+            error = %error,
+            "CAPS event body failed to parse"
+        );
+        self.push_diagnostic(Diagnostic::CapsDecodeFailed {
+            message: message.to_owned(),
+            reason: Some(error.to_string()),
         });
     }
 
@@ -406,194 +424,191 @@ impl Session {
             // The reply to an `ObjectMedia` GET: an object's current per-face
             // media (`UPDATE` and the navigate cap have no media-bearing reply —
             // they advance the object's media version instead).
-            CAP_OBJECT_MEDIA => {
-                if let Some(response) = ObjectMediaResponse::from_llsd(body) {
-                    self.events.push_back(Event::ObjectMedia {
-                        object_id: response.object_id,
-                        version: response.version,
-                        faces: response.faces,
-                    });
-                } else {
-                    self.caps_decode_failed(message);
-                }
-            }
+            CAP_OBJECT_MEDIA => match ObjectMediaResponse::from_llsd(body) {
+                Ok(response) => self.events.push_back(Event::ObjectMedia {
+                    object_id: response.object_id,
+                    version: response.version,
+                    faces: response.faces,
+                }),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `ModifyMaterialParams` POST (setting a GLTF material
             // on object faces): a `{ success, message }` status map.
             CAP_MODIFY_MATERIAL_PARAMS => {
-                let success = body.get("success").and_then(Llsd::as_bool).unwrap_or(false);
-                let message = body
-                    .get("message")
-                    .and_then(Llsd::as_str)
-                    .unwrap_or_default()
-                    .to_owned();
-                self.events
-                    .push_back(Event::MaterialParamsResult { success, message });
+                match (
+                    body.field_bool("success", "success"),
+                    body.field_str("message", "message"),
+                ) {
+                    (Ok(success), Ok(field_message)) => {
+                        self.events.push_back(Event::MaterialParamsResult {
+                            success: success.unwrap_or(false),
+                            message: field_message.unwrap_or_default().to_owned(),
+                        });
+                    }
+                    _ => self.caps_decode_failed(message),
+                }
             }
             // The reply to a `ProvisionVoiceAccountRequest` POST: either Vivox
             // SIP credentials or a WebRTC JSEP answer. Only the signalling is
             // surfaced; opening the audio session is the caller's concern.
-            CAP_PROVISION_VOICE_ACCOUNT => {
-                self.events
-                    .push_back(Event::VoiceAccountProvisioned(VoiceAccountInfo::from_llsd(
-                        body,
-                    )));
-            }
+            CAP_PROVISION_VOICE_ACCOUNT => match VoiceAccountInfo::from_llsd(body) {
+                Ok(info) => self.events.push_back(Event::VoiceAccountProvisioned(info)),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `ParcelVoiceInfoRequest` POST: the parcel's voice
             // channel URI (absent when the parcel has no voice).
-            CAP_PARCEL_VOICE_INFO => {
-                if let Some(info) = ParcelVoiceInfo::from_llsd(body) {
-                    self.events.push_back(Event::ParcelVoiceInfo(info));
-                } else {
-                    self.caps_decode_failed(message);
-                }
-            }
+            CAP_PARCEL_VOICE_INFO => match ParcelVoiceInfo::from_llsd(body) {
+                Ok(Some(info)) => self.events.push_back(Event::ParcelVoiceInfo(info)),
+                Ok(None) => self.caps_decode_failed(message),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `GetDisplayNames` GET: the requested agents' display
             // names (with unresolved ids folded in as `missing` placeholders).
-            CAP_GET_DISPLAY_NAMES => {
-                self.events
-                    .push_back(Event::DisplayNames(parse_display_names(body)));
-            }
+            CAP_GET_DISPLAY_NAMES => match parse_display_names(body) {
+                Ok(names) => self.events.push_back(Event::DisplayNames(names)),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `RemoteParcelRequest` POST: the grid-wide parcel id
             // covering the requested region location (feeds a `ParcelInfoRequest`).
-            CAP_REMOTE_PARCEL_REQUEST => {
-                if let Some(parcel_id) = parse_remote_parcel_reply(body) {
-                    self.events.push_back(Event::RemoteParcelId(parcel_id));
-                } else {
-                    self.caps_decode_failed(message);
-                }
-            }
+            CAP_REMOTE_PARCEL_REQUEST => match parse_remote_parcel_reply(body) {
+                Ok(Some(parcel_id)) => self.events.push_back(Event::RemoteParcelId(parcel_id)),
+                Ok(None) => self.caps_decode_failed(message),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `SimulatorFeatures` GET: the region's feature flags
             // and limits (with the OpenSim-only grid extras folded in when present).
-            CAP_SIMULATOR_FEATURES => {
-                self.events.push_back(Event::SimulatorFeatures(Box::new(
-                    parse_simulator_features(body),
-                )));
-            }
+            CAP_SIMULATOR_FEATURES => match parse_simulator_features(body) {
+                Ok(features) => self
+                    .events
+                    .push_back(Event::SimulatorFeatures(Box::new(features))),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to an `AgentPreferences` POST: the agent's full stored
             // preferences after the (possibly empty) update.
-            CAP_AGENT_PREFERENCES => {
-                self.events
-                    .push_back(Event::AgentPreferences(Box::new(parse_agent_preferences(
-                        body,
-                    ))));
-            }
+            CAP_AGENT_PREFERENCES => match parse_agent_preferences(body) {
+                Ok(preferences) => self
+                    .events
+                    .push_back(Event::AgentPreferences(Box::new(preferences))),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `GetObjectCost` POST: the per-object land-impact and
             // physics costs, keyed by object id.
-            CAP_GET_OBJECT_COST => {
-                self.events
-                    .push_back(Event::ObjectCosts(parse_get_object_cost(body)));
-            }
+            CAP_GET_OBJECT_COST => match parse_get_object_cost(body) {
+                Ok(costs) => self.events.push_back(Event::ObjectCosts(costs)),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `ResourceCostSelected` POST: the summed selection
             // costs.
-            CAP_RESOURCE_COST_SELECTED => {
-                self.events
-                    .push_back(Event::SelectedResourceCost(parse_resource_cost_selected(
-                        body,
-                    )));
-            }
+            CAP_RESOURCE_COST_SELECTED => match parse_resource_cost_selected(body) {
+                Ok(cost) => self.events.push_back(Event::SelectedResourceCost(cost)),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `GetObjectPhysicsData` POST: the per-object physics
             // material parameters, keyed by object id.
-            CAP_GET_OBJECT_PHYSICS_DATA => {
-                self.events
-                    .push_back(Event::ObjectPhysicsData(parse_get_object_physics_data(
-                        body,
-                    )));
-            }
+            CAP_GET_OBJECT_PHYSICS_DATA => match parse_get_object_physics_data(body) {
+                Ok(data) => self.events.push_back(Event::ObjectPhysicsData(data)),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // An `ObjectPhysicsProperties` event-queue push: updated physics
             // material parameters for a batch of objects, keyed by region-local id.
-            "ObjectPhysicsProperties" => {
-                // An event-queue push for the current region: scope each id to
-                // the root circuit.
-                let circuit = self.root_circuit_id().unwrap_or_default();
-                let entries = parse_object_physics_properties(body)
-                    .into_iter()
-                    .map(|(id, data)| (ScopedObjectId::new(circuit, id), data))
-                    .collect();
-                self.events
-                    .push_back(Event::ObjectPhysicsProperties(entries));
-            }
+            "ObjectPhysicsProperties" => match parse_object_physics_properties(body) {
+                Ok(raw) => {
+                    // An event-queue push for the current region: scope each id to
+                    // the root circuit.
+                    let circuit = self.root_circuit_id().unwrap_or_default();
+                    let entries = raw
+                        .into_iter()
+                        .map(|(id, data)| (ScopedObjectId::new(circuit, id), data))
+                        .collect();
+                    self.events
+                        .push_back(Event::ObjectPhysicsProperties(entries));
+                }
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to an `AttachmentResources` GET: the agent's scripted
             // attachments grouped by attachment point, with a resource summary.
-            CAP_ATTACHMENT_RESOURCES => {
-                self.events.push_back(Event::AttachmentResources(Box::new(
-                    parse_attachment_resources(body),
-                )));
-            }
+            CAP_ATTACHMENT_RESOURCES => match parse_attachment_resources(body) {
+                Ok(report) => self
+                    .events
+                    .push_back(Event::AttachmentResources(Box::new(report))),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `LandResources` POST: the follow-up cap URLs the
             // runtimes then GET (surfacing the summary/detail reports below).
-            CAP_LAND_RESOURCES => {
-                self.events
-                    .push_back(Event::LandResourcesUrls(parse_land_resources_reply(body)));
-            }
+            CAP_LAND_RESOURCES => match parse_land_resources_reply(body) {
+                Ok(urls) => self.events.push_back(Event::LandResourcesUrls(urls)),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // A `LandResources` `ScriptResourceSummary` follow-up GET: the parcel's
             // resource totals (forwarded by the runtimes under this tag).
-            LAND_RESOURCE_SUMMARY_TAG => {
-                self.events
-                    .push_back(Event::LandResourceSummary(parse_land_resource_summary(
-                        body,
-                    )));
-            }
+            LAND_RESOURCE_SUMMARY_TAG => match parse_land_resource_summary(body) {
+                Ok(summary) => self.events.push_back(Event::LandResourceSummary(summary)),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // A `LandResources` `ScriptResourceDetails` follow-up GET: the parcel's
             // per-object resource breakdown.
-            LAND_RESOURCE_DETAIL_TAG => {
-                self.events
-                    .push_back(Event::LandResourceDetail(parse_land_resource_detail(body)));
-            }
+            LAND_RESOURCE_DETAIL_TAG => match parse_land_resource_detail(body) {
+                Ok(detail) => self.events.push_back(Event::LandResourceDetail(detail)),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `GetExperienceInfo` GET: the requested experiences'
             // metadata (with unresolved ids folded in as `missing` placeholders).
-            CAP_GET_EXPERIENCE_INFO => {
-                self.events
-                    .push_back(Event::ExperienceInfo(parse_experience_infos(body)));
-            }
+            CAP_GET_EXPERIENCE_INFO => match parse_experience_infos(body) {
+                Ok(infos) => self.events.push_back(Event::ExperienceInfo(infos)),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `FindExperienceByName` GET: one page of search hits.
-            CAP_FIND_EXPERIENCE_BY_NAME => {
-                self.events
-                    .push_back(Event::ExperienceSearchResults(parse_experience_infos(body)));
-            }
+            CAP_FIND_EXPERIENCE_BY_NAME => match parse_experience_infos(body) {
+                Ok(infos) => self.events.push_back(Event::ExperienceSearchResults(infos)),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `GetExperiences` GET or an `ExperiencePreferences`
             // PUT/DELETE: the agent's allowed/blocked experiences.
             CAP_GET_EXPERIENCES | CAP_EXPERIENCE_PREFERENCES => {
-                let (allowed, blocked) = parse_experience_permissions(body);
-                self.events
-                    .push_back(Event::ExperiencePermissions { allowed, blocked });
+                match parse_experience_permissions(body) {
+                    Ok((allowed, blocked)) => self
+                        .events
+                        .push_back(Event::ExperiencePermissions { allowed, blocked }),
+                    Err(error) => self.caps_decode_error(message, &error),
+                }
             }
             // The reply to an `AgentExperiences` GET: experiences the agent owns.
-            CAP_AGENT_EXPERIENCES => {
-                self.events
-                    .push_back(Event::OwnedExperiences(parse_experience_ids(body)));
-            }
+            CAP_AGENT_EXPERIENCES => match parse_experience_ids(body) {
+                Ok(ids) => self.events.push_back(Event::OwnedExperiences(ids)),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `GetAdminExperiences` GET: experiences the agent
             // administers.
-            CAP_GET_ADMIN_EXPERIENCES => {
-                self.events
-                    .push_back(Event::AdminExperiences(parse_experience_ids(body)));
-            }
+            CAP_GET_ADMIN_EXPERIENCES => match parse_experience_ids(body) {
+                Ok(ids) => self.events.push_back(Event::AdminExperiences(ids)),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `GetCreatorExperiences` GET: experiences the agent
             // created.
-            CAP_GET_CREATOR_EXPERIENCES => {
-                self.events
-                    .push_back(Event::CreatorExperiences(parse_experience_ids(body)));
-            }
+            CAP_GET_CREATOR_EXPERIENCES => match parse_experience_ids(body) {
+                Ok(ids) => self.events.push_back(Event::CreatorExperiences(ids)),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to an `UpdateExperience` POST: the experience's metadata
             // after the edit.
-            CAP_UPDATE_EXPERIENCE => {
-                self.events.push_back(Event::ExperienceUpdated(
-                    parse_experience_infos(body)
-                        .into_iter()
-                        .next()
-                        .unwrap_or_default(),
-                ));
-            }
+            CAP_UPDATE_EXPERIENCE => match parse_experience_infos(body) {
+                Ok(infos) => self.events.push_back(Event::ExperienceUpdated(
+                    infos.into_iter().next().unwrap_or_default(),
+                )),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `RegionExperiences` GET or POST: the region's
             // allow/block/trust lists.
-            CAP_REGION_EXPERIENCES => {
-                let (allowed, blocked, trusted) = parse_region_experiences(body);
-                self.events.push_back(Event::RegionExperiences {
-                    allowed,
-                    blocked,
-                    trusted,
-                });
-            }
+            CAP_REGION_EXPERIENCES => match parse_region_experiences(body) {
+                Ok((allowed, blocked, trusted)) => {
+                    self.events.push_back(Event::RegionExperiences {
+                        allowed,
+                        blocked,
+                        trusted,
+                    });
+                }
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `ReadOfflineMsgs` GET (the modern Second Life
             // offline-IM history, #28): an array of stored instant messages, each
             // surfaced as an offline [`Event::InstantMessageReceived`] (the legacy

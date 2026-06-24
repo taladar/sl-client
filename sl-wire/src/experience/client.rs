@@ -4,6 +4,7 @@ use super::{
     ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate, PROPERTY_INVALID,
     SEARCH_PAGE_SIZE, uuid_array,
 };
+use crate::WireError;
 use crate::llsd::{Llsd, push_escaped};
 use sl_types::key::ExperienceKey;
 use uuid::Uuid;
@@ -166,16 +167,22 @@ pub fn build_region_experiences_request(
 /// viewer, which inserts an [`PROPERTY_INVALID`] cache entry for each). A reply
 /// that is itself a single flat experience map (as `UpdateExperience` returns) is
 /// decoded as one record.
-#[must_use]
-pub fn parse_experience_infos(body: &Llsd) -> Vec<ExperienceInfo> {
+///
+/// # Errors
+///
+/// Returns a [`WireError::MalformedField`] if a decoded LLSD field has the wrong
+/// kind.
+pub fn parse_experience_infos(body: &Llsd) -> Result<Vec<ExperienceInfo>, WireError> {
     let mut infos = Vec::new();
-    if let Some(keys) = body.get("experience_keys").and_then(Llsd::as_array) {
-        infos.extend(keys.iter().map(ExperienceInfo::from_llsd));
+    if let Some(keys) = body.field_array("experience_keys", "experience_keys")? {
+        for key in keys {
+            infos.push(ExperienceInfo::from_llsd(key)?);
+        }
     } else if body.get("public_id").is_some() {
         // A bare experience map (the `UpdateExperience` reply shape).
-        infos.push(ExperienceInfo::from_llsd(body));
+        infos.push(ExperienceInfo::from_llsd(body)?);
     }
-    for id in uuid_array(body.get("error_ids")) {
+    for id in uuid_array(body, "error_ids")? {
         infos.push(ExperienceInfo {
             public_id: ExperienceKey::from(id),
             properties: ExperienceProperties(PROPERTY_INVALID),
@@ -183,52 +190,74 @@ pub fn parse_experience_infos(body: &Llsd) -> Vec<ExperienceInfo> {
             ..ExperienceInfo::default()
         });
     }
-    infos
+    Ok(infos)
 }
 
 /// Decodes the `experience_ids` array of an `AgentExperiences` /
 /// `GetAdminExperiences` / `GetCreatorExperiences` / `GroupExperiences` reply.
-#[must_use]
-pub fn parse_experience_ids(body: &Llsd) -> Vec<ExperienceKey> {
-    uuid_array(body.get("experience_ids"))
+///
+/// # Errors
+///
+/// Returns a [`WireError::MalformedField`] if `experience_ids` is present but not
+/// an LLSD array.
+pub fn parse_experience_ids(body: &Llsd) -> Result<Vec<ExperienceKey>, WireError> {
+    Ok(uuid_array(body, "experience_ids")?
         .into_iter()
         .map(ExperienceKey::from)
-        .collect()
+        .collect())
 }
 
 /// Decodes the `{ experiences, blocked }` of a `GetExperiences` /
 /// `ExperiencePreferences` reply into the agent's allowed and blocked id lists.
-#[must_use]
-pub fn parse_experience_permissions(body: &Llsd) -> (Vec<ExperienceKey>, Vec<ExperienceKey>) {
-    (
-        uuid_array(body.get("experiences"))
+///
+/// # Errors
+///
+/// Returns a [`WireError::MalformedField`] if `experiences` or `blocked` is
+/// present but not an LLSD array.
+pub fn parse_experience_permissions(
+    body: &Llsd,
+) -> Result<(Vec<ExperienceKey>, Vec<ExperienceKey>), WireError> {
+    Ok((
+        uuid_array(body, "experiences")?
             .into_iter()
             .map(ExperienceKey::from)
             .collect(),
-        uuid_array(body.get("blocked"))
+        uuid_array(body, "blocked")?
             .into_iter()
             .map(ExperienceKey::from)
             .collect(),
-    )
+    ))
 }
 
 /// Decodes the `{ allowed, blocked, trusted }` of a `RegionExperiences` reply.
-#[must_use]
+///
+/// # Errors
+///
+/// Returns a [`WireError::MalformedField`] if `allowed`, `blocked`, or `trusted`
+/// is present but not an LLSD array.
+#[expect(
+    clippy::type_complexity,
+    reason = "the (allowed, blocked, trusted) tuple, wrapped in Result for the malformed-field error"
+)]
 pub fn parse_region_experiences(
     body: &Llsd,
-) -> (Vec<ExperienceKey>, Vec<ExperienceKey>, Vec<ExperienceKey>) {
-    let keys = |name: &str| {
-        uuid_array(body.get(name))
+) -> Result<(Vec<ExperienceKey>, Vec<ExperienceKey>, Vec<ExperienceKey>), WireError> {
+    let keys = |name: &'static str| -> Result<Vec<ExperienceKey>, WireError> {
+        Ok(uuid_array(body, name)?
             .into_iter()
             .map(ExperienceKey::from)
-            .collect()
+            .collect())
     };
-    (keys("allowed"), keys("blocked"), keys("trusted"))
+    Ok((keys("allowed")?, keys("blocked")?, keys("trusted")?))
 }
 
 /// Decodes the `{ status }` boolean of an `IsExperienceAdmin` /
 /// `IsExperienceContributor` reply.
-#[must_use]
-pub fn parse_experience_status(body: &Llsd) -> bool {
-    body.get("status").and_then(Llsd::as_bool).unwrap_or(false)
+///
+/// # Errors
+///
+/// Returns a [`WireError::MalformedField`] if `status` is present but not an LLSD
+/// boolean.
+pub fn parse_experience_status(body: &Llsd) -> Result<bool, WireError> {
+    Ok(body.field_bool("status", "status")?.unwrap_or(false))
 }

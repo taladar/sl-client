@@ -22,6 +22,7 @@
 
 use std::collections::HashMap;
 
+use crate::WireError;
 use crate::llsd::{Llsd, parse_llsd_xml, push_escaped};
 
 /// The voice server type string for the legacy Vivox (SIP/RTP) backend, sent as
@@ -223,27 +224,40 @@ pub fn build_voice_signaling_request(
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML, or
+/// [`WireError::MalformedField`] if a present field has the wrong LLSD kind.
 pub fn parse_provision_voice_account_request(
     xml: &str,
-) -> Result<VoiceProvisionRequest, roxmltree::Error> {
-    let root = parse_llsd_xml(xml)?;
-    let string = |key: &str| root.get(key).and_then(Llsd::as_str).map(str::to_owned);
-    let jsep_offer_sdp = root
-        .get("jsep")
-        .and_then(|jsep| jsep.get("sdp"))
-        .and_then(Llsd::as_str)
-        .map(str::to_owned);
+) -> Result<VoiceProvisionRequest, WireError> {
+    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+        field: "ProvisionVoiceAccountRequest",
+        value: format!("{error:?}"),
+    })?;
+    let jsep_offer_sdp = match root.get("jsep") {
+        None | Some(Llsd::Undef) => None,
+        Some(jsep @ Llsd::Map(_)) => jsep.field_str("sdp", "sdp")?.map(str::to_owned),
+        Some(other) => {
+            return Err(WireError::MalformedField {
+                field: "jsep",
+                value: other.kind().to_owned(),
+            });
+        }
+    };
     Ok(VoiceProvisionRequest {
-        voice_server_type: string("voice_server_type"),
-        channel_type: string("channel_type"),
+        voice_server_type: root
+            .field_str("voice_server_type", "voice_server_type")?
+            .map(str::to_owned),
+        channel_type: root
+            .field_str("channel_type", "channel_type")?
+            .map(str::to_owned),
         parcel_local_id: root
-            .get("parcel_local_id")
-            .and_then(Llsd::as_i32)
+            .field_i32("parcel_local_id", "parcel_local_id")?
             .map(crate::RegionLocalParcelId),
         jsep_offer_sdp,
-        logout: root.get("logout").and_then(Llsd::as_bool).unwrap_or(false),
-        viewer_session: string("viewer_session"),
+        logout: root.field_bool("logout", "logout")?.unwrap_or(false),
+        viewer_session: root
+            .field_str("viewer_session", "viewer_session")?
+            .map(str::to_owned),
     })
 }
 
@@ -256,46 +270,52 @@ pub fn parse_provision_voice_account_request(
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML, or
+/// [`WireError::MalformedField`] if a present field has the wrong LLSD kind.
 pub fn parse_voice_signaling_request(
     xml: &str,
-) -> Result<(String, Vec<IceCandidate>, bool), roxmltree::Error> {
-    let root = parse_llsd_xml(xml)?;
+) -> Result<(String, Vec<IceCandidate>, bool), WireError> {
+    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+        field: "VoiceSignalingRequest",
+        value: format!("{error:?}"),
+    })?;
     let viewer_session = root
-        .get("viewer_session")
-        .and_then(Llsd::as_str)
+        .field_str("viewer_session", "viewer_session")?
         .unwrap_or_default()
         .to_owned();
-    let completed = root
-        .get("candidate")
-        .and_then(|candidate| candidate.get("completed"))
-        .and_then(Llsd::as_bool)
-        .unwrap_or(false);
-    let candidates = root
-        .get("candidates")
-        .and_then(Llsd::as_array)
-        .map(|array| {
-            array
-                .iter()
-                .map(|entry| IceCandidate {
+    let completed = match root.get("candidate") {
+        None | Some(Llsd::Undef) => false,
+        Some(candidate @ Llsd::Map(_)) => candidate
+            .field_bool("completed", "completed")?
+            .unwrap_or(false),
+        Some(other) => {
+            return Err(WireError::MalformedField {
+                field: "candidate",
+                value: other.kind().to_owned(),
+            });
+        }
+    };
+    let candidates = match root.field_array("candidates", "candidates")? {
+        None => Vec::new(),
+        Some(array) => array
+            .iter()
+            .map(|entry| {
+                Ok(IceCandidate {
                     sdp_mid: entry
-                        .get("sdpMid")
-                        .and_then(Llsd::as_str)
+                        .field_str("sdpMid", "sdpMid")?
                         .unwrap_or_default()
                         .to_owned(),
                     sdp_mline_index: entry
-                        .get("sdpMLineIndex")
-                        .and_then(Llsd::as_i32)
+                        .field_i32("sdpMLineIndex", "sdpMLineIndex")?
                         .unwrap_or(0),
                     candidate: entry
-                        .get("candidate")
-                        .and_then(Llsd::as_str)
+                        .field_str("candidate", "candidate")?
                         .unwrap_or_default()
                         .to_owned(),
                 })
-                .collect()
-        })
-        .unwrap_or_default();
+            })
+            .collect::<Result<Vec<_>, WireError>>()?,
+    };
     Ok((viewer_session, candidates, completed))
 }
 
@@ -330,29 +350,86 @@ pub struct VoiceAccountInfo {
 
 impl VoiceAccountInfo {
     /// Decodes a [`VoiceAccountInfo`] from the LLSD body of a
-    /// `ProvisionVoiceAccountRequest` reply. Missing fields are left `None`
-    /// rather than failing, so a partial (or backend-specific) reply still
-    /// decodes.
-    #[must_use]
-    pub fn from_llsd(body: &Llsd) -> Self {
-        let string = |key: &str| body.get(key).and_then(Llsd::as_str).map(str::to_owned);
-        let jsep = body.get("jsep");
-        Self {
-            voice_server_type: string("voice_server_type"),
-            username: string("username"),
-            password: string("password"),
-            sip_uri_hostname: string("voice_sip_uri_hostname"),
-            account_server_name: string("voice_account_server_name"),
-            viewer_session: string("viewer_session"),
-            jsep_type: jsep
-                .and_then(|j| j.get("type"))
-                .and_then(Llsd::as_str)
+    /// `ProvisionVoiceAccountRequest` reply.
+    ///
+    /// The same capability answers both backends, so no field is
+    /// *unconditionally* required; instead, the populated discriminator selects
+    /// a backend and that backend's signalling fields are then mandatory, since
+    /// a conforming grid always emits them and the viewer rejects the reply
+    /// without them:
+    ///
+    /// - **WebRTC** — when a `jsep` map is present, the JSEP answer is required:
+    ///   `jsep.type`, `jsep.sdp`, and the `viewer_session` are all read without
+    ///   a fallback and a missing one aborts the connection
+    ///   (`llvoicewebrtc.cpp` lines 2860-2864, which `.has()`-guard all three
+    ///   and otherwise enter `VOICE_STATE_SESSION_EXIT`). OpenSim's WebRTC
+    ///   module emits all three together.
+    /// - **Vivox** — when `username` is present (the Vivox credentials reply),
+    ///   the `password` is required: Firestorm reads both directly without a
+    ///   `.has()` guard (`llvoicevivox.cpp` lines 1328-1329) and OpenSim's
+    ///   `VivoxVoiceModule.cs:595-596` always emits the pair, so a username
+    ///   without a password is malformed credentials. The SIP hostname / server
+    ///   URI stay optional — Firestorm `.has()`-guards them
+    ///   (`llvoicevivox.cpp` lines 1331-1340).
+    ///
+    /// A reply carrying neither discriminator (e.g. an echo of just
+    /// `voice_server_type`) decodes to an all-`None` shell rather than failing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WireError::MissingField`] when a selected backend's mandatory
+    /// signalling field is absent, or [`WireError::MalformedField`] if a present
+    /// field has the wrong LLSD kind.
+    pub fn from_llsd(body: &Llsd) -> Result<Self, WireError> {
+        let (jsep_type, jsep_sdp) = match body.get("jsep") {
+            None | Some(Llsd::Undef) => (None, None),
+            // A present `jsep` map is the WebRTC answer: both `type` and `sdp`
+            // are mandatory (the viewer reads both without a fallback).
+            Some(jsep @ Llsd::Map(_)) => (
+                Some(jsep.require_str("type", "jsep.type")?.to_owned()),
+                Some(jsep.require_str("sdp", "jsep.sdp")?.to_owned()),
+            ),
+            Some(other) => {
+                return Err(WireError::MalformedField {
+                    field: "jsep",
+                    value: other.kind().to_owned(),
+                });
+            }
+        };
+        let username = body.field_str("username", "username")?.map(str::to_owned);
+        // Vivox credentials always come as a username/password pair.
+        let password = if username.is_some() {
+            Some(body.require_str("password", "password")?.to_owned())
+        } else {
+            body.field_str("password", "password")?.map(str::to_owned)
+        };
+        // A WebRTC answer is always tied to a viewer session the viewer echoes
+        // back on signalling and logout.
+        let viewer_session = if jsep_sdp.is_some() {
+            Some(
+                body.require_str("viewer_session", "viewer_session")?
+                    .to_owned(),
+            )
+        } else {
+            body.field_str("viewer_session", "viewer_session")?
+                .map(str::to_owned)
+        };
+        Ok(Self {
+            voice_server_type: body
+                .field_str("voice_server_type", "voice_server_type")?
                 .map(str::to_owned),
-            jsep_sdp: jsep
-                .and_then(|j| j.get("sdp"))
-                .and_then(Llsd::as_str)
+            username,
+            password,
+            sip_uri_hostname: body
+                .field_str("voice_sip_uri_hostname", "voice_sip_uri_hostname")?
                 .map(str::to_owned),
-        }
+            account_server_name: body
+                .field_str("voice_account_server_name", "voice_account_server_name")?
+                .map(str::to_owned),
+            viewer_session,
+            jsep_type,
+            jsep_sdp,
+        })
     }
 
     /// Whether this reply carries a WebRTC JSEP answer (vs. Vivox credentials).
@@ -424,43 +501,70 @@ impl ParcelVoiceInfo {
     /// Decodes a [`ParcelVoiceInfo`] from the LLSD body of a
     /// `ParcelVoiceInfoRequest` reply (`{ parcel_local_id, region_name,
     /// voice_credentials: { channel_uri, channel_credentials? } }`). Returns
-    /// `None` if the body is not a map (the cap returned `undef` / no voice).
-    #[must_use]
-    pub fn from_llsd(body: &Llsd) -> Option<Self> {
+    /// `Ok(None)` if the body is not a map (the cap returned `undef` / no
+    /// voice) — confirmed correct against the viewer, which on a missing
+    /// `voice_credentials` simply drops out of spatial voice rather than
+    /// treating a half-decoded reply as authoritative (`llvoicevivox.cpp` lines
+    /// 1721-1735).
+    ///
+    /// Within a present reply, only `channel_uri` is mandatory and only when the
+    /// `voice_credentials` map itself is present: the viewer reads it directly
+    /// without a `.has()` guard (`llvoicevivox.cpp:5153`,
+    /// `setSpatialChannel`) and OpenSim's `VivoxVoiceModule.cs:698` /
+    /// `FreeSwitchVoiceModule.cs:474` always emit it, so a credentials map
+    /// without it is malformed. An *empty* `channel_uri` is the grid's
+    /// "no voice on this parcel" sentinel and decodes to `None`. The
+    /// `parcel_local_id` and `region_name` stay optional (the viewer never
+    /// validates them; they default to `-1` / the unknown-region sentinel), and
+    /// `channel_credentials` stays optional (OpenSim never emits it — both
+    /// modules comment the line out).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WireError::MissingField`] if a present `voice_credentials` map
+    /// lacks `channel_uri`, or [`WireError::MalformedField`] if a present field
+    /// has the wrong LLSD kind.
+    pub fn from_llsd(body: &Llsd) -> Result<Option<Self>, WireError> {
         if !matches!(body, Llsd::Map(_)) {
-            return None;
+            return Ok(None);
         }
-        let credentials = body.get("voice_credentials");
-        let channel_uri = credentials
-            .and_then(|map| map.get("channel_uri"))
-            .and_then(Llsd::as_str)
-            .filter(|uri| !uri.is_empty())
-            .map(str::to_owned);
-        let channel_credentials = credentials
-            .and_then(|map| map.get("channel_credentials"))
-            .and_then(Llsd::as_str)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned);
+        let (channel_uri, channel_credentials) = match body.get("voice_credentials") {
+            None | Some(Llsd::Undef) => (None, None),
+            Some(credentials @ Llsd::Map(_)) => (
+                Some(credentials.require_str("channel_uri", "channel_uri")?)
+                    .filter(|uri| !uri.is_empty())
+                    .map(str::to_owned),
+                credentials
+                    .field_str("channel_credentials", "channel_credentials")?
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned),
+            ),
+            Some(other) => {
+                return Err(WireError::MalformedField {
+                    field: "voice_credentials",
+                    value: other.kind().to_owned(),
+                });
+            }
+        };
         // An empty region name is the "unknown region" sentinel (`None`); a
-        // non-empty but invalid name rejects the whole reply (the `?` returns
-        // `None` from this function).
-        let region_name = crate::region_name_from_wire(
+        // non-empty but invalid name rejects the whole reply (returns
+        // `Ok(None)` from this function).
+        let Ok(region_name) = crate::region_name_from_wire(
             "region_name",
-            body.get("region_name")
-                .and_then(Llsd::as_str)
+            body.field_str("region_name", "region_name")?
                 .unwrap_or_default(),
-        )
-        .ok()?;
-        Some(Self {
+        ) else {
+            return Ok(None);
+        };
+        Ok(Some(Self {
             parcel_local_id: crate::RegionLocalParcelId(
-                body.get("parcel_local_id")
-                    .and_then(Llsd::as_i32)
+                body.field_i32("parcel_local_id", "parcel_local_id")?
                     .unwrap_or(-1),
             ),
             region_name,
             channel_uri,
             channel_credentials,
-        })
+        }))
     }
 
     /// Builds the LLSD reply body for a `ParcelVoiceInfoRequest`
@@ -517,6 +621,7 @@ mod tests {
         build_voice_signaling_request, parse_provision_voice_account_request,
         parse_voice_signaling_request,
     };
+    use crate::WireError;
     use crate::llsd::parse_llsd_xml;
 
     /// A Vivox provision body carries only the server type and decodes its
@@ -538,7 +643,7 @@ mod tests {
             "</map></llsd>"
         ))
         .map_err(|error| format!("{error:?}"))?;
-        let info = VoiceAccountInfo::from_llsd(&reply);
+        let info = VoiceAccountInfo::from_llsd(&reply).map_err(|error| format!("{error:?}"))?;
         assert_eq!(info.username.as_deref(), Some("xMjQ1"));
         assert_eq!(info.password.as_deref(), Some("secret"));
         assert_eq!(info.sip_uri_hostname.as_deref(), Some("sip.example.com"));
@@ -574,7 +679,7 @@ mod tests {
             "</map></llsd>"
         ))
         .map_err(|error| format!("{error:?}"))?;
-        let info = VoiceAccountInfo::from_llsd(&reply);
+        let info = VoiceAccountInfo::from_llsd(&reply).map_err(|error| format!("{error:?}"))?;
         assert_eq!(info.viewer_session.as_deref(), Some("abc-123"));
         assert_eq!(info.jsep_type.as_deref(), Some("answer"));
         assert_eq!(info.jsep_sdp.as_deref(), Some("v=0 answer"));
@@ -597,7 +702,9 @@ mod tests {
             "</map></map></llsd>"
         ))
         .map_err(|error| format!("{error:?}"))?;
-        let info = ParcelVoiceInfo::from_llsd(&reply).ok_or("expected a parcel voice info")?;
+        let info = ParcelVoiceInfo::from_llsd(&reply)
+            .map_err(|error| format!("{error:?}"))?
+            .ok_or("expected a parcel voice info")?;
         assert_eq!(info.parcel_local_id, crate::RegionLocalParcelId(42));
         assert_eq!(
             crate::region_name_to_wire(info.region_name.as_ref()),
@@ -611,6 +718,67 @@ mod tests {
         Ok(())
     }
 
+    /// A WebRTC provision reply that carries a `jsep` answer but no
+    /// `viewer_session` is rejected as [`WireError::MissingField`] — the viewer
+    /// reads the session id without a fallback and otherwise aborts the
+    /// connection.
+    #[test]
+    fn webrtc_provision_missing_viewer_session_is_error() -> Result<(), String> {
+        let reply = parse_llsd_xml(concat!(
+            "<llsd><map>",
+            "<key>jsep</key><map><key>type</key><string>answer</string>",
+            "<key>sdp</key><string>v=0 answer</string></map>",
+            "</map></llsd>"
+        ))
+        .map_err(|error| format!("{error:?}"))?;
+        match VoiceAccountInfo::from_llsd(&reply) {
+            Err(WireError::MissingField {
+                field: "viewer_session",
+            }) => Ok(()),
+            other => Err(format!(
+                "expected MissingField viewer_session, got {other:?}"
+            )),
+        }
+    }
+
+    /// A Vivox provision reply with a `username` but no `password` is malformed
+    /// credentials — rejected as [`WireError::MissingField`].
+    #[test]
+    fn vivox_provision_missing_password_is_error() -> Result<(), String> {
+        let reply = parse_llsd_xml(concat!(
+            "<llsd><map>",
+            "<key>username</key><string>xMjQ1</string>",
+            "</map></llsd>"
+        ))
+        .map_err(|error| format!("{error:?}"))?;
+        match VoiceAccountInfo::from_llsd(&reply) {
+            Err(WireError::MissingField { field: "password" }) => Ok(()),
+            other => Err(format!("expected MissingField password, got {other:?}")),
+        }
+    }
+
+    /// A `voice_credentials` map without a `channel_uri` is malformed — rejected
+    /// as [`WireError::MissingField`]. (An *empty* `channel_uri` is instead the
+    /// valid no-voice sentinel, covered by `parcel_voice_info_no_voice`.)
+    #[test]
+    fn parcel_voice_info_missing_channel_uri_is_error() -> Result<(), String> {
+        let reply = parse_llsd_xml(concat!(
+            "<llsd><map>",
+            "<key>parcel_local_id</key><integer>1</integer>",
+            "<key>region_name</key><string>Quiet</string>",
+            "<key>voice_credentials</key><map>",
+            "<key>channel_credentials</key><string>creds</string></map>",
+            "</map></llsd>"
+        ))
+        .map_err(|error| format!("{error:?}"))?;
+        match ParcelVoiceInfo::from_llsd(&reply) {
+            Err(WireError::MissingField {
+                field: "channel_uri",
+            }) => Ok(()),
+            other => Err(format!("expected MissingField channel_uri, got {other:?}")),
+        }
+    }
+
     /// An empty `channel_uri` (no voice on the parcel) decodes to `None`.
     #[test]
     fn parcel_voice_info_no_voice() -> Result<(), String> {
@@ -622,7 +790,9 @@ mod tests {
             "</map></llsd>"
         ))
         .map_err(|error| format!("{error:?}"))?;
-        let info = ParcelVoiceInfo::from_llsd(&reply).ok_or("expected a parcel voice info")?;
+        let info = ParcelVoiceInfo::from_llsd(&reply)
+            .map_err(|error| format!("{error:?}"))?
+            .ok_or("expected a parcel voice info")?;
         assert_eq!(info.channel_uri, None);
         Ok(())
     }
@@ -719,7 +889,10 @@ mod tests {
         };
         let reply = parse_llsd_xml(&build_provision_voice_account_response(&vivox))
             .map_err(|error| format!("{error:?}"))?;
-        assert_eq!(VoiceAccountInfo::from_llsd(&reply), vivox);
+        assert_eq!(
+            VoiceAccountInfo::from_llsd(&reply).map_err(|error| format!("{error:?}"))?,
+            vivox
+        );
 
         let webrtc = VoiceAccountInfo {
             voice_server_type: Some("webrtc".to_owned()),
@@ -730,7 +903,7 @@ mod tests {
         };
         let reply = parse_llsd_xml(&build_provision_voice_account_response(&webrtc))
             .map_err(|error| format!("{error:?}"))?;
-        let decoded = VoiceAccountInfo::from_llsd(&reply);
+        let decoded = VoiceAccountInfo::from_llsd(&reply).map_err(|error| format!("{error:?}"))?;
         assert_eq!(decoded, webrtc);
         assert!(decoded.is_webrtc());
         Ok(())
@@ -750,7 +923,9 @@ mod tests {
         let reply = parse_llsd_xml(&build_parcel_voice_info_response(&info))
             .map_err(|error| format!("{error:?}"))?;
         assert_eq!(
-            ParcelVoiceInfo::from_llsd(&reply).ok_or("expected a parcel voice info")?,
+            ParcelVoiceInfo::from_llsd(&reply)
+                .map_err(|error| format!("{error:?}"))?
+                .ok_or("expected a parcel voice info")?,
             info
         );
 
@@ -764,7 +939,9 @@ mod tests {
         let reply = parse_llsd_xml(&build_parcel_voice_info_response(&no_voice))
             .map_err(|error| format!("{error:?}"))?;
         assert_eq!(
-            ParcelVoiceInfo::from_llsd(&reply).ok_or("expected a parcel voice info")?,
+            ParcelVoiceInfo::from_llsd(&reply)
+                .map_err(|error| format!("{error:?}"))?
+                .ok_or("expected a parcel voice info")?,
             no_voice
         );
         Ok(())

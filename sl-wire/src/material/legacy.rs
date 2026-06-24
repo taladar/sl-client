@@ -1,6 +1,7 @@
 //! Legacy `RenderMaterials` capability: zipped binary-LLSD material codec.
 
 use super::{LegacyMaterial, RenderMaterialEntry};
+use crate::WireError;
 use crate::endian;
 use crate::field::Reader;
 use crate::llsd::{Llsd, parse_llsd_xml};
@@ -57,73 +58,80 @@ pub fn parse_render_materials_response(xml: &str) -> Vec<RenderMaterialEntry> {
     let Some(Llsd::Array(items)) = read_binary_value(&mut reader) else {
         return Vec::new();
     };
-    items.iter().filter_map(render_material_entry).collect()
+    items
+        .iter()
+        .filter_map(|item| render_material_entry(item).ok().flatten())
+        .collect()
 }
 
 /// Decodes one `{ "ID", "Material" }` entry of a `RenderMaterials` response.
-fn render_material_entry(item: &Llsd) -> Option<RenderMaterialEntry> {
-    let id_bytes = item.get("ID").and_then(Llsd::as_binary)?;
-    let material_id = Uuid::from_slice(id_bytes).ok()?;
-    let material = legacy_material_from_llsd(item.get("Material")?);
-    Some(RenderMaterialEntry {
+fn render_material_entry(item: &Llsd) -> Result<Option<RenderMaterialEntry>, WireError> {
+    let Some(id_bytes) = item.field_binary("ID", "ID")? else {
+        return Ok(None);
+    };
+    let Ok(material_id) = Uuid::from_slice(id_bytes) else {
+        return Ok(None);
+    };
+    // Validate that "Material", when present, is a map; absent stays a default
+    // (empty) material. The borrow below reuses the same value.
+    if item.field_map("Material", "Material")?.is_none() {
+        return Ok(None);
+    }
+    let Some(material_value) = item.get("Material") else {
+        return Ok(None);
+    };
+    let material = legacy_material_from_llsd(material_value)?;
+    Ok(Some(RenderMaterialEntry {
         material_id,
         material,
-    })
+    }))
 }
 
 /// Decodes a [`LegacyMaterial`] from its `RenderMaterials` LLSD map, undoing the
 /// fixed-point scaling on the texture transforms.
-fn legacy_material_from_llsd(map: &Llsd) -> LegacyMaterial {
-    LegacyMaterial {
-        normal_map: TextureKey::from(
-            map.get("NormMap")
-                .and_then(Llsd::as_uuid)
-                .unwrap_or_default(),
-        ),
-        normal_offset: (scaled(map, "NormOffsetX"), scaled(map, "NormOffsetY")),
-        normal_repeat: (scaled(map, "NormRepeatX"), scaled(map, "NormRepeatY")),
-        normal_rotation: scaled(map, "NormRotation"),
-        specular_map: TextureKey::from(
-            map.get("SpecMap")
-                .and_then(Llsd::as_uuid)
-                .unwrap_or_default(),
-        ),
-        specular_offset: (scaled(map, "SpecOffsetX"), scaled(map, "SpecOffsetY")),
-        specular_repeat: (scaled(map, "SpecRepeatX"), scaled(map, "SpecRepeatY")),
-        specular_rotation: scaled(map, "SpecRotation"),
-        specular_color: color_from_llsd(map.get("SpecColor")),
-        specular_exponent: byte_field(map, "SpecExp"),
-        environment_intensity: byte_field(map, "EnvIntensity"),
-        diffuse_alpha_mode: byte_field(map, "DiffuseAlphaMode"),
-        alpha_mask_cutoff: byte_field(map, "AlphaMaskCutoff"),
-    }
+fn legacy_material_from_llsd(map: &Llsd) -> Result<LegacyMaterial, WireError> {
+    Ok(LegacyMaterial {
+        normal_map: TextureKey::from(map.field_uuid("NormMap", "NormMap")?.unwrap_or_default()),
+        normal_offset: (scaled(map, "NormOffsetX")?, scaled(map, "NormOffsetY")?),
+        normal_repeat: (scaled(map, "NormRepeatX")?, scaled(map, "NormRepeatY")?),
+        normal_rotation: scaled(map, "NormRotation")?,
+        specular_map: TextureKey::from(map.field_uuid("SpecMap", "SpecMap")?.unwrap_or_default()),
+        specular_offset: (scaled(map, "SpecOffsetX")?, scaled(map, "SpecOffsetY")?),
+        specular_repeat: (scaled(map, "SpecRepeatX")?, scaled(map, "SpecRepeatY")?),
+        specular_rotation: scaled(map, "SpecRotation")?,
+        specular_color: color_from_llsd(map)?,
+        specular_exponent: byte_field(map, "SpecExp")?,
+        environment_intensity: byte_field(map, "EnvIntensity")?,
+        diffuse_alpha_mode: byte_field(map, "DiffuseAlphaMode")?,
+        alpha_mask_cutoff: byte_field(map, "AlphaMaskCutoff")?,
+    })
 }
 
 /// Reads an integer map field and undoes the material fixed-point scale.
-fn scaled(map: &Llsd, key: &str) -> f32 {
-    let raw = map.get(key).and_then(Llsd::as_i32).unwrap_or(0);
-    narrow_to_f32(f64::from(raw)) / MATERIAL_FIXED_SCALE
+fn scaled(map: &Llsd, key: &'static str) -> Result<f32, WireError> {
+    let raw = map.field_i32(key, key)?.unwrap_or(0);
+    Ok(narrow_to_f32(f64::from(raw)) / MATERIAL_FIXED_SCALE)
 }
 
 /// Reads a small unsigned-byte map field, clamping out-of-range values to `0`.
-fn byte_field(map: &Llsd, key: &str) -> u8 {
-    map.get(key)
-        .and_then(Llsd::as_i32)
+fn byte_field(map: &Llsd, key: &'static str) -> Result<u8, WireError> {
+    Ok(map
+        .field_i32(key, key)?
         .and_then(|value| u8::try_from(value).ok())
-        .unwrap_or(0)
+        .unwrap_or(0))
 }
 
 /// Decodes a four-element RGBA colour array (each element an integer 0–255).
-fn color_from_llsd(value: Option<&Llsd>) -> [u8; 4] {
+fn color_from_llsd(map: &Llsd) -> Result<[u8; 4], WireError> {
     let mut color = [255_u8; 4];
-    if let Some(array) = value.and_then(Llsd::as_array) {
+    if let Some(array) = map.field_array("SpecColor", "SpecColor")? {
         for (slot, element) in color.iter_mut().zip(array) {
             if let Some(byte) = element.as_i32().and_then(|raw| u8::try_from(raw).ok()) {
                 *slot = byte;
             }
         }
     }
-    color
+    Ok(color)
 }
 
 /// Narrows an `f64` to `f32` (the material transforms are stored as `f32`).

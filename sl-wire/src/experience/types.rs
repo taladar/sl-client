@@ -1,10 +1,27 @@
 //! Experience value types: properties, permissions, info, and update params.
 
 use super::llsd_uuid;
+use crate::WireError;
 use crate::llsd::Llsd;
 use sl_types::key::{AgentKey, ExperienceKey, GroupKey, OwnerKey};
 use std::collections::HashMap;
 use uuid::Uuid;
+
+/// Reads a required UUID field that, like [`super::llsd_uuid`], accepts either a
+/// `uuid` or a UUID-valued `string`. An absent (or `Undef`) field is a
+/// [`WireError::MissingField`]; a present value that is neither a `uuid` nor a
+/// parseable UUID string is a [`WireError::MalformedField`]. (We cannot use
+/// [`Llsd::require_uuid`](crate::llsd::Llsd::require_uuid), which rejects the
+/// string form the lenient path historically accepted here.)
+fn require_uuid_lenient(map: &Llsd, field: &'static str) -> Result<Uuid, WireError> {
+    match map.get(field) {
+        None | Some(Llsd::Undef) => Err(WireError::MissingField { field }),
+        Some(value) => llsd_uuid(value).ok_or_else(|| WireError::MalformedField {
+            field,
+            value: value.kind().to_owned(),
+        }),
+    }
+}
 
 /// Experience [`properties`](ExperienceInfo::properties) bit: the experience id is
 /// invalid (a placeholder for an `error_ids` entry the grid could not resolve).
@@ -186,38 +203,45 @@ impl Default for ExperienceInfo {
 
 impl ExperienceInfo {
     /// Decodes an [`ExperienceInfo`] from one `experience_keys` map element.
-    /// Missing fields take their defaults rather than failing.
-    #[must_use]
-    pub fn from_llsd(map: &Llsd) -> Self {
-        let string = |key: &str| {
-            map.get(key)
-                .and_then(Llsd::as_str)
-                .unwrap_or_default()
-                .to_owned()
+    ///
+    /// `public_id` is required: it is the experience key every other record is
+    /// filed under, so a record without it is meaningless (the viewer's cache
+    /// key and the only field it guards with `has()` — see
+    /// `LLExperienceCache::importFile`/`insert` in Firestorm's
+    /// `indra/llmessage/llexperiencecache.cpp`). Every other field is optional
+    /// and takes its default when absent, mirroring the viewer's unconditional
+    /// `.asString()/.asInteger()/.asUUID()` reads. The `missing`/`PROPERTY_INVALID`
+    /// placeholder is built directly (not via this fn), so requiring `public_id`
+    /// does not affect it.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WireError::MissingField`] if `public_id` is absent, or a
+    /// [`WireError::MalformedField`] if a present field has the wrong LLSD kind.
+    pub fn from_llsd(map: &Llsd) -> Result<Self, WireError> {
+        let string = |key: &'static str| -> Result<String, WireError> {
+            Ok(map.field_str(key, key)?.unwrap_or_default().to_owned())
         };
-        Self {
-            public_id: ExperienceKey::from(
-                map.get("public_id").and_then(llsd_uuid).unwrap_or_default(),
-            ),
-            name: string("name"),
+        Ok(Self {
+            public_id: ExperienceKey::from(require_uuid_lenient(map, "public_id")?),
+            name: string("name")?,
             owner: experience_owner(
                 map.get("agent_id").and_then(llsd_uuid).unwrap_or_default(),
                 map.get("group_id").and_then(llsd_uuid).unwrap_or_default(),
             ),
-            description: string("description"),
+            description: string("description")?,
             properties: ExperienceProperties(
-                map.get("properties").and_then(Llsd::as_i32).unwrap_or(0),
+                map.field_i32("properties", "properties")?.unwrap_or(0),
             ),
-            quota: map.get("quota").and_then(Llsd::as_i32).unwrap_or(0),
-            expiration: map.get("expiration").and_then(Llsd::as_f64).unwrap_or(0.0),
-            maturity: map.get("maturity").and_then(Llsd::as_i32).unwrap_or(0),
-            slurl: string("slurl"),
-            extended_metadata: string("extended_metadata"),
+            quota: map.field_i32("quota", "quota")?.unwrap_or(0),
+            expiration: map.field_f64("expiration", "expiration")?.unwrap_or(0.0),
+            maturity: map.field_i32("maturity", "maturity")?.unwrap_or(0),
+            slurl: string("slurl")?,
+            extended_metadata: string("extended_metadata")?,
             missing: map
-                .get("DoesNotExist")
-                .and_then(Llsd::as_bool)
+                .field_bool("DoesNotExist", "DoesNotExist")?
                 .unwrap_or(false),
-        }
+        })
     }
 
     /// Encodes this record as one `experience_keys` map element — the inverse of
