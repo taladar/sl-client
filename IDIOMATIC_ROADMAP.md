@@ -1201,3 +1201,101 @@ churn" rule) were moved into the shared `sl-types` crate in one release
   `pub use sl_types::…` so the flat `sl_proto::…` surface and downstream crates
   are unchanged. `sl-proto`'s `serde` dependency was dropped (its only user,
   `LandArea`, left).
+
+### Phase 7 — second-pass audit (missed ids, in-band sentinels, non-masking)
+
+A fresh audit after the Phases 1–6 sweeps found three remaining classes of the
+same gaps, pursued under three user decisions (via `AskUserQuestion`): (A) raw
+ids still in user-facing APIs become typed newtypes — **new ones kept
+client-local in `sl-proto`** per the standing rule; (B) **maximal** in-band-nil/
+`0`-sentinel → `Option`, with a documented exception list; (C) silently-masked
+decode sites become **always a hard `WireError`** on a present-but-malformed
+value (absence stays `Option`/default, never an error).
+
+**A — domain-id newtypes (DONE):**
+
+- [x] Name-lookup ids the Phase-5 sweeps missed: `AvatarName.id` → `AgentKey`,
+      `GroupName.id` → `GroupKey`, `DisplayName.id` (sl-wire) → `AgentKey`.
+      Codec wraps at the boundary (LLSD/UDP byte-identical); `DisplayName` lost
+      its derived `Default` (no `AgentKey::default`) → equivalent manual impl.
+      (commit "Phase 7 A1")
+- [x] New client-local UUID newtypes (mirror the `sl-types` key ergonomics
+      `From<Uuid>`/`uuid()`/`Display`): **`PickKey`** (avatar_profile.rs — the
+      picks-side parallel of `ClassifiedKey`;
+      `AvatarPick`/`PickInfo`/`PickUpdate` `pick_id`, the
+      `RequestPickInfo`/`DeletePick`/`GodDeletePick` commands + methods),
+      **`GroupNoticeKey`** (`GroupNotice.notice_id` + `RequestGroupNotice`),
+      **`ProposalVoteId`** (`GroupActiveProposalItem`/`GroupVoteHistoryItem`
+      `vote_id`, the ballot `proposal_id`), **`ProposalCandidateId`**
+      (`GroupVote.candidate_id`, a distinct type from `ProposalVoteId`).
+      Re-exported through both runtimes; REPL parses raw `Uuid` then wraps; +3
+      unit tests. **Left raw (deliberately):** the
+      `*_request_id`/`query_id`/`transaction_id` correlation ids and session
+      tokens (no entity identity). (commit "Phase 7 A2")
+
+**B — in-band sentinel → `Option` (maximal; IN PROGRESS):**
+
+- [x] EEP textures (`SkySettings` sun/moon/cloud/bloom/halo/rainbow,
+      `WaterSettings` normal_map/transparent_texture) → `Option<TextureKey>`;
+      new `optional_texture_member`/`optional_texture_to_llsd` LLSD boundary
+      helpers. Viewer effects (`ViewerEffectData::{LookAt,PointAt}`
+      source/target, `Spiral` source/target) →
+      `Option<AgentKey>`/`Option<ObjectKey>`; module-local
+      `optional_agent`/`optional_object` decode helpers +
+      `map_or_else(Uuid::nil,..)` encode. The REPL gained reusable
+      `opt_agent`/`opt_object` arg helpers (absent/nil → `None`) for the rest of
+      the sweep. +1 unit test. (commit "Phase 7 B part 1")
+- [x] `ParticleSystem.texture_id`/`target_id` → `Option<TextureKey>`/
+  `Option<ObjectKey>` (nil → `None` in the `PSYS` blob codec). (commit "Phase 7
+  B part 2")
+- [ ] **Remaining nil-key fields** (apply the same nil ⇄ `None` boundary
+      pattern; wire byte-identical): parcel
+      `media_id`/`snapshot_id`/`auth_buyer_id`
+      (`ParcelInfo`/`ParcelUpdate`/`ParcelMediaUpdateInfo`/`ParcelDetails` —
+      note `snapshot_id`/`media_id` are shared with `PickInfo`/`ClassifiedInfo`/
+      `DirLandResult`/`PlacesResult` and read by `sl-survey`, so convert all
+      carriers together); `ObjectProperties` `folder_id`/`from_task_id`;
+      `TextureFace.material_id`; `Wearable.asset_id`; group
+      `ActiveGroup .active_group_id`/`GroupRole.role_id`/`GroupProfile.insignia_id`;
+      map `TelehubInfo.object_id`/`MapItem.id`; `ScriptDialog.owner_id` (raw
+      `Uuid`); `ChatSource::Object.owner_id`/`InstantMessage.region_id` (raw
+      `Uuid`); `InventoryFolder.parent_id` (nil = root); editing
+      `RezObjectRequest.group_id`/ `ray_target_id`. (`MuteEntry.id` is
+      genuinely-keyed-or-name — see exceptions.)
+- [ ] **Remaining numeric `0`/`-1`-means-unset fields** → `Option`:
+  `InstantMessage.timestamp`/`Event::ConferenceInvited.timestamp` (0 = unset),
+  `ParcelMediaUpdateInfo` `media_width`/`media_height` (0 = native), and the
+  `InventoryCallbackId` `0`-no-callback call sites.
+- **Exceptions (kept in-band — sentinel is in the value domain):** open enums
+  preserving `Unknown(raw)`; the polymorphic `MapItem.name`; outbound search
+  filters (`DirPlacesQuery.sim_name`) that are partial query strings, not
+  identities.
+
+**C — non-masking decode (always hard error; IN PROGRESS):**
+
+- [x] New `WireError::{InvalidUuid, MalformedField}` + strict
+      `parse_uuid_field`/`parse_optional_uuid_field`/`parse_u32_field` helpers.
+      Hardened the user-cited masking sites: `estate_info_from_params` (→
+      `Result<Option<EstateInfo>, WireError>`; a malformed owner/id/flags/sun/
+      parent/covenant-timestamp / a non-empty invalid covenant id rejects the
+      whole `EstateInfo`; `EstateInfo`+`EstateCovenant` `covenant_id` became
+      `Option<Uuid>` — the B half); `parse_mute_list`/`parse_mute_line` (→
+      fallible; a bad UUID/flags line is a hard error, blank still `Ok(None)`);
+      `parse_uuid_string` (EventInfoReply `Creator`); `inventory_offer_bucket`
+      (rejects an out-of-byte- range asset code instead of writing `0`). +2 unit
+      tests. (commit "Phase 7 C part 1")
+- [ ] **Verify-then-fix leads** (read to separate real masking from defensive/
+      unreachable code, then fix only genuine masking): `terrain.rs`
+      `unwrap_or(0)` on a coefficient size / zigzag index (a size/index mismatch
+      that silently flattens or reads the wrong coefficient should fail the
+      patch decode; the procedural-math intermediates stay clamped);
+      `appearance.rs` `decode_texture_entry` per-face `unwrap_or_default`
+      (confirm it is LL's intentional default-fill — if so leave it; only a
+      genuine length-shortfall errors); the `sl-wire` caps LLSD
+      `.unwrap_or_default()` sweep (keep an *absent* optional key lenient, but
+      make a *present key of the wrong LLSD type* a hard `CapsDecodeFailed`).
+- **Confirmed non-issues (do not touch):** `uuid_crc` `chunks_exact(4)`
+  `unwrap_or(0)` (unreachable, for the indexing lint); the documented-sentinel
+  `grid_coordinates_from_handle`/`parse_lure_region_handle`; `login.rs` `.ok()`
+  → `Option` fields (correct optional handling); the server-side
+  `build_map_block_reply` `u16::try_from` clamp (encode of our own data).
