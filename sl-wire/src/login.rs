@@ -8,7 +8,10 @@ use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
+use crate::geometry::Direction;
+use crate::region_handle::RegionHandle;
 use sl_types::key::{AgentKey, InventoryFolderKey};
+use sl_types::map::RegionCoordinates;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -34,8 +37,8 @@ pub enum StartLocation {
     Region {
         /// The destination region's name.
         region: String,
-        /// The position within the region, in metres `[x, y, z]`.
-        position: [f32; 3],
+        /// The position within the region, in metres.
+        position: RegionCoordinates,
     },
 }
 
@@ -43,7 +46,7 @@ impl StartLocation {
     /// A [`StartLocation::Region`] for the named region at the given in-region
     /// position.
     #[must_use]
-    pub fn region(name: impl Into<String>, position: [f32; 3]) -> Self {
+    pub fn region(name: impl Into<String>, position: RegionCoordinates) -> Self {
         Self::Region {
             region: name.into(),
             position,
@@ -58,10 +61,10 @@ impl StartLocation {
         match self {
             Self::Last => "last".to_owned(),
             Self::Home => "home".to_owned(),
-            Self::Region {
-                region,
-                position: [x, y, z],
-            } => format!("uri:{region}&{x}&{y}&{z}"),
+            Self::Region { region, position } => {
+                let (x, y, z) = (position.x(), position.y(), position.z());
+                format!("uri:{region}&{x}&{y}&{z}")
+            }
         }
     }
 }
@@ -96,7 +99,7 @@ impl FromStr for StartLocation {
                     |value: &str| value.trim().parse::<f32>().map_err(|_ignored| malformed());
                 Ok(Self::Region {
                     region: region.to_owned(),
-                    position: [coord(x)?, coord(y)?, coord(z)?],
+                    position: RegionCoordinates::new(coord(x)?, coord(y)?, coord(z)?),
                 })
             }
         }
@@ -358,7 +361,7 @@ pub struct LoginSuccess {
     pub home: Option<HomeLocation>,
     /// The camera look-at direction at the start location, parsed from the
     /// top-level `look_at` response field, if present and well-formed.
-    pub look_at: Option<[f32; 3]>,
+    pub look_at: Option<Direction>,
     /// The global X metre coordinate of the start region's south-west corner,
     /// from the top-level `region_x` response field. `None` if the grid did not
     /// provide it. Together with [`region_y`](Self::region_y) this packs into the
@@ -398,13 +401,13 @@ pub struct LoginSuccess {
 /// 'position':[r128.0,r128.0,r25.0], 'look_at':[r1.0,r0.0,r0.0]}`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HomeLocation {
-    /// The home region's grid-corner world coordinates in metres — the two
-    /// components of the region handle (`region_handle`: `(x, y)`).
-    pub region_handle: (u32, u32),
+    /// The home region's handle (its grid-corner world coordinates in metres,
+    /// the two components the wire carries as `region_handle: [x, y]`).
+    pub region_handle: RegionHandle,
     /// The home position within the region (`position`).
-    pub position: [f32; 3],
+    pub position: RegionCoordinates,
     /// The camera look-at direction at home (`look_at`).
-    pub look_at: [f32; 3],
+    pub look_at: Direction,
 }
 
 /// One folder of the inventory skeleton carried in a login response
@@ -534,7 +537,7 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
         inventory_skeleton: parse_skeleton(response_struct, "inventory-skeleton"),
         buddy_list: parse_buddy_list(response_struct),
         home: members.get("home").and_then(|h| parse_home(h)),
-        look_at: members.get("look_at").and_then(|l| parse_vector3(l)),
+        look_at: members.get("look_at").and_then(|l| parse_direction(l)),
         region_x: members.get("region_x").and_then(|x| x.trim().parse().ok()),
         region_y: members.get("region_y").and_then(|y| y.trim().parse().ok()),
         agent_access: members.get("agent_access").cloned(),
@@ -569,13 +572,13 @@ fn parse_array_struct_uuid(
 /// three sections is missing or malformed.
 fn parse_home(value: &str) -> Option<HomeLocation> {
     let handle = r_numbers(section(value, "region_handle")?);
-    let position = parse_vector3(section(value, "position")?)?;
-    let look_at = parse_vector3(section(value, "look_at")?)?;
+    let position = parse_region_coords(section(value, "position")?)?;
+    let look_at = parse_direction(section(value, "look_at")?)?;
     let [x, y, ..] = handle.as_slice() else {
         return None;
     };
     Some(HomeLocation {
-        region_handle: (round_to_u32(*x), round_to_u32(*y)),
+        region_handle: RegionHandle::from_global(round_to_u32(*x), round_to_u32(*y)),
         position,
         look_at,
     })
@@ -589,6 +592,18 @@ fn parse_vector3(value: &str) -> Option<[f32; 3]> {
         return None;
     };
     Some([f64_to_f32(*x), f64_to_f32(*y), f64_to_f32(*z)])
+}
+
+/// Parses a quasi-LLSD `r`-prefixed list as region-local coordinates.
+fn parse_region_coords(value: &str) -> Option<RegionCoordinates> {
+    let [x, y, z] = parse_vector3(value)?;
+    Some(RegionCoordinates::new(x, y, z))
+}
+
+/// Parses a quasi-LLSD `r`-prefixed list as a facing direction.
+fn parse_direction(value: &str) -> Option<Direction> {
+    let [x, y, z] = parse_vector3(value)?;
+    Some(Direction::new(x, y, z))
 }
 
 /// Returns the contents between the `[` and `]` that follow the first occurrence
@@ -984,7 +999,11 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
         push_string_member(out, "home", &home_to_string(home));
     }
     if let Some(look_at) = success.look_at {
-        push_string_member(out, "look_at", &vector3_to_string(look_at));
+        push_string_member(
+            out,
+            "look_at",
+            &vector3_to_string([look_at.x(), look_at.y(), look_at.z()]),
+        );
     }
     if let Some(region_x) = success.region_x {
         push_int_member(out, "region_x", i64::from(region_x));
@@ -1076,9 +1095,9 @@ fn push_buddy_list_member(out: &mut String, buddies: &[BuddyListEntry]) {
 /// reads: `{'region_handle':[rX,rY], 'position':[rX,rY,rZ], 'look_at':[rX,rY,rZ]}`
 /// with the `r` real-number markers.
 fn home_to_string(home: &HomeLocation) -> String {
-    let (rx, ry) = home.region_handle;
-    let [px, py, pz] = home.position;
-    let [lx, ly, lz] = home.look_at;
+    let (rx, ry) = home.region_handle.global_coordinates();
+    let (px, py, pz) = (home.position.x(), home.position.y(), home.position.z());
+    let (lx, ly, lz) = (home.look_at.x(), home.look_at.y(), home.look_at.z());
     format!(
         "{{'region_handle':[r{rx},r{ry}], 'position':[r{px},r{py},r{pz}], 'look_at':[r{lx},r{ly},r{lz}]}}"
     )

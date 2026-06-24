@@ -7,6 +7,7 @@ use sl_types::key::{
 use sl_types::map::RegionName;
 use sl_types::money::LindenAmount;
 use sl_types::search::ClassifiedCategory;
+use sl_wire::{Direction, GlobalCoordinates};
 use uuid::Uuid;
 
 /// A profile **pick** id (the viewer's `LLPickData::mPickID`).
@@ -145,7 +146,7 @@ pub struct PickInfo {
     /// (unknown) name.
     pub sim_name: Option<RegionName>,
     /// The pick's global position (metres, grid-wide coordinates).
-    pub pos_global: (f64, f64, f64),
+    pub pos_global: GlobalCoordinates,
     /// The sort order (only meaningful for top picks).
     pub sort_order: i32,
     /// Whether the pick is enabled (shown in the profile).
@@ -181,7 +182,7 @@ pub struct ClassifiedInfo {
     /// empty (unknown) name.
     pub sim_name: Option<RegionName>,
     /// The classified's global position (metres, grid-wide coordinates).
-    pub pos_global: (f64, f64, f64),
+    pub pos_global: GlobalCoordinates,
     /// The parcel name.
     pub parcel_name: String,
     /// The classified flags bitfield (e.g. mature, auto-renew).
@@ -264,7 +265,7 @@ pub struct PickUpdate {
     /// The pick snapshot texture id.
     pub snapshot_id: Option<TextureKey>,
     /// The pick's global position (metres; nil/zero to use the agent's).
-    pub pos_global: (f64, f64, f64),
+    pub pos_global: GlobalCoordinates,
     /// The sort order (only meaningful for top picks; normally `0`).
     pub sort_order: i32,
     /// Whether the pick is enabled (shown in the profile).
@@ -279,7 +280,7 @@ impl Default for PickUpdate {
             name: String::new(),
             description: String::new(),
             snapshot_id: None,
-            pos_global: (0.0, 0.0, 0.0),
+            pos_global: GlobalCoordinates::new(0.0, 0.0, 0.0),
             sort_order: 0,
             enabled: true,
         }
@@ -309,7 +310,7 @@ pub struct ClassifiedUpdate {
     /// The classified snapshot texture id.
     pub snapshot_id: Option<TextureKey>,
     /// The classified's global position (metres; nil/zero to use the agent's).
-    pub pos_global: (f64, f64, f64),
+    pub pos_global: GlobalCoordinates,
     /// The classified flags bitfield (e.g. mature, auto-renew).
     pub classified_flags: u8,
     /// The amount to pay to list this classified (L$).
@@ -325,7 +326,7 @@ impl Default for ClassifiedUpdate {
             description: String::new(),
             parcel_id: None,
             snapshot_id: None,
-            pos_global: (0.0, 0.0, 0.0),
+            pos_global: GlobalCoordinates::new(0.0, 0.0, 0.0),
             classified_flags: 0,
             price_for_listing: LindenAmount(0),
         }
@@ -391,7 +392,7 @@ pub struct LoginAccount {
     pub home: Option<sl_wire::HomeLocation>,
     /// The camera look-at direction at the start location (`look_at`), if the
     /// grid provided it.
-    pub look_at: Option<[f32; 3]>,
+    pub look_at: Option<Direction>,
     /// The account's current maturity / content rating (`agent_access`).
     pub agent_access: Maturity,
     /// The maximum maturity rating the account is entitled to

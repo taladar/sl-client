@@ -257,8 +257,8 @@ impl ParcelRecord {
             is_group_owned: info.owner.is_group(),
             sale_price: info.sale_price.clone(),
             area: info.area,
-            aabb_min: [info.aabb_min.0, info.aabb_min.1, info.aabb_min.2],
-            aabb_max: [info.aabb_max.0, info.aabb_max.1, info.aabb_max.2],
+            aabb_min: [info.aabb_min.x(), info.aabb_min.y(), info.aabb_min.z()],
+            aabb_max: [info.aabb_max.x(), info.aabb_max.y(), info.aabb_max.z()],
             create_objects: info.create_objects(),
             create_group_objects: info.create_group_objects(),
             use_ban_list: info.use_ban_list(),
@@ -1013,7 +1013,8 @@ async fn survey_command(parameters: SurveyParameters) -> Result<(), Error> {
             SessionOutcome::RelogAt { handle, name } => {
                 tracing::info!("re-logging in at {name} to continue the survey");
                 survey.start_handle = handle;
-                start_location = StartLocation::region(name, [128.0, 128.0, 30.0]);
+                start_location =
+                    StartLocation::region(name, RegionCoordinates::new(128.0, 128.0, 30.0));
             }
         }
     }

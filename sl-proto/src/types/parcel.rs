@@ -1,10 +1,10 @@
 //! Parcels and land management: properties, access lists, media, overlays.
 
 use sl_types::key::{AgentKey, GroupKey, ObjectKey, OwnerKey, ParcelKey, TextureKey};
-use sl_types::lsl::Vector;
-use sl_types::map::RegionName;
+use sl_types::map::{RegionCoordinates, RegionName};
 use sl_types::money::LindenAmount;
 use sl_wire::ParcelFlags;
+use sl_wire::{Direction, GlobalCoordinates};
 use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
 use uuid::Uuid;
 
@@ -191,9 +191,9 @@ pub struct ParcelInfo {
     /// The parcel's rent price, in L$.
     pub rent_price: LindenAmount,
     /// The minimum corner of the parcel's axis-aligned bounding box, in metres.
-    pub aabb_min: (f32, f32, f32),
+    pub aabb_min: RegionCoordinates,
     /// The maximum corner of the parcel's axis-aligned bounding box, in metres.
-    pub aabb_max: (f32, f32, f32),
+    pub aabb_max: RegionCoordinates,
     /// The parcel area in square metres.
     pub area: LandArea,
     /// One bit per 4×4 m region square, marking which squares belong to this
@@ -251,9 +251,9 @@ pub struct ParcelInfo {
     /// How many hours a parcel pass lasts.
     pub pass_hours: f32,
     /// The teleport-landing location within the parcel, in region metres.
-    pub user_location: (f32, f32, f32),
+    pub user_location: RegionCoordinates,
     /// The direction an arriving agent faces at the landing point.
-    pub user_look_at: (f32, f32, f32),
+    pub user_look_at: Direction,
     /// How an avatar arrives on the parcel (blocked / landing point / anywhere).
     pub landing_type: LandingType,
     /// Region setting: pushing (`llPushObject`) is overridden/blocked region-wide.
@@ -639,9 +639,9 @@ pub struct ParcelUpdate {
     /// The parcel snapshot texture id (`None` if none).
     pub snapshot_id: Option<TextureKey>,
     /// The teleport-landing location within the parcel.
-    pub user_location: Vector,
+    pub user_location: RegionCoordinates,
     /// The direction an arriving agent faces at the landing point.
-    pub user_look_at: Vector,
+    pub user_look_at: Direction,
     /// The landing type (`0` = blocked, `1` = landing point, `2` = anywhere).
     pub landing_type: u8,
 }
@@ -664,16 +664,8 @@ impl Default for ParcelUpdate {
             category: ParcelCategory::None,
             auth_buyer_id: None,
             snapshot_id: None,
-            user_location: Vector {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            user_look_at: Vector {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
+            user_location: RegionCoordinates::new(0.0, 0.0, 0.0),
+            user_look_at: Direction::ZERO,
             landing_type: 0,
         }
     }
@@ -742,8 +734,8 @@ pub struct LandStatItem {
     pub task_local_id: RegionLocalObjectId,
     /// The object's id (`TaskID`).
     pub task_id: ObjectKey,
-    /// The object's region position (`LocationX`/`Y`/`Z`), as `[x, y, z]` metres.
-    pub location: [f32; 3],
+    /// The object's region position (`LocationX`/`Y`/`Z`), in metres.
+    pub location: RegionCoordinates,
     /// The object's score for this report (`Score`): script time for top-scripts,
     /// collision count for top-colliders.
     pub score: f32,
@@ -777,12 +769,8 @@ pub struct ParcelDetails {
     /// The packed parcel flags byte (a condensed subset of the full
     /// [`ParcelFlags`](sl_wire::ParcelFlags)).
     pub flags: u8,
-    /// The parcel anchor's global X coordinate, in metres.
-    pub global_x: f32,
-    /// The parcel anchor's global Y coordinate, in metres.
-    pub global_y: f32,
-    /// The parcel anchor's global Z coordinate, in metres.
-    pub global_z: f32,
+    /// The parcel anchor's global position, in metres.
+    pub global_position: GlobalCoordinates,
     /// The containing region's name, or `None` when the grid sent an empty
     /// (unknown) name.
     pub sim_name: Option<RegionName>,
@@ -806,9 +794,7 @@ impl Default for ParcelDetails {
             actual_area: LandArea(0),
             billable_area: LandArea(0),
             flags: 0,
-            global_x: 0.0,
-            global_y: 0.0,
-            global_z: 0.0,
+            global_position: GlobalCoordinates::new(0.0, 0.0, 0.0),
             sim_name: None,
             snapshot_id: None,
             dwell: 0.0,

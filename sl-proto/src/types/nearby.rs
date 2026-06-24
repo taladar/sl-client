@@ -2,7 +2,7 @@
 //! `ViewerEffect` look-at / point-at / beam machinery, and agent tracking.
 
 use sl_types::key::{AgentKey, ObjectKey};
-use sl_wire::{Reader, Writer};
+use sl_wire::{GlobalCoordinates, Reader, Writer};
 use uuid::Uuid;
 
 /// One avatar's coarse position, as carried by a `CoarseLocationUpdate`
@@ -277,7 +277,7 @@ pub enum ViewerEffectData {
         /// The object being looked at (`None` for none).
         target: Option<ObjectKey>,
         /// The global target position, in metres.
-        target_position: [f64; 3],
+        target_position: GlobalCoordinates,
         /// What the gaze is directed at.
         look_at_type: LookAtType,
     },
@@ -288,7 +288,7 @@ pub enum ViewerEffectData {
         /// The object being pointed at (`None` for none).
         target: Option<ObjectKey>,
         /// The global target position, in metres.
-        target_position: [f64; 3],
+        target_position: GlobalCoordinates,
         /// What the gesture is directed at.
         point_at_type: PointAtType,
     },
@@ -301,7 +301,7 @@ pub enum ViewerEffectData {
         /// The object the effect points to (`None` for none).
         target: Option<ObjectKey>,
         /// The global position, in metres (zero when unused).
-        position: [f64; 3],
+        position: GlobalCoordinates,
     },
     /// Any other or unrecognised `TypeData`, kept verbatim.
     Raw(Vec<u8>),
@@ -332,7 +332,8 @@ impl ViewerEffectData {
         let mut reader = Reader::new(bytes);
         let source = optional_agent(reader.uuid().ok()?);
         let target = optional_object(reader.uuid().ok()?);
-        let target_position = reader.vector3d().ok()?;
+        let [tx, ty, tz] = reader.vector3d().ok()?;
+        let target_position = GlobalCoordinates::new(tx, ty, tz);
         let look_at_type = LookAtType::from_code(reader.u8().ok()?);
         Some(Self::LookAt {
             source,
@@ -347,7 +348,8 @@ impl ViewerEffectData {
         let mut reader = Reader::new(bytes);
         let source = optional_agent(reader.uuid().ok()?);
         let target = optional_object(reader.uuid().ok()?);
-        let target_position = reader.vector3d().ok()?;
+        let [tx, ty, tz] = reader.vector3d().ok()?;
+        let target_position = GlobalCoordinates::new(tx, ty, tz);
         let point_at_type = PointAtType::from_code(reader.u8().ok()?);
         Some(Self::PointAt {
             source,
@@ -362,7 +364,8 @@ impl ViewerEffectData {
         let mut reader = Reader::new(bytes);
         let source = optional_object(reader.uuid().ok()?);
         let target = optional_object(reader.uuid().ok()?);
-        let position = reader.vector3d().ok()?;
+        let [px, py, pz] = reader.vector3d().ok()?;
+        let position = GlobalCoordinates::new(px, py, pz);
         Some(Self::Spiral {
             source,
             target,
@@ -384,7 +387,11 @@ impl ViewerEffectData {
             } => {
                 writer.put_uuid(source.map_or_else(Uuid::nil, |key| key.uuid()));
                 writer.put_uuid(target.map_or_else(Uuid::nil, |key| key.uuid()));
-                writer.put_vector3d(*target_position);
+                writer.put_vector3d([
+                    target_position.x(),
+                    target_position.y(),
+                    target_position.z(),
+                ]);
                 writer.put_u8(look_at_type.to_code());
             }
             Self::PointAt {
@@ -395,7 +402,11 @@ impl ViewerEffectData {
             } => {
                 writer.put_uuid(source.map_or_else(Uuid::nil, |key| key.uuid()));
                 writer.put_uuid(target.map_or_else(Uuid::nil, |key| key.uuid()));
-                writer.put_vector3d(*target_position);
+                writer.put_vector3d([
+                    target_position.x(),
+                    target_position.y(),
+                    target_position.z(),
+                ]);
                 writer.put_u8(point_at_type.to_code());
             }
             Self::Spiral {
@@ -405,7 +416,7 @@ impl ViewerEffectData {
             } => {
                 writer.put_uuid(source.map_or_else(Uuid::nil, |key| key.uuid()));
                 writer.put_uuid(target.map_or_else(Uuid::nil, |key| key.uuid()));
-                writer.put_vector3d(*position);
+                writer.put_vector3d([position.x(), position.y(), position.z()]);
             }
             Self::Raw(bytes) => return bytes.clone(),
         }
@@ -455,6 +466,7 @@ mod tests {
 
     use super::{LookAtType, PointAtType, ViewerEffectData, ViewerEffectType};
     use pretty_assertions::assert_eq;
+    use sl_wire::GlobalCoordinates;
     use uuid::Uuid;
 
     /// Every effect-type code round-trips through `from_code`/`to_code`.
@@ -471,7 +483,7 @@ mod tests {
         let data = ViewerEffectData::LookAt {
             source: Some(AgentKey::from(Uuid::from_u128(1))),
             target: Some(ObjectKey::from(Uuid::from_u128(2))),
-            target_position: [1.5, -2.5, 3.5],
+            target_position: GlobalCoordinates::new(1.5, -2.5, 3.5),
             look_at_type: LookAtType::Focus,
         };
         let bytes = data.to_wire();
@@ -488,7 +500,7 @@ mod tests {
         let data = ViewerEffectData::PointAt {
             source: Some(AgentKey::from(Uuid::from_u128(3))),
             target: Some(ObjectKey::from(Uuid::from_u128(4))),
-            target_position: [0.0, 0.0, 0.0],
+            target_position: GlobalCoordinates::new(0.0, 0.0, 0.0),
             point_at_type: PointAtType::Grab,
         };
         let bytes = data.to_wire();
@@ -505,7 +517,7 @@ mod tests {
         let data = ViewerEffectData::Spiral {
             source: Some(ObjectKey::from(Uuid::from_u128(5))),
             target: Some(ObjectKey::from(Uuid::from_u128(6))),
-            position: [10.0, 20.0, 30.0],
+            position: GlobalCoordinates::new(10.0, 20.0, 30.0),
         };
         let bytes = data.to_wire();
         assert_eq!(bytes.len(), 56);
@@ -522,7 +534,7 @@ mod tests {
         let data = ViewerEffectData::LookAt {
             source: None,
             target: None,
-            target_position: [0.0, 0.0, 0.0],
+            target_position: GlobalCoordinates::new(0.0, 0.0, 0.0),
             look_at_type: LookAtType::None,
         };
         let bytes = data.to_wire();

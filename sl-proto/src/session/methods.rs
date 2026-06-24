@@ -82,6 +82,7 @@ use sl_wire::{
     parse_object_physics_properties, parse_region_experiences, parse_remote_parcel_reply,
     parse_resource_cost_selected, parse_simulator_features, zero_decode,
 };
+use sl_wire::{Direction, GlobalCoordinates};
 use std::collections::{BTreeMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Instant;
@@ -1596,7 +1597,7 @@ impl Session {
                         .map(|item| LandStatItem {
                             task_local_id: RegionLocalObjectId(item.task_local_id),
                             task_id: ObjectKey::from(item.task_id),
-                            location: [item.location_x, item.location_y, item.location_z],
+                            location: RegionCoordinates::new(item.location_x, item.location_y, item.location_z),
                             score: item.score,
                             task_name: trimmed_string(&item.task_name),
                             owner_name: trimmed_string(&item.owner_name),
@@ -1617,9 +1618,11 @@ impl Session {
                         data.billable_area,
                     )?,
                     flags: data.flags,
-                    global_x: data.global_x,
-                    global_y: data.global_y,
-                    global_z: data.global_z,
+                    global_position: GlobalCoordinates::new(
+                        f64::from(data.global_x),
+                        f64::from(data.global_y),
+                        f64::from(data.global_z),
+                    ),
                     sim_name: sl_wire::region_name_from_wire(
                         "SimName",
                         &trimmed_string(&data.sim_name),
@@ -2529,7 +2532,11 @@ impl Session {
                                     block.billable_area,
                                 )?,
                                 flags: block.flags,
-                                global_position: (block.global_x, block.global_y, block.global_z),
+                                global_position: GlobalCoordinates::new(
+                                    f64::from(block.global_x),
+                                    f64::from(block.global_y),
+                                    f64::from(block.global_z),
+                                ),
                                 sim_name: sl_wire::region_name_from_wire(
                                     "SimName",
                                     &trimmed_string(&block.sim_name),
@@ -2562,7 +2569,7 @@ impl Session {
                             "SimName",
                             &trimmed_string(&data.sim_name),
                         )?,
-                        global_position: (global_x, global_y, global_z),
+                        global_position: GlobalCoordinates::new(global_x, global_y, global_z),
                         flags: data.event_flags,
                     },
                 });
@@ -2751,7 +2758,7 @@ impl Session {
                             data.sim_position.y,
                             data.sim_position.z,
                         ),
-                        look_at: (data.look_at.x, data.look_at.y, data.look_at.z),
+                        look_at: Direction::new(data.look_at.x, data.look_at.y, data.look_at.z),
                         flags: request.options.first().map_or(0, |option| option.flags),
                     })));
             }

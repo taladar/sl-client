@@ -381,7 +381,10 @@ pub use editing::{
     ObjectFlagSettings, ObjectTransform, PermissionField, PrimShape, ProductType, RestoreItem,
     SaleType, TeleportFlags,
 };
-pub use environment::{DayCycle, DayCycleFrame, EnvironmentSettings, SkySettings, WaterSettings};
+pub use environment::{
+    CloudPosDensity, Color, ColorAlpha, DayCycle, DayCycleFrame, EnvironmentSettings, Glow, Scale,
+    SkySettings, WaterSettings,
+};
 pub use event::Event;
 pub use group::{
     ActiveGroup, CreateGroupParams, GroupAccountDetails, GroupAccountDetailsEntry,

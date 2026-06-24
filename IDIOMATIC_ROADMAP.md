@@ -1453,8 +1453,8 @@ value (absence stays `Option`/default, never an error).
   → `Option` fields (correct optional handling); the server-side
   `build_map_block_reply` `u16::try_from` clamp (encode of our own data).
 
-**D — geometry tuples → typed `sl-types` coordinate/vector types (consume-only;
-NOT STARTED):**
+**D — geometry tuples → typed `sl-types` coordinate/vector types (consume-only
+for `RegionCoordinates`; two NEW client-local types; COMPLETE 2026-06-24):**
 
 A fresh-eye audit (2026-06-24, user-spotted) found `(f32, f32, f32)` position
 tuples that the Phase 6 map-geometry sweep never revisited — it only typed the
@@ -1465,25 +1465,121 @@ and wire byte-identical (wire `Vector` is f32, `From<Vector> for
 RegionCoordinates` already exists). The tuples split by concept — only the
 **region-local positions** become `RegionCoordinates`:
 
-- [ ] Region-local **position** tuples → `RegionCoordinates`:
+- [x] Region-local **position** tuples → `RegionCoordinates` (consume-only):
       `ChatMessage.position`, `InstantMessage.position`,
       `Event::ConferenceInvited.position`, `ParcelInfo` (parcel.rs)
-      `user_location` + `aabb_min`/`aabb_max`.
-- [ ] **Direction** tuples (`ScriptTeleportRequest.look_at`,
-      `ParcelInfo.user_look_at`) — a unit direction, NOT a coordinate.
-      `sl-types` has no dedicated direction/unit-vector type (only
-      `lsl::Vector`, a plain f32 3-vector). Per the standing rule, add a
-      client-local `Direction` newtype in `sl-proto` first (batch-migrate to
-      `sl-types` later); do NOT force these into `RegionCoordinates`.
-      (User-requested 2026-06-24: prefer a named type over `lsl::Vector` if none
-      exists — none does.)
-- [ ] `DirPeopleResult`/`directory.rs` `global_position` — grid-**global**
-      metres. `sl-types` has no global-metres coordinate type either
-      (`Location`/`UnconstrainedLocation` are region-name + integer region
-      coords; `GridCoordinates` is region *indices*; `Distance` is a scalar).
-      Per the standing rule, add a client-local global-metres coordinate newtype
-      in `sl-proto` first (batch-migrate to `sl-types` later).
-      (User-requested 2026-06-24.)
+      `user_location` + `aabb_min`/`aabb_max`. Codec wraps at the boundary
+      (`RegionCoordinates::new(x, y, z)` on decode, `.x()/.y()/.z()` on encode);
+      LLSD helpers gained `region_coords_from_llsd`/`region_coords_to_llsd`,
+      and the `offline_message_position`/`llsd_position` helpers now return
+      `RegionCoordinates`. Wire bytes byte-identical. (The outbound
+      `ParcelUpdate.user_location`/`user_look_at` — `lsl::Vector` — were ALSO
+      converted in the second pass below, per the user's "Vector→typed"
+      directive.)
+- [x] **Direction** tuples (`ScriptTeleportRequest.look_at`,
+      `ParcelInfo.user_look_at`) → NEW public client-local `Direction` newtype
+      (`sl-wire/src/geometry.rs` — see the second-pass note): a full 3-D `f32`
+      facing vector (verified vs
+      the viewer — `LLAgent::resetAxes` uses the look-at as the agent *at*-axis
+      including its vertical component, so it is a 3-D direction, not a
+      horizontal-only or position vector; not forcibly normalised so the raw
+      components round-trip byte-identically). `new`/`x()`/`y()`/`z()`/`ZERO`
+      + `length()`/`normalized() -> Option<Direction>`. Re-exported through
+      `sl-proto`/`sl-client-tokio`/`sl-client-bevy`; REPL `global_or_zero`
+      unaffected. (Name chosen by the user 2026-06-24.)
+- [x] `directory.rs`/`avatar_profile.rs` global-metre fields →
+      NEW public client-local `GlobalCoordinates` newtype
+      (`sl-wire/src/geometry.rs` — see the second-pass note): grid-**global**
+      metres, `f64`-backed
+      (matching the wire's `LLVector3d` double-precision globals). MAXIMAL scope
+      (user-directed 2026-06-24): `PlacesResult.global_position` (the F32 wire
+      field widens to `f64` at the boundary via `f64::from`, narrows back via a
+      sanctioned `global_to_f32` on the server encode),
+      `EventInfo.global_position` (f64), and the four `avatar_profile.rs`
+      `pos_global` fields
+      (`PickInfo`/`ClassifiedInfo`/`PickUpdate`/`ClassifiedUpdate`, all f64).
+      `new`/`x()`/`y()`/`z()` + conversions to/from a `(GridCoordinates,
+      RegionCoordinates)` pair (`from_grid_and_region`/`From<(…)>`/`split() ->
+      Option<(…)>`, the `region_index * 256 + region_local` mapping) plus a
+      region-**corner** shortcut `from_grid_corner(grid)` /
+      `From<GridCoordinates>` (`<256 * grid_x, 256 * grid_y, 0>`, no all-zero
+      `RegionCoordinates` — user-requested 2026-06-24). Re-exported through
+      `sl-proto`/tokio/bevy; REPL `global_or_zero` returns `GlobalCoordinates`.
+      +7 geometry unit tests. NO `sl-types` change.
+
+      **`sl-types` migration note (PPS HUD config):** when `GlobalCoordinates`
+      moves into `sl-types`, the existing `GridRectangleLike::pps_hud_config`
+      (`sl-map-tools` `sl-types/src/map.rs:582`) is a consumer — it hand-builds
+      a global-metre LSL vector `<256 * grid_x, 256 * grid_y, 0>`, i.e. exactly
+      `GlobalCoordinates::from_grid_corner(corner)`. Re-express it through the
+      new type at migration time.
+- [x] **Second pass — completeness sweep (2026-06-24, user-directed "everything
+      incl. sl-wire fields").** The first pass missed several coordinate-shaped
+      fields that did not use the `position`/`pos_global`/`global_position`
+      naming the audit grepped for. Decision (user `AskUserQuestion`): convert
+      **all** of them, and **move `Direction`/`GlobalCoordinates` DOWN into
+      `sl-wire`** (alongside `RegionHandle` etc.) so the wire codec layer can
+      use them too — `sl-proto` re-exports them, so the flat `sl_proto::…`
+      surface is unchanged. `RegionCoordinates` was already reachable in
+      `sl-wire` (it lives in `sl-types`). Additional conversions:
+      - **`sl-proto`:** `ParcelUpdate.user_location`→`RegionCoordinates` /
+      `user_look_at`→`Direction` (were `lsl::Vector`); `Postcard.pos_global`
+      (`[f64;3]`)→`GlobalCoordinates`; `ParcelDetails` `global_x/y/z`
+      (f32)→one `global_position: GlobalCoordinates`; `LandStatItem.location`
+      (`[f32;3]`)→`RegionCoordinates`; `ViewerEffectData`
+      `LookAt`/`PointAt.target_position` + `Spiral.position`
+      (`[f64;3]`)→`GlobalCoordinates`; and
+      `Command::RequestRemoteParcelId.location` (`Vector`)→
+      `RegionCoordinates`.
+      - **`MapItem`** (`global_x`/`global_y`: `u32`)→one `position:
+      GlobalCoordinates` (z=0). The old `& !0xFF` / `& 0xFF` C-ism is gone:
+      region/offset split now goes through `GlobalCoordinates::split()`, and
+      `region_handle()`/`region_position()` return `Option` (the typed split
+      is fallible). `MapItem` lost `Eq` (now holds `f64`). Codec narrows
+      `f64`→`u32` via a sanctioned `map_global_to_u32`.
+      - **`sl-wire`:** `HomeLocation.position`→`RegionCoordinates` /
+      `look_at`→`Direction`; `LoginSuccess.look_at` (and the mirrored
+      `LoginAccount.look_at`)→`Option<Direction>`;
+      `StartLocation::Region.position`→`RegionCoordinates`;
+      `RemoteParcelRequest.location` (`[f64;3]`)→`RegionCoordinates` (LLSD
+      `f64` reals narrow at the boundary via the now-`pub(crate)`
+      `geometry::narrow`); `ScriptedObjectInfo.location`
+      (`[f32;3]`)→`RegionCoordinates`. `RemoteParcelRequest` lost its derived
+      `Default` (manual impl — `RegionCoordinates` is not `Default`).
+      `HomeLocation.region_handle` (`(u32,u32)` corner metres)→`RegionHandle`
+      (the existing handle type; codec uses `from_global`/`global_coordinates`).
+      - **Third pass — environment value types (user-directed: "not all vectors
+      of 3 numbers are the same").** The `environment.rs` `[f32;3]` fields were
+      *not* coordinates but still deserved distinct types so they can't be
+      transposed. NEW client-local value newtypes in `environment.rs` (migration
+      candidates): `Color`
+      (RGB — `ambient`/`blue_horizon`/`blue_density`/
+      `cloud_color`/`water_fog_color`); `Scale` (a dimensionless 3-axis
+      **scale factor**, NOT metres — `normal_scale`, the water "Reflection
+      Wavelet Scale", verified vs the viewer `WATER_NORM_SCALE` uniform); `Glow`
+      (`(size, reserved, focus)` — the unused middle is preserved verbatim for
+      round-trip); `CloudPosDensity` (`(position_x, position_y, density)` — a
+      *mixed* vector with named accessors, since Z is density not altitude);
+      `ColorAlpha`
+      (RGBA — `sunlight_color`, the alpha-carrying `[f32;4]` sibling of `Color`,
+      kept distinct so it can't be transposed with a 3-channel colour or a
+      rotation quaternion). LLSD codec gained
+      `{color,color_alpha,scale,glow,cloud_pos_density}_{from,to}_llsd` helpers;
+      `color3_from_llsd` removed. +5 unit tests. Re-exported through `sl-proto`
+      (not the runtimes — the sibling `SkySettings`/`WaterSettings` aren't
+      re-exported there either).
+      - **STILL NOT converted (deliberate):** `MapLayer` `left/right/top/bottom`
+      — these *are* grid-index rectangle bounds and would naturally be a
+      `GridRectangle`, BUT `GridCoordinates`/`GridRectangle` store `u16` and the
+      SL whole-grid layer reports `u32` bounds that can exceed `u16::MAX`, so
+      they would truncate. **TODO at `sl-types` migration time:** widen
+      `GridRectangle` to `u32` (or add a `u32` grid-rect type) and adopt it for
+      `MapLayer`. Also `EnvironmentSettings.track_altitudes` (three scalar
+      altitude breakpoints, not a vector) stays raw.
+      Re-exported `Direction`/`GlobalCoordinates` through `sl-proto`/tokio/bevy;
+      `Color`/`ColorAlpha`/`Scale`/`Glow`/`CloudPosDensity` through `sl-proto`;
+      REPL + survey updated; wire bytes byte-identical throughout. All builds +
+      clippy(0) + 742 tests + doc(0) + rumdl green. NO `sl-types` change.
 
 ### Phase 8 — typed URLs (`url::Url`)
 

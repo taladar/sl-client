@@ -835,7 +835,7 @@ impl Circuit {
         update: &PickUpdate,
         now: Instant,
     ) -> Result<(), WireError> {
-        let (x, y, z) = update.pos_global;
+        let pos = update.pos_global;
         let message = AnyMessage::PickInfoUpdate(PickInfoUpdate {
             agent_data: PickInfoUpdateAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
@@ -853,7 +853,7 @@ impl Circuit {
                 name: with_nul(&update.name),
                 desc: with_nul(&update.description),
                 snapshot_id: update.snapshot_id.map_or_else(Uuid::nil, |s| s.uuid()),
-                pos_global: [x, y, z],
+                pos_global: [pos.x(), pos.y(), pos.z()],
                 sort_order: update.sort_order,
                 enabled: update.enabled,
             },
@@ -907,7 +907,7 @@ impl Circuit {
         update: &ClassifiedUpdate,
         now: Instant,
     ) -> Result<(), WireError> {
-        let (x, y, z) = update.pos_global;
+        let pos = update.pos_global;
         let message = AnyMessage::ClassifiedInfoUpdate(ClassifiedInfoUpdate {
             agent_data: ClassifiedInfoUpdateAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
@@ -924,7 +924,7 @@ impl Circuit {
                 // Set on the simulator as the message passes through.
                 parent_estate: 0,
                 snapshot_id: update.snapshot_id.map_or_else(Uuid::nil, |s| s.uuid()),
-                pos_global: [x, y, z],
+                pos_global: [pos.x(), pos.y(), pos.z()],
                 classified_flags: update.classified_flags,
                 price_for_listing: crate::types::linden_to_wire(
                     "PriceForListing",
@@ -3094,8 +3094,16 @@ impl Circuit {
                 category: update.category.to_u8(),
                 auth_buyer_id: update.auth_buyer_id.map_or_else(Uuid::nil, |a| a.uuid()),
                 snapshot_id: update.snapshot_id.map_or_else(Uuid::nil, |s| s.uuid()),
-                user_location: update.user_location.clone(),
-                user_look_at: update.user_look_at.clone(),
+                user_location: Vector {
+                    x: update.user_location.x(),
+                    y: update.user_location.y(),
+                    z: update.user_location.z(),
+                },
+                user_look_at: Vector {
+                    x: update.user_look_at.x(),
+                    y: update.user_look_at.y(),
+                    z: update.user_look_at.z(),
+                },
                 landing_type: update.landing_type,
             },
         });
@@ -3732,7 +3740,11 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
                 asset_id: postcard.asset_id,
-                pos_global: postcard.pos_global,
+                pos_global: [
+                    postcard.pos_global.x(),
+                    postcard.pos_global.y(),
+                    postcard.pos_global.z(),
+                ],
                 to: with_nul(&postcard.to),
                 from: with_nul(&postcard.from),
                 name: with_nul(&postcard.name),

@@ -29,20 +29,31 @@ use crate::endian::{u64_from_be, u64_to_be};
 use crate::llsd::Llsd;
 use crate::region_handle::RegionHandle;
 use sl_types::key::ParcelKey;
+use sl_types::map::RegionCoordinates;
 
 /// A decoded `RemoteParcelRequest` body: the region location to resolve, plus the
 /// region identity the grid uses to find it. Exactly one of
 /// [`region_id`](Self::region_id) / [`region_handle`](Self::region_handle) is
 /// meaningful — the viewer sends the id when known and the handle otherwise — so
 /// the absent one is nil / zero.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RemoteParcelRequest {
-    /// The region-relative position `[x, y, z]` whose parcel to resolve.
-    pub location: [f64; 3],
+    /// The region-relative position whose parcel to resolve.
+    pub location: RegionCoordinates,
     /// The region's grid-wide id (nil when the viewer only knew the handle).
     pub region_id: Uuid,
     /// The 256 m region handle (zero when the viewer sent a `region_id` instead).
     pub region_handle: RegionHandle,
+}
+
+impl Default for RemoteParcelRequest {
+    fn default() -> Self {
+        Self {
+            location: RegionCoordinates::new(0.0, 0.0, 0.0),
+            region_id: Uuid::nil(),
+            region_handle: RegionHandle::default(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -58,14 +69,18 @@ pub struct RemoteParcelRequest {
 /// [`parse_remote_parcel_request`].
 #[must_use]
 pub fn build_remote_parcel_request(
-    location: [f64; 3],
+    location: RegionCoordinates,
     region_id: Uuid,
     region_handle: RegionHandle,
 ) -> String {
     let mut map: HashMap<String, Llsd> = HashMap::new();
     let _previous = map.insert(
         "location".to_owned(),
-        Llsd::Array(location.iter().map(|coord| Llsd::Real(*coord)).collect()),
+        Llsd::Array(vec![
+            Llsd::Real(f64::from(location.x())),
+            Llsd::Real(f64::from(location.y())),
+            Llsd::Real(f64::from(location.z())),
+        ]),
     );
     if region_id.is_nil() {
         let _previous = map.insert(
@@ -105,18 +120,20 @@ pub fn parse_remote_parcel_reply(body: &Llsd) -> Result<Option<ParcelKey>, WireE
 /// of the wrong kind.
 pub fn parse_remote_parcel_request(body: &Llsd) -> Result<RemoteParcelRequest, WireError> {
     let location = match body.field_array("location", "location")? {
-        None => [0.0, 0.0, 0.0],
+        None => RegionCoordinates::new(0.0, 0.0, 0.0),
         Some(array) => {
-            let coord = |index: usize| -> Result<f64, WireError> {
+            let coord = |index: usize| -> Result<f32, WireError> {
                 match array.get(index) {
                     None | Some(Llsd::Undef) => Ok(0.0),
-                    Some(v) => v.as_f64().ok_or_else(|| WireError::MalformedField {
-                        field: "location",
-                        value: v.kind().to_owned(),
+                    Some(v) => v.as_f64().map(crate::geometry::narrow).ok_or_else(|| {
+                        WireError::MalformedField {
+                            field: "location",
+                            value: v.kind().to_owned(),
+                        }
                     }),
                 }
             };
-            [coord(0)?, coord(1)?, coord(2)?]
+            RegionCoordinates::new(coord(0)?, coord(1)?, coord(2)?)
         }
     };
     let region_id = body
@@ -159,6 +176,7 @@ mod tests {
     };
     use crate::llsd::parse_llsd_xml;
     use crate::region_handle::RegionHandle;
+    use sl_types::map::RegionCoordinates;
 
     /// Parses a UUID in a test, surfacing a `String` error for the `?` operator.
     fn uuid(text: &str) -> Result<Uuid, String> {
@@ -170,14 +188,15 @@ mod tests {
     #[test]
     fn request_with_region_id_round_trips() -> Result<(), String> {
         let region = uuid("11111111-1111-1111-1111-111111111111")?;
-        let body = build_remote_parcel_request([128.0, 64.5, 22.0], region, RegionHandle(0));
+        let body = build_remote_parcel_request(
+            RegionCoordinates::new(128.0, 64.5, 22.0),
+            region,
+            RegionHandle(0),
+        );
         let parsed =
             parse_remote_parcel_request(&parse_llsd_xml(&body).map_err(|e| format!("{e:?}"))?)
                 .map_err(|e| format!("{e:?}"))?;
-        assert_eq!(
-            parsed.location.map(f64::to_bits),
-            [128.0_f64, 64.5, 22.0].map(f64::to_bits)
-        );
+        assert_eq!(parsed.location, RegionCoordinates::new(128.0, 64.5, 22.0));
         assert_eq!(parsed.region_id, region);
         assert_eq!(parsed.region_handle, RegionHandle(0));
         Ok(())
@@ -188,7 +207,8 @@ mod tests {
     #[test]
     fn request_with_region_handle_round_trips() -> Result<(), String> {
         let handle = RegionHandle(0x0003_F480_0003_F480_u64);
-        let body = build_remote_parcel_request([1.0, 2.0, 3.0], Uuid::nil(), handle);
+        let body =
+            build_remote_parcel_request(RegionCoordinates::new(1.0, 2.0, 3.0), Uuid::nil(), handle);
         let parsed =
             parse_remote_parcel_request(&parse_llsd_xml(&body).map_err(|e| format!("{e:?}"))?)
                 .map_err(|e| format!("{e:?}"))?;

@@ -2,6 +2,7 @@
 
 use super::{AgentOrObjectKey, AssetType, InventoryItemOrFolderKey};
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey};
+use sl_types::map::RegionCoordinates;
 use uuid::Uuid;
 
 /// The kind of a chat message, from the `Type`/`ChatType` byte shared by
@@ -263,7 +264,7 @@ pub struct ChatMessage {
     /// Whether the message was audible at the listener.
     pub audible: ChatAudible,
     /// The speaker's region-local position, in metres.
-    pub position: (f32, f32, f32),
+    pub position: RegionCoordinates,
     /// The message text (UTF-8, with any trailing NUL padding removed).
     pub message: String,
 }
@@ -421,7 +422,7 @@ pub struct InstantMessage {
     /// The source region's id (`None` if not provided).
     pub region_id: Option<Uuid>,
     /// The sender's region-local position, in metres.
-    pub position: (f32, f32, f32),
+    pub position: RegionCoordinates,
     /// Whether the message was stored-and-forwarded while the agent was offline.
     pub offline: bool,
     /// The sender's timestamp as a Unix time in seconds (`None` when unset on
@@ -498,6 +499,7 @@ pub struct InventoryOffer {
 mod tests {
     use pretty_assertions::assert_eq;
     use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey};
+    use sl_types::map::RegionCoordinates;
     use uuid::Uuid;
 
     use super::{
@@ -536,7 +538,7 @@ mod tests {
             dialog: ImDialog::InventoryOffered,
             from_group: false,
             region_id: None,
-            position: (0.0, 0.0, 0.0),
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
             offline: false,
             timestamp: None,
             id: Uuid::from_u128(0xcc33),
@@ -573,7 +575,7 @@ mod tests {
             dialog: ImDialog::InventoryOffered,
             from_group: false,
             region_id: None,
-            position: (0.0, 0.0, 0.0),
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
             offline: false,
             timestamp: None,
             id: Uuid::from_u128(0xcc33),

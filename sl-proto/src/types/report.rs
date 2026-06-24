@@ -5,6 +5,7 @@
 //! capability); this module holds the [`Postcard`] payload of the `SendPostcard`
 //! UDP message, which emails a snapshot.
 
+use sl_wire::GlobalCoordinates;
 use uuid::Uuid;
 
 /// A snapshot postcard to email via the `SendPostcard` UDP message. The viewer
@@ -23,7 +24,7 @@ pub struct Postcard {
     /// The uploaded snapshot asset id to email.
     pub asset_id: Uuid,
     /// The global position the snapshot was taken at (metres).
-    pub pos_global: [f64; 3],
+    pub pos_global: GlobalCoordinates,
     /// The destination email address(es).
     pub to: String,
     /// The source email address.
@@ -44,7 +45,7 @@ impl Default for Postcard {
     fn default() -> Self {
         Self {
             asset_id: Uuid::nil(),
-            pos_global: [0.0, 0.0, 0.0],
+            pos_global: GlobalCoordinates::new(0.0, 0.0, 0.0),
             to: String::new(),
             from: String::new(),
             name: String::new(),

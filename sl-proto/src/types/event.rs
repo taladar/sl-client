@@ -26,6 +26,7 @@ use sl_types::key::{
 };
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
+use sl_types::map::RegionCoordinates;
 use sl_wire::AgentPreferences;
 use sl_wire::AttachmentResourcesReport;
 use sl_wire::DisplayName;
@@ -689,7 +690,7 @@ pub enum Event {
         /// The source region's id (nil if not provided — OpenSim sends nil).
         region_id: Uuid,
         /// The inviting agent's region-local position, in metres.
-        position: (f32, f32, f32),
+        position: RegionCoordinates,
         /// The parent estate id of the source.
         parent_estate_id: u32,
         /// The inviting agent's timestamp as a Unix time in seconds (`None` when

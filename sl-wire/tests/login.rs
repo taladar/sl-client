@@ -6,9 +6,10 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_types::key::InventoryFolderKey;
+    use sl_types::map::RegionCoordinates;
     use sl_wire::{
-        LoginRequest, LoginResponse, StartLocation, build_login_request, parse_login_response,
-        password_hash,
+        Direction, LoginRequest, LoginResponse, RegionHandle, StartLocation, build_login_request,
+        parse_login_response, password_hash,
     };
 
     /// Asserts two three-component vectors are equal within a small tolerance
@@ -17,6 +18,16 @@ mod test {
         for (a, e) in actual.iter().zip(expected.iter()) {
             assert!((a - e).abs() < 1e-4, "{actual:?} != {expected:?}");
         }
+    }
+
+    /// Asserts region-local coordinates equal `expected` within tolerance.
+    fn assert_region_approx(actual: RegionCoordinates, expected: [f32; 3]) {
+        assert_vec3_approx([actual.x(), actual.y(), actual.z()], expected);
+    }
+
+    /// Asserts a facing direction equals `expected` within tolerance.
+    fn assert_direction_approx(actual: Direction, expected: [f32; 3]) {
+        assert_vec3_approx([actual.x(), actual.y(), actual.z()], expected);
     }
 
     /// A minimal XML-RPC response struct wrapper around the given members.
@@ -261,11 +272,14 @@ mod test {
             return Err("expected a successful login".into());
         };
         let home = success.home.ok_or("home location")?;
-        assert_eq!(home.region_handle, (256_000, 256_256));
-        assert_vec3_approx(home.position, [128.5, 127.0, 25.75]);
-        assert_vec3_approx(home.look_at, [1.0, 0.0, 0.0]);
+        assert_eq!(
+            home.region_handle,
+            RegionHandle::from_global(256_000, 256_256)
+        );
+        assert_region_approx(home.position, [128.5, 127.0, 25.75]);
+        assert_direction_approx(home.look_at, [1.0, 0.0, 0.0]);
         let look_at = success.look_at.ok_or("start look-at")?;
-        assert_vec3_approx(look_at, [0.9994, 0.0316, 0.0]);
+        assert_direction_approx(look_at, [0.9994, 0.0316, 0.0]);
         assert_eq!(success.agent_access.as_deref(), Some("M"));
         assert_eq!(success.agent_access_max.as_deref(), Some("A"));
         assert_eq!(success.max_agent_groups, Some(42));
@@ -459,7 +473,7 @@ mod test {
 
         // A well-formed `uri:` start (the `&`s are XML-escaped by the builder and
         // unescaped on parse) round-trips into a typed `StartLocation`.
-        let start = StartLocation::region("Sandbox", [128.0, 128.0, 30.0]);
+        let start = StartLocation::region("Sandbox", RegionCoordinates::new(128.0, 128.0, 30.0));
         let request =
             LoginRequest::new("Test", "User", "secret", start.clone(), "MyViewer", "1.2.3");
         assert_eq!(
@@ -543,11 +557,11 @@ mod test {
                 rights_has: 1,
             }],
             home: Some(HomeLocation {
-                region_handle: (256_000, 256_256),
-                position: [128.5, 127.0, 25.75],
-                look_at: [1.0, 0.0, 0.0],
+                region_handle: RegionHandle::from_global(256_000, 256_256),
+                position: RegionCoordinates::new(128.5, 127.0, 25.75),
+                look_at: Direction::new(1.0, 0.0, 0.0),
             }),
-            look_at: Some([0.9994, 0.0316, 0.0]),
+            look_at: Some(Direction::new(0.9994, 0.0316, 0.0)),
             region_x: Some(256_000),
             region_y: Some(256_256),
             agent_access: Some("M".to_owned()),
@@ -591,10 +605,13 @@ mod test {
         assert_eq!(parsed.inventory_skeleton, success.inventory_skeleton);
         assert_eq!(parsed.buddy_list, success.buddy_list);
         let home = parsed.home.ok_or("home")?;
-        assert_eq!(home.region_handle, (256_000, 256_256));
-        assert_vec3_approx(home.position, [128.5, 127.0, 25.75]);
-        assert_vec3_approx(home.look_at, [1.0, 0.0, 0.0]);
-        assert_vec3_approx(parsed.look_at.ok_or("look_at")?, [0.9994, 0.0316, 0.0]);
+        assert_eq!(
+            home.region_handle,
+            RegionHandle::from_global(256_000, 256_256)
+        );
+        assert_region_approx(home.position, [128.5, 127.0, 25.75]);
+        assert_direction_approx(home.look_at, [1.0, 0.0, 0.0]);
+        assert_direction_approx(parsed.look_at.ok_or("look_at")?, [0.9994, 0.0316, 0.0]);
         assert_eq!(parsed.region_x, Some(256_000));
         assert_eq!(parsed.region_y, Some(256_256));
         assert_eq!(parsed.agent_access.as_deref(), Some("M"));
@@ -741,7 +758,8 @@ mod test {
         assert_eq!(StartLocation::Last.to_wire_string(), "last");
         assert_eq!(StartLocation::Home.to_wire_string(), "home");
         assert_eq!(
-            StartLocation::region("Hello World", [128.0, 64.5, 30.0]).to_wire_string(),
+            StartLocation::region("Hello World", RegionCoordinates::new(128.0, 64.5, 30.0))
+                .to_wire_string(),
             "uri:Hello World&128&64.5&30"
         );
     }
@@ -752,7 +770,7 @@ mod test {
         for location in [
             StartLocation::Last,
             StartLocation::Home,
-            StartLocation::region("Sandbox", [128.0, 128.0, 30.0]),
+            StartLocation::region("Sandbox", RegionCoordinates::new(128.0, 128.0, 30.0)),
         ] {
             let wire = location.to_wire_string();
             assert_eq!(wire.parse::<StartLocation>()?, location, "for {wire:?}");
@@ -766,7 +784,10 @@ mod test {
         // `&`-separated coordinates, so a stray `&` in the name still parses.
         assert_eq!(
             "uri:A&B&1&2&3".parse::<StartLocation>(),
-            Ok(StartLocation::region("A&B", [1.0, 2.0, 3.0]))
+            Ok(StartLocation::region(
+                "A&B",
+                RegionCoordinates::new(1.0, 2.0, 3.0)
+            ))
         );
     }
 

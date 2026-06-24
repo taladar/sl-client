@@ -48,13 +48,13 @@ pub use sl_proto::{
     AvatarProperties, Camera, CameraError, ChatAudible, ChatChannel, ChatMessage, ChatSource,
     ChatSourceType, ChatType, ChatTypeNotAVolume, CircuitCode, CircuitId, ClassifiedCategory,
     ClassifiedInfo, ClassifiedUpdate, ClickAction, Command, ControlFlags, CreateGroupParams,
-    DeRezDestination, DetachOrder, Diagnostic, DisconnectReason, Distance, EconomyData,
+    DeRezDestination, DetachOrder, Diagnostic, Direction, DisconnectReason, Distance, EconomyData,
     EstateAccessDelta, EstateAccessKind, EstateInfo, Event, ExperienceInfo, ExperiencePermission,
     ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights,
-    GltfMaterialOverride, GridCoordinates, GroupMember, GroupMembership, GroupNotice,
-    GroupNoticeAttachment, GroupNoticeKey, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit,
-    GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
-    HomeLocation, IceCandidate, ImDialog, ImageCodec, InstantMessage, InterestsUpdate,
+    GlobalCoordinates, GltfMaterialOverride, GridCoordinates, GroupMember, GroupMembership,
+    GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile, GroupRole, GroupRoleChange,
+    GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType,
+    GroupTitle, HomeLocation, IceCandidate, ImDialog, ImageCodec, InstantMessage, InterestsUpdate,
     InventoryCallbackId, InventoryFolder, InventoryFolderKey, InventoryItem,
     InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryType, Key, Kilobits, LandArea,
     LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance,
@@ -1264,11 +1264,8 @@ impl Client {
                         }
                         Some(Command::RequestRemoteParcelId { location, region_id, region_handle }) => {
                             if let Some(url) = caps.get(CAP_REMOTE_PARCEL_REQUEST).cloned() {
-                                let body = build_remote_parcel_request(
-                                    [f64::from(location.x), f64::from(location.y), f64::from(location.z)],
-                                    region_id,
-                                    region_handle,
-                                );
+                                let body =
+                                    build_remote_parcel_request(location, region_id, region_handle);
                                 tokio::spawn(post_voice_cap(url, body, CAP_REMOTE_PARCEL_REQUEST, http.clone(), caps_tx.clone()));
                             }
                         }
