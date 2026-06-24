@@ -414,10 +414,12 @@ pub struct ParcelMediaUpdateInfo {
     pub media_type: String,
     /// The media description; empty if unset.
     pub media_desc: String,
-    /// The media surface width in pixels (0 if unset / native).
-    pub media_width: i32,
-    /// The media surface height in pixels (0 if unset / native).
-    pub media_height: i32,
+    /// The media surface width in pixels (`None` if unset / native — the `0`
+    /// wire sentinel).
+    pub media_width: Option<i32>,
+    /// The media surface height in pixels (`None` if unset / native — the `0`
+    /// wire sentinel).
+    pub media_height: Option<i32>,
     /// Whether the media loops.
     pub media_loop: bool,
 }

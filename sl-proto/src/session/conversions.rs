@@ -831,7 +831,7 @@ pub(crate) fn instant_message(
         region_id: crate::types::optional_uuid_from_wire(block.region_id),
         position: (block.position.x, block.position.y, block.position.z),
         offline: block.offline != 0,
-        timestamp: block.timestamp,
+        timestamp: crate::types::optional_u32_from_wire(block.timestamp),
         id: block.id,
         parent_estate_id: block.parent_estate_id,
         message: trimmed_string(&block.message),
@@ -2231,7 +2231,7 @@ pub(crate) fn offline_message_from_record(record: &Llsd) -> Option<InstantMessag
         region_id: crate::types::optional_uuid_from_wire(uuid_member_lenient(record, "region_id")),
         position: offline_message_position(record),
         offline: true,
-        timestamp: u32_member(record, "timestamp"),
+        timestamp: crate::types::optional_u32_from_wire(u32_member(record, "timestamp")),
         id,
         parent_estate_id: u32_member(record, "parent_estate_id"),
         message: string_member(record, "message"),
@@ -2289,7 +2289,7 @@ pub(crate) fn chatterbox_invitation_from_llsd(body: &Llsd) -> Option<Event> {
         region_id: uuid_member_lenient(params, "region_id"),
         position: llsd_position(params),
         parent_estate_id: u32_member(params, "parent_estate_id"),
-        timestamp: u32_member(params, "timestamp"),
+        timestamp: crate::types::optional_u32_from_wire(u32_member(params, "timestamp")),
         binary_bucket,
     })
 }
@@ -3171,7 +3171,10 @@ pub(crate) fn offline_message_to_record(im: &InstantMessage) -> Llsd {
             Llsd::Uuid(crate::types::optional_uuid_to_wire(im.region_id)),
         ),
         ("position", vec3_to_llsd(im.position)),
-        ("timestamp", u32_to_llsd(im.timestamp)),
+        (
+            "timestamp",
+            u32_to_llsd(crate::types::optional_u32_to_wire(im.timestamp)),
+        ),
         ("transaction-id", Llsd::Uuid(im.id)),
         ("parent_estate_id", u32_to_llsd(im.parent_estate_id)),
         ("message", Llsd::String(im.message.clone())),
@@ -3212,7 +3215,10 @@ pub fn chatterbox_invitation_to_llsd(event: &Event) -> Llsd {
         ("region_id", Llsd::Uuid(*region_id)),
         ("position", vec3_to_llsd(*position)),
         ("parent_estate_id", u32_to_llsd(*parent_estate_id)),
-        ("timestamp", u32_to_llsd(*timestamp)),
+        (
+            "timestamp",
+            u32_to_llsd(crate::types::optional_u32_to_wire(*timestamp)),
+        ),
         (
             "data",
             llsd_map(vec![("binary_bucket", Llsd::Binary(binary_bucket.clone()))]),
@@ -3956,7 +3962,7 @@ mod caps_serializer_tests {
             region_id: Some(Uuid::from_u128(0xa3)),
             position: (128.0, 64.0, 32.0),
             offline: true,
-            timestamp: 1_700_000_500,
+            timestamp: Some(1_700_000_500),
             id: Uuid::from_u128(0xa4),
             parent_estate_id: 1,
             message: "stored while offline".to_owned(),
@@ -3981,7 +3987,7 @@ mod caps_serializer_tests {
             region_id: Uuid::from_u128(0xb3),
             position: (12.0, 34.0, 56.0),
             parent_estate_id: 2,
-            timestamp: 1_700_001_000,
+            timestamp: Some(1_700_001_000),
             binary_bucket: vec![1, 2, 3, 4, 5],
         };
         assert_eq!(
