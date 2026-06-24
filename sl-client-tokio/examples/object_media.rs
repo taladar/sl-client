@@ -93,7 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 command_tx
                     .send(Command::RezObject {
                         shape: PrimShape::cube(REZ_POSITION),
-                        group_id: Uuid::nil().into(),
+                        group_id: None,
                     })
                     .await
                     .ok();
@@ -149,7 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         trash,
                                     )),
                                     transaction_id: Uuid::from_u128(0x0024_3DE7),
-                                    group_id: Uuid::nil().into(),
+                                    group_id: None,
                                 })
                                 .await
                                 .ok();

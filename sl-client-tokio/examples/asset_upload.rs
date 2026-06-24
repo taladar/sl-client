@@ -83,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::InventorySkeleton(folders) => {
                 root_folder = folders
                     .iter()
-                    .find(|folder| folder.parent_id.uuid().is_nil())
+                    .find(|folder| folder.parent_id.is_none())
                     .map(|folder| folder.folder_id)
                     .or(root_folder);
             }

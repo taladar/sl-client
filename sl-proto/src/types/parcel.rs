@@ -1,6 +1,6 @@
 //! Parcels and land management: properties, access lists, media, overlays.
 
-use sl_types::key::{GroupKey, ObjectKey, OwnerKey, ParcelKey, TextureKey};
+use sl_types::key::{AgentKey, GroupKey, ObjectKey, OwnerKey, ParcelKey, TextureKey};
 use sl_types::lsl::Vector;
 use sl_types::map::RegionName;
 use sl_types::money::LindenAmount;
@@ -238,14 +238,14 @@ pub struct ParcelInfo {
     /// [`ParcelUpdate::media_url`]. This is the legacy single-media-URL field;
     /// the per-face media-on-a-prim system is a separate (CAPS) surface.
     pub media_url: String,
-    /// The texture id the parcel media replaces while playing (nil if none).
-    pub media_id: TextureKey,
+    /// The texture id the parcel media replaces while playing (`None` if none).
+    pub media_id: Option<TextureKey>,
     /// Whether the media is auto-scaled to fit the surface it replaces.
     pub media_auto_scale: bool,
-    /// The only agent allowed to buy the parcel (nil for anyone).
-    pub auth_buyer_id: Uuid,
-    /// The parcel's snapshot texture id (nil if none).
-    pub snapshot_id: TextureKey,
+    /// The only agent allowed to buy the parcel (`None` for anyone).
+    pub auth_buyer_id: Option<AgentKey>,
+    /// The parcel's snapshot texture id (`None` if none).
+    pub snapshot_id: Option<TextureKey>,
     /// The price of a parcel pass, in L$.
     pub pass_price: LindenAmount,
     /// How many hours a parcel pass lasts.
@@ -405,8 +405,8 @@ impl ParcelMediaCommand {
 pub struct ParcelMediaUpdateInfo {
     /// The media URL the parcel streams (e.g. an HLS/MP4/web page).
     pub media_url: String,
-    /// The texture the media replaces on the parcel surface (nil if none).
-    pub media_id: TextureKey,
+    /// The texture the media replaces on the parcel surface (`None` if none).
+    pub media_id: Option<TextureKey>,
     /// Whether the media is auto-scaled to the surface.
     pub media_auto_scale: bool,
     /// The media MIME type (e.g. `"video/vnd.secondlife.qt.legacy"`,
@@ -620,22 +620,22 @@ pub struct ParcelUpdate {
     pub music_url: String,
     /// The streaming media URL.
     pub media_url: String,
-    /// The media texture id.
-    pub media_id: TextureKey,
+    /// The media texture id (`None` if none).
+    pub media_id: Option<TextureKey>,
     /// Whether to auto-scale the media to the prim face.
     pub media_auto_scale: bool,
-    /// The group the parcel is set to.
-    pub group_id: GroupKey,
+    /// The group the parcel is set to (`None` for none).
+    pub group_id: Option<GroupKey>,
     /// The price of a parcel pass in L$.
     pub pass_price: LindenAmount,
     /// How many hours a parcel pass lasts.
     pub pass_hours: f32,
     /// The parcel's search category.
     pub category: ParcelCategory,
-    /// The only agent allowed to buy the parcel (nil for anyone).
-    pub auth_buyer_id: Uuid,
-    /// The parcel snapshot texture id.
-    pub snapshot_id: TextureKey,
+    /// The only agent allowed to buy the parcel (`None` for anyone).
+    pub auth_buyer_id: Option<AgentKey>,
+    /// The parcel snapshot texture id (`None` if none).
+    pub snapshot_id: Option<TextureKey>,
     /// The teleport-landing location within the parcel.
     pub user_location: Vector,
     /// The direction an arriving agent faces at the landing point.
@@ -654,14 +654,14 @@ impl Default for ParcelUpdate {
             description: String::new(),
             music_url: String::new(),
             media_url: String::new(),
-            media_id: TextureKey::from(Uuid::nil()),
+            media_id: None,
             media_auto_scale: false,
-            group_id: GroupKey::from(Uuid::nil()),
+            group_id: None,
             pass_price: LindenAmount(0),
             pass_hours: 0.0,
             category: ParcelCategory::None,
-            auth_buyer_id: Uuid::nil(),
-            snapshot_id: TextureKey::from(Uuid::nil()),
+            auth_buyer_id: None,
+            snapshot_id: None,
             user_location: Vector {
                 x: 0.0,
                 y: 0.0,
@@ -784,8 +784,8 @@ pub struct ParcelDetails {
     /// The containing region's name, or `None` when the grid sent an empty
     /// (unknown) name.
     pub sim_name: Option<RegionName>,
-    /// The parcel snapshot texture id.
-    pub snapshot_id: TextureKey,
+    /// The parcel snapshot texture id (`None` if none).
+    pub snapshot_id: Option<TextureKey>,
     /// The parcel's dwell (traffic) value.
     pub dwell: f32,
     /// The sale price in L$ (when for sale).
@@ -808,7 +808,7 @@ impl Default for ParcelDetails {
             global_y: 0.0,
             global_z: 0.0,
             sim_name: None,
-            snapshot_id: TextureKey::from(Uuid::nil()),
+            snapshot_id: None,
             dwell: 0.0,
             sale_price: None,
             auction_id: 0,

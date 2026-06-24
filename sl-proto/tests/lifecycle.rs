@@ -635,7 +635,7 @@ mod test {
             received.source,
             ChatSource::Agent(AgentKey::from(uuid::Uuid::from_u128(0x42)))
         );
-        assert_eq!(received.owner_id, uuid::Uuid::from_u128(0x43));
+        assert_eq!(received.owner_id, Some(uuid::Uuid::from_u128(0x43)));
         assert_eq!(received.chat_type, ChatType::Normal);
         assert_eq!(received.audible, ChatAudible::Fully);
         assert_eq!(received.position, (10.0, 20.0, 30.0));
@@ -2154,7 +2154,7 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an ActiveGroupChanged event")?;
-        assert_eq!(active.active_group_id, GroupKey::from(group));
+        assert_eq!(active.active_group_id, Some(GroupKey::from(group)));
         assert_eq!(active.group_title, "Founder");
         assert_eq!(active.group_name, "Test Group");
         assert_eq!(active.group_powers, 0x1234);
@@ -2296,7 +2296,7 @@ mod test {
         assert_eq!(role_count, 5);
         assert_eq!(roles.len(), 1);
         let first = roles.first().ok_or("first role")?;
-        assert_eq!(first.role_id, GroupRoleKey::from(role));
+        assert_eq!(first.role_id, Some(GroupRoleKey::from(role)));
         assert_eq!(first.name, "Officers");
         Ok(())
     }
@@ -2342,7 +2342,7 @@ mod test {
         assert_eq!(total_pairs, 12);
         assert_eq!(pairs.len(), 1);
         let first = pairs.first().ok_or("first pair")?;
-        assert_eq!(first.role_id, GroupRoleKey::from(role));
+        assert_eq!(first.role_id, Some(GroupRoleKey::from(role)));
         assert_eq!(first.member_id, AgentKey::from(member));
         Ok(())
     }
@@ -2536,7 +2536,7 @@ mod test {
                 name: "My Group".to_owned(),
                 charter: "hi".to_owned(),
                 show_in_list: true,
-                insignia_id: TextureKey::from(uuid::Uuid::nil()),
+                insignia_id: None,
                 membership_fee: LindenAmount(0),
                 open_enrollment: true,
                 allow_publish: false,
@@ -2598,7 +2598,7 @@ mod test {
             GroupKey::from(group),
             &[
                 GroupRoleEdit {
-                    role_id: GroupRoleKey::from(role),
+                    role_id: Some(GroupRoleKey::from(role)),
                     name: "Officers".to_owned(),
                     description: "the officers".to_owned(),
                     title: "Officer".to_owned(),
@@ -2606,7 +2606,7 @@ mod test {
                     update_type: GroupRoleUpdateType::Create,
                 },
                 GroupRoleEdit {
-                    role_id: GroupRoleKey::from(uuid::Uuid::from_u128(0x6713)),
+                    role_id: Some(GroupRoleKey::from(uuid::Uuid::from_u128(0x6713))),
                     name: String::new(),
                     description: String::new(),
                     title: String::new(),
@@ -2652,12 +2652,12 @@ mod test {
             GroupKey::from(group),
             &[
                 GroupRoleMemberChange {
-                    role_id: GroupRoleKey::from(role),
+                    role_id: Some(GroupRoleKey::from(role)),
                     member_id: AgentKey::from(member),
                     change: GroupRoleChange::Add,
                 },
                 GroupRoleMemberChange {
-                    role_id: GroupRoleKey::from(role),
+                    role_id: Some(GroupRoleKey::from(role)),
                     member_id: AgentKey::from(uuid::Uuid::from_u128(0x6717)),
                     change: GroupRoleChange::Remove,
                 },
@@ -3314,7 +3314,7 @@ mod test {
             })
             .ok_or("expected a ScriptDialog event")?;
         assert_eq!(dialog.object_id, ObjectKey::from(object));
-        assert_eq!(dialog.owner_id, owner);
+        assert_eq!(dialog.owner_id, Some(owner));
         assert_eq!(dialog.object_name, "Vendor");
         assert_eq!(dialog.message, "Pick one");
         assert_eq!(dialog.chat_channel, ChatChannel(-1234));
@@ -4072,7 +4072,7 @@ mod test {
         assert_eq!(wearables.len(), 2);
         let shape = wearables.first().ok_or("first wearable")?;
         assert_eq!(shape.item_id, InventoryKey::from(shape_item));
-        assert_eq!(shape.asset_id, shape_asset);
+        assert_eq!(shape.asset_id, Some(shape_asset));
         assert_eq!(shape.wearable_type, WearableType::Shape);
         assert!(shape.wearable_type.is_body_part());
         let shirt = wearables.get(1).ok_or("second wearable")?;
@@ -4685,7 +4685,7 @@ mod test {
                 circuit,
                 sl_proto::RegionLocalObjectId(99),
             )],
-            GroupKey::from(uuid::Uuid::nil()),
+            None,
             Vector {
                 x: 1.0,
                 y: 2.0,
@@ -4700,7 +4700,7 @@ mod test {
             true,
             true,
             false,
-            ObjectKey::from(uuid::Uuid::nil()),
+            None,
             0,
             now,
         )?;
@@ -4814,8 +4814,8 @@ mod test {
         )?;
         session.rez_object_from_notecard(
             &NotecardRez {
-                group_id: GroupKey::from(uuid::Uuid::nil()),
-                from_task_id: ObjectKey::from(uuid::Uuid::nil()),
+                group_id: None,
+                from_task_id: None,
                 bypass_raycast: false,
                 ray_start: Vector {
                     x: 1.0,
@@ -4827,7 +4827,7 @@ mod test {
                     y: 5.0,
                     z: 6.0,
                 },
-                ray_target_id: ObjectKey::from(uuid::Uuid::nil()),
+                ray_target_id: None,
                 ray_end_is_intersection: true,
                 rez_selected: false,
                 remove_item: false,
@@ -5493,7 +5493,7 @@ mod test {
             return Err("expected ParcelMediaUpdate".into());
         };
         assert_eq!(update.media_url, "http://example.com/movie");
-        assert_eq!(update.media_id, TextureKey::from(media));
+        assert_eq!(update.media_id, Some(TextureKey::from(media)));
         assert!(update.media_auto_scale);
         assert_eq!(update.media_type, "text/html");
         assert_eq!(update.media_desc, "a web page");
@@ -5819,7 +5819,7 @@ mod test {
         let first = folders.first().ok_or("root folder")?;
         assert_eq!(first.name, "My Inventory");
         assert_eq!(first.folder_id, root);
-        assert_eq!(folders.get(1).ok_or("second folder")?.parent_id, root);
+        assert_eq!(folders.get(1).ok_or("second folder")?.parent_id, Some(root));
         Ok(())
     }
 
@@ -6808,7 +6808,7 @@ mod test {
         // Absent media → empty URLs / nil id / no auto-scale.
         assert_eq!(parcel.music_url, "");
         assert_eq!(parcel.media_url, "");
-        assert_eq!(parcel.media_id, TextureKey::from(uuid::Uuid::nil()));
+        assert_eq!(parcel.media_id, None);
         assert!(!parcel.media_auto_scale);
         Ok(())
     }
@@ -6841,7 +6841,7 @@ mod test {
             .ok_or("expected a ParcelProperties event")?;
         assert_eq!(parcel.music_url, "http://stream.example/audio");
         assert_eq!(parcel.media_url, "http://example.com/movie");
-        assert_eq!(parcel.media_id, TextureKey::from(media_id));
+        assert_eq!(parcel.media_id, Some(TextureKey::from(media_id)));
         assert!(parcel.media_auto_scale);
         Ok(())
     }
@@ -6933,8 +6933,8 @@ mod test {
         assert_eq!(parcel.parcel_prim_bonus.to_bits(), 1.5_f32.to_bits());
         assert_eq!(parcel.other_clean_time, 15);
         assert_eq!(parcel.sale_price, Some(LindenAmount(9999)));
-        assert_eq!(parcel.auth_buyer_id, buyer);
-        assert_eq!(parcel.snapshot_id, TextureKey::from(snapshot));
+        assert_eq!(parcel.auth_buyer_id, Some(AgentKey::from(buyer)));
+        assert_eq!(parcel.snapshot_id, Some(TextureKey::from(snapshot)));
         assert_eq!(parcel.pass_price, LindenAmount(25));
         assert_eq!(parcel.pass_hours.to_bits(), 4.0_f32.to_bits());
         assert_eq!(parcel.user_location.0.to_bits(), 12.0_f32.to_bits());
@@ -7763,7 +7763,7 @@ mod test {
             ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(7)),
             512,
             1024,
-            GroupKey::from(uuid::Uuid::nil()),
+            None,
             false,
             now,
         )?;
@@ -8483,7 +8483,7 @@ mod test {
             .ok_or("expected a TelehubInfo event")?;
         assert_eq!(
             telehub.object_id,
-            ObjectKey::from(uuid::Uuid::from_u128(0x7E1E))
+            Some(ObjectKey::from(uuid::Uuid::from_u128(0x7E1E)))
         );
         assert_eq!(telehub.object_name, "Welcome Hub");
         assert_eq!(telehub.position.x.to_bits(), 128.0_f32.to_bits());
@@ -8731,7 +8731,7 @@ mod test {
         assert_eq!(parcel.media_url, "http://example.com/movie");
         assert_eq!(
             parcel.media_id,
-            TextureKey::from(uuid::Uuid::from_u128(0x33ED))
+            Some(TextureKey::from(uuid::Uuid::from_u128(0x33ED)))
         );
         assert!(parcel.media_auto_scale);
         Ok(())
@@ -10075,11 +10075,11 @@ mod test {
         );
         assert_eq!(
             properties.folder_id,
-            InventoryFolderKey::from(uuid::Uuid::from_u128(0x55))
+            Some(InventoryFolderKey::from(uuid::Uuid::from_u128(0x55)))
         );
         assert_eq!(
             properties.from_task_id,
-            ObjectKey::from(uuid::Uuid::from_u128(0x66))
+            Some(ObjectKey::from(uuid::Uuid::from_u128(0x66)))
         );
         assert_eq!(properties.aggregate_perms, 0x0E);
         assert_eq!(properties.aggregate_perm_textures, 0x0F);
@@ -10429,11 +10429,7 @@ mod test {
             y: 64.0,
             z: 25.0,
         };
-        session.rez_object(
-            &PrimShape::cube(position.clone()),
-            GroupKey::from(uuid::Uuid::nil()),
-            now,
-        )?;
+        session.rez_object(&PrimShape::cube(position.clone()), None, now)?;
         let sent = drain(&mut session)?;
         let add = sent
             .iter()
@@ -10662,7 +10658,7 @@ mod test {
             )],
             DeRezDestination::TakeIntoAgentInventory(InventoryFolderKey::from(folder)),
             uuid::Uuid::from_u128(0x7),
-            GroupKey::from(uuid::Uuid::nil()),
+            None,
             now,
         )?;
         let sent = drain(&mut session)?;
@@ -12004,7 +12000,7 @@ mod test {
             .inventory_folder(folder_id)
             .ok_or("folder should be cached")?;
         assert_eq!(cached.name, "Toys & Co");
-        assert_eq!(cached.parent_id, InventoryFolderKey::from(parent_id));
+        assert_eq!(cached.parent_id, Some(InventoryFolderKey::from(parent_id)));
 
         // Removing it drops it from the cache.
         session.remove_inventory_folders(&[folder_id], now)?;

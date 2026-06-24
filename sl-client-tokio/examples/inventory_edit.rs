@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 info!("inventory skeleton: {} folders", folders.len());
                 root = folders
                     .iter()
-                    .find(|folder| folder.parent_id.uuid().is_nil())
+                    .find(|folder| folder.parent_id.is_none())
                     .map(|folder| folder.folder_id)
                     .or(root);
             }

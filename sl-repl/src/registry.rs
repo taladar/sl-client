@@ -970,7 +970,7 @@ fn build_pick_update(args: &Args, ctx: &dyn ReplContext) -> Result<PickUpdate, R
         },
         name: args.str_or(ctx, "name", 2, "")?,
         description: args.str_or(ctx, "description", 3, "")?,
-        snapshot_id: TextureKey::from(args.uuid_or_nil(ctx, "snapshot_id", 4)?),
+        snapshot_id: args.opt_texture(ctx, "snapshot_id", 4)?,
         pos_global: global_or_zero(args, ctx, "pos_global", 5)?,
         sort_order: args.parse_or(ctx, "sort_order", 6, "i32", 0)?,
         enabled: args.bool_or(ctx, "enabled", 7, true)?,
@@ -992,7 +992,7 @@ fn build_classified_update(
             let parcel = args.uuid_or_nil(ctx, "parcel_id", 4)?;
             (!parcel.is_nil()).then(|| ParcelKey::from(parcel))
         },
-        snapshot_id: TextureKey::from(args.uuid_or_nil(ctx, "snapshot_id", 5)?),
+        snapshot_id: args.opt_texture(ctx, "snapshot_id", 5)?,
         pos_global: global_or_zero(args, ctx, "pos_global", 6)?,
         classified_flags: args.parse_or(ctx, "classified_flags", 7, "u8", 0)?,
         price_for_listing: LindenAmount(args.parse_or(ctx, "price_for_listing", 8, "u64", 0)?),
@@ -1008,7 +1008,7 @@ fn build_create_group_params(
         name: args.req_str(ctx, "name", 0)?,
         charter: args.str_or(ctx, "charter", 1, "")?,
         show_in_list: args.bool_or(ctx, "show_in_list", 2, true)?,
-        insignia_id: TextureKey::from(args.uuid_or_nil(ctx, "insignia_id", 3)?),
+        insignia_id: args.opt_texture(ctx, "insignia_id", 3)?,
         membership_fee: LindenAmount(args.parse_or(ctx, "membership_fee", 4, "u64", 0)?),
         open_enrollment: args.bool_or(ctx, "open_enrollment", 5, false)?,
         allow_publish: args.bool_or(ctx, "allow_publish", 6, false)?,
@@ -1102,14 +1102,14 @@ fn build_parcel_update(args: &Args, ctx: &dyn ReplContext) -> Result<ParcelUpdat
         description: args.str_or(ctx, "description", 4, "")?,
         music_url: args.str_or(ctx, "music_url", 5, "")?,
         media_url: args.str_or(ctx, "media_url", 6, "")?,
-        media_id: TextureKey::from(args.uuid_or_nil(ctx, "media_id", 7)?),
+        media_id: args.opt_texture(ctx, "media_id", 7)?,
         media_auto_scale: args.bool_or(ctx, "media_auto_scale", 8, false)?,
-        group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 9)?),
+        group_id: args.opt_group(ctx, "group_id", 9)?,
         pass_price: LindenAmount(args.parse_or(ctx, "pass_price", 10, "u64", 0)?),
         pass_hours: args.parse_or(ctx, "pass_hours", 11, "f32", 0.0)?,
         category: ParcelCategory::from_u8(args.parse_or(ctx, "category", 12, "u8", 0)?),
-        auth_buyer_id: args.uuid_or_nil(ctx, "auth_buyer_id", 13)?,
-        snapshot_id: TextureKey::from(args.uuid_or_nil(ctx, "snapshot_id", 14)?),
+        auth_buyer_id: args.opt_agent(ctx, "auth_buyer_id", 13)?,
+        snapshot_id: args.opt_texture(ctx, "snapshot_id", 14)?,
         user_location: args
             .opt_vector(ctx, "user_location", 15)?
             .unwrap_or(Vector {
@@ -2072,7 +2072,10 @@ fn all_specs() -> Vec<CommandSpec> {
                     None => sl_proto::GroupRoleUpdateType::UpdateAll,
                 };
                 let role = GroupRoleEdit {
-                    role_id: GroupRoleKey::from(args.uuid_or_nil(ctx, "role_id", 1)?),
+                    role_id: {
+                        let raw = args.uuid_or_nil(ctx, "role_id", 1)?;
+                        (!raw.is_nil()).then(|| GroupRoleKey::from(raw))
+                    },
                     name: args.str_or(ctx, "name", 2, "")?,
                     description: args.str_or(ctx, "description", 3, "")?,
                     title: args.str_or(ctx, "title", 4, "")?,
@@ -2092,10 +2095,13 @@ fn all_specs() -> Vec<CommandSpec> {
                 let mut changes = Vec::new();
                 for record in args.vec_records(ctx, "changes", 1)? {
                     changes.push(GroupRoleMemberChange {
-                        role_id: GroupRoleKey::from(args::literal_uuid(
-                            "changes",
-                            record_field("changes", &record, 0)?,
-                        )?),
+                        role_id: {
+                            let raw = args::literal_uuid(
+                                "changes",
+                                record_field("changes", &record, 0)?,
+                            )?;
+                            (!raw.is_nil()).then(|| GroupRoleKey::from(raw))
+                        },
                         member_id: AgentKey::from(args::literal_uuid(
                             "changes",
                             record_field("changes", &record, 1)?,
@@ -2411,7 +2417,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     local_id: scoped_parcel(ctx, args.req_parse(ctx, "local_id", 0, "i32")?)?,
                     price: args.req_parse(ctx, "price", 1, "i32")?,
                     area: args.req_parse(ctx, "area", 2, "i32")?,
-                    group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 3)?),
+                    group_id: args.opt_group(ctx, "group_id", 3)?,
                     is_group_owned: args.bool_or(ctx, "is_group_owned", 4, false)?,
                 })
             },
@@ -2961,7 +2967,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::RezObject {
                     shape: PrimShape::cube(args.req_vector(ctx, "position", 0)?),
-                    group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 1)?),
+                    group_id: args.opt_group(ctx, "group_id", 1)?,
                 })
             },
         },
@@ -2975,7 +2981,7 @@ fn all_specs() -> Vec<CommandSpec> {
                         args.vec_parse::<u32>(ctx, "local_ids", 0, "u32")?,
                     )?,
                     offset: args.req_vector(ctx, "offset", 1)?,
-                    group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 2)?),
+                    group_id: args.opt_group(ctx, "group_id", 2)?,
                 })
             },
         },
@@ -3006,7 +3012,7 @@ fn all_specs() -> Vec<CommandSpec> {
                         parse_derez_destination("destination", &value, id)?
                     },
                     transaction_id: args.uuid_or_nil(ctx, "transaction_id", 3)?,
-                    group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 4)?),
+                    group_id: args.opt_group(ctx, "group_id", 4)?,
                 })
             },
         },
@@ -3256,8 +3262,8 @@ fn all_specs() -> Vec<CommandSpec> {
                     )?,
                     ray_start: args.req_vector(ctx, "ray_start", 1)?,
                     ray_end: args.req_vector(ctx, "ray_end", 2)?,
-                    group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 100)?),
-                    ray_target_id: args.object_or_nil(ctx, "ray_target_id", 101)?,
+                    group_id: args.opt_group(ctx, "group_id", 100)?,
+                    ray_target_id: args.opt_object(ctx, "ray_target_id", 101)?,
                     bypass_raycast: args.bool_or(ctx, "bypass_raycast", 102, false)?,
                     ray_end_is_intersection: args.bool_or(
                         ctx,
@@ -3387,10 +3393,10 @@ fn all_specs() -> Vec<CommandSpec> {
                             .into_iter()
                             .map(InventoryKey::from)
                             .collect(),
-                        group_id: GroupKey::from(args.uuid_or_nil(ctx, "group_id", 100)?),
-                        from_task_id: args.object_or_nil(ctx, "from_task_id", 101)?,
+                        group_id: args.opt_group(ctx, "group_id", 100)?,
+                        from_task_id: args.opt_object(ctx, "from_task_id", 101)?,
                         object_id: args.object_or_nil(ctx, "object_id", 102)?,
-                        ray_target_id: args.object_or_nil(ctx, "ray_target_id", 103)?,
+                        ray_target_id: args.opt_object(ctx, "ray_target_id", 103)?,
                         bypass_raycast: args.bool_or(ctx, "bypass_raycast", 104, false)?,
                         ray_end_is_intersection: args.bool_or(
                             ctx,
@@ -3508,10 +3514,13 @@ fn all_specs() -> Vec<CommandSpec> {
                             "wearables",
                             record_field("wearables", &record, 0)?,
                         )?),
-                        asset_id: args::literal_uuid(
-                            "wearables",
-                            record_field("wearables", &record, 1)?,
-                        )?,
+                        asset_id: {
+                            let raw = args::literal_uuid(
+                                "wearables",
+                                record_field("wearables", &record, 1)?,
+                            )?;
+                            (!raw.is_nil()).then_some(raw)
+                        },
                         wearable_type: parse_wearable_type(
                             "wearables",
                             record_field("wearables", &record, 2)?,

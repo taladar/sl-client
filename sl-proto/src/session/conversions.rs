@@ -747,10 +747,10 @@ pub(crate) fn parcel_info(msg: &ParcelProperties) -> Result<ParcelInfo, sl_wire:
         description: trimmed_string(&data.desc),
         music_url: trimmed_string(&data.music_url),
         media_url: trimmed_string(&data.media_url),
-        media_id: TextureKey::from(data.media_id),
+        media_id: crate::types::optional_key_from_wire(data.media_id),
         media_auto_scale: data.media_auto_scale != 0,
-        auth_buyer_id: data.auth_buyer_id,
-        snapshot_id: TextureKey::from(data.snapshot_id),
+        auth_buyer_id: crate::types::optional_key_from_wire(data.auth_buyer_id),
+        snapshot_id: crate::types::optional_key_from_wire(data.snapshot_id),
         pass_price: crate::types::linden_from_wire("PassPrice", data.pass_price)?,
         pass_hours: data.pass_hours,
         user_location: (
@@ -786,7 +786,7 @@ pub(crate) fn chat_message(data: &ChatFromSimulatorChatDataBlock) -> ChatMessage
     ChatMessage {
         from_name: trimmed_string(&data.from_name),
         source: ChatSource::from_wire(data.source_type, data.source_id),
-        owner_id: data.owner_id,
+        owner_id: crate::types::optional_uuid_from_wire(data.owner_id),
         chat_type: ChatType::from_u8(data.chat_type),
         audible: ChatAudible::from_u8(data.audible),
         position: (data.position.x, data.position.y, data.position.z),
@@ -828,7 +828,7 @@ pub(crate) fn instant_message(
         to_agent_id: AgentKey::from(block.to_agent_id),
         dialog: ImDialog::from_u8(block.dialog),
         from_group: block.from_group,
-        region_id: block.region_id,
+        region_id: crate::types::optional_uuid_from_wire(block.region_id),
         position: (block.position.x, block.position.y, block.position.z),
         offline: block.offline != 0,
         timestamp: block.timestamp,
@@ -901,7 +901,7 @@ pub(crate) fn pick_info(data: &PickInfoReplyDataBlock) -> Result<PickInfo, sl_wi
         parcel_id: ParcelKey::from(data.parcel_id),
         name: trimmed_string(&data.name),
         description: trimmed_string(&data.desc),
-        snapshot_id: TextureKey::from(data.snapshot_id),
+        snapshot_id: crate::types::optional_key_from_wire(data.snapshot_id),
         user: trimmed_string(&data.user),
         original_name: trimmed_string(&data.original_name),
         sim_name: sl_wire::region_name_from_wire("SimName", &trimmed_string(&data.sim_name))?,
@@ -926,7 +926,7 @@ pub(crate) fn classified_info(
         description: trimmed_string(&data.desc),
         parcel_id: ParcelKey::from(data.parcel_id),
         parent_estate: data.parent_estate,
-        snapshot_id: TextureKey::from(data.snapshot_id),
+        snapshot_id: crate::types::optional_key_from_wire(data.snapshot_id),
         sim_name: sl_wire::region_name_from_wire("SimName", &trimmed_string(&data.sim_name))?,
         pos_global: (x, y, z),
         parcel_name: trimmed_string(&data.parcel_name),
@@ -942,7 +942,7 @@ pub(crate) fn classified_info(
 pub(crate) fn skeleton_folder(folder: &SkeletonFolder) -> InventoryFolder {
     InventoryFolder {
         folder_id: folder.folder_id,
-        parent_id: folder.parent_id,
+        parent_id: (!folder.parent_id.uuid().is_nil()).then_some(folder.parent_id),
         name: folder.name.clone(),
         folder_type: folder.type_default,
         version: folder.version,
@@ -965,7 +965,7 @@ pub(crate) fn active_group(data: &AgentDataUpdateAgentDataBlock) -> ActiveGroup 
         first_name: trimmed_string(&data.first_name),
         last_name: trimmed_string(&data.last_name),
         group_title: trimmed_string(&data.group_title),
-        active_group_id: GroupKey::from(data.active_group_id),
+        active_group_id: crate::types::optional_key_from_wire(data.active_group_id),
         group_powers: data.group_powers,
         group_name: trimmed_string(&data.group_name),
     }
@@ -1002,7 +1002,7 @@ pub(crate) fn group_member(
 /// Builds [`GroupRole`] from a `GroupRoleDataReply` entry.
 pub(crate) fn group_role(data: &GroupRoleDataReplyRoleDataBlock) -> GroupRole {
     GroupRole {
-        role_id: GroupRoleKey::from(data.role_id),
+        role_id: crate::types::optional_key_from_wire(data.role_id),
         name: trimmed_string(&data.name),
         title: trimmed_string(&data.title),
         description: trimmed_string(&data.description),
@@ -1015,7 +1015,7 @@ pub(crate) fn group_role(data: &GroupRoleDataReplyRoleDataBlock) -> GroupRole {
 pub(crate) fn group_title(data: &GroupTitlesReplyGroupDataBlock) -> GroupTitle {
     GroupTitle {
         title: trimmed_string(&data.title),
-        role_id: GroupRoleKey::from(data.role_id),
+        role_id: crate::types::optional_key_from_wire(data.role_id),
         selected: data.selected,
     }
 }
@@ -1031,7 +1031,7 @@ pub(crate) fn group_profile(
         show_in_list: data.show_in_list,
         member_title: trimmed_string(&data.member_title),
         powers: data.powers_mask,
-        insignia_id: TextureKey::from(data.insignia_id),
+        insignia_id: crate::types::optional_key_from_wire(data.insignia_id),
         founder_id: AgentKey::from(data.founder_id),
         membership_fee: crate::types::linden_from_wire("MembershipFee", data.membership_fee)?,
         open_enrollment: data.open_enrollment,
@@ -1192,10 +1192,12 @@ pub(crate) fn script_dialog(message: &sl_wire::messages::ScriptDialog) -> Script
         object_name: trimmed_string(&data.object_name),
         owner_first_name: trimmed_string(&data.first_name),
         owner_last_name: trimmed_string(&data.last_name),
-        owner_id: message
-            .owner_data
-            .first()
-            .map_or_else(Uuid::nil, |owner| owner.owner_id),
+        owner_id: crate::types::optional_uuid_from_wire(
+            message
+                .owner_data
+                .first()
+                .map_or_else(Uuid::nil, |owner| owner.owner_id),
+        ),
         message: trimmed_string(&data.message),
         chat_channel: ChatChannel(data.chat_channel),
         image_id: TextureKey::from(data.image_id),
@@ -1231,7 +1233,7 @@ pub(crate) fn script_permission_request(
 pub(crate) fn inventory_folder(data: &InventoryDescendentsFolderDataBlock) -> InventoryFolder {
     InventoryFolder {
         folder_id: InventoryFolderKey::from(data.folder_id),
-        parent_id: InventoryFolderKey::from(data.parent_id),
+        parent_id: crate::types::optional_key_from_wire(data.parent_id),
         name: trimmed_string(&data.name),
         folder_type: data.r#type,
         version: 0,
@@ -1368,7 +1370,7 @@ pub(crate) fn inventory_item_from_create(
 pub(crate) fn bulk_update_folder(data: &BulkUpdateInventoryFolderDataBlock) -> InventoryFolder {
     InventoryFolder {
         folder_id: InventoryFolderKey::from(data.folder_id),
-        parent_id: InventoryFolderKey::from(data.parent_id),
+        parent_id: crate::types::optional_key_from_wire(data.parent_id),
         name: trimmed_string(&data.name),
         folder_type: data.r#type,
         version: 0,
@@ -1478,7 +1480,7 @@ pub(crate) fn map_item(data: &sl_wire::messages::MapItemReplyDataBlock) -> MapIt
     MapItem {
         global_x: data.x,
         global_y: data.y,
-        id: data.id,
+        id: crate::types::optional_uuid_from_wire(data.id),
         extra: data.extra,
         extra2: data.extra2,
         name: trimmed_string(&data.name),
@@ -1551,7 +1553,7 @@ pub(crate) fn map_item_to_data_block(item: &MapItem) -> MapItemReplyDataBlock {
     MapItemReplyDataBlock {
         x: item.global_x,
         y: item.global_y,
-        id: item.id,
+        id: crate::types::optional_uuid_to_wire(item.id),
         extra: item.extra,
         extra2: item.extra2,
         name: with_nul(&item.name),
@@ -1889,12 +1891,12 @@ pub(crate) fn parcel_info_from_llsd(body: &Llsd) -> Option<ParcelInfo> {
         description: str_field("Desc"),
         music_url: str_field("MusicURL"),
         media_url: str_field("MediaURL"),
-        media_id: TextureKey::from(uuid_field("MediaID")),
+        media_id: crate::types::optional_key_from_wire(uuid_field("MediaID")),
         // OpenSim encodes MediaAutoScale as an LLSD boolean; `as_bool` also
         // tolerates the integer form.
         media_auto_scale: bool_field("MediaAutoScale"),
-        auth_buyer_id: uuid_field("AuthBuyerID"),
-        snapshot_id: TextureKey::from(uuid_field("SnapshotID")),
+        auth_buyer_id: crate::types::optional_key_from_wire(uuid_field("AuthBuyerID")),
+        snapshot_id: crate::types::optional_key_from_wire(uuid_field("SnapshotID")),
         pass_price: crate::types::linden_from_wire("PassPrice", i32_field("PassPrice")).ok()?,
         pass_hours: data.get("PassHours").and_then(Llsd::as_f32).unwrap_or(0.0),
         user_location: vec3_from_llsd(data.get("UserLocation")),
@@ -2226,7 +2228,7 @@ pub(crate) fn offline_message_from_record(record: &Llsd) -> Option<InstantMessag
             .get("from_group")
             .and_then(Llsd::as_bool)
             .unwrap_or(false),
-        region_id: uuid_member_lenient(record, "region_id"),
+        region_id: crate::types::optional_uuid_from_wire(uuid_member_lenient(record, "region_id")),
         position: offline_message_position(record),
         offline: true,
         timestamp: u32_member(record, "timestamp"),
@@ -2477,7 +2479,7 @@ pub(crate) fn bulk_update_inventory_from_llsd(
         .iter()
         .map(|folder| InventoryFolder {
             folder_id: InventoryFolderKey::from(uuid_member(folder, "FolderID")),
-            parent_id: InventoryFolderKey::from(uuid_member(folder, "ParentID")),
+            parent_id: crate::types::optional_key_from_wire(uuid_member(folder, "ParentID")),
             name: string_member(folder, "Name"),
             folder_type: i8::try_from(i32_member(folder, "Type")).unwrap_or(-1),
             version: 0,
@@ -2578,7 +2580,7 @@ pub(crate) fn created_category_from_llsd(body: &Llsd) -> Option<InventoryFolder>
     }
     Some(InventoryFolder {
         folder_id: InventoryFolderKey::from(folder_id),
-        parent_id: InventoryFolderKey::from(uuid_member(body, "parent_id")),
+        parent_id: crate::types::optional_key_from_wire(uuid_member(body, "parent_id")),
         name: string_member(body, "name"),
         folder_type: i8::try_from(i32_member(body, "type")).unwrap_or(-1),
         version: 1,
@@ -2589,7 +2591,7 @@ pub(crate) fn created_category_from_llsd(body: &Llsd) -> Option<InventoryFolder>
 pub(crate) fn inventory_folder_from_llsd(category: &Llsd) -> InventoryFolder {
     InventoryFolder {
         folder_id: InventoryFolderKey::from(uuid_member(category, "category_id")),
-        parent_id: InventoryFolderKey::from(uuid_member(category, "parent_id")),
+        parent_id: crate::types::optional_key_from_wire(uuid_member(category, "parent_id")),
         name: string_member(category, "name"),
         folder_type: i8::try_from(i32_member(category, "type_default")).unwrap_or(-1),
         version: i32_member(category, "version"),
@@ -3058,10 +3060,26 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Result<Llsd, sl_wire::WireError
         ("Desc", Llsd::String(info.description.clone())),
         ("MusicURL", Llsd::String(info.music_url.clone())),
         ("MediaURL", Llsd::String(info.media_url.clone())),
-        ("MediaID", Llsd::Uuid(info.media_id.uuid())),
+        (
+            "MediaID",
+            Llsd::Uuid(crate::types::optional_key_to_wire(info.media_id, |k| {
+                k.uuid()
+            })),
+        ),
         ("MediaAutoScale", Llsd::Boolean(info.media_auto_scale)),
-        ("AuthBuyerID", Llsd::Uuid(info.auth_buyer_id)),
-        ("SnapshotID", Llsd::Uuid(info.snapshot_id.uuid())),
+        (
+            "AuthBuyerID",
+            Llsd::Uuid(crate::types::optional_key_to_wire(
+                info.auth_buyer_id,
+                |k| k.uuid(),
+            )),
+        ),
+        (
+            "SnapshotID",
+            Llsd::Uuid(crate::types::optional_key_to_wire(info.snapshot_id, |k| {
+                k.uuid()
+            })),
+        ),
         (
             "PassPrice",
             Llsd::Integer(crate::types::linden_to_wire("PassPrice", &info.pass_price)?),
@@ -3148,7 +3166,10 @@ pub(crate) fn offline_message_to_record(im: &InstantMessage) -> Llsd {
         ("to_agent_id", Llsd::Uuid(im.to_agent_id.uuid())),
         ("dialog", Llsd::Integer(i32::from(im.dialog.to_u8()))),
         ("from_group", Llsd::Boolean(im.from_group)),
-        ("region_id", Llsd::Uuid(im.region_id)),
+        (
+            "region_id",
+            Llsd::Uuid(crate::types::optional_uuid_to_wire(im.region_id)),
+        ),
         ("position", vec3_to_llsd(im.position)),
         ("timestamp", u32_to_llsd(im.timestamp)),
         ("transaction-id", Llsd::Uuid(im.id)),
@@ -3348,7 +3369,12 @@ pub fn bulk_update_inventory_to_llsd(
         .map(|folder| {
             llsd_map(vec![
                 ("FolderID", Llsd::Uuid(folder.folder_id.uuid())),
-                ("ParentID", Llsd::Uuid(folder.parent_id.uuid())),
+                (
+                    "ParentID",
+                    Llsd::Uuid(crate::types::optional_key_to_wire(folder.parent_id, |p| {
+                        p.uuid()
+                    })),
+                ),
                 ("Name", Llsd::String(folder.name.clone())),
                 ("Type", Llsd::Integer(i32::from(folder.folder_type))),
             ])
@@ -3457,7 +3483,12 @@ pub fn ais_inventory_update_to_llsd(
 pub fn created_category_to_llsd(folder: &InventoryFolder) -> Llsd {
     llsd_map(vec![
         ("folder_id", Llsd::Uuid(folder.folder_id.uuid())),
-        ("parent_id", Llsd::Uuid(folder.parent_id.uuid())),
+        (
+            "parent_id",
+            Llsd::Uuid(crate::types::optional_key_to_wire(folder.parent_id, |p| {
+                p.uuid()
+            })),
+        ),
         ("name", Llsd::String(folder.name.clone())),
         ("type", Llsd::Integer(i32::from(folder.folder_type))),
     ])
@@ -3468,7 +3499,12 @@ pub fn created_category_to_llsd(folder: &InventoryFolder) -> Llsd {
 pub(crate) fn inventory_folder_to_llsd(folder: &InventoryFolder) -> Llsd {
     llsd_map(vec![
         ("category_id", Llsd::Uuid(folder.folder_id.uuid())),
-        ("parent_id", Llsd::Uuid(folder.parent_id.uuid())),
+        (
+            "parent_id",
+            Llsd::Uuid(crate::types::optional_key_to_wire(folder.parent_id, |p| {
+                p.uuid()
+            })),
+        ),
         ("name", Llsd::String(folder.name.clone())),
         ("type_default", Llsd::Integer(i32::from(folder.folder_type))),
         ("version", Llsd::Integer(folder.version)),
@@ -3664,8 +3700,8 @@ pub(crate) fn object_properties(
         category: block.category,
         inventory_serial: block.inventory_serial,
         item_id: InventoryKey::from(block.item_id),
-        folder_id: InventoryFolderKey::from(block.folder_id),
-        from_task_id: ObjectKey::from(block.from_task_id),
+        folder_id: crate::types::optional_key_from_wire(block.folder_id),
+        from_task_id: crate::types::optional_key_from_wire(block.from_task_id),
         aggregate_perms: block.aggregate_perms,
         aggregate_perm_textures: block.aggregate_perm_textures,
         aggregate_perm_textures_owner: block.aggregate_perm_textures_owner,
@@ -3881,10 +3917,10 @@ mod caps_serializer_tests {
             description: "A description".to_owned(),
             music_url: "http://music".to_owned(),
             media_url: "http://media".to_owned(),
-            media_id: TextureKey::from(Uuid::from_u128(0x33)),
+            media_id: Some(TextureKey::from(Uuid::from_u128(0x33))),
             media_auto_scale: true,
-            auth_buyer_id: Uuid::from_u128(0x44),
-            snapshot_id: TextureKey::from(Uuid::from_u128(0x55)),
+            auth_buyer_id: Some(AgentKey::from(Uuid::from_u128(0x44))),
+            snapshot_id: Some(TextureKey::from(Uuid::from_u128(0x55))),
             pass_price: LindenAmount(25),
             pass_hours: 2.0,
             user_location: (10.0, 20.0, 30.0),
@@ -3917,7 +3953,7 @@ mod caps_serializer_tests {
             to_agent_id: AgentKey::from(Uuid::from_u128(0xa2)),
             dialog: ImDialog::FromTask,
             from_group: false,
-            region_id: Uuid::from_u128(0xa3),
+            region_id: Some(Uuid::from_u128(0xa3)),
             position: (128.0, 64.0, 32.0),
             offline: true,
             timestamp: 1_700_000_500,
@@ -4044,7 +4080,7 @@ mod caps_serializer_tests {
             descendents: 2,
             folders: vec![InventoryFolder {
                 folder_id: InventoryFolderKey::from(Uuid::from_u128(0xe1)),
-                parent_id: InventoryFolderKey::from(Uuid::from_u128(0xe0)),
+                parent_id: crate::types::optional_key_from_wire(Uuid::from_u128(0xe0)),
                 name: "Sub".to_owned(),
                 folder_type: -1,
                 version: 3,
@@ -4065,7 +4101,7 @@ mod caps_serializer_tests {
         // last-owner id (parser defaults nil).
         let folders = vec![InventoryFolder {
             folder_id: InventoryFolderKey::from(Uuid::from_u128(0xf1)),
-            parent_id: InventoryFolderKey::from(Uuid::from_u128(0xf2)),
+            parent_id: crate::types::optional_key_from_wire(Uuid::from_u128(0xf2)),
             name: "Folder".to_owned(),
             folder_type: -1,
             version: 0,
@@ -4088,7 +4124,7 @@ mod caps_serializer_tests {
     fn ais_inventory_update_round_trip() -> Result<(), sl_wire::WireError> {
         let folders = vec![InventoryFolder {
             folder_id: InventoryFolderKey::from(Uuid::from_u128(0x1a1)),
-            parent_id: InventoryFolderKey::from(Uuid::from_u128(0x1a2)),
+            parent_id: crate::types::optional_key_from_wire(Uuid::from_u128(0x1a2)),
             name: "AIS Folder".to_owned(),
             folder_type: 8,
             version: 5,
@@ -4109,7 +4145,7 @@ mod caps_serializer_tests {
         // The synchronous reply fixes version at 1.
         let folder = InventoryFolder {
             folder_id: InventoryFolderKey::from(Uuid::from_u128(0x2a1)),
-            parent_id: InventoryFolderKey::from(Uuid::from_u128(0x2a2)),
+            parent_id: crate::types::optional_key_from_wire(Uuid::from_u128(0x2a2)),
             name: "New Category".to_owned(),
             folder_type: -1,
             version: 1,

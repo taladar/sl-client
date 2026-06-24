@@ -770,7 +770,7 @@ mod test {
                 flags: 0,
                 global_position: (1000.0, 2000.0, 30.0),
                 sim_name: region("Region"),
-                snapshot_id: TextureKey::from(uuid::Uuid::nil()),
+                snapshot_id: None,
                 dwell: 3.0,
                 price: LindenAmount(0),
             }],
@@ -992,8 +992,8 @@ mod test {
         )?;
         client.rez_object_from_notecard(
             &NotecardRez {
-                group_id: GroupKey::from(uuid::Uuid::nil()),
-                from_task_id: ObjectKey::from(uuid::Uuid::nil()),
+                group_id: None,
+                from_task_id: None,
                 bypass_raycast: false,
                 ray_start: sl_types::lsl::Vector {
                     x: 1.0,
@@ -1005,7 +1005,7 @@ mod test {
                     y: 5.0,
                     z: 6.0,
                 },
-                ray_target_id: ObjectKey::from(uuid::Uuid::nil()),
+                ray_target_id: None,
                 ray_end_is_intersection: true,
                 rez_selected: false,
                 remove_item: false,
@@ -1253,7 +1253,7 @@ mod test {
                 global_y: 257_024.0,
                 global_z: 23.5,
                 sim_name: region("Default Region"),
-                snapshot_id: TextureKey::from(uuid::Uuid::from_u128(0x77)),
+                snapshot_id: Some(TextureKey::from(uuid::Uuid::from_u128(0x77))),
                 dwell: 88.0,
                 sale_price: Some(LindenAmount(1000)),
                 auction_id: 0,
@@ -1361,7 +1361,7 @@ mod test {
         )?;
         sim.send_telehub_info(
             &TelehubInfo {
-                object_id: ObjectKey::from(uuid::Uuid::from_u128(0x7E1E)),
+                object_id: Some(ObjectKey::from(uuid::Uuid::from_u128(0x7E1E))),
                 object_name: "Welcome Hub".to_owned(),
                 position: sl_types::lsl::Vector {
                     x: 128.0,
@@ -2427,7 +2427,7 @@ mod test {
             MapItem {
                 global_x: 256_000,
                 global_y: 256_128,
-                id: uuid::Uuid::nil(),
+                id: None,
                 extra: 4,
                 extra2: 0,
                 name: "dots".to_owned(),
@@ -2435,7 +2435,7 @@ mod test {
             MapItem {
                 global_x: 257_000,
                 global_y: 256_200,
-                id: uuid::Uuid::from_u128(0x55AA),
+                id: Some(uuid::Uuid::from_u128(0x55AA)),
                 extra: 1024,
                 extra2: 250,
                 name: "Parcel For Sale".to_owned(),

@@ -256,8 +256,8 @@ pub struct ChatMessage {
     /// The speaker — the source id and source-type folded into one typed value
     /// (an avatar, an object, the system, or an unrecognised source type).
     pub source: ChatSource,
-    /// For an object speaker, its owner's agent id; nil otherwise.
-    pub owner_id: Uuid,
+    /// For an object speaker, its owner's agent id; `None` otherwise.
+    pub owner_id: Option<Uuid>,
     /// The chat type (whisper / normal / shout / …).
     pub chat_type: ChatType,
     /// Whether the message was audible at the listener.
@@ -418,8 +418,8 @@ pub struct InstantMessage {
     pub dialog: ImDialog,
     /// Whether the message came from a group (rather than an agent).
     pub from_group: bool,
-    /// The source region's id (nil if not provided).
-    pub region_id: Uuid,
+    /// The source region's id (`None` if not provided).
+    pub region_id: Option<Uuid>,
     /// The sender's region-local position, in metres.
     pub position: (f32, f32, f32),
     /// Whether the message was stored-and-forwarded while the agent was offline.
@@ -534,7 +534,7 @@ mod tests {
             to_agent_id: AgentKey::from(Uuid::from_u128(0xa12)),
             dialog: ImDialog::InventoryOffered,
             from_group: false,
-            region_id: Uuid::nil(),
+            region_id: None,
             position: (0.0, 0.0, 0.0),
             offline: false,
             timestamp: 0,
@@ -571,7 +571,7 @@ mod tests {
             to_agent_id: AgentKey::from(Uuid::from_u128(0xa12)),
             dialog: ImDialog::InventoryOffered,
             from_group: false,
-            region_id: Uuid::nil(),
+            region_id: None,
             position: (0.0, 0.0, 0.0),
             offline: false,
             timestamp: 0,

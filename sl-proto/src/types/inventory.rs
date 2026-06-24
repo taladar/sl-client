@@ -11,8 +11,8 @@ use uuid::Uuid;
 pub struct InventoryFolder {
     /// The folder's id.
     pub folder_id: InventoryFolderKey,
-    /// The parent folder's id (nil for the root).
-    pub parent_id: InventoryFolderKey,
+    /// The parent folder's id (`None` for the root).
+    pub parent_id: Option<InventoryFolderKey>,
     /// The folder name.
     pub name: String,
     /// The folder's default asset/folder type (`FolderType`; `-1` for none).
@@ -194,12 +194,12 @@ mod tests {
 
         let folder = InventoryFolder {
             folder_id: InventoryFolderKey::from(folder_raw),
-            parent_id: InventoryFolderKey::from(Uuid::nil()),
+            parent_id: None,
             name: "Objects".to_owned(),
             folder_type: -1,
             version: 1,
         };
         assert_eq!(folder.folder_id.uuid(), folder_raw);
-        assert!(folder.parent_id.uuid().is_nil());
+        assert!(folder.parent_id.is_none());
     }
 }

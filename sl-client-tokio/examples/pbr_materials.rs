@@ -46,8 +46,8 @@ fn harvest_material_ids(texture_entry: &[u8], out: &mut BTreeSet<Uuid>) {
     }
     let entry = decode_texture_entry(texture_entry, MAX_FACES);
     for face in &entry.faces {
-        if !face.material_id.is_nil() {
-            out.insert(face.material_id);
+        if let Some(material_id) = face.material_id {
+            out.insert(material_id);
         }
     }
 }

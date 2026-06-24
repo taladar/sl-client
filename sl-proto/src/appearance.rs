@@ -120,7 +120,10 @@ pub fn decode_texture_entry(bytes: &[u8], face_count: usize) -> TextureEntry {
             bump_shiny_fullbright: bump.get(index).copied().unwrap_or(0),
             media_flags: media.get(index).copied().unwrap_or(0),
             glow: u8_to_f32(glow.get(index).copied().unwrap_or(0)) / 255.0,
-            material_id: material.get(index).copied().unwrap_or_default(),
+            material_id: material
+                .get(index)
+                .copied()
+                .and_then(|id| (!id.is_nil()).then_some(id)),
         })
         .collect();
 
@@ -288,7 +291,10 @@ pub fn encode_texture_entry(entry: &TextureEntry) -> Vec<u8> {
         .collect();
     let media: Vec<u8> = faces.iter().map(|face| face.media_flags).collect();
     let glow: Vec<u8> = faces.iter().map(|face| pack_glow(face.glow)).collect();
-    let material: Vec<Uuid> = faces.iter().map(|face| face.material_id).collect();
+    let material: Vec<Uuid> = faces
+        .iter()
+        .map(|face| face.material_id.unwrap_or_else(Uuid::nil))
+        .collect();
 
     let mut writer = Writer::new();
     pack_field(&mut writer, &texture_id, Writer::put_uuid);
@@ -529,7 +535,7 @@ mod tests {
             bump_shiny_fullbright: 0x21,
             media_flags: 1,
             glow: 0.0,
-            material_id: Uuid::nil(),
+            material_id: None,
         };
         let shared = TextureFace {
             texture_id: TextureKey::from(tex_b),
@@ -542,7 +548,7 @@ mod tests {
             bump_shiny_fullbright: 0,
             media_flags: 0,
             glow: 0.0,
-            material_id: Uuid::nil(),
+            material_id: None,
         };
         let entry = TextureEntry {
             faces: vec![face0, shared, shared],

@@ -852,7 +852,7 @@ impl Circuit {
                     .map_or_else(Uuid::nil, |parcel| parcel.uuid()),
                 name: with_nul(&update.name),
                 desc: with_nul(&update.description),
-                snapshot_id: update.snapshot_id.uuid(),
+                snapshot_id: update.snapshot_id.map_or_else(Uuid::nil, |s| s.uuid()),
                 pos_global: [x, y, z],
                 sort_order: update.sort_order,
                 enabled: update.enabled,
@@ -923,7 +923,7 @@ impl Circuit {
                     .map_or_else(Uuid::nil, |parcel| parcel.uuid()),
                 // Set on the simulator as the message passes through.
                 parent_estate: 0,
-                snapshot_id: update.snapshot_id.uuid(),
+                snapshot_id: update.snapshot_id.map_or_else(Uuid::nil, |s| s.uuid()),
                 pos_global: [x, y, z],
                 classified_flags: update.classified_flags,
                 price_for_listing: crate::types::linden_to_wire(
@@ -1211,7 +1211,7 @@ impl Circuit {
                 name: with_nul(&params.name),
                 charter: with_nul(&params.charter),
                 show_in_list: params.show_in_list,
-                insignia_id: params.insignia_id.uuid(),
+                insignia_id: params.insignia_id.map_or_else(Uuid::nil, |i| i.uuid()),
                 membership_fee: crate::types::linden_to_wire(
                     "MembershipFee",
                     &params.membership_fee,
@@ -1347,7 +1347,7 @@ impl Circuit {
             role_data: roles
                 .iter()
                 .map(|role| GroupRoleUpdateRoleDataBlock {
-                    role_id: role.role_id.uuid(),
+                    role_id: role.role_id.map_or_else(Uuid::nil, |r| r.uuid()),
                     name: with_nul(&role.name),
                     description: with_nul(&role.description),
                     title: with_nul(&role.title),
@@ -1376,7 +1376,7 @@ impl Circuit {
             role_change: changes
                 .iter()
                 .map(|change| GroupRoleChangesRoleChangeBlock {
-                    role_id: change.role_id.uuid(),
+                    role_id: change.role_id.map_or_else(Uuid::nil, |r| r.uuid()),
                     member_id: change.member_id.uuid(),
                     change: change.change.to_u32(),
                 })
@@ -3086,14 +3086,14 @@ impl Circuit {
                 desc: with_nul(&update.description),
                 music_url: with_nul(&update.music_url),
                 media_url: with_nul(&update.media_url),
-                media_id: update.media_id.uuid(),
+                media_id: update.media_id.map_or_else(Uuid::nil, |m| m.uuid()),
                 media_auto_scale: u8::from(update.media_auto_scale),
-                group_id: update.group_id.uuid(),
+                group_id: update.group_id.map_or_else(Uuid::nil, |g| g.uuid()),
                 pass_price: crate::types::linden_to_wire("PassPrice", &update.pass_price)?,
                 pass_hours: update.pass_hours,
                 category: update.category.to_u8(),
-                auth_buyer_id: update.auth_buyer_id,
-                snapshot_id: update.snapshot_id.uuid(),
+                auth_buyer_id: update.auth_buyer_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                snapshot_id: update.snapshot_id.map_or_else(Uuid::nil, |s| s.uuid()),
                 user_location: update.user_location.clone(),
                 user_look_at: update.user_look_at.clone(),
                 landing_type: update.landing_type,
@@ -3193,7 +3193,7 @@ impl Circuit {
         local_id: RegionLocalParcelId,
         price: i32,
         area: i32,
-        group_id: GroupKey,
+        group_id: Option<GroupKey>,
         is_group_owned: bool,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -3203,7 +3203,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             data: ParcelBuyDataBlock {
-                group_id: group_id.uuid(),
+                group_id: group_id.map_or_else(Uuid::nil, |g| g.uuid()),
                 is_group_owned,
                 remove_contribution: false,
                 local_id: local_id.0,
@@ -3884,14 +3884,14 @@ impl Circuit {
     pub(crate) fn send_object_add(
         &mut self,
         shape: &PrimShape,
-        group_id: GroupKey,
+        group_id: Option<GroupKey>,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectAdd(ObjectAdd {
             agent_data: ObjectAddAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                group_id: group_id.uuid(),
+                group_id: group_id.map_or_else(Uuid::nil, |g| g.uuid()),
             },
             object_data: ObjectAddObjectDataBlock {
                 p_code: shape.pcode,
@@ -3935,14 +3935,14 @@ impl Circuit {
         &mut self,
         local_ids: &[RegionLocalObjectId],
         offset: Vector,
-        group_id: GroupKey,
+        group_id: Option<GroupKey>,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDuplicate(ObjectDuplicate {
             agent_data: ObjectDuplicateAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                group_id: group_id.uuid(),
+                group_id: group_id.map_or_else(Uuid::nil, |g| g.uuid()),
             },
             shared_data: ObjectDuplicateSharedDataBlock {
                 offset,
@@ -3986,7 +3986,7 @@ impl Circuit {
         local_ids: &[RegionLocalObjectId],
         destination: DeRezDestination,
         transaction_id: Uuid,
-        group_id: GroupKey,
+        group_id: Option<GroupKey>,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::DeRezObject(DeRezObject {
@@ -3995,7 +3995,7 @@ impl Circuit {
                 session_id: self.session_id,
             },
             agent_block: DeRezObjectAgentBlockBlock {
-                group_id: group_id.uuid(),
+                group_id: group_id.map_or_else(Uuid::nil, |g| g.uuid()),
                 destination: destination.to_code(),
                 destination_id: destination.destination_id(),
                 transaction_id,
@@ -4485,14 +4485,14 @@ impl Circuit {
     pub(crate) fn send_object_duplicate_on_ray(
         &mut self,
         local_ids: &[RegionLocalObjectId],
-        group_id: GroupKey,
+        group_id: Option<GroupKey>,
         ray_start: Vector,
         ray_end: Vector,
         bypass_raycast: bool,
         ray_end_is_intersection: bool,
         copy_centers: bool,
         copy_rotates: bool,
-        ray_target_id: ObjectKey,
+        ray_target_id: Option<ObjectKey>,
         duplicate_flags: u32,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -4500,14 +4500,14 @@ impl Circuit {
             agent_data: ObjectDuplicateOnRayAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                group_id: group_id.uuid(),
+                group_id: group_id.map_or_else(Uuid::nil, |g| g.uuid()),
                 ray_start,
                 ray_end,
                 bypass_raycast,
                 ray_end_is_intersection,
                 copy_centers,
                 copy_rotates,
-                ray_target_id: ray_target_id.uuid(),
+                ray_target_id: ray_target_id.map_or_else(Uuid::nil, |t| t.uuid()),
                 duplicate_flags,
             },
             object_data: local_ids
@@ -4573,14 +4573,14 @@ impl Circuit {
             agent_data: RezObjectFromNotecardAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                group_id: rez.group_id.uuid(),
+                group_id: rez.group_id.map_or_else(Uuid::nil, |g| g.uuid()),
             },
             rez_data: RezObjectFromNotecardRezDataBlock {
-                from_task_id: rez.from_task_id.uuid(),
+                from_task_id: rez.from_task_id.map_or_else(Uuid::nil, |t| t.uuid()),
                 bypass_raycast: u8::from(rez.bypass_raycast),
                 ray_start: rez.ray_start.clone(),
                 ray_end: rez.ray_end.clone(),
-                ray_target_id: rez.ray_target_id.uuid(),
+                ray_target_id: rez.ray_target_id.map_or_else(Uuid::nil, |t| t.uuid()),
                 ray_end_is_intersection: rez.ray_end_is_intersection,
                 rez_selected: rez.rez_selected,
                 remove_item: rez.remove_item,

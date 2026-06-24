@@ -23,7 +23,7 @@ use std::time::Duration;
 use sl_client_tokio::{
     AgentKey, Client, Command, CreateGroupParams, DisconnectReason, Error, Event, GroupRoleChange,
     GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, LindenAmount, LoginParams,
-    LoginRequest, TextureKey, Throttle, Uuid, group_powers,
+    LoginRequest, Throttle, Uuid, group_powers,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -98,7 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         name: format!("sl-client #31 {agent_id}"),
                         charter: "throwaway group for #31 testing".to_owned(),
                         show_in_list: false,
-                        insignia_id: TextureKey::from(Uuid::nil()),
+                        insignia_id: None,
                         membership_fee: LindenAmount(0),
                         open_enrollment: true,
                         allow_publish: false,
@@ -132,7 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .send(Command::UpdateGroupRoles {
                         group_id: created,
                         roles: vec![GroupRoleEdit {
-                            role_id: Uuid::new_v4().into(),
+                            role_id: Some(Uuid::new_v4().into()),
                             name: ROLE_NAME.to_owned(),
                             description: "created by #31".to_owned(),
                             title: "Tester".to_owned(),
@@ -166,7 +166,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 for role in &roles {
                     info!(
-                        "  role {} \"{}\" powers {:#x}",
+                        "  role {:?} \"{}\" powers {:#x}",
                         role.role_id, role.name, role.powers
                     );
                 }
@@ -177,15 +177,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .await
                     .ok();
                 if let Some(found) = roles.iter().find(|role| role.name == ROLE_NAME) {
+                    // A named custom role always carries a real id (only the
+                    // "Everyone" default role has a nil/`None` id).
+                    let Some(found_role_id) = found.role_id else {
+                        continue;
+                    };
                     if role_id.is_none() {
                         // First sighting: update the role's title/powers.
-                        role_id = Some(found.role_id);
-                        info!("found new role {}; updating it", found.role_id);
+                        role_id = Some(found_role_id);
+                        info!("found new role {found_role_id}; updating it");
                         command_tx
                             .send(Command::UpdateGroupRoles {
                                 group_id: group,
                                 roles: vec![GroupRoleEdit {
-                                    role_id: found.role_id,
+                                    role_id: Some(found_role_id),
                                     name: ROLE_NAME.to_owned(),
                                     description: "updated by #31".to_owned(),
                                     title: "Senior Tester".to_owned(),
@@ -202,7 +207,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .send(Command::ChangeGroupRoleMembers {
                                     group_id: group,
                                     changes: vec![GroupRoleMemberChange {
-                                        role_id: found.role_id,
+                                        role_id: Some(found_role_id),
                                         member_id: AgentKey::from(member_id),
                                         change: GroupRoleChange::Add,
                                     }],
@@ -230,7 +235,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .send(Command::UpdateGroupRoles {
                                 group_id: group,
                                 roles: vec![GroupRoleEdit {
-                                    role_id: found.role_id,
+                                    role_id: Some(found_role_id),
                                     name: String::new(),
                                     description: String::new(),
                                     title: String::new(),
