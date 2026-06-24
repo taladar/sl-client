@@ -47,44 +47,45 @@ use sl_proto::{
 // survey commands, and read events. `Event` is aliased to avoid clashing with
 // Bevy's `Event` derive.
 pub use sl_proto::{
-    ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnyMessage,
-    AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, Camera,
-    CameraError, ChatAudible, ChatChannel, ChatMessage, ChatSource, ChatSourceType, ChatType,
-    ChatTypeNotAVolume, CircuitCode, CircuitId, ClassifiedCategory, ClassifiedInfo,
-    ClassifiedUpdate, ClickAction, Command, ControlFlags, CreateGroupParams, DeRezDestination,
-    DetachOrder, Diagnostic, Direction, DisconnectReason, Distance, EconomyData, EstateAccessDelta,
-    EstateAccessKind, EstateInfo, ExperienceInfo, ExperiencePermission, ExperienceProperties,
-    ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights, GlobalCoordinates,
-    GltfMaterialOverride, GridCoordinates, GroupMember, GroupMembership, GroupNotice,
-    GroupNoticeAttachment, GroupNoticeKey, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit,
-    GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
-    HomeLocation, IceCandidate, ImDialog, InstantMessage, InterestsUpdate, InventoryCallbackId,
-    InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey,
-    InventoryOffer, InventoryType, Key, Kilobits, LandArea, LandingType, LegacyMaterial, LightData,
-    LightImage, LindenAmount, LindenBalance, LoadUrlRequest, LoginAccount, LoginParams,
-    LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
-    MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate,
-    Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType, NegativeBalanceError,
-    NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings,
-    ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties, ObjectTransform,
-    OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-    ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
-    ParcelVoiceInfo, ParticleSystem, PermissionField, PhysicsShapeTypes, PickInfo, PickKey,
-    PickUpdate, PingId, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
-    ProposalCandidateId, ProposalVoteId, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
-    RegionCombatSettings, RegionCoordinates, RegionFlags, RegionHandle, RegionIdentity,
-    RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionName,
-    Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType, ScopedObjectId,
-    ScopedParcelId, ScriptControl, ScriptControlAction, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTeleportRequest, SculptData, SculptOrMeshKey, SequenceNumber,
-    SimulatorFeatures, SoundFlags, SoundPreload, StartLocation, StartLocationParseError,
-    TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry, TextureFace, TextureKey,
-    Throttle, ThrottleBuilder, ThrottleError, TransferId, Transmit, Uuid, Vector, VoiceAccountInfo,
-    VoiceProvisionRequest, Wearable, WearableType, XferId, avatar_texture, decode_particle_system,
-    decode_texture_anim, decode_texture_entry, grid_to_handle, group_powers, handle_to_global,
-    handle_to_grid, particle_pattern, pcode, sim_access, texture_anim_mode,
+    ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnimationKey,
+    AnyMessage, AssetKey, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick,
+    AvatarProperties, Camera, CameraError, ChatAudible, ChatChannel, ChatMessage, ChatSource,
+    ChatSourceType, ChatType, ChatTypeNotAVolume, CircuitCode, CircuitId, ClassifiedCategory,
+    ClassifiedInfo, ClassifiedUpdate, ClickAction, Command, ControlFlags, CreateGroupParams,
+    DeRezDestination, DetachOrder, Diagnostic, Direction, DisconnectReason, Distance, EconomyData,
+    EstateAccessDelta, EstateAccessKind, EstateInfo, ExperienceInfo, ExperiencePermission,
+    ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights,
+    GlobalCoordinates, GltfMaterialOverride, GridCoordinates, GroupMember, GroupMembership,
+    GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile, GroupRole, GroupRoleChange,
+    GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType,
+    GroupTitle, HomeLocation, IceCandidate, ImDialog, InstantMessage, InterestsUpdate,
+    InventoryCallbackId, InventoryFolder, InventoryFolderKey, InventoryItem,
+    InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryType, Key, Kilobits, LandArea,
+    LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance,
+    LoadUrlRequest, LoginAccount, LoginParams, LoginRequest, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE,
+    MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
+    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance,
+    MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
+    NegativeBalanceError, NeighborInfo, NewInventoryItem, Object, ObjectExtraParams,
+    ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties,
+    ObjectTransform, OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus,
+    ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, PhysicsShapeTypes, PickInfo,
+    PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape, PrimShapeParams, ProductType,
+    ProfileUpdate, ProposalCandidateId, ProposalVoteId, ReflectionProbe, ReflectionProbeFlags,
+    RegionChatSettings, RegionCombatSettings, RegionCoordinates, RegionFlags, RegionHandle,
+    RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
+    RegionName, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType,
+    ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData, SculptOrMeshKey,
+    SequenceNumber, SimulatorFeatures, SoundFlags, SoundPreload, StartLocation,
+    StartLocationParseError, TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry,
+    TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TransferId, Transmit, Uuid,
+    Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, XferId,
+    avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
+    grid_to_handle, group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode,
+    sim_access, texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -1569,7 +1570,7 @@ fn advance_running(
                         .cloned()
                 {
                     let asset_tx = caps.asset_tx.clone();
-                    let (id, range) = (*mesh_id, *byte_range);
+                    let (id, range) = (mesh_id.uuid(), *byte_range);
                     std::thread::spawn(move || {
                         run_asset_fetch(
                             &url,
@@ -1591,7 +1592,7 @@ fn advance_running(
                     && let Some(url) = caps.map.get(CAP_GET_ASSET).cloned()
                 {
                     let asset_tx = caps.asset_tx.clone();
-                    let (id, asset_type, range) = (*asset_id, *asset_type, *byte_range);
+                    let (id, asset_type, range) = (asset_id.uuid(), *asset_type, *byte_range);
                     std::thread::spawn(move || {
                         run_generic_asset_fetch(&url, id, asset_type, range, &asset_tx);
                     });

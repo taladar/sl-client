@@ -9,29 +9,29 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
-        AbuseReport, AbuseReportType, AgentKey, AssetType, AttachmentMode, AttachmentPoint, Camera,
-        ChatAudible, ChatChannel, ChatSource, ChatType, ClassifiedCategory, ClassifiedKey,
-        ClassifiedUpdate, ClickAction, CloudPosDensity, CoarseLocation, Color, ColorAlpha,
-        ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, DetachOrder,
-        Diagnostic, DirFindFlags, Direction, DisconnectReason, Distance, EnvironmentSettings,
-        EstateAccessDelta, EstateAccessKind, Event, EventId, FollowCamProperty, FriendKey,
-        FriendRights, GestureActivation, GlobalCoordinates, Glow, GroupKey, GroupNoticeAttachment,
-        GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType,
-        ImDialog, ImageCodec, InterestsUpdate, InventoryCallbackId, InventoryFolderKey,
-        InventoryItem, InventoryItemOrFolderKey, InventoryKey, LandArea, LandingType, LindenAmount,
-        LindenBalance, LoginAccount, LoginParams, LookAtType, MapItemType, Material, Maturity,
-        MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
-        NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey,
-        ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-        ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
-        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5,
-        PickUpdate, PointAtType, Postcard, PrimShape, ProductType, ProfileUpdate,
-        ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability,
-        RestoreItem, RezAttachment, SaleType, Scale, ScopedObjectId, ScopedParcelId,
-        ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session, SkySettings, SoundFlags,
-        TeleportFlags, TerrainLayerType, TextureKey, Throttle, TransferStatus, Transmit,
-        ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
-        avatar_texture, group_powers, pcode,
+        AbuseReport, AbuseReportType, AgentKey, AnimationKey, AssetKey, AssetType, AttachmentMode,
+        AttachmentPoint, Camera, ChatAudible, ChatChannel, ChatSource, ChatType,
+        ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction, CloudPosDensity,
+        CoarseLocation, Color, ColorAlpha, ControlFlags, CreateGroupParams, DayCycle,
+        DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, Direction,
+        DisconnectReason, Distance, EnvironmentSettings, EstateAccessDelta, EstateAccessKind,
+        Event, EventId, FollowCamProperty, FriendKey, FriendRights, GestureActivation,
+        GlobalCoordinates, Glow, GroupKey, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit,
+        GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImageCodec,
+        InterestsUpdate, InventoryCallbackId, InventoryFolderKey, InventoryItem,
+        InventoryItemOrFolderKey, InventoryKey, LandArea, LandingType, LindenAmount, LindenBalance,
+        LoginAccount, LoginParams, LookAtType, MapItemType, Material, Maturity, MeanCollisionType,
+        MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem,
+        NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
+        ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
+        ParcelKey, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
+        ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate, PointAtType,
+        Postcard, PrimShape, ProductType, ProfileUpdate, ReflectionProbeFlags, RegionCoordinates,
+        RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType, Scale,
+        ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissions, SculptOrMeshKey,
+        Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType, TextureKey, Throttle,
+        TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings,
+        WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -3648,7 +3648,7 @@ mod test {
         drain(&mut session)?;
 
         let sound = uuid::Uuid::from_u128(0x5005);
-        session.request_asset(sound, AssetType::Sound, 1.0, now)?;
+        session.request_asset(AssetKey::from(sound), AssetType::Sound, 1.0, now)?;
 
         // The client sends a TransferRequest on the asset channel/source with a
         // params blob of the asset UUID followed by its little-endian type code.
@@ -3739,7 +3739,7 @@ mod test {
         drain(&mut session)?;
 
         let missing = uuid::Uuid::from_u128(0x404);
-        session.request_asset(missing, AssetType::Animation, 1.0, now)?;
+        session.request_asset(AssetKey::from(missing), AssetType::Animation, 1.0, now)?;
         let sent = drain(&mut session)?;
         let transfer_id = sent
             .iter()
@@ -5688,7 +5688,13 @@ mod test {
 
         let start = uuid::Uuid::from_u128(0x100);
         let stop = uuid::Uuid::from_u128(0x200);
-        session.set_animations(&[(start, true), (stop, false)], now)?;
+        session.set_animations(
+            &[
+                (AnimationKey::from(start), true),
+                (AnimationKey::from(stop), false),
+            ],
+            now,
+        )?;
         let sent = drain(&mut session)?;
         let animation = sent
             .iter()
@@ -5724,7 +5730,7 @@ mod test {
         drain(&mut session)?;
 
         let dance = uuid::Uuid::from_u128(0x300);
-        session.play_animation(dance, now)?;
+        session.play_animation(AnimationKey::from(dance), now)?;
         let sent = drain(&mut session)?;
         let animation = sent
             .iter()
