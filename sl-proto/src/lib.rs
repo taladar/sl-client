@@ -17,7 +17,10 @@ mod types;
 
 pub use appearance::{MAX_FACES, decode_texture_entry, encode_texture_entry};
 pub use asset_keys::{AnimationKey, AssetKey};
-pub use bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
+pub use bookkeeping_ids::{
+    GroupRequestId, ImSessionId, InventoryCallbackId, LureId, PingId, QueryId, TransactionId,
+    TransferId, XferId,
+};
 pub use command::Command;
 pub use error::Error;
 pub use extra_params::encode_extra_params;

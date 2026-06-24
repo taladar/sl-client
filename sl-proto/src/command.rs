@@ -11,17 +11,17 @@ use crate::{
     ClassifiedKey, ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams,
     DeRezDestination, DetachOrder, DirFindFlags, Distance, EstateAccessDelta, EventId,
     ExperienceKey, ExperiencePermission, ExperienceUpdate, FriendKey, FriendRights,
-    GestureActivation, GroupKey, GroupNoticeAttachment, GroupNoticeKey, GroupRoleEdit,
-    GroupRoleKey, GroupRoleMemberChange, IceCandidate, InterestsUpdate, InventoryFolderKey,
-    InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandSearchType, LandStatReportType,
-    LindenAmount, MapItemType, Material, MaterialOverrideUpdate, MediaEntry, MeshKey,
-    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
-    ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
-    ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField,
-    PickKey, PickUpdate, Postcard, PrimShape, ProfileUpdate, ProposalVoteId, RegionCoordinates,
-    RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, Rotation, SaleType,
-    ScriptPermissions, TextureKey, Throttle, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
-    Wearable,
+    GestureActivation, GroupKey, GroupNoticeAttachment, GroupNoticeKey, GroupRequestId,
+    GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate,
+    InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandSearchType,
+    LandStatReportType, LindenAmount, LureId, MapItemType, Material, MaterialOverrideUpdate,
+    MediaEntry, MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem,
+    NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
+    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
+    ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape, ProfileUpdate,
+    ProposalVoteId, QueryId, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability,
+    RestoreItem, RezAttachment, Rotation, SaleType, ScriptPermissions, TextureKey, Throttle,
+    TransactionId, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -145,7 +145,7 @@ pub enum Command {
         /// The pick id.
         pick_id: PickKey,
         /// The query id for the dataserver to resend the pick list under.
-        query_id: Uuid,
+        query_id: QueryId,
     },
     /// Create or edit one of the agent's classifieds (`ClassifiedInfoUpdate`).
     UpdateClassified(ClassifiedUpdate),
@@ -156,7 +156,7 @@ pub enum Command {
         /// The classified id.
         classified_id: ClassifiedKey,
         /// The query id for the dataserver to resend the classified list under.
-        query_id: Uuid,
+        query_id: QueryId,
     },
     /// Request the contents (sub-folders and items) of an inventory folder over
     /// **UDP** (`FetchInventoryDescendents`). The reply arrives as
@@ -210,7 +210,7 @@ pub enum Command {
         /// The item, with its fields set to the desired values.
         item: Box<InventoryItem>,
         /// The asset transaction id (nil if not replacing the asset).
-        transaction_id: Uuid,
+        transaction_id: TransactionId,
     },
     /// Move an item into a folder, optionally renaming it (an empty `new_name`
     /// keeps the name), via `MoveInventoryItem`.
@@ -351,13 +351,13 @@ pub enum Command {
     /// calling card goes into `calling_card_folder`.
     AcceptFriendship {
         /// The offer's transaction id (the friendship-offer IM's `id`).
-        transaction_id: Uuid,
+        transaction_id: TransactionId,
         /// The inventory folder to place the new calling card in.
         calling_card_folder: InventoryFolderKey,
     },
     /// Decline a friendship offer (`DeclineFriendship`). The `transaction_id` is
     /// the [`InstantMessage::id`](crate::InstantMessage::id) of the incoming friendship-offer IM.
-    DeclineFriendship(Uuid),
+    DeclineFriendship(TransactionId),
     /// Make a group the active group (`ActivateGroup`); nil clears it. Confirmed
     /// by [`Event::ActiveGroupChanged`](crate::Event::ActiveGroupChanged).
     ActivateGroup(GroupKey),
@@ -459,7 +459,7 @@ pub enum Command {
         /// The group to query.
         group_id: GroupKey,
         /// A client-chosen id echoed back in the reply for correlation.
-        request_id: Uuid,
+        request_id: GroupRequestId,
         /// The interval length in days.
         interval_days: i32,
         /// Which interval (0 = current, 1 = previous).
@@ -472,7 +472,7 @@ pub enum Command {
         /// The group to query.
         group_id: GroupKey,
         /// A client-chosen id echoed back in the reply for correlation.
-        request_id: Uuid,
+        request_id: GroupRequestId,
         /// The interval length in days.
         interval_days: i32,
         /// Which interval (0 = current, 1 = previous).
@@ -485,7 +485,7 @@ pub enum Command {
         /// The group to query.
         group_id: GroupKey,
         /// A client-chosen id echoed back in the reply for correlation.
-        request_id: Uuid,
+        request_id: GroupRequestId,
         /// The interval length in days.
         interval_days: i32,
         /// Which interval (0 = current, 1 = previous).
@@ -498,7 +498,7 @@ pub enum Command {
         /// The group to query.
         group_id: GroupKey,
         /// A client-chosen id echoed back in the reply for correlation.
-        transaction_id: Uuid,
+        transaction_id: TransactionId,
     },
     /// Request a group's vote history (`GroupVoteHistoryRequest`). Each finished
     /// proposal arrives as
@@ -507,7 +507,7 @@ pub enum Command {
         /// The group to query.
         group_id: GroupKey,
         /// A client-chosen id echoed back in the reply for correlation.
-        transaction_id: Uuid,
+        transaction_id: TransactionId,
     },
     /// Start a new group proposal/vote (`StartGroupProposal`). It then appears in
     /// the group's active proposals.
@@ -1108,7 +1108,7 @@ pub enum Command {
         /// item, or task id where applicable.
         destination: DeRezDestination,
         /// A caller-chosen id correlating the resulting inventory update.
-        transaction_id: Uuid,
+        transaction_id: TransactionId,
         /// The active group (`None` for none).
         group_id: Option<GroupKey>,
     },
@@ -1533,7 +1533,7 @@ pub enum Command {
     RezAttachments {
         /// A fresh, caller-chosen id correlating the compound message's parts
         /// (the viewer generates a new UUID per request).
-        compound_id: Uuid,
+        compound_id: TransactionId,
         /// Whether to first detach everything currently worn (e.g. when replacing
         /// the whole outfit) or keep it and add these alongside.
         detach: DetachOrder,
@@ -1576,7 +1576,7 @@ pub enum Command {
     /// `query_id`.
     DirFindQuery {
         /// A client-chosen id echoed back in the reply.
-        query_id: Uuid,
+        query_id: QueryId,
         /// The search text.
         query_text: String,
         /// What to search and how to sort/filter.
@@ -1589,7 +1589,7 @@ pub enum Command {
     /// [`Event::DirPlacesReply`](crate::Event::DirPlacesReply).
     DirPlacesQuery {
         /// A client-chosen id echoed back in the reply.
-        query_id: Uuid,
+        query_id: QueryId,
         /// The search text.
         query_text: String,
         /// Result inclusion/sort flags (the maturity-inclusion and sort bits).
@@ -1606,7 +1606,7 @@ pub enum Command {
     /// with a [`Event::DirLandReply`](crate::Event::DirLandReply).
     DirLandQuery {
         /// A client-chosen id echoed back in the reply.
-        query_id: Uuid,
+        query_id: QueryId,
         /// Result inclusion/sort and limit flags (e.g.
         /// [`DirFindFlags::FOR_SALE`], [`DirFindFlags::LIMIT_BY_PRICE`]).
         flags: DirFindFlags,
@@ -1623,7 +1623,7 @@ pub enum Command {
     /// answers with a [`Event::DirClassifiedReply`](crate::Event::DirClassifiedReply).
     DirClassifiedQuery {
         /// A client-chosen id echoed back in the reply.
-        query_id: Uuid,
+        query_id: QueryId,
         /// The search text.
         query_text: String,
         /// Result inclusion/sort flags (the maturity-inclusion and sort bits).
@@ -1639,7 +1639,7 @@ pub enum Command {
     /// [`Event::AvatarPickerReply`](crate::Event::AvatarPickerReply).
     AvatarPickerRequest {
         /// A client-chosen id echoed back in the reply.
-        query_id: Uuid,
+        query_id: QueryId,
         /// The (partial) name to match.
         name: String,
     },
@@ -1648,10 +1648,10 @@ pub enum Command {
     /// answers with a [`Event::PlacesReply`](crate::Event::PlacesReply).
     PlacesQuery {
         /// A client-chosen id echoed back in the reply.
-        query_id: Uuid,
+        query_id: QueryId,
         /// A correlation id echoed back in the reply (the viewer reuses it to
         /// route the reply to the requesting panel).
-        transaction_id: Uuid,
+        transaction_id: TransactionId,
         /// The search text (empty for all holdings).
         query_text: String,
         /// Result flags (the holdings-selection bits).
@@ -1914,14 +1914,14 @@ pub enum Command {
     /// [`ImDialog::LureUser`](crate::ImDialog::LureUser) IM.
     AcceptTeleportLure {
         /// The lure id from the offer IM.
-        lure_id: Uuid,
+        lure_id: LureId,
     },
     /// Decline a teleport lure (`IM_LURE_DECLINED`).
     DeclineTeleportLure {
         /// The offer IM's sender.
         from_agent_id: AgentKey,
         /// The lure id from the offer IM.
-        lure_id: Uuid,
+        lure_id: LureId,
     },
     /// Request a teleport from `to_agent_id` (`IM_TELEPORT_REQUEST`): ask them to
     /// offer this agent a teleport.
@@ -1942,7 +1942,7 @@ pub enum Command {
         /// The item's name (shown to the recipient).
         item_name: String,
         /// A fresh transaction id echoed back on accept/decline.
-        transaction_id: Uuid,
+        transaction_id: TransactionId,
     },
     /// Offer an inventory folder to `to_agent_id` over IM (`IM_INVENTORY_OFFERED`).
     GiveInventoryFolder {
@@ -1953,7 +1953,7 @@ pub enum Command {
         /// The folder's name (shown to the recipient).
         folder_name: String,
         /// A fresh transaction id echoed back on accept/decline.
-        transaction_id: Uuid,
+        transaction_id: TransactionId,
     },
     /// Accept an inventory offer (`IM_INVENTORY_ACCEPTED`), filing it into
     /// `folder_id`. `offer` is decoded from the incoming
@@ -1977,7 +1977,7 @@ pub enum Command {
     /// [`Event::ConferenceSessionMessage`](crate::Event::ConferenceSessionMessage).
     StartConference {
         /// A fresh, caller-chosen session id naming the conference.
-        session_id: Uuid,
+        session_id: ImSessionId,
         /// The agents to invite.
         invitees: Vec<AgentKey>,
         /// The opening message.
@@ -1986,14 +1986,14 @@ pub enum Command {
     /// Send a message into a conference / ad-hoc IM session (`IM_SESSION_SEND`).
     SendConferenceMessage {
         /// The conference session id.
-        session_id: Uuid,
+        session_id: ImSessionId,
         /// The message text.
         message: String,
     },
     /// Leave a conference / ad-hoc IM session (`IM_SESSION_LEAVE`).
     LeaveConference {
         /// The conference session id.
-        session_id: Uuid,
+        session_id: ImSessionId,
     },
     /// Flush stored offline instant messages over the legacy UDP trigger
     /// (`RetrieveInstantMessages`); they arrive as offline

@@ -144,11 +144,97 @@ impl core::fmt::Display for InventoryCallbackId {
     }
 }
 
+/// A UUID-valued correlation id a client mints (or echoes) to match a reply to
+/// the exchange that provoked it. Carries the same role as the integer
+/// bookkeeping ids above, but on the wire it is a `Uuid`; it is *not* a
+/// persistent entity key.
+macro_rules! uuid_correlation_id {
+    ($(#[$meta:meta])* $name:ident, $role:literal) => {
+        $(#[$meta])*
+        #[doc = concat!("A ", $role, " correlation id (a wire `Uuid` echoed back to pair a reply with its request).")]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+        pub struct $name(pub Uuid);
+
+        impl $name {
+            /// Wraps a raw `Uuid`.
+            #[must_use]
+            pub const fn new(id: Uuid) -> Self {
+                Self(id)
+            }
+
+            /// The raw `Uuid` (the value the wire codec sees).
+            #[must_use]
+            pub const fn get(self) -> Uuid {
+                self.0
+            }
+        }
+
+        impl From<Uuid> for $name {
+            fn from(id: Uuid) -> Self {
+                Self(id)
+            }
+        }
+
+        impl core::fmt::Display for $name {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+    };
+}
+
+uuid_correlation_id!(
+    /// Correlates a reply with the `ImprovedInstantMessage` / inventory / group
+    /// exchange that produced it (a friendship offer's id, a fresh
+    /// inventory-offer id, an asset transaction, a group proposal/vote, a derez,
+    /// a compound-attachment message).
+    TransactionId,
+    "transaction"
+);
+uuid_correlation_id!(
+    /// Correlates a dataserver search reply (`DirFindQuery`, `PlacesQuery`,
+    /// `AvatarPickerRequest`, a god pick/classified delete) with its request.
+    QueryId,
+    "dataserver-query"
+);
+uuid_correlation_id!(
+    /// Correlates a `GroupAccount*` financial reply with its request.
+    GroupRequestId,
+    "group-account-request"
+);
+uuid_correlation_id!(
+    /// Names an ad-hoc conference IM session (`IM_SESSION_CONFERENCE_START`).
+    ImSessionId,
+    "conference IM session"
+);
+uuid_correlation_id!(
+    /// The id of a received teleport-lure offer (`ImprovedInstantMessage`'s `id`),
+    /// quoted back when accepting or declining the lure.
+    LureId,
+    "teleport-lure"
+);
+
 #[cfg(test)]
 mod tests {
-    use super::{InventoryCallbackId, PingId, TransferId, XferId};
+    use super::{
+        GroupRequestId, ImSessionId, InventoryCallbackId, LureId, PingId, QueryId, TransactionId,
+        TransferId, XferId,
+    };
     use pretty_assertions::assert_eq;
     use uuid::Uuid;
+
+    #[test]
+    fn uuid_correlation_ids_round_trip() {
+        let id = Uuid::from_u128(0x1234);
+        assert_eq!(TransactionId::from(id).get(), id);
+        assert_eq!(QueryId::new(id).get(), id);
+        assert_eq!(GroupRequestId::from(id).to_string(), id.to_string());
+        assert_eq!(ImSessionId::from(id).get(), id);
+        assert_eq!(LureId::from(id).get(), id);
+        // Distinct types do not unify, so a query id cannot stand in for a
+        // transaction id at a call site (checked by construction, not at runtime).
+        assert_eq!(LureId::default(), LureId(Uuid::nil()));
+    }
 
     #[test]
     fn ping_id_round_trips_and_wraps() {

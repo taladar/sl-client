@@ -16,22 +16,23 @@ mod test {
         DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, Direction,
         DisconnectReason, Distance, EnvironmentSettings, EstateAccessDelta, EstateAccessKind,
         Event, EventId, FollowCamProperty, FriendKey, FriendRights, GestureActivation,
-        GlobalCoordinates, Glow, GroupKey, GroupNoticeAttachment, GroupRoleChange, GroupRoleEdit,
-        GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImageCodec,
-        InterestsUpdate, InventoryCallbackId, InventoryFolderKey, InventoryItem,
-        InventoryItemOrFolderKey, InventoryKey, LandArea, LandingType, LindenAmount, LindenBalance,
-        LoginAccount, LoginParams, LookAtType, MapItemType, Material, Maturity, MeanCollisionType,
-        MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem,
-        NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
-        ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
-        ParcelKey, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-        ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate, PointAtType,
-        Postcard, PrimShape, ProductType, ProfileUpdate, ReflectionProbeFlags, RegionCoordinates,
-        RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType, Scale,
-        ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissions, SculptOrMeshKey,
-        Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType, TextureKey, Throttle,
-        TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings,
-        WearableType, avatar_texture, group_powers, pcode,
+        GlobalCoordinates, Glow, GroupKey, GroupNoticeAttachment, GroupRequestId, GroupRoleChange,
+        GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog,
+        ImSessionId, ImageCodec, InterestsUpdate, InventoryCallbackId, InventoryFolderKey,
+        InventoryItem, InventoryItemOrFolderKey, InventoryKey, LandArea, LandingType, LindenAmount,
+        LindenBalance, LoginAccount, LoginParams, LookAtType, LureId, MapItemType, Material,
+        Maturity, MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags,
+        MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey,
+        ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+        ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
+        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5,
+        PickUpdate, PointAtType, Postcard, PrimShape, ProductType, ProfileUpdate, QueryId,
+        ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability,
+        RestoreItem, RezAttachment, SaleType, Scale, ScopedObjectId, ScopedParcelId,
+        ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session, SkySettings, SoundFlags,
+        TeleportFlags, TerrainLayerType, TextureKey, Throttle, TransactionId, TransferStatus,
+        Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
+        avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -2106,7 +2107,11 @@ mod test {
 
         let transaction = uuid::Uuid::from_u128(0xAA);
         let folder = uuid::Uuid::from_u128(0xBB);
-        session.accept_friendship(transaction, InventoryFolderKey::from(folder), now)?;
+        session.accept_friendship(
+            TransactionId::from(transaction),
+            InventoryFolderKey::from(folder),
+            now,
+        )?;
         let sent = drain(&mut session)?;
         let accept = sent
             .iter()
@@ -2122,7 +2127,7 @@ mod test {
         );
 
         let decline_tx = uuid::Uuid::from_u128(0xCC);
-        session.decline_friendship(decline_tx, now)?;
+        session.decline_friendship(TransactionId::from(decline_tx), now)?;
         let sent = drain(&mut session)?;
         let decline = sent
             .iter()
@@ -4255,7 +4260,12 @@ mod test {
                 description: String::new(),
             },
         ];
-        session.rez_attachments(compound, DetachOrder::DetachAllFirst, &attachments, now)?;
+        session.rez_attachments(
+            TransactionId::from(compound),
+            DetachOrder::DetachAllFirst,
+            &attachments,
+            now,
+        )?;
         let sent = drain(&mut session)?;
         let rez = sent
             .iter()
@@ -4497,7 +4507,7 @@ mod test {
 
         let query_id = uuid::Uuid::from_u128(0x30);
         session.dir_find_query(
-            query_id,
+            QueryId::from(query_id),
             "alice",
             DirFindFlags::PEOPLE.union(DirFindFlags::ONLINE),
             20,
@@ -4983,17 +4993,37 @@ mod test {
         let request_id = uuid::Uuid::from_u128(0xF00D);
         let transaction_id = uuid::Uuid::from_u128(0x7AC7);
         let proposal_id = uuid::Uuid::from_u128(0x9A0E);
-        session.request_group_account_summary(GroupKey::from(group_id), request_id, 60, 0, now)?;
-        session.request_group_account_details(GroupKey::from(group_id), request_id, 60, 0, now)?;
-        session.request_group_account_transactions(
+        session.request_group_account_summary(
             GroupKey::from(group_id),
-            request_id,
+            GroupRequestId::from(request_id),
             60,
             0,
             now,
         )?;
-        session.request_group_active_proposals(GroupKey::from(group_id), transaction_id, now)?;
-        session.request_group_vote_history(GroupKey::from(group_id), transaction_id, now)?;
+        session.request_group_account_details(
+            GroupKey::from(group_id),
+            GroupRequestId::from(request_id),
+            60,
+            0,
+            now,
+        )?;
+        session.request_group_account_transactions(
+            GroupKey::from(group_id),
+            GroupRequestId::from(request_id),
+            60,
+            0,
+            now,
+        )?;
+        session.request_group_active_proposals(
+            GroupKey::from(group_id),
+            TransactionId::from(transaction_id),
+            now,
+        )?;
+        session.request_group_vote_history(
+            GroupKey::from(group_id),
+            TransactionId::from(transaction_id),
+            now,
+        )?;
         session.start_group_proposal(
             GroupKey::from(group_id),
             3,
@@ -10719,7 +10749,7 @@ mod test {
                 sl_proto::RegionLocalObjectId(21),
             )],
             DeRezDestination::TakeIntoAgentInventory(InventoryFolderKey::from(folder)),
-            uuid::Uuid::from_u128(0x7),
+            TransactionId::from(uuid::Uuid::from_u128(0x7)),
             None,
             now,
         )?;
@@ -11645,7 +11675,7 @@ mod test {
         drain(&mut session)?;
 
         let lure_id = uuid::Uuid::from_u128(0xCAFE);
-        session.accept_teleport_lure(lure_id, now)?;
+        session.accept_teleport_lure(LureId::from(lure_id), now)?;
         let sent = drain(&mut session)?;
         let req = sent
             .iter()
@@ -11667,7 +11697,7 @@ mod test {
 
         let from = uuid::Uuid::from_u128(0x55);
         let lure_id = uuid::Uuid::from_u128(0xCAFE);
-        session.decline_teleport_lure(AgentKey::from(from), lure_id, now)?;
+        session.decline_teleport_lure(AgentKey::from(from), LureId::from(lure_id), now)?;
         let sent = drain(&mut session)?;
         let block = first_im(&sent)?;
         assert_eq!(block.dialog, 24); // IM_LURE_DECLINED
@@ -11708,7 +11738,7 @@ mod test {
             InventoryKey::from(item),
             AssetType::Notecard,
             "My Card",
-            tx,
+            TransactionId::from(tx),
             now,
         )?;
         let sent = drain(&mut session)?;
@@ -11738,7 +11768,7 @@ mod test {
             AgentKey::from(uuid::Uuid::from_u128(0xD1)),
             InventoryFolderKey::from(folder),
             "My Folder",
-            uuid::Uuid::from_u128(0x9999),
+            TransactionId::from(uuid::Uuid::from_u128(0x9999)),
             now,
         )?;
         let sent = drain(&mut session)?;
@@ -11817,7 +11847,7 @@ mod test {
         let a = uuid::Uuid::from_u128(0xA1);
         let b = uuid::Uuid::from_u128(0xB2);
         session.start_conference(
-            session_id,
+            ImSessionId::from(session_id),
             &[AgentKey::from(a), AgentKey::from(b)],
             "hello all",
             now,
@@ -11841,8 +11871,8 @@ mod test {
         drain(&mut session)?;
 
         let session_id = uuid::Uuid::from_u128(0x5E51);
-        session.send_conference_message(session_id, "hi", now)?;
-        session.leave_conference(session_id, now)?;
+        session.send_conference_message(ImSessionId::from(session_id), "hi", now)?;
+        session.leave_conference(ImSessionId::from(session_id), now)?;
         let sent = drain(&mut session)?;
         let blocks: Vec<_> = sent
             .iter()
@@ -12143,7 +12173,7 @@ mod test {
         // uuid_crc(1) = the low 16 bytes read as four LE u32s, summed: the last
         // chunk [0,0,0,1] => 1 << 24.
         let item = sample_item(uuid::Uuid::from_u128(1), uuid::Uuid::nil(), "Renamed");
-        session.update_inventory_item(&item, uuid::Uuid::nil(), now)?;
+        session.update_inventory_item(&item, TransactionId::from(uuid::Uuid::nil()), now)?;
         let sent = drain(&mut session)?;
         let update = sent
             .iter()
