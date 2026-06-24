@@ -2106,7 +2106,7 @@ mod test {
 
         let transaction = uuid::Uuid::from_u128(0xAA);
         let folder = uuid::Uuid::from_u128(0xBB);
-        session.accept_friendship(transaction, folder, now)?;
+        session.accept_friendship(transaction, InventoryFolderKey::from(folder), now)?;
         let sent = drain(&mut session)?;
         let accept = sent
             .iter()
@@ -2753,7 +2753,7 @@ mod test {
         drain(&mut session)?;
 
         let item = uuid::Uuid::from_u128(0x6E5_7003);
-        session.deactivate_gestures(&[item], now)?;
+        session.deactivate_gestures(&[InventoryKey::from(item)], now)?;
         let sent = drain(&mut session)?;
         let deactivate = sent
             .iter()
@@ -3410,7 +3410,7 @@ mod test {
         let item = uuid::Uuid::from_u128(0x8007);
         session.answer_script_permissions(
             ObjectKey::from(task),
-            item,
+            InventoryKey::from(item),
             ScriptPermissions(ScriptPermissions::TAKE_CONTROLS),
             now,
         )?;
@@ -4182,7 +4182,7 @@ mod test {
         drain(&mut session)?;
 
         let item = uuid::Uuid::from_u128(0xAA);
-        session.remove_attachment(AttachmentPoint::Skull, item, now)?;
+        session.remove_attachment(AttachmentPoint::Skull, InventoryKey::from(item), now)?;
         let sent = drain(&mut session)?;
         let remove = sent
             .iter()
@@ -4674,8 +4674,8 @@ mod test {
         )?;
         session.buy_object_inventory(
             ObjectKey::from(object),
-            uuid::Uuid::from_u128(0x17E),
-            uuid::Uuid::nil(),
+            InventoryKey::from(uuid::Uuid::from_u128(0x17E)),
+            InventoryFolderKey::from(uuid::Uuid::nil()),
             now,
         )?;
         session.request_pay_price(ObjectKey::from(object), now)?;
@@ -4893,9 +4893,18 @@ mod test {
 
         let object_id = uuid::Uuid::from_u128(0x0B1E);
         let item_id = uuid::Uuid::from_u128(0x17E3);
-        session.request_script_running(ObjectKey::from(object_id), item_id, now)?;
-        session.set_script_running(ObjectKey::from(object_id), item_id, true, now)?;
-        session.reset_script(ObjectKey::from(object_id), item_id, now)?;
+        session.request_script_running(
+            ObjectKey::from(object_id),
+            InventoryKey::from(item_id),
+            now,
+        )?;
+        session.set_script_running(
+            ObjectKey::from(object_id),
+            InventoryKey::from(item_id),
+            true,
+            now,
+        )?;
+        session.reset_script(ObjectKey::from(object_id), InventoryKey::from(item_id), now)?;
         let sent = drain(&mut session)?;
 
         let get = sent
@@ -5927,7 +5936,7 @@ mod test {
         drain(&mut session)?;
 
         let folder = uuid::Uuid::from_u128(0xF0);
-        session.request_folder_contents(folder, now)?;
+        session.request_folder_contents(InventoryFolderKey::from(folder), now)?;
         let sent = drain(&mut session)?;
         let fetch = sent
             .iter()
@@ -11690,7 +11699,7 @@ mod test {
         let tx = uuid::Uuid::from_u128(0x9999);
         session.give_inventory(
             AgentKey::from(to),
-            item,
+            InventoryKey::from(item),
             AssetType::Notecard,
             "My Card",
             tx,
@@ -11721,7 +11730,7 @@ mod test {
         let folder = uuid::Uuid::from_u128(0x4321);
         session.give_inventory_folder(
             AgentKey::from(uuid::Uuid::from_u128(0xD1)),
-            folder,
+            InventoryFolderKey::from(folder),
             "My Folder",
             uuid::Uuid::from_u128(0x9999),
             now,
@@ -11774,7 +11783,7 @@ mod test {
 
         // Accept files the item into a destination folder.
         let folder = uuid::Uuid::from_u128(0xF0);
-        session.accept_inventory_offer(&offer, folder, now)?;
+        session.accept_inventory_offer(&offer, InventoryFolderKey::from(folder), now)?;
         let accept = drain(&mut session)?;
         let block = first_im(&accept)?;
         assert_eq!(block.dialog, 5); // IM_INVENTORY_ACCEPTED
@@ -11784,7 +11793,7 @@ mod test {
 
         // Decline routes to the trash folder.
         let trash = uuid::Uuid::from_u128(0x7A);
-        session.decline_inventory_offer(&offer, trash, now)?;
+        session.decline_inventory_offer(&offer, InventoryFolderKey::from(trash), now)?;
         let decline = drain(&mut session)?;
         let block = first_im(&decline)?;
         assert_eq!(block.dialog, 6); // IM_INVENTORY_DECLINED
@@ -12032,7 +12041,13 @@ mod test {
 
         let folder_id = uuid::Uuid::from_u128(0xF0);
         let parent_id = uuid::Uuid::from_u128(0x10);
-        session.create_inventory_folder(folder_id, parent_id, 8, "Toys & Co", now)?;
+        session.create_inventory_folder(
+            InventoryFolderKey::from(folder_id),
+            InventoryFolderKey::from(parent_id),
+            8,
+            "Toys & Co",
+            now,
+        )?;
         let sent = drain(&mut session)?;
         let create = sent
             .iter()
@@ -12049,13 +12064,13 @@ mod test {
 
         // The folder is in the cache optimistically (no reply on this path).
         let cached = session
-            .inventory_folder(folder_id)
+            .inventory_folder(InventoryFolderKey::from(folder_id))
             .ok_or("folder should be cached")?;
         assert_eq!(cached.name, "Toys & Co");
         assert_eq!(cached.parent_id, Some(InventoryFolderKey::from(parent_id)));
 
         // Removing it drops it from the cache.
-        session.remove_inventory_folders(&[folder_id], now)?;
+        session.remove_inventory_folders(&[InventoryFolderKey::from(folder_id)], now)?;
         let sent = drain(&mut session)?;
         assert!(
             sent.iter()
@@ -12063,7 +12078,9 @@ mod test {
             "expected a RemoveInventoryFolder"
         );
         assert!(
-            session.inventory_folder(folder_id).is_none(),
+            session
+                .inventory_folder(InventoryFolderKey::from(folder_id))
+                .is_none(),
             "folder should be uncached after removal"
         );
         Ok(())
@@ -12139,7 +12156,7 @@ mod test {
 
         // The optimistic cache holds the updated item.
         let cached = session
-            .inventory_item(uuid::Uuid::from_u128(1))
+            .inventory_item(InventoryKey::from(uuid::Uuid::from_u128(1)))
             .ok_or("item should be cached")?;
         assert_eq!(cached.name, "Renamed");
         Ok(())
@@ -12153,7 +12170,12 @@ mod test {
 
         let item_id = uuid::Uuid::from_u128(0x21);
         let folder_id = uuid::Uuid::from_u128(0x22);
-        session.move_inventory_item(item_id, folder_id, "NewName", now)?;
+        session.move_inventory_item(
+            InventoryKey::from(item_id),
+            InventoryFolderKey::from(folder_id),
+            "NewName",
+            now,
+        )?;
         let sent = drain(&mut session)?;
         let mv = sent
             .iter()
@@ -12248,11 +12270,11 @@ mod test {
         assert_eq!(second_item.name, "Second Note");
 
         let cached = session
-            .inventory_item(item_id)
+            .inventory_item(InventoryKey::from(item_id))
             .ok_or("item should be cached")?;
         assert_eq!(cached.name, "Fresh Note");
         let second_cached = session
-            .inventory_item(second_item_id)
+            .inventory_item(InventoryKey::from(second_item_id))
             .ok_or("second item should be cached")?;
         assert_eq!(second_cached.name, "Second Note");
         Ok(())
@@ -12330,14 +12352,14 @@ mod test {
 
         assert_eq!(
             session
-                .inventory_folder(folder_id)
+                .inventory_folder(InventoryFolderKey::from(folder_id))
                 .ok_or("folder should be cached")?
                 .name,
             "Copied Folder"
         );
         assert_eq!(
             session
-                .inventory_item(item_id)
+                .inventory_item(InventoryKey::from(item_id))
                 .ok_or("item should be cached")?
                 .name,
             "Copied Item"

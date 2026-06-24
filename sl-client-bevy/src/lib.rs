@@ -601,7 +601,7 @@ fn advance_running(
                     .ok();
             }
             Command::RequestFolderContents(folder_id) => {
-                session.request_folder_contents(folder_id.uuid(), now).ok();
+                session.request_folder_contents(*folder_id, now).ok();
             }
             Command::FetchInventoryFolders(folder_ids) => {
                 if let Some(caps) = caps.as_ref()
@@ -624,13 +624,7 @@ fn advance_running(
                 name,
             } => {
                 session
-                    .create_inventory_folder(
-                        folder_id.uuid(),
-                        parent_id.uuid(),
-                        *folder_type,
-                        name,
-                        now,
-                    )
+                    .create_inventory_folder(*folder_id, *parent_id, *folder_type, name, now)
                     .ok();
             }
             Command::UpdateInventoryFolder {
@@ -640,13 +634,7 @@ fn advance_running(
                 name,
             } => {
                 session
-                    .update_inventory_folder(
-                        folder_id.uuid(),
-                        parent_id.uuid(),
-                        *folder_type,
-                        name,
-                        now,
-                    )
+                    .update_inventory_folder(*folder_id, *parent_id, *folder_type, name, now)
                     .ok();
             }
             Command::MoveInventoryFolder {
@@ -654,12 +642,11 @@ fn advance_running(
                 parent_id,
             } => {
                 session
-                    .move_inventory_folder(folder_id.uuid(), parent_id.uuid(), now)
+                    .move_inventory_folder(*folder_id, *parent_id, now)
                     .ok();
             }
             Command::RemoveInventoryFolders(folder_ids) => {
-                let folder_ids: Vec<Uuid> = folder_ids.iter().map(|id| id.uuid()).collect();
-                session.remove_inventory_folders(&folder_ids, now).ok();
+                session.remove_inventory_folders(folder_ids, now).ok();
             }
             Command::CreateInventoryItem(new) => {
                 session.create_inventory_item(new, now).ok();
@@ -678,7 +665,7 @@ fn advance_running(
                 new_name,
             } => {
                 session
-                    .move_inventory_item(item_id.uuid(), folder_id.uuid(), new_name, now)
+                    .move_inventory_item(*item_id, *folder_id, new_name, now)
                     .ok();
             }
             Command::CopyInventoryItem {
@@ -688,37 +675,26 @@ fn advance_running(
                 new_name,
             } => {
                 session
-                    .copy_inventory_item(
-                        *old_agent_id,
-                        old_item_id.uuid(),
-                        new_folder_id.uuid(),
-                        new_name,
-                        now,
-                    )
+                    .copy_inventory_item(*old_agent_id, *old_item_id, *new_folder_id, new_name, now)
                     .ok();
             }
             Command::RemoveInventoryItems(item_ids) => {
-                let item_ids: Vec<Uuid> = item_ids.iter().map(|id| id.uuid()).collect();
-                session.remove_inventory_items(&item_ids, now).ok();
+                session.remove_inventory_items(item_ids, now).ok();
             }
             Command::ChangeInventoryItemFlags { item_id, flags } => {
                 session
-                    .change_inventory_item_flags(item_id.uuid(), *flags, now)
+                    .change_inventory_item_flags(*item_id, *flags, now)
                     .ok();
             }
             Command::PurgeInventoryDescendents(folder_id) => {
-                session
-                    .purge_inventory_descendents(folder_id.uuid(), now)
-                    .ok();
+                session.purge_inventory_descendents(*folder_id, now).ok();
             }
             Command::RemoveInventoryObjects {
                 folder_ids,
                 item_ids,
             } => {
-                let folder_ids: Vec<Uuid> = folder_ids.iter().map(|id| id.uuid()).collect();
-                let item_ids: Vec<Uuid> = item_ids.iter().map(|id| id.uuid()).collect();
                 session
-                    .remove_inventory_objects(&folder_ids, &item_ids, now)
+                    .remove_inventory_objects(folder_ids, item_ids, now)
                     .ok();
             }
             Command::CreateInventoryCategory {
@@ -903,7 +879,7 @@ fn advance_running(
                 calling_card_folder,
             } => {
                 session
-                    .accept_friendship(*transaction_id, calling_card_folder.uuid(), now)
+                    .accept_friendship(*transaction_id, *calling_card_folder, now)
                     .ok();
             }
             Command::DeclineFriendship(transaction_id) => {
@@ -989,8 +965,7 @@ fn advance_running(
                 session.activate_gestures(gestures, now).ok();
             }
             Command::DeactivateGestures { item_ids } => {
-                let item_ids: Vec<Uuid> = item_ids.iter().map(|id| id.uuid()).collect();
-                session.deactivate_gestures(&item_ids, now).ok();
+                session.deactivate_gestures(item_ids, now).ok();
             }
             Command::SetAlwaysRun { mode } => {
                 session.set_always_run(*mode, now).ok();
@@ -1133,7 +1108,7 @@ fn advance_running(
                 permissions,
             } => {
                 session
-                    .answer_script_permissions(*task_id, item_id.uuid(), *permissions, now)
+                    .answer_script_permissions(*task_id, *item_id, *permissions, now)
                     .ok();
             }
             Command::RequestMuteList => {
@@ -1690,7 +1665,7 @@ fn advance_running(
                 item_id,
             } => {
                 session
-                    .remove_attachment(*attachment_point, item_id.uuid(), now)
+                    .remove_attachment(*attachment_point, *item_id, now)
                     .ok();
             }
             Command::RezAttachment(rez) => {
@@ -1831,7 +1806,7 @@ fn advance_running(
                 folder_id,
             } => {
                 session
-                    .buy_object_inventory(*object_id, item_id.uuid(), folder_id.uuid(), now)
+                    .buy_object_inventory(*object_id, *item_id, *folder_id, now)
                     .ok();
             }
             Command::RequestPayPrice { object_id } => {
@@ -1895,7 +1870,7 @@ fn advance_running(
             }
             Command::RequestScriptRunning { object_id, item_id } => {
                 session
-                    .request_script_running(*object_id, item_id.uuid(), now)
+                    .request_script_running(*object_id, *item_id, now)
                     .ok();
             }
             Command::SetScriptRunning {
@@ -1904,11 +1879,11 @@ fn advance_running(
                 running,
             } => {
                 session
-                    .set_script_running(*object_id, item_id.uuid(), *running, now)
+                    .set_script_running(*object_id, *item_id, *running, now)
                     .ok();
             }
             Command::ResetScript { object_id, item_id } => {
-                session.reset_script(*object_id, item_id.uuid(), now).ok();
+                session.reset_script(*object_id, *item_id, now).ok();
             }
             Command::UploadAssetUdp {
                 asset_type,
@@ -2394,7 +2369,7 @@ fn advance_running(
                 session
                     .give_inventory(
                         *to_agent_id,
-                        item_id.uuid(),
+                        *item_id,
                         *asset_type,
                         item_name,
                         *transaction_id,
@@ -2411,7 +2386,7 @@ fn advance_running(
                 session
                     .give_inventory_folder(
                         *to_agent_id,
-                        folder_id.uuid(),
+                        *folder_id,
                         folder_name,
                         *transaction_id,
                         now,
@@ -2419,16 +2394,14 @@ fn advance_running(
                     .ok();
             }
             Command::AcceptInventoryOffer { offer, folder_id } => {
-                session
-                    .accept_inventory_offer(offer, folder_id.uuid(), now)
-                    .ok();
+                session.accept_inventory_offer(offer, *folder_id, now).ok();
             }
             Command::DeclineInventoryOffer {
                 offer,
                 trash_folder_id,
             } => {
                 session
-                    .decline_inventory_offer(offer, trash_folder_id.uuid(), now)
+                    .decline_inventory_offer(offer, *trash_folder_id, now)
                     .ok();
             }
             Command::StartConference {

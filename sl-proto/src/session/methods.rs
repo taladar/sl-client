@@ -3769,11 +3769,11 @@ impl Session {
     pub fn accept_friendship(
         &mut self,
         transaction_id: Uuid,
-        calling_card_folder: Uuid,
+        calling_card_folder: InventoryFolderKey,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_accept_friendship(transaction_id, calling_card_folder, now)?;
+        circuit.send_accept_friendship(transaction_id, calling_card_folder.uuid(), now)?;
         Ok(())
     }
 
@@ -4158,9 +4158,14 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn deactivate_gestures(&mut self, item_ids: &[Uuid], now: Instant) -> Result<(), Error> {
+    pub fn deactivate_gestures(
+        &mut self,
+        item_ids: &[InventoryKey],
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_deactivate_gestures(item_ids, now)?;
+        let wire: Vec<Uuid> = item_ids.iter().map(InventoryKey::uuid).collect();
+        circuit.send_deactivate_gestures(&wire, now)?;
         Ok(())
     }
 
@@ -4582,14 +4587,14 @@ impl Session {
     pub fn give_inventory(
         &mut self,
         to_agent_id: AgentKey,
-        item_id: Uuid,
+        item_id: InventoryKey,
         asset_type: AssetType,
         item_name: &str,
         transaction_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
-        let bucket = inventory_offer_bucket(asset_type, item_id)?;
+        let bucket = inventory_offer_bucket(asset_type, item_id.uuid())?;
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
@@ -4617,13 +4622,13 @@ impl Session {
     pub fn give_inventory_folder(
         &mut self,
         to_agent_id: AgentKey,
-        folder_id: Uuid,
+        folder_id: InventoryFolderKey,
         folder_name: &str,
         transaction_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
-        let bucket = inventory_offer_bucket(AssetType::Folder, folder_id)?;
+        let bucket = inventory_offer_bucket(AssetType::Folder, folder_id.uuid())?;
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
@@ -4652,7 +4657,7 @@ impl Session {
     pub fn accept_inventory_offer(
         &mut self,
         offer: &InventoryOffer,
-        folder_id: Uuid,
+        folder_id: InventoryFolderKey,
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
@@ -4665,7 +4670,7 @@ impl Session {
                 id: offer.transaction_id,
                 message: "",
                 from_name: &from_name,
-                binary_bucket: folder_id.as_bytes().to_vec(),
+                binary_bucket: folder_id.uuid().as_bytes().to_vec(),
             },
             now,
         )?;
@@ -4682,7 +4687,7 @@ impl Session {
     pub fn decline_inventory_offer(
         &mut self,
         offer: &InventoryOffer,
-        trash_folder_id: Uuid,
+        trash_folder_id: InventoryFolderKey,
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
@@ -4695,7 +4700,7 @@ impl Session {
                 id: offer.transaction_id,
                 message: "",
                 from_name: &from_name,
-                binary_bucket: trash_folder_id.as_bytes().to_vec(),
+                binary_bucket: trash_folder_id.uuid().as_bytes().to_vec(),
             },
             now,
         )?;
@@ -4854,12 +4859,12 @@ impl Session {
     pub fn answer_script_permissions(
         &mut self,
         task_id: ObjectKey,
-        item_id: Uuid,
+        item_id: InventoryKey,
         permissions: ScriptPermissions,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_script_answer_yes(task_id, item_id, permissions.0, now)?;
+        circuit.send_script_answer_yes(task_id, item_id.uuid(), permissions.0, now)?;
         Ok(())
     }
 
@@ -5184,11 +5189,11 @@ impl Session {
     pub fn remove_attachment(
         &mut self,
         attachment_point: AttachmentPoint,
-        item_id: Uuid,
+        item_id: InventoryKey,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_remove_attachment(attachment_point, item_id, now)?;
+        circuit.send_remove_attachment(attachment_point, item_id.uuid(), now)?;
         Ok(())
     }
 
@@ -5515,12 +5520,12 @@ impl Session {
     pub fn buy_object_inventory(
         &mut self,
         object_id: ObjectKey,
-        item_id: Uuid,
-        folder_id: Uuid,
+        item_id: InventoryKey,
+        folder_id: InventoryFolderKey,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_buy_object_inventory(object_id, item_id, folder_id, now)?;
+        circuit.send_buy_object_inventory(object_id, item_id.uuid(), folder_id.uuid(), now)?;
         Ok(())
     }
 
@@ -5685,11 +5690,11 @@ impl Session {
     pub fn request_script_running(
         &mut self,
         object_id: ObjectKey,
-        item_id: Uuid,
+        item_id: InventoryKey,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_get_script_running(object_id, item_id, now)?;
+        circuit.send_get_script_running(object_id, item_id.uuid(), now)?;
         Ok(())
     }
 
@@ -5703,12 +5708,12 @@ impl Session {
     pub fn set_script_running(
         &mut self,
         object_id: ObjectKey,
-        item_id: Uuid,
+        item_id: InventoryKey,
         running: bool,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_set_script_running(object_id, item_id, running, now)?;
+        circuit.send_set_script_running(object_id, item_id.uuid(), running, now)?;
         Ok(())
     }
 
@@ -5722,11 +5727,11 @@ impl Session {
     pub fn reset_script(
         &mut self,
         object_id: ObjectKey,
-        item_id: Uuid,
+        item_id: InventoryKey,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_script_reset(object_id, item_id, now)?;
+        circuit.send_script_reset(object_id, item_id.uuid(), now)?;
         Ok(())
     }
 
@@ -5895,9 +5900,13 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn request_folder_contents(&mut self, folder_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn request_folder_contents(
+        &mut self,
+        folder_id: InventoryFolderKey,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_fetch_inventory_descendents(folder_id, now)?;
+        circuit.send_fetch_inventory_descendents(folder_id.uuid(), now)?;
         Ok(())
     }
 
@@ -5906,15 +5915,15 @@ impl Session {
     /// A cached inventory folder by id, if known (from the login skeleton, a
     /// folder-contents fetch, a simulator push, or the agent's own mutations).
     #[must_use]
-    pub fn inventory_folder(&self, folder_id: Uuid) -> Option<&InventoryFolder> {
-        self.inventory_folders.get(&folder_id)
+    pub fn inventory_folder(&self, folder_id: InventoryFolderKey) -> Option<&InventoryFolder> {
+        self.inventory_folders.get(&folder_id.uuid())
     }
 
     /// A cached inventory item by id, if known (from a folder-contents fetch, a
     /// simulator push, or the agent's own mutations).
     #[must_use]
-    pub fn inventory_item(&self, item_id: Uuid) -> Option<&InventoryItem> {
-        self.inventory_items.get(&item_id)
+    pub fn inventory_item(&self, item_id: InventoryKey) -> Option<&InventoryItem> {
+        self.inventory_items.get(&item_id.uuid())
     }
 
     /// All cached inventory folders, keyed by folder id.
@@ -5936,8 +5945,9 @@ impl Session {
     #[must_use]
     pub fn inventory_children(
         &self,
-        folder_id: Uuid,
+        folder_id: InventoryFolderKey,
     ) -> (Vec<&InventoryFolder>, Vec<&InventoryItem>) {
+        let folder_id = folder_id.uuid();
         let folders = self
             .inventory_folders
             .values()
@@ -6021,17 +6031,23 @@ impl Session {
     /// [`Error::Wire`] on an encode failure.
     pub fn create_inventory_folder(
         &mut self,
-        folder_id: Uuid,
-        parent_id: Uuid,
+        folder_id: InventoryFolderKey,
+        parent_id: InventoryFolderKey,
         folder_type: i8,
         name: &str,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_create_inventory_folder(folder_id, parent_id, folder_type, name, now)?;
+        circuit.send_create_inventory_folder(
+            folder_id.uuid(),
+            parent_id.uuid(),
+            folder_type,
+            name,
+            now,
+        )?;
         self.cache_inventory_folder(InventoryFolder {
-            folder_id: InventoryFolderKey::from(folder_id),
-            parent_id: crate::types::optional_key_from_wire(parent_id),
+            folder_id,
+            parent_id: crate::types::optional_key_from_wire(parent_id.uuid()),
             name: name.to_owned(),
             folder_type,
             version: 1,
@@ -6048,22 +6064,28 @@ impl Session {
     /// [`Error::Wire`] on an encode failure.
     pub fn update_inventory_folder(
         &mut self,
-        folder_id: Uuid,
-        parent_id: Uuid,
+        folder_id: InventoryFolderKey,
+        parent_id: InventoryFolderKey,
         folder_type: i8,
         name: &str,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_update_inventory_folder(folder_id, parent_id, folder_type, name, now)?;
+        circuit.send_update_inventory_folder(
+            folder_id.uuid(),
+            parent_id.uuid(),
+            folder_type,
+            name,
+            now,
+        )?;
         self.cache_inventory_folder(InventoryFolder {
-            folder_id: InventoryFolderKey::from(folder_id),
-            parent_id: crate::types::optional_key_from_wire(parent_id),
+            folder_id,
+            parent_id: crate::types::optional_key_from_wire(parent_id.uuid()),
             name: name.to_owned(),
             folder_type,
             version: self
                 .inventory_folders
-                .get(&folder_id)
+                .get(&folder_id.uuid())
                 .map_or(1, |folder| folder.version),
         });
         Ok(())
@@ -6079,8 +6101,8 @@ impl Session {
     /// [`Error::Wire`] on an encode failure.
     pub fn move_inventory_folder(
         &mut self,
-        folder_id: Uuid,
-        parent_id: Uuid,
+        folder_id: InventoryFolderKey,
+        parent_id: InventoryFolderKey,
         now: Instant,
     ) -> Result<(), Error> {
         self.move_inventory_folders(&[(folder_id, parent_id)], false, now)
@@ -6096,15 +6118,19 @@ impl Session {
     /// [`Error::Wire`] on an encode failure.
     pub fn move_inventory_folders(
         &mut self,
-        moves: &[(Uuid, Uuid)],
+        moves: &[(InventoryFolderKey, InventoryFolderKey)],
         stamp: bool,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_move_inventory_folders(moves, stamp, now)?;
+        let wire: Vec<(Uuid, Uuid)> = moves
+            .iter()
+            .map(|(folder_id, parent_id)| (folder_id.uuid(), parent_id.uuid()))
+            .collect();
+        circuit.send_move_inventory_folders(&wire, stamp, now)?;
         for &(folder_id, parent_id) in moves {
-            if let Some(folder) = self.inventory_folders.get_mut(&folder_id) {
-                folder.parent_id = crate::types::optional_key_from_wire(parent_id);
+            if let Some(folder) = self.inventory_folders.get_mut(&folder_id.uuid()) {
+                folder.parent_id = crate::types::optional_key_from_wire(parent_id.uuid());
             }
         }
         Ok(())
@@ -6119,14 +6145,15 @@ impl Session {
     /// [`Error::Wire`] on an encode failure.
     pub fn remove_inventory_folders(
         &mut self,
-        folder_ids: &[Uuid],
+        folder_ids: &[InventoryFolderKey],
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_remove_inventory_folders(folder_ids, now)?;
-        for &folder_id in folder_ids {
-            self.purge_cached_descendents(folder_id);
-            self.inventory_folders.remove(&folder_id);
+        let wire: Vec<Uuid> = folder_ids.iter().map(InventoryFolderKey::uuid).collect();
+        circuit.send_remove_inventory_folders(&wire, now)?;
+        for folder_id in folder_ids {
+            self.purge_cached_descendents(folder_id.uuid());
+            self.inventory_folders.remove(&folder_id.uuid());
         }
         Ok(())
     }
@@ -6181,8 +6208,8 @@ impl Session {
     /// [`Error::Wire`] on an encode failure.
     pub fn move_inventory_item(
         &mut self,
-        item_id: Uuid,
-        folder_id: Uuid,
+        item_id: InventoryKey,
+        folder_id: InventoryFolderKey,
         new_name: &str,
         now: Instant,
     ) -> Result<(), Error> {
@@ -6199,15 +6226,21 @@ impl Session {
     /// [`Error::Wire`] on an encode failure.
     pub fn move_inventory_items(
         &mut self,
-        moves: &[(Uuid, Uuid, String)],
+        moves: &[(InventoryKey, InventoryFolderKey, String)],
         stamp: bool,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_move_inventory_items(moves, stamp, now)?;
+        let wire: Vec<(Uuid, Uuid, String)> = moves
+            .iter()
+            .map(|(item_id, folder_id, new_name)| {
+                (item_id.uuid(), folder_id.uuid(), new_name.clone())
+            })
+            .collect();
+        circuit.send_move_inventory_items(&wire, stamp, now)?;
         for (item_id, folder_id, new_name) in moves {
-            if let Some(item) = self.inventory_items.get_mut(item_id) {
-                item.folder_id = InventoryFolderKey::from(*folder_id);
+            if let Some(item) = self.inventory_items.get_mut(&item_id.uuid()) {
+                item.folder_id = *folder_id;
                 if !new_name.is_empty() {
                     item.name.clone_from(new_name);
                 }
@@ -6228,8 +6261,8 @@ impl Session {
     pub fn copy_inventory_item(
         &mut self,
         old_agent_id: AgentKey,
-        old_item_id: Uuid,
-        new_folder_id: Uuid,
+        old_item_id: InventoryKey,
+        new_folder_id: InventoryFolderKey,
         new_name: &str,
         now: Instant,
     ) -> Result<InventoryCallbackId, Error> {
@@ -6237,8 +6270,8 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_copy_inventory_item(
             old_agent_id,
-            old_item_id,
-            new_folder_id,
+            old_item_id.uuid(),
+            new_folder_id.uuid(),
             new_name,
             callback_id,
             now,
@@ -6252,11 +6285,16 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established, or
     /// [`Error::Wire`] on an encode failure.
-    pub fn remove_inventory_items(&mut self, item_ids: &[Uuid], now: Instant) -> Result<(), Error> {
+    pub fn remove_inventory_items(
+        &mut self,
+        item_ids: &[InventoryKey],
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_remove_inventory_items(item_ids, now)?;
+        let wire: Vec<Uuid> = item_ids.iter().map(InventoryKey::uuid).collect();
+        circuit.send_remove_inventory_items(&wire, now)?;
         for item_id in item_ids {
-            self.inventory_items.remove(item_id);
+            self.inventory_items.remove(&item_id.uuid());
         }
         Ok(())
     }
@@ -6270,13 +6308,13 @@ impl Session {
     /// [`Error::Wire`] on an encode failure.
     pub fn change_inventory_item_flags(
         &mut self,
-        item_id: Uuid,
+        item_id: InventoryKey,
         flags: u32,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_change_inventory_item_flags(item_id, flags, now)?;
-        if let Some(item) = self.inventory_items.get_mut(&item_id) {
+        circuit.send_change_inventory_item_flags(item_id.uuid(), flags, now)?;
+        if let Some(item) = self.inventory_items.get_mut(&item_id.uuid()) {
             item.flags = flags;
         }
         Ok(())
@@ -6291,12 +6329,12 @@ impl Session {
     /// [`Error::Wire`] on an encode failure.
     pub fn purge_inventory_descendents(
         &mut self,
-        folder_id: Uuid,
+        folder_id: InventoryFolderKey,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_purge_inventory_descendents(folder_id, now)?;
-        self.purge_cached_descendents(folder_id);
+        circuit.send_purge_inventory_descendents(folder_id.uuid(), now)?;
+        self.purge_cached_descendents(folder_id.uuid());
         Ok(())
     }
 
@@ -6309,18 +6347,20 @@ impl Session {
     /// [`Error::Wire`] on an encode failure.
     pub fn remove_inventory_objects(
         &mut self,
-        folder_ids: &[Uuid],
-        item_ids: &[Uuid],
+        folder_ids: &[InventoryFolderKey],
+        item_ids: &[InventoryKey],
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_remove_inventory_objects(folder_ids, item_ids, now)?;
-        for &folder_id in folder_ids {
-            self.purge_cached_descendents(folder_id);
-            self.inventory_folders.remove(&folder_id);
+        let folder_wire: Vec<Uuid> = folder_ids.iter().map(InventoryFolderKey::uuid).collect();
+        let item_wire: Vec<Uuid> = item_ids.iter().map(InventoryKey::uuid).collect();
+        circuit.send_remove_inventory_objects(&folder_wire, &item_wire, now)?;
+        for folder_id in folder_ids {
+            self.purge_cached_descendents(folder_id.uuid());
+            self.inventory_folders.remove(&folder_id.uuid());
         }
         for item_id in item_ids {
-            self.inventory_items.remove(item_id);
+            self.inventory_items.remove(&item_id.uuid());
         }
         Ok(())
     }
