@@ -747,8 +747,8 @@ pub(crate) fn parcel_info(msg: &ParcelProperties) -> Result<ParcelInfo, sl_wire:
         )?,
         name: trimmed_string(&data.name),
         description: trimmed_string(&data.desc),
-        music_url: trimmed_string(&data.music_url),
-        media_url: trimmed_string(&data.media_url),
+        music_url: sl_wire::optional_url_from_wire("MusicURL", &trimmed_string(&data.music_url))?,
+        media_url: sl_wire::optional_url_from_wire("MediaURL", &trimmed_string(&data.media_url))?,
         media_id: crate::types::optional_key_from_wire(data.media_id),
         media_auto_scale: data.media_auto_scale != 0,
         auth_buyer_id: crate::types::optional_key_from_wire(data.auth_buyer_id),
@@ -1725,7 +1725,7 @@ pub(crate) struct CapsTeleportFinish {
     /// The destination simulator's UDP address.
     pub(crate) dest: SocketAddr,
     /// The destination region's seed capability URL.
-    pub(crate) seed: String,
+    pub(crate) seed: url::Url,
     /// The destination region's maturity byte (`SimAccess`).
     pub(crate) sim_access: u8,
     /// The `TeleportFlags` bitfield.
@@ -1746,11 +1746,15 @@ pub(crate) fn teleport_finish_from_llsd(body: &Llsd) -> Option<CapsTeleportFinis
         .try_into()
         .ok()?;
     let port = u16::try_from(info.get("SimPort").and_then(Llsd::as_i32)?).ok()?;
-    let seed = info
-        .get("SeedCapability")
-        .and_then(Llsd::as_str)
-        .unwrap_or("")
-        .to_owned();
+    // The seed capability is required for the teleport; an empty or unparsable
+    // value drops the whole `TeleportFinish` (surfaced as a CAPS-decode failure).
+    let seed = sl_wire::url_from_wire(
+        "SeedCapability",
+        info.get("SeedCapability")
+            .and_then(Llsd::as_str)
+            .unwrap_or(""),
+    )
+    .ok()?;
     // `SimAccess` is encoded as an LLSD integer; clamp into the maturity byte.
     let sim_access = info
         .get("SimAccess")
@@ -1787,7 +1791,7 @@ pub(crate) fn enable_simulator_from_caps_llsd(body: &Llsd) -> Option<(u64, Socke
 /// from a CAPS `CrossedRegion` event body: the `RegionData` array carries
 /// `RegionHandle` (u64), `SimIP` (4 bytes), `SimPort` (plain integer, no swap)
 /// and `SeedCapability` (url).
-pub(crate) fn crossed_region_from_caps_llsd(body: &Llsd) -> Option<(u64, SocketAddr, String)> {
+pub(crate) fn crossed_region_from_caps_llsd(body: &Llsd) -> Option<(u64, SocketAddr, url::Url)> {
     let region = body.get("RegionData").and_then(|r| r.index(0))?;
     let handle = region.get("RegionHandle").map(llsd_u64)?;
     let octets: [u8; 4] = region
@@ -1796,11 +1800,16 @@ pub(crate) fn crossed_region_from_caps_llsd(body: &Llsd) -> Option<(u64, SocketA
         .try_into()
         .ok()?;
     let port = u16::try_from(region.get("SimPort").and_then(Llsd::as_i32)?).ok()?;
-    let seed = region
-        .get("SeedCapability")
-        .and_then(Llsd::as_str)
-        .unwrap_or("")
-        .to_owned();
+    // The seed capability is required for the handover; an empty or unparsable
+    // value drops the whole `CrossedRegion` (surfaced as a CAPS-decode failure).
+    let seed = sl_wire::url_from_wire(
+        "SeedCapability",
+        region
+            .get("SeedCapability")
+            .and_then(Llsd::as_str)
+            .unwrap_or(""),
+    )
+    .ok()?;
     Some((
         handle,
         SocketAddr::new(IpAddr::V4(Ipv4Addr::from(octets)), port),
@@ -1811,14 +1820,20 @@ pub(crate) fn crossed_region_from_caps_llsd(body: &Llsd) -> Option<(u64, SocketA
 /// Extracts the child region's simulator address and seed capability from a CAPS
 /// `EstablishAgentCommunication` event body: `{ "sim-ip-and-port": "ip:port",
 /// "seed-capability": url }`.
-pub(crate) fn establish_agent_communication_from_llsd(body: &Llsd) -> Option<(SocketAddr, String)> {
+pub(crate) fn establish_agent_communication_from_llsd(
+    body: &Llsd,
+) -> Option<(SocketAddr, url::Url)> {
     let sim = body.get("sim-ip-and-port").and_then(Llsd::as_str)?;
     let sim: SocketAddr = sim.parse().ok()?;
-    let seed = body
-        .get("seed-capability")
-        .and_then(Llsd::as_str)
-        .unwrap_or("")
-        .to_owned();
+    // The seed capability is required; an empty or unparsable URL drops the
+    // whole establish event (the `.ok()?` matches the `sim` parse above).
+    let seed = sl_wire::url_from_wire(
+        "seed-capability",
+        body.get("seed-capability")
+            .and_then(Llsd::as_str)
+            .unwrap_or(""),
+    )
+    .ok()?;
     Some((sim, seed))
 }
 
@@ -1903,8 +1918,10 @@ pub(crate) fn parcel_info_from_llsd(body: &Llsd) -> Option<ParcelInfo> {
         .ok()?,
         name: str_field("Name"),
         description: str_field("Desc"),
-        music_url: str_field("MusicURL"),
-        media_url: str_field("MediaURL"),
+        // A non-empty but unparsable URL drops the whole parcel record (the same
+        // non-masking stance the `.ok()?` above applies to the sale price).
+        music_url: sl_wire::optional_url_from_wire("MusicURL", &str_field("MusicURL")).ok()?,
+        media_url: sl_wire::optional_url_from_wire("MediaURL", &str_field("MediaURL")).ok()?,
         media_id: crate::types::optional_key_from_wire(uuid_field("MediaID")),
         // OpenSim encodes MediaAutoScale as an LLSD boolean; `as_bool` also
         // tolerates the integer form.
@@ -3152,8 +3169,14 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Result<Llsd, sl_wire::WireError
         ),
         ("Name", Llsd::String(info.name.clone())),
         ("Desc", Llsd::String(info.description.clone())),
-        ("MusicURL", Llsd::String(info.music_url.clone())),
-        ("MediaURL", Llsd::String(info.media_url.clone())),
+        (
+            "MusicURL",
+            Llsd::String(sl_wire::optional_url_to_wire(info.music_url.as_ref())),
+        ),
+        (
+            "MediaURL",
+            Llsd::String(sl_wire::optional_url_to_wire(info.media_url.as_ref())),
+        ),
         (
             "MediaID",
             Llsd::Uuid(crate::types::optional_key_to_wire(info.media_id, |k| {
@@ -3701,11 +3724,16 @@ pub(crate) fn pack_quaternion_to_vec3(rotation: &Rotation) -> [f32; 3] {
 }
 
 /// Builds an [`Object`] from a full `ObjectUpdate` object-data block.
+///
+/// # Errors
+///
+/// Returns [`WireError::InvalidUrl`](sl_wire::WireError::InvalidUrl) when the
+/// block carries a non-empty but unparsable media URL.
 pub(crate) fn object_from_full_update(
     block: &ObjectUpdateObjectDataBlock,
     region_handle: RegionHandle,
-) -> Object {
-    Object {
+) -> Result<Object, sl_wire::WireError> {
+    Ok(Object {
         region_handle,
         local_id: RegionLocalObjectId(block.id),
         // Stamped by the session when the object is cached (`upsert_object`).
@@ -3728,7 +3756,7 @@ pub(crate) fn object_from_full_update(
         text: trimmed_string(&block.text),
         text_color: block.text_color,
         name_value: trimmed_string(&block.name_value),
-        media_url: trimmed_string(&block.media_url),
+        media_url: sl_wire::optional_url_from_wire("MediaURL", &trimmed_string(&block.media_url))?,
         texture_entry: block.texture_entry.clone(),
         texture_anim: block.texture_anim.clone(),
         texture_animation: crate::particles::decode_texture_anim(&block.texture_anim),
@@ -3742,7 +3770,7 @@ pub(crate) fn object_from_full_update(
         joint_type: block.joint_type,
         joint_pivot: block.joint_pivot.clone(),
         joint_axis_or_anchor: block.joint_axis_or_anchor.clone(),
-    }
+    })
 }
 
 /// Reads the path/profile [`PrimShapeParams`] from a full `ObjectUpdate` block's
@@ -3915,18 +3943,19 @@ mod caps_serializer_tests {
     }
 
     #[test]
-    fn teleport_finish_round_trips() {
+    fn teleport_finish_round_trips() -> Result<(), url::ParseError> {
         let dest = addr(192, 168, 7, 9, 13_001);
         let llsd = teleport_finish_to_llsd(dest, "https://seed/tp", 21, 0x8000_00ff);
         assert_eq!(
             teleport_finish_from_llsd(&llsd),
             Some(CapsTeleportFinish {
                 dest,
-                seed: "https://seed/tp".to_owned(),
+                seed: "https://seed/tp".parse()?,
                 sim_access: 21,
                 teleport_flags: 0x8000_00ff,
             })
         );
+        Ok(())
     }
 
     #[test]
@@ -3938,24 +3967,26 @@ mod caps_serializer_tests {
     }
 
     #[test]
-    fn crossed_region_round_trips() {
+    fn crossed_region_round_trips() -> Result<(), url::ParseError> {
         let dest = addr(10, 0, 0, 6, 9001);
         let handle = 0x0003_ec00_0003_e800;
         let llsd = crossed_region_to_caps_llsd(handle, dest, "https://seed/x");
         assert_eq!(
             crossed_region_from_caps_llsd(&llsd),
-            Some((handle, dest, "https://seed/x".to_owned()))
+            Some((handle, dest, "https://seed/x".parse()?))
         );
+        Ok(())
     }
 
     #[test]
-    fn establish_agent_communication_round_trips() {
+    fn establish_agent_communication_round_trips() -> Result<(), url::ParseError> {
         let sim = addr(10, 0, 0, 7, 9002);
         let llsd = establish_agent_communication_to_llsd(sim, "https://seed/eac");
         assert_eq!(
             establish_agent_communication_from_llsd(&llsd),
-            Some((sim, "https://seed/eac".to_owned()))
+            Some((sim, "https://seed/eac".parse()?))
         );
+        Ok(())
     }
 
     #[test]
@@ -4017,8 +4048,8 @@ mod caps_serializer_tests {
             sale_price: Some(LindenAmount(999)),
             name: "Test Parcel".to_owned(),
             description: "A description".to_owned(),
-            music_url: "http://music".to_owned(),
-            media_url: "http://media".to_owned(),
+            music_url: Some(sl_wire::url_from_wire("MusicURL", "http://music")?),
+            media_url: Some(sl_wire::url_from_wire("MediaURL", "http://media")?),
             media_id: Some(TextureKey::from(Uuid::from_u128(0x33))),
             media_auto_scale: true,
             auth_buyer_id: Some(AgentKey::from(Uuid::from_u128(0x44))),

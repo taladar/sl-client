@@ -94,9 +94,9 @@ pub(crate) async fn fetch_land_resources(
         .await
         .ok();
 
-    if !urls.script_resource_summary.is_empty() {
+    if let Some(summary) = urls.script_resource_summary {
         get_caps_llsd(
-            urls.script_resource_summary,
+            summary.to_string(),
             LAND_RESOURCE_SUMMARY_TAG,
             http.clone(),
             caps_tx.clone(),
@@ -104,7 +104,13 @@ pub(crate) async fn fetch_land_resources(
         .await;
     }
     if let Some(detail_url) = urls.script_resource_details {
-        get_caps_llsd(detail_url, LAND_RESOURCE_DETAIL_TAG, http, caps_tx).await;
+        get_caps_llsd(
+            detail_url.to_string(),
+            LAND_RESOURCE_DETAIL_TAG,
+            http,
+            caps_tx,
+        )
+        .await;
     }
 }
 

@@ -219,10 +219,12 @@ pub(crate) fn compressed_object(
     } else {
         (String::new(), [0; 4])
     };
+    // A non-empty but unparsable media URL drops the whole compressed object
+    // (the `.ok()?` matches how every other malformed field here returns `None`).
     let media_url = if cflags.contains(CompressedFlags::MEDIA_URL) {
-        read_nul_string(&mut reader)?
+        sl_wire::optional_url_from_wire("MediaURL", &read_nul_string(&mut reader)?).ok()?
     } else {
-        String::new()
+        None
     };
     let mut object = Object {
         region_handle,
@@ -364,7 +366,7 @@ fn compressed_flags(object: &Object) -> CompressedFlags {
     if !object.name_value.is_empty() {
         flags |= CompressedFlags::HAS_NAME_VALUES;
     }
-    if !object.media_url.is_empty() {
+    if object.media_url.is_some() {
         flags |= CompressedFlags::MEDIA_URL;
     }
     flags
@@ -422,7 +424,10 @@ pub fn encode_compressed_object(object: &Object) -> Vec<u8> {
         writer.bytes(&object.text_color);
     }
     if cflags.contains(CompressedFlags::MEDIA_URL) {
-        write_nul_string(&mut writer, &object.media_url);
+        write_nul_string(
+            &mut writer,
+            &sl_wire::optional_url_to_wire(object.media_url.as_ref()),
+        );
     }
     // Trailing fields, in the simulator's fixed pack order.
     if cflags.contains(CompressedFlags::HAS_PARTICLES_LEGACY) {

@@ -153,7 +153,7 @@ fn update_experience_round_trip() -> Result<(), String> {
         description: "desc".to_owned(),
         maturity: 13,
         properties: PROPERTY_GRID,
-        slurl: "http://maps/y".to_owned(),
+        slurl: Some(url::Url::parse("http://maps/y").map_err(|e| e.to_string())?),
         extended_metadata: String::new(),
     };
     let body = build_update_experience_request(&update);
@@ -297,7 +297,7 @@ fn update_experience_request_round_trip() -> Result<(), String> {
         description: "desc & more".to_owned(),
         maturity: 13,
         properties: PROPERTY_GRID,
-        slurl: "http://maps/y".to_owned(),
+        slurl: Some(url::Url::parse("http://maps/y").map_err(|e| e.to_string())?),
         extended_metadata: "<x/>".to_owned(),
     };
     let body = build_update_experience_request(&update);
@@ -357,7 +357,7 @@ fn experience_infos_response_round_trip() -> Result<(), String> {
         description: "fun & games".to_owned(),
         properties: ExperienceProperties(PROPERTY_GRID),
         maturity: 13,
-        slurl: "http://maps/x".to_owned(),
+        slurl: Some(url::Url::parse("http://maps/x").map_err(|e| e.to_string())?),
         ..ExperienceInfo::default()
     };
     let missing = ExperienceInfo {

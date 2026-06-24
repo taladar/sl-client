@@ -9,7 +9,7 @@ use sl_wire::LoginRequest;
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoginParams {
     /// The XML-RPC login endpoint URL (e.g. `http://127.0.0.1:9000/`).
-    pub login_uri: String,
+    pub login_uri: url::Url,
     /// The login request to send.
     pub request: LoginRequest,
 }
@@ -20,7 +20,7 @@ pub struct LoginParams {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoginHttpRequest {
     /// The URL to POST to.
-    pub url: String,
+    pub url: url::Url,
     /// The XML-RPC request body.
     pub body: String,
     /// The `User-Agent` header to send, identifying the viewer by its channel

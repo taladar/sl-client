@@ -62,15 +62,15 @@ pub struct OpenSimExtras {
     /// Whether the grid permits the "export" creator permission (`ExportSupported`).
     pub export_supported: Option<bool>,
     /// The grid's map-tile server base URL (`map-server-url`).
-    pub map_server_url: Option<String>,
+    pub map_server_url: Option<url::Url>,
     /// The grid's web search endpoint (`search-server-url`).
-    pub search_server_url: Option<String>,
+    pub search_server_url: Option<url::Url>,
     /// The grid's destination-guide URL (`destination-guide-url`).
-    pub destination_guide_url: Option<String>,
+    pub destination_guide_url: Option<url::Url>,
     /// The grid's avatar-picker URL (`avatar-picker-url`).
-    pub avatar_picker_url: Option<String>,
+    pub avatar_picker_url: Option<url::Url>,
     /// The grid's HyperGrid URL prefix (`GridURL`).
-    pub grid_url: Option<String>,
+    pub grid_url: Option<url::Url>,
     /// The currency symbol the grid displays (`currency`), e.g. `"OS$"`.
     pub currency: Option<String>,
     /// The `llSay`/normal chat range in metres (`say-range`; viewer default 20).
@@ -149,21 +149,19 @@ impl OpenSimExtras {
     /// grid did not advertise it); a present key of the wrong LLSD kind is a hard
     /// error.
     fn from_llsd(map: &Llsd) -> Result<Self, WireError> {
+        // A URL key decodes through the codec boundary helper: absent or empty is
+        // the "not advertised" sentinel (`None`), a non-empty but unparsable value
+        // is a hard error.
+        let url_field = |key: &'static str| -> Result<Option<url::Url>, WireError> {
+            crate::optional_url_from_wire(key, map.field_str(key, key)?.unwrap_or(""))
+        };
         Ok(Self {
             export_supported: map.field_bool("ExportSupported", "ExportSupported")?,
-            map_server_url: map
-                .field_str("map-server-url", "map-server-url")?
-                .map(str::to_owned),
-            search_server_url: map
-                .field_str("search-server-url", "search-server-url")?
-                .map(str::to_owned),
-            destination_guide_url: map
-                .field_str("destination-guide-url", "destination-guide-url")?
-                .map(str::to_owned),
-            avatar_picker_url: map
-                .field_str("avatar-picker-url", "avatar-picker-url")?
-                .map(str::to_owned),
-            grid_url: map.field_str("GridURL", "GridURL")?.map(str::to_owned),
+            map_server_url: url_field("map-server-url")?,
+            search_server_url: url_field("search-server-url")?,
+            destination_guide_url: url_field("destination-guide-url")?,
+            avatar_picker_url: url_field("avatar-picker-url")?,
+            grid_url: url_field("GridURL")?,
             currency: map.field_str("currency", "currency")?.map(str::to_owned),
             say_range: map.field_i32("say-range", "say-range")?,
             shout_range: map.field_i32("shout-range", "shout-range")?,
@@ -187,19 +185,22 @@ impl OpenSimExtras {
             put("ExportSupported", Llsd::Boolean(value));
         }
         if let Some(value) = &self.map_server_url {
-            put("map-server-url", Llsd::String(value.clone()));
+            put("map-server-url", Llsd::String(crate::url_to_wire(value)));
         }
         if let Some(value) = &self.search_server_url {
-            put("search-server-url", Llsd::String(value.clone()));
+            put("search-server-url", Llsd::String(crate::url_to_wire(value)));
         }
         if let Some(value) = &self.destination_guide_url {
-            put("destination-guide-url", Llsd::String(value.clone()));
+            put(
+                "destination-guide-url",
+                Llsd::String(crate::url_to_wire(value)),
+            );
         }
         if let Some(value) = &self.avatar_picker_url {
-            put("avatar-picker-url", Llsd::String(value.clone()));
+            put("avatar-picker-url", Llsd::String(crate::url_to_wire(value)));
         }
         if let Some(value) = &self.grid_url {
-            put("GridURL", Llsd::String(value.clone()));
+            put("GridURL", Llsd::String(crate::url_to_wire(value)));
         }
         if let Some(value) = &self.currency {
             put("currency", Llsd::String(value.clone()));
@@ -463,11 +464,19 @@ mod tests {
             ),
             open_sim_extras: Some(OpenSimExtras {
                 export_supported: Some(true),
-                map_server_url: Some("http://maps.example/".to_owned()),
-                search_server_url: Some("http://search.example/".to_owned()),
-                destination_guide_url: Some("http://guide.example/".to_owned()),
-                avatar_picker_url: Some("http://picker.example/".to_owned()),
-                grid_url: Some("http://grid.example/".to_owned()),
+                map_server_url: Some(
+                    url::Url::parse("http://maps.example/").map_err(|e| e.to_string())?,
+                ),
+                search_server_url: Some(
+                    url::Url::parse("http://search.example/").map_err(|e| e.to_string())?,
+                ),
+                destination_guide_url: Some(
+                    url::Url::parse("http://guide.example/").map_err(|e| e.to_string())?,
+                ),
+                avatar_picker_url: Some(
+                    url::Url::parse("http://picker.example/").map_err(|e| e.to_string())?,
+                ),
+                grid_url: Some(url::Url::parse("http://grid.example/").map_err(|e| e.to_string())?),
                 currency: Some("OS$".to_owned()),
                 say_range: Some(20),
                 shout_range: Some(100),

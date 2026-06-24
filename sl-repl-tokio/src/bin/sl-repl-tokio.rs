@@ -72,6 +72,13 @@ pub enum Error {
     /// A grid nickname could not be mapped to a login URI.
     #[error("unknown grid `{0}`; pass --login-uri explicitly")]
     UnknownGrid(String),
+    /// The resolved login URI was not a valid URL.
+    #[error("invalid login URI: {0}")]
+    LoginUri(
+        #[from]
+        #[source]
+        url::ParseError,
+    ),
     /// The grid issued an MFA challenge but the avatar has no `mfa_command`.
     #[error("the grid requires multi-factor authentication but no mfa_command is configured")]
     MfaRequired,
@@ -444,9 +451,10 @@ async fn connect_with_mfa(
     mut request: LoginRequest,
     avatar: &Avatar,
 ) -> Result<Client, Error> {
+    let login_uri: url::Url = login_uri.parse()?;
     loop {
         let params = LoginParams {
-            login_uri: login_uri.to_owned(),
+            login_uri: login_uri.clone(),
             request: request.clone(),
         };
         match Client::connect(params).await {
@@ -557,7 +565,7 @@ async fn run_repl(args: RunArgs) -> Result<(), Error> {
         ctx.set_identity(agent.uuid(), session, circuit);
     }
     if let Some(seed) = client.seed_capability() {
-        ctx.set_cap("Seed", seed);
+        ctx.set_cap("Seed", seed.as_str());
     }
     let self_agent = client.agent_id();
 

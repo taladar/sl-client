@@ -56,7 +56,7 @@ fn harvest_material_ids(texture_entry: &[u8], out: &mut BTreeSet<Uuid>) {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
-    let login_uri = env_or("SL_LOGIN_URI", "http://127.0.0.1:9000/");
+    let login_uri: url::Url = env_or("SL_LOGIN_URI", "http://127.0.0.1:9000/").parse()?;
     let first = std::env::var("SL_FIRST")?;
     let last = std::env::var("SL_LAST")?;
     let password = std::env::var("SL_PASSWORD")?;

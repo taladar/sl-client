@@ -31,6 +31,7 @@ mod remote_parcel;
 mod resource_report;
 mod sequence_number;
 mod sim_features;
+mod url;
 mod voice;
 mod zerocode;
 
@@ -138,6 +139,7 @@ pub use sim_features::{
     AnimatedObjects, OpenSimExtras, PhysicsShapeTypes, SimulatorFeatures,
     build_simulator_features_response, parse_simulator_features,
 };
+pub use url::{optional_url_from_wire, optional_url_to_wire, url_from_wire, url_to_wire};
 pub use voice::{
     IceCandidate, ParcelVoiceInfo, VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC,
     VoiceAccountInfo, VoiceProvisionRequest, build_parcel_voice_info_request,
@@ -477,8 +479,8 @@ mod test {
     -> Result<(), Box<dyn std::error::Error>> {
         let object = sl_types::key::ObjectKey::from(uuid::Uuid::from_u128(0x000b_1ec7));
         let entry = MediaEntry {
-            current_url: "https://example.com/stream".to_owned(),
-            home_url: "https://example.com/home".to_owned(),
+            current_url: Some(url::Url::parse("https://example.com/stream")?),
+            home_url: Some(url::Url::parse("https://example.com/home")?),
             auto_play: true,
             auto_scale: true,
             width_pixels: 1024,

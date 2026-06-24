@@ -258,7 +258,7 @@ pub enum Event {
         /// The neighbouring simulator's UDP address (the child circuit's key).
         sim: SocketAddr,
         /// The neighbour's seed capability URL to POST.
-        seed_capability: String,
+        seed_capability: url::Url,
     },
     /// A region was reported by the world map (a `MapBlockReply` entry), giving
     /// its name and grid coordinates. Sent in response to

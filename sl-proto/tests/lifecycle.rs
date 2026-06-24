@@ -161,9 +161,9 @@ mod test {
     }
 
     /// Builds a `Session` with throwaway login parameters.
-    fn new_session() -> Session {
-        Session::new(LoginParams {
-            login_uri: "http://127.0.0.1:9000/".to_owned(),
+    fn new_session() -> Result<Session, TestError> {
+        Ok(Session::new(LoginParams {
+            login_uri: "http://127.0.0.1:9000/".parse()?,
             request: LoginRequest::new(
                 "Test",
                 "User",
@@ -172,19 +172,19 @@ mod test {
                 "MyViewer",
                 "1.2.3",
             ),
-        })
+        }))
     }
 
     /// A successful login response pointing at the test simulator.
-    fn success() -> LoginResponse {
-        LoginResponse::Success(Box::new(LoginSuccess {
+    fn success() -> Result<LoginResponse, TestError> {
+        Ok(LoginResponse::Success(Box::new(LoginSuccess {
             agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
             session_id: uuid::Uuid::from_u128(2),
             secure_session_id: uuid::Uuid::from_u128(3),
             circuit_code: CircuitCode(0x0011_2233),
             sim_ip: Ipv4Addr::new(127, 0, 0, 1),
             sim_port: 9000,
-            seed_capability: "http://127.0.0.1:9000/seed".to_owned(),
+            seed_capability: "http://127.0.0.1:9000/seed".parse()?,
             message: None,
             mfa_hash: None,
             inventory_root: None,
@@ -200,7 +200,7 @@ mod test {
             library_root: None,
             library_owner: None,
             library_skeleton: Vec::new(),
-        }))
+        })))
     }
 
     /// Decodes the message carried by a transmitted datagram.
@@ -275,9 +275,9 @@ mod test {
     /// Drives a session from login through the region handshake into the active
     /// state, returning the active session.
     fn established(now: Instant) -> Result<Session, TestError> {
-        let mut session = new_session();
+        let mut session = new_session()?;
         assert!(session.login_http_request().is_some());
-        session.handle_login_response(success(), now)?;
+        session.handle_login_response(success()?, now)?;
 
         let sent = drain(&mut session)?;
         assert!(matches!(sent.first(), Some(AnyMessage::UseCircuitCode(_))));
@@ -333,7 +333,7 @@ mod test {
 
     #[test]
     fn login_failure_disconnects() -> Result<(), TestError> {
-        let mut session = new_session();
+        let mut session = new_session()?;
         let failure = LoginResponse::Failure(LoginFailure {
             reason: "key".to_owned(),
             message: "bad password".to_owned(),
@@ -392,8 +392,8 @@ mod test {
     #[test]
     fn retransmits_unacknowledged_reliable_packets() -> Result<(), TestError> {
         let now = Instant::now();
-        let mut session = new_session();
-        session.handle_login_response(success(), now)?;
+        let mut session = new_session()?;
+        session.handle_login_response(success()?, now)?;
         let _initial = drain(&mut session)?; // UseCircuitCode + CompleteAgentMovement
 
         // Without any ack, the resend timer eventually fires and retransmits.
@@ -412,9 +412,9 @@ mod test {
     #[test]
     fn exhausted_resend_reports_expected_reply_missing() -> Result<(), TestError> {
         let now = Instant::now();
-        let mut session = new_session();
+        let mut session = new_session()?;
         session.set_diagnostics(true);
-        session.handle_login_response(success(), now)?;
+        session.handle_login_response(success()?, now)?;
         let _initial = drain(&mut session)?; // UseCircuitCode + CompleteAgentMovement
 
         // Nothing is ever acked: drive the resend clock until the reliable
@@ -447,8 +447,8 @@ mod test {
     #[test]
     fn exhausted_resend_is_silent_without_diagnostics() -> Result<(), TestError> {
         let now = Instant::now();
-        let mut session = new_session();
-        session.handle_login_response(success(), now)?;
+        let mut session = new_session()?;
+        session.handle_login_response(success()?, now)?;
         let _initial = drain(&mut session)?;
 
         for _ in 0..16 {
@@ -1845,10 +1845,10 @@ mod test {
     #[test]
     fn login_buddy_list_emits_friend_list() -> Result<(), TestError> {
         let now = Instant::now();
-        let mut session = new_session();
+        let mut session = new_session()?;
         let friend_a = uuid::Uuid::from_u128(0xF1);
         let friend_b = uuid::Uuid::from_u128(0xF2);
-        let LoginResponse::Success(mut login_success) = success() else {
+        let LoginResponse::Success(mut login_success) = success()? else {
             return Err("expected a success response".into());
         };
         login_success.buddy_list = vec![
@@ -5499,7 +5499,10 @@ mod test {
         let Event::ParcelMediaUpdate(update) = event else {
             return Err("expected ParcelMediaUpdate".into());
         };
-        assert_eq!(update.media_url, "http://example.com/movie");
+        assert_eq!(
+            update.media_url.as_ref().map(url::Url::as_str),
+            Some("http://example.com/movie")
+        );
         assert_eq!(update.media_id, Some(TextureKey::from(media)));
         assert!(update.media_auto_scale);
         assert_eq!(update.media_type, "text/html");
@@ -5559,8 +5562,14 @@ mod test {
             .ok_or("face 0")?
             .as_ref()
             .ok_or("face 0 media")?;
-        assert_eq!(face0.current_url, "http://example.com/stream");
-        assert_eq!(face0.home_url, "http://example.com/home");
+        assert_eq!(
+            face0.current_url.as_ref().map(url::Url::as_str),
+            Some("http://example.com/stream")
+        );
+        assert_eq!(
+            face0.home_url.as_ref().map(url::Url::as_str),
+            Some("http://example.com/home")
+        );
         assert!(face0.auto_play);
         assert_eq!(face0.width_pixels, 1024);
         assert_eq!(face0.height_pixels, 512);
@@ -5771,7 +5780,7 @@ mod test {
     #[test]
     fn login_skeleton_emits_inventory_skeleton() -> Result<(), TestError> {
         let now = Instant::now();
-        let mut session = new_session();
+        let mut session = new_session()?;
         let root = InventoryFolderKey::from(uuid::Uuid::from_u128(0xF0));
         let login = LoginResponse::Success(Box::new(LoginSuccess {
             agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
@@ -5780,7 +5789,7 @@ mod test {
             circuit_code: CircuitCode(0x0011_2233),
             sim_ip: Ipv4Addr::new(127, 0, 0, 1),
             sim_port: 9000,
-            seed_capability: "http://127.0.0.1:9000/seed".to_owned(),
+            seed_capability: "http://127.0.0.1:9000/seed".parse()?,
             message: None,
             mfa_hash: None,
             inventory_root: Some(root),
@@ -5833,7 +5842,7 @@ mod test {
     #[test]
     fn login_emits_account_and_library_and_stores_them() -> Result<(), TestError> {
         let now = Instant::now();
-        let mut session = new_session();
+        let mut session = new_session()?;
         let lib_root = InventoryFolderKey::from(uuid::Uuid::from_u128(0x0112));
         let lib_owner = uuid::Uuid::from_u128(0xAB);
         let login = LoginResponse::Success(Box::new(LoginSuccess {
@@ -5843,7 +5852,7 @@ mod test {
             circuit_code: CircuitCode(0x0011_2233),
             sim_ip: Ipv4Addr::new(127, 0, 0, 1),
             sim_port: 9000,
-            seed_capability: "http://127.0.0.1:9000/seed".to_owned(),
+            seed_capability: "http://127.0.0.1:9000/seed".parse()?,
             message: None,
             mfa_hash: None,
             inventory_root: None,
@@ -6091,8 +6100,8 @@ mod test {
     /// Drives a session to the awaiting-handshake state (login answered, but no
     /// `RegionHandshake` received yet), draining the bootstrap traffic/events.
     fn awaiting_handshake(now: Instant) -> Result<Session, TestError> {
-        let mut session = new_session();
-        session.handle_login_response(success(), now)?;
+        let mut session = new_session()?;
+        session.handle_login_response(success()?, now)?;
         drain(&mut session)?;
         drain_events(&mut session);
         Ok(session)
@@ -6353,8 +6362,8 @@ mod test {
         // Log in with a start region at global (256000, 256512) metres — grid
         // (1000, 1002). The handshake does not carry the handle, so the session
         // must surface the one seeded from the login response.
-        let mut session = new_session();
-        let LoginResponse::Success(mut boxed) = success() else {
+        let mut session = new_session()?;
+        let LoginResponse::Success(mut boxed) = success()? else {
             return Err("expected a success fixture".into());
         };
         boxed.region_x = Some(256_000);
@@ -6814,8 +6823,8 @@ mod test {
         assert!(parcel.use_ban_list());
         assert!(!parcel.use_access_list());
         // Absent media → empty URLs / nil id / no auto-scale.
-        assert_eq!(parcel.music_url, "");
-        assert_eq!(parcel.media_url, "");
+        assert_eq!(parcel.music_url, None);
+        assert_eq!(parcel.media_url, None);
         assert_eq!(parcel.media_id, None);
         assert!(!parcel.media_auto_scale);
         Ok(())
@@ -6847,8 +6856,14 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a ParcelProperties event")?;
-        assert_eq!(parcel.music_url, "http://stream.example/audio");
-        assert_eq!(parcel.media_url, "http://example.com/movie");
+        assert_eq!(
+            parcel.music_url.as_ref().map(url::Url::as_str),
+            Some("http://stream.example/audio")
+        );
+        assert_eq!(
+            parcel.media_url.as_ref().map(url::Url::as_str),
+            Some("http://example.com/movie")
+        );
         assert_eq!(parcel.media_id, Some(TextureKey::from(media_id)));
         assert!(parcel.media_auto_scale);
         Ok(())
@@ -8742,8 +8757,14 @@ mod test {
         assert_eq!(parcel.raw_parcel_flags, 64);
         assert!(parcel.create_objects());
         // The stream / media URLs decode off the CAPS LLSD too.
-        assert_eq!(parcel.music_url, "http://stream.example/audio");
-        assert_eq!(parcel.media_url, "http://example.com/movie");
+        assert_eq!(
+            parcel.music_url.as_ref().map(url::Url::as_str),
+            Some("http://stream.example/audio")
+        );
+        assert_eq!(
+            parcel.media_url.as_ref().map(url::Url::as_str),
+            Some("http://example.com/movie")
+        );
         assert_eq!(
             parcel.media_id,
             Some(TextureKey::from(uuid::Uuid::from_u128(0x33ED)))
@@ -10298,7 +10319,10 @@ mod test {
         assert_eq!(object.local_id, sl_proto::RegionLocalObjectId(700));
         assert_eq!(object.text, "hello");
         assert_eq!(object.text_color, [10, 20, 30, 200]);
-        assert_eq!(object.media_url, "http://example/");
+        assert_eq!(
+            object.media_url.as_ref().map(url::Url::as_str),
+            Some("http://example/")
+        );
         assert_eq!(object.sound, sound_id);
         assert!((object.gain - 0.75).abs() < f32::EPSILON);
         assert_eq!(object.sound_flags, 0x01);
@@ -10988,7 +11012,7 @@ mod test {
         assert_eq!(info.password.as_deref(), Some("s3cr3t"));
         assert_eq!(info.sip_uri_hostname.as_deref(), Some("sip.example.com"));
         assert_eq!(
-            info.account_server_name.as_deref(),
+            info.account_server_name.as_ref().map(url::Url::as_str),
             Some("https://vivox.example/api")
         );
         assert!(!info.is_webrtc());
@@ -11053,7 +11077,7 @@ mod test {
         assert_eq!(info.parcel_local_id, sl_proto::RegionLocalParcelId(7));
         assert_eq!(info.region_name, region_name("Default Region"));
         assert_eq!(
-            info.channel_uri.as_deref(),
+            info.channel_uri.as_ref().map(url::Url::as_str),
             Some("sip:Region@sip.example.com")
         );
         Ok(())
@@ -11395,8 +11419,8 @@ mod test {
         drain_events(&mut session);
 
         let urls = sl_proto::LandResourcesUrls {
-            script_resource_summary: "http://sim/cap/srs".to_owned(),
-            script_resource_details: Some("http://sim/cap/srd".to_owned()),
+            script_resource_summary: Some("http://sim/cap/srs".parse()?),
+            script_resource_details: Some("http://sim/cap/srd".parse()?),
         };
         let body = sl_proto::parse_llsd_xml(&sl_proto::build_land_resources_response(&urls))?;
         session.handle_caps_event(sl_proto::CAP_LAND_RESOURCES, &body, now)?;
@@ -11408,7 +11432,10 @@ mod test {
             })
             .ok_or("expected a LandResourcesUrls event")?;
         assert_eq!(
-            decoded.script_resource_details.as_deref(),
+            decoded
+                .script_resource_details
+                .as_ref()
+                .map(url::Url::as_str),
             Some("http://sim/cap/srd")
         );
 

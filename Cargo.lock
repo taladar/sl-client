@@ -1754,6 +1754,7 @@ dependencies = [
  "thiserror",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
 ]
 
@@ -1769,6 +1770,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
 ]
 
@@ -1789,6 +1791,7 @@ dependencies = [
  "sl-wire",
  "thiserror",
  "tracing",
+ "url",
  "uuid",
 ]
 
@@ -1802,6 +1805,7 @@ dependencies = [
  "thiserror",
  "toml",
  "tracing",
+ "url",
  "uuid",
 ]
 
@@ -1823,6 +1827,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -1842,6 +1847,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -1863,6 +1869,7 @@ dependencies = [
  "tracing-appender",
  "tracing-journald",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -1891,6 +1898,7 @@ dependencies = [
  "sl-msg-template",
  "sl-types",
  "thiserror",
+ "url",
  "uuid",
 ]
 

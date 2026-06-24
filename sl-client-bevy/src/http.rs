@@ -99,15 +99,11 @@ pub(crate) fn run_land_resources(
     };
     caps_tx.send((CAP_LAND_RESOURCES.to_owned(), reply)).ok();
 
-    if !urls.script_resource_summary.is_empty() {
-        run_get_caps_llsd(
-            &urls.script_resource_summary,
-            LAND_RESOURCE_SUMMARY_TAG,
-            caps_tx,
-        );
+    if let Some(summary) = urls.script_resource_summary {
+        run_get_caps_llsd(summary.as_str(), LAND_RESOURCE_SUMMARY_TAG, caps_tx);
     }
     if let Some(detail_url) = urls.script_resource_details {
-        run_get_caps_llsd(&detail_url, LAND_RESOURCE_DETAIL_TAG, caps_tx);
+        run_get_caps_llsd(detail_url.as_str(), LAND_RESOURCE_DETAIL_TAG, caps_tx);
     }
 }
 

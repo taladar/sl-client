@@ -872,10 +872,12 @@ pub struct MediaEntry {
     /// The control style: `0` = standard browser controls, `1` = mini
     /// (`controls`).
     pub controls: i32,
-    /// The URL currently shown (`current_url`); a navigation changes this.
-    pub current_url: String,
-    /// The home URL loaded when the media (re)starts (`home_url`).
-    pub home_url: String,
+    /// The URL currently shown (`current_url`); a navigation changes this. The
+    /// empty wire value (no media loaded) decodes to [`None`].
+    pub current_url: Option<url::Url>,
+    /// The home URL loaded when the media (re)starts (`home_url`). The empty wire
+    /// value (no home URL) decodes to [`None`].
+    pub home_url: Option<url::Url>,
     /// Whether playback loops (`auto_loop`).
     pub auto_loop: bool,
     /// Whether the media plays automatically (`auto_play`).
@@ -907,8 +909,8 @@ impl Default for MediaEntry {
         Self {
             alt_image_enable: false,
             controls: 0,
-            current_url: String::new(),
-            home_url: String::new(),
+            current_url: None,
+            home_url: None,
             auto_loop: false,
             auto_play: false,
             auto_scale: false,
@@ -937,8 +939,11 @@ impl MediaEntry {
         Ok(Self {
             alt_image_enable: llsd_bool(value, "alt_image_enable", default.alt_image_enable)?,
             controls: llsd_int(value, "controls", default.controls)?,
-            current_url: llsd_string(value, "current_url")?,
-            home_url: llsd_string(value, "home_url")?,
+            current_url: crate::optional_url_from_wire(
+                "current_url",
+                &llsd_string(value, "current_url")?,
+            )?,
+            home_url: crate::optional_url_from_wire("home_url", &llsd_string(value, "home_url")?)?,
             auto_loop: llsd_bool(value, "auto_loop", default.auto_loop)?,
             auto_play: llsd_bool(value, "auto_play", default.auto_play)?,
             auto_scale: llsd_bool(value, "auto_scale", default.auto_scale)?,
@@ -972,8 +977,16 @@ impl MediaEntry {
         out.push_str("<map>");
         push_bool_field(out, "alt_image_enable", self.alt_image_enable);
         push_int_field(out, "controls", self.controls);
-        push_string_field(out, "current_url", &self.current_url);
-        push_string_field(out, "home_url", &self.home_url);
+        push_string_field(
+            out,
+            "current_url",
+            &crate::optional_url_to_wire(self.current_url.as_ref()),
+        );
+        push_string_field(
+            out,
+            "home_url",
+            &crate::optional_url_to_wire(self.home_url.as_ref()),
+        );
         push_bool_field(out, "auto_loop", self.auto_loop);
         push_bool_field(out, "auto_play", self.auto_play);
         push_bool_field(out, "auto_scale", self.auto_scale);

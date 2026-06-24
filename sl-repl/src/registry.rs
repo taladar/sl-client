@@ -1093,8 +1093,8 @@ fn build_parcel_update(args: &Args, ctx: &dyn ReplContext) -> Result<ParcelUpdat
         )?)),
         name: args.str_or(ctx, "name", 3, "")?,
         description: args.str_or(ctx, "description", 4, "")?,
-        music_url: args.str_or(ctx, "music_url", 5, "")?,
-        media_url: args.str_or(ctx, "media_url", 6, "")?,
+        music_url: args.opt_url(ctx, "music_url", 5)?,
+        media_url: args.opt_url(ctx, "media_url", 6)?,
         media_id: args.opt_texture(ctx, "media_id", 7)?,
         media_auto_scale: args.bool_or(ctx, "media_auto_scale", 8, false)?,
         group_id: args.opt_group(ctx, "group_id", 9)?,
@@ -1200,8 +1200,8 @@ fn build_media_entry(args: &Args, ctx: &dyn ReplContext) -> Result<MediaEntry, R
     Ok(MediaEntry {
         alt_image_enable: args.bool_or(ctx, "alt_image_enable", 100, false)?,
         controls: args.parse_or(ctx, "controls", 101, "i32", 0)?,
-        current_url: args.str_or(ctx, "current_url", 102, "")?,
-        home_url: args.str_or(ctx, "home_url", 103, "")?,
+        current_url: args.opt_url(ctx, "current_url", 102)?,
+        home_url: args.opt_url(ctx, "home_url", 103)?,
         auto_loop: args.bool_or(ctx, "auto_loop", 104, false)?,
         auto_play: args.bool_or(ctx, "auto_play", 105, false)?,
         auto_scale: args.bool_or(ctx, "auto_scale", 106, false)?,
@@ -1249,7 +1249,7 @@ fn build_experience_update(
         description: args.str_or(ctx, "description", 2, "")?,
         maturity: args.parse_or(ctx, "maturity", 3, "i32", 0)?,
         properties: args.parse_or(ctx, "properties", 4, "i32", 0)?,
-        slurl: args.str_or(ctx, "slurl", 5, "")?,
+        slurl: args.opt_url(ctx, "slurl", 5)?,
         extended_metadata: args.str_or(ctx, "extended_metadata", 6, "")?,
     })
 }

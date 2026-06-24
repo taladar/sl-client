@@ -337,7 +337,7 @@ pub struct LoginSuccess {
     /// The destination simulator's UDP port.
     pub sim_port: u16,
     /// The capabilities seed URL.
-    pub seed_capability: String,
+    pub seed_capability: url::Url,
     /// The welcome/login message, if any.
     pub message: Option<String>,
     /// A fresh `mfa_hash` to remember and send on future logins to skip the
@@ -529,7 +529,7 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
         circuit_code: CircuitCode(parse_parsed(&members, "circuit_code")?),
         sim_ip: parse_parsed(&members, "sim_ip")?,
         sim_port: parse_parsed(&members, "sim_port")?,
-        seed_capability: required(&members, "seed_capability")?.clone(),
+        seed_capability: parse_parsed(&members, "seed_capability")?,
         message: members.get("message").cloned(),
         mfa_hash: members.get("mfa_hash").cloned(),
         inventory_root: parse_array_struct_uuid(response_struct, "inventory-root", "folder_id")
@@ -987,7 +987,7 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
     push_int_member(out, "circuit_code", i64::from(success.circuit_code.get()));
     push_string_member(out, "sim_ip", &success.sim_ip.to_string());
     push_int_member(out, "sim_port", i64::from(success.sim_port));
-    push_string_member(out, "seed_capability", &success.seed_capability);
+    push_string_member(out, "seed_capability", success.seed_capability.as_str());
     push_opt_string_member(out, "message", success.message.as_deref());
     push_opt_string_member(out, "mfa_hash", success.mfa_hash.as_deref());
     if let Some(root) = success.inventory_root {

@@ -231,13 +231,13 @@ pub struct ParcelInfo {
     pub name: String,
     /// The parcel's description.
     pub description: String,
-    /// The parcel's streaming-audio URL (the "music" stream), empty if none.
+    /// The parcel's streaming-audio URL (the "music" stream), [`None`] if none.
     /// Set it with [`ParcelUpdate::music_url`].
-    pub music_url: String,
-    /// The parcel's media URL (movie / web page), empty if none. Set it with
+    pub music_url: Option<url::Url>,
+    /// The parcel's media URL (movie / web page), [`None`] if none. Set it with
     /// [`ParcelUpdate::media_url`]. This is the legacy single-media-URL field;
     /// the per-face media-on-a-prim system is a separate (CAPS) surface.
-    pub media_url: String,
+    pub media_url: Option<url::Url>,
     /// The texture id the parcel media replaces while playing (`None` if none).
     pub media_id: Option<TextureKey>,
     /// Whether the media is auto-scaled to fit the surface it replaces.
@@ -403,8 +403,9 @@ impl ParcelMediaCommand {
 /// separate [`ParcelInfo::music_url`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParcelMediaUpdateInfo {
-    /// The media URL the parcel streams (e.g. an HLS/MP4/web page).
-    pub media_url: String,
+    /// The media URL the parcel streams (e.g. an HLS/MP4/web page), [`None`] if
+    /// the update cleared it.
+    pub media_url: Option<url::Url>,
     /// The texture the media replaces on the parcel surface (`None` if none).
     pub media_id: Option<TextureKey>,
     /// Whether the media is auto-scaled to the surface.
@@ -618,10 +619,10 @@ pub struct ParcelUpdate {
     pub name: String,
     /// The parcel description.
     pub description: String,
-    /// The streaming music URL.
-    pub music_url: String,
-    /// The streaming media URL.
-    pub media_url: String,
+    /// The streaming music URL ([`None`] clears it).
+    pub music_url: Option<url::Url>,
+    /// The streaming media URL ([`None`] clears it).
+    pub media_url: Option<url::Url>,
     /// The media texture id (`None` if none).
     pub media_id: Option<TextureKey>,
     /// Whether to auto-scale the media to the prim face.
@@ -654,8 +655,8 @@ impl Default for ParcelUpdate {
             sale_price: None,
             name: String::new(),
             description: String::new(),
-            music_url: String::new(),
-            media_url: String::new(),
+            music_url: None,
+            media_url: None,
             media_id: None,
             media_auto_scale: false,
             group_id: None,

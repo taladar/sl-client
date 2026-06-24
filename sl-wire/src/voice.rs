@@ -336,8 +336,9 @@ pub struct VoiceAccountInfo {
     /// The Vivox SIP domain / hostname (`voice_sip_uri_hostname`).
     pub sip_uri_hostname: Option<String>,
     /// The Vivox account API endpoint (`voice_account_server_name` — despite the
-    /// name, a full URI, as the viewer notes).
-    pub account_server_name: Option<String>,
+    /// name, a full URI, as the viewer notes). The empty wire value decodes to
+    /// [`None`].
+    pub account_server_name: Option<url::Url>,
     /// The WebRTC viewer session id, echoed back on
     /// [`VoiceSignalingRequest`](build_voice_signaling_request) and logout.
     pub viewer_session: Option<String>,
@@ -423,9 +424,11 @@ impl VoiceAccountInfo {
             sip_uri_hostname: body
                 .field_str("voice_sip_uri_hostname", "voice_sip_uri_hostname")?
                 .map(str::to_owned),
-            account_server_name: body
-                .field_str("voice_account_server_name", "voice_account_server_name")?
-                .map(str::to_owned),
+            account_server_name: crate::optional_url_from_wire(
+                "voice_account_server_name",
+                body.field_str("voice_account_server_name", "voice_account_server_name")?
+                    .unwrap_or(""),
+            )?,
             viewer_session,
             jsep_type,
             jsep_sdp,
@@ -451,12 +454,17 @@ impl VoiceAccountInfo {
             ("username", &self.username),
             ("password", &self.password),
             ("voice_sip_uri_hostname", &self.sip_uri_hostname),
-            ("voice_account_server_name", &self.account_server_name),
             ("viewer_session", &self.viewer_session),
         ] {
             if let Some(value) = value {
                 let _previous = map.insert(key.to_owned(), Llsd::String(value.clone()));
             }
+        }
+        if let Some(value) = &self.account_server_name {
+            let _previous = map.insert(
+                "voice_account_server_name".to_owned(),
+                Llsd::String(crate::url_to_wire(value)),
+            );
         }
         if self.jsep_type.is_some() || self.jsep_sdp.is_some() {
             let mut jsep: HashMap<String, Llsd> = HashMap::new();
@@ -492,7 +500,7 @@ pub struct ParcelVoiceInfo {
     /// The channel URI to connect to (a `sip:` URI for Vivox/FreeSWITCH), or
     /// `None`/empty when the parcel has no voice (the viewer then drops out of
     /// spatial voice).
-    pub channel_uri: Option<String>,
+    pub channel_uri: Option<url::Url>,
     /// Optional per-channel credentials (rarely sent — OpenSim leaves it unset).
     pub channel_credentials: Option<String>,
 }
@@ -531,9 +539,10 @@ impl ParcelVoiceInfo {
         let (channel_uri, channel_credentials) = match body.get("voice_credentials") {
             None | Some(Llsd::Undef) => (None, None),
             Some(credentials @ Llsd::Map(_)) => (
-                Some(credentials.require_str("channel_uri", "channel_uri")?)
-                    .filter(|uri| !uri.is_empty())
-                    .map(str::to_owned),
+                crate::optional_url_from_wire(
+                    "channel_uri",
+                    credentials.require_str("channel_uri", "channel_uri")?,
+                )?,
                 credentials
                     .field_str("channel_credentials", "channel_credentials")?
                     .filter(|value| !value.is_empty())
@@ -579,7 +588,7 @@ impl ParcelVoiceInfo {
     pub fn to_llsd(&self) -> Llsd {
         let mut credentials: HashMap<String, Llsd> = HashMap::from([(
             "channel_uri".to_owned(),
-            Llsd::String(self.channel_uri.clone().unwrap_or_default()),
+            Llsd::String(crate::optional_url_to_wire(self.channel_uri.as_ref())),
         )]);
         if let Some(value) = &self.channel_credentials {
             let _previous = credentials.insert(
@@ -648,7 +657,7 @@ mod tests {
         assert_eq!(info.password.as_deref(), Some("secret"));
         assert_eq!(info.sip_uri_hostname.as_deref(), Some("sip.example.com"));
         assert_eq!(
-            info.account_server_name.as_deref(),
+            info.account_server_name.as_ref().map(url::Url::as_str),
             Some("https://vivox.example/api")
         );
         assert!(!info.is_webrtc());
@@ -711,7 +720,7 @@ mod tests {
             "Default Region"
         );
         assert_eq!(
-            info.channel_uri.as_deref(),
+            info.channel_uri.as_ref().map(url::Url::as_str),
             Some("sip:Region@sip.example.com")
         );
         assert_eq!(info.channel_credentials, None);
@@ -884,7 +893,9 @@ mod tests {
             username: Some("xMjQ1".to_owned()),
             password: Some("secret".to_owned()),
             sip_uri_hostname: Some("sip.example.com".to_owned()),
-            account_server_name: Some("https://vivox.example/api".to_owned()),
+            account_server_name: Some(
+                url::Url::parse("https://vivox.example/api").map_err(|e| e.to_string())?,
+            ),
             ..VoiceAccountInfo::default()
         };
         let reply = parse_llsd_xml(&build_provision_voice_account_response(&vivox))
@@ -917,7 +928,9 @@ mod tests {
             parcel_local_id: crate::RegionLocalParcelId(42),
             region_name: crate::region_name_from_wire("region_name", "Default Region")
                 .map_err(|error| format!("{error:?}"))?,
-            channel_uri: Some("sip:Region@sip.example.com".to_owned()),
+            channel_uri: Some(
+                url::Url::parse("sip:Region@sip.example.com").map_err(|e| e.to_string())?,
+            ),
             channel_credentials: Some("creds".to_owned()),
         };
         let reply = parse_llsd_xml(&build_parcel_voice_info_response(&info))

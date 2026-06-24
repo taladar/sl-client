@@ -183,7 +183,7 @@ pub struct SlIdentity {
     /// The circuit code assigned by the grid.
     pub circuit_code: Option<CircuitCode>,
     /// The seed capability URL, if the login response carried one.
-    pub seed_capability: Option<String>,
+    pub seed_capability: Option<url::Url>,
 }
 
 /// Emitted when the grid requires a multi-factor one-time code. To answer it,
@@ -278,7 +278,7 @@ fn start_login(mut commands: Commands, config: Res<SlConfig>) {
             let (tx, rx) = unbounded();
             std::thread::spawn(move || {
                 tx.send(perform_login(
-                    &request.url,
+                    request.url.as_str(),
                     &request.user_agent,
                     request.body,
                 ))
@@ -368,7 +368,7 @@ fn advance_login(
                             agent_id: session.agent_id(),
                             session_id: session.session_id(),
                             circuit_code: session.circuit_code(),
-                            seed_capability: session.seed_capability().map(str::to_owned),
+                            seed_capability: session.seed_capability().cloned(),
                         });
                         let caps = start_caps(&session);
                         SlInner::Running {

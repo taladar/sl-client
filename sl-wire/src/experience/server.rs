@@ -188,7 +188,7 @@ pub fn parse_update_experience_request(xml: &str) -> Result<ExperienceUpdate, Wi
         description: string("description")?,
         maturity: root.field_i32("maturity", "maturity")?.unwrap_or(0),
         properties: root.field_i32("properties", "properties")?.unwrap_or(0),
-        slurl: string("slurl")?,
+        slurl: crate::optional_url_from_wire("slurl", &string("slurl")?)?,
         extended_metadata: string("extended_metadata")?,
     })
 }

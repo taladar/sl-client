@@ -28,6 +28,7 @@ thiserror = "2.0.18"
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "tracing-log"] }
+url = "2.5.8"
 
 [dev-dependencies]
 pretty_assertions = { version = "1.4.1" }

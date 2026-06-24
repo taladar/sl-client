@@ -403,6 +403,29 @@ impl Args {
         Ok((!raw.is_nil()).then(|| TextureKey::from(raw)))
     }
 
+    /// An optional URL argument: an absent or empty value maps to `None` (the
+    /// in-band "unset" sentinel the wire uses for an empty URL field); a
+    /// non-empty but unparsable value is rejected as an invalid argument.
+    pub(crate) fn opt_url(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        pos: usize,
+    ) -> Result<Option<url::Url>, ReplError> {
+        match self.opt_str(ctx, field, pos)? {
+            Some(value) if !value.trim().is_empty() => {
+                url::Url::parse(&value)
+                    .map(Some)
+                    .map_err(|_invalid| ReplError::InvalidArg {
+                        field: field.to_owned(),
+                        value,
+                        expected: "URL".to_owned(),
+                    })
+            }
+            _ => Ok(None),
+        }
+    }
+
     /// A list of [`ObjectKey`]s from the keyword/positional UUID list (each raw
     /// UUID wrapped).
     pub(crate) fn vec_object(
