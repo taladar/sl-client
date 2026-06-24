@@ -716,12 +716,32 @@ enum SessionState {
     Closed,
 }
 
-/// Bookkeeping for an in-progress teleport handover, so the next
-/// `RegionHandshake` is reported as a [`Event::RegionChanged`].
-#[derive(Debug)]
-struct HandoverPending {
-    /// The destination region handle reported by `TeleportFinish`.
-    region_handle: RegionHandle,
+/// Where the session is in a teleport / region-handover sequence.
+///
+/// Collapses what were two correlated `Option` fields (the in-flight teleport's
+/// destination and the post-arrival handover bookkeeping) into one value, so the
+/// illegal "both set at once" combination is unrepresentable: a request and a
+/// pending handover are mutually exclusive phases of the same sequence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TeleportPhase {
+    /// No teleport or region handover is in progress.
+    Idle,
+    /// A `TeleportLocationRequest` / `TeleportLureRequest` was sent; awaiting the
+    /// `TeleportFinish`. `target` is the best-effort destination region handle
+    /// (a cross-region lure's authoritative handle arrives with the finish).
+    Requested {
+        /// The destination region handle the teleport was aimed at.
+        target: RegionHandle,
+    },
+    /// A teleport finished or a region border was crossed: the new root circuit
+    /// is up and the next `RegionHandshake` should surface a
+    /// [`Event::RegionChanged`] for `region_handle` (rather than the login-time
+    /// `RegionHandshakeComplete`).
+    Handover {
+        /// The destination region handle reported by `TeleportFinish` / the
+        /// region crossing.
+        region_handle: RegionHandle,
+    },
 }
 
 /// A single agent session: login bookkeeping plus one simulator circuit.
@@ -771,11 +791,10 @@ pub struct Session {
     /// Set between an `AgentRequestSit` and the `AvatarSitResponse` that follows,
     /// so the response is completed with an `AgentSit`.
     sit_requested: bool,
-    /// In-progress teleport handover bookkeeping, if any.
-    handover: Option<HandoverPending>,
-    /// The destination region handle of an in-flight teleport (between sending
-    /// `TeleportLocationRequest` and receiving `TeleportFinish`/failure).
-    teleport_target: Option<RegionHandle>,
+    /// Where the session is in a teleport / region-handover sequence (between
+    /// sending a `TeleportLocationRequest` and the next region's
+    /// `RegionHandshake`).
+    teleport: TeleportPhase,
     /// The current region's capability-seed URL (from login or a teleport), for
     /// the driver to fetch the CAPS map and event queue.
     seed_capability: Option<url::Url>,

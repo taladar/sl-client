@@ -30,8 +30,8 @@ use super::{
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
     CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, Circuit, DEFAULT_DRAW_DISTANCE,
-    HandoverPending, IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG,
-    LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, Session, SessionState, TELEPORT_TIMEOUT,
+    IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
+    MAX_INLINE_ASSET, SIT_TIMEOUT, Session, SessionState, TELEPORT_TIMEOUT, TeleportPhase,
     TextureDownload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
@@ -136,8 +136,7 @@ impl Session {
             head_rotation: IDENTITY_ROTATION,
             camera: Camera::region_center(),
             sit_requested: false,
-            handover: None,
-            teleport_target: None,
+            teleport: TeleportPhase::Idle,
             seed_capability: None,
             inventory_root: None,
             login_account: None,
@@ -280,7 +279,10 @@ impl Session {
             }
             "TeleportFinish" => {
                 if let Some(finish) = teleport_finish_from_llsd(body) {
-                    let region_handle = self.teleport_target.unwrap_or(RegionHandle(0));
+                    let region_handle = match self.teleport {
+                        TeleportPhase::Requested { target } => target,
+                        TeleportPhase::Idle | TeleportPhase::Handover { .. } => RegionHandle(0),
+                    };
                     if matches!(self.state, SessionState::Teleporting) {
                         self.events.push_back(Event::TeleportFinished {
                             region_handle,
@@ -687,8 +689,7 @@ impl Session {
         if seed_capability.is_some() {
             self.seed_capability = seed_capability;
         }
-        self.teleport_target = None;
-        self.handover = Some(HandoverPending { region_handle });
+        self.teleport = TeleportPhase::Handover { region_handle };
         self.state = SessionState::AwaitingHandshake;
         Ok(())
     }
@@ -713,17 +714,19 @@ impl Session {
             }
         }
         self.state = SessionState::Active;
-        match self.handover.take() {
-            Some(handover) => {
+        match core::mem::replace(&mut self.teleport, TeleportPhase::Idle) {
+            TeleportPhase::Handover { region_handle } => {
                 if let Some((sim, circuit)) = self.circuit.as_ref().map(|c| (c.sim_addr, c.id)) {
                     self.events.push_back(Event::RegionChanged {
-                        region_handle: handover.region_handle,
+                        region_handle,
                         sim,
                         circuit,
                     });
                 }
             }
-            None => self.events.push_back(Event::RegionHandshakeComplete),
+            TeleportPhase::Idle | TeleportPhase::Requested { .. } => {
+                self.events.push_back(Event::RegionHandshakeComplete);
+            }
         }
     }
 
@@ -823,7 +826,7 @@ impl Session {
         if seed.is_some() {
             self.seed_capability = seed;
         }
-        self.handover = Some(HandoverPending { region_handle });
+        self.teleport = TeleportPhase::Handover { region_handle };
         self.state = SessionState::AwaitingHandshake;
         Ok(())
     }
@@ -1956,7 +1959,7 @@ impl Session {
             AnyMessage::TeleportFailed(failed) => {
                 if matches!(self.state, SessionState::Teleporting) {
                     self.state = SessionState::Active;
-                    self.teleport_target = None;
+                    self.teleport = TeleportPhase::Idle;
                     if let Some(circuit) = self.circuit.as_mut() {
                         circuit.timers.teleport = None;
                     }
@@ -3019,7 +3022,7 @@ impl Session {
                 .is_some_and(|d| now >= d)
         {
             self.state = SessionState::Active;
-            self.teleport_target = None;
+            self.teleport = TeleportPhase::Idle;
             if let Some(circuit) = self.circuit.as_mut() {
                 circuit.timers.teleport = None;
             }
@@ -4520,7 +4523,9 @@ impl Session {
         circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
         // Best-effort destination hint; a cross-region lure's TeleportFinish
         // carries the authoritative handle, so a non-fake-parcel id is harmless.
-        self.teleport_target = Some(parse_lure_region_handle(lure_id.get()));
+        self.teleport = TeleportPhase::Requested {
+            target: parse_lure_region_handle(lure_id.get()),
+        };
         self.state = SessionState::Teleporting;
         Ok(())
     }
@@ -7927,7 +7932,9 @@ impl Session {
         };
         circuit.send_teleport_location_request(region_handle.0, position, look_at, now)?;
         circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
-        self.teleport_target = Some(region_handle);
+        self.teleport = TeleportPhase::Requested {
+            target: region_handle,
+        };
         self.state = SessionState::Teleporting;
         Ok(())
     }
