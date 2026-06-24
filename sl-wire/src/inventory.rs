@@ -28,6 +28,7 @@ use std::collections::HashMap;
 use sl_types::key::{InventoryFolderKey, InventoryKey};
 use uuid::Uuid;
 
+use crate::WireError;
 use crate::llsd::{Llsd, parse_llsd_xml, push_escaped};
 
 /// The viewer's maximum AIS3 folder-fetch depth (`MAX_FOLDER_DEPTH_REQUEST`);
@@ -230,12 +231,16 @@ pub struct AisCategoryCreate {
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
-pub fn parse_ais_create_category_body(xml: &str) -> Result<AisCategoryCreate, roxmltree::Error> {
-    let root = parse_llsd_xml(xml)?;
+/// Returns [`WireError::MalformedField`] if the body is not well-formed XML or a
+/// present field has the wrong LLSD kind.
+pub fn parse_ais_create_category_body(xml: &str) -> Result<AisCategoryCreate, WireError> {
+    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+        field: "AisCreateCategory",
+        value: error.to_string(),
+    })?;
     Ok(AisCategoryCreate {
-        folder_type: root.get("type").and_then(Llsd::as_i32).unwrap_or(-1),
-        name: llsd_string(&root, "name"),
+        folder_type: root.field_i32("type", "type")?.unwrap_or(-1),
+        name: llsd_string(&root, "name")?,
     })
 }
 
@@ -244,10 +249,14 @@ pub fn parse_ais_create_category_body(xml: &str) -> Result<AisCategoryCreate, ro
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
-pub fn parse_ais_rename_category_body(xml: &str) -> Result<String, roxmltree::Error> {
-    let root = parse_llsd_xml(xml)?;
-    Ok(llsd_string(&root, "name"))
+/// Returns [`WireError::MalformedField`] if the body is not well-formed XML or a
+/// present field has the wrong LLSD kind.
+pub fn parse_ais_rename_category_body(xml: &str) -> Result<String, WireError> {
+    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+        field: "AisRenameCategory",
+        value: error.to_string(),
+    })?;
+    llsd_string(&root, "name")
 }
 
 /// Parses an AIS3 re-parent body (`{ parent_id }`) into the new parent id, the
@@ -256,12 +265,15 @@ pub fn parse_ais_rename_category_body(xml: &str) -> Result<String, roxmltree::Er
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
-pub fn parse_ais_move_body(xml: &str) -> Result<InventoryFolderKey, roxmltree::Error> {
-    let root = parse_llsd_xml(xml)?;
+/// Returns [`WireError::MalformedField`] if the body is not well-formed XML or a
+/// present field has the wrong LLSD kind.
+pub fn parse_ais_move_body(xml: &str) -> Result<InventoryFolderKey, WireError> {
+    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+        field: "AisMove",
+        value: error.to_string(),
+    })?;
     Ok(InventoryFolderKey::from(
-        root.get("parent_id")
-            .and_then(Llsd::as_uuid)
+        root.field_uuid("parent_id", "parent_id")?
             .unwrap_or_else(Uuid::nil),
     ))
 }
@@ -281,12 +293,16 @@ pub struct AisItemUpdate {
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
-pub fn parse_ais_update_item_body(xml: &str) -> Result<AisItemUpdate, roxmltree::Error> {
-    let root = parse_llsd_xml(xml)?;
+/// Returns [`WireError::MalformedField`] if the body is not well-formed XML or a
+/// present field has the wrong LLSD kind.
+pub fn parse_ais_update_item_body(xml: &str) -> Result<AisItemUpdate, WireError> {
+    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+        field: "AisUpdateItem",
+        value: error.to_string(),
+    })?;
     Ok(AisItemUpdate {
-        name: llsd_string(&root, "name"),
-        description: llsd_string(&root, "desc"),
+        name: llsd_string(&root, "name")?,
+        description: llsd_string(&root, "desc")?,
     })
 }
 
@@ -309,34 +325,42 @@ pub struct CreateInventoryCategoryRequest {
 /// the inverse of [`build_create_inventory_category_request`]. Served by both
 /// OpenSim and Second Life.
 ///
+/// The `folder_id` (the client-chosen id of the folder to create), `parent_id`
+/// (the containing folder), and `name` are mandatory: OpenSim's handler reads
+/// each unconditionally and rejects the request (HTTP 400) if any is absent or
+/// mistyped (`BunchOfCaps.cs:1242-1258`), and Firestorm always sends all three
+/// (`llinventorymodel.cpp:1181-1184`). The `folder_type` stays optional —
+/// absence defaults to `-1` (`FolderType::None`), a legitimate "no preferred
+/// type" value.
+///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+/// Returns [`WireError::MissingField`] if `folder_id`, `parent_id`, or `name`
+/// is absent, and [`WireError::MalformedField`] if the body is not well-formed
+/// XML or a present field has the wrong LLSD kind.
 pub fn parse_create_inventory_category_request(
     xml: &str,
-) -> Result<CreateInventoryCategoryRequest, roxmltree::Error> {
-    let root = parse_llsd_xml(xml)?;
+) -> Result<CreateInventoryCategoryRequest, WireError> {
+    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+        field: "CreateInventoryCategory",
+        value: error.to_string(),
+    })?;
     Ok(CreateInventoryCategoryRequest {
-        folder_id: InventoryFolderKey::from(llsd_uuid(&root, "folder_id")),
-        parent_id: InventoryFolderKey::from(llsd_uuid(&root, "parent_id")),
-        folder_type: root.get("type").and_then(Llsd::as_i32).unwrap_or(-1),
-        name: llsd_string(&root, "name"),
+        folder_id: InventoryFolderKey::from(root.require_uuid("folder_id", "folder_id")?),
+        parent_id: InventoryFolderKey::from(root.require_uuid("parent_id", "parent_id")?),
+        folder_type: root.field_i32("type", "type")?.unwrap_or(-1),
+        name: root.require_str("name", "name")?.to_owned(),
     })
 }
 
 /// Returns the string member `key` of `root`, or the empty string if absent.
-fn llsd_string(root: &Llsd, key: &str) -> String {
-    root.get(key)
-        .and_then(Llsd::as_str)
-        .unwrap_or("")
-        .to_owned()
-}
-
-/// Returns the UUID member `key` of `root`, or the nil UUID if absent.
-fn llsd_uuid(root: &Llsd, key: &str) -> Uuid {
-    root.get(key)
-        .and_then(Llsd::as_uuid)
-        .unwrap_or_else(Uuid::nil)
+///
+/// # Errors
+///
+/// Returns [`WireError::MalformedField`] if `key` is present with a non-string
+/// LLSD value.
+fn llsd_string(root: &Llsd, key: &'static str) -> Result<String, WireError> {
+    Ok(root.field_str(key, key)?.unwrap_or("").to_owned())
 }
 
 /// The set of inventory objects an AIS3 mutation reply reports as changed — the

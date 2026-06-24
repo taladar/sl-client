@@ -14,10 +14,13 @@ pub(crate) async fn fetch_group_experiences(
     events: mpsc::Sender<Event>,
 ) {
     if let Some(llsd) = get_llsd(&url, &http).await {
+        let Ok(experience_ids) = parse_experience_ids(&llsd) else {
+            return;
+        };
         events
             .send(Event::GroupExperiences {
                 group_id,
-                experience_ids: parse_experience_ids(&llsd),
+                experience_ids,
             })
             .await
             .ok();
@@ -33,10 +36,13 @@ pub(crate) async fn fetch_experience_admin(
     events: mpsc::Sender<Event>,
 ) {
     if let Some(llsd) = get_llsd(&url, &http).await {
+        let Ok(is_admin) = parse_experience_status(&llsd) else {
+            return;
+        };
         events
             .send(Event::ExperienceAdminStatus {
                 experience_id,
-                is_admin: parse_experience_status(&llsd),
+                is_admin,
             })
             .await
             .ok();
@@ -53,10 +59,13 @@ pub(crate) async fn fetch_experience_contributor(
     events: mpsc::Sender<Event>,
 ) {
     if let Some(llsd) = get_llsd(&url, &http).await {
+        let Ok(is_contributor) = parse_experience_status(&llsd) else {
+            return;
+        };
         events
             .send(Event::ExperienceContributorStatus {
                 experience_id,
-                is_contributor: parse_experience_status(&llsd),
+                is_contributor,
             })
             .await
             .ok();

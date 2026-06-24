@@ -11130,12 +11130,12 @@ mod test {
         drain_events(&mut session);
 
         let features = sl_proto::SimulatorFeatures {
-            mesh_upload_enabled: true,
-            physics_materials_enabled: true,
-            max_agent_attachments: 38,
+            mesh_upload_enabled: Some(true),
+            physics_materials_enabled: Some(true),
+            max_agent_attachments: Some(38),
             open_sim_extras: Some(sl_proto::OpenSimExtras {
-                say_range: 20,
-                currency: "OS$".to_owned(),
+                say_range: Some(20),
+                currency: Some("OS$".to_owned()),
                 ..sl_proto::OpenSimExtras::default()
             }),
             ..sl_proto::SimulatorFeatures::default()
@@ -11151,12 +11151,14 @@ mod test {
         let Event::SimulatorFeatures(decoded) = event else {
             return Err("expected SimulatorFeatures".into());
         };
-        assert!(decoded.mesh_upload_enabled);
-        assert!(decoded.physics_materials_enabled);
-        assert_eq!(decoded.max_agent_attachments, 38);
+        assert_eq!(decoded.mesh_upload_enabled, Some(true));
+        assert_eq!(decoded.physics_materials_enabled, Some(true));
+        assert_eq!(decoded.max_agent_attachments, Some(38));
+        // A flag the reply omitted stays `None` (not advertised), not `Some(false)`.
+        assert_eq!(decoded.gltf_enabled, None);
         let extras = decoded.open_sim_extras.ok_or("expected OpenSim extras")?;
-        assert_eq!(extras.say_range, 20);
-        assert_eq!(extras.currency, "OS$");
+        assert_eq!(extras.say_range, Some(20));
+        assert_eq!(extras.currency, Some("OS$".to_owned()));
         Ok(())
     }
 
@@ -12412,6 +12414,7 @@ mod test {
             drain_diagnostics(&mut session),
             vec![Diagnostic::CapsDecodeFailed {
                 message: "ParcelProperties".to_owned(),
+                reason: None,
             }]
         );
         Ok(())

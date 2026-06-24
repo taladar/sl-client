@@ -24,6 +24,7 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 
+use crate::WireError;
 use crate::endian::{u64_from_be, u64_to_be};
 use crate::llsd::Llsd;
 use crate::region_handle::RegionHandle;
@@ -80,11 +81,14 @@ pub fn build_remote_parcel_request(
 /// Decodes a `RemoteParcelRequest` reply (`{ parcel_id }`) into the resolved
 /// parcel id, or [`None`] when the body lacks a `parcel_id` (the grid could not
 /// resolve the location).
-#[must_use]
-pub fn parse_remote_parcel_reply(body: &Llsd) -> Option<ParcelKey> {
-    body.get("parcel_id")
-        .and_then(Llsd::as_uuid)
-        .map(ParcelKey::from)
+///
+/// # Errors
+/// Returns [`WireError::MalformedField`] if `parcel_id` is present but of the
+/// wrong LLSD kind.
+pub fn parse_remote_parcel_reply(body: &Llsd) -> Result<Option<ParcelKey>, WireError> {
+    Ok(body
+        .field_uuid("parcel_id", "parcel_id")?
+        .map(ParcelKey::from))
 }
 
 // ---------------------------------------------------------------------------
@@ -95,31 +99,40 @@ pub fn parse_remote_parcel_reply(body: &Llsd) -> Option<ParcelKey> {
 /// [`build_remote_parcel_request`]. A missing `location` defaults to the origin;
 /// an absent `region_id` / `region_handle` decodes to nil / zero. The
 /// `region_handle` is read from the 8-byte big-endian binary the viewer sends.
-#[must_use]
-pub fn parse_remote_parcel_request(body: &Llsd) -> RemoteParcelRequest {
-    let location = body
-        .get("location")
-        .and_then(Llsd::as_array)
-        .map_or([0.0, 0.0, 0.0], |array| {
-            let coord = |index: usize| array.get(index).and_then(Llsd::as_f64).unwrap_or(0.0);
-            [coord(0), coord(1), coord(2)]
-        });
+///
+/// # Errors
+/// Returns [`WireError::MalformedField`] if a decoded LLSD field is present but
+/// of the wrong kind.
+pub fn parse_remote_parcel_request(body: &Llsd) -> Result<RemoteParcelRequest, WireError> {
+    let location = match body.field_array("location", "location")? {
+        None => [0.0, 0.0, 0.0],
+        Some(array) => {
+            let coord = |index: usize| -> Result<f64, WireError> {
+                match array.get(index) {
+                    None | Some(Llsd::Undef) => Ok(0.0),
+                    Some(v) => v.as_f64().ok_or_else(|| WireError::MalformedField {
+                        field: "location",
+                        value: v.kind().to_owned(),
+                    }),
+                }
+            };
+            [coord(0)?, coord(1)?, coord(2)?]
+        }
+    };
     let region_id = body
-        .get("region_id")
-        .and_then(Llsd::as_uuid)
+        .field_uuid("region_id", "region_id")?
         .unwrap_or_else(Uuid::nil);
     let region_handle = body
-        .get("region_handle")
-        .and_then(Llsd::as_binary)
+        .field_binary("region_handle", "region_handle")?
         .and_then(|bytes| bytes.get(0..8))
         .and_then(|head| <[u8; 8]>::try_from(head).ok())
         .map(|head| RegionHandle(u64_from_be(head)))
         .unwrap_or_default();
-    RemoteParcelRequest {
+    Ok(RemoteParcelRequest {
         location,
         region_id,
         region_handle,
-    }
+    })
 }
 
 /// Builds a `RemoteParcelRequest` reply (`{ parcel_id }`) from a resolved parcel
@@ -159,7 +172,8 @@ mod tests {
         let region = uuid("11111111-1111-1111-1111-111111111111")?;
         let body = build_remote_parcel_request([128.0, 64.5, 22.0], region, RegionHandle(0));
         let parsed =
-            parse_remote_parcel_request(&parse_llsd_xml(&body).map_err(|e| format!("{e:?}"))?);
+            parse_remote_parcel_request(&parse_llsd_xml(&body).map_err(|e| format!("{e:?}"))?)
+                .map_err(|e| format!("{e:?}"))?;
         assert_eq!(
             parsed.location.map(f64::to_bits),
             [128.0_f64, 64.5, 22.0].map(f64::to_bits)
@@ -176,7 +190,8 @@ mod tests {
         let handle = RegionHandle(0x0003_F480_0003_F480_u64);
         let body = build_remote_parcel_request([1.0, 2.0, 3.0], Uuid::nil(), handle);
         let parsed =
-            parse_remote_parcel_request(&parse_llsd_xml(&body).map_err(|e| format!("{e:?}"))?);
+            parse_remote_parcel_request(&parse_llsd_xml(&body).map_err(|e| format!("{e:?}"))?)
+                .map_err(|e| format!("{e:?}"))?;
         assert_eq!(parsed.region_id, Uuid::nil());
         assert_eq!(parsed.region_handle, handle);
         Ok(())
@@ -188,7 +203,8 @@ mod tests {
         let parcel = ParcelKey::from(uuid("22222222-2222-2222-2222-222222222222")?);
         let xml = build_remote_parcel_response(parcel);
         let parsed =
-            parse_remote_parcel_reply(&parse_llsd_xml(&xml).map_err(|e| format!("{e:?}"))?);
+            parse_remote_parcel_reply(&parse_llsd_xml(&xml).map_err(|e| format!("{e:?}"))?)
+                .map_err(|e| format!("{e:?}"))?;
         assert_eq!(parsed, Some(parcel));
         Ok(())
     }

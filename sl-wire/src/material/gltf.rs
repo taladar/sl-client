@@ -1,6 +1,7 @@
 //! GLTF (PBR) material overrides and the `ModifyMaterialParams` set request.
 
 use super::{GltfMaterialOverride, MaterialOverrideUpdate};
+use crate::WireError;
 use crate::llsd::{Llsd, parse_llsd_xml, push_escaped};
 
 // ---------------------------------------------------------------------------
@@ -353,23 +354,26 @@ pub fn parse_modify_material_params_request(
     let Some(array) = root.as_array() else {
         return Ok(Vec::new());
     };
-    Ok(array.iter().filter_map(modify_material_update).collect())
+    Ok(array
+        .iter()
+        .filter_map(|item| modify_material_update(item).ok().flatten())
+        .collect())
 }
 
 /// Decodes one `ModifyMaterialParams` array entry into a
 /// [`MaterialOverrideUpdate`], or `None` if it lacks an `object_id`.
-fn modify_material_update(item: &Llsd) -> Option<MaterialOverrideUpdate> {
-    let object_id = sl_types::key::ObjectKey::from(item.get("object_id").and_then(Llsd::as_uuid)?);
-    let side = item.get("side").and_then(Llsd::as_i32).unwrap_or(-1);
-    let gltf_json = item
-        .get("gltf_json")
-        .and_then(Llsd::as_str)
-        .map(str::to_owned);
-    let asset_id = item.get("asset_id").and_then(Llsd::as_uuid);
-    Some(MaterialOverrideUpdate {
+fn modify_material_update(item: &Llsd) -> Result<Option<MaterialOverrideUpdate>, WireError> {
+    let Some(raw_object_id) = item.field_uuid("object_id", "object_id")? else {
+        return Ok(None);
+    };
+    let object_id = sl_types::key::ObjectKey::from(raw_object_id);
+    let side = item.field_i32("side", "side")?.unwrap_or(-1);
+    let gltf_json = item.field_str("gltf_json", "gltf_json")?.map(str::to_owned);
+    let asset_id = item.field_uuid("asset_id", "asset_id")?;
+    Ok(Some(MaterialOverrideUpdate {
         object_id,
         side,
         gltf_json,
         asset_id,
-    })
+    }))
 }

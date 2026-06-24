@@ -86,4 +86,14 @@ pub enum WireError {
         /// The offending value, rendered for diagnostics.
         value: String,
     },
+    /// A field that a conforming peer is required to send was absent from a
+    /// decoded body (an LLSD map key that should always be present, e.g. the
+    /// identity id a capability reply is *about*). The message is rejected rather
+    /// than silently substituting a default, since its absence means the body is
+    /// malformed or from an incompatible peer.
+    #[error("required field {field} was absent")]
+    MissingField {
+        /// A short static label identifying the absent field.
+        field: &'static str,
+    },
 }

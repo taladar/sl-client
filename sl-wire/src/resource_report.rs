@@ -25,6 +25,7 @@ use std::collections::HashMap;
 use sl_types::key::{AgentKey, OwnerKey, ParcelKey};
 use uuid::Uuid;
 
+use crate::WireError;
 use crate::llsd::Llsd;
 
 /// One resource budget line in a [`ResourceSummary`]: how much of a named
@@ -115,23 +116,36 @@ fn resource_amount_to_llsd(amount: &ResourceAmount) -> Llsd {
 }
 
 /// Decodes one `{ type, amount }` resource line from LLSD.
-fn resource_amount_from_llsd(value: &Llsd) -> ResourceAmount {
-    ResourceAmount {
-        resource_type: value
-            .get("type")
-            .and_then(Llsd::as_str)
-            .unwrap_or_default()
-            .to_owned(),
-        amount: value.get("amount").and_then(Llsd::as_i32).unwrap_or(0),
-    }
+///
+/// `type` and `amount` are both **required**: OpenSim writes both unconditionally
+/// for every resource line (`BunchOfCaps.cs` `WriteScriptResourceData`,
+/// `AddElem("amount", …)` / `AddElem("type", …)`), and a line missing either is a
+/// nonsense record (an unnamed budget, or a named budget with no number), so an
+/// absent key is a hard [`WireError::MissingField`] rather than a silent
+/// `{ type: "", amount: 0 }`.
+fn resource_amount_from_llsd(value: &Llsd) -> Result<ResourceAmount, WireError> {
+    Ok(ResourceAmount {
+        resource_type: value.require_str("type", "type")?.to_owned(),
+        amount: value.require_i32("amount", "amount")?,
+    })
 }
 
 /// Decodes an `available`/`used` array of resource lines.
-fn resource_amounts_from_llsd(value: Option<&Llsd>) -> Vec<ResourceAmount> {
-    value
-        .and_then(Llsd::as_array)
-        .map(|amounts| amounts.iter().map(resource_amount_from_llsd).collect())
-        .unwrap_or_default()
+fn resource_amounts_from_llsd(
+    value: Option<&Llsd>,
+    label: &'static str,
+) -> Result<Vec<ResourceAmount>, WireError> {
+    match value {
+        None | Some(Llsd::Undef) => Ok(Vec::new()),
+        Some(Llsd::Array(amounts)) => amounts
+            .iter()
+            .map(resource_amount_from_llsd)
+            .collect::<Result<Vec<_>, _>>(),
+        Some(other) => Err(WireError::MalformedField {
+            field: label,
+            value: other.kind().to_owned(),
+        }),
+    }
 }
 
 /// Serialises a [`ResourceSummary`] to its `{ available, used }` LLSD map.
@@ -146,11 +160,11 @@ fn resource_summary_to_llsd(summary: &ResourceSummary) -> Llsd {
 }
 
 /// Decodes a [`ResourceSummary`] from its `{ available, used }` LLSD map.
-fn resource_summary_from_llsd(value: &Llsd) -> ResourceSummary {
-    ResourceSummary {
-        available: resource_amounts_from_llsd(value.get("available")),
-        used: resource_amounts_from_llsd(value.get("used")),
-    }
+fn resource_summary_from_llsd(value: &Llsd) -> Result<ResourceSummary, WireError> {
+    Ok(ResourceSummary {
+        available: resource_amounts_from_llsd(value.get("available"), "available")?,
+        used: resource_amounts_from_llsd(value.get("used"), "used")?,
+    })
 }
 
 /// Serialises a `[x, y, z]` vector to an LLSD array of three reals (the LLSD
@@ -165,14 +179,27 @@ fn vector3_to_llsd(vector: [f32; 3]) -> Llsd {
 }
 
 /// Decodes an LLSD array of three reals into a `[x, y, z]` vector.
-fn vector3_from_llsd(value: Option<&Llsd>) -> [f32; 3] {
-    let component = |index: usize| {
-        value
-            .and_then(|array| array.index(index))
-            .and_then(Llsd::as_f32)
-            .unwrap_or(0.0)
+fn vector3_from_llsd(value: Option<&Llsd>, label: &'static str) -> Result<[f32; 3], WireError> {
+    let array = match value {
+        None | Some(Llsd::Undef) => return Ok([0.0, 0.0, 0.0]),
+        Some(Llsd::Array(array)) => array,
+        Some(other) => {
+            return Err(WireError::MalformedField {
+                field: label,
+                value: other.kind().to_owned(),
+            });
+        }
     };
-    [component(0), component(1), component(2)]
+    let component = |index: usize| -> Result<f32, WireError> {
+        match array.get(index) {
+            None | Some(Llsd::Undef) => Ok(0.0),
+            Some(element) => element.as_f32().ok_or_else(|| WireError::MalformedField {
+                field: label,
+                value: element.kind().to_owned(),
+            }),
+        }
+    };
+    Ok([component(0)?, component(1)?, component(2)?])
 }
 
 /// Serialises one [`ScriptedObjectInfo`] to its LLSD map. Memory/URL fields are
@@ -200,43 +227,64 @@ fn scripted_object_to_llsd(object: &ScriptedObjectInfo) -> Llsd {
 }
 
 /// Decodes one [`ScriptedObjectInfo`] from its LLSD map.
-fn scripted_object_from_llsd(value: &Llsd) -> ScriptedObjectInfo {
-    let resources = value.get("resources");
-    ScriptedObjectInfo {
-        id: value.get("id").and_then(Llsd::as_uuid).unwrap_or_default(),
-        location: vector3_from_llsd(value.get("location")),
+///
+/// `id` and `owner_id` are **required**: OpenSim writes both unconditionally for
+/// every object in both the attachment report and the land detail report
+/// (`BunchOfCaps.cs` — `AddElem("id", …)` / `AddElem("owner_id", …)`), and a
+/// scripted-object record with no identity or no owner is meaningless, so an
+/// absent key is a hard [`WireError::MissingField`]. The remaining fields stay
+/// optional: `name` may be empty, `location` is `.has()`-guarded by Firestorm
+/// (`llfloaterscriptlimits.cpp`), `is_group_owned` is explicitly tolerated as
+/// absent there ("may not be sent by all server versions" → default `false`), and
+/// the `resources` memory/URL counts are written only when non-zero in the
+/// attachment report (`BunchOfCaps.cs` `if (asi.memory > 0)` / `if (asi.urls > 0)`).
+fn scripted_object_from_llsd(value: &Llsd) -> Result<ScriptedObjectInfo, WireError> {
+    let resources = match value.get("resources") {
+        None | Some(Llsd::Undef) => ScriptedObjectResources::default(),
+        Some(map @ Llsd::Map(_)) => ScriptedObjectResources {
+            memory: map.field_i32("memory", "memory")?,
+            urls: map.field_i32("urls", "urls")?,
+        },
+        Some(other) => {
+            return Err(WireError::MalformedField {
+                field: "resources",
+                value: other.kind().to_owned(),
+            });
+        }
+    };
+    Ok(ScriptedObjectInfo {
+        id: value.require_uuid("id", "id")?,
+        location: vector3_from_llsd(value.get("location"), "location")?,
         name: value
-            .get("name")
-            .and_then(Llsd::as_str)
+            .field_str("name", "name")?
             .unwrap_or_default()
             .to_owned(),
         owner: owner_key_from_wire(
+            value.require_uuid("owner_id", "owner_id")?,
             value
-                .get("owner_id")
-                .and_then(Llsd::as_uuid)
-                .unwrap_or_default(),
-            value
-                .get("is_group_owned")
-                .and_then(Llsd::as_bool)
+                .field_bool("is_group_owned", "is_group_owned")?
                 .unwrap_or(false),
         ),
-        resources: ScriptedObjectResources {
-            memory: resources
-                .and_then(|map| map.get("memory"))
-                .and_then(Llsd::as_i32),
-            urls: resources
-                .and_then(|map| map.get("urls"))
-                .and_then(Llsd::as_i32),
-        },
-    }
+        resources,
+    })
 }
 
 /// Decodes an array of [`ScriptedObjectInfo`].
-fn scripted_objects_from_llsd(value: Option<&Llsd>) -> Vec<ScriptedObjectInfo> {
-    value
-        .and_then(Llsd::as_array)
-        .map(|objects| objects.iter().map(scripted_object_from_llsd).collect())
-        .unwrap_or_default()
+fn scripted_objects_from_llsd(
+    value: Option<&Llsd>,
+    label: &'static str,
+) -> Result<Vec<ScriptedObjectInfo>, WireError> {
+    match value {
+        None | Some(Llsd::Undef) => Ok(Vec::new()),
+        Some(Llsd::Array(objects)) => objects
+            .iter()
+            .map(scripted_object_from_llsd)
+            .collect::<Result<Vec<_>, _>>(),
+        Some(other) => Err(WireError::MalformedField {
+            field: label,
+            value: other.kind().to_owned(),
+        }),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -264,33 +312,48 @@ pub struct AttachmentResourcesReport {
 }
 
 /// Decodes an `AttachmentResources` reply.
-#[must_use]
-pub fn parse_attachment_resources(body: &Llsd) -> AttachmentResourcesReport {
-    let attachments = body
-        .get("attachments")
-        .and_then(Llsd::as_array)
-        .map(|points| {
-            points
-                .iter()
-                .map(|point| AttachmentLocation {
+///
+/// # Errors
+/// Returns [`WireError::MissingField`] if a required field of a scripted-object
+/// record (`id`, `owner_id`) or a resource line (`type`, `amount`) is absent, or
+/// [`WireError::MalformedField`] if a decoded LLSD field is present but of the
+/// wrong kind.
+pub fn parse_attachment_resources(body: &Llsd) -> Result<AttachmentResourcesReport, WireError> {
+    let attachments = match body.get("attachments") {
+        None | Some(Llsd::Undef) => Vec::new(),
+        Some(Llsd::Array(points)) => points
+            .iter()
+            .map(|point| {
+                Ok(AttachmentLocation {
                     location: point
-                        .get("location")
-                        .and_then(Llsd::as_str)
+                        .field_str("location", "location")?
                         .unwrap_or_default()
                         .to_owned(),
-                    objects: scripted_objects_from_llsd(point.get("objects")),
+                    objects: scripted_objects_from_llsd(point.get("objects"), "objects")?,
                 })
-                .collect()
-        })
-        .unwrap_or_default();
-    let summary = body
-        .get("summary")
-        .map(resource_summary_from_llsd)
-        .unwrap_or_default();
-    AttachmentResourcesReport {
+            })
+            .collect::<Result<Vec<_>, WireError>>()?,
+        Some(other) => {
+            return Err(WireError::MalformedField {
+                field: "attachments",
+                value: other.kind().to_owned(),
+            });
+        }
+    };
+    let summary = match body.get("summary") {
+        None | Some(Llsd::Undef) => ResourceSummary::default(),
+        Some(map @ Llsd::Map(_)) => resource_summary_from_llsd(map)?,
+        Some(other) => {
+            return Err(WireError::MalformedField {
+                field: "summary",
+                value: other.kind().to_owned(),
+            });
+        }
+    };
+    Ok(AttachmentResourcesReport {
         attachments,
         summary,
-    }
+    })
 }
 
 /// Builds an `AttachmentResources` reply (server side) — the inverse of
@@ -352,27 +415,31 @@ pub fn build_land_resources_request(parcel_id: ParcelKey) -> String {
 }
 
 /// Decodes a `LandResources` request: the requested parcel id.
-#[must_use]
-pub fn parse_land_resources_request(body: &Llsd) -> Option<ParcelKey> {
-    body.get("parcel_id")
-        .and_then(Llsd::as_uuid)
-        .map(ParcelKey::from)
+///
+/// # Errors
+/// Returns [`WireError::MalformedField`] if `parcel_id` is present but of the
+/// wrong LLSD kind.
+pub fn parse_land_resources_request(body: &Llsd) -> Result<Option<ParcelKey>, WireError> {
+    Ok(body
+        .field_uuid("parcel_id", "parcel_id")?
+        .map(ParcelKey::from))
 }
 
 /// Decodes a `LandResources` reply: the follow-up capability URLs.
-#[must_use]
-pub fn parse_land_resources_reply(body: &Llsd) -> LandResourcesUrls {
-    LandResourcesUrls {
+///
+/// # Errors
+/// Returns [`WireError::MalformedField`] if a decoded LLSD field is present but
+/// of the wrong kind.
+pub fn parse_land_resources_reply(body: &Llsd) -> Result<LandResourcesUrls, WireError> {
+    Ok(LandResourcesUrls {
         script_resource_summary: body
-            .get("ScriptResourceSummary")
-            .and_then(Llsd::as_str)
+            .field_str("ScriptResourceSummary", "ScriptResourceSummary")?
             .unwrap_or_default()
             .to_owned(),
         script_resource_details: body
-            .get("ScriptResourceDetails")
-            .and_then(Llsd::as_str)
+            .field_str("ScriptResourceDetails", "ScriptResourceDetails")?
             .map(str::to_owned),
-    }
+    })
 }
 
 /// Builds a `LandResources` reply from the follow-up URLs (server side) — the
@@ -398,11 +465,20 @@ pub fn build_land_resources_response(urls: &LandResourcesUrls) -> String {
 
 /// Decodes a `ScriptResourceSummary` follow-up report: the parcel's resource
 /// totals (carried under a `summary` key).
-#[must_use]
-pub fn parse_land_resource_summary(body: &Llsd) -> ResourceSummary {
-    body.get("summary")
-        .map(resource_summary_from_llsd)
-        .unwrap_or_default()
+///
+/// # Errors
+/// Returns [`WireError::MissingField`] if a resource line is missing its required
+/// `type` or `amount`, or [`WireError::MalformedField`] if a decoded LLSD field
+/// is present but of the wrong kind.
+pub fn parse_land_resource_summary(body: &Llsd) -> Result<ResourceSummary, WireError> {
+    match body.get("summary") {
+        None | Some(Llsd::Undef) => Ok(ResourceSummary::default()),
+        Some(map @ Llsd::Map(_)) => resource_summary_from_llsd(map),
+        Some(other) => Err(WireError::MalformedField {
+            field: "summary",
+            value: other.kind().to_owned(),
+        }),
+    }
 }
 
 /// Builds a `ScriptResourceSummary` follow-up report (server side) — the inverse
@@ -431,28 +507,42 @@ pub struct ParcelScriptResources {
 
 /// Decodes a `ScriptResourceDetails` follow-up report: the per-parcel scripted-
 /// object breakdown (carried under a `parcels` array).
-#[must_use]
-pub fn parse_land_resource_detail(body: &Llsd) -> Vec<ParcelScriptResources> {
-    body.get("parcels")
-        .and_then(Llsd::as_array)
-        .map(|parcels| {
-            parcels
-                .iter()
-                .map(|parcel| ParcelScriptResources {
+///
+/// Within each parcel record, `id` and `local_id` are **required**: OpenSim
+/// writes both unconditionally for every parcel (`BunchOfCaps.cs` —
+/// `AddElem("id", …)` / `AddElem("local_id", …)`), and a parcel record with no
+/// grid id or no region-local id can identify no parcel, so an absent key is a
+/// hard [`WireError::MissingField`]. `name` stays optional (it may be empty and
+/// Firestorm reads it blind).
+///
+/// # Errors
+/// Returns [`WireError::MissingField`] if a required field (`id`, `local_id`) is
+/// absent, or [`WireError::MalformedField`] if a decoded LLSD field is present
+/// but of the wrong kind.
+pub fn parse_land_resource_detail(body: &Llsd) -> Result<Vec<ParcelScriptResources>, WireError> {
+    match body.get("parcels") {
+        None | Some(Llsd::Undef) => Ok(Vec::new()),
+        Some(Llsd::Array(parcels)) => parcels
+            .iter()
+            .map(|parcel| {
+                Ok(ParcelScriptResources {
                     name: parcel
-                        .get("name")
-                        .and_then(Llsd::as_str)
+                        .field_str("name", "name")?
                         .unwrap_or_default()
                         .to_owned(),
-                    id: parcel.get("id").and_then(Llsd::as_uuid).unwrap_or_default(),
+                    id: parcel.require_uuid("id", "id")?,
                     local_id: crate::RegionLocalParcelId(
-                        parcel.get("local_id").and_then(Llsd::as_i32).unwrap_or(0),
+                        parcel.require_i32("local_id", "local_id")?,
                     ),
-                    objects: scripted_objects_from_llsd(parcel.get("objects")),
+                    objects: scripted_objects_from_llsd(parcel.get("objects"), "objects")?,
                 })
-                .collect()
-        })
-        .unwrap_or_default()
+            })
+            .collect::<Result<Vec<_>, WireError>>(),
+        Some(other) => Err(WireError::MalformedField {
+            field: "parcels",
+            value: other.kind().to_owned(),
+        }),
+    }
 }
 
 /// Builds a `ScriptResourceDetails` follow-up report (server side) — the inverse
@@ -535,7 +625,8 @@ mod tests {
         let xml = build_attachment_resources_response(&report);
         let parsed = parse_attachment_resources(
             &parse_llsd_xml(&xml).map_err(|error| format!("{error:?}"))?,
-        );
+        )
+        .map_err(|error| format!("{error:?}"))?;
         assert_eq!(parsed, report);
         Ok(())
     }
@@ -548,7 +639,8 @@ mod tests {
         let body = build_land_resources_request(parcel_id);
         let parsed = parse_land_resources_request(
             &parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?,
-        );
+        )
+        .map_err(|error| format!("{error:?}"))?;
         assert_eq!(parsed, Some(parcel_id));
 
         let urls = LandResourcesUrls {
@@ -558,7 +650,8 @@ mod tests {
         let xml = build_land_resources_response(&urls);
         let parsed = parse_land_resources_reply(
             &parse_llsd_xml(&xml).map_err(|error| format!("{error:?}"))?,
-        );
+        )
+        .map_err(|error| format!("{error:?}"))?;
         assert_eq!(parsed, urls);
         Ok(())
     }
@@ -579,7 +672,8 @@ mod tests {
         let xml = build_land_resource_summary_response(&summary);
         let parsed = parse_land_resource_summary(
             &parse_llsd_xml(&xml).map_err(|error| format!("{error:?}"))?,
-        );
+        )
+        .map_err(|error| format!("{error:?}"))?;
         assert_eq!(parsed, summary);
 
         let parcels = vec![ParcelScriptResources {
@@ -591,7 +685,8 @@ mod tests {
         let xml = build_land_resource_detail_response(&parcels);
         let parsed = parse_land_resource_detail(
             &parse_llsd_xml(&xml).map_err(|error| format!("{error:?}"))?,
-        );
+        )
+        .map_err(|error| format!("{error:?}"))?;
         assert_eq!(parsed, parcels);
         Ok(())
     }

@@ -228,8 +228,11 @@ fn write_diagnostic(out: &mut String, diagnostic: &Diagnostic) -> std::fmt::Resu
         Diagnostic::UnknownCapsEvent { message } => {
             write!(out, "UnknownCapsEvent message={message}")?;
         }
-        Diagnostic::CapsDecodeFailed { message } => {
+        Diagnostic::CapsDecodeFailed { message, reason } => {
             write!(out, "CapsDecodeFailed message={message}")?;
+            if let Some(reason) = reason {
+                write!(out, " reason={reason}")?;
+            }
         }
         Diagnostic::ExpectedReplyMissing { request, sequence } => match sequence {
             Some(seq) => write!(out, "ExpectedReplyMissing request={request} sequence={seq}")?,

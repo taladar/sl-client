@@ -25,6 +25,7 @@ use std::collections::HashMap;
 use sl_types::key::AgentKey;
 use uuid::Uuid;
 
+use crate::WireError;
 use crate::llsd::Llsd;
 
 /// A single avatar's display-name record, as carried in a `GetDisplayNames`
@@ -98,35 +99,45 @@ impl DisplayName {
         }
     }
 
-    /// Decodes a [`DisplayName`] from one `agents` map element. Missing fields
-    /// take their defaults rather than failing, matching the lenient decoding
-    /// used elsewhere for cap replies.
-    #[must_use]
-    pub fn from_llsd(map: &Llsd) -> Self {
-        let string = |key: &str| {
-            map.get(key)
-                .and_then(Llsd::as_str)
-                .unwrap_or_default()
-                .to_owned()
+    /// Decodes a [`DisplayName`] from one `agents` map element.
+    ///
+    /// A resolved `agents` entry carries the agent's identity, so the four
+    /// identity fields — `id`, `username`, `legacy_first_name`,
+    /// `legacy_last_name` — are required: a conforming grid always emits them
+    /// (OpenSim `BunchOfCaps.cs` lines 2323-2326) and the Firestorm reader uses
+    /// them without a fallback (`llavatarname.cpp` lines 112, 114-115;
+    /// `llavatarnamecache.cpp:235` keys the cache by `id`), so their absence
+    /// makes the record meaningless. The remaining fields degrade gracefully:
+    /// `display_name` falls back to the username when empty/absent in the viewer
+    /// (`llavatarname.cpp:123`), and the bool/timestamp fields default to a
+    /// stale/immediate-refetch value, so they stay optional.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WireError::MissingField`] if a required identity field is
+    /// absent, or [`WireError::MalformedField`] if a present field has the wrong
+    /// LLSD kind.
+    pub fn from_llsd(map: &Llsd) -> Result<Self, WireError> {
+        let optional_string = |key: &'static str| -> Result<String, WireError> {
+            Ok(map.field_str(key, key)?.unwrap_or_default().to_owned())
         };
-        Self {
-            id: AgentKey::from(
-                map.get("id")
-                    .and_then(Llsd::as_uuid)
-                    .unwrap_or_else(Uuid::nil),
-            ),
-            username: string("username"),
-            display_name: string("display_name"),
-            legacy_first_name: string("legacy_first_name"),
-            legacy_last_name: string("legacy_last_name"),
+        Ok(Self {
+            id: AgentKey::from(map.require_uuid("id", "id")?),
+            username: map.require_str("username", "username")?.to_owned(),
+            display_name: optional_string("display_name")?,
+            legacy_first_name: map
+                .require_str("legacy_first_name", "legacy_first_name")?
+                .to_owned(),
+            legacy_last_name: map
+                .require_str("legacy_last_name", "legacy_last_name")?
+                .to_owned(),
             is_display_name_default: map
-                .get("is_display_name_default")
-                .and_then(Llsd::as_bool)
+                .field_bool("is_display_name_default", "is_display_name_default")?
                 .unwrap_or(false),
-            display_name_expires: string("display_name_expires"),
-            display_name_next_update: string("display_name_next_update"),
+            display_name_expires: optional_string("display_name_expires")?,
+            display_name_next_update: optional_string("display_name_next_update")?,
             missing: false,
-        }
+        })
     }
 
     /// Encodes this record as one `agents` map element — the inverse of
@@ -195,20 +206,29 @@ pub fn display_names_query(ids: &[Uuid]) -> String {
 /// `bad_ids` id becomes a [`missing`](DisplayName::missing) placeholder (matching
 /// the viewer, which caches an unresolved entry for ids the grid could not
 /// resolve).
-#[must_use]
-pub fn parse_display_names(body: &Llsd) -> Vec<DisplayName> {
+///
+/// # Errors
+///
+/// Returns [`WireError::MalformedField`] if `agents`/`bad_ids` is present with
+/// the wrong LLSD kind, or an `agents` element has a wrong-kind field.
+pub fn parse_display_names(body: &Llsd) -> Result<Vec<DisplayName>, WireError> {
     let mut names = Vec::new();
-    if let Some(agents) = body.get("agents").and_then(Llsd::as_array) {
-        names.extend(agents.iter().map(DisplayName::from_llsd));
+    if let Some(agents) = body.field_array("agents", "agents")? {
+        names.extend(
+            agents
+                .iter()
+                .map(DisplayName::from_llsd)
+                .collect::<Result<Vec<_>, WireError>>()?,
+        );
     }
-    if let Some(bad) = body.get("bad_ids").and_then(Llsd::as_array) {
+    if let Some(bad) = body.field_array("bad_ids", "bad_ids")? {
         names.extend(bad.iter().filter_map(Llsd::as_uuid).map(|id| DisplayName {
             id: AgentKey::from(id),
             missing: true,
             ..DisplayName::default()
         }));
     }
-    names
+    Ok(names)
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +291,7 @@ mod tests {
         DisplayName, build_display_names_response, display_names_query, parse_display_names,
         parse_display_names_query,
     };
+    use crate::WireError;
     use crate::llsd::parse_llsd_xml;
 
     /// Parses a UUID in a test, surfacing a `String` error for the `?` operator.
@@ -307,7 +328,7 @@ mod tests {
             "</map></llsd>"
         ))
         .map_err(|error| format!("{error:?}"))?;
-        let names = parse_display_names(&reply);
+        let names = parse_display_names(&reply).map_err(|error| format!("{error:?}"))?;
         let [first, second] = names.as_slice() else {
             return Err(format!("expected 2 names, got {}", names.len()));
         };
@@ -324,6 +345,26 @@ mod tests {
         );
         assert!(second.missing);
         Ok(())
+    }
+
+    /// An `agents` entry that omits a mandatory identity field (here the
+    /// `username`) is rejected as [`WireError::MissingField`] rather than
+    /// decoding a half-populated record — a resolved entry's identity fields are
+    /// always emitted by a conforming grid.
+    #[test]
+    fn display_names_missing_identity_field_is_error() -> Result<(), String> {
+        let reply = parse_llsd_xml(concat!(
+            "<llsd><map><key>agents</key><array><map>",
+            "<key>id</key><uuid>11111111-1111-1111-1111-111111111111</uuid>",
+            "<key>legacy_first_name</key><string>James</string>",
+            "<key>legacy_last_name</key><string>Linden</string>",
+            "</map></array></map></llsd>"
+        ))
+        .map_err(|error| format!("{error:?}"))?;
+        match parse_display_names(&reply) {
+            Err(WireError::MissingField { field: "username" }) => Ok(()),
+            other => Err(format!("expected MissingField username, got {other:?}")),
+        }
     }
 
     /// The server query parser is the inverse of [`display_names_query`], and the
@@ -353,7 +394,8 @@ mod tests {
         };
         let xml = build_display_names_response(&[name.clone(), missing]);
         let parsed =
-            parse_display_names(&parse_llsd_xml(&xml).map_err(|error| format!("{error:?}"))?);
+            parse_display_names(&parse_llsd_xml(&xml).map_err(|error| format!("{error:?}"))?)
+                .map_err(|error| format!("{error:?}"))?;
         let [first, second] = parsed.as_slice() else {
             return Err(format!("expected 2 names, got {}", parsed.len()));
         };

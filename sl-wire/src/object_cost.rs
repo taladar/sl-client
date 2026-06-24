@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use sl_types::key::ObjectKey;
 use uuid::Uuid;
 
+use crate::WireError;
 use crate::llsd::Llsd;
 
 /// The accounting costs of one object, as carried by a `GetObjectCost` reply.
@@ -89,17 +90,16 @@ pub(crate) fn object_ids_request(object_ids: &[ObjectKey]) -> Llsd {
 }
 
 /// Decodes the `object_ids` array of an `{ object_ids: [...] }` request body.
-#[must_use]
-pub(crate) fn parse_object_ids(body: &Llsd) -> Vec<ObjectKey> {
-    body.get("object_ids")
-        .and_then(Llsd::as_array)
+pub(crate) fn parse_object_ids(body: &Llsd) -> Result<Vec<ObjectKey>, WireError> {
+    Ok(body
+        .field_array("object_ids", "object_ids")?
         .map(|ids| {
             ids.iter()
                 .filter_map(Llsd::as_uuid)
                 .map(ObjectKey::from)
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default())
 }
 
 /// Serialises one [`ObjectCost`] to its LLSD map. Shared by the client decoder's
@@ -129,31 +129,28 @@ fn object_cost_to_llsd(cost: &ObjectCost) -> Llsd {
     ]))
 }
 
-/// Decodes one [`ObjectCost`] from its LLSD map (lenient: absent keys default).
-fn object_cost_from_llsd(value: &Llsd) -> ObjectCost {
-    ObjectCost {
+/// Decodes one [`ObjectCost`] from its LLSD map.
+///
+/// The four numeric cost fields are the core data the per-object record is about
+/// and a conforming emitter always sends them (OpenSim
+/// `BunchOfCaps.cs:GetObjectCost` writes them unconditionally; Firestorm
+/// `llviewerobjectlist.cpp` reads all four), so their absence is a hard
+/// [`WireError::MissingField`]. `resource_limiting_type` is emitted by OpenSim
+/// but never read by the Firestorm reference reader, so it stays optional
+/// (defaulting to the empty string).
+fn object_cost_from_llsd(value: &Llsd) -> Result<ObjectCost, WireError> {
+    Ok(ObjectCost {
         linked_set_resource_cost: value
-            .get("linked_set_resource_cost")
-            .and_then(Llsd::as_f32)
-            .unwrap_or(0.0),
-        resource_cost: value
-            .get("resource_cost")
-            .and_then(Llsd::as_f32)
-            .unwrap_or(0.0),
-        physics_cost: value
-            .get("physics_cost")
-            .and_then(Llsd::as_f32)
-            .unwrap_or(0.0),
+            .require_f32("linked_set_resource_cost", "linked_set_resource_cost")?,
+        resource_cost: value.require_f32("resource_cost", "resource_cost")?,
+        physics_cost: value.require_f32("physics_cost", "physics_cost")?,
         linked_set_physics_cost: value
-            .get("linked_set_physics_cost")
-            .and_then(Llsd::as_f32)
-            .unwrap_or(0.0),
+            .require_f32("linked_set_physics_cost", "linked_set_physics_cost")?,
         resource_limiting_type: value
-            .get("resource_limiting_type")
-            .and_then(Llsd::as_str)
+            .field_str("resource_limiting_type", "resource_limiting_type")?
             .unwrap_or_default()
             .to_owned(),
-    }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -167,23 +164,29 @@ pub fn build_get_object_cost_request(object_ids: &[ObjectKey]) -> String {
 }
 
 /// Decodes a `GetObjectCost` reply: the per-object costs, keyed by object id.
-/// The result is sorted by id so it is deterministic.
-#[must_use]
-pub fn parse_get_object_cost(body: &Llsd) -> Vec<(ObjectKey, ObjectCost)> {
+/// The result is sorted by id so it is deterministic. Objects absent from the
+/// reply map (the "no such object" signal) are simply not present in the result.
+///
+/// # Errors
+/// Returns [`WireError::MissingField`] if a present per-object cost map omits a
+/// required cost field, or [`WireError::MalformedField`] if a decoded LLSD field
+/// is present but of the wrong kind.
+pub fn parse_get_object_cost(body: &Llsd) -> Result<Vec<(ObjectKey, ObjectCost)>, WireError> {
     let mut costs: Vec<(ObjectKey, ObjectCost)> = body
         .as_map()
         .map(|map| {
             map.iter()
                 .filter_map(|(key, value)| {
-                    Uuid::parse_str(key)
-                        .ok()
-                        .map(|id| (ObjectKey::from(id), object_cost_from_llsd(value)))
+                    Uuid::parse_str(key).ok().map(|id| {
+                        object_cost_from_llsd(value).map(|cost| (ObjectKey::from(id), cost))
+                    })
                 })
-                .collect()
+                .collect::<Result<Vec<_>, _>>()
         })
+        .transpose()?
         .unwrap_or_default();
     costs.sort_by_key(|(id, _cost)| id.uuid());
-    costs
+    Ok(costs)
 }
 
 /// Builds a `GetObjectCost` reply from the per-object costs (server side) — the
@@ -220,16 +223,20 @@ pub fn build_resource_cost_selected_request(
 
 /// Decodes a `ResourceCostSelected` request: the selection kind and the ids.
 /// Defaults to [`SelectedCostKind::Roots`] with no ids when neither key is set.
-#[must_use]
-pub fn parse_resource_cost_selected_request(body: &Llsd) -> (SelectedCostKind, Vec<ObjectKey>) {
-    let (kind, key) = if body.get("selected_prims").is_some() {
+///
+/// # Errors
+/// Returns [`WireError::MalformedField`] if a decoded LLSD field is present but
+/// of the wrong kind.
+pub fn parse_resource_cost_selected_request(
+    body: &Llsd,
+) -> Result<(SelectedCostKind, Vec<ObjectKey>), WireError> {
+    let (kind, key): (SelectedCostKind, &'static str) = if body.get("selected_prims").is_some() {
         (SelectedCostKind::Prims, "selected_prims")
     } else {
         (SelectedCostKind::Roots, "selected_roots")
     };
     let ids = body
-        .get(key)
-        .and_then(Llsd::as_array)
+        .field_array(key, key)?
         .map(|ids| {
             ids.iter()
                 .filter_map(Llsd::as_uuid)
@@ -237,24 +244,36 @@ pub fn parse_resource_cost_selected_request(body: &Llsd) -> (SelectedCostKind, V
                 .collect()
         })
         .unwrap_or_default();
-    (kind, ids)
+    Ok((kind, ids))
 }
 
-/// Decodes a `ResourceCostSelected` reply: the summed selection costs.
-#[must_use]
-pub fn parse_resource_cost_selected(body: &Llsd) -> SelectedResourceCost {
-    let selected = body.get("selected");
-    let read = |key: &str| {
-        selected
-            .and_then(|map| map.get(key))
-            .and_then(Llsd::as_f32)
-            .unwrap_or(0.0)
+/// Decodes a `ResourceCostSelected` reply: the summed selection costs. An absent
+/// (or `Undef`) `selected` map yields the default (all-zero) costs.
+///
+/// # Errors
+/// Returns [`WireError::MissingField`] if the `selected` map is present but omits
+/// a summed-cost field, or [`WireError::MalformedField`] if a decoded LLSD field
+/// is present but of the wrong kind.
+pub fn parse_resource_cost_selected(body: &Llsd) -> Result<SelectedResourceCost, WireError> {
+    let selected = match body.get("selected") {
+        None | Some(Llsd::Undef) => return Ok(SelectedResourceCost::default()),
+        Some(map @ Llsd::Map(_)) => map,
+        Some(other) => {
+            return Err(WireError::MalformedField {
+                field: "selected",
+                value: other.kind().to_owned(),
+            });
+        }
     };
-    SelectedResourceCost {
-        physics: read("physics"),
-        streaming: read("streaming"),
-        simulation: read("simulation"),
-    }
+    // When the `selected` map is present it is the whole point of the reply, so
+    // its three summed-cost fields are required: OpenSim
+    // `BunchOfCaps.cs:ResourceCostSelected` writes physics/streaming/simulation
+    // unconditionally and Firestorm `llaccountingcostmanager.cpp` reads them.
+    Ok(SelectedResourceCost {
+        physics: selected.require_f32("physics", "physics")?,
+        streaming: selected.require_f32("streaming", "streaming")?,
+        simulation: selected.require_f32("simulation", "simulation")?,
+    })
 }
 
 /// Builds a `ResourceCostSelected` reply from the summed selection costs (server
@@ -290,6 +309,7 @@ mod tests {
         build_resource_cost_selected_response, parse_get_object_cost, parse_resource_cost_selected,
         parse_resource_cost_selected_request,
     };
+    use crate::WireError;
     use crate::llsd::parse_llsd_xml;
     use crate::object_cost::parse_object_ids;
 
@@ -323,7 +343,8 @@ mod tests {
         ];
         let xml = build_get_object_cost_response(&costs);
         let parsed =
-            parse_get_object_cost(&parse_llsd_xml(&xml).map_err(|error| format!("{error:?}"))?);
+            parse_get_object_cost(&parse_llsd_xml(&xml).map_err(|error| format!("{error:?}"))?)
+                .map_err(|error| format!("{error:?}"))?;
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed.first().map(|entry| entry.0), Some(id_a));
         assert_eq!(parsed.get(1).map(|entry| entry.0), Some(id_b));
@@ -343,9 +364,53 @@ mod tests {
         ];
         let body = build_get_object_cost_request(&ids);
         let parsed =
-            parse_object_ids(&parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?);
+            parse_object_ids(&parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?)
+                .map_err(|error| format!("{error:?}"))?;
         assert_eq!(parsed, ids);
         Ok(())
+    }
+
+    /// A present per-object cost map that omits a required numeric cost field is
+    /// a hard `MissingField` error rather than being silently defaulted.
+    #[test]
+    fn object_cost_missing_required_field_is_error() -> Result<(), String> {
+        let xml = concat!(
+            "<llsd><map>",
+            "<key>11111111-1111-1111-1111-111111111111</key><map>",
+            "<key>linked_set_resource_cost</key><real>1.0</real>",
+            // resource_cost deliberately omitted
+            "<key>physics_cost</key><real>0.0</real>",
+            "<key>linked_set_physics_cost</key><real>0.0</real>",
+            "<key>resource_limiting_type</key><string>legacy</string>",
+            "</map></map></llsd>"
+        );
+        let body = parse_llsd_xml(xml).map_err(|error| format!("{error:?}"))?;
+        match parse_get_object_cost(&body) {
+            Err(WireError::MissingField {
+                field: "resource_cost",
+            }) => Ok(()),
+            other => Err(format!(
+                "expected MissingField resource_cost, got {other:?}"
+            )),
+        }
+    }
+
+    /// A present `selected` map that omits a required summed-cost field is a hard
+    /// `MissingField` error.
+    #[test]
+    fn resource_cost_selected_missing_field_is_error() -> Result<(), String> {
+        let xml = concat!(
+            "<llsd><map><key>selected</key><map>",
+            "<key>physics</key><real>2.0</real>",
+            // streaming deliberately omitted
+            "<key>simulation</key><real>4.0</real>",
+            "</map></map></llsd>"
+        );
+        let body = parse_llsd_xml(xml).map_err(|error| format!("{error:?}"))?;
+        match parse_resource_cost_selected(&body) {
+            Err(WireError::MissingField { field: "streaming" }) => Ok(()),
+            other => Err(format!("expected MissingField streaming, got {other:?}")),
+        }
     }
 
     /// A `ResourceCostSelected` request round-trips the selection kind and ids,
@@ -356,7 +421,8 @@ mod tests {
         let body = build_resource_cost_selected_request(SelectedCostKind::Roots, &ids);
         let (kind, parsed_ids) = parse_resource_cost_selected_request(
             &parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?,
-        );
+        )
+        .map_err(|error| format!("{error:?}"))?;
         assert_eq!(kind, SelectedCostKind::Roots);
         assert_eq!(parsed_ids, ids);
 
@@ -368,7 +434,8 @@ mod tests {
         let xml = build_resource_cost_selected_response(&cost);
         let parsed = parse_resource_cost_selected(
             &parse_llsd_xml(&xml).map_err(|error| format!("{error:?}"))?,
-        );
+        )
+        .map_err(|error| format!("{error:?}"))?;
         assert_eq!(parsed, cost);
         Ok(())
     }

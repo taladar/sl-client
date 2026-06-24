@@ -12,6 +12,8 @@ use base64::Engine as _;
 use sl_types::key::{InventoryFolderKey, InventoryKey, ObjectKey};
 use uuid::Uuid;
 
+use crate::error::WireError;
+
 /// A parsed LLSD value.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Llsd {
@@ -138,6 +140,272 @@ impl Llsd {
             Self::Binary(value) => Some(value),
             _ => None,
         }
+    }
+
+    /// The short LLSD kind name (`"integer"`, `"string"`, …) of this value, used
+    /// to label a wrong-type field in a [`WireError::MalformedField`] diagnostic.
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::Undef => "undef",
+            Self::Boolean(_) => "boolean",
+            Self::Integer(_) => "integer",
+            Self::Real(_) => "real",
+            Self::String(_) => "string",
+            Self::Uuid(_) => "uuid",
+            Self::Binary(_) => "binary",
+            Self::Date(_) => "date",
+            Self::Uri(_) => "uri",
+            Self::Array(_) => "array",
+            Self::Map(_) => "map",
+        }
+    }
+
+    /// Looks up an optional map member `key`, distinguishing *absent* from
+    /// *present but wrong type*. Returns `Ok(None)` when the key is absent or
+    /// explicitly `Undef` (a lenient optional field), `Ok(Some(value))` when the
+    /// member is present and `accessor` accepts its LLSD kind, and
+    /// `Err(WireError::MalformedField)` when the member is present but of the
+    /// wrong kind — so a malformed CAPS body is rejected (surfaced as a
+    /// `CapsDecodeFailed`) rather than silently coerced to a default.
+    ///
+    /// `field` is a short static label naming the field for the diagnostic.
+    fn field_with<T>(
+        &self,
+        key: &str,
+        field: &'static str,
+        accessor: impl Fn(&Self) -> Option<T>,
+    ) -> Result<Option<T>, WireError> {
+        match self.get(key) {
+            None | Some(Self::Undef) => Ok(None),
+            Some(value) => accessor(value)
+                .map(Some)
+                .ok_or_else(|| WireError::MalformedField {
+                    field,
+                    value: value.kind().to_owned(),
+                }),
+        }
+    }
+
+    /// Reads an optional integer (or boolean) map field; see `field_with`.
+    ///
+    /// # Errors
+    /// Returns [`WireError::MalformedField`] if `key` is present but of the wrong LLSD kind.
+    pub fn field_i32(&self, key: &str, field: &'static str) -> Result<Option<i32>, WireError> {
+        self.field_with(key, field, Self::as_i32)
+    }
+
+    /// Reads an optional real (or integer) map field as `f64`; see `field_with`.
+    ///
+    /// # Errors
+    /// Returns [`WireError::MalformedField`] if `key` is present but of the wrong LLSD kind.
+    pub fn field_f64(&self, key: &str, field: &'static str) -> Result<Option<f64>, WireError> {
+        self.field_with(key, field, Self::as_f64)
+    }
+
+    /// Reads an optional real (or integer) map field narrowed to `f32`; see
+    /// `field_with`.
+    ///
+    /// # Errors
+    /// Returns [`WireError::MalformedField`] if `key` is present but of the wrong LLSD kind.
+    pub fn field_f32(&self, key: &str, field: &'static str) -> Result<Option<f32>, WireError> {
+        self.field_with(key, field, Self::as_f32)
+    }
+
+    /// Reads an optional boolean (or integer) map field; see `field_with`.
+    ///
+    /// # Errors
+    /// Returns [`WireError::MalformedField`] if `key` is present but of the wrong LLSD kind.
+    pub fn field_bool(&self, key: &str, field: &'static str) -> Result<Option<bool>, WireError> {
+        self.field_with(key, field, Self::as_bool)
+    }
+
+    /// Reads an optional UUID map field; see `field_with`.
+    ///
+    /// # Errors
+    /// Returns [`WireError::MalformedField`] if `key` is present but of the wrong LLSD kind.
+    pub fn field_uuid(&self, key: &str, field: &'static str) -> Result<Option<Uuid>, WireError> {
+        self.field_with(key, field, Self::as_uuid)
+    }
+
+    /// Reads an optional string (or URI/date) map field; see `field_with`.
+    ///
+    /// # Errors
+    /// Returns [`WireError::MalformedField`] if `key` is present but of the wrong LLSD kind.
+    pub fn field_str(&self, key: &str, field: &'static str) -> Result<Option<&str>, WireError> {
+        match self.get(key) {
+            None | Some(Self::Undef) => Ok(None),
+            Some(value) => value
+                .as_str()
+                .map(Some)
+                .ok_or_else(|| WireError::MalformedField {
+                    field,
+                    value: value.kind().to_owned(),
+                }),
+        }
+    }
+
+    /// Reads an optional binary map field; see `field_with`.
+    ///
+    /// # Errors
+    /// Returns [`WireError::MalformedField`] if `key` is present but of the wrong LLSD kind.
+    pub fn field_binary(&self, key: &str, field: &'static str) -> Result<Option<&[u8]>, WireError> {
+        match self.get(key) {
+            None | Some(Self::Undef) => Ok(None),
+            Some(value) => value
+                .as_binary()
+                .map(Some)
+                .ok_or_else(|| WireError::MalformedField {
+                    field,
+                    value: value.kind().to_owned(),
+                }),
+        }
+    }
+
+    /// Reads an optional array map field; see `field_with`.
+    ///
+    /// # Errors
+    /// Returns [`WireError::MalformedField`] if `key` is present but of the wrong LLSD kind.
+    pub fn field_array(
+        &self,
+        key: &str,
+        field: &'static str,
+    ) -> Result<Option<&[Self]>, WireError> {
+        match self.get(key) {
+            None | Some(Self::Undef) => Ok(None),
+            Some(value) => value
+                .as_array()
+                .map(Some)
+                .ok_or_else(|| WireError::MalformedField {
+                    field,
+                    value: value.kind().to_owned(),
+                }),
+        }
+    }
+
+    /// Reads an optional map map field; see `field_with`.
+    ///
+    /// # Errors
+    /// Returns [`WireError::MalformedField`] if `key` is present but of the wrong LLSD kind.
+    pub fn field_map(
+        &self,
+        key: &str,
+        field: &'static str,
+    ) -> Result<Option<&HashMap<String, Self>>, WireError> {
+        match self.get(key) {
+            None | Some(Self::Undef) => Ok(None),
+            Some(value) => value
+                .as_map()
+                .map(Some)
+                .ok_or_else(|| WireError::MalformedField {
+                    field,
+                    value: value.kind().to_owned(),
+                }),
+        }
+    }
+
+    /// Reads a *required* integer (or boolean) map field: like
+    /// [`field_i32`](Self::field_i32) but a [`WireError::MissingField`] when the
+    /// key is absent.
+    ///
+    /// # Errors
+    /// Returns [`WireError::MissingField`] if `key` is absent, or
+    /// [`WireError::MalformedField`] if present but of the wrong LLSD kind.
+    pub fn require_i32(&self, key: &str, field: &'static str) -> Result<i32, WireError> {
+        self.field_i32(key, field)?
+            .ok_or(WireError::MissingField { field })
+    }
+
+    /// Reads a *required* real (or integer) map field as `f64`; absent is a
+    /// [`WireError::MissingField`]. See [`field_f64`](Self::field_f64).
+    ///
+    /// # Errors
+    /// Returns [`WireError::MissingField`] if `key` is absent, or
+    /// [`WireError::MalformedField`] if present but of the wrong LLSD kind.
+    pub fn require_f64(&self, key: &str, field: &'static str) -> Result<f64, WireError> {
+        self.field_f64(key, field)?
+            .ok_or(WireError::MissingField { field })
+    }
+
+    /// Reads a *required* real (or integer) map field narrowed to `f32`; absent
+    /// is a [`WireError::MissingField`]. See [`field_f32`](Self::field_f32).
+    ///
+    /// # Errors
+    /// Returns [`WireError::MissingField`] if `key` is absent, or
+    /// [`WireError::MalformedField`] if present but of the wrong LLSD kind.
+    pub fn require_f32(&self, key: &str, field: &'static str) -> Result<f32, WireError> {
+        self.field_f32(key, field)?
+            .ok_or(WireError::MissingField { field })
+    }
+
+    /// Reads a *required* boolean (or integer) map field; absent is a
+    /// [`WireError::MissingField`]. See [`field_bool`](Self::field_bool).
+    ///
+    /// # Errors
+    /// Returns [`WireError::MissingField`] if `key` is absent, or
+    /// [`WireError::MalformedField`] if present but of the wrong LLSD kind.
+    pub fn require_bool(&self, key: &str, field: &'static str) -> Result<bool, WireError> {
+        self.field_bool(key, field)?
+            .ok_or(WireError::MissingField { field })
+    }
+
+    /// Reads a *required* UUID map field; absent is a
+    /// [`WireError::MissingField`]. See [`field_uuid`](Self::field_uuid).
+    ///
+    /// # Errors
+    /// Returns [`WireError::MissingField`] if `key` is absent, or
+    /// [`WireError::MalformedField`] if present but of the wrong LLSD kind.
+    pub fn require_uuid(&self, key: &str, field: &'static str) -> Result<Uuid, WireError> {
+        self.field_uuid(key, field)?
+            .ok_or(WireError::MissingField { field })
+    }
+
+    /// Reads a *required* string (or URI/date) map field; absent is a
+    /// [`WireError::MissingField`]. See [`field_str`](Self::field_str).
+    ///
+    /// # Errors
+    /// Returns [`WireError::MissingField`] if `key` is absent, or
+    /// [`WireError::MalformedField`] if present but of the wrong LLSD kind.
+    pub fn require_str(&self, key: &str, field: &'static str) -> Result<&str, WireError> {
+        self.field_str(key, field)?
+            .ok_or(WireError::MissingField { field })
+    }
+
+    /// Reads a *required* binary map field; absent is a
+    /// [`WireError::MissingField`]. See [`field_binary`](Self::field_binary).
+    ///
+    /// # Errors
+    /// Returns [`WireError::MissingField`] if `key` is absent, or
+    /// [`WireError::MalformedField`] if present but of the wrong LLSD kind.
+    pub fn require_binary(&self, key: &str, field: &'static str) -> Result<&[u8], WireError> {
+        self.field_binary(key, field)?
+            .ok_or(WireError::MissingField { field })
+    }
+
+    /// Reads a *required* array map field; absent is a
+    /// [`WireError::MissingField`]. See [`field_array`](Self::field_array).
+    ///
+    /// # Errors
+    /// Returns [`WireError::MissingField`] if `key` is absent, or
+    /// [`WireError::MalformedField`] if present but of the wrong LLSD kind.
+    pub fn require_array(&self, key: &str, field: &'static str) -> Result<&[Self], WireError> {
+        self.field_array(key, field)?
+            .ok_or(WireError::MissingField { field })
+    }
+
+    /// Reads a *required* map map field; absent is a
+    /// [`WireError::MissingField`]. See [`field_map`](Self::field_map).
+    ///
+    /// # Errors
+    /// Returns [`WireError::MissingField`] if `key` is absent, or
+    /// [`WireError::MalformedField`] if present but of the wrong LLSD kind.
+    pub fn require_map(
+        &self,
+        key: &str,
+        field: &'static str,
+    ) -> Result<&HashMap<String, Self>, WireError> {
+        self.field_map(key, field)?
+            .ok_or(WireError::MissingField { field })
     }
 
     /// Serializes this value as a complete LLSD-XML document
@@ -660,29 +928,31 @@ impl MediaEntry {
     /// Decodes a [`MediaEntry`] from its LLSD map form (one per-face entry of an
     /// `ObjectMedia` response's `object_media_data` array). Missing fields fall
     /// back to the viewer's [`Default`] values.
-    #[must_use]
-    pub fn from_llsd(value: &Llsd) -> Self {
+    ///
+    /// # Errors
+    /// Returns [`WireError::MalformedField`] if a present field is of the wrong
+    /// LLSD kind.
+    pub fn from_llsd(value: &Llsd) -> Result<Self, WireError> {
         let default = Self::default();
-        Self {
-            alt_image_enable: llsd_bool(value, "alt_image_enable", default.alt_image_enable),
-            controls: llsd_int(value, "controls", default.controls),
-            current_url: llsd_string(value, "current_url"),
-            home_url: llsd_string(value, "home_url"),
-            auto_loop: llsd_bool(value, "auto_loop", default.auto_loop),
-            auto_play: llsd_bool(value, "auto_play", default.auto_play),
-            auto_scale: llsd_bool(value, "auto_scale", default.auto_scale),
-            auto_zoom: llsd_bool(value, "auto_zoom", default.auto_zoom),
+        Ok(Self {
+            alt_image_enable: llsd_bool(value, "alt_image_enable", default.alt_image_enable)?,
+            controls: llsd_int(value, "controls", default.controls)?,
+            current_url: llsd_string(value, "current_url")?,
+            home_url: llsd_string(value, "home_url")?,
+            auto_loop: llsd_bool(value, "auto_loop", default.auto_loop)?,
+            auto_play: llsd_bool(value, "auto_play", default.auto_play)?,
+            auto_scale: llsd_bool(value, "auto_scale", default.auto_scale)?,
+            auto_zoom: llsd_bool(value, "auto_zoom", default.auto_zoom)?,
             first_click_interact: llsd_bool(
                 value,
                 "first_click_interact",
                 default.first_click_interact,
-            ),
-            width_pixels: llsd_int(value, "width_pixels", default.width_pixels),
-            height_pixels: llsd_int(value, "height_pixels", default.height_pixels),
-            whitelist_enable: llsd_bool(value, "whitelist_enable", default.whitelist_enable),
+            )?,
+            width_pixels: llsd_int(value, "width_pixels", default.width_pixels)?,
+            height_pixels: llsd_int(value, "height_pixels", default.height_pixels)?,
+            whitelist_enable: llsd_bool(value, "whitelist_enable", default.whitelist_enable)?,
             whitelist: value
-                .get("whitelist")
-                .and_then(Llsd::as_array)
+                .field_array("whitelist", "whitelist")?
                 .map(|array| {
                     array
                         .iter()
@@ -690,9 +960,9 @@ impl MediaEntry {
                         .collect()
                 })
                 .unwrap_or_default(),
-            perms_interact: llsd_perm(value, "perms_interact", default.perms_interact),
-            perms_control: llsd_perm(value, "perms_control", default.perms_control),
-        }
+            perms_interact: llsd_perm(value, "perms_interact", default.perms_interact)?,
+            perms_control: llsd_perm(value, "perms_control", default.perms_control)?,
+        })
     }
 
     /// Serializes this entry as the LLSD-XML `<map>…</map>` body the viewer
@@ -725,33 +995,32 @@ impl MediaEntry {
     }
 }
 
-/// Reads a boolean LLSD map field, falling back to `default` when absent.
-fn llsd_bool(value: &Llsd, key: &str, default: bool) -> bool {
-    value.get(key).and_then(Llsd::as_bool).unwrap_or(default)
+/// Reads a boolean LLSD map field, falling back to `default` when absent. A
+/// present key of the wrong LLSD kind is rejected (see [`Llsd::field_bool`]).
+fn llsd_bool(value: &Llsd, key: &'static str, default: bool) -> Result<bool, WireError> {
+    Ok(value.field_bool(key, key)?.unwrap_or(default))
 }
 
-/// Reads an integer LLSD map field, falling back to `default` when absent.
-fn llsd_int(value: &Llsd, key: &str, default: i32) -> i32 {
-    value.get(key).and_then(Llsd::as_i32).unwrap_or(default)
+/// Reads an integer LLSD map field, falling back to `default` when absent. A
+/// present key of the wrong LLSD kind is rejected (see [`Llsd::field_i32`]).
+fn llsd_int(value: &Llsd, key: &'static str, default: i32) -> Result<i32, WireError> {
+    Ok(value.field_i32(key, key)?.unwrap_or(default))
 }
 
-/// Reads a string LLSD map field, defaulting to the empty string when absent.
-fn llsd_string(value: &Llsd, key: &str) -> String {
-    value
-        .get(key)
-        .and_then(Llsd::as_str)
-        .unwrap_or_default()
-        .to_owned()
+/// Reads a string LLSD map field, defaulting to the empty string when absent. A
+/// present key of the wrong LLSD kind is rejected (see [`Llsd::field_str`]).
+fn llsd_string(value: &Llsd, key: &'static str) -> Result<String, WireError> {
+    Ok(value.field_str(key, key)?.unwrap_or_default().to_owned())
 }
 
 /// Reads a media-permission byte field, falling back to `default` when absent or
-/// out of a byte's range.
-fn llsd_perm(value: &Llsd, key: &str, default: u8) -> u8 {
-    value
-        .get(key)
-        .and_then(Llsd::as_i32)
+/// out of a byte's range. A present key of the wrong LLSD kind (not an integer)
+/// is rejected (see [`Llsd::field_i32`]).
+fn llsd_perm(value: &Llsd, key: &'static str, default: u8) -> Result<u8, WireError> {
+    Ok(value
+        .field_i32(key, key)?
         .and_then(|raw| u8::try_from(raw).ok())
-        .unwrap_or(default)
+        .unwrap_or(default))
 }
 
 /// Reads a UUID-valued LLSD value, accepting either a `uuid` or a `string`.
@@ -857,29 +1126,47 @@ pub struct ObjectMediaResponse {
 impl ObjectMediaResponse {
     /// Decodes an [`ObjectMediaResponse`] from the LLSD body of an `ObjectMedia`
     /// GET reply (`{ object_id, object_media_version, object_media_data }`).
-    /// Returns `None` if the body carries no `object_id`.
-    #[must_use]
-    pub fn from_llsd(body: &Llsd) -> Option<Self> {
-        let object_id = ObjectKey::from(body.get("object_id").and_then(llsd_uuid)?);
+    ///
+    /// `object_id` is the identity the reply is *about* and is mandatory: the
+    /// simulator always populates it (OpenSim `MoapModule.cs` `resp.PrimID =
+    /// primId`), and the viewer keys the reply on it — Firestorm
+    /// (`llmediadataclient.cpp:953-959`) drops the entire response when the id
+    /// does not match the requested object, so an absent (null) id is a
+    /// malformed reply, not a legitimate empty result. `object_media_version`
+    /// and `object_media_data` are read without a presence check (absent →
+    /// empty), matching the viewer, which reads them unconditionally
+    /// (`llmediadataclient.cpp:962-963`).
+    ///
+    /// # Errors
+    /// Returns [`WireError::MissingField`] if `object_id` is absent, and
+    /// [`WireError::MalformedField`] if `object_id` (or any present field) is of
+    /// the wrong LLSD kind.
+    pub fn from_llsd(body: &Llsd) -> Result<Self, WireError> {
+        let object_id =
+            match body.get("object_id") {
+                None => return Err(WireError::MissingField { field: "object_id" }),
+                Some(value) => llsd_uuid(value).map(ObjectKey::from).ok_or_else(|| {
+                    WireError::MalformedField {
+                        field: "object_id",
+                        value: value.kind().to_owned(),
+                    }
+                })?,
+            };
         let version = body
-            .get("object_media_version")
-            .and_then(Llsd::as_str)
+            .field_str("object_media_version", "object_media_version")?
             .unwrap_or_default()
             .to_owned();
-        let faces = body
-            .get("object_media_data")
-            .and_then(Llsd::as_array)
-            .map(|array| {
-                array
-                    .iter()
-                    .map(|entry| match entry {
-                        Llsd::Map(_) => Some(MediaEntry::from_llsd(entry)),
-                        _ => None,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        Some(Self {
+        let faces = match body.field_array("object_media_data", "object_media_data")? {
+            None => Vec::new(),
+            Some(array) => array
+                .iter()
+                .map(|entry| match entry {
+                    Llsd::Map(_) => MediaEntry::from_llsd(entry).map(Some),
+                    _ => Ok(None),
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        };
+        Ok(Self {
             object_id,
             version,
             faces,
@@ -971,4 +1258,48 @@ pub fn build_event_queue_response(id: i32, events: &[EventQueueEvent]) -> String
         ("events".to_owned(), Llsd::Array(event_array)),
     ]))
     .to_llsd_xml()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    /// An absent key is lenient (`Ok(None)`), a present value of the right kind
+    /// reads, and a present value of the *wrong* kind is a hard
+    /// [`WireError::MalformedField`] rather than a silently coerced default.
+    #[test]
+    fn field_accessors_reject_wrong_kind_but_tolerate_absent() -> Result<(), WireError> {
+        let map = Llsd::Map(HashMap::from([
+            ("count".to_owned(), Llsd::Integer(7)),
+            ("name".to_owned(), Llsd::String("region".to_owned())),
+            ("missing".to_owned(), Llsd::Undef),
+        ]));
+
+        // Present, right kind.
+        assert_eq!(map.field_i32("count", "count")?, Some(7));
+        assert_eq!(map.field_str("name", "name")?, Some("region"));
+
+        // Absent, or an explicit Undef, is lenient.
+        assert_eq!(map.field_i32("absent", "absent")?, None);
+        assert_eq!(map.field_str("missing", "missing")?, None);
+
+        // Present but the wrong LLSD kind is a hard error carrying the field
+        // label and the offending kind.
+        assert_eq!(
+            map.field_i32("name", "name"),
+            Err(WireError::MalformedField {
+                field: "name",
+                value: "string".to_owned(),
+            })
+        );
+        assert_eq!(
+            map.field_str("count", "count"),
+            Err(WireError::MalformedField {
+                field: "count",
+                value: "integer".to_owned(),
+            })
+        );
+        Ok(())
+    }
 }

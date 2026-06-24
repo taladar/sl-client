@@ -3,6 +3,7 @@
 use super::{
     ExperienceInfo, ExperiencePermission, ExperienceUpdate, llsd_uuid, parse_region_experiences,
 };
+use crate::WireError;
 use crate::llsd::{Llsd, parse_llsd_xml};
 use sl_types::key::ExperienceKey;
 use std::collections::HashMap;
@@ -167,14 +168,15 @@ pub fn parse_set_experience_permission_request(
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
-pub fn parse_update_experience_request(xml: &str) -> Result<ExperienceUpdate, roxmltree::Error> {
-    let root = parse_llsd_xml(xml)?;
-    let string = |key: &str| {
-        root.get(key)
-            .and_then(Llsd::as_str)
-            .unwrap_or_default()
-            .to_owned()
+/// Returns a [`WireError::MalformedField`] if the body is not well-formed XML or
+/// a present field has the wrong LLSD kind.
+pub fn parse_update_experience_request(xml: &str) -> Result<ExperienceUpdate, WireError> {
+    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+        field: "UpdateExperience",
+        value: error.to_string(),
+    })?;
+    let string = |key: &'static str| -> Result<String, WireError> {
+        Ok(root.field_str(key, key)?.unwrap_or_default().to_owned())
     };
     Ok(ExperienceUpdate {
         public_id: ExperienceKey::from(
@@ -182,12 +184,12 @@ pub fn parse_update_experience_request(xml: &str) -> Result<ExperienceUpdate, ro
                 .and_then(llsd_uuid)
                 .unwrap_or_default(),
         ),
-        name: string("name"),
-        description: string("description"),
-        maturity: root.get("maturity").and_then(Llsd::as_i32).unwrap_or(0),
-        properties: root.get("properties").and_then(Llsd::as_i32).unwrap_or(0),
-        slurl: string("slurl"),
-        extended_metadata: string("extended_metadata"),
+        name: string("name")?,
+        description: string("description")?,
+        maturity: root.field_i32("maturity", "maturity")?.unwrap_or(0),
+        properties: root.field_i32("properties", "properties")?.unwrap_or(0),
+        slurl: string("slurl")?,
+        extended_metadata: string("extended_metadata")?,
     })
 }
 
@@ -198,15 +200,20 @@ pub fn parse_update_experience_request(xml: &str) -> Result<ExperienceUpdate, ro
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+/// Returns a [`WireError::MalformedField`] if the body is not well-formed XML or
+/// a present `allowed`/`blocked`/`trusted` field has the wrong LLSD kind.
 #[expect(
     clippy::type_complexity,
-    reason = "mirrors parse_region_experiences' (allowed, blocked, trusted) tuple, wrapped in Result for the XML parse error"
+    reason = "mirrors parse_region_experiences' (allowed, blocked, trusted) tuple, wrapped in Result for the malformed-field error"
 )]
 pub fn parse_region_experiences_request(
     xml: &str,
-) -> Result<(Vec<ExperienceKey>, Vec<ExperienceKey>, Vec<ExperienceKey>), roxmltree::Error> {
-    Ok(parse_region_experiences(&parse_llsd_xml(xml)?))
+) -> Result<(Vec<ExperienceKey>, Vec<ExperienceKey>, Vec<ExperienceKey>), WireError> {
+    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+        field: "RegionExperiences",
+        value: error.to_string(),
+    })?;
+    parse_region_experiences(&root)
 }
 
 /// Builds an array-of-UUIDs LLSD value from experience ids.

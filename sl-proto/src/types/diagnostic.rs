@@ -57,10 +57,15 @@ pub enum Diagnostic {
         message: String,
     },
     /// A CAPS event the session *does* handle arrived, but its LLSD body failed
-    /// to parse into the expected shape (the `from_llsd` returned `None`).
+    /// to parse into the expected shape (a required field was absent, a field
+    /// held the wrong LLSD kind, or a legacy `from_llsd` returned `None`).
     CapsDecodeFailed {
         /// The event / capability name whose body could not be parsed.
         message: String,
+        /// The decode error that caused the drop, rendered for debugging (which
+        /// field was missing or malformed). [`None`] for the legacy
+        /// `Option`-returning decoders that do not report a specific cause.
+        reason: Option<String>,
     },
     /// A reliable request never received its expected reply: either a reliable
     /// packet exhausted its retransmission budget, or an operation awaiting a
