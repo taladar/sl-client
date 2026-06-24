@@ -7,7 +7,7 @@ use crate::types::{
     AssetType, Camera, Diagnostic, Event, ImageCodec, InventoryFolder, InventoryItem, LoginAccount,
     LoginParams, Object, TerrainPatch, Throttle,
 };
-use sl_types::key::{AgentKey, InventoryFolderKey};
+use sl_types::key::{AgentKey, InventoryFolderKey, ObjectKey};
 use sl_types::lsl::Rotation;
 use sl_types::map::Distance;
 use sl_wire::CircuitCode;
@@ -744,6 +744,28 @@ enum TeleportPhase {
     },
 }
 
+/// Where the agent is in an object-sit sequence.
+///
+/// Replaces a bare `sit_requested: bool` with the three distinct phases the
+/// flag conflated, so the seat object learned from the `AvatarSitResponse` is
+/// carried by the type rather than dropped: a request that has not been
+/// answered cannot be confused with being seated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SitState {
+    /// Not seated on an object and no sit request outstanding. Whether the
+    /// agent is standing, walking, or ground-sitting is an avatar *animation*
+    /// concern, not an object sit, and is not tracked here.
+    NotSitting,
+    /// An `AgentRequestSit` was sent; awaiting the `AvatarSitResponse`.
+    AwaitingResponse,
+    /// Seated on an object: the `AvatarSitResponse` arrived and the session
+    /// answered with an `AgentSit`.
+    Seated {
+        /// The object the agent is seated on.
+        on: ObjectKey,
+    },
+}
+
 /// A single agent session: login bookkeeping plus one simulator circuit.
 ///
 /// This is a pure state machine. Feed it bytes and the current [`Instant`] via
@@ -788,9 +810,10 @@ pub struct Session {
     /// Defaults to [`Camera::region_center`] until a client calls
     /// [`Session::set_camera`].
     camera: Camera,
-    /// Set between an `AgentRequestSit` and the `AvatarSitResponse` that follows,
-    /// so the response is completed with an `AgentSit`.
-    sit_requested: bool,
+    /// Where the agent is in an object-sit sequence (request → response →
+    /// seated). Drives whether an incoming `AvatarSitResponse` is one the
+    /// session asked for, and records the seat object once sat.
+    sit: SitState,
     /// Where the session is in a teleport / region-handover sequence (between
     /// sending a `TeleportLocationRequest` and the next region's
     /// `RegionHandshake`).
