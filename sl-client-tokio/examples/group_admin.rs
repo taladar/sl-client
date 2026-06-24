@@ -22,8 +22,8 @@ use std::time::Duration;
 
 use sl_client_tokio::{
     AgentKey, Client, Command, CreateGroupParams, DisconnectReason, Error, Event, GroupRoleChange,
-    GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, LindenAmount, LoginParams,
-    LoginRequest, Throttle, Uuid, group_powers,
+    GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType, LindenAmount,
+    LoginParams, LoginRequest, Throttle, Uuid, group_powers,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -132,7 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .send(Command::UpdateGroupRoles {
                         group_id: created,
                         roles: vec![GroupRoleEdit {
-                            role_id: Some(Uuid::new_v4().into()),
+                            role_id: Some(GroupRoleKey::from(Uuid::new_v4())),
                             name: ROLE_NAME.to_owned(),
                             description: "created by #31".to_owned(),
                             title: "Tester".to_owned(),
