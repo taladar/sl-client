@@ -62,6 +62,44 @@ pub(crate) fn group_to_wire(group: Option<sl_types::key::GroupKey>) -> uuid::Uui
     group.map_or_else(uuid::Uuid::nil, |g| g.uuid())
 }
 
+/// Decode a wire UUID into an optional typed key: a nil UUID is the in-band
+/// "absent" sentinel and maps to `None`, any other value to `Some(K::from(..))`.
+///
+/// This is the codec boundary for the many nil-means-unset id fields (parcel
+/// snapshot/media textures, optional task/folder ids, …). The inverse on encode
+/// is [`optional_key_to_wire`].
+pub(crate) fn optional_key_from_wire<K>(uuid: uuid::Uuid) -> Option<K>
+where
+    K: From<uuid::Uuid>,
+{
+    (!uuid.is_nil()).then(|| K::from(uuid))
+}
+
+/// Encode an optional typed key back to a wire UUID, mapping `None` to the nil
+/// UUID (the inverse of [`optional_key_from_wire`]). The closure extracts the
+/// inner UUID (the keys have no shared trait for it).
+pub(crate) fn optional_key_to_wire<K>(
+    key: Option<K>,
+    to_uuid: impl FnOnce(K) -> uuid::Uuid,
+) -> uuid::Uuid {
+    key.map_or_else(uuid::Uuid::nil, to_uuid)
+}
+
+/// Decode a wire UUID into an optional raw [`Uuid`](uuid::Uuid): a nil UUID is
+/// the in-band "absent" sentinel and maps to `None`. For the nil-means-unset id
+/// fields that were deliberately left untyped (no agent/group/object family
+/// fits, or the id is a raw correlation value). The inverse on encode is
+/// [`optional_uuid_to_wire`].
+pub(crate) fn optional_uuid_from_wire(uuid: uuid::Uuid) -> Option<uuid::Uuid> {
+    (!uuid.is_nil()).then_some(uuid)
+}
+
+/// Encode an optional raw [`Uuid`](uuid::Uuid) back to a wire UUID, mapping
+/// `None` to the nil UUID (the inverse of [`optional_uuid_from_wire`]).
+pub(crate) fn optional_uuid_to_wire(uuid: Option<uuid::Uuid>) -> uuid::Uuid {
+    uuid.unwrap_or_else(uuid::Uuid::nil)
+}
+
 /// Build an [`OwnerKey`](sl_types::key::OwnerKey) for the types that signal group
 /// ownership via a *null* `OwnerID`, carrying the owning group in the separate
 /// `GroupID` slot (`ObjectProperties` and friends): a nil `OwnerID` alongside a
@@ -383,10 +421,11 @@ mod owner_codec_tests {
         group_from_wire, group_to_wire, inventory_owner_from_wire, land_area_from_wire,
         land_area_to_wire, linden_cover_from_wire, linden_cover_to_wire, linden_from_wire,
         linden_price_from_wire, linden_price_to_wire, linden_to_wire, object_owner_from_wire,
-        object_owner_to_wire, owner_key_from_wire,
+        object_owner_to_wire, optional_key_from_wire, optional_key_to_wire,
+        optional_uuid_from_wire, optional_uuid_to_wire, owner_key_from_wire,
     };
     use pretty_assertions::assert_eq;
-    use sl_types::key::{AgentKey, GroupKey, OwnerKey};
+    use sl_types::key::{AgentKey, GroupKey, OwnerKey, TextureKey};
     use sl_types::money::LindenAmount;
     use uuid::Uuid;
 
@@ -513,6 +552,40 @@ mod owner_codec_tests {
         assert_eq!(group_from_wire(g), Some(GroupKey::from(g)));
         assert_eq!(group_to_wire(None), Uuid::nil());
         assert_eq!(group_to_wire(Some(GroupKey::from(g))), g);
+    }
+
+    #[test]
+    fn optional_key_wire_maps_nil_to_none() {
+        // A nil wire UUID is the in-band "absent" sentinel and decodes to `None`;
+        // any other value round-trips bit-identically through `Some(K)`.
+        let raw = Uuid::from_u128(0xF00D);
+        assert_eq!(
+            optional_key_from_wire::<TextureKey>(Uuid::nil()),
+            None,
+            "nil decodes to None"
+        );
+        assert_eq!(
+            optional_key_from_wire::<TextureKey>(raw),
+            Some(TextureKey::from(raw)),
+        );
+        // Encode is the exact inverse: `None` -> nil, `Some(k)` -> the raw bytes.
+        assert_eq!(
+            optional_key_to_wire(None::<TextureKey>, |k| k.uuid()),
+            Uuid::nil()
+        );
+        assert_eq!(
+            optional_key_to_wire(Some(TextureKey::from(raw)), |k| k.uuid()),
+            raw,
+        );
+    }
+
+    #[test]
+    fn optional_uuid_wire_maps_nil_to_none() {
+        let raw = Uuid::from_u128(0xBEEF);
+        assert_eq!(optional_uuid_from_wire(Uuid::nil()), None);
+        assert_eq!(optional_uuid_from_wire(raw), Some(raw));
+        assert_eq!(optional_uuid_to_wire(None), Uuid::nil());
+        assert_eq!(optional_uuid_to_wire(Some(raw)), raw);
     }
 
     #[test]

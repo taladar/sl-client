@@ -113,8 +113,8 @@ pub struct EstateCovenant {
 /// teleports to one of its spawn points.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TelehubInfo {
-    /// The telehub object's id (nil when the region has no telehub).
-    pub object_id: ObjectKey,
+    /// The telehub object's id (`None` when the region has no telehub).
+    pub object_id: Option<ObjectKey>,
     /// The telehub object's name (empty when there is no telehub).
     pub object_name: String,
     /// The telehub object's region-local position (a fallback the viewer uses
@@ -275,8 +275,8 @@ pub struct MapItem {
     pub global_x: u32,
     /// The item's global y coordinate in metres.
     pub global_y: u32,
-    /// The item's identifier (a parcel/event id, or nil for avatar dots).
-    pub id: Uuid,
+    /// The item's identifier (a parcel/event id, or `None` for avatar dots).
+    pub id: Option<Uuid>,
     /// Type-specific context (count, area, event id — see [`MapItem`]).
     pub extra: i32,
     /// Type-specific context (sale price, hub kind, flags — see [`MapItem`]).

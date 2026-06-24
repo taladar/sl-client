@@ -307,7 +307,7 @@ pub struct PlacesResult {
     /// empty (unknown) name.
     pub sim_name: Option<RegionName>,
     /// The parcel's snapshot texture.
-    pub snapshot_id: TextureKey,
+    pub snapshot_id: Option<TextureKey>,
     /// The parcel's dwell (traffic) score.
     pub dwell: f32,
     /// The parcel's price, in L$.

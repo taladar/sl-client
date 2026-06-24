@@ -89,8 +89,9 @@ separately with that id when it is `Some`.
 A region can route every incoming teleport to a **telehub** — an object with one
 or more **spawn points** arrivals are scattered across.
 `Command::RequestTelehubInfo` asks for the current layout; the reply is
-`Event::TelehubInfo(TelehubInfo)`, with the telehub object's **id** (nil when
-the region has none), **name**, **position** and **rotation**, and the list of
+`Event::TelehubInfo(TelehubInfo)`, with the telehub object's **id** (`None`
+when the region has none), **name**, **position** and **rotation**, and the list
+of
 **spawn points** (each relative to the telehub).
 
 The telehub is managed by the estate owner (or a god) with four more commands,

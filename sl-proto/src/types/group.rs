@@ -111,8 +111,8 @@ pub struct ActiveGroup {
     pub last_name: String,
     /// The active group's title shown over the avatar (empty if no active group).
     pub group_title: String,
-    /// The active group's id (nil if no active group).
-    pub active_group_id: GroupKey,
+    /// The active group's id (`None` if no active group).
+    pub active_group_id: Option<GroupKey>,
     /// The agent's powers bitfield within the active group.
     pub group_powers: u64,
     /// The active group's name (empty if no active group).
@@ -159,8 +159,8 @@ pub struct GroupMember {
 /// One role within a group, from a `GroupRoleDataReply` entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupRole {
-    /// The role id (nil for the "Everyone" default role).
-    pub role_id: GroupRoleKey,
+    /// The role id (`None` for the "Everyone" default role).
+    pub role_id: Option<GroupRoleKey>,
     /// The role name.
     pub name: String,
     /// The role title shown over members holding it.
@@ -177,7 +177,7 @@ pub struct GroupRole {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GroupRoleMember {
     /// The role id.
-    pub role_id: GroupRoleKey,
+    pub role_id: Option<GroupRoleKey>,
     /// The member's agent id.
     pub member_id: AgentKey,
 }
@@ -188,7 +188,7 @@ pub struct GroupTitle {
     /// The title text.
     pub title: String,
     /// The role the title belongs to.
-    pub role_id: GroupRoleKey,
+    pub role_id: Option<GroupRoleKey>,
     /// Whether this is the agent's currently selected title.
     pub selected: bool,
 }
@@ -212,8 +212,8 @@ pub struct GroupProfile {
     pub member_title: String,
     /// The requesting agent's powers bitfield.
     pub powers: u64,
-    /// The group insignia (texture id).
-    pub insignia_id: TextureKey,
+    /// The group insignia (texture id; `None` if none).
+    pub insignia_id: Option<TextureKey>,
     /// The group founder's agent id.
     pub founder_id: AgentKey,
     /// The L$ fee to join.
@@ -249,8 +249,8 @@ pub struct CreateGroupParams {
     pub charter: String,
     /// Whether the group is shown in search.
     pub show_in_list: bool,
-    /// The group insignia (texture id); nil for none.
-    pub insignia_id: TextureKey,
+    /// The group insignia (texture id; `None` for none).
+    pub insignia_id: Option<TextureKey>,
     /// The L$ fee to join.
     pub membership_fee: LindenAmount,
     /// Whether enrollment is open (no invitation needed).
@@ -323,7 +323,7 @@ impl GroupRoleUpdateType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupRoleEdit {
     /// The role id (a fresh id for `Create`, the existing role for the rest).
-    pub role_id: GroupRoleKey,
+    pub role_id: Option<GroupRoleKey>,
     /// The role name.
     pub name: String,
     /// The role description.
@@ -363,7 +363,7 @@ impl GroupRoleChange {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GroupRoleMemberChange {
     /// The role to add the member to or remove them from.
-    pub role_id: GroupRoleKey,
+    pub role_id: Option<GroupRoleKey>,
     /// The member's agent id.
     pub member_id: AgentKey,
     /// Whether to add or remove the member.

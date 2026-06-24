@@ -1515,7 +1515,7 @@ impl Session {
                 self.events
                     .push_back(Event::ParcelMediaUpdate(ParcelMediaUpdateInfo {
                         media_url: trimmed_string(&data.media_url),
-                        media_id: TextureKey::from(data.media_id),
+                        media_id: crate::types::optional_key_from_wire(data.media_id),
                         media_auto_scale: data.media_auto_scale != 0,
                         media_type: trimmed_string(&extended.media_type),
                         media_desc: trimmed_string(&extended.media_desc),
@@ -1609,7 +1609,7 @@ impl Session {
                         "SimName",
                         &trimmed_string(&data.sim_name),
                     )?,
-                    snapshot_id: TextureKey::from(data.snapshot_id),
+                    snapshot_id: crate::types::optional_key_from_wire(data.snapshot_id),
                     dwell: data.dwell,
                     // The packed parcel flags byte carries PARCEL_FOR_SALE (0x04).
                     sale_price: crate::types::linden_price_from_wire(
@@ -1647,7 +1647,7 @@ impl Session {
             AnyMessage::TelehubInfo(info) => {
                 let block = &info.telehub_block;
                 self.events.push_back(Event::TelehubInfo(TelehubInfo {
-                    object_id: ObjectKey::from(block.object_id),
+                    object_id: crate::types::optional_key_from_wire(block.object_id),
                     object_name: trimmed_string(&block.object_name),
                     position: block.telehub_pos.clone(),
                     rotation: block.telehub_rot.clone(),
@@ -2205,7 +2205,7 @@ impl Session {
                         .iter()
                         .map(|block| Wearable {
                             item_id: InventoryKey::from(block.item_id),
-                            asset_id: block.asset_id,
+                            asset_id: crate::types::optional_uuid_from_wire(block.asset_id),
                             wearable_type: WearableType::from_code(block.wearable_type),
                         })
                         .collect(),
@@ -2518,7 +2518,7 @@ impl Session {
                                     "SimName",
                                     &trimmed_string(&block.sim_name),
                                 )?,
-                                snapshot_id: TextureKey::from(block.snapshot_id),
+                                snapshot_id: crate::types::optional_key_from_wire(block.snapshot_id),
                                 dwell: block.dwell,
                                 price: crate::types::linden_from_wire("Price", block.price)?,
                             })
@@ -2783,7 +2783,7 @@ impl Session {
                         .member_data
                         .iter()
                         .map(|pair| GroupRoleMember {
-                            role_id: GroupRoleKey::from(pair.role_id),
+                            role_id: crate::types::optional_key_from_wire(pair.role_id),
                             member_id: AgentKey::from(pair.member_id),
                         })
                         .collect(),
@@ -5560,14 +5560,14 @@ impl Session {
     pub fn duplicate_objects_on_ray(
         &mut self,
         local_ids: &[ScopedObjectId],
-        group_id: GroupKey,
+        group_id: Option<GroupKey>,
         ray_start: Vector,
         ray_end: Vector,
         bypass_raycast: bool,
         ray_end_is_intersection: bool,
         copy_centers: bool,
         copy_rotates: bool,
-        ray_target_id: ObjectKey,
+        ray_target_id: Option<ObjectKey>,
         duplicate_flags: u32,
         now: Instant,
     ) -> Result<(), Error> {
@@ -5886,7 +5886,7 @@ impl Session {
         let folders = self
             .inventory_folders
             .values()
-            .filter(|folder| folder.parent_id.uuid() == folder_id)
+            .filter(|folder| folder.parent_id.is_some_and(|p| p.uuid() == folder_id))
             .collect();
         let items = self
             .inventory_items
@@ -5932,7 +5932,7 @@ impl Session {
         let subfolders: Vec<Uuid> = self
             .inventory_folders
             .values()
-            .filter(|folder| folder.parent_id.uuid() == folder_id)
+            .filter(|folder| folder.parent_id.is_some_and(|p| p.uuid() == folder_id))
             .map(|folder| folder.folder_id.uuid())
             .collect();
         self.inventory_items
@@ -5976,7 +5976,7 @@ impl Session {
         circuit.send_create_inventory_folder(folder_id, parent_id, folder_type, name, now)?;
         self.cache_inventory_folder(InventoryFolder {
             folder_id: InventoryFolderKey::from(folder_id),
-            parent_id: InventoryFolderKey::from(parent_id),
+            parent_id: crate::types::optional_key_from_wire(parent_id),
             name: name.to_owned(),
             folder_type,
             version: 1,
@@ -6003,7 +6003,7 @@ impl Session {
         circuit.send_update_inventory_folder(folder_id, parent_id, folder_type, name, now)?;
         self.cache_inventory_folder(InventoryFolder {
             folder_id: InventoryFolderKey::from(folder_id),
-            parent_id: InventoryFolderKey::from(parent_id),
+            parent_id: crate::types::optional_key_from_wire(parent_id),
             name: name.to_owned(),
             folder_type,
             version: self
@@ -6049,7 +6049,7 @@ impl Session {
         circuit.send_move_inventory_folders(moves, stamp, now)?;
         for &(folder_id, parent_id) in moves {
             if let Some(folder) = self.inventory_folders.get_mut(&folder_id) {
-                folder.parent_id = InventoryFolderKey::from(parent_id);
+                folder.parent_id = crate::types::optional_key_from_wire(parent_id);
             }
         }
         Ok(())
@@ -6484,7 +6484,7 @@ impl Session {
         local_id: ScopedParcelId,
         price: i32,
         area: i32,
-        group_id: GroupKey,
+        group_id: Option<GroupKey>,
         is_group_owned: bool,
         now: Instant,
     ) -> Result<(), Error> {
@@ -7332,8 +7332,8 @@ impl Session {
     }
 
     /// Rezzes (creates) a new primitive described by `shape` (an `ObjectAdd`);
-    /// `group_id` is the group the new object is set to (use [`Uuid::nil`] for
-    /// none). The new object arrives as an [`Event::ObjectAdded`]. Build `shape`
+    /// `group_id` is the group the new object is set to (`None` for none). The
+    /// new object arrives as an [`Event::ObjectAdded`]. Build `shape`
     /// from [`PrimShape::cube`].
     ///
     /// # Errors
@@ -7343,7 +7343,7 @@ impl Session {
     pub fn rez_object(
         &mut self,
         shape: &PrimShape,
-        group_id: GroupKey,
+        group_id: Option<GroupKey>,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -7362,7 +7362,7 @@ impl Session {
         &mut self,
         local_ids: &[ScopedObjectId],
         offset: Vector,
-        group_id: GroupKey,
+        group_id: Option<GroupKey>,
         now: Instant,
     ) -> Result<(), Error> {
         let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
@@ -7414,7 +7414,7 @@ impl Session {
         local_ids: &[ScopedObjectId],
         destination: DeRezDestination,
         transaction_id: Uuid,
-        group_id: GroupKey,
+        group_id: Option<GroupKey>,
         now: Instant,
     ) -> Result<(), Error> {
         let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {

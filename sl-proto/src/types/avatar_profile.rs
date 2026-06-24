@@ -136,7 +136,7 @@ pub struct PickInfo {
     /// The pick description.
     pub description: String,
     /// The pick snapshot texture id.
-    pub snapshot_id: TextureKey,
+    pub snapshot_id: Option<TextureKey>,
     /// The owner's account name, as the grid resolves it.
     pub user: String,
     /// The parcel's original name.
@@ -176,7 +176,7 @@ pub struct ClassifiedInfo {
     /// The parent estate id.
     pub parent_estate: u32,
     /// The classified snapshot texture id.
-    pub snapshot_id: TextureKey,
+    pub snapshot_id: Option<TextureKey>,
     /// The region name the classified is in, or `None` when the grid sent an
     /// empty (unknown) name.
     pub sim_name: Option<RegionName>,
@@ -262,7 +262,7 @@ pub struct PickUpdate {
     /// The pick description.
     pub description: String,
     /// The pick snapshot texture id.
-    pub snapshot_id: TextureKey,
+    pub snapshot_id: Option<TextureKey>,
     /// The pick's global position (metres; nil/zero to use the agent's).
     pub pos_global: (f64, f64, f64),
     /// The sort order (only meaningful for top picks; normally `0`).
@@ -278,7 +278,7 @@ impl Default for PickUpdate {
             parcel_id: None,
             name: String::new(),
             description: String::new(),
-            snapshot_id: TextureKey::from(Uuid::nil()),
+            snapshot_id: None,
             pos_global: (0.0, 0.0, 0.0),
             sort_order: 0,
             enabled: true,
@@ -307,7 +307,7 @@ pub struct ClassifiedUpdate {
     /// in the agent's current parcel.
     pub parcel_id: Option<ParcelKey>,
     /// The classified snapshot texture id.
-    pub snapshot_id: TextureKey,
+    pub snapshot_id: Option<TextureKey>,
     /// The classified's global position (metres; nil/zero to use the agent's).
     pub pos_global: (f64, f64, f64),
     /// The classified flags bitfield (e.g. mature, auto-renew).
@@ -324,7 +324,7 @@ impl Default for ClassifiedUpdate {
             name: String::new(),
             description: String::new(),
             parcel_id: None,
-            snapshot_id: TextureKey::from(Uuid::nil()),
+            snapshot_id: None,
             pos_global: (0.0, 0.0, 0.0),
             classified_flags: 0,
             price_for_listing: LindenAmount(0),

@@ -125,8 +125,8 @@ impl WearableType {
 pub struct Wearable {
     /// The inventory item id of the worn wearable.
     pub item_id: InventoryKey,
-    /// The wearable's asset id (nil when not known, e.g. when sending).
-    pub asset_id: Uuid,
+    /// The wearable's asset id (`None` when not known, e.g. when sending).
+    pub asset_id: Option<Uuid>,
     /// Which body/clothing slot this wearable occupies.
     pub wearable_type: WearableType,
 }
@@ -210,8 +210,8 @@ pub struct TextureFace {
     pub media_flags: u8,
     /// Glow amount, in the range 0..1.
     pub glow: f32,
-    /// The material id (a legacy materials asset; nil if none).
-    pub material_id: Uuid,
+    /// The material id (a legacy materials asset; `None` if none).
+    pub material_id: Option<Uuid>,
 }
 
 impl TextureFace {
@@ -809,7 +809,7 @@ mod tests {
             bump_shiny_fullbright,
             media_flags,
             glow: 0.0,
-            material_id: super::Uuid::nil(),
+            material_id: None,
         }
     }
 

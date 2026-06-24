@@ -552,8 +552,8 @@ pub enum ServerEvent {
     DuplicateObjectsOnRay {
         /// The region-local ids to duplicate.
         local_ids: Vec<RegionLocalObjectId>,
-        /// The active group the copies are set to ([`Uuid::nil`] for none).
-        group_id: GroupKey,
+        /// The active group the copies are set to (`None` for none).
+        group_id: Option<GroupKey>,
         /// The ray's start point (region-local).
         ray_start: Vector,
         /// The ray's end point (region-local).
@@ -566,8 +566,8 @@ pub enum ServerEvent {
         copy_centers: bool,
         /// Whether to copy each object's rotation.
         copy_rotates: bool,
-        /// The object the ray is cast against ([`Uuid::nil`] for the terrain).
-        ray_target_id: ObjectKey,
+        /// The object the ray is cast against (`None` for the terrain).
+        ray_target_id: Option<ObjectKey>,
         /// The duplicate flags (see `object_flags.h`).
         duplicate_flags: u32,
     },
@@ -1933,7 +1933,7 @@ impl SimSession {
                         global_y: result.global_position.1,
                         global_z: result.global_position.2,
                         sim_name: with_nul(&sl_wire::region_name_to_wire(result.sim_name.as_ref())),
-                        snapshot_id: result.snapshot_id.uuid(),
+                        snapshot_id: result.snapshot_id.map_or_else(Uuid::nil, |s| s.uuid()),
                         dwell: result.dwell,
                         price: crate::types::linden_to_wire("Price", &result.price)?,
                     })
@@ -2414,7 +2414,7 @@ impl SimSession {
                 global_y: details.global_y,
                 global_z: details.global_z,
                 sim_name: with_nul(&sl_wire::region_name_to_wire(details.sim_name.as_ref())),
-                snapshot_id: details.snapshot_id.uuid(),
+                snapshot_id: details.snapshot_id.map_or_else(Uuid::nil, |s| s.uuid()),
                 dwell: details.dwell,
                 sale_price: crate::types::linden_price_to_wire(
                     "SalePrice",
@@ -2470,7 +2470,7 @@ impl SimSession {
         }
         let message = AnyMessage::TelehubInfo(TelehubInfoMessage {
             telehub_block: TelehubInfoTelehubBlockBlock {
-                object_id: info.object_id.uuid(),
+                object_id: info.object_id.map_or_else(Uuid::nil, |o| o.uuid()),
                 object_name: with_nul(&info.object_name),
                 telehub_pos: info.position.clone(),
                 telehub_rot: info.rotation.clone(),
@@ -3056,14 +3056,14 @@ impl SimSession {
                         .iter()
                         .map(|item| RegionLocalObjectId(item.object_local_id))
                         .collect(),
-                    group_id: GroupKey::from(agent.group_id),
+                    group_id: crate::types::optional_key_from_wire(agent.group_id),
                     ray_start: agent.ray_start.clone(),
                     ray_end: agent.ray_end.clone(),
                     bypass_raycast: agent.bypass_raycast,
                     ray_end_is_intersection: agent.ray_end_is_intersection,
                     copy_centers: agent.copy_centers,
                     copy_rotates: agent.copy_rotates,
-                    ray_target_id: ObjectKey::from(agent.ray_target_id),
+                    ray_target_id: crate::types::optional_key_from_wire(agent.ray_target_id),
                     duplicate_flags: agent.duplicate_flags,
                 });
             }
@@ -3108,12 +3108,12 @@ impl SimSession {
                 let rez_data = &rez.rez_data;
                 self.events.push_back(ServerEvent::RezObjectFromNotecard {
                     rez: NotecardRez {
-                        group_id: GroupKey::from(rez.agent_data.group_id),
-                        from_task_id: ObjectKey::from(rez_data.from_task_id),
+                        group_id: crate::types::optional_key_from_wire(rez.agent_data.group_id),
+                        from_task_id: crate::types::optional_key_from_wire(rez_data.from_task_id),
                         bypass_raycast: rez_data.bypass_raycast != 0,
                         ray_start: rez_data.ray_start.clone(),
                         ray_end: rez_data.ray_end.clone(),
-                        ray_target_id: ObjectKey::from(rez_data.ray_target_id),
+                        ray_target_id: crate::types::optional_key_from_wire(rez_data.ray_target_id),
                         ray_end_is_intersection: rez_data.ray_end_is_intersection,
                         rez_selected: rez_data.rez_selected,
                         remove_item: rez_data.remove_item,

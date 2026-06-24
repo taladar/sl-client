@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use sl_proto::{AgentKey, ObjectKey, Rotation, Uuid, Vector};
+use sl_proto::{AgentKey, GroupKey, ObjectKey, Rotation, TextureKey, Uuid, Vector};
 
 use crate::context::ReplContext;
 use crate::error::ReplError;
@@ -377,6 +377,30 @@ impl Args {
     ) -> Result<Option<AgentKey>, ReplError> {
         let raw = self.uuid_or_nil(ctx, field, pos)?;
         Ok((!raw.is_nil()).then(|| AgentKey::from(raw)))
+    }
+
+    /// An optional [`GroupKey`] argument: an absent or nil id maps to `None`
+    /// (the in-band "none" sentinel the wire uses for an unset group id).
+    pub(crate) fn opt_group(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        pos: usize,
+    ) -> Result<Option<GroupKey>, ReplError> {
+        let raw = self.uuid_or_nil(ctx, field, pos)?;
+        Ok((!raw.is_nil()).then(|| GroupKey::from(raw)))
+    }
+
+    /// An optional [`TextureKey`] argument: an absent or nil id maps to `None`
+    /// (the in-band "none" sentinel the wire uses for an unset texture id).
+    pub(crate) fn opt_texture(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        pos: usize,
+    ) -> Result<Option<TextureKey>, ReplError> {
+        let raw = self.uuid_or_nil(ctx, field, pos)?;
+        Ok((!raw.is_nil()).then(|| TextureKey::from(raw)))
     }
 
     /// A list of [`ObjectKey`]s from the keyword/positional UUID list (each raw

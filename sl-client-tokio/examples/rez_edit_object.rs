@@ -87,7 +87,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 command_tx
                     .send(Command::RezObject {
                         shape: PrimShape::cube(REZ_POSITION),
-                        group_id: Uuid::nil().into(),
+                        group_id: None,
                     })
                     .await
                     .ok();
@@ -154,7 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     trash,
                                 )),
                                 transaction_id: Uuid::from_u128(0x051C_17DE_1E7E),
-                                group_id: Uuid::nil().into(),
+                                group_id: None,
                             })
                             .await
                             .ok();
@@ -178,7 +178,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     props.name, props.description, props.sale_type, props.sale_price
                 );
                 info!(
-                    "  recovered: item_id={} folder_id={} from_task_id={} inv_serial={} \
+                    "  recovered: item_id={} folder_id={:?} from_task_id={:?} inv_serial={} \
                      aggregate_perms={:#x}/{:#x}/{:#x} texture_ids={:?}",
                     props.item_id,
                     props.folder_id,

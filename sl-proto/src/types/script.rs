@@ -20,8 +20,8 @@ pub struct ScriptDialog {
     pub owner_first_name: String,
     /// The object owner's last name.
     pub owner_last_name: String,
-    /// The object owner's agent id (nil if the sim did not include it).
-    pub owner_id: Uuid,
+    /// The object owner's agent id (`None` if the sim did not include it).
+    pub owner_id: Option<Uuid>,
     /// The dialog message text.
     pub message: String,
     /// The hidden chat channel the button reply is sent on.

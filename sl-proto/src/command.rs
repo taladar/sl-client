@@ -760,8 +760,8 @@ pub enum Command {
         price: i32,
         /// The parcel area in m².
         area: i32,
-        /// The group to buy for (nil for a personal purchase).
-        group_id: GroupKey,
+        /// The group to buy for (`None` for a personal purchase).
+        group_id: Option<GroupKey>,
         /// Whether the purchase is group-owned.
         is_group_owned: bool,
     },
@@ -1082,8 +1082,8 @@ pub enum Command {
     RezObject {
         /// The shape of the prim to rez.
         shape: PrimShape,
-        /// The group the new object is set to ([`Uuid::nil`] for none).
-        group_id: GroupKey,
+        /// The group the new object is set to (`None` for none).
+        group_id: Option<GroupKey>,
     },
     /// Duplicate objects with an offset (`ObjectDuplicate`).
     DuplicateObjects {
@@ -1091,8 +1091,8 @@ pub enum Command {
         local_ids: Vec<ScopedObjectId>,
         /// The offset to apply to the copies.
         offset: Vector,
-        /// The group the copies are set to.
-        group_id: GroupKey,
+        /// The group the copies are set to (`None` for none).
+        group_id: Option<GroupKey>,
     },
     /// Delete objects to the trash (`ObjectDelete`).
     DeleteObjects {
@@ -1108,8 +1108,8 @@ pub enum Command {
         destination: DeRezDestination,
         /// A caller-chosen id correlating the resulting inventory update.
         transaction_id: Uuid,
-        /// The active group ([`Uuid::nil`] for none).
-        group_id: GroupKey,
+        /// The active group (`None` for none).
+        group_id: Option<GroupKey>,
     },
     /// Move/rotate/scale an object (`MultipleObjectUpdate`).
     UpdateObject {
@@ -1272,8 +1272,8 @@ pub enum Command {
     DuplicateObjectsOnRay {
         /// The region-local ids to duplicate.
         local_ids: Vec<ScopedObjectId>,
-        /// The active group the copies are set to ([`Uuid::nil`] for none).
-        group_id: GroupKey,
+        /// The active group the copies are set to (`None` for none).
+        group_id: Option<GroupKey>,
         /// The ray's start point (region-local).
         ray_start: Vector,
         /// The ray's end point (region-local).
@@ -1286,8 +1286,8 @@ pub enum Command {
         copy_centers: bool,
         /// Whether to copy each object's rotation.
         copy_rotates: bool,
-        /// The object the ray is cast against ([`Uuid::nil`] for the terrain).
-        ray_target_id: ObjectKey,
+        /// The object the ray is cast against (`None` for the terrain).
+        ray_target_id: Option<ObjectKey>,
         /// The duplicate flags (see `object_flags.h`).
         duplicate_flags: u32,
     },

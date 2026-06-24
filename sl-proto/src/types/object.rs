@@ -694,11 +694,11 @@ pub struct ObjectProperties {
     /// used to correlate an in-world object back to its inventory item — needed
     /// for attachments and "find in inventory".
     pub item_id: InventoryKey,
-    /// The inventory folder the source item lives in (nil if not applicable).
-    pub folder_id: InventoryFolderKey,
+    /// The inventory folder the source item lives in (`None` if not applicable).
+    pub folder_id: Option<InventoryFolderKey>,
     /// The task (object) this item came from, when it was rezzed from another
-    /// object's contents (nil if not applicable).
-    pub from_task_id: ObjectKey,
+    /// object's contents (`None` if not applicable).
+    pub from_task_id: Option<ObjectKey>,
     /// The aggregate permission rollup across the linkset's contents — the
     /// build-floater "next owner can…" summary.
     pub aggregate_perms: u8,
