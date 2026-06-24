@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use sl_client_tokio::{
     Client, Command, DisconnectReason, Error, Event, InventoryFolderKey, InventoryKey, LoginParams,
-    LoginRequest, NewInventoryItem, Throttle, Uuid,
+    LoginRequest, NewInventoryItem, Throttle, TransactionId, Uuid,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -171,7 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     command_tx
                         .send(Command::UpdateInventoryItem {
                             item: Box::new(renamed),
-                            transaction_id: Uuid::nil(),
+                            transaction_id: TransactionId::from(Uuid::nil()),
                         })
                         .await
                         .ok();

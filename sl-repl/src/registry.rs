@@ -30,16 +30,21 @@ use sl_proto::ExperienceKey;
 use sl_proto::FriendKey;
 use sl_proto::GlobalCoordinates;
 use sl_proto::GroupKey;
+use sl_proto::GroupRequestId;
 use sl_proto::GroupRoleKey;
+use sl_proto::ImSessionId;
 use sl_proto::InventoryFolderKey;
 use sl_proto::InventoryItemOrFolderKey;
 use sl_proto::InventoryKey;
+use sl_proto::LureId;
 use sl_proto::MeshKey;
 use sl_proto::ObjectKey;
 use sl_proto::OwnerKey;
 use sl_proto::ParcelKey;
+use sl_proto::QueryId;
 use sl_proto::RegionCoordinates;
 use sl_proto::TextureKey;
+use sl_proto::TransactionId;
 use sl_proto::{
     AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentMode, AttachmentPoint,
     Camera, ChatType, ClassifiedCategory, ClassifiedUpdate, Command, ControlFlags,
@@ -1524,7 +1529,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::GodDeletePick {
                     pick_id: PickKey::from(args.req_uuid(ctx, "pick_id", 0)?),
-                    query_id: args.req_uuid(ctx, "query_id", 1)?,
+                    query_id: QueryId::from(args.req_uuid(ctx, "query_id", 1)?),
                 })
             },
         },
@@ -1552,7 +1557,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::GodDeleteClassified {
                     classified_id: ClassifiedKey::from(args.req_uuid(ctx, "classified_id", 0)?),
-                    query_id: args.req_uuid(ctx, "query_id", 1)?,
+                    query_id: QueryId::from(args.req_uuid(ctx, "query_id", 1)?),
                 })
             },
         },
@@ -1638,7 +1643,11 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::UpdateInventoryItem {
                     item: Box::new(build_inventory_item(args, ctx)?),
-                    transaction_id: args.uuid_or_nil(ctx, "transaction_id", 100)?,
+                    transaction_id: TransactionId::from(args.uuid_or_nil(
+                        ctx,
+                        "transaction_id",
+                        100,
+                    )?),
                 })
             },
         },
@@ -1861,7 +1870,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<transaction_id> <calling_card_folder>",
             build: |args, ctx| {
                 Ok(Command::AcceptFriendship {
-                    transaction_id: args.req_uuid(ctx, "transaction_id", 0)?,
+                    transaction_id: TransactionId::from(args.req_uuid(ctx, "transaction_id", 0)?),
                     calling_card_folder: InventoryFolderKey::from(args.req_uuid(
                         ctx,
                         "calling_card_folder",
@@ -1874,11 +1883,9 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "decline_friendship",
             usage: "<transaction_id>",
             build: |args, ctx| {
-                Ok(Command::DeclineFriendship(args.req_uuid(
-                    ctx,
-                    "transaction_id",
-                    0,
-                )?))
+                Ok(Command::DeclineFriendship(TransactionId::from(
+                    args.req_uuid(ctx, "transaction_id", 0)?,
+                )))
             },
         },
         CommandSpec {
@@ -2148,7 +2155,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::RequestGroupAccountSummary {
                     group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
-                    request_id: args.req_uuid(ctx, "request_id", 1)?,
+                    request_id: GroupRequestId::from(args.req_uuid(ctx, "request_id", 1)?),
                     interval_days: args.req_parse(ctx, "interval_days", 2, "i32")?,
                     current_interval: args.req_parse(ctx, "current_interval", 3, "i32")?,
                 })
@@ -2160,7 +2167,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::RequestGroupAccountDetails {
                     group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
-                    request_id: args.req_uuid(ctx, "request_id", 1)?,
+                    request_id: GroupRequestId::from(args.req_uuid(ctx, "request_id", 1)?),
                     interval_days: args.req_parse(ctx, "interval_days", 2, "i32")?,
                     current_interval: args.req_parse(ctx, "current_interval", 3, "i32")?,
                 })
@@ -2172,7 +2179,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::RequestGroupAccountTransactions {
                     group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
-                    request_id: args.req_uuid(ctx, "request_id", 1)?,
+                    request_id: GroupRequestId::from(args.req_uuid(ctx, "request_id", 1)?),
                     interval_days: args.req_parse(ctx, "interval_days", 2, "i32")?,
                     current_interval: args.req_parse(ctx, "current_interval", 3, "i32")?,
                 })
@@ -2184,7 +2191,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::RequestGroupActiveProposals {
                     group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
-                    transaction_id: args.req_uuid(ctx, "transaction_id", 1)?,
+                    transaction_id: TransactionId::from(args.req_uuid(ctx, "transaction_id", 1)?),
                 })
             },
         },
@@ -2194,7 +2201,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::RequestGroupVoteHistory {
                     group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
-                    transaction_id: args.req_uuid(ctx, "transaction_id", 1)?,
+                    transaction_id: TransactionId::from(args.req_uuid(ctx, "transaction_id", 1)?),
                 })
             },
         },
@@ -3002,7 +3009,11 @@ fn all_specs() -> Vec<CommandSpec> {
                         let value = args.req_str(ctx, "destination", 1)?;
                         parse_derez_destination("destination", &value, id)?
                     },
-                    transaction_id: args.uuid_or_nil(ctx, "transaction_id", 3)?,
+                    transaction_id: TransactionId::from(args.uuid_or_nil(
+                        ctx,
+                        "transaction_id",
+                        3,
+                    )?),
                     group_id: args.opt_group(ctx, "group_id", 4)?,
                 })
             },
@@ -3624,7 +3635,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<compound_id> <item_id:owner_id:attachment_point[:add|replace],…> \
                     [detach=detach|keep]",
             build: |args, ctx| {
-                let compound_id = args.uuid_or_nil(ctx, "compound_id", 0)?;
+                let compound_id = TransactionId::from(args.uuid_or_nil(ctx, "compound_id", 0)?);
                 let detach = enum_arg_or(
                     args,
                     ctx,
@@ -3705,7 +3716,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<query_id> <query_text> <flags-u32> [query_start=0]",
             build: |args, ctx| {
                 Ok(Command::DirFindQuery {
-                    query_id: args.req_uuid(ctx, "query_id", 0)?,
+                    query_id: QueryId::from(args.req_uuid(ctx, "query_id", 0)?),
                     query_text: args.req_str(ctx, "query_text", 1)?,
                     flags: DirFindFlags::from_bits(args.req_parse(ctx, "flags", 2, "u32")?),
                     query_start: args.parse_or(ctx, "query_start", 3, "i32", 0)?,
@@ -3717,7 +3728,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<query_id> <query_text> <flags-u32> [category=0] [sim_name=] [query_start=0]",
             build: |args, ctx| {
                 Ok(Command::DirPlacesQuery {
-                    query_id: args.req_uuid(ctx, "query_id", 0)?,
+                    query_id: QueryId::from(args.req_uuid(ctx, "query_id", 0)?),
                     query_text: args.req_str(ctx, "query_text", 1)?,
                     flags: DirFindFlags::from_bits(args.req_parse(ctx, "flags", 2, "u32")?),
                     category: ParcelCategory::from_u8(args.parse_or(ctx, "category", 3, "u8", 0)?),
@@ -3732,7 +3743,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     [query_start=0]",
             build: |args, ctx| {
                 Ok(Command::DirLandQuery {
-                    query_id: args.req_uuid(ctx, "query_id", 0)?,
+                    query_id: QueryId::from(args.req_uuid(ctx, "query_id", 0)?),
                     flags: DirFindFlags::from_bits(args.req_parse(ctx, "flags", 1, "u32")?),
                     search_type: LandSearchType::from_bits(args.parse_or(
                         ctx,
@@ -3752,7 +3763,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<query_id> <query_text> <flags-u32> [category=0] [query_start=0]",
             build: |args, ctx| {
                 Ok(Command::DirClassifiedQuery {
-                    query_id: args.req_uuid(ctx, "query_id", 0)?,
+                    query_id: QueryId::from(args.req_uuid(ctx, "query_id", 0)?),
                     query_text: args.req_str(ctx, "query_text", 1)?,
                     flags: DirFindFlags::from_bits(args.req_parse(ctx, "flags", 2, "u32")?),
                     category: ClassifiedCategory::from_u32(
@@ -3767,7 +3778,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<query_id> <name>",
             build: |args, ctx| {
                 Ok(Command::AvatarPickerRequest {
-                    query_id: args.req_uuid(ctx, "query_id", 0)?,
+                    query_id: QueryId::from(args.req_uuid(ctx, "query_id", 0)?),
                     name: args.req_str(ctx, "name", 1)?,
                 })
             },
@@ -3777,8 +3788,8 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<query_id> <transaction_id> [query_text=] [flags=0] [category=0] [sim_name=]",
             build: |args, ctx| {
                 Ok(Command::PlacesQuery {
-                    query_id: args.req_uuid(ctx, "query_id", 0)?,
-                    transaction_id: args.req_uuid(ctx, "transaction_id", 1)?,
+                    query_id: QueryId::from(args.req_uuid(ctx, "query_id", 0)?),
+                    transaction_id: TransactionId::from(args.req_uuid(ctx, "transaction_id", 1)?),
                     query_text: args.str_or(ctx, "query_text", 2, "")?,
                     flags: DirFindFlags::from_bits(args.parse_or(ctx, "flags", 3, "u32", 0)?),
                     category: ParcelCategory::from_u8(args.parse_or(ctx, "category", 4, "u8", 0)?),
@@ -4250,7 +4261,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<lure_id>",
             build: |args, ctx| {
                 Ok(Command::AcceptTeleportLure {
-                    lure_id: args.req_uuid(ctx, "lure_id", 0)?,
+                    lure_id: LureId::from(args.req_uuid(ctx, "lure_id", 0)?),
                 })
             },
         },
@@ -4260,7 +4271,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::DeclineTeleportLure {
                     from_agent_id: AgentKey::from(args.req_uuid(ctx, "from_agent_id", 0)?),
-                    lure_id: args.req_uuid(ctx, "lure_id", 1)?,
+                    lure_id: LureId::from(args.req_uuid(ctx, "lure_id", 1)?),
                 })
             },
         },
@@ -4283,7 +4294,11 @@ fn all_specs() -> Vec<CommandSpec> {
                     item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?),
                     asset_type: enum_arg(args, ctx, "asset_type", 2, parse_asset_type)?,
                     item_name: args.str_or(ctx, "item_name", 3, "")?,
-                    transaction_id: args.uuid_or_nil(ctx, "transaction_id", 4)?,
+                    transaction_id: TransactionId::from(args.uuid_or_nil(
+                        ctx,
+                        "transaction_id",
+                        4,
+                    )?),
                 })
             },
         },
@@ -4295,7 +4310,11 @@ fn all_specs() -> Vec<CommandSpec> {
                     to_agent_id: AgentKey::from(args.req_uuid(ctx, "to_agent_id", 0)?),
                     folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 1)?),
                     folder_name: args.str_or(ctx, "folder_name", 2, "")?,
-                    transaction_id: args.uuid_or_nil(ctx, "transaction_id", 3)?,
+                    transaction_id: TransactionId::from(args.uuid_or_nil(
+                        ctx,
+                        "transaction_id",
+                        3,
+                    )?),
                 })
             },
         },
@@ -4328,7 +4347,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<session_id> <invitee,invitee,…> [message]",
             build: |args, ctx| {
                 Ok(Command::StartConference {
-                    session_id: args.req_uuid(ctx, "session_id", 0)?,
+                    session_id: ImSessionId::from(args.req_uuid(ctx, "session_id", 0)?),
                     invitees: args
                         .vec_uuid(ctx, "invitees", 1)?
                         .into_iter()
@@ -4343,7 +4362,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<session_id> <message>",
             build: |args, ctx| {
                 Ok(Command::SendConferenceMessage {
-                    session_id: args.req_uuid(ctx, "session_id", 0)?,
+                    session_id: ImSessionId::from(args.req_uuid(ctx, "session_id", 0)?),
                     message: args.req_str(ctx, "message", 1)?,
                 })
             },
@@ -4353,7 +4372,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<session_id>",
             build: |args, ctx| {
                 Ok(Command::LeaveConference {
-                    session_id: args.req_uuid(ctx, "session_id", 0)?,
+                    session_id: ImSessionId::from(args.req_uuid(ctx, "session_id", 0)?),
                 })
             },
         },
@@ -4438,7 +4457,8 @@ mod tests {
         AbuseReportType, AgentKey, AgentPreferences, AssetType, ChatChannel, ChatType, CircuitId,
         Command, ControlFlags, FriendRights, GroupKey, InventoryKey, LandStatReportType,
         LindenAmount, MapItemType, MovementMode, ObjectBuyItem, ObjectKey, OwnerKey, RegionHandle,
-        RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId, ScopedParcelId, Uuid,
+        RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId, ScopedParcelId,
+        TransactionId, Uuid,
     };
 
     use super::Registry;
@@ -5171,7 +5191,7 @@ mod tests {
             ),
             Ok(Command::RequestGroupActiveProposals { group_id, transaction_id })
                 if group_id == GroupKey::from(Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111))
-                    && transaction_id == Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222)
+                    && transaction_id == TransactionId::from(Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222))
         ));
     }
 

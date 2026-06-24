@@ -12,7 +12,7 @@ use std::time::Duration;
 use sl_client_tokio::{
     Client, Command, DeRezDestination, DisconnectReason, Event, InventoryFolderKey, LindenAmount,
     LoginParams, LoginRequest, ObjectTransform, PrimShape, SaleType, ScopedObjectId, Throttle,
-    Uuid, Vector, pcode,
+    TransactionId, Uuid, Vector, pcode,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -153,7 +153,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 destination: DeRezDestination::Trash(InventoryFolderKey::from(
                                     trash,
                                 )),
-                                transaction_id: Uuid::from_u128(0x051C_17DE_1E7E),
+                                transaction_id: TransactionId::from(Uuid::from_u128(
+                                    0x051C_17DE_1E7E,
+                                )),
                                 group_id: None,
                             })
                             .await

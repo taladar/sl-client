@@ -18,17 +18,18 @@ mod test {
         FollowCamPropertyValue, GestureActivation, GlobalCoordinates, GridCoordinates,
         GridRectangle, GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
         GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupKey,
-        GroupName, GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryKey,
-        LandArea, LandSearchType, LandStatItem, LandStatReportType, LindenAmount, LindenBalance,
-        LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
-        MeanCollision, MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem, ObjectKey,
-        ObjectPropertiesFamily, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey,
+        GroupName, GroupRequestId, GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey,
+        InventoryKey, LandArea, LandSearchType, LandStatItem, LandStatReportType, LindenAmount,
+        LindenBalance, LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
+        Maturity, MeanCollision, MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem,
+        ObjectKey, ObjectPropertiesFamily, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey,
         ParcelObjectOwner, ParcelReturnType, Permissions5, PingId, PlacesResult, PointAtType,
-        Postcard, ProductType, RegionCoordinates, RegionHandle, RegionIdentity,
+        Postcard, ProductType, QueryId, RegionCoordinates, RegionHandle, RegionIdentity,
         RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment, SaleType,
         ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ServerEvent, Session,
-        SimSession, TelehubInfo, TextureKey, Throttle, Transmit, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
+        SimSession, TelehubInfo, TextureKey, Throttle, TransactionId, Transmit, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
+        parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -369,7 +370,12 @@ mod test {
             name: String::new(),
             description: String::new(),
         }];
-        client.rez_attachments(compound, DetachOrder::Keep, &attachments, now)?;
+        client.rez_attachments(
+            TransactionId::from(compound),
+            DetachOrder::Keep,
+            &attachments,
+            now,
+        )?;
         pump(&mut client, &mut sim, now)?;
 
         let events = drain_server(&mut sim);
@@ -549,14 +555,14 @@ mod test {
         let qid = uuid::Uuid::from_u128(0xE01);
         let txn = uuid::Uuid::from_u128(0xE02);
         client.dir_find_query(
-            qid,
+            QueryId::from(qid),
             "alice",
             DirFindFlags::PEOPLE.union(DirFindFlags::ONLINE),
             0,
             now,
         )?;
         client.dir_places_query(
-            qid,
+            QueryId::from(qid),
             "sandbox",
             DirFindFlags::INC_PG,
             ParcelCategory::Commercial,
@@ -565,7 +571,7 @@ mod test {
             now,
         )?;
         client.dir_land_query(
-            qid,
+            QueryId::from(qid),
             DirFindFlags::FOR_SALE.union(DirFindFlags::LIMIT_BY_PRICE),
             LandSearchType::MAINLAND,
             5000,
@@ -574,17 +580,17 @@ mod test {
             now,
         )?;
         client.dir_classified_query(
-            qid,
+            QueryId::from(qid),
             "shoes",
             DirFindFlags::INC_MATURE,
             ClassifiedCategory::PropertyRental,
             0,
             now,
         )?;
-        client.avatar_picker_request(qid, "bob", now)?;
+        client.avatar_picker_request(QueryId::from(qid), "bob", now)?;
         client.places_query(
-            qid,
-            txn,
+            QueryId::from(qid),
+            TransactionId::from(txn),
             "",
             DirFindFlags::NONE,
             ParcelCategory::None,
@@ -1491,17 +1497,37 @@ mod test {
         let proposal_id = sl_proto::ProposalVoteId::from(uuid::Uuid::from_u128(0x9A0E));
 
         // Client -> sim: every G10 request surfaces a matching server event.
-        client.request_group_account_summary(GroupKey::from(group_id), request_id, 60, 0, now)?;
-        client.request_group_account_details(GroupKey::from(group_id), request_id, 60, 0, now)?;
-        client.request_group_account_transactions(
+        client.request_group_account_summary(
             GroupKey::from(group_id),
-            request_id,
+            GroupRequestId::from(request_id),
             60,
             0,
             now,
         )?;
-        client.request_group_active_proposals(GroupKey::from(group_id), transaction_id, now)?;
-        client.request_group_vote_history(GroupKey::from(group_id), transaction_id, now)?;
+        client.request_group_account_details(
+            GroupKey::from(group_id),
+            GroupRequestId::from(request_id),
+            60,
+            0,
+            now,
+        )?;
+        client.request_group_account_transactions(
+            GroupKey::from(group_id),
+            GroupRequestId::from(request_id),
+            60,
+            0,
+            now,
+        )?;
+        client.request_group_active_proposals(
+            GroupKey::from(group_id),
+            TransactionId::from(transaction_id),
+            now,
+        )?;
+        client.request_group_vote_history(
+            GroupKey::from(group_id),
+            TransactionId::from(transaction_id),
+            now,
+        )?;
         client.start_group_proposal(
             GroupKey::from(group_id),
             3,

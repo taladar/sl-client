@@ -36,7 +36,10 @@ use super::{
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
-use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
+use crate::bookkeeping_ids::{
+    GroupRequestId, ImSessionId, InventoryCallbackId, LureId, PingId, QueryId, TransactionId,
+    TransferId, XferId,
+};
 use crate::error::Error;
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::terrain;
@@ -3660,11 +3663,11 @@ impl Session {
     pub fn god_delete_pick(
         &mut self,
         pick_id: PickKey,
-        query_id: Uuid,
+        query_id: QueryId,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_pick_god_delete(pick_id, query_id, now)?;
+        circuit.send_pick_god_delete(pick_id, query_id.get(), now)?;
         Ok(())
     }
 
@@ -3714,11 +3717,11 @@ impl Session {
     pub fn god_delete_classified(
         &mut self,
         classified_id: ClassifiedKey,
-        query_id: Uuid,
+        query_id: QueryId,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_classified_god_delete(classified_id, query_id, now)?;
+        circuit.send_classified_god_delete(classified_id, query_id.get(), now)?;
         Ok(())
     }
 
@@ -3769,12 +3772,12 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn accept_friendship(
         &mut self,
-        transaction_id: Uuid,
+        transaction_id: TransactionId,
         calling_card_folder: InventoryFolderKey,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_accept_friendship(transaction_id, calling_card_folder.uuid(), now)?;
+        circuit.send_accept_friendship(transaction_id.get(), calling_card_folder.uuid(), now)?;
         Ok(())
     }
 
@@ -3786,9 +3789,13 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn decline_friendship(&mut self, transaction_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn decline_friendship(
+        &mut self,
+        transaction_id: TransactionId,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_decline_friendship(transaction_id, now)?;
+        circuit.send_decline_friendship(transaction_id.get(), now)?;
         Ok(())
     }
 
@@ -4264,7 +4271,7 @@ impl Session {
     pub fn request_group_account_summary(
         &mut self,
         group_id: GroupKey,
-        request_id: Uuid,
+        request_id: GroupRequestId,
         interval_days: i32,
         current_interval: i32,
         now: Instant,
@@ -4272,7 +4279,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_account_summary_request(
             group_id,
-            request_id,
+            request_id.get(),
             interval_days,
             current_interval,
             now,
@@ -4291,7 +4298,7 @@ impl Session {
     pub fn request_group_account_details(
         &mut self,
         group_id: GroupKey,
-        request_id: Uuid,
+        request_id: GroupRequestId,
         interval_days: i32,
         current_interval: i32,
         now: Instant,
@@ -4299,7 +4306,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_account_details_request(
             group_id,
-            request_id,
+            request_id.get(),
             interval_days,
             current_interval,
             now,
@@ -4317,7 +4324,7 @@ impl Session {
     pub fn request_group_account_transactions(
         &mut self,
         group_id: GroupKey,
-        request_id: Uuid,
+        request_id: GroupRequestId,
         interval_days: i32,
         current_interval: i32,
         now: Instant,
@@ -4325,7 +4332,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_account_transactions_request(
             group_id,
-            request_id,
+            request_id.get(),
             interval_days,
             current_interval,
             now,
@@ -4344,11 +4351,11 @@ impl Session {
     pub fn request_group_active_proposals(
         &mut self,
         group_id: GroupKey,
-        transaction_id: Uuid,
+        transaction_id: TransactionId,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_group_active_proposals_request(group_id, transaction_id, now)?;
+        circuit.send_group_active_proposals_request(group_id, transaction_id.get(), now)?;
         Ok(())
     }
 
@@ -4362,11 +4369,11 @@ impl Session {
     pub fn request_group_vote_history(
         &mut self,
         group_id: GroupKey,
-        transaction_id: Uuid,
+        transaction_id: TransactionId,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_group_vote_history_request(group_id, transaction_id, now)?;
+        circuit.send_group_vote_history_request(group_id, transaction_id.get(), now)?;
         Ok(())
     }
 
@@ -4500,16 +4507,20 @@ impl Session {
     /// Returns [`Error::NotActive`] if the session is not active,
     /// [`Error::NoCircuit`] if no circuit is established, or [`Error::Wire`] if
     /// the request fails to encode.
-    pub fn accept_teleport_lure(&mut self, lure_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn accept_teleport_lure(&mut self, lure_id: LureId, now: Instant) -> Result<(), Error> {
         if !matches!(self.state, SessionState::Active) {
             return Err(Error::NotActive);
         }
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_teleport_lure_request(lure_id, TeleportFlags(TeleportFlags::VIA_LURE), now)?;
+        circuit.send_teleport_lure_request(
+            lure_id.get(),
+            TeleportFlags(TeleportFlags::VIA_LURE),
+            now,
+        )?;
         circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
         // Best-effort destination hint; a cross-region lure's TeleportFinish
         // carries the authoritative handle, so a non-fake-parcel id is harmless.
-        self.teleport_target = Some(parse_lure_region_handle(lure_id));
+        self.teleport_target = Some(parse_lure_region_handle(lure_id.get()));
         self.state = SessionState::Teleporting;
         Ok(())
     }
@@ -4525,7 +4536,7 @@ impl Session {
     pub fn decline_teleport_lure(
         &mut self,
         from_agent_id: AgentKey,
-        lure_id: Uuid,
+        lure_id: LureId,
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
@@ -4535,7 +4546,7 @@ impl Session {
                 to_agent_id: from_agent_id.uuid(),
                 from_group: false,
                 dialog: ImDialog::LureDeclined,
-                id: lure_id,
+                id: lure_id.get(),
                 message: "",
                 from_name: &from_name,
                 binary_bucket: Vec::new(),
@@ -4591,7 +4602,7 @@ impl Session {
         item_id: InventoryKey,
         asset_type: AssetType,
         item_name: &str,
-        transaction_id: Uuid,
+        transaction_id: TransactionId,
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
@@ -4602,7 +4613,7 @@ impl Session {
                 to_agent_id: to_agent_id.uuid(),
                 from_group: false,
                 dialog: ImDialog::InventoryOffered,
-                id: transaction_id,
+                id: transaction_id.get(),
                 message: item_name,
                 from_name: &from_name,
                 binary_bucket: bucket,
@@ -4625,7 +4636,7 @@ impl Session {
         to_agent_id: AgentKey,
         folder_id: InventoryFolderKey,
         folder_name: &str,
-        transaction_id: Uuid,
+        transaction_id: TransactionId,
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
@@ -4636,7 +4647,7 @@ impl Session {
                 to_agent_id: to_agent_id.uuid(),
                 from_group: false,
                 dialog: ImDialog::InventoryOffered,
-                id: transaction_id,
+                id: transaction_id.get(),
                 message: folder_name,
                 from_name: &from_name,
                 binary_bucket: bucket,
@@ -4722,7 +4733,7 @@ impl Session {
     /// [`Error::Wire`] if the message fails to encode.
     pub fn start_conference(
         &mut self,
-        session_id: Uuid,
+        session_id: ImSessionId,
         invitees: &[AgentKey],
         message: &str,
         now: Instant,
@@ -4730,14 +4741,17 @@ impl Session {
         let from_name = self.agent_name();
         let invitee_ids: Vec<Uuid> = invitees.iter().map(AgentKey::uuid).collect();
         let bucket = pack_uuids(&invitee_ids);
-        let to_agent_id = invitee_ids.first().copied().unwrap_or(session_id);
+        let to_agent_id = invitee_ids
+            .first()
+            .copied()
+            .unwrap_or_else(|| session_id.get());
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
                 to_agent_id,
                 from_group: false,
                 dialog: ImDialog::SessionConferenceStart,
-                id: session_id,
+                id: session_id.get(),
                 message,
                 from_name: &from_name,
                 binary_bucket: bucket,
@@ -4757,7 +4771,7 @@ impl Session {
     /// [`Error::Wire`] if the message fails to encode.
     pub fn send_conference_message(
         &mut self,
-        session_id: Uuid,
+        session_id: ImSessionId,
         message: &str,
         now: Instant,
     ) -> Result<(), Error> {
@@ -4765,10 +4779,10 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
-                to_agent_id: session_id,
+                to_agent_id: session_id.get(),
                 from_group: false,
                 dialog: ImDialog::SessionSend,
-                id: session_id,
+                id: session_id.get(),
                 message,
                 from_name: &from_name,
                 binary_bucket: Vec::new(),
@@ -4785,15 +4799,15 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the message fails to encode.
-    pub fn leave_conference(&mut self, session_id: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn leave_conference(&mut self, session_id: ImSessionId, now: Instant) -> Result<(), Error> {
         let from_name = self.agent_name();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
-                to_agent_id: session_id,
+                to_agent_id: session_id.get(),
                 from_group: false,
                 dialog: ImDialog::SessionLeave,
-                id: session_id,
+                id: session_id.get(),
                 message: "",
                 from_name: &from_name,
                 binary_bucket: Vec::new(),
@@ -5223,13 +5237,13 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn rez_attachments(
         &mut self,
-        compound_id: Uuid,
+        compound_id: TransactionId,
         detach: DetachOrder,
         attachments: &[RezAttachment],
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_rez_multiple_attachments(compound_id, detach, attachments, now)?;
+        circuit.send_rez_multiple_attachments(compound_id.get(), detach, attachments, now)?;
         Ok(())
     }
 
@@ -5300,14 +5314,14 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn dir_find_query(
         &mut self,
-        query_id: Uuid,
+        query_id: QueryId,
         query_text: &str,
         flags: DirFindFlags,
         query_start: i32,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_dir_find_query(query_id, query_text, flags, query_start, now)?;
+        circuit.send_dir_find_query(query_id.get(), query_text, flags, query_start, now)?;
         Ok(())
     }
 
@@ -5321,7 +5335,7 @@ impl Session {
     #[expect(clippy::too_many_arguments, reason = "mirrors the wire query block")]
     pub fn dir_places_query(
         &mut self,
-        query_id: Uuid,
+        query_id: QueryId,
         query_text: &str,
         flags: DirFindFlags,
         category: ParcelCategory,
@@ -5331,7 +5345,7 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_dir_places_query(
-            query_id,
+            query_id.get(),
             query_text,
             flags,
             category,
@@ -5352,7 +5366,7 @@ impl Session {
     #[expect(clippy::too_many_arguments, reason = "mirrors the wire query block")]
     pub fn dir_land_query(
         &mut self,
-        query_id: Uuid,
+        query_id: QueryId,
         flags: DirFindFlags,
         search_type: LandSearchType,
         price: i32,
@@ -5361,7 +5375,15 @@ impl Session {
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_dir_land_query(query_id, flags, search_type, price, area, query_start, now)?;
+        circuit.send_dir_land_query(
+            query_id.get(),
+            flags,
+            search_type,
+            price,
+            area,
+            query_start,
+            now,
+        )?;
         Ok(())
     }
 
@@ -5374,7 +5396,7 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn dir_classified_query(
         &mut self,
-        query_id: Uuid,
+        query_id: QueryId,
         query_text: &str,
         flags: DirFindFlags,
         category: ClassifiedCategory,
@@ -5383,7 +5405,7 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_dir_classified_query(
-            query_id,
+            query_id.get(),
             query_text,
             flags,
             category,
@@ -5402,12 +5424,12 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn avatar_picker_request(
         &mut self,
-        query_id: Uuid,
+        query_id: QueryId,
         name: &str,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_avatar_picker_request(query_id, name, now)?;
+        circuit.send_avatar_picker_request(query_id.get(), name, now)?;
         Ok(())
     }
 
@@ -5422,8 +5444,8 @@ impl Session {
     #[expect(clippy::too_many_arguments, reason = "mirrors the wire query block")]
     pub fn places_query(
         &mut self,
-        query_id: Uuid,
-        transaction_id: Uuid,
+        query_id: QueryId,
+        transaction_id: TransactionId,
         query_text: &str,
         flags: DirFindFlags,
         category: ParcelCategory,
@@ -5432,8 +5454,8 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_places_query(
-            query_id,
-            transaction_id,
+            query_id.get(),
+            transaction_id.get(),
             query_text,
             flags,
             category,
@@ -6194,12 +6216,12 @@ impl Session {
     pub fn update_inventory_item(
         &mut self,
         item: &InventoryItem,
-        transaction_id: Uuid,
+        transaction_id: TransactionId,
         now: Instant,
     ) -> Result<(), Error> {
         let callback_id = self.next_inventory_callback();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_update_inventory_item(item, transaction_id, callback_id, now)?;
+        circuit.send_update_inventory_item(item, transaction_id.get(), callback_id, now)?;
         self.cache_inventory_item(item.clone());
         Ok(())
     }
@@ -7528,7 +7550,7 @@ impl Session {
         &mut self,
         local_ids: &[ScopedObjectId],
         destination: DeRezDestination,
-        transaction_id: Uuid,
+        transaction_id: TransactionId,
         group_id: Option<GroupKey>,
         now: Instant,
     ) -> Result<(), Error> {
@@ -7536,7 +7558,7 @@ impl Session {
             return Ok(());
         };
         let circuit = self.circuit_for_scope(scope)?;
-        circuit.send_derez_object(&local_ids, destination, transaction_id, group_id, now)?;
+        circuit.send_derez_object(&local_ids, destination, transaction_id.get(), group_id, now)?;
         Ok(())
     }
 
