@@ -433,8 +433,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "parcel media update: url {:?} type {:?} {}x{} loop={}",
                     update.media_url,
                     update.media_type,
-                    update.media_width,
-                    update.media_height,
+                    update.media_width.unwrap_or(0),
+                    update.media_height.unwrap_or(0),
                     update.media_loop,
                 );
             }

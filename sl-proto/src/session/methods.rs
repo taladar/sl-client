@@ -1519,8 +1519,8 @@ impl Session {
                         media_auto_scale: data.media_auto_scale != 0,
                         media_type: trimmed_string(&extended.media_type),
                         media_desc: trimmed_string(&extended.media_desc),
-                        media_width: extended.media_width,
-                        media_height: extended.media_height,
+                        media_width: crate::types::optional_i32_from_wire(extended.media_width),
+                        media_height: crate::types::optional_i32_from_wire(extended.media_height),
                         media_loop: extended.media_loop != 0,
                     }));
             }
@@ -1844,7 +1844,8 @@ impl Session {
                     self.events.push_back(Event::InventoryItemCreated {
                         sim_approved: reply.agent_data.sim_approved,
                         transaction_id: reply.agent_data.transaction_id,
-                        callback_id: InventoryCallbackId(data.callback_id),
+                        callback_id: crate::types::optional_u32_from_wire(data.callback_id)
+                            .map(InventoryCallbackId),
                         item,
                     });
                 }

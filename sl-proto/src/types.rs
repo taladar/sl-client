@@ -100,6 +100,29 @@ pub(crate) fn optional_uuid_to_wire(uuid: Option<uuid::Uuid>) -> uuid::Uuid {
     uuid.unwrap_or_else(uuid::Uuid::nil)
 }
 
+/// Decode a wire `u32` into an optional value: `0` is the in-band "unset"
+/// sentinel and maps to `None`, any other value to `Some(..)`. The codec
+/// boundary for the numeric `0`-means-unset fields (IM/invitation timestamps,
+/// the async inventory callback id). The inverse on encode is
+/// [`optional_u32_to_wire`].
+pub(crate) fn optional_u32_from_wire(value: u32) -> Option<u32> {
+    (value != 0).then_some(value)
+}
+
+/// Encode an optional `u32` back to a wire value, mapping `None` to the `0`
+/// sentinel (the inverse of [`optional_u32_from_wire`]).
+pub(crate) fn optional_u32_to_wire(value: Option<u32>) -> u32 {
+    value.unwrap_or(0)
+}
+
+/// Decode a wire `i32` into an optional value: `0` is the in-band "unset"
+/// sentinel and maps to `None`, any other value to `Some(..)`. The codec
+/// boundary for the numeric `0`-means-unset/native fields (parcel media
+/// width/height, which the client only ever decodes).
+pub(crate) fn optional_i32_from_wire(value: i32) -> Option<i32> {
+    (value != 0).then_some(value)
+}
+
 /// Build an [`OwnerKey`](sl_types::key::OwnerKey) for the types that signal group
 /// ownership via a *null* `OwnerID`, carrying the owning group in the separate
 /// `GroupID` slot (`ObjectProperties` and friends): a nil `OwnerID` alongside a
@@ -421,8 +444,9 @@ mod owner_codec_tests {
         group_from_wire, group_to_wire, inventory_owner_from_wire, land_area_from_wire,
         land_area_to_wire, linden_cover_from_wire, linden_cover_to_wire, linden_from_wire,
         linden_price_from_wire, linden_price_to_wire, linden_to_wire, object_owner_from_wire,
-        object_owner_to_wire, optional_key_from_wire, optional_key_to_wire,
-        optional_uuid_from_wire, optional_uuid_to_wire, owner_key_from_wire,
+        object_owner_to_wire, optional_i32_from_wire, optional_key_from_wire, optional_key_to_wire,
+        optional_u32_from_wire, optional_u32_to_wire, optional_uuid_from_wire,
+        optional_uuid_to_wire, owner_key_from_wire,
     };
     use pretty_assertions::assert_eq;
     use sl_types::key::{AgentKey, GroupKey, OwnerKey, TextureKey};
@@ -586,6 +610,21 @@ mod owner_codec_tests {
         assert_eq!(optional_uuid_from_wire(raw), Some(raw));
         assert_eq!(optional_uuid_to_wire(None), Uuid::nil());
         assert_eq!(optional_uuid_to_wire(Some(raw)), raw);
+    }
+
+    #[test]
+    fn optional_numeric_wire_maps_zero_to_none() {
+        // `0` is the in-band "unset" sentinel for these numeric fields and
+        // decodes to `None`; any other value round-trips bit-identically.
+        assert_eq!(optional_u32_from_wire(0), None);
+        assert_eq!(optional_u32_from_wire(1_700_000_000), Some(1_700_000_000));
+        assert_eq!(optional_u32_to_wire(None), 0);
+        assert_eq!(optional_u32_to_wire(Some(1_700_000_000)), 1_700_000_000);
+
+        assert_eq!(optional_i32_from_wire(0), None);
+        assert_eq!(optional_i32_from_wire(1024), Some(1024));
+        // A negative value is not a sentinel — it round-trips as `Some`.
+        assert_eq!(optional_i32_from_wire(-1), Some(-1));
     }
 
     #[test]

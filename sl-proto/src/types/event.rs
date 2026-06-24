@@ -453,9 +453,11 @@ pub enum Event {
         sim_approved: bool,
         /// The transaction id echoed from the originating request (nil if none).
         transaction_id: Uuid,
-        /// The async callback id echoed from the originating request (`0` if
-        /// none), used by a client to correlate the reply with its request.
-        callback_id: InventoryCallbackId,
+        /// The async callback id echoed from the originating request (`None` if
+        /// none — the `0` wire sentinel, e.g. an item the sim materialised
+        /// without a client request), used by a client to correlate the reply
+        /// with its request.
+        callback_id: Option<InventoryCallbackId>,
         /// The created/updated item.
         item: InventoryItem,
     },
@@ -690,8 +692,9 @@ pub enum Event {
         position: (f32, f32, f32),
         /// The parent estate id of the source.
         parent_estate_id: u32,
-        /// The inviting agent's timestamp (`0` when unset).
-        timestamp: u32,
+        /// The inviting agent's timestamp as a Unix time in seconds (`None` when
+        /// unset on the wire — the `0` sentinel).
+        timestamp: Option<u32>,
         /// The dialog-dependent binary payload. For a group IM this carries the
         /// group/session name used to label the session; empty for an ordinary
         /// conference invite.

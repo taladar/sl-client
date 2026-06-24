@@ -424,8 +424,9 @@ pub struct InstantMessage {
     pub position: (f32, f32, f32),
     /// Whether the message was stored-and-forwarded while the agent was offline.
     pub offline: bool,
-    /// The sender's timestamp (`0` when unset; the simulator often fills it).
-    pub timestamp: u32,
+    /// The sender's timestamp as a Unix time in seconds (`None` when unset on
+    /// the wire — the `0` sentinel; the simulator often fills it).
+    pub timestamp: Option<u32>,
     /// A dialog-dependent id: the IM session id for chats, or a transaction id
     /// for offers.
     pub id: Uuid,
@@ -537,7 +538,7 @@ mod tests {
             region_id: None,
             position: (0.0, 0.0, 0.0),
             offline: false,
-            timestamp: 0,
+            timestamp: None,
             id: Uuid::from_u128(0xcc33),
             parent_estate_id: 0,
             message: "here you go".to_owned(),
@@ -574,7 +575,7 @@ mod tests {
             region_id: None,
             position: (0.0, 0.0, 0.0),
             offline: false,
-            timestamp: 0,
+            timestamp: None,
             id: Uuid::from_u128(0xcc33),
             parent_estate_id: 0,
             message: "a whole folder".to_owned(),

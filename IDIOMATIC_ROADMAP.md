@@ -1297,10 +1297,33 @@ value (absence stays `Option`/default, never an error).
       `sim_session` suites updated; book `content/region.md` (telehub id). NO
       sl-types touched (all client wire concepts / consumed keys). Build +
       clippy (--workspace --all-targets) + 718 tests green.
-- [ ] **Remaining numeric `0`/`-1`-means-unset fields** → `Option`:
+- [x] **Remaining numeric `0`/`-1`-means-unset fields** → `Option`:
   `InstantMessage.timestamp`/`Event::ConferenceInvited.timestamp` (0 = unset),
   `ParcelMediaUpdateInfo` `media_width`/`media_height` (0 = native), and the
-  `InventoryCallbackId` `0`-no-callback call sites.
+  `InventoryCallbackId` `0`-no-callback call site. **DONE** (2026-06-24). Added
+  two reusable codec helpers in `sl-proto/src/types.rs`
+  (`optional_u32_from_wire`/`optional_u32_to_wire` for the `u32` timestamp
+  fields, `optional_i32_from_wire` for the decode-only `i32` media dimensions —
+  no `_to_wire` since `ParcelMediaUpdateInfo` is never encoded client-side),
+  mirroring the existing `optional_uuid_*` boundary helpers. `0` ⇄ `None` is
+  wire byte-identical. Converted: `InstantMessage.timestamp` → `Option<u32>`
+  (UDP `instant_message` decode + the offline-IM LLSD decode/encode in
+  `conversions.rs`); `Event::ConferenceInvited.timestamp` → `Option<u32>` (the
+  `ChatterBoxInvitation` CAPS decode/encode); `ParcelMediaUpdateInfo`
+  `media_width`/`media_height` → `Option<i32>` (the `ParcelMediaUpdate` decode);
+  `Event::InventoryItemCreated.callback_id` → `Option<InventoryCallbackId>`
+  (the `UpdateCreateInventoryItem` decode — `0` = an item the sim materialised
+  with no client request, e.g. an accepted inventory offer). The
+  `InventoryBulkUpdate.item_callbacks` site already filtered `callback_id != 0`,
+  so it needed no change. `next_inventory_callback` and the
+  `create`/`copy_inventory_item` returns stay non-`Option` (they always allocate
+  a real id). REPL/survey don't read these fields (they match the variant with
+  `..`); the one example reading `media_width`/`media_height`
+  (`tokio_login_hold_logout`) uses `.unwrap_or(0)`. +1 unit test
+  (`optional_numeric_wire_maps_zero_to_none`, incl. a negative `i32` is *not* a
+  sentinel); lifecycle + `sim_session` suites updated. NO sl-types touched.
+  Build + clippy (--workspace --all-targets) + all tests green. **Phase 7 B
+  COMPLETE.**
 - **Exceptions (kept in-band — sentinel is in the value domain):** open enums
   preserving `Unknown(raw)`; the polymorphic `MapItem.name`; outbound search
   filters (`DirPlacesQuery.sim_name`) that are partial query strings, not
@@ -1334,3 +1357,35 @@ value (absence stays `Option`/default, never an error).
   `grid_coordinates_from_handle`/`parse_lure_region_handle`; `login.rs` `.ok()`
   → `Option` fields (correct optional handling); the server-side
   `build_map_block_reply` `u16::try_from` clamp (encode of our own data).
+
+**D — geometry tuples → typed `sl-types` coordinate/vector types (consume-only;
+NOT STARTED):**
+
+A fresh-eye audit (2026-06-24, user-spotted) found `(f32, f32, f32)` position
+tuples that the Phase 6 map-geometry sweep never revisited — it only typed the
+teleport positions (`Command::Teleport`/`teleport_to`/`ScriptTeleportRequest`)
+with `sl_types::map::RegionCoordinates`. These are the same concept
+(region-local metres) and should adopt the same type; conversion is consume-only
+and wire byte-identical (wire `Vector` is f32, `From<Vector> for
+RegionCoordinates` already exists). The tuples split by concept — only the
+**region-local positions** become `RegionCoordinates`:
+
+- [ ] Region-local **position** tuples → `RegionCoordinates`:
+      `ChatMessage.position`, `InstantMessage.position`,
+      `Event::ConferenceInvited.position`, `ParcelInfo` (parcel.rs)
+      `user_location` + `aabb_min`/`aabb_max`.
+- [ ] **Direction** tuples (`ScriptTeleportRequest.look_at`,
+      `ParcelInfo.user_look_at`) — a unit direction, NOT a coordinate.
+      `sl-types` has no dedicated direction/unit-vector type (only
+      `lsl::Vector`, a plain f32 3-vector). Per the standing rule, add a
+      client-local `Direction` newtype in `sl-proto` first (batch-migrate to
+      `sl-types` later); do NOT force these into `RegionCoordinates`.
+      (User-requested 2026-06-24: prefer a named type over `lsl::Vector` if none
+      exists — none does.)
+- [ ] `DirPeopleResult`/`directory.rs` `global_position` — grid-**global**
+      metres. `sl-types` has no global-metres coordinate type either
+      (`Location`/`UnconstrainedLocation` are region-name + integer region
+      coords; `GridCoordinates` is region *indices*; `Distance` is a scalar).
+      Per the standing rule, add a client-local global-metres coordinate newtype
+      in `sl-proto` first (batch-migrate to `sl-types` later).
+      (User-requested 2026-06-24.)

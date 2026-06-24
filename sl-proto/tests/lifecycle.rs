@@ -5497,8 +5497,8 @@ mod test {
         assert!(update.media_auto_scale);
         assert_eq!(update.media_type, "text/html");
         assert_eq!(update.media_desc, "a web page");
-        assert_eq!(update.media_width, 1024);
-        assert_eq!(update.media_height, 768);
+        assert_eq!(update.media_width, Some(1024));
+        assert_eq!(update.media_height, Some(768));
         assert!(update.media_loop);
         Ok(())
     }
@@ -11874,7 +11874,7 @@ mod test {
         assert_eq!(received.from_agent_id, AgentKey::from(from));
         assert_eq!(received.from_agent_name, "Sender Name");
         assert_eq!(received.message, "stored hello");
-        assert_eq!(received.timestamp, 1_700_000_000);
+        assert_eq!(received.timestamp, Some(1_700_000_000));
         assert_eq!(received.id, uuid::Uuid::from_u128(0xABC));
         Ok(())
     }
@@ -11942,7 +11942,7 @@ mod test {
         assert_eq!(region_id, region);
         assert_eq!(position, (1.5, 2.5, 3.5));
         assert_eq!(parent_estate_id, 101);
-        assert_eq!(timestamp, 1_700_000_000);
+        assert_eq!(timestamp, Some(1_700_000_000));
         // "My Group" base64-decoded — the group/session label.
         assert_eq!(binary_bucket, b"My Group");
         Ok(())
@@ -12188,11 +12188,11 @@ mod test {
         assert_eq!(created.len(), 2);
         let (sim_approved, callback_id, item) = created.first().ok_or("first item")?;
         assert!(*sim_approved);
-        assert_eq!(*callback_id, InventoryCallbackId(7));
+        assert_eq!(*callback_id, Some(InventoryCallbackId(7)));
         assert_eq!(item.name, "Fresh Note");
         assert_eq!(item.asset_id, uuid::Uuid::from_u128(0x55));
         let (_, second_callback, second_item) = created.get(1).ok_or("second item")?;
-        assert_eq!(*second_callback, InventoryCallbackId(8));
+        assert_eq!(*second_callback, Some(InventoryCallbackId(8)));
         assert_eq!(second_item.name, "Second Note");
 
         let cached = session
