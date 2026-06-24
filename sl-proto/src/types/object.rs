@@ -119,8 +119,10 @@ pub struct Object {
     /// The object's name-value pairs (e.g. an attachment's `AttachItemID`), as
     /// the raw newline-separated string; empty if none.
     pub name_value: String,
-    /// The media URL set on the object, empty if none.
-    pub media_url: String,
+    /// The media URL set on the object, [`None`] if none. This is the legacy
+    /// single-URL object-media field; per-face media is the separate (CAPS)
+    /// `ObjectMedia` surface.
+    pub media_url: Option<url::Url>,
     /// The raw `TextureEntry` blob (per-face texture/colour data), undecoded.
     /// Decode with
     /// [`decode_texture_entry`](crate::decode_texture_entry).
@@ -828,7 +830,7 @@ mod tests {
             text: String::new(),
             text_color: [0; 4],
             name_value: name_value.to_owned(),
-            media_url: String::new(),
+            media_url: None,
             texture_entry: Vec::new(),
             texture_anim: Vec::new(),
             texture_animation: None,

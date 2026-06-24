@@ -126,7 +126,10 @@ pub fn build_update_experience_request(update: &ExperienceUpdate) -> String {
     out.push_str("</integer><key>properties</key><integer>");
     out.push_str(&update.properties.to_string());
     out.push_str("</integer><key>slurl</key><string>");
-    push_escaped(&mut out, &update.slurl);
+    push_escaped(
+        &mut out,
+        &crate::optional_url_to_wire(update.slurl.as_ref()),
+    );
     out.push_str("</string><key>extended_metadata</key><string>");
     push_escaped(&mut out, &update.extended_metadata);
     out.push_str("</string></map></llsd>");

@@ -65,6 +65,13 @@ pub enum Error {
     /// A grid nickname could not be mapped to a login URI.
     #[error("unknown grid `{0}`; pass --login-uri explicitly")]
     UnknownGrid(String),
+    /// The resolved login URI was not a valid URL.
+    #[error("invalid login URI: {0}")]
+    LoginUri(
+        #[from]
+        #[source]
+        url::ParseError,
+    ),
     /// The grid issued an MFA challenge but the avatar has no `mfa_command`.
     #[error("the grid requires multi-factor authentication but no mfa_command is configured")]
     MfaRequired,
@@ -534,7 +541,7 @@ fn repl_driver(
             state.ctx.set_identity(agent.uuid(), session, circuit);
         }
         if let Some(seed) = &id.seed_capability {
-            state.ctx.set_cap("Seed", seed);
+            state.ctx.set_cap("Seed", seed.as_str());
         }
         state.self_agent = id.agent_id.map(|agent| agent.uuid());
     }
@@ -691,7 +698,7 @@ fn run_repl(args: RunArgs) -> Result<(), Error> {
             avatar.last()
         );
         let params = LoginParams {
-            login_uri: login_uri.clone(),
+            login_uri: login_uri.parse()?,
             request: request.clone(),
         };
         let outcome = run_session(&params, args.smoke, &line_rx, recorder.take());

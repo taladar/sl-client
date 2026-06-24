@@ -58,7 +58,7 @@ pub(crate) fn start_caps(session: &Session) -> Option<Caps> {
 /// POSTs a neighbour region's seed capability (in a detached thread, result
 /// ignored) so the simulator marks the agent's capabilities as sent and begins
 /// streaming that region's scene to the child circuit.
-pub(crate) fn post_neighbour_seed(seed_url: String) {
+pub(crate) fn post_neighbour_seed(seed_url: url::Url) {
     std::thread::spawn(move || {
         let Ok(http) = ReqwestBlockingClient::builder()
             .timeout(EVENT_QUEUE_TIMEOUT)
@@ -67,7 +67,7 @@ pub(crate) fn post_neighbour_seed(seed_url: String) {
             return;
         };
         let _ignored = http
-            .post(&seed_url)
+            .post(seed_url)
             .header("Content-Type", "application/llsd+xml")
             .body(build_seed_request(REQUESTED_CAPABILITIES))
             .send();
@@ -79,7 +79,7 @@ pub(crate) fn post_neighbour_seed(seed_url: String) {
 /// `caps_tx` until `stop` is set, a receiver is dropped (e.g. on region change),
 /// or a request fails fatally.
 pub(crate) fn run_caps(
-    seed_url: String,
+    seed_url: url::Url,
     caps_tx: &Sender<(String, Llsd)>,
     map_tx: &Sender<HashMap<String, String>>,
     stop: &AtomicBool,
@@ -91,7 +91,7 @@ pub(crate) fn run_caps(
         return;
     };
     let Ok(response) = http
-        .post(&seed_url)
+        .post(seed_url)
         .header("Content-Type", "application/llsd+xml")
         .body(build_seed_request(REQUESTED_CAPABILITIES))
         .send()

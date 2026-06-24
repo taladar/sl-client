@@ -96,4 +96,17 @@ pub enum WireError {
         /// A short static label identifying the absent field.
         field: &'static str,
     },
+    /// A field that should carry a URL held a non-empty value that does not parse
+    /// as one. An empty value, where the field treats it as an "absent" sentinel,
+    /// decodes to `None` rather than this error; only a present-but-unparsable URL
+    /// is rejected rather than silently coerced, matching the non-masking stance
+    /// of [`InvalidRegionName`](WireError::InvalidRegionName) and
+    /// [`InvalidUuid`](WireError::InvalidUuid).
+    #[error("field {field} carried invalid URL {value:?}")]
+    InvalidUrl {
+        /// A short static label identifying the offending field.
+        field: &'static str,
+        /// The offending value, rendered for diagnostics.
+        value: String,
+    },
 }

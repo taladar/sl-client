@@ -174,8 +174,9 @@ pub struct ExperienceInfo {
     /// The content rating (`maturity`; `sim_access` codes: PG 13 / Mature 34 /
     /// Adult 42).
     pub maturity: i32,
-    /// A SLURL to the experience's home location (`slurl`).
-    pub slurl: String,
+    /// A SLURL to the experience's home location (`slurl`). The empty wire value
+    /// (no home location set) decodes to [`None`].
+    pub slurl: Option<url::Url>,
     /// Opaque extended metadata XML (`extended_metadata`).
     pub extended_metadata: String,
     /// `true` when this is a placeholder for an `error_ids` entry — the grid could
@@ -194,7 +195,7 @@ impl Default for ExperienceInfo {
             quota: i32::default(),
             expiration: f64::default(),
             maturity: i32::default(),
-            slurl: String::default(),
+            slurl: None,
             extended_metadata: String::default(),
             missing: bool::default(),
         }
@@ -236,7 +237,7 @@ impl ExperienceInfo {
             quota: map.field_i32("quota", "quota")?.unwrap_or(0),
             expiration: map.field_f64("expiration", "expiration")?.unwrap_or(0.0),
             maturity: map.field_i32("maturity", "maturity")?.unwrap_or(0),
-            slurl: string("slurl")?,
+            slurl: crate::optional_url_from_wire("slurl", &string("slurl")?)?,
             extended_metadata: string("extended_metadata")?,
             missing: map
                 .field_bool("DoesNotExist", "DoesNotExist")?
@@ -269,7 +270,10 @@ impl ExperienceInfo {
             ("quota".to_owned(), Llsd::Integer(self.quota)),
             ("expiration".to_owned(), Llsd::Real(self.expiration)),
             ("maturity".to_owned(), Llsd::Integer(self.maturity)),
-            ("slurl".to_owned(), Llsd::String(self.slurl.clone())),
+            (
+                "slurl".to_owned(),
+                Llsd::String(crate::optional_url_to_wire(self.slurl.as_ref())),
+            ),
             (
                 "extended_metadata".to_owned(),
                 Llsd::String(self.extended_metadata.clone()),
@@ -297,8 +301,8 @@ pub struct ExperienceUpdate {
     pub maturity: i32,
     /// The new [`ExperienceProperties`] bits (only admins may change them).
     pub properties: i32,
-    /// The new home-location SLURL.
-    pub slurl: String,
+    /// The new home-location SLURL ([`None`] clears it / leaves it unset).
+    pub slurl: Option<url::Url>,
     /// The new extended-metadata XML.
     pub extended_metadata: String,
 }
@@ -311,7 +315,7 @@ impl Default for ExperienceUpdate {
             description: String::default(),
             maturity: i32::default(),
             properties: i32::default(),
-            slurl: String::default(),
+            slurl: None,
             extended_metadata: String::default(),
         }
     }

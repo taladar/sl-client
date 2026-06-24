@@ -236,8 +236,8 @@ impl Session {
     /// provided one. The driver POSTs this to obtain the capability map and the
     /// `EventQueueGet` URL. It changes on each region change.
     #[must_use]
-    pub fn seed_capability(&self) -> Option<&str> {
-        self.seed_capability.as_deref()
+    pub const fn seed_capability(&self) -> Option<&url::Url> {
+        self.seed_capability.as_ref()
     }
 
     /// Feeds a parsed CAPS response into the session, surfacing any recognised
@@ -651,7 +651,7 @@ impl Session {
         &mut self,
         dest: SocketAddr,
         region_handle: RegionHandle,
-        seed_capability: Option<String>,
+        seed_capability: Option<url::Url>,
         now: Instant,
     ) -> Result<(), Error> {
         if !matches!(self.state, SessionState::Teleporting) {
@@ -779,7 +779,7 @@ impl Session {
         &mut self,
         dest: SocketAddr,
         region_handle: RegionHandle,
-        seed: Option<String>,
+        seed: Option<url::Url>,
         now: Instant,
     ) -> Result<(), Error> {
         let Some(root) = self.circuit.as_ref() else {
@@ -788,9 +788,7 @@ impl Session {
         let (agent_id, session_id, code) = (root.agent_id, root.session_id, root.code);
         // Prefer the seed from `CrossedRegion`; fall back to the one cached from
         // the child's `EstablishAgentCommunication`.
-        let seed = seed
-            .filter(|s| !s.is_empty())
-            .or_else(|| self.child_seeds.get(&dest).cloned());
+        let seed = seed.or_else(|| self.child_seeds.get(&dest).cloned());
         // A pre-opened child keeps its own circuit id (same connection instance);
         // only the fresh fallback circuit needs a newly minted one.
         let fallback_id = self.mint_circuit_id();
@@ -1105,7 +1103,7 @@ impl Session {
                 let region_handle = RegionHandle(update.region_data.region_handle);
                 self.note_time_dilation(from, region_handle, update.region_data.time_dilation);
                 for block in &update.object_data {
-                    self.upsert_object(from, object_from_full_update(block, region_handle));
+                    self.upsert_object(from, object_from_full_update(block, region_handle)?);
                 }
             }
             AnyMessage::ObjectUpdateCompressed(update) => {
@@ -1530,7 +1528,10 @@ impl Session {
                 let extended = &update.data_block_extended;
                 self.events
                     .push_back(Event::ParcelMediaUpdate(ParcelMediaUpdateInfo {
-                        media_url: trimmed_string(&data.media_url),
+                        media_url: sl_wire::optional_url_from_wire(
+                            "MediaURL",
+                            &trimmed_string(&data.media_url),
+                        )?,
                         media_id: crate::types::optional_key_from_wire(data.media_id),
                         media_auto_scale: data.media_auto_scale != 0,
                         media_type: trimmed_string(&extended.media_type),
@@ -1974,7 +1975,14 @@ impl Session {
                     // reads it little-endian, so swap back to host order.
                     let port = info.sim_port.swap_bytes();
                     let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(info.sim_ip)), port);
-                    let seed = Some(String::from_utf8_lossy(&info.seed_capability).into_owned());
+                    // An empty inline seed is the "absent" sentinel and falls back
+                    // to the seed cached from the child's
+                    // `EstablishAgentCommunication`; a non-empty but unparsable one
+                    // is a hard error (drops the datagram) rather than masked.
+                    let seed = sl_wire::optional_url_from_wire(
+                        "seed-capability",
+                        String::from_utf8_lossy(&info.seed_capability).as_ref(),
+                    )?;
                     self.events.push_back(Event::TeleportFinished {
                         region_handle: RegionHandle(info.region_handle),
                         sim: dest,
@@ -1994,7 +2002,13 @@ impl Session {
                     // reads it little-endian, so swap back to host order.
                     let port = region.sim_port.swap_bytes();
                     let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(region.sim_ip)), port);
-                    let seed = Some(String::from_utf8_lossy(&region.seed_capability).into_owned());
+                    // As in `TeleportFinish`: an empty inline seed falls back to
+                    // the cached child seed during promotion; a non-empty but
+                    // unparsable one is a hard error.
+                    let seed = sl_wire::optional_url_from_wire(
+                        "seed-capability",
+                        String::from_utf8_lossy(&region.seed_capability).as_ref(),
+                    )?;
                     self.promote_child_to_root(dest, RegionHandle(region.region_handle), seed, now)?;
                 }
             }
@@ -2741,7 +2755,7 @@ impl Session {
                             data.owner_is_group,
                         ),
                         message: trimmed_string(&data.message),
-                        url: trimmed_string(&data.url),
+                        url: sl_wire::url_from_wire("URL", &trimmed_string(&data.url))?,
                     })));
             }
             AnyMessage::ScriptTeleportRequest(request) => {

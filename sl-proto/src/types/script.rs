@@ -123,7 +123,7 @@ pub struct LoadUrlRequest {
     /// The accompanying message text.
     pub message: String,
     /// The URL the object asks to open.
-    pub url: String,
+    pub url: url::Url,
 }
 
 /// A scripted-object request to teleport the agent (`llMapDestination` /

@@ -41,14 +41,14 @@ pub(crate) fn abort_task(task: &mut Option<tokio::task::JoinHandle<()>>) {
 /// capability names, returning the cap-name → URL map (empty on any failure or
 /// if no seed is known yet).
 pub(crate) async fn fetch_capabilities(
-    seed: Option<&str>,
+    seed: Option<&url::Url>,
     http: &ReqwestClient,
 ) -> HashMap<String, String> {
     let Some(seed_url) = seed else {
         return HashMap::new();
     };
     let result = http
-        .post(seed_url)
+        .post(seed_url.clone())
         .header("Content-Type", "application/llsd+xml")
         .body(build_seed_request(REQUESTED_CAPABILITIES))
         .send()

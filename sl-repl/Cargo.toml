@@ -21,6 +21,7 @@ sl-proto = { version = "0.1.0", path = "../sl-proto" }
 thiserror = { version = "2.0.18" }
 toml = { version = "1.1.2" }
 tracing = { version = "0.1.44" }
+url = { version = "2.5.8" }
 uuid = { version = "1.18.1" }
 
 [dev-dependencies]

@@ -92,7 +92,7 @@ pub enum Error {
 pub struct SurveyParameters {
     /// The XML-RPC login endpoint URL.
     #[clap(long, default_value = "http://127.0.0.1:9000/")]
-    login_uri: String,
+    login_uri: url::Url,
     /// The avatar's first name.
     #[clap(long)]
     first: String,

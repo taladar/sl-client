@@ -407,11 +407,11 @@ pub fn build_attachment_resources_response(report: &AttachmentResourcesReport) -
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LandResourcesUrls {
     /// The URL of the parcel's resource-summary follow-up cap
-    /// (`ScriptResourceSummary`).
-    pub script_resource_summary: String,
+    /// (`ScriptResourceSummary`). The empty/absent wire value decodes to [`None`].
+    pub script_resource_summary: Option<url::Url>,
     /// The URL of the parcel's resource-detail follow-up cap
     /// (`ScriptResourceDetails`), when the agent may see it.
-    pub script_resource_details: Option<String>,
+    pub script_resource_details: Option<url::Url>,
 }
 
 /// Builds the LLSD body for a `LandResources` POST (`{ parcel_id: uuid }`). The
@@ -443,13 +443,16 @@ pub fn parse_land_resources_request(body: &Llsd) -> Result<Option<ParcelKey>, Wi
 /// of the wrong kind.
 pub fn parse_land_resources_reply(body: &Llsd) -> Result<LandResourcesUrls, WireError> {
     Ok(LandResourcesUrls {
-        script_resource_summary: body
-            .field_str("ScriptResourceSummary", "ScriptResourceSummary")?
-            .unwrap_or_default()
-            .to_owned(),
-        script_resource_details: body
-            .field_str("ScriptResourceDetails", "ScriptResourceDetails")?
-            .map(str::to_owned),
+        script_resource_summary: crate::optional_url_from_wire(
+            "ScriptResourceSummary",
+            body.field_str("ScriptResourceSummary", "ScriptResourceSummary")?
+                .unwrap_or(""),
+        )?,
+        script_resource_details: crate::optional_url_from_wire(
+            "ScriptResourceDetails",
+            body.field_str("ScriptResourceDetails", "ScriptResourceDetails")?
+                .unwrap_or(""),
+        )?,
     })
 }
 
@@ -457,14 +460,17 @@ pub fn parse_land_resources_reply(body: &Llsd) -> Result<LandResourcesUrls, Wire
 /// inverse of [`parse_land_resources_reply`].
 #[must_use]
 pub fn build_land_resources_response(urls: &LandResourcesUrls) -> String {
-    let mut map: HashMap<String, Llsd> = HashMap::from([(
-        "ScriptResourceSummary".to_owned(),
-        Llsd::String(urls.script_resource_summary.clone()),
-    )]);
+    let mut map: HashMap<String, Llsd> = HashMap::new();
+    if let Some(summary) = &urls.script_resource_summary {
+        let _previous = map.insert(
+            "ScriptResourceSummary".to_owned(),
+            Llsd::String(crate::url_to_wire(summary)),
+        );
+    }
     if let Some(details) = &urls.script_resource_details {
         let _previous = map.insert(
             "ScriptResourceDetails".to_owned(),
-            Llsd::String(details.clone()),
+            Llsd::String(crate::url_to_wire(details)),
         );
     }
     Llsd::Map(map).to_llsd_xml()
@@ -656,8 +662,12 @@ mod tests {
         assert_eq!(parsed, Some(parcel_id));
 
         let urls = LandResourcesUrls {
-            script_resource_summary: "http://sim/cap/srs".to_owned(),
-            script_resource_details: Some("http://sim/cap/srd".to_owned()),
+            script_resource_summary: Some(
+                url::Url::parse("http://sim/cap/srs").map_err(|e| e.to_string())?,
+            ),
+            script_resource_details: Some(
+                url::Url::parse("http://sim/cap/srd").map_err(|e| e.to_string())?,
+            ),
         };
         let xml = build_land_resources_response(&urls);
         let parsed = parse_land_resources_reply(

@@ -745,7 +745,7 @@ pub struct Session {
     /// The capability-seed URL for each child region (from the CAPS
     /// `EstablishAgentCommunication` event), keyed by simulator address; used as
     /// the new seed when a child is promoted to root.
-    child_seeds: BTreeMap<SocketAddr, String>,
+    child_seeds: BTreeMap<SocketAddr, url::Url>,
     /// A monotonic counter for minting a fresh [`CircuitId`] each time a circuit
     /// instance is established (never zero — zero is the "no circuit" sentinel).
     next_circuit_id: u64,
@@ -778,7 +778,7 @@ pub struct Session {
     teleport_target: Option<RegionHandle>,
     /// The current region's capability-seed URL (from login or a teleport), for
     /// the driver to fetch the CAPS map and event queue.
-    seed_capability: Option<String>,
+    seed_capability: Option<url::Url>,
     /// The agent's inventory root ("My Inventory") folder id, from the login
     /// response.
     inventory_root: Option<InventoryFolderKey>,

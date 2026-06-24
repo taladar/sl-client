@@ -110,7 +110,10 @@ mod test {
         assert_eq!(success.circuit_code, sl_wire::CircuitCode(123_456));
         assert_eq!(success.sim_ip, Ipv4Addr::new(127, 0, 0, 1));
         assert_eq!(success.sim_port, 9000);
-        assert_eq!(success.seed_capability, "http://127.0.0.1:9000/CAPS/seed");
+        assert_eq!(
+            success.seed_capability.as_str(),
+            "http://127.0.0.1:9000/CAPS/seed"
+        );
         assert_eq!(success.message.as_deref(), Some("Welcome"));
         Ok(())
     }
@@ -529,7 +532,7 @@ mod test {
             circuit_code: sl_wire::CircuitCode(123_456),
             sim_ip: Ipv4Addr::new(127, 0, 0, 1),
             sim_port: 9000,
-            seed_capability: "http://127.0.0.1:9000/CAPS/seed".to_owned(),
+            seed_capability: "http://127.0.0.1:9000/CAPS/seed".parse()?,
             message: Some("Welcome <home> & enjoy".to_owned()),
             mfa_hash: Some("rememberme".to_owned()),
             inventory_root: Some(InventoryFolderKey::from(

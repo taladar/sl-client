@@ -52,7 +52,7 @@ fn near_rez(position: &Vector) -> bool {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
-    let login_uri = env_or("SL_LOGIN_URI", "http://127.0.0.1:9000/");
+    let login_uri: url::Url = env_or("SL_LOGIN_URI", "http://127.0.0.1:9000/").parse()?;
     let first = std::env::var("SL_FIRST")?;
     let last = std::env::var("SL_LAST")?;
     let password = std::env::var("SL_PASSWORD")?;
@@ -115,8 +115,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut faces: Vec<Option<MediaEntry>> = vec![None; CUBE_FACES];
                     if let Some(slot) = faces.first_mut() {
                         *slot = Some(MediaEntry {
-                            current_url: MEDIA_URL.to_owned(),
-                            home_url: MEDIA_URL.to_owned(),
+                            current_url: Some(MEDIA_URL.parse()?),
+                            home_url: Some(MEDIA_URL.parse()?),
                             auto_play: true,
                             auto_scale: true,
                             width_pixels: 1024,

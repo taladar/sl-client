@@ -38,12 +38,12 @@ async fn prompt_mfa_code() -> Result<String, Box<dyn std::error::Error>> {
 
 /// Connects, performing the interactive MFA retry if the grid challenges.
 async fn connect_with_mfa(
-    login_uri: &str,
+    login_uri: &url::Url,
     mut request: LoginRequest,
 ) -> Result<Client, Box<dyn std::error::Error>> {
     loop {
         let params = LoginParams {
-            login_uri: login_uri.to_owned(),
+            login_uri: login_uri.clone(),
             request: request.clone(),
         };
         match Client::connect(params).await {
@@ -65,7 +65,7 @@ async fn connect_with_mfa(
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
-    let login_uri = env_or("SL_LOGIN_URI", "http://127.0.0.1:9000/");
+    let login_uri: url::Url = env_or("SL_LOGIN_URI", "http://127.0.0.1:9000/").parse()?;
     let first = std::env::var("SL_FIRST")?;
     let last = std::env::var("SL_LAST")?;
     let password = std::env::var("SL_PASSWORD")?;

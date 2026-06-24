@@ -65,9 +65,9 @@ mod test {
     }
 
     /// A fresh client session pointing at the test simulator.
-    fn new_client() -> Session {
-        Session::new(LoginParams {
-            login_uri: "http://127.0.0.1:9000/".to_owned(),
+    fn new_client() -> Result<Session, TestError> {
+        Ok(Session::new(LoginParams {
+            login_uri: "http://127.0.0.1:9000/".parse()?,
             request: LoginRequest::new(
                 "Test",
                 "User",
@@ -76,19 +76,19 @@ mod test {
                 "MyViewer",
                 "1.2.3",
             ),
-        })
+        }))
     }
 
     /// A successful login response pointing at the test simulator.
-    fn success() -> LoginResponse {
-        LoginResponse::Success(Box::new(LoginSuccess {
+    fn success() -> Result<LoginResponse, TestError> {
+        Ok(LoginResponse::Success(Box::new(LoginSuccess {
             agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
             session_id: uuid::Uuid::from_u128(2),
             secure_session_id: uuid::Uuid::from_u128(3),
             circuit_code: CircuitCode(0x0011_2233),
             sim_ip: Ipv4Addr::new(127, 0, 0, 1),
             sim_port: 9000,
-            seed_capability: "http://127.0.0.1:9000/seed".to_owned(),
+            seed_capability: "http://127.0.0.1:9000/seed".parse()?,
             message: None,
             mfa_hash: None,
             inventory_root: None,
@@ -104,7 +104,7 @@ mod test {
             library_root: None,
             library_owner: None,
             library_skeleton: Vec::new(),
-        }))
+        })))
     }
 
     /// Builds an inbound datagram carrying a fully encoded client message.
@@ -177,8 +177,8 @@ mod test {
     /// Logs a client in and drives both peers through circuit setup and arrival,
     /// returning the active pair.
     fn setup(now: Instant) -> Result<(Session, SimSession), TestError> {
-        let mut client = new_client();
-        client.handle_login_response(success(), now)?;
+        let mut client = new_client()?;
+        client.handle_login_response(success()?, now)?;
         let mut sim = SimSession::new(RegionHandle(REGION_HANDLE), now);
         pump(&mut client, &mut sim, now)?;
         Ok((client, sim))

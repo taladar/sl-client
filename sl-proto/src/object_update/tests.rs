@@ -204,7 +204,10 @@ fn compressed_object_round_trips() -> Result<(), TestError> {
     assert_eq!(object.local_id, RegionLocalObjectId(424_242));
     assert_eq!(object.parent_id, RegionLocalObjectId(7));
     assert_eq!(object.text, "hello");
-    assert_eq!(object.media_url, "http://example.com/m");
+    assert_eq!(
+        object.media_url.as_ref().map(url::Url::as_str),
+        Some("http://example.com/m")
+    );
     assert_eq!(object.data, vec![0xAB, 0xCD]);
     assert_eq!(object.particle_system.len(), 86);
     assert_eq!(object.texture_entry, vec![10, 20, 30, 40, 50]);

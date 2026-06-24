@@ -177,7 +177,7 @@ impl Client {
 
         let http = ReqwestClient::new();
         let body = http
-            .post(&request.url)
+            .post(request.url)
             .header("Content-Type", "text/xml")
             .header("User-Agent", &request.user_agent)
             .body(request.body)
@@ -235,7 +235,7 @@ impl Client {
     /// can seed its placeholder context with it before [`Client::run`] consumes
     /// the client.
     #[must_use]
-    pub fn seed_capability(&self) -> Option<&str> {
+    pub const fn seed_capability(&self) -> Option<&url::Url> {
         self.session.seed_capability()
     }
 
