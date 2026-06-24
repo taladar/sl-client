@@ -10,36 +10,9 @@ use sl_types::search::ClassifiedCategory;
 use sl_wire::{Direction, GlobalCoordinates};
 use uuid::Uuid;
 
-/// A profile **pick** id (the viewer's `LLPickData::mPickID`).
-///
-/// A pick is a profile-listed place; this id fetches its full details
-/// ([`Session::request_pick_info`](crate::Session::request_pick_info)) and
-/// deletes it. It is the picks-side parallel of [`ClassifiedKey`], so the two
-/// can't be transposed. Kept client-local in `sl-proto` (per the standing "new
-/// types go local first, batch-migrate to `sl-types` later" rule); mirrors the
-/// `sl-types` key ergonomics (`From<Uuid>`/[`uuid`](Self::uuid)/`Display`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PickKey(pub Uuid);
-
-impl From<Uuid> for PickKey {
-    fn from(id: Uuid) -> Self {
-        Self(id)
-    }
-}
-
-impl PickKey {
-    /// Returns the wrapped raw `Uuid`.
-    #[must_use]
-    pub const fn uuid(self) -> Uuid {
-        self.0
-    }
-}
-
-impl core::fmt::Display for PickKey {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+// `PickKey` (a profile pick id) now lives in `sl_types::key`; re-exported here
+// so the existing `sl_proto::…` path is unchanged.
+pub use sl_types::key::PickKey;
 
 /// An avatar's profile properties, parsed from `AvatarPropertiesReply`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -275,7 +248,7 @@ pub struct PickUpdate {
 impl Default for PickUpdate {
     fn default() -> Self {
         Self {
-            pick_id: PickKey(Uuid::nil()),
+            pick_id: PickKey::from(Uuid::nil()),
             parcel_id: None,
             name: String::new(),
             description: String::new(),
@@ -333,40 +306,10 @@ impl Default for ClassifiedUpdate {
     }
 }
 
-/// The rights one party grants the other in a Second Life friendship: a
-/// bitfield shared by the login `buddy-list`, `GrantUserRights`, and
-/// `ChangeUserRights`. The flag values match the viewer's `RIGHTS_*`/`GRANT_*`
-/// constants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct FriendRights(pub i32);
-
-impl FriendRights {
-    /// The other party may see when this party is online (`GRANT_ONLINE_STATUS`).
-    pub const CAN_SEE_ONLINE: i32 = 1 << 0;
-    /// The other party may see this party's location on the world map
-    /// (`GRANT_MAP_LOCATION`).
-    pub const CAN_SEE_ON_MAP: i32 = 1 << 1;
-    /// The other party may modify this party's objects (`GRANT_MODIFY_OBJECTS`).
-    pub const CAN_MODIFY_OBJECTS: i32 = 1 << 2;
-
-    /// Whether the see-online bit is set.
-    #[must_use]
-    pub const fn can_see_online(self) -> bool {
-        self.0 & Self::CAN_SEE_ONLINE != 0
-    }
-
-    /// Whether the see-on-map bit is set.
-    #[must_use]
-    pub const fn can_see_on_map(self) -> bool {
-        self.0 & Self::CAN_SEE_ON_MAP != 0
-    }
-
-    /// Whether the modify-objects bit is set.
-    #[must_use]
-    pub const fn can_modify_objects(self) -> bool {
-        self.0 & Self::CAN_MODIFY_OBJECTS != 0
-    }
-}
+// `FriendRights` (the friendship grant bitfield) now lives in
+// `sl_types::friend`; re-exported here so the existing `sl_proto::…` path is
+// unchanged.
+pub use sl_types::friend::FriendRights;
 
 /// One friend from the login buddy list, with the friendship rights in both
 /// directions (parsed from the login `buddy-list`).
@@ -464,7 +407,7 @@ mod tests {
         assert_eq!(PickKey::from(raw).to_string(), raw.to_string());
         // The create-new sentinel (nil) round-trips too.
         assert_eq!(PickKey::from(Uuid::nil()).uuid(), Uuid::nil());
-        assert_eq!(PickUpdate::default().pick_id, PickKey(Uuid::nil()));
+        assert_eq!(PickUpdate::default().pick_id, PickKey::from(Uuid::nil()));
     }
 
     /// [`ClassifiedCategory`] maps every named classified-directory code to its

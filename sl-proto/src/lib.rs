@@ -113,13 +113,12 @@ pub use sl_wire::{
     MessageId, MfaChallenge, ObjectCost, ObjectMediaResponse, ObjectPermMasks, ObjectPhysicsData,
     OpenSimExtras, ParcelFlags, ParcelScriptResources, ParcelVoiceInfo, Permissions, Permissions5,
     PhysicsShapeType, PhysicsShapeTypes, ReflectionProbeFlags, RegionFlags, RegionHandle,
-    RegionHandleError, RegionLocalObjectId, RegionLocalParcelId, RemoteParcelRequest,
-    RenderMaterialEntry, ResourceAmount, ResourceSummary, ScriptedObjectInfo,
-    ScriptedObjectResources, SelectedCostKind, SelectedResourceCost, SequenceNumber,
-    SimulatorFeatures, StartLocation, StartLocationParseError, VOICE_SERVER_TYPE_VIVOX,
-    VOICE_SERVER_TYPE_WEBRTC, VoiceAccountInfo, VoiceProvisionRequest, WireError,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, build_agent_preferences_request,
+    RegionLocalObjectId, RegionLocalParcelId, RemoteParcelRequest, RenderMaterialEntry,
+    ResourceAmount, ResourceSummary, ScriptedObjectInfo, ScriptedObjectResources, SelectedCostKind,
+    SelectedResourceCost, SequenceNumber, SimulatorFeatures, StartLocation,
+    StartLocationParseError, VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC, VoiceAccountInfo,
+    VoiceProvisionRequest, WireError, ais_category_children_fetch_url, ais_category_children_url,
+    ais_category_url, ais_create_category_url, ais_item_url, build_agent_preferences_request,
     build_agent_preferences_response, build_ais_create_category_body, build_ais_move_body,
     build_ais_rename_category_body, build_ais_update_item_body, build_ais_update_response,
     build_attachment_resources_response, build_create_inventory_category_request,
@@ -171,7 +170,9 @@ pub use sl_types::chat::ChatChannel;
 // Re-export the region-name and map-geometry types used by the region/map/
 // teleport reply types. `GridCoordinates` carries a region's grid index pair;
 // `RegionCoordinates` carries a region-local position (the teleport target).
-pub use sl_types::map::{Distance, GridCoordinates, RegionCoordinates, RegionName};
+pub use sl_types::map::{
+    Distance, GridCoordinates, GridRectangle, GridRectangleLike, RegionCoordinates, RegionName,
+};
 // Re-export the vector and rotation types used by the teleport and movement APIs.
 pub use sl_types::lsl::{Rotation, Vector};
 // Re-export the L$ amount type used by the money balance/transfer APIs.

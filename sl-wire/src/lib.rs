@@ -119,7 +119,7 @@ pub use object_physics::{
 pub use parcel_flags::{ParcelFlags, RegionFlags, sim_access};
 pub use permissions::{Permissions, Permissions5};
 pub use reflection_probe_flags::ReflectionProbeFlags;
-pub use region_handle::{RegionHandle, RegionHandleError};
+pub use region_handle::RegionHandle;
 pub use region_local_id::{RegionLocalObjectId, RegionLocalParcelId};
 pub use region_name::{region_name_from_wire, region_name_to_wire};
 pub use remote_parcel::{

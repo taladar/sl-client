@@ -562,8 +562,8 @@ impl Survey {
             Event::NeighborDiscovered(neighbor) => {
                 self.queue_region(
                     neighbor.region_handle.0,
-                    u32::from(neighbor.grid_coordinates.x()),
-                    u32::from(neighbor.grid_coordinates.y()),
+                    neighbor.grid_coordinates.x(),
+                    neighbor.grid_coordinates.y(),
                 );
                 if let Some(current) = self.current.as_mut()
                     && !current.neighbors.contains(&neighbor.region_handle.0)
@@ -582,8 +582,8 @@ impl Survey {
                 );
                 self.queue_region(
                     region.region_handle.0,
-                    u32::from(region.grid_coordinates.x()),
-                    u32::from(region.grid_coordinates.y()),
+                    region.grid_coordinates.x(),
+                    region.grid_coordinates.y(),
                 );
             }
             Event::TeleportFailed { reason, .. } => {

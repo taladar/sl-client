@@ -6,36 +6,9 @@ use sl_types::money::LindenAmount;
 use crate::types::{LandArea, LindenBalance};
 use uuid::Uuid;
 
-/// A group **notice** id (the viewer's group-notice `mNoticeID`).
-///
-/// A notice is one posting in a group's notice list; this id fetches its full
-/// body/attachment
-/// ([`Session::request_group_notice`](crate::Session::request_group_notice)).
-/// Kept client-local in `sl-proto` (per the standing "new types go local first,
-/// batch-migrate to `sl-types` later" rule); mirrors the `sl-types` key
-/// ergonomics (`From<Uuid>`/[`uuid`](Self::uuid)/`Display`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct GroupNoticeKey(pub Uuid);
-
-impl From<Uuid> for GroupNoticeKey {
-    fn from(id: Uuid) -> Self {
-        Self(id)
-    }
-}
-
-impl GroupNoticeKey {
-    /// Returns the wrapped raw `Uuid`.
-    #[must_use]
-    pub const fn uuid(self) -> Uuid {
-        self.0
-    }
-}
-
-impl core::fmt::Display for GroupNoticeKey {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+// `GroupNoticeKey` (a group notice id) now lives in `sl_types::key`; re-exported
+// here so the existing `sl_proto::…` path is unchanged.
+pub use sl_types::key::GroupNoticeKey;
 
 /// A group **proposal** id (the viewer's `mVoteID` / a ballot's `proposal_id`).
 ///

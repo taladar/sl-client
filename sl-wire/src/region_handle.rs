@@ -43,8 +43,7 @@ impl RegionHandle {
 
     /// Splits the handle into its grid coordinates (region indices), i.e. the
     /// global south-west corner in metres divided by the 256 m region size. For
-    /// the typed (and range-checked) form, use
-    /// `sl_types::map::GridCoordinates::try_from`.
+    /// the typed form, use `sl_types::map::GridCoordinates::from`.
     #[must_use]
     pub fn grid_coordinates(self) -> (u32, u32) {
         let (global_x, global_y) = self.global_coordinates();
@@ -93,44 +92,21 @@ impl core::fmt::UpperHex for RegionHandle {
     }
 }
 
-/// The error returned when a [`RegionHandle`] cannot be expressed as
-/// [`sl_types::map::GridCoordinates`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum RegionHandleError {
-    /// A decoded grid coordinate did not fit in the `u16` a
-    /// [`sl_types::map::GridCoordinates`] holds.
-    #[error("region handle grid coordinate {coordinate} out of range for GridCoordinates")]
-    GridCoordinateOutOfRange {
-        /// The out-of-range grid coordinate (region index).
-        coordinate: u32,
-    },
-}
-
 impl From<sl_types::map::GridCoordinates> for RegionHandle {
     /// Builds the region handle for the south-west corner identified by these
-    /// grid coordinates. Always succeeds — every `u16` grid index packs into a
-    /// handle.
+    /// grid coordinates. Always succeeds — every grid index packs into a handle.
     fn from(coordinates: sl_types::map::GridCoordinates) -> Self {
-        Self::from_grid(u32::from(coordinates.x()), u32::from(coordinates.y()))
+        Self::from_grid(coordinates.x(), coordinates.y())
     }
 }
 
-impl TryFrom<RegionHandle> for sl_types::map::GridCoordinates {
-    type Error = RegionHandleError;
-
-    /// Decodes the handle's grid coordinates, failing if either index exceeds
-    /// the `u16` range a [`sl_types::map::GridCoordinates`] holds (only possible
-    /// for a malformed handle — real grid indices are well under `u16::MAX`).
-    fn try_from(handle: RegionHandle) -> Result<Self, Self::Error> {
+impl From<RegionHandle> for sl_types::map::GridCoordinates {
+    /// Decodes the handle's grid coordinates. Infallible now that
+    /// [`sl_types::map::GridCoordinates`] holds `u32` indices (the handle's
+    /// `global / 256` grid index always fits).
+    fn from(handle: RegionHandle) -> Self {
         let (x, y) = handle.grid_coordinates();
-        let x = u16::try_from(x)
-            .ok()
-            .ok_or(RegionHandleError::GridCoordinateOutOfRange { coordinate: x })?;
-        let y = u16::try_from(y)
-            .ok()
-            .ok_or(RegionHandleError::GridCoordinateOutOfRange { coordinate: y })?;
-        Ok(Self::new(x, y))
+        Self::new(x, y)
     }
 }
 
@@ -171,22 +147,21 @@ mod tests {
     }
 
     #[test]
-    fn grid_coordinates_type_round_trips() -> Result<(), super::RegionHandleError> {
+    fn grid_coordinates_type_round_trips() {
         let coordinates = sl_types::map::GridCoordinates::new(1000, 1001);
         let handle = RegionHandle::from(coordinates);
         assert_eq!(handle.grid_coordinates(), (1000, 1001));
-        let back = sl_types::map::GridCoordinates::try_from(handle)?;
+        let back = sl_types::map::GridCoordinates::from(handle);
         assert_eq!(back, coordinates);
-        Ok(())
     }
 
     #[test]
-    fn grid_coordinates_rejects_out_of_range_handle() {
-        // global_x = u32::MAX metres → grid index 16_777_215, far above u16::MAX.
+    fn grid_coordinates_handles_large_index() {
+        // global_x = u32::MAX metres → grid index 16_777_215, far above u16::MAX;
+        // now representable since GridCoordinates holds u32.
         let handle = RegionHandle::from_global(u32::MAX, 0);
-        assert!(matches!(
-            sl_types::map::GridCoordinates::try_from(handle),
-            Err(super::RegionHandleError::GridCoordinateOutOfRange { .. })
-        ));
+        let coordinates = sl_types::map::GridCoordinates::from(handle);
+        assert_eq!(coordinates.x(), u32::MAX / 256);
+        assert_eq!(coordinates.y(), 0);
     }
 }
