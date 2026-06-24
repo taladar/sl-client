@@ -16,7 +16,7 @@ mod test {
         DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult,
         DirPlaceResult, EstateCovenant, Event, EventId, EventInfo, FollowCamProperty,
         FollowCamPropertyValue, GestureActivation, GlobalCoordinates, GridCoordinates,
-        GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
+        GridRectangle, GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
         GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupKey,
         GroupName, GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryKey,
         LandArea, LandSearchType, LandStatItem, LandStatReportType, LindenAmount, LindenBalance,
@@ -2471,17 +2471,17 @@ mod test {
 
         let layers = vec![
             MapLayer {
-                left: 0,
-                right: 9999,
-                top: 9999,
-                bottom: 0,
+                rect: GridRectangle::new(
+                    GridCoordinates::new(0, 0),
+                    GridCoordinates::new(9999, 9999),
+                ),
                 image_id: TextureKey::from(uuid::Uuid::from_u128(0xABCD)),
             },
             MapLayer {
-                left: 1000,
-                right: 1100,
-                top: 1200,
-                bottom: 1000,
+                rect: GridRectangle::new(
+                    GridCoordinates::new(1000, 1000),
+                    GridCoordinates::new(1100, 1200),
+                ),
                 image_id: TextureKey::from(uuid::Uuid::from_u128(0x1234)),
             },
         ];

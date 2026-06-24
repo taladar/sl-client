@@ -6,7 +6,7 @@ use super::Maturity;
 use sl_types::key::{ObjectKey, TextureKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
-use sl_types::map::{GridCoordinates, RegionCoordinates, RegionName};
+use sl_types::map::{GridCoordinates, GridRectangle, RegionCoordinates, RegionName};
 use sl_wire::{GlobalCoordinates, RegionHandle};
 use uuid::Uuid;
 
@@ -311,19 +311,14 @@ impl MapItem {
 /// the per-region names and details ([`MapRegionInfo`]).
 ///
 /// The rectangle bounds are **inclusive grid coordinates** (region indices):
-/// the tile covers regions `left..=right` by `bottom..=top`. Second Life's main
-/// grid is a single global layer (`left = bottom = 0`, `right = top` very large);
-/// OpenSim grids report their own coverage.
+/// the tile covers the regions in [`rect`](Self::rect). Second Life's main grid
+/// is a single global layer (lower-left `(0, 0)`, upper-right very large — which
+/// is why [`GridRectangle`] stores `u32`); OpenSim grids report their own
+/// coverage.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MapLayer {
-    /// The left (minimum x) grid coordinate the tile covers, inclusive.
-    pub left: u32,
-    /// The right (maximum x) grid coordinate the tile covers, inclusive.
-    pub right: u32,
-    /// The top (maximum y) grid coordinate the tile covers, inclusive.
-    pub top: u32,
-    /// The bottom (minimum y) grid coordinate the tile covers, inclusive.
-    pub bottom: u32,
+    /// The inclusive grid-coordinate rectangle the tile covers.
+    pub rect: GridRectangle,
     /// The map-tile texture id for this layer.
     pub image_id: TextureKey,
 }
@@ -418,10 +413,7 @@ mod tests {
         let region_handle = RegionHandle::from(grid_coordinates);
         assert_eq!(grid_coordinates.x(), 1000);
         assert_eq!(grid_coordinates.y(), 1001);
-        assert_eq!(
-            GridCoordinates::try_from(region_handle),
-            Ok(grid_coordinates)
-        );
+        assert_eq!(GridCoordinates::from(region_handle), grid_coordinates);
     }
 
     #[test]

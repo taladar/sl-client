@@ -32,6 +32,8 @@ use sl_types::key::ParcelKey;
 use sl_types::key::TextureKey;
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::map::GridCoordinates;
+use sl_types::map::GridRectangle;
+use sl_types::map::GridRectangleLike as _;
 use sl_types::map::RegionCoordinates;
 use sl_wire::RegionHandle;
 use sl_wire::messages::{
@@ -73,7 +75,7 @@ pub(crate) fn trimmed_string(bytes: &[u8]) -> String {
 /// the only way [`GridCoordinates::try_from`] can fail is a malformed handle, in
 /// which case we fall back to the `(0, 0)` "unknown" sentinel.
 pub(crate) fn grid_coordinates_from_handle(handle: RegionHandle) -> GridCoordinates {
-    GridCoordinates::try_from(handle).unwrap_or_else(|_| GridCoordinates::new(0, 0))
+    GridCoordinates::from(handle)
 }
 
 /// Parses a UUID from a wire string field that carries a UUID in text form
@@ -1453,9 +1455,9 @@ pub(crate) fn map_region_info(
     let Some(name) = sl_wire::region_name_from_wire("Name", &trimmed_string(&data.name))? else {
         return Ok(None);
     };
-    // The wire carries the grid index pair as `u16`; the region handle is the
-    // typed inverse of those coordinates.
-    let grid_coordinates = GridCoordinates::new(data.x, data.y);
+    // The wire carries the grid index pair as `u16`; widen into the `u32`
+    // `GridCoordinates` holds.
+    let grid_coordinates = GridCoordinates::new(u32::from(data.x), u32::from(data.y));
     Ok(Some(MapRegionInfo {
         name: Some(name),
         grid_coordinates,
@@ -1508,8 +1510,10 @@ const fn map_global_to_u32(meters: f64) -> u32 {
 /// block (see [`build_map_block_reply`]).
 pub(crate) fn map_region_info_to_data_block(info: &MapRegionInfo) -> MapBlockReplyDataBlock {
     MapBlockReplyDataBlock {
-        x: info.grid_coordinates.x(),
-        y: info.grid_coordinates.y(),
+        // the wire field is `u16`; a real region index always fits (saturate
+        // defensively rather than panic on a malformed value)
+        x: u16::try_from(info.grid_coordinates.x()).unwrap_or(u16::MAX),
+        y: u16::try_from(info.grid_coordinates.y()).unwrap_or(u16::MAX),
         name: with_nul(&sl_wire::region_name_to_wire(info.name.as_ref())),
         access: info.maturity.to_sim_access(),
         region_flags: info.region_flags,
@@ -1602,22 +1606,27 @@ pub fn build_map_item_reply(
 /// are inclusive grid coordinates.
 pub(crate) fn map_layer(data: &MapLayerReplyLayerDataBlock) -> MapLayer {
     MapLayer {
-        left: data.left,
-        right: data.right,
-        top: data.top,
-        bottom: data.bottom,
+        // the wire bounds are inclusive corners: (left, bottom) is the
+        // lower-left and (right, top) the upper-right; `GridRectangle::new`
+        // normalises them
+        rect: GridRectangle::new(
+            GridCoordinates::new(data.left, data.bottom),
+            GridCoordinates::new(data.right, data.top),
+        ),
         image_id: TextureKey::from(data.image_id),
     }
 }
 
 /// Encodes a [`MapLayer`] into a `MapLayerReply` `LayerData` block — the
 /// simulator-side inverse of [`map_layer`].
-pub(crate) const fn map_layer_to_data_block(layer: &MapLayer) -> MapLayerReplyLayerDataBlock {
+pub(crate) fn map_layer_to_data_block(layer: &MapLayer) -> MapLayerReplyLayerDataBlock {
+    let lower_left = layer.rect.lower_left_corner();
+    let upper_right = layer.rect.upper_right_corner();
     MapLayerReplyLayerDataBlock {
-        left: layer.left,
-        right: layer.right,
-        top: layer.top,
-        bottom: layer.bottom,
+        left: lower_left.x(),
+        right: upper_right.x(),
+        top: upper_right.y(),
+        bottom: lower_left.y(),
         image_id: layer.image_id.uuid(),
     }
 }

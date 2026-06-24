@@ -8922,10 +8922,13 @@ mod test {
             .ok_or("expected a MapLayers event")?;
         assert_eq!(layers.len(), 1);
         let layer = layers.first().ok_or("one layer")?;
-        assert_eq!(layer.left, 0);
-        assert_eq!(layer.right, 9999);
-        assert_eq!(layer.top, 9999);
-        assert_eq!(layer.bottom, 0);
+        assert_eq!(
+            layer.rect,
+            sl_proto::GridRectangle::new(
+                sl_proto::GridCoordinates::new(0, 0),
+                sl_proto::GridCoordinates::new(9999, 9999),
+            )
+        );
         assert_eq!(
             layer.image_id,
             TextureKey::from(uuid::Uuid::from_u128(0xABCD))

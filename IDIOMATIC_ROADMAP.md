@@ -1202,6 +1202,44 @@ churn" rule) were moved into the shared `sl-types` crate in one release
   are unchanged. `sl-proto`'s `serde` dependency was dropped (its only user,
   `LandArea`, left).
 
+#### Second batch + `GridRectangle` widening (`sl-types 0.6.0`)
+
+The remaining general value/geometry types created client-local in the Phase 7
+passes were migrated in a second release (`sl-types 0.6.0`), alongside the
+deferred `GridRectangle` widening. `sl-wire`/`sl-proto` now consume them and
+re-export through the flat surface + runtimes, so downstream paths are
+unchanged.
+
+- **`GridRectangle` widened to `u32`** (the Phase 7D "STILL NOT converted"
+  TODO): `GridCoordinates`/`GridCoordinateOffset`/`GridRectangle` and the
+  `GridRectangleLike` trait now work in `u32`, so the SL whole-grid map layer's
+  bounds (which can exceed `u16::MAX`) no longer truncate. `MapLayer`
+  (`sl-proto`) dropped its `left`/`right`/`top`/`bottom: u32` for one
+  `rect: GridRectangle` (codec byte-identical: wire `(left, bottom)` =
+  lower-left, `(right, top)` = upper-right). The widening rippled through the
+  `sl-map-tools` consumers (sl-glw, sl-map-apis, sl-map-cli, sl-map-web); the
+  redb region caches moved to `*_v2` tables (old `u16` tables dropped on open).
+  `RegionHandle → GridCoordinates` became infallible (`TryFrom` → `From`;
+  `RegionHandleError` removed). `MapBlockReply` region indices stay `u16` on the
+  wire (narrowed at that boundary).
+- **`pps_hud_config`** (`sl-map-tools` `GridRectangleLike`) is now expressed
+  through `GlobalCoordinates::from_grid_corner` (the migrated global-metre
+  type).
+- Moved to `sl-types`: `Direction`, `GlobalCoordinates`, `Scale`,
+  `TeleportFlags` (→ `map.rs`); `PickKey`, `GroupNoticeKey` (→ `key.rs`,
+  reshaped to wrap `Key`); `ScriptPermissions` (→ `lsl.rs`);
+  `Color`/`ColorAlpha`/`Glow`/`CloudPosDensity` (→ new `environment.rs`);
+  `FriendRights` (→ new `friend.rs`); `ExperienceProperties` + its `PROPERTY_*`
+  consts (→ new `experience.rs`); `ParcelAccessFlags`/`ParcelReturnType` (→ new
+  `parcel.rs`). The float value types gained `serde` (matching the `map.rs`
+  coordinate siblings).
+- Kept client-local (codec/wire/correlation, not general concepts): `narrow`
+  (sl-wire LLSD helper), `SEARCH_PAGE_SIZE`, the LLSD `{color,scale,…}_*_llsd`
+  codec helpers, and — by explicit decision — `ProposalVoteId`/
+  `ProposalCandidateId` (the defunct group-voting feature), `SoundFlags`,
+  `DirFindFlags`, `LandSearchType`, `MapRequestFlags`, plus the
+  bookkeeping/correlation/region-local ids.
+
 ### Phase 7 — second-pass audit (missed ids, in-band sentinels, non-masking)
 
 A fresh audit after the Phases 1–6 sweeps found three remaining classes of the
@@ -1507,12 +1545,11 @@ RegionCoordinates` already exists). The tuples split by concept — only the
       `sl-proto`/tokio/bevy; REPL `global_or_zero` returns `GlobalCoordinates`.
       +7 geometry unit tests. NO `sl-types` change.
 
-      **`sl-types` migration note (PPS HUD config):** when `GlobalCoordinates`
-      moves into `sl-types`, the existing `GridRectangleLike::pps_hud_config`
-      (`sl-map-tools` `sl-types/src/map.rs:582`) is a consumer — it hand-builds
-      a global-metre LSL vector `<256 * grid_x, 256 * grid_y, 0>`, i.e. exactly
-      `GlobalCoordinates::from_grid_corner(corner)`. Re-express it through the
-      new type at migration time.
+      **`sl-types` migration note (PPS HUD config): DONE in `sl-types 0.6.0`.**
+      `GlobalCoordinates` moved into `sl-types` and
+      `GridRectangleLike::pps_hud_config` now builds its global-metre LSL vector
+      through `GlobalCoordinates::from_grid_corner` (see the second
+      batched-migration subsection above).
 - [x] **Second pass — completeness sweep (2026-06-24, user-directed "everything
       incl. sl-wire fields").** The first pass missed several coordinate-shaped
       fields that did not use the `position`/`pos_global`/`global_position`
@@ -1568,14 +1605,12 @@ RegionCoordinates` already exists). The tuples split by concept — only the
       `color3_from_llsd` removed. +5 unit tests. Re-exported through `sl-proto`
       (not the runtimes — the sibling `SkySettings`/`WaterSettings` aren't
       re-exported there either).
-      - **STILL NOT converted (deliberate):** `MapLayer` `left/right/top/bottom`
-      — these *are* grid-index rectangle bounds and would naturally be a
-      `GridRectangle`, BUT `GridCoordinates`/`GridRectangle` store `u16` and the
-      SL whole-grid layer reports `u32` bounds that can exceed `u16::MAX`, so
-      they would truncate. **TODO at `sl-types` migration time:** widen
-      `GridRectangle` to `u32` (or add a `u32` grid-rect type) and adopt it for
-      `MapLayer`. Also `EnvironmentSettings.track_altitudes` (three scalar
-      altitude breakpoints, not a vector) stays raw.
+      - **`MapLayer` `left/right/top/bottom`: DONE in `sl-types 0.6.0`.** These
+      grid-index rectangle bounds are now one `rect: GridRectangle`, after
+      `GridRectangle`/`GridCoordinates` were widened `u16` → `u32` (the SL
+      whole-grid layer reports bounds exceeding `u16::MAX`). See the second
+      batched-migration subsection above. `EnvironmentSettings.track_altitudes`
+      (three scalar altitude breakpoints, not a vector) stays raw.
       Re-exported `Direction`/`GlobalCoordinates` through `sl-proto`/tokio/bevy;
       `Color`/`ColorAlpha`/`Scale`/`Glow`/`CloudPosDensity` through `sl-proto`;
       REPL + survey updated; wire bytes byte-identical throughout. All builds +
