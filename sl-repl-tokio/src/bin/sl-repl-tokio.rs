@@ -599,7 +599,7 @@ async fn run_repl(args: RunArgs) -> Result<(), Error> {
                         if args.smoke && !smoke_fired {
                             smoke_fired = true;
                             if let Some(agent) = self_agent {
-                                for command in smoke_battery(agent.uuid()) {
+                                for command in smoke_battery(agent) {
                                     command_tx.send(command).await.ok();
                                 }
                             }

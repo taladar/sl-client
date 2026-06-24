@@ -9,7 +9,7 @@
 //! reply fails to decode). The inventory skeleton and group memberships already
 //! arrive unsolicited at login, so they are not re-requested here.
 
-use sl_proto::{Command, MapItemType, RegionHandle, Uuid, VoiceProvisionRequest};
+use sl_proto::{AgentKey, Command, MapItemType, RegionHandle, VoiceProvisionRequest};
 
 /// Build the ordered smoke-test battery of read-only requests for the logged-in
 /// agent `self_agent`.
@@ -24,7 +24,7 @@ use sl_proto::{Command, MapItemType, RegionHandle, Uuid, VoiceProvisionRequest};
     clippy::module_name_repetitions,
     reason = "`smoke_battery` reads best as the crate's public smoke-test entry point"
 )]
-pub fn smoke_battery(self_agent: Uuid) -> Vec<Command> {
+pub fn smoke_battery(self_agent: AgentKey) -> Vec<Command> {
     vec![
         // Wallet and grid economy.
         Command::RequestMoneyBalance,
@@ -70,13 +70,15 @@ pub fn smoke_battery(self_agent: Uuid) -> Vec<Command> {
 
 #[cfg(test)]
 mod tests {
-    use sl_proto::{Command, Uuid};
+    use sl_proto::{AgentKey, Command, Uuid};
 
     use super::smoke_battery;
 
     /// A stable test agent id (all-`a` nibbles).
-    fn agent() -> Uuid {
-        Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap_or_else(|_| Uuid::nil())
+    fn agent() -> AgentKey {
+        AgentKey::from(
+            Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap_or_else(|_| Uuid::nil()),
+        )
     }
 
     #[test]

@@ -65,7 +65,7 @@ use crate::types::{
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
     AgentKey, ClassifiedKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
-    ParcelKey, TextureKey,
+    OwnerKey, ParcelKey, TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::map::{Distance, RegionCoordinates};
@@ -3432,9 +3432,9 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn sit_on(&mut self, target: Uuid, offset: Vector, now: Instant) -> Result<(), Error> {
+    pub fn sit_on(&mut self, target: ObjectKey, offset: Vector, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_agent_request_sit(target, offset, now)?;
+        circuit.send_agent_request_sit(target.uuid(), offset, now)?;
         circuit.timers.sit = Some(deadline(now, SIT_TIMEOUT));
         self.sit_requested = true;
         Ok(())
@@ -3472,9 +3472,13 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn request_avatar_properties(&mut self, target: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn request_avatar_properties(
+        &mut self,
+        target: AgentKey,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_avatar_properties_request(target, now)?;
+        circuit.send_avatar_properties_request(target.uuid(), now)?;
         Ok(())
     }
 
@@ -3485,9 +3489,9 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn request_avatar_picks(&mut self, target: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn request_avatar_picks(&mut self, target: AgentKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_generic_message("avatarpicksrequest", &[target.to_string()], now)?;
+        circuit.send_generic_message("avatarpicksrequest", &[target.uuid().to_string()], now)?;
         Ok(())
     }
 
@@ -3499,9 +3503,9 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn request_avatar_notes(&mut self, target: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn request_avatar_notes(&mut self, target: AgentKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_generic_message("avatarnotesrequest", &[target.to_string()], now)?;
+        circuit.send_generic_message("avatarnotesrequest", &[target.uuid().to_string()], now)?;
         Ok(())
     }
 
@@ -3514,9 +3518,17 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn request_avatar_classifieds(&mut self, target: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn request_avatar_classifieds(
+        &mut self,
+        target: AgentKey,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_generic_message("avatarclassifiedsrequest", &[target.to_string()], now)?;
+        circuit.send_generic_message(
+            "avatarclassifiedsrequest",
+            &[target.uuid().to_string()],
+            now,
+        )?;
         Ok(())
     }
 
@@ -3602,12 +3614,12 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn update_avatar_notes(
         &mut self,
-        target: Uuid,
+        target: AgentKey,
         notes: &str,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_avatar_notes_update(target, notes, now)?;
+        circuit.send_avatar_notes_update(target.uuid(), notes, now)?;
         Ok(())
     }
 
@@ -4459,12 +4471,13 @@ impl Session {
     /// [`Error::Wire`] if the message fails to encode.
     pub fn offer_teleport(
         &mut self,
-        targets: &[Uuid],
+        targets: &[AgentKey],
         message: &str,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_start_lure(targets, message, now)?;
+        let targets: Vec<Uuid> = targets.iter().map(AgentKey::uuid).collect();
+        circuit.send_start_lure(&targets, message, now)?;
         Ok(())
     }
 
@@ -5257,9 +5270,14 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn find_agent(&mut self, hunter: Uuid, prey: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn find_agent(
+        &mut self,
+        hunter: AgentKey,
+        prey: AgentKey,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_find_agent(hunter, prey, now)?;
+        circuit.send_find_agent(hunter.uuid(), prey.uuid(), now)?;
         Ok(())
     }
 
@@ -6334,8 +6352,9 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if a request fails to encode.
-    pub fn request_avatar_names(&mut self, ids: &[Uuid], now: Instant) -> Result<(), Error> {
+    pub fn request_avatar_names(&mut self, ids: &[AgentKey], now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let ids: Vec<Uuid> = ids.iter().map(AgentKey::uuid).collect();
         for batch in ids.chunks(UUID_NAMES_PER_REQUEST) {
             circuit.send_uuid_name_request(batch, now)?;
         }
@@ -6350,8 +6369,9 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if a request fails to encode.
-    pub fn request_group_names(&mut self, ids: &[Uuid], now: Instant) -> Result<(), Error> {
+    pub fn request_group_names(&mut self, ids: &[GroupKey], now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let ids: Vec<Uuid> = ids.iter().map(GroupKey::uuid).collect();
         for batch in ids.chunks(UUID_NAMES_PER_REQUEST) {
             circuit.send_uuid_group_name_request(batch, now)?;
         }
@@ -6545,13 +6565,14 @@ impl Session {
         &mut self,
         local_id: ScopedParcelId,
         return_type: ParcelReturnType,
-        owner_ids: &[Uuid],
+        owner_ids: &[OwnerKey],
         task_ids: &[ObjectKey],
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit_for_scope(local_id.circuit)?;
         let local_id = local_id.id;
-        circuit.send_parcel_return_objects(local_id, return_type.0, owner_ids, task_ids, now)?;
+        let owner_ids: Vec<Uuid> = owner_ids.iter().map(OwnerKey::uuid).collect();
+        circuit.send_parcel_return_objects(local_id, return_type.0, &owner_ids, task_ids, now)?;
         Ok(())
     }
 
@@ -6710,13 +6731,14 @@ impl Session {
         &mut self,
         local_id: ScopedParcelId,
         return_type: ParcelReturnType,
-        owner_ids: &[Uuid],
+        owner_ids: &[OwnerKey],
         task_ids: &[ObjectKey],
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit_for_scope(local_id.circuit)?;
         let local_id = local_id.id;
-        circuit.send_parcel_disable_objects(local_id, return_type.0, owner_ids, task_ids, now)?;
+        let owner_ids: Vec<Uuid> = owner_ids.iter().map(OwnerKey::uuid).collect();
+        circuit.send_parcel_disable_objects(local_id, return_type.0, &owner_ids, task_ids, now)?;
         Ok(())
     }
 
@@ -6793,14 +6815,14 @@ impl Session {
     pub fn update_estate_access(
         &mut self,
         delta: EstateAccessDelta,
-        target: Uuid,
+        target: OwnerKey,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         let params = [
             circuit.agent_id.to_string(),
             delta.to_u32().to_string(),
-            target.to_string(),
+            target.uuid().to_string(),
         ];
         circuit.send_estate_owner_message("estateaccessdelta", &params, now)?;
         Ok(())
@@ -6813,9 +6835,9 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn kick_estate_user(&mut self, target: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn kick_estate_user(&mut self, target: AgentKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_estate_owner_message("kickestate", &[target.to_string()], now)?;
+        circuit.send_estate_owner_message("kickestate", &[target.uuid().to_string()], now)?;
         Ok(())
     }
 
@@ -6825,9 +6847,9 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn teleport_home_user(&mut self, target: Uuid, now: Instant) -> Result<(), Error> {
+    pub fn teleport_home_user(&mut self, target: AgentKey, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        let params = [circuit.agent_id.to_string(), target.to_string()];
+        let params = [circuit.agent_id.to_string(), target.uuid().to_string()];
         circuit.send_estate_owner_message("teleporthomeuser", &params, now)?;
         Ok(())
     }
@@ -7021,9 +7043,14 @@ impl Session {
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn god_kick_user(&mut self, target: Uuid, reason: &str, now: Instant) -> Result<(), Error> {
+    pub fn god_kick_user(
+        &mut self,
+        target: AgentKey,
+        reason: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_god_kick_user(target, reason, now)?;
+        circuit.send_god_kick_user(target.uuid(), reason, now)?;
         Ok(())
     }
 
@@ -7282,11 +7309,17 @@ impl Session {
 
     // Object interaction & editing (#17) -----------------------------------
     //
-    // These act on the current (root) region; an object is named by its
-    // region-local id (from [`Session::objects`] / an object event). Each sends
-    // a single reliable message on the root circuit. Edit and rez operations
-    // require the appropriate object/parcel permissions on the grid; the
-    // simulator silently ignores a request the agent is not allowed to make.
+    // An object is named by its [`ScopedObjectId`] (from [`Session::objects`] /
+    // an object event), which carries the [`CircuitId`] of the circuit it was
+    // learned on. These ops are sent on *that* circuit — the root region or a
+    // neighbour's child circuit — so they work on objects across a region
+    // border just as in the region the avatar stands in (this is what the
+    // viewer does: it grabs/edits on the object's own region). Operations that
+    // create rather than name an existing object (e.g. [`Session::rez_object`])
+    // act on the current (root) region instead. Each sends a single reliable
+    // message. Edit and rez operations require the appropriate object/parcel
+    // permissions on the grid; the simulator silently ignores a request the
+    // agent is not allowed to make.
 
     /// Touches (left-clicks) the object `local_id`: sends an `ObjectGrab` and an
     /// immediate `ObjectDeGrab` with no drag in between, which is what triggers

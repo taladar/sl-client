@@ -22,15 +22,16 @@ mod test {
         LindenBalance, LoginAccount, LoginParams, LookAtType, MapItemType, Material, Maturity,
         MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
         NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey,
-        ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-        ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType,
-        ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate,
-        PointAtType, Postcard, PrimShape, ProductType, ProfileUpdate, ReflectionProbeFlags,
-        RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment,
-        SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissions,
-        SculptOrMeshKey, Session, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType,
-        TextureKey, Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, WaterSettings, WearableType, avatar_texture, group_powers, pcode,
+        ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+        ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
+        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5,
+        PickUpdate, PointAtType, Postcard, PrimShape, ProductType, ProfileUpdate,
+        ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability,
+        RestoreItem, RezAttachment, SaleType, Scale, ScopedObjectId, ScopedParcelId,
+        ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session, SkySettings, SoundFlags,
+        TeleportFlags, TerrainLayerType, TextureKey, Throttle, TransferStatus, Transmit,
+        ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
+        avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -1205,7 +1206,7 @@ mod test {
         drain(&mut session)?;
 
         let target = uuid::Uuid::from_u128(0x5117);
-        session.sit_on(target, vec3(0.0, 0.0, 0.0), now)?;
+        session.sit_on(ObjectKey::from(target), vec3(0.0, 0.0, 0.0), now)?;
         let sent = drain(&mut session)?;
         let request = sent
             .iter()
@@ -1292,7 +1293,11 @@ mod test {
         session.set_diagnostics(true);
         drain(&mut session)?;
 
-        session.sit_on(uuid::Uuid::from_u128(0x5117), vec3(0.0, 0.0, 0.0), now)?;
+        session.sit_on(
+            ObjectKey::from(uuid::Uuid::from_u128(0x5117)),
+            vec3(0.0, 0.0, 0.0),
+            now,
+        )?;
         drain(&mut session)?;
 
         // No AvatarSitResponse arrives; the sit timer fires. Sit is best-effort,
@@ -1328,7 +1333,7 @@ mod test {
         drain(&mut session)?;
 
         let target = uuid::Uuid::from_u128(0xA1);
-        session.request_avatar_properties(target, now)?;
+        session.request_avatar_properties(AgentKey::from(target), now)?;
         let sent = drain(&mut session)?;
         let request = sent
             .iter()
@@ -1393,7 +1398,7 @@ mod test {
         drain(&mut session)?;
 
         let target = uuid::Uuid::from_u128(0xA1);
-        session.request_avatar_picks(target, now)?;
+        session.request_avatar_picks(AgentKey::from(target), now)?;
         let sent = drain(&mut session)?;
         let generic = sent
             .iter()
@@ -1481,7 +1486,7 @@ mod test {
         drain(&mut session)?;
 
         let target = uuid::Uuid::from_u128(0xA1);
-        session.request_avatar_classifieds(target, now)?;
+        session.request_avatar_classifieds(AgentKey::from(target), now)?;
         let sent = drain(&mut session)?;
         let generic = sent
             .iter()
@@ -1709,7 +1714,7 @@ mod test {
             now,
         )?;
         let target = uuid::Uuid::from_u128(0xA1);
-        session.update_avatar_notes(target, "a good friend", now)?;
+        session.update_avatar_notes(AgentKey::from(target), "a good friend", now)?;
         let sent = drain(&mut session)?;
 
         let props = sent
@@ -4325,7 +4330,7 @@ mod test {
         let prey = uuid::Uuid::from_u128(0xF1);
         let hunter = uuid::Uuid::from_u128(0xF0);
         session.track_agent(AgentKey::from(prey), now)?;
-        session.find_agent(hunter, prey, now)?;
+        session.find_agent(AgentKey::from(hunter), AgentKey::from(prey), now)?;
         let sent = drain(&mut session)?;
         let track = sent
             .iter()
@@ -7800,7 +7805,7 @@ mod test {
         session.return_parcel_objects(
             ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(7)),
             ParcelReturnType::OTHER,
-            &[uuid::Uuid::from_u128(0x99)],
+            &[OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(0x99)))],
             &[],
             now,
         )?;
@@ -7973,7 +7978,7 @@ mod test {
         session.disable_parcel_objects(
             ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(7)),
             ParcelReturnType::OTHER,
-            &[uuid::Uuid::from_u128(0x99)],
+            &[OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(0x99)))],
             &[ObjectKey::from(uuid::Uuid::from_u128(0xAB))],
             now,
         )?;
@@ -8184,10 +8189,10 @@ mod test {
         session.request_estate_info(now)?;
         session.update_estate_access(
             EstateAccessDelta::BannedAgentAdd,
-            uuid::Uuid::from_u128(9),
+            OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(9))),
             now,
         )?;
-        session.kick_estate_user(uuid::Uuid::from_u128(9), now)?;
+        session.kick_estate_user(AgentKey::from(uuid::Uuid::from_u128(9)), now)?;
         session.restart_region(-1, now)?;
         session.send_estate_message("hello estate", now)?;
         session.set_region_info(
@@ -8199,7 +8204,7 @@ mod test {
             },
             now,
         )?;
-        session.god_kick_user(uuid::Uuid::from_u128(9), "spam", now)?;
+        session.god_kick_user(AgentKey::from(uuid::Uuid::from_u128(9)), "spam", now)?;
         let sent = drain(&mut session)?;
 
         let estate: Vec<_> = sent
@@ -11602,7 +11607,7 @@ mod test {
 
         let a = uuid::Uuid::from_u128(0xA1);
         let b = uuid::Uuid::from_u128(0xB2);
-        session.offer_teleport(&[a, b], "come over", now)?;
+        session.offer_teleport(&[AgentKey::from(a), AgentKey::from(b)], "come over", now)?;
         let sent = drain(&mut session)?;
         let lure = sent
             .iter()

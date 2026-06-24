@@ -1402,7 +1402,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<target> <offset-vec>",
             build: |args, ctx| {
                 Ok(Command::Sit {
-                    target: args.req_uuid(ctx, "target", 0)?,
+                    target: args.req_object(ctx, "target", 0)?,
                     offset: args.req_vector(ctx, "offset", 1)?,
                 })
             },
@@ -1422,7 +1422,7 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "request_avatar_properties",
             usage: "<avatar_id>",
             build: |args, ctx| {
-                Ok(Command::RequestAvatarProperties(args.req_uuid(
+                Ok(Command::RequestAvatarProperties(args.req_agent(
                     ctx,
                     "avatar_id",
                     0,
@@ -1433,7 +1433,7 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "request_avatar_picks",
             usage: "<avatar_id>",
             build: |args, ctx| {
-                Ok(Command::RequestAvatarPicks(args.req_uuid(
+                Ok(Command::RequestAvatarPicks(args.req_agent(
                     ctx,
                     "avatar_id",
                     0,
@@ -1444,7 +1444,7 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "request_avatar_notes",
             usage: "<avatar_id>",
             build: |args, ctx| {
-                Ok(Command::RequestAvatarNotes(args.req_uuid(
+                Ok(Command::RequestAvatarNotes(args.req_agent(
                     ctx,
                     "avatar_id",
                     0,
@@ -1455,7 +1455,7 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "request_avatar_classifieds",
             usage: "<avatar_id>",
             build: |args, ctx| {
-                Ok(Command::RequestAvatarClassifieds(args.req_uuid(
+                Ok(Command::RequestAvatarClassifieds(args.req_agent(
                     ctx,
                     "avatar_id",
                     0,
@@ -1496,7 +1496,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<target_id> <notes>",
             build: |args, ctx| {
                 Ok(Command::UpdateAvatarNotes {
-                    target_id: args.req_uuid(ctx, "target_id", 0)?,
+                    target_id: args.req_agent(ctx, "target_id", 0)?,
                     notes: args.req_str(ctx, "notes", 1)?,
                 })
             },
@@ -2304,7 +2304,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<agent_id> [agent_id...]",
             build: |args, ctx| {
                 Ok(Command::RequestAvatarNames(
-                    args.req_uuid_list(ctx, "agent_id", 0)?,
+                    args.req_agent_list(ctx, "agent_id", 0)?,
                 ))
             },
         },
@@ -2313,7 +2313,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<group_id> [group_id...]",
             build: |args, ctx| {
                 Ok(Command::RequestGroupNames(
-                    args.req_uuid_list(ctx, "group_id", 0)?,
+                    args.req_group_list(ctx, "group_id", 0)?,
                 ))
             },
         },
@@ -2322,7 +2322,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<agent_id> [agent_id...]",
             build: |args, ctx| {
                 Ok(Command::RequestDisplayNames(
-                    args.req_uuid_list(ctx, "agent_id", 0)?,
+                    args.req_agent_list(ctx, "agent_id", 0)?,
                 ))
             },
         },
@@ -2417,7 +2417,7 @@ fn all_specs() -> Vec<CommandSpec> {
                 Ok(Command::ReturnParcelObjects {
                     local_id: scoped_parcel(ctx, args.req_parse(ctx, "local_id", 0, "i32")?)?,
                     return_type: ParcelReturnType(args.req_parse(ctx, "return_type", 1, "u32")?),
-                    owner_ids: args.vec_uuid(ctx, "owner_ids", 2)?,
+                    owner_ids: args.vec_owner(ctx, "owner_ids", 2)?,
                     task_ids: args.vec_object(ctx, "task_ids", 3)?,
                 })
             },
@@ -2510,7 +2510,7 @@ fn all_specs() -> Vec<CommandSpec> {
                 Ok(Command::DisableParcelObjects {
                     local_id: scoped_parcel(ctx, args.req_parse(ctx, "local_id", 0, "i32")?)?,
                     return_type: ParcelReturnType(args.req_parse(ctx, "return_type", 1, "u32")?),
-                    owner_ids: args.vec_uuid(ctx, "owner_ids", 2)?,
+                    owner_ids: args.vec_owner(ctx, "owner_ids", 2)?,
                     task_ids: args.vec_object(ctx, "task_ids", 3)?,
                 })
             },
@@ -2637,7 +2637,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::UpdateEstateAccess {
                     delta: enum_arg(args, ctx, "delta", 0, parse_estate_access_delta)?,
-                    target: args.req_uuid(ctx, "target", 1)?,
+                    target: args.req_owner(ctx, "target", 1)?,
                 })
             },
         },
@@ -2646,7 +2646,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<target>",
             build: |args, ctx| {
                 Ok(Command::KickEstateUser {
-                    target: args.req_uuid(ctx, "target", 0)?,
+                    target: args.req_agent(ctx, "target", 0)?,
                 })
             },
         },
@@ -2655,7 +2655,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<target>",
             build: |args, ctx| {
                 Ok(Command::TeleportHomeUser {
-                    target: args.req_uuid(ctx, "target", 0)?,
+                    target: args.req_agent(ctx, "target", 0)?,
                 })
             },
         },
@@ -2740,7 +2740,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<target> [reason]",
             build: |args, ctx| {
                 Ok(Command::GodKickUser {
-                    target: args.req_uuid(ctx, "target", 0)?,
+                    target: args.req_agent(ctx, "target", 0)?,
                     reason: args.str_or(ctx, "reason", 1, "")?,
                 })
             },
@@ -3692,8 +3692,8 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<hunter> <prey>",
             build: |args, ctx| {
                 Ok(Command::FindAgent {
-                    hunter: args.req_uuid(ctx, "hunter", 0)?,
-                    prey: args.req_uuid(ctx, "prey", 1)?,
+                    hunter: args.req_agent(ctx, "hunter", 0)?,
+                    prey: args.req_agent(ctx, "prey", 1)?,
                 })
             },
         },
@@ -4229,7 +4229,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<target,target,…> [message]",
             build: |args, ctx| {
                 Ok(Command::OfferTeleport {
-                    targets: args.vec_uuid(ctx, "targets", 0)?,
+                    targets: args.vec_agent(ctx, "targets", 0)?,
                     message: args.str_or(ctx, "message", 1, "")?,
                 })
             },
@@ -4424,10 +4424,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use sl_proto::{
-        AbuseReportType, AgentPreferences, AssetType, ChatChannel, ChatType, CircuitId, Command,
-        ControlFlags, FriendRights, GroupKey, InventoryKey, LandStatReportType, LindenAmount,
-        MapItemType, MovementMode, ObjectBuyItem, ObjectKey, RegionHandle, RegionLocalObjectId,
-        RegionLocalParcelId, SaleType, ScopedObjectId, ScopedParcelId, Uuid,
+        AbuseReportType, AgentKey, AgentPreferences, AssetType, ChatChannel, ChatType, CircuitId,
+        Command, ControlFlags, FriendRights, GroupKey, InventoryKey, LandStatReportType,
+        LindenAmount, MapItemType, MovementMode, ObjectBuyItem, ObjectKey, OwnerKey, RegionHandle,
+        RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId, ScopedParcelId, Uuid,
     };
 
     use super::Registry;
@@ -4922,7 +4922,7 @@ mod tests {
         assert!(matches!(
             build_scoped(&format!("disable_parcel_objects 7 8 owner_ids={ONE} task_ids={TWO}")),
             Ok(Command::DisableParcelObjects { local_id: ScopedParcelId { circuit: TEST_CIRCUIT, id: RegionLocalParcelId(7) }, return_type, owner_ids, task_ids })
-                if return_type.0 == 8 && owner_ids == vec![uuid(ONE)] && task_ids == vec![ObjectKey::from(uuid(TWO))]
+                if return_type.0 == 8 && owner_ids == vec![OwnerKey::Agent(AgentKey::from(uuid(ONE)))] && task_ids == vec![ObjectKey::from(uuid(TWO))]
         ));
     }
 

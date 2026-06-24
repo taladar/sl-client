@@ -2084,7 +2084,8 @@ fn advance_running(
                 if let Some(caps) = caps.as_ref()
                     && let Some(base) = caps.map.get(CAP_GET_DISPLAY_NAMES).cloned()
                 {
-                    let url = format!("{base}{}", display_names_query(agent_ids));
+                    let agent_uuids: Vec<Uuid> = agent_ids.iter().map(AgentKey::uuid).collect();
+                    let url = format!("{base}{}", display_names_query(&agent_uuids));
                     let events_tx = caps.events_tx.clone();
                     std::thread::spawn(move || {
                         run_get_caps_llsd(&url, CAP_GET_DISPLAY_NAMES, &events_tx);

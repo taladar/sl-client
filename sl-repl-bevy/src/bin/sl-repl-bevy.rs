@@ -12,8 +12,9 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, ExternalPrinter};
 use sl_client_bevy::{
-    Command, LoginParams, LoginRequest, MfaChallenge, SlCapabilities, SlClientPlugin, SlCommand,
-    SlDiagnostic, SlEvent, SlIdentity, SlMfaChallenge, SlSessionEvent, StartLocation, Uuid,
+    AgentKey, Command, LoginParams, LoginRequest, MfaChallenge, SlCapabilities, SlClientPlugin,
+    SlCommand, SlDiagnostic, SlEvent, SlIdentity, SlMfaChallenge, SlSessionEvent, StartLocation,
+    Uuid,
 };
 use sl_repl::{
     Avatar, Credentials, MetaCommand, ReplAction, ScriptRecorder, SessionContext, format_command,
@@ -556,7 +557,7 @@ fn repl_driver(
                 if state.smoke && !state.smoke_fired {
                     state.smoke_fired = true;
                     if let Some(agent) = state.self_agent {
-                        for command in smoke_battery(agent) {
+                        for command in smoke_battery(AgentKey::from(agent)) {
                             commands.write(SlCommand(command));
                         }
                     }
