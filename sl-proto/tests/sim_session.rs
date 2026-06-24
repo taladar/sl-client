@@ -22,13 +22,13 @@ mod test {
         LandArea, LandSearchType, LandStatItem, LandStatReportType, LindenAmount, LindenBalance,
         LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
         MeanCollision, MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem, ObjectKey,
-        ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelKey, ParcelObjectOwner,
-        ParcelReturnType, Permissions5, PingId, PlacesResult, PointAtType, Postcard, ProductType,
-        RegionCoordinates, RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId,
-        RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
-        ScriptControlAction, ServerEvent, Session, SimSession, TelehubInfo, TextureKey, Throttle,
-        Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
-        parse_event_queue_response,
+        ObjectPropertiesFamily, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey,
+        ParcelObjectOwner, ParcelReturnType, Permissions5, PingId, PlacesResult, PointAtType,
+        Postcard, ProductType, RegionCoordinates, RegionHandle, RegionIdentity,
+        RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment, SaleType,
+        ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ServerEvent, Session,
+        SimSession, TelehubInfo, TextureKey, Throttle, Transmit, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -444,7 +444,7 @@ mod test {
         let prey = uuid::Uuid::from_u128(0xB01);
         let hunter = uuid::Uuid::from_u128(0xB00);
         client.track_agent(AgentKey::from(prey), now)?;
-        client.find_agent(hunter, prey, now)?;
+        client.find_agent(AgentKey::from(hunter), AgentKey::from(prey), now)?;
         pump(&mut client, &mut sim, now)?;
 
         let events = drain_server(&mut sim);
@@ -1173,7 +1173,7 @@ mod test {
         client.disable_parcel_objects(
             ScopedParcelId::new(circuit, RegionLocalParcelId(7)),
             ParcelReturnType::OTHER,
-            &[uuid::Uuid::from_u128(0x99)],
+            &[OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(0x99)))],
             &[ObjectKey::from(uuid::Uuid::from_u128(0xAB))],
             now,
         )?;
@@ -2635,8 +2635,8 @@ mod test {
 
         let alice = uuid::Uuid::from_u128(0xA11CE);
         let club = uuid::Uuid::from_u128(0xC1B);
-        client.request_avatar_names(&[alice], now)?;
-        client.request_group_names(&[club], now)?;
+        client.request_avatar_names(&[AgentKey::from(alice)], now)?;
+        client.request_group_names(&[GroupKey::from(club)], now)?;
         pump(&mut client, &mut sim, now)?;
 
         // The simulator surfaces both lookups for the application to answer.

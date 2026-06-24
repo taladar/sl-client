@@ -1258,7 +1258,9 @@ impl Client {
                         }
                         Some(Command::RequestDisplayNames(agent_ids)) => {
                             if let Some(base) = caps.get(CAP_GET_DISPLAY_NAMES).cloned() {
-                                let url = format!("{base}{}", display_names_query(&agent_ids));
+                                let agent_uuids: Vec<Uuid> =
+                                    agent_ids.iter().map(AgentKey::uuid).collect();
+                                let url = format!("{base}{}", display_names_query(&agent_uuids));
                                 tokio::spawn(get_caps_llsd(url, CAP_GET_DISPLAY_NAMES, http.clone(), caps_tx.clone()));
                             }
                         }

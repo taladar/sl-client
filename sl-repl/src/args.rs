@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use sl_proto::{AgentKey, GroupKey, ObjectKey, Rotation, TextureKey, Uuid, Vector};
+use sl_proto::{AgentKey, GroupKey, ObjectKey, OwnerKey, Rotation, TextureKey, Uuid, Vector};
 
 use crate::context::ReplContext;
 use crate::error::ReplError;
@@ -438,6 +438,85 @@ impl Args {
             .vec_uuid(ctx, field, pos)?
             .into_iter()
             .map(ObjectKey::from)
+            .collect())
+    }
+
+    /// A required [`AgentKey`] argument (a raw UUID parsed and wrapped).
+    pub(crate) fn req_agent(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        pos: usize,
+    ) -> Result<AgentKey, ReplError> {
+        Ok(AgentKey::from(self.req_uuid(ctx, field, pos)?))
+    }
+
+    /// A required, non-empty list of [`AgentKey`]s (see [`Self::req_uuid_list`]).
+    pub(crate) fn req_agent_list(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        from_pos: usize,
+    ) -> Result<Vec<AgentKey>, ReplError> {
+        Ok(self
+            .req_uuid_list(ctx, field, from_pos)?
+            .into_iter()
+            .map(AgentKey::from)
+            .collect())
+    }
+
+    /// A required, non-empty list of [`GroupKey`]s (see [`Self::req_uuid_list`]).
+    pub(crate) fn req_group_list(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        from_pos: usize,
+    ) -> Result<Vec<GroupKey>, ReplError> {
+        Ok(self
+            .req_uuid_list(ctx, field, from_pos)?
+            .into_iter()
+            .map(GroupKey::from)
+            .collect())
+    }
+
+    /// An optional list of [`AgentKey`]s (see [`Self::vec_uuid`]).
+    pub(crate) fn vec_agent(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        pos: usize,
+    ) -> Result<Vec<AgentKey>, ReplError> {
+        Ok(self
+            .vec_uuid(ctx, field, pos)?
+            .into_iter()
+            .map(AgentKey::from)
+            .collect())
+    }
+
+    /// A required owner argument (an agent or group). A bare UUID is taken as an
+    /// agent owner ([`OwnerKey::Agent`]); the REPL has no syntax to mark a group
+    /// owner.
+    pub(crate) fn req_owner(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        pos: usize,
+    ) -> Result<OwnerKey, ReplError> {
+        Ok(OwnerKey::Agent(self.req_agent(ctx, field, pos)?))
+    }
+
+    /// An optional list of owner ids, each a bare UUID taken as an agent owner
+    /// (see [`Self::req_owner`]).
+    pub(crate) fn vec_owner(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        pos: usize,
+    ) -> Result<Vec<OwnerKey>, ReplError> {
+        Ok(self
+            .vec_agent(ctx, field, pos)?
+            .into_iter()
+            .map(OwnerKey::Agent)
             .collect())
     }
 

@@ -16,7 +16,7 @@ use crate::{
     InventoryType, LandSearchType, LandStatReportType, LindenAmount, MapItemType, Material,
     MaterialOverrideUpdate, MediaEntry, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
     NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform,
-    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
+    OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
     ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape, ProfileUpdate,
     ProposalVoteId, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem,
     RezAttachment, Rotation, SaleType, ScriptPermissions, TextureKey, Throttle, Uuid, Vector,
@@ -87,7 +87,7 @@ pub enum Command {
     /// result arrives as an [`Event::SitResult`](crate::Event::SitResult).
     Sit {
         /// The object to sit on.
-        target: Uuid,
+        target: ObjectKey,
         /// The seat offset, in region-local metres.
         offset: Vector,
     },
@@ -103,15 +103,15 @@ pub enum Command {
     },
     /// Request an avatar's profile. Replies arrive as [`Event::AvatarProperties`](crate::Event::AvatarProperties),
     /// [`Event::AvatarInterests`](crate::Event::AvatarInterests), and [`Event::AvatarGroups`](crate::Event::AvatarGroups).
-    RequestAvatarProperties(Uuid),
+    RequestAvatarProperties(AgentKey),
     /// Request an avatar's picks. The reply arrives as [`Event::AvatarPicks`](crate::Event::AvatarPicks).
-    RequestAvatarPicks(Uuid),
+    RequestAvatarPicks(AgentKey),
     /// Request the agent's private notes about an avatar. The reply arrives as
     /// [`Event::AvatarNotes`](crate::Event::AvatarNotes).
-    RequestAvatarNotes(Uuid),
+    RequestAvatarNotes(AgentKey),
     /// Request an avatar's classified ads. The reply arrives as
     /// [`Event::AvatarClassifieds`](crate::Event::AvatarClassifieds).
-    RequestAvatarClassifieds(Uuid),
+    RequestAvatarClassifieds(AgentKey),
     /// Request the full details of one pick. `creator_id` is the pick's owner
     /// (the `target_id` from [`Event::AvatarPicks`](crate::Event::AvatarPicks)). The reply arrives as
     /// [`Event::PickInfo`](crate::Event::PickInfo).
@@ -131,7 +131,7 @@ pub enum Command {
     /// Set the agent's private notes about an avatar (`AvatarNotesUpdate`).
     UpdateAvatarNotes {
         /// The avatar the notes are about.
-        target_id: Uuid,
+        target_id: AgentKey,
         /// The note text.
         notes: String,
     },
@@ -604,11 +604,11 @@ pub enum Command {
     /// does not resolve or cache names on its own — a caller asks for the ids it
     /// needs (e.g. an estate's manager list) and decides what to do with the
     /// answers. Large lists are split across several requests automatically.
-    RequestAvatarNames(Vec<Uuid>),
+    RequestAvatarNames(Vec<AgentKey>),
     /// Resolve group ids to their names (`UUIDGroupNameRequest`); replies arrive
     /// as [`Event::GroupNames`](crate::Event::GroupNames). See
     /// [`RequestAvatarNames`](Self::RequestAvatarNames).
-    RequestGroupNames(Vec<Uuid>),
+    RequestGroupNames(Vec<GroupKey>),
     /// Resolve agent ids to their **display names** over the `GetDisplayNames`
     /// capability, batching every id into one request; the reply arrives as
     /// [`Event::DisplayNames`](crate::Event::DisplayNames). This complements the
@@ -618,7 +618,7 @@ pub enum Command {
     /// one record. The cap is Second-Life-centric (stock OpenSim serves it only
     /// with its user-management component present), so the command is a no-op when
     /// the region seed omits the capability.
-    RequestDisplayNames(Vec<Uuid>),
+    RequestDisplayNames(Vec<AgentKey>),
     /// Request the region's **feature flags** via the `SimulatorFeatures`
     /// capability; the reply arrives as
     /// [`Event::SimulatorFeatures`](crate::Event::SimulatorFeatures). The runtimes
@@ -772,7 +772,7 @@ pub enum Command {
         /// Which objects to return (combine `ParcelReturnType` constants).
         return_type: ParcelReturnType,
         /// Optional owner-id scope.
-        owner_ids: Vec<Uuid>,
+        owner_ids: Vec<OwnerKey>,
         /// Optional explicit object/task-id scope.
         task_ids: Vec<ObjectKey>,
     },
@@ -851,7 +851,7 @@ pub enum Command {
         /// Which objects to disable.
         return_type: ParcelReturnType,
         /// Optional owner-id scope.
-        owner_ids: Vec<Uuid>,
+        owner_ids: Vec<OwnerKey>,
         /// Optional explicit object/task-id scope.
         task_ids: Vec<ObjectKey>,
     },
@@ -885,17 +885,17 @@ pub enum Command {
         /// Which list change to apply.
         delta: EstateAccessDelta,
         /// The target agent or group id.
-        target: Uuid,
+        target: OwnerKey,
     },
     /// Kick (eject) an agent from the region (`kickestate`).
     KickEstateUser {
         /// The agent to kick.
-        target: Uuid,
+        target: AgentKey,
     },
     /// Teleport an agent home (`teleporthomeuser`).
     TeleportHomeUser {
         /// The agent to send home.
-        target: Uuid,
+        target: AgentKey,
     },
     /// Teleport every agent in the region home (`teleporthomeallusers`).
     TeleportHomeAllUsers,
@@ -945,7 +945,7 @@ pub enum Command {
     /// God-level eject of an agent (`GodKickUser`; needs grid-god rights).
     GodKickUser {
         /// The agent to kick.
-        target: Uuid,
+        target: AgentKey,
         /// The kick reason.
         reason: String,
     },
@@ -1560,9 +1560,9 @@ pub enum Command {
     /// [`Event::FindAgentReply`](crate::Event::FindAgentReply).
     FindAgent {
         /// The requesting agent (the "hunter"); usually the agent's own id.
-        hunter: Uuid,
+        hunter: AgentKey,
         /// The agent to locate (the "prey").
-        prey: Uuid,
+        prey: AgentKey,
     },
     /// Run a directory people / groups / events search (`DirFindQuery`): the
     /// unified *Search* query whose [`DirFindFlags`] select what is searched
@@ -1904,7 +1904,7 @@ pub enum Command {
     /// [`ImDialog::LureUser`](crate::ImDialog::LureUser).
     OfferTeleport {
         /// The agents to invite.
-        targets: Vec<Uuid>,
+        targets: Vec<AgentKey>,
         /// The accompanying message.
         message: String,
     },

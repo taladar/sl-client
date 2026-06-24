@@ -86,15 +86,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .await
                     .ok();
                 command_tx
-                    .send(Command::RequestAvatarProperties(target))
+                    .send(Command::RequestAvatarProperties(AgentKey::from(target)))
                     .await
                     .ok();
                 command_tx
-                    .send(Command::RequestAvatarPicks(target))
+                    .send(Command::RequestAvatarPicks(AgentKey::from(target)))
                     .await
                     .ok();
                 command_tx
-                    .send(Command::RequestAvatarClassifieds(target))
+                    .send(Command::RequestAvatarClassifieds(AgentKey::from(target)))
                     .await
                     .ok();
 
@@ -153,7 +153,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     // Re-read the profile to confirm the edit took.
                     command_tx
-                        .send(Command::RequestAvatarProperties(target))
+                        .send(Command::RequestAvatarProperties(AgentKey::from(target)))
                         .await
                         .ok();
                     command_tx.send(Command::DeletePick(pick_id)).await.ok();
