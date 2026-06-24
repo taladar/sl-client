@@ -336,7 +336,7 @@ mod test {
         drain_server(&mut sim);
 
         let item = uuid::Uuid::from_u128(0x5151);
-        client.remove_attachment(AttachmentPoint::Skull, item, now)?;
+        client.remove_attachment(AttachmentPoint::Skull, InventoryKey::from(item), now)?;
         pump(&mut client, &mut sim, now)?;
 
         let events = drain_server(&mut sim);
@@ -967,8 +967,8 @@ mod test {
         )?;
         client.buy_object_inventory(
             object,
-            uuid::Uuid::from_u128(0x17E),
-            uuid::Uuid::nil(),
+            InventoryKey::from(uuid::Uuid::from_u128(0x17E)),
+            InventoryFolderKey::from(uuid::Uuid::nil()),
             now,
         )?;
         client.request_pay_price(object, now)?;
@@ -1422,9 +1422,9 @@ mod test {
         let item_id = uuid::Uuid::from_u128(0x17E3);
 
         // Client -> sim: the three task-script control messages surface.
-        client.request_script_running(object_id, item_id, now)?;
-        client.set_script_running(object_id, item_id, true, now)?;
-        client.reset_script(object_id, item_id, now)?;
+        client.request_script_running(object_id, InventoryKey::from(item_id), now)?;
+        client.set_script_running(object_id, InventoryKey::from(item_id), true, now)?;
+        client.reset_script(object_id, InventoryKey::from(item_id), now)?;
         pump(&mut client, &mut sim, now)?;
 
         let server_events = drain_server(&mut sim);
@@ -1730,7 +1730,7 @@ mod test {
             }],
             now,
         )?;
-        client.deactivate_gestures(&[item_b], now)?;
+        client.deactivate_gestures(&[InventoryKey::from(item_b)], now)?;
         pump(&mut client, &mut sim, now)?;
 
         let server_events = drain_server(&mut sim);
