@@ -281,6 +281,8 @@ fn on_events(
             | SlSessionEvent::LandResourceSummary(_)
             | SlSessionEvent::LandResourceDetail(_)
             | SlSessionEvent::LandStatReply { .. }
+            | SlSessionEvent::SimStats(_)
+            | SlSessionEvent::SimulatorTime(_)
             | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged {

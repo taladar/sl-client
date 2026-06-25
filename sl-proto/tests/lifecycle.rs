@@ -16,23 +16,24 @@ mod test {
         DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, Direction,
         DisconnectReason, Distance, EnvironmentSettings, EstateAccessDelta, EstateAccessKind,
         Event, EventId, FollowCamProperty, FriendKey, FriendRights, GestureActivation,
-        GlobalCoordinates, Glow, GroupKey, GroupNoticeAttachment, GroupRequestId, GroupRoleChange,
-        GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog,
-        ImSessionId, ImageCodec, InterestsUpdate, InventoryCallbackId, InventoryFolderKey,
-        InventoryItem, InventoryItemOrFolderKey, InventoryKey, LandArea, LandingType, LindenAmount,
-        LindenBalance, LoginAccount, LoginParams, LookAtType, LureId, MapItemType, Material,
-        Maturity, MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags,
-        MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey,
-        ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-        ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
-        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5,
-        PickUpdate, PointAtType, Postcard, PrimShape, ProductType, ProfileUpdate, QueryId,
-        ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability,
-        RestoreItem, RezAttachment, SaleType, Scale, ScopedObjectId, ScopedParcelId,
-        ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session, SkySettings, SoundFlags,
-        TeleportFlags, TerrainLayerType, TextureKey, Throttle, TransactionId, TransferStatus,
-        Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
-        avatar_texture, group_powers, pcode,
+        GlobalCoordinates, Glow, GridCoordinates, GroupKey, GroupNoticeAttachment, GroupRequestId,
+        GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType,
+        ImDialog, ImSessionId, ImageCodec, InterestsUpdate, InventoryCallbackId,
+        InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, LandArea,
+        LandingType, LindenAmount, LindenBalance, LoginAccount, LoginParams, LookAtType, LureId,
+        MapItemType, Material, Maturity, MeanCollisionType, MeshKey, MoneyTransactionType,
+        MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem,
+        ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
+        ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey,
+        ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
+        PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
+        ProductType, ProfileUpdate, QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle,
+        RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType, Scale, ScopedObjectId,
+        ScopedParcelId, ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session,
+        SimStatId, SimulatorTime, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType,
+        TextureKey, Throttle, TransactionId, TransferStatus, Transmit, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
+        group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -119,7 +120,9 @@ mod test {
         ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock, ScriptRunningReply,
         ScriptRunningReplyScriptBlock, ScriptTeleportRequest, ScriptTeleportRequestDataBlock,
         ScriptTeleportRequestOptionsBlock, SendXferPacket, SendXferPacketDataPacketBlock,
-        SendXferPacketXferIDBlock, SoundTrigger, SoundTriggerSoundDataBlock,
+        SendXferPacketXferIDBlock, SimStats, SimStatsPidStatBlock, SimStatsRegionBlock,
+        SimStatsRegionInfoBlock, SimStatsStatBlock, SimulatorViewerTimeMessage,
+        SimulatorViewerTimeMessageTimeInfoBlock, SoundTrigger, SoundTriggerSoundDataBlock,
         TelehubInfo as TelehubInfoMessage, TelehubInfoSpawnPointBlockBlock,
         TelehubInfoTelehubBlockBlock, TeleportFailed, TeleportFailedAlertInfoBlock,
         TeleportFailedInfoBlock, TeleportFinish, TeleportFinishInfoBlock, TransferInfo,
@@ -641,6 +644,135 @@ mod test {
         assert_eq!(received.chat_type, ChatType::Normal);
         assert_eq!(received.audible, ChatAudible::Fully);
         assert_eq!(received.position, RegionCoordinates::new(10.0, 20.0, 30.0));
+        Ok(())
+    }
+
+    #[test]
+    fn sim_stats_surfaces_region_telemetry() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let stats = AnyMessage::SimStats(SimStats {
+            region: SimStatsRegionBlock {
+                region_x: 1000,
+                region_y: 1001,
+                region_flags: 0x1234,
+                object_capacity: 15_000,
+            },
+            stat: vec![
+                SimStatsStatBlock {
+                    stat_id: 0, // TimeDilation
+                    stat_value: 0.97,
+                },
+                SimStatsStatBlock {
+                    stat_id: 13, // Agents
+                    stat_value: 5.0,
+                },
+                SimStatsStatBlock {
+                    stat_id: 9999, // unknown id, preserved verbatim
+                    stat_value: 1.0,
+                },
+            ],
+            pid_stat: SimStatsPidStatBlock { pid: 4242 },
+            region_info: vec![SimStatsRegionInfoBlock {
+                region_flags_extended: 0xDEAD_BEEF_0000_0001,
+            }],
+        });
+        let datagram = server_message(&stats, 7, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let received = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::SimStats(stats) => Some(stats),
+                _ => None,
+            })
+            .ok_or("expected a SimStats event")?;
+        assert_eq!(received.grid_coordinates, GridCoordinates::new(1000, 1001));
+        assert_eq!(received.region_flags, 0x1234);
+        assert_eq!(received.object_capacity, 15_000);
+        // The extended flags come from the RegionInfo block, not the 32-bit field.
+        assert_eq!(received.region_flags_extended, 0xDEAD_BEEF_0000_0001);
+        assert_eq!(
+            received.stats,
+            vec![
+                (SimStatId::TimeDilation, 0.97),
+                (SimStatId::Agents, 5.0),
+                (SimStatId::Unknown(9999), 1.0),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sim_stats_without_region_info_falls_back_to_32bit_flags() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let stats = AnyMessage::SimStats(SimStats {
+            region: SimStatsRegionBlock {
+                region_x: 1,
+                region_y: 2,
+                region_flags: 0x00AB,
+                object_capacity: 20_000,
+            },
+            stat: Vec::new(),
+            pid_stat: SimStatsPidStatBlock { pid: 0 },
+            region_info: Vec::new(),
+        });
+        session.handle_datagram(sim_addr(), &server_message(&stats, 8, false)?, now)?;
+
+        let received = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::SimStats(stats) => Some(stats),
+                _ => None,
+            })
+            .ok_or("expected a SimStats event")?;
+        // No RegionInfo block: extended flags are the zero-extended 32-bit field.
+        assert_eq!(received.region_flags_extended, 0x00AB);
+        assert!(received.stats.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn simulator_viewer_time_surfaces_world_time() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let time = AnyMessage::SimulatorViewerTimeMessage(SimulatorViewerTimeMessage {
+            time_info: SimulatorViewerTimeMessageTimeInfoBlock {
+                usec_since_start: 1_234_567_890,
+                sec_per_day: 86_400,
+                sec_per_year: 31_536_000,
+                sun_direction: vec3(0.0, 0.0, 1.0),
+                sun_phase: 1.5,
+                sun_ang_velocity: vec3(0.0, 0.1, 0.0),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&time, 9, false)?, now)?;
+
+        let received = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::SimulatorTime(time) => Some(time),
+                _ => None,
+            })
+            .ok_or("expected a SimulatorTime event")?;
+        assert_eq!(
+            *received,
+            SimulatorTime {
+                usec_since_start: 1_234_567_890,
+                sec_per_day: 86_400,
+                sec_per_year: 31_536_000,
+                sun_direction: vec3(0.0, 0.0, 1.0),
+                sun_phase: 1.5,
+                sun_ang_velocity: vec3(0.0, 0.1, 0.0),
+            }
+        );
         Ok(())
     }
 

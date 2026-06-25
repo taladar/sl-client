@@ -154,14 +154,18 @@ dispatch arms, `event_name` arms, and tests, then `cargo test`/`clippy`/`fmt`.
 
 ### Batch 1 — region telemetry (closes issue 2)
 
-- **`SimStats` (Low 140)** → `Event::SimStats(Box<RegionStats>)`.
-  `RegionStats { region_coords: RegionCoordinates, region_flags: u32,
+- **`SimStats` (Low 140)** → `Event::SimStats(Box<RegionStats>)`:
+  `RegionStats { grid_coordinates: GridCoordinates, region_flags: u32,
   object_capacity: u32, region_flags_extended: u64, stats: Vec<(SimStatId,
   f32)> }`, where `SimStatId` is an enum over the known stat ids with an
-  `Unknown(u32)` fallback. Stat-id meanings (TimeDilation=0, SimFPS=1,
-  PhysicsFPS=2, Agents=13, ActiveScripts=15, …) are enumerated in
-  `~/devel/3rdparty/opensim/OpenSim/Framework/SimStats.cs` (`StatsID` enum) and
-  the Firestorm `LLViewerStats` sim-stat ids.
+  `Unknown(u32)` fallback. (Implemented as `GridCoordinates`, not the
+  originally-sketched `RegionCoordinates`: the `RegionX` / `RegionY` fields
+  carry the region's map-tile indices, not a region-local position — confirmed
+  against OpenSim `RegionInfo.RegionLocX = WorldLocX / RegionSize`.) Stat-id
+  meanings
+  (TimeDilation=0, SimFPS=1, PhysicsFPS=2, Agents=13, ActiveScripts=15, …) are
+  enumerated in `~/devel/3rdparty/opensim/OpenSim/Framework/SimStats.cs`
+  (`StatsID` enum) and the Firestorm `LLViewerStats` sim-stat ids.
 - **`SimulatorViewerTimeMessage` (Low 150)** → `Event::SimulatorTime(Box<…>)`
   with `usec_since_start: u64, sec_per_day: u32, sec_per_year: u32,
   sun_direction: Vector, sun_phase: f32, sun_ang_velocity: Vector`.
@@ -294,7 +298,7 @@ section with the resulting table before starting outbound batches.
 
 ## Status
 
-- [ ] Batch 1 — region telemetry (SimStats, SimulatorViewerTimeMessage)
+- [x] Batch 1 — region telemetry (SimStats, SimulatorViewerTimeMessage)
 - [ ] Batch 2 — generic message family
 - [ ] Batch 3 — session errors & forced disconnect
 - [ ] Batch 4 — scene & appearance

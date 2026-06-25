@@ -575,6 +575,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::LandResourcesUrls(_)
             | Event::LandResourceSummary(_)
             | Event::LandResourceDetail(_)
+            | Event::SimStats(_)
+            | Event::SimulatorTime(_)
             | Event::LandStatReply { .. } => {}
         }
     }

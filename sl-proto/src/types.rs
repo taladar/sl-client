@@ -418,7 +418,10 @@ pub use parcel::{
     ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelRequestResult,
     ParcelReturnType, ParcelStatus, ParcelUpdate,
 };
-pub use region::{RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits};
+pub use region::{
+    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits, RegionStats, SimStatId,
+    SimulatorTime,
+};
 pub use report::Postcard;
 pub use script::{
     AlertInfo, FollowCamProperty, FollowCamPropertyValue, LoadUrlRequest, MuteEntry, MuteFlags,

@@ -320,6 +320,8 @@ const fn event_name(event: &Event) -> &'static str {
         Event::RegionHandshakeComplete => "region_handshake_complete",
         Event::RegionInfoHandshake(..) => "region_info_handshake",
         Event::RegionLimits(..) => "region_limits",
+        Event::SimStats(..) => "sim_stats",
+        Event::SimulatorTime(..) => "simulator_time",
         Event::AvatarNames(..) => "avatar_names",
         Event::GroupNames(..) => "group_names",
         Event::DisplayNames(..) => "display_names",

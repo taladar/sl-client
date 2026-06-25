@@ -360,6 +360,8 @@ fn on_events(
             | SlSessionEvent::LandResourcesUrls(_)
             | SlSessionEvent::LandResourceSummary(_)
             | SlSessionEvent::LandResourceDetail(_)
+            | SlSessionEvent::SimStats(_)
+            | SlSessionEvent::SimulatorTime(_)
             | SlSessionEvent::LandStatReply { .. } => {}
         }
     }
