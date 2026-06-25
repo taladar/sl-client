@@ -22,12 +22,13 @@ use crate::types::{
     NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectTransform,
     ParcelAccessEntry, ParcelCategory, ParcelUpdate, PermissionField, PickKey, PickUpdate,
     Postcard, PrimShape, PrimShapeParams, ProfileUpdate, Reliability, RestoreItem, RezAttachment,
-    SaleType, TeleportFlags, TextureEntry, Throttle, ViewerEffect, Wearable,
+    RezObjectParams, RezScriptParams, SaleType, ScriptPermissions, TeleportFlags, TextureEntry,
+    Throttle, ViewerEffect, Wearable,
 };
 use crate::types::{GroupNoticeKey, ProposalVoteId};
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
-    AgentKey, ClassifiedKey, FriendKey, GroupKey, ObjectKey, ParcelKey, TextureKey,
+    AgentKey, ClassifiedKey, FriendKey, GroupKey, InventoryKey, ObjectKey, ParcelKey, TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::map::Distance;
@@ -218,6 +219,12 @@ use sl_wire::messages::{
     RezObjectFromNotecardAgentDataBlock, RezObjectFromNotecardInventoryDataBlock,
     RezObjectFromNotecardNotecardDataBlock, RezObjectFromNotecardRezDataBlock, RezRestoreToWorld,
     RezRestoreToWorldAgentDataBlock, RezRestoreToWorldInventoryDataBlock,
+};
+use sl_wire::messages::{
+    DetachAttachmentIntoInv, DetachAttachmentIntoInvObjectDataBlock, RevokePermissions,
+    RevokePermissionsAgentDataBlock, RevokePermissionsDataBlock, RezObject,
+    RezObjectAgentDataBlock, RezObjectInventoryDataBlock, RezObjectRezDataBlock, RezScript,
+    RezScriptAgentDataBlock, RezScriptInventoryBlockBlock, RezScriptUpdateBlockBlock,
 };
 use sl_wire::messages::{
     GetScriptRunning, GetScriptRunningScriptBlock, ScriptReset, ScriptResetAgentDataBlock,
@@ -4769,6 +4776,152 @@ impl Circuit {
                 .iter()
                 .map(|id| RezObjectFromNotecardInventoryDataBlock { item_id: id.uuid() })
                 .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RezObject` reliably (rez the inventory item `params.item` into
+    /// the world as a new object).
+    pub(crate) fn send_rez_object(
+        &mut self,
+        params: &RezObjectParams,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let item = &params.item;
+        let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
+        let message = AnyMessage::RezObject(RezObject {
+            agent_data: RezObjectAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+                group_id: params.group_id.map_or_else(Uuid::nil, |g| g.uuid()),
+            },
+            rez_data: RezObjectRezDataBlock {
+                from_task_id: params.from_task_id.map_or_else(Uuid::nil, |t| t.uuid()),
+                bypass_raycast: u8::from(params.bypass_raycast),
+                ray_start: params.ray_start.clone(),
+                ray_end: params.ray_end.clone(),
+                ray_target_id: params.ray_target_id.map_or_else(Uuid::nil, |t| t.uuid()),
+                ray_end_is_intersection: params.ray_end_is_intersection,
+                rez_selected: params.rez_selected,
+                remove_item: params.remove_item,
+                item_flags: params.item_flags,
+                group_mask: params.group_mask,
+                everyone_mask: params.everyone_mask,
+                next_owner_mask: params.next_owner_mask,
+            },
+            inventory_data: RezObjectInventoryDataBlock {
+                item_id: item.item_id.uuid(),
+                folder_id: item.folder_id.uuid(),
+                creator_id: item.creator_id.uuid(),
+                owner_id,
+                group_id,
+                base_mask: item.permissions.base.bits(),
+                owner_mask: item.permissions.owner.bits(),
+                group_mask: item.permissions.group.bits(),
+                everyone_mask: item.permissions.everyone.bits(),
+                next_owner_mask: item.permissions.next_owner.bits(),
+                group_owned: item.owner.is_group(),
+                transaction_id: item.transaction_id,
+                r#type: item.asset_type,
+                inv_type: item.inv_type,
+                flags: item.flags,
+                sale_type: item.sale_type.to_code(),
+                sale_price: crate::types::linden_price_to_wire(
+                    "SalePrice",
+                    item.sale_price.as_ref(),
+                )?,
+                name: with_nul(&item.name),
+                description: with_nul(&item.description),
+                creation_date: item.creation_date,
+                crc: item.crc,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RezScript` reliably (drop the script item `params.item` into the
+    /// task inventory of the in-world object `local_id`).
+    pub(crate) fn send_rez_script(
+        &mut self,
+        local_id: RegionLocalObjectId,
+        params: &RezScriptParams,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let item = &params.item;
+        let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
+        let message = AnyMessage::RezScript(RezScript {
+            agent_data: RezScriptAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+                group_id: params.group_id.map_or_else(Uuid::nil, |g| g.uuid()),
+            },
+            update_block: RezScriptUpdateBlockBlock {
+                object_local_id: local_id.0,
+                enabled: params.enabled,
+            },
+            inventory_block: RezScriptInventoryBlockBlock {
+                item_id: item.item_id.uuid(),
+                folder_id: item.folder_id.uuid(),
+                creator_id: item.creator_id.uuid(),
+                owner_id,
+                group_id,
+                base_mask: item.permissions.base.bits(),
+                owner_mask: item.permissions.owner.bits(),
+                group_mask: item.permissions.group.bits(),
+                everyone_mask: item.permissions.everyone.bits(),
+                next_owner_mask: item.permissions.next_owner.bits(),
+                group_owned: item.owner.is_group(),
+                transaction_id: item.transaction_id,
+                r#type: item.asset_type,
+                inv_type: item.inv_type,
+                flags: item.flags,
+                sale_type: item.sale_type.to_code(),
+                sale_price: crate::types::linden_price_to_wire(
+                    "SalePrice",
+                    item.sale_price.as_ref(),
+                )?,
+                name: with_nul(&item.name),
+                description: with_nul(&item.description),
+                creation_date: item.creation_date,
+                crc: item.crc,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RevokePermissions` reliably (revoke the named LSL script
+    /// `permissions` previously granted to the object `object_id`).
+    pub(crate) fn send_revoke_permissions(
+        &mut self,
+        object_id: ObjectKey,
+        permissions: ScriptPermissions,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RevokePermissions(RevokePermissions {
+            agent_data: RevokePermissionsAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            data: RevokePermissionsDataBlock {
+                object_id: object_id.uuid(),
+                object_permissions: permissions.0.cast_unsigned(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `DetachAttachmentIntoInv` reliably (detach the worn attachment
+    /// `item_id` back into inventory).
+    pub(crate) fn send_detach_attachment_into_inv(
+        &mut self,
+        item_id: InventoryKey,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::DetachAttachmentIntoInv(DetachAttachmentIntoInv {
+            object_data: DetachAttachmentIntoInvObjectDataBlock {
+                agent_id: self.agent_id.uuid(),
+                item_id: item_id.uuid(),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }

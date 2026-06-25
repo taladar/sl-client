@@ -670,6 +670,73 @@ pub struct RestoreItem {
     pub crc: u32,
 }
 
+/// Placement and permission parameters for rezzing an inventory item into the
+/// world as a new in-world object (`RezObject`), as passed to
+/// [`Session::rez_object_from_inventory`](crate::Session::rez_object_from_inventory).
+/// The ray fields place the new object exactly as the notecard-rez path does
+/// (see [`NotecardRez`]); the `*_mask` fields are the permission masks *applied
+/// to the rezzed object*, distinct from the stored permissions of the source
+/// [`item`](Self::item).
+#[derive(Debug, Clone, PartialEq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "mirrors the independent boolean toggles of the RezObject wire block"
+)]
+pub struct RezObjectParams {
+    /// The active group the new object is set to (`None` for none) — the
+    /// `AgentData.GroupID` of the message.
+    pub group_id: Option<GroupKey>,
+    /// The task (prim) whose inventory holds the source item, when rezzing from
+    /// an in-world object's contents (`None` when rezzing from the agent's own
+    /// inventory).
+    pub from_task_id: Option<ObjectKey>,
+    /// When set, the simulator trusts `ray_end` rather than raycasting.
+    pub bypass_raycast: bool,
+    /// The ray's start point (region-local).
+    pub ray_start: Vector,
+    /// The ray's end point (region-local).
+    pub ray_end: Vector,
+    /// The object the ray is cast against (`None` for the terrain).
+    pub ray_target_id: Option<ObjectKey>,
+    /// Whether `ray_end` is the actual intersection point.
+    pub ray_end_is_intersection: bool,
+    /// Whether the rezzed object should be left selected.
+    pub rez_selected: bool,
+    /// Whether to remove the source inventory item after rezzing.
+    pub remove_item: bool,
+    /// The item flags to apply to the rezzed object.
+    pub item_flags: u32,
+    /// The group permissions mask to apply to the rezzed object.
+    pub group_mask: u32,
+    /// The everyone permissions mask to apply to the rezzed object.
+    pub everyone_mask: u32,
+    /// The next-owner permissions mask to apply to the rezzed object.
+    pub next_owner_mask: u32,
+    /// The full inventory item being rezzed (the message's `InventoryData`
+    /// block — the same per-item payload as [`RezRestoreToWorld`]).
+    ///
+    /// [`RezRestoreToWorld`]: crate::Session::rez_restore_to_world
+    pub item: RestoreItem,
+}
+
+/// Parameters for dropping a script inventory item into an in-world object's
+/// task inventory (`RezScript`), as passed to
+/// [`Session::rez_script`](crate::Session::rez_script). The target object is
+/// named separately by its region-local id; this struct carries the rest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RezScriptParams {
+    /// The active group the operation is performed under (`None` for none) — the
+    /// `AgentData.GroupID` of the message.
+    pub group_id: Option<GroupKey>,
+    /// Whether the script is rezzed already enabled (running).
+    pub enabled: bool,
+    /// The full inventory item for the script being dropped in (the message's
+    /// `InventoryBlock` — the same per-item payload as [`RezRestoreToWorld`]).
+    ///
+    /// [`RezRestoreToWorld`]: crate::Session::rez_restore_to_world
+    pub item: RestoreItem,
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;

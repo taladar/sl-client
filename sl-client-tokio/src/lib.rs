@@ -1158,6 +1158,18 @@ impl Client {
                         Some(Command::RezObjectFromNotecard { rez }) => {
                             self.session.rez_object_from_notecard(&rez, Instant::now())?;
                         }
+                        Some(Command::RezObjectFromInventory { params }) => {
+                            self.session.rez_object_from_inventory(&params, Instant::now())?;
+                        }
+                        Some(Command::RezScript { target, params }) => {
+                            self.session.rez_script(target, &params, Instant::now())?;
+                        }
+                        Some(Command::RevokeScriptPermissions { object_id, permissions }) => {
+                            self.session.revoke_script_permissions(object_id, permissions, Instant::now())?;
+                        }
+                        Some(Command::DetachAttachmentIntoInventory { item_id }) => {
+                            self.session.detach_attachment_into_inventory(item_id, Instant::now())?;
+                        }
                         Some(Command::RequestScriptRunning { object_id, item_id }) => {
                             self.session.request_script_running(object_id, item_id, Instant::now())?;
                         }

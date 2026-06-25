@@ -67,11 +67,11 @@ use crate::types::{
     ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
     PermissionField, PickKey, PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams,
     ProfileUpdate, ProposalVoteId, RegionInfoUpdate, RegionStats, Reliability, RestoreItem,
-    RezAttachment, SaleType, ScriptControl, ScriptControlAction, ScriptPermissions,
-    ScriptTeleportRequest, ServerError, SimStatId, SimulatorTime, SoundFlags, SoundPreload,
-    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
-    TextureEntry, Throttle, TransferStatus, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, Wearable, WearableType,
+    RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptControl, ScriptControlAction,
+    ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId, SimulatorTime, SoundFlags,
+    SoundPreload, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch,
+    Texture, TextureEntry, Throttle, TransferStatus, Transmit, UserInfo, ViewerEffect,
+    ViewerEffectData, ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -6147,6 +6147,85 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_rez_object_from_notecard(rez, now)?;
+        Ok(())
+    }
+
+    /// Rezzes the inventory item `params.item` into the world as a new object via
+    /// `RezObject`. The ray fields of `params` place the object exactly as
+    /// [`Session::rez_object`] (the new-prim `ObjectAdd` path) does; the new
+    /// object arrives as an [`Event::ObjectAdded`]. To rez objects embedded in a
+    /// notecard instead, use [`Session::rez_object_from_notecard`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn rez_object_from_inventory(
+        &mut self,
+        params: &RezObjectParams,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_rez_object(params, now)?;
+        Ok(())
+    }
+
+    /// Drops the script inventory item `params.item` into the task inventory of
+    /// the in-world object `target` via `RezScript`, optionally rezzed already
+    /// running ([`RezScriptParams::enabled`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn rez_script(
+        &mut self,
+        target: ScopedObjectId,
+        params: &RezScriptParams,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(target.circuit)?;
+        circuit.send_rez_script(target.id, params, now)?;
+        Ok(())
+    }
+
+    /// Revokes the named LSL script `permissions` previously granted to the
+    /// object `object_id` via `RevokePermissions` (the inverse of
+    /// [`Session::answer_script_permissions`]). Passing
+    /// [`ScriptPermissions::default`] (an empty set) revokes nothing; a full set
+    /// revokes every previously granted permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn revoke_script_permissions(
+        &mut self,
+        object_id: ObjectKey,
+        permissions: ScriptPermissions,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_revoke_permissions(object_id, permissions, now)?;
+        Ok(())
+    }
+
+    /// Detaches the worn attachment whose inventory item is `item_id` back into
+    /// inventory via `DetachAttachmentIntoInv`. Unlike [`Session::detach_objects`]
+    /// this names the inventory item, not the rezzed object's region-local id, so
+    /// it works without first having seen the object rez.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn detach_attachment_into_inventory(
+        &mut self,
+        item_id: InventoryKey,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_detach_attachment_into_inv(item_id, now)?;
         Ok(())
     }
 

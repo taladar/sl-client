@@ -20,9 +20,9 @@ use crate::{
     OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
     ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams,
     ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates, RegionHandle, RegionInfoUpdate,
-    Reliability, RestoreItem, RezAttachment, Rotation, SaleType, ScriptPermissions, TextureEntry,
-    TextureKey, Throttle, TransactionId, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
-    Wearable,
+    Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
+    ScriptPermissions, TextureEntry, TextureKey, Throttle, TransactionId, Uuid, Vector,
+    ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1351,6 +1351,32 @@ pub enum Command {
     RezObjectFromNotecard {
         /// The rez parameters (ray placement, permissions, notecard, items).
         rez: NotecardRez,
+    },
+    /// Rez an inventory item into the world as a new object (`RezObject`).
+    RezObjectFromInventory {
+        /// The rez parameters (ray placement, permission masks, source item).
+        params: Box<RezObjectParams>,
+    },
+    /// Drop a script inventory item into an in-world object (`RezScript`).
+    RezScript {
+        /// The object whose task inventory the script is dropped into.
+        target: ScopedObjectId,
+        /// The rez parameters (running flag, active group, source item).
+        params: Box<RezScriptParams>,
+    },
+    /// Revoke LSL script permissions previously granted to an object
+    /// (`RevokePermissions`).
+    RevokeScriptPermissions {
+        /// The object whose granted permissions are revoked.
+        object_id: ObjectKey,
+        /// The permissions to revoke.
+        permissions: ScriptPermissions,
+    },
+    /// Detach a worn attachment back into inventory by its inventory item id
+    /// (`DetachAttachmentIntoInv`).
+    DetachAttachmentIntoInventory {
+        /// The attachment's inventory item id.
+        item_id: InventoryKey,
     },
     /// Ask whether a task's script is currently running (`GetScriptRunning`);
     /// the simulator answers with
