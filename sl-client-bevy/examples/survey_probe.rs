@@ -304,6 +304,8 @@ fn on_events(
             | SlSessionEvent::ServerError(_)
             | SlSessionEvent::FeatureDisabled(_)
             | SlSessionEvent::Kicked(_)
+            | SlSessionEvent::AgentStateUpdate { .. }
+            | SlSessionEvent::NavMeshStatus(_)
             | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged {

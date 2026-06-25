@@ -478,6 +478,8 @@ const fn event_name(event: &Event) -> &'static str {
         Event::AvatarAnimation { .. } => "avatar_animation",
         Event::ObjectAnimation { .. } => "object_animation",
         Event::RebakeAvatarTextures { .. } => "rebake_avatar_textures",
+        Event::AgentStateUpdate { .. } => "agent_state_update",
+        Event::NavMeshStatus(..) => "nav_mesh_status",
         Event::CoarseLocationUpdate { .. } => "coarse_location_update",
         Event::ViewerEffect(..) => "viewer_effect",
         Event::FindAgentReply { .. } => "find_agent_reply",

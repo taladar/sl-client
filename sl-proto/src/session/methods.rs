@@ -1,9 +1,10 @@
 //! The driver-facing `Session` API: login, UDP/CAPS dispatch, and command methods.
 
 use super::conversions::{
-    OutgoingIm, ZERO_VECTOR, active_group, ais_inventory_update_from_llsd, avatar_animations,
-    avatar_appearance, avatar_group, avatar_interests, avatar_names, avatar_properties,
-    bulk_update_folder, bulk_update_inventory_from_llsd, bulk_update_item, chat_message,
+    OutgoingIm, ZERO_VECTOR, active_group, agent_state_update_from_llsd,
+    ais_inventory_update_from_llsd, avatar_animations, avatar_appearance, avatar_group,
+    avatar_interests, avatar_names, avatar_properties, bulk_update_folder,
+    bulk_update_inventory_from_llsd, bulk_update_item, chat_message,
     chatterbox_invitation_from_llsd, classified_info, created_category_from_llsd,
     crossed_region_from_caps_llsd, economy_data, enable_simulator_from_caps_llsd,
     environment_from_llsd, establish_agent_communication_from_llsd, estate_access_from_params,
@@ -13,8 +14,8 @@ use super::conversions::{
     group_notice, group_profile, group_role, group_title, group_vote_history_item, index_into,
     instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
     inventory_item_from_create, inventory_offer_bucket, map_item, map_layer, map_region_info,
-    money_balance, neighbor_info, object_from_full_update, object_properties,
-    offline_messages_from_llsd, pack_uuids, parcel_info, parcel_info_from_llsd,
+    money_balance, nav_mesh_status_from_llsd, neighbor_info, object_from_full_update,
+    object_properties, offline_messages_from_llsd, pack_uuids, parcel_info, parcel_info_from_llsd,
     parse_lure_region_handle, parse_mute_list, parse_uuid_string, pick_info, region_identity,
     region_limits, script_dialog, script_permission_request, server_appearance_update_from_llsd,
     skeleton_folder, teleport_finish_from_llsd, trimmed_string,
@@ -635,6 +636,26 @@ impl Session {
             "ChatterBoxInvitation" => {
                 if let Some(event) = chatterbox_invitation_from_llsd(body) {
                     self.events.push_back(event);
+                } else {
+                    self.caps_decode_failed(message);
+                }
+            }
+            // A pathfinding agent-state push: whether the agent may currently
+            // rebake this region's navmesh (`{ "can_modify_navmesh": bool }`).
+            // SL-only.
+            "AgentStateUpdate" => {
+                if let Some(can_modify_navmesh) = agent_state_update_from_llsd(body) {
+                    self.events
+                        .push_back(Event::AgentStateUpdate { can_modify_navmesh });
+                } else {
+                    self.caps_decode_failed(message);
+                }
+            }
+            // A pathfinding navmesh-status push: the region's navmesh build
+            // state and version. SL-only.
+            "NavMeshStatusUpdate" => {
+                if let Some(status) = nav_mesh_status_from_llsd(body) {
+                    self.events.push_back(Event::NavMeshStatus(status));
                 } else {
                     self.caps_decode_failed(message);
                 }

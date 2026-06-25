@@ -785,6 +785,8 @@ impl Survey {
             | Event::ServerError(_)
             | Event::FeatureDisabled(_)
             | Event::Kicked(_)
+            | Event::AgentStateUpdate { .. }
+            | Event::NavMeshStatus(_)
             | Event::Environment(_) => {}
         }
         Ok(false)
