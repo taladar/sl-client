@@ -265,9 +265,14 @@ impl ReplContext for SessionContext {
         if self.circuit_code.map(|code| code.to_string()).as_deref() == Some(literal) {
             return Some("$circuit".to_owned());
         }
-        if self.circuit_id.map(|id| id.get().to_string()).as_deref() == Some(literal) {
-            return Some("$circuitid".to_owned());
-        }
+        // `$circuitid` is deliberately *not* symbolized here by bare value: the
+        // circuit-instance id is a small monotonic counter (`circuit#1`, `#2`,
+        // …), so matching it as a bare integer would clobber every unrelated
+        // small integer in an event's fields (a region flag, a cpu ratio, a
+        // billable factor, …). The formatter symbolizes it from its distinctive
+        // `CircuitId(<n>)` `Debug` wrapper instead (see
+        // `format::symbolize_circuit_id`), which still stabilizes the genuinely
+        // run-varying id across runs without the false positives.
         if self
             .parcel_local_id
             .map(|local| local.to_string())
@@ -385,5 +390,27 @@ mod tests {
         );
         assert_eq!(ctx.symbolize("Da Boom Plaza"), Some("$dest".to_owned()));
         assert_eq!(ctx.symbolize("nothing"), None);
+    }
+
+    #[test]
+    fn small_circuit_id_does_not_symbolize_bare_integers() {
+        use std::net::SocketAddr;
+
+        use sl_proto::{CircuitId, Event};
+
+        let mut ctx = SessionContext::new();
+        let sim = SocketAddr::from(([127, 0, 0, 1], 9000));
+        ctx.apply_event(&Event::CircuitEstablished {
+            sim,
+            circuit: CircuitId::new(1),
+        });
+        // The circuit-instance id is a tiny counter; a bare "1" (a region flag,
+        // a cpu ratio, …) must not be mistaken for it — that was the aditi
+        // RegionInfo bug where `region_protocols`/`cpu_ratio`/`billable_factor`
+        // all rendered as `$circuitid`.
+        assert_eq!(ctx.symbolize("1"), None);
+        // Forward resolution and circuit scoping still see it, though.
+        assert_eq!(ctx.resolve_placeholder("circuitid"), Some("1".to_owned()));
+        assert_eq!(ctx.current_circuit_id(), Some(CircuitId::new(1)));
     }
 }

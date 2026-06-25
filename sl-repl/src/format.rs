@@ -32,7 +32,8 @@ use crate::context::ReplContext;
     reason = "`format_event` is the natural public name for this renderer"
 )]
 pub fn format_event(event: &Event, ctx: &dyn ReplContext) -> String {
-    let body = symbolize_text(&strip_leading_ident(&format!("{event:?}")), ctx);
+    let debug = symbolize_circuit_id(&format!("{event:?}"), ctx);
+    let body = symbolize_text(&strip_leading_ident(&debug), ctx);
     let name = event_name(event);
     let mut out = String::with_capacity(name.len().saturating_add(body.len()));
     out.push_str(name);
@@ -51,7 +52,8 @@ pub fn format_event(event: &Event, ctx: &dyn ReplContext) -> String {
     reason = "`format_command` is the natural public name for this renderer"
 )]
 pub fn format_command(command: &Command, ctx: &dyn ReplContext) -> String {
-    let body = symbolize_text(&strip_leading_ident(&format!("{command:?}")), ctx);
+    let debug = symbolize_circuit_id(&format!("{command:?}"), ctx);
+    let body = symbolize_text(&strip_leading_ident(&debug), ctx);
     let name = command_name(command);
     let mut out = String::with_capacity(name.len().saturating_add(body.len()));
     out.push_str(name);
@@ -100,6 +102,29 @@ fn strip_leading_ident(text: &str) -> String {
         out.push(c);
     }
     out
+}
+
+/// Rewrite the typed circuit-instance wrapper back to the `$circuitid`
+/// placeholder.
+///
+/// The circuit-instance id is a small monotonic counter (`circuit#1`, `#2`, …)
+/// that changes run-to-run as circuits are minted (teleports, region crossings),
+/// so leaving it literal would yield false-positive diffs between two
+/// transcripts of the same operations. But matching it by bare value — as the
+/// other bindings are matched in [`symbolize_text`] — would clobber every
+/// coincidental small integer in an event's fields (a region flag, a cpu ratio,
+/// a billable factor, …).
+///
+/// Its `Debug` rendering is the distinctive `CircuitId(<n>)` wrapper (also the
+/// form it takes inside `ScopedObjectId` / `ScopedParcelId`), which no unrelated
+/// field produces. Replacing that exact wrapper — gated on the live
+/// [`ReplContext::current_circuit_id`] — symbolizes the genuine id everywhere it
+/// appears while leaving bare integers alone. A no-op when no circuit is bound.
+fn symbolize_circuit_id(text: &str, ctx: &dyn ReplContext) -> String {
+    match ctx.current_circuit_id() {
+        Some(circuit) => text.replace(&format!("CircuitId({})", circuit.get()), "$circuitid"),
+        None => text.to_owned(),
+    }
 }
 
 /// Rewrite the binding-backed literals in `text` back to their `$placeholder`
@@ -736,7 +761,7 @@ mod tests {
 
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        AgentKey, Command, Diagnostic, Event, MessageId, RegionHandle, Uuid, WireError,
+        AgentKey, CircuitId, Command, Diagnostic, Event, MessageId, RegionHandle, Uuid, WireError,
     };
 
     use super::{format_command, format_diagnostic, format_event, hexdump};
@@ -823,6 +848,39 @@ mod tests {
         assert!(
             formatted.contains("$region"),
             "the region handle is symbolized: {formatted}"
+        );
+    }
+
+    #[test]
+    fn event_symbolizes_circuit_id_wrapper_not_bare_integers() {
+        let sim: SocketAddr = "127.0.0.1:9000"
+            .parse()
+            .unwrap_or_else(|_| SocketAddr::from(([127, 0, 0, 1], 9000)));
+        let event = Event::CircuitEstablished {
+            sim,
+            circuit: CircuitId::new(1),
+        };
+        let mut ctx = SessionContext::new();
+        ctx.apply_event(&event);
+        let formatted = format_event(&event, &ctx);
+        assert!(
+            formatted.contains("$circuitid"),
+            "the typed circuit-instance wrapper is symbolized: {formatted}"
+        );
+        assert!(
+            !formatted.contains("CircuitId(1)"),
+            "the literal CircuitId wrapper no longer appears: {formatted}"
+        );
+        // The bare "1" in the sim address's last octet is a coincidental small
+        // integer, not the circuit id, and must survive untouched.
+        assert!(
+            formatted.contains("127.0.0.1:9000"),
+            "an unrelated bare integer is left literal: {formatted}"
+        );
+        assert_eq!(
+            formatted.matches("$circuitid").count(),
+            1,
+            "only the genuine circuit id is symbolized, not the octet: {formatted}"
         );
     }
 
