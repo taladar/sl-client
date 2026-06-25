@@ -18,6 +18,10 @@ client `Session`:
 - **Outbound** (client→server): expose a `send_*` method (+ `Command` + REPL
   registry entry) for every non-outdated message the client should be able to
   send.
+- **CAPS EventQueue** (server→client push — a *second* inbound surface):
+  decode and surface every non-outdated event the simulator pushes over
+  the `EventQueueGet` long-poll, so these too become typed `Event`s instead of
+  `UnknownCapsEvent` warnings (where issue 3's `AgentStateUpdate` lives).
 
 **Explicitly out of scope** (skipped, with rationale below): messages a client
 never receives on its agent circuit (sim↔sim trust, circuit/transport
@@ -195,6 +199,75 @@ Server-initiated inventory mutations to keep a client mirror current:
 `ReplyTaskInventory` (290, object contents), `UserInfoReply` (400, email/IM
 prefs), `DeRezAck` (292), `ForceObjectSelect` (205), `GrantGodlikePowers` (258).
 
+## CAPS EventQueue gap
+
+A second inbound surface: events the simulator pushes over the `EventQueueGet`
+long-poll capability (not LLUDP, not HTTP cap GET/POST replies). They are
+dispatched by name in `Session::handle_caps_event`
+(`sl-proto/src/session/methods.rs` ~line 263), with an `UnknownCapsEvent`
+diagnostic fallback — the same shape of gap as the inbound UDP one. Surfaced by
+issue 3 in `KNOWN_ISSUES_ADITI.md` (`AgentStateUpdate` logged unhandled on
+aditi).
+
+**Audit method:** the viewer's EventQueue dispatch (Firestorm
+`indra/newview/lleventpoll.cpp` → `LLMessageSystem::dispatch(msg_name, …)`, plus
+the per-event `LLHTTPNode` registrations) and OpenSim's senders
+(`OpenSim/Region/ClientStack/Linden/Caps/EventQueue/EventQueueGetHandlers.cs`)
+give the universe; our handled set is the string-literal arms in
+`handle_caps_event`.
+
+**Already handled (push):** `EnableSimulator`, `EstablishAgentCommunication`,
+`TeleportFinish`, `CrossedRegion`, `ParcelProperties`, `AgentGroupDataUpdate`,
+`BulkUpdateInventory`, `ObjectPhysicsProperties`, `UpdateAvatarAppearance`,
+`ExtEnvironment`, `ChatterBoxInvitation` (+ the HTTP cap GET/POST replies routed
+through the same match).
+
+**Implementation pattern:** add a match arm to `handle_caps_event`, parse the
+LLSD `body` with a `*_from_llsd` helper (mirror
+`chatterbox_invitation_from_llsd` / the parsers in
+`sl-proto/src/session/conversions.rs`), and push a typed
+`Event` — then the same Event variant + `event_name` arm + tests as the UDP
+pattern.
+
+### Unhandled EventQueue events
+
+| Event | Disposition |
+| --- | --- |
+| `AgentStateUpdate` | HANDLE — EQ batch 1 (closes issue 3) |
+| `NavMeshStatusUpdate` | HANDLE — EQ batch 1 |
+| `AgentDropGroup` | HANDLE — EQ batch 2 |
+| `DisplayNameUpdate` | HANDLE — EQ batch 2 |
+| `SetDisplayNameReply` | HANDLE — EQ batch 2 |
+| `WindLightRefresh` | HANDLE — EQ batch 3 |
+| `SimConsoleResponse` | HANDLE — EQ batch 3 |
+| `RequiredVoiceVersion` | HANDLE — EQ batch 3 |
+| `OpenRegionInfo` | HANDLE — EQ batch 3 (OpenSim-specific) |
+| `ChatterBoxSessionAgentListUpdates` | DEFER — `CHAT_ROADMAP.md` |
+| `ChatterBoxSessionStartReply` | DEFER — `CHAT_ROADMAP.md` |
+| `ChatterBoxSessionUpdate` | DEFER — `CHAT_ROADMAP.md` |
+| `ChatterBoxSessionEventReply` | DEFER — `CHAT_ROADMAP.md` |
+| `ForceCloseChatterBoxSession` | DEFER — `CHAT_ROADMAP.md` |
+
+The `ChatterBox*` session-lifecycle events are the stateful group/conference
+chat machinery already designed in `CHAT_ROADMAP.md` (which owns
+`ChatterBoxInvitation` → `Event::ConferenceInvited`); they are handled there,
+not here, to avoid a half-built chat surface.
+
+### EventQueue batches
+
+- **EQ batch 1 — pathfinding agent state (closes issue 3).**
+  `AgentStateUpdate` (body `{ "can_modify_navmesh": bool }` — whether the agent
+  may rebake this region's navmesh; Firestorm `llpathfindingmanager.cpp`) and
+  `NavMeshStatusUpdate` (navmesh dirty/baking status). SL-only — OpenSim emits
+  neither, so this only ever shows up against a real grid.
+- **EQ batch 2 — group & display-name pushes.** `AgentDropGroup` (the sim
+  dropped the agent from a group), `DisplayNameUpdate` (a cached display name
+  changed), `SetDisplayNameReply` (result of the agent's own set-display-name).
+- **EQ batch 3 — region/environment/voice misc.** `WindLightRefresh`
+  (re-fetch environment), `SimConsoleResponse` (reply to a region
+  debug-console command), `RequiredVoiceVersion` (voice protocol version),
+  `OpenRegionInfo` (OpenSim extended region settings).
+
 ## Outbound gap — Phase 0 audit required
 
 The outbound gap could **not** be auto-computed: the client builds outbound
@@ -227,5 +300,8 @@ section with the resulting table before starting outbound batches.
 - [ ] Batch 4 — scene & appearance
 - [ ] Batch 5 — friendship & calling cards
 - [ ] Batch 6 — inventory sync, task inventory & misc
+- [ ] EQ batch 1 — pathfinding agent state (AgentStateUpdate — closes issue 3)
+- [ ] EQ batch 2 — group & display-name pushes
+- [ ] EQ batch 3 — region/environment/voice misc
 - [ ] Phase 0 — outbound audit (fill the outbound gap table)
 - [ ] Outbound batches (defined after Phase 0)
