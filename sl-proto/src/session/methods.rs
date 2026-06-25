@@ -61,10 +61,11 @@ use crate::types::{
     ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo,
     ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
     PickUpdate, PlacesResult, Postcard, PrimShape, ProfileUpdate, ProposalVoteId, RegionInfoUpdate,
-    Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl, ScriptControlAction,
-    ScriptPermissions, ScriptTeleportRequest, SoundFlags, SoundPreload, TelehubInfo, TeleportFlags,
-    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, Wearable, WearableType,
+    RegionStats, Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl,
+    ScriptControlAction, ScriptPermissions, ScriptTeleportRequest, SimStatId, SimulatorTime,
+    SoundFlags, SoundPreload, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
+    Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
+    WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -72,7 +73,7 @@ use sl_types::key::{
     OwnerKey, ParcelKey, TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
-use sl_types::map::{Distance, RegionCoordinates};
+use sl_types::map::{Distance, GridCoordinates, RegionCoordinates};
 use sl_types::money::LindenAmount;
 use sl_wire::{
     AbuseReport, AnyMessage, CircuitCode, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd,
@@ -2356,6 +2357,45 @@ impl Session {
                     you: index_into(update.index.you),
                     prey: index_into(update.index.prey),
                 });
+            }
+            // Periodic region performance telemetry (~1 Hz). `RegionX`/`RegionY`
+            // carry the region's map-tile indices (grid coordinates); the
+            // 64-bit extended flags fall back to the zero-extended 32-bit flags
+            // when the sim sends no `RegionInfo` block.
+            AnyMessage::SimStats(stats) => {
+                let region_flags_extended = stats
+                    .region_info
+                    .first()
+                    .map_or_else(|| u64::from(stats.region.region_flags), |info| {
+                        info.region_flags_extended
+                    });
+                self.events.push_back(Event::SimStats(Box::new(RegionStats {
+                    grid_coordinates: GridCoordinates::new(
+                        stats.region.region_x,
+                        stats.region.region_y,
+                    ),
+                    region_flags: stats.region.region_flags,
+                    object_capacity: stats.region.object_capacity,
+                    region_flags_extended,
+                    stats: stats
+                        .stat
+                        .iter()
+                        .map(|block| (SimStatId::from_id(block.stat_id), block.stat_value))
+                        .collect(),
+                })));
+            }
+            // The simulator's world clock and sun state, so the viewer can
+            // resynchronise its day cycle.
+            AnyMessage::SimulatorViewerTimeMessage(time) => {
+                self.events
+                    .push_back(Event::SimulatorTime(Box::new(SimulatorTime {
+                        usec_since_start: time.time_info.usec_since_start,
+                        sec_per_day: time.time_info.sec_per_day,
+                        sec_per_year: time.time_info.sec_per_year,
+                        sun_direction: time.time_info.sun_direction.clone(),
+                        sun_phase: time.time_info.sun_phase,
+                        sun_ang_velocity: time.time_info.sun_ang_velocity.clone(),
+                    })));
             }
             // Transient HUD effects from other avatars (look-at / point-at gaze,
             // beams, …). Each effect's `TypeData` is decoded into a typed

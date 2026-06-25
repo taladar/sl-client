@@ -762,6 +762,8 @@ impl Survey {
             | Event::LandResourceSummary(_)
             | Event::LandResourceDetail(_)
             | Event::LandStatReply { .. }
+            | Event::SimStats(_)
+            | Event::SimulatorTime(_)
             | Event::Environment(_) => {}
         }
         Ok(false)

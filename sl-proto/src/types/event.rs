@@ -16,9 +16,10 @@ use super::{
     MapRegionInfo, Maturity, MeanCollision, MoneyBalance, MuteEntry, NeighborInfo, Object,
     ObjectProperties, ObjectPropertiesFamily, ParcelAccessEntry, ParcelAccessScope, ParcelDetails,
     ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
-    PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, ScriptControl,
-    ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest, SoundFlags, SoundPreload,
-    TelehubInfo, TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
+    PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, RegionStats,
+    ScriptControl, ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest, SimulatorTime,
+    SoundFlags, SoundPreload, TelehubInfo, TeleportFlags, TerrainPatch, Texture, TransferStatus,
+    ViewerEffect, Wearable,
 };
 use sl_types::key::{
     AgentKey, ExperienceKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
@@ -70,6 +71,12 @@ pub enum Event {
     /// The current region's agent and object limits, parsed from a `RegionInfo`
     /// reply to [`Session::request_region_info`](crate::Session::request_region_info).
     RegionLimits(RegionLimits),
+    /// The region's periodic performance telemetry, parsed from a `SimStats`
+    /// message the simulator pushes roughly once a second.
+    SimStats(Box<RegionStats>),
+    /// The simulator's world time and sun state, parsed from a
+    /// `SimulatorViewerTimeMessage`.
+    SimulatorTime(Box<SimulatorTime>),
     /// Legacy avatar names resolved from a `UUIDNameReply` (a reply to
     /// [`Session::request_avatar_names`](crate::Session::request_avatar_names)).
     /// A single reply may batch several ids, and one request may be answered by
