@@ -14,27 +14,27 @@ mod test {
         ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction, CloudPosDensity,
         CoarseLocation, Color, ColorAlpha, ControlFlags, CreateGroupParams, DayCycle,
         DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, Direction,
-        DisconnectReason, Distance, EnvironmentSettings, EstateAccessDelta, EstateAccessKind,
-        Event, EventId, FollowCamProperty, FriendKey, FriendRights, GestureActivation,
-        GlobalCoordinates, Glow, GridCoordinates, GroupKey, GroupNoticeAttachment, GroupRequestId,
-        GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType,
-        ImDialog, ImSessionId, ImageCodec, InterestsUpdate, InventoryCallbackId,
-        InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
-        InventoryKey, LandArea, LandingType, LindenAmount, LindenBalance, LoginAccount,
-        LoginParams, LookAtType, LureId, MapItemType, Material, Maturity, MeanCollisionType,
-        MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NavMeshBuildStatus,
-        NavMeshStatus, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey,
-        ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-        ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
-        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5,
-        PickUpdate, PointAtType, Postcard, PrimShape, ProductType, ProfileUpdate, QueryId,
-        ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability,
-        RestoreItem, RezAttachment, SaleType, Scale, ScopedObjectId, ScopedParcelId,
-        ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session, SimStatId, SimulatorTime,
-        SkySettings, SoundFlags, TaskInventoryReply, TeleportFlags, TerrainLayerType, TextureKey,
-        Throttle, TransactionId, TransferStatus, Transmit, UserInfo, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
-        group_powers, pcode,
+        DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EnvironmentSettings,
+        EstateAccessDelta, EstateAccessKind, Event, EventId, FollowCamProperty, FriendKey,
+        FriendRights, GestureActivation, GlobalCoordinates, Glow, GridCoordinates, GroupKey,
+        GroupNoticeAttachment, GroupRequestId, GroupRoleChange, GroupRoleEdit, GroupRoleKey,
+        GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImSessionId, ImageCodec,
+        InterestsUpdate, InventoryCallbackId, InventoryFolderKey, InventoryItem, InventoryItemMove,
+        InventoryItemOrFolderKey, InventoryKey, LandArea, LandingType, LindenAmount, LindenBalance,
+        LoginAccount, LoginParams, LookAtType, LureId, MapItemType, Material, Maturity,
+        MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
+        NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NotecardRez, ObjectBuyItem,
+        ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
+        ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey,
+        ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
+        PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
+        ProductType, ProfileUpdate, QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle,
+        RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType, Scale, ScopedObjectId,
+        ScopedParcelId, ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session,
+        SetDisplayNameReply, SimStatId, SimulatorTime, SkySettings, SoundFlags, TaskInventoryReply,
+        TeleportFlags, TerrainLayerType, TextureKey, Throttle, TransactionId, TransferStatus,
+        Transmit, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings,
+        WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -3793,6 +3793,121 @@ mod test {
                 status: NavMeshBuildStatus::Building,
             }
         );
+        Ok(())
+    }
+
+    #[test]
+    fn agent_drop_group_caps_surfaces_dropped_group() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // The `AgentDropGroup` push wraps a single `AgentData` element; only the
+        // `GroupID` matters (the echoed `AgentID` is this agent itself).
+        let body = parse_llsd_xml(concat!(
+            "<llsd><map><key>AgentData</key><array><map>",
+            "<key>AgentID</key><uuid>00000000-0000-0000-0000-0000000000a1</uuid>",
+            "<key>GroupID</key><uuid>00000000-0000-0000-0000-0000000067b2</uuid>",
+            "</map></array></map></llsd>",
+        ))?;
+        session.handle_caps_event("AgentDropGroup", &body, now)?;
+
+        let group = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AgentDroppedFromGroup { group } => Some(group),
+                _ => None,
+            })
+            .ok_or("expected an AgentDroppedFromGroup event")?;
+        assert_eq!(group, GroupKey::from(uuid::Uuid::from_u128(0x67b2)));
+        Ok(())
+    }
+
+    #[test]
+    fn display_name_update_caps_surfaces_new_record() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // The `DisplayNameUpdate` push: old name plus the new `agent` record
+        // (People API fields, no embedded id — it comes from `agent_id`).
+        let body = parse_llsd_xml(concat!(
+            "<llsd><map>",
+            "<key>agent_id</key><uuid>00000000-0000-0000-0000-0000000000a1</uuid>",
+            "<key>old_display_name</key><string>Old Name</string>",
+            "<key>agent</key><map>",
+            "<key>username</key><string>james.linden</string>",
+            "<key>display_name</key><string>James the Great</string>",
+            "<key>legacy_first_name</key><string>James</string>",
+            "<key>legacy_last_name</key><string>Linden</string>",
+            "<key>is_display_name_default</key><boolean>0</boolean>",
+            "</map></map></llsd>",
+        ))?;
+        session.handle_caps_event("DisplayNameUpdate", &body, now)?;
+
+        let update = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::DisplayNameUpdate(update) => Some(update),
+                _ => None,
+            })
+            .ok_or("expected a DisplayNameUpdate event")?;
+        let expected = DisplayName {
+            id: AgentKey::from(uuid::Uuid::from_u128(0xa1)),
+            username: "james.linden".to_owned(),
+            display_name: "James the Great".to_owned(),
+            legacy_first_name: "James".to_owned(),
+            legacy_last_name: "Linden".to_owned(),
+            is_display_name_default: false,
+            display_name_expires: String::new(),
+            display_name_next_update: String::new(),
+            missing: false,
+        };
+        assert_eq!(
+            *update,
+            DisplayNameUpdate {
+                old_display_name: "Old Name".to_owned(),
+                name: expected,
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn set_display_name_reply_caps_surfaces_result() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A successful `SetDisplayNameReply`: status 200, the new name in
+        // `content.display_name`.
+        let body = parse_llsd_xml(concat!(
+            "<llsd><map>",
+            "<key>status</key><integer>200</integer>",
+            "<key>reason</key><string>OK</string>",
+            "<key>content</key><map>",
+            "<key>display_name</key><string>James the Great</string>",
+            "</map></map></llsd>",
+        ))?;
+        session.handle_caps_event("SetDisplayNameReply", &body, now)?;
+
+        let reply = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::SetDisplayNameReply(reply) => Some(reply),
+                _ => None,
+            })
+            .ok_or("expected a SetDisplayNameReply event")?;
+        assert_eq!(
+            *reply,
+            SetDisplayNameReply {
+                status: 200,
+                reason: "OK".to_owned(),
+                new_display_name: Some("James the Great".to_owned()),
+                error_tag: None,
+            }
+        );
+        assert!(reply.succeeded());
         Ok(())
     }
 

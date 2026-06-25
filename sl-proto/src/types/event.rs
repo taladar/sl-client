@@ -7,21 +7,21 @@ use super::{
     AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPick, AvatarPickerResult,
     AvatarProperties, ChatMessage, ClassifiedInfo, CoarseLocation, DirClassifiedResult,
     DirEventResult, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
-    DisconnectReason, EconomyData, EnvironmentSettings, EstateAccessKind, EstateCovenant,
-    EstateInfo, EventInfo, FeatureDisabled, FollowCamPropertyValue, Friend, FriendRights,
-    GenericMessage, GenericStreamingMessage, GroupAccountDetails, GroupAccountSummary,
-    GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
-    GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, GroupVoteHistoryItem,
-    ImDialog, InstantMessage, InventoryFolder, InventoryItem, InventoryItemMove, Kick,
-    LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapLayer,
-    MapRegionInfo, Maturity, MeanCollision, MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo,
-    Object, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ParcelAccessEntry,
-    ParcelAccessScope, ParcelDetails, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelObjectOwner, ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation, RegionIdentity,
-    RegionLimits, RegionStats, ScriptControl, ScriptDialog, ScriptPermissionRequest,
-    ScriptTeleportRequest, ServerError, SimulatorTime, SoundFlags, SoundPreload,
-    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainPatch, Texture, TransferStatus,
-    UserInfo, ViewerEffect, Wearable,
+    DisconnectReason, DisplayNameUpdate, EconomyData, EnvironmentSettings, EstateAccessKind,
+    EstateCovenant, EstateInfo, EventInfo, FeatureDisabled, FollowCamPropertyValue, Friend,
+    FriendRights, GenericMessage, GenericStreamingMessage, GroupAccountDetails,
+    GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupMember,
+    GroupMembership, GroupName, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle,
+    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
+    InventoryItemMove, Kick, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
+    MapItem, MapItemType, MapLayer, MapRegionInfo, Maturity, MeanCollision, MoneyBalance,
+    MuteEntry, NavMeshStatus, NeighborInfo, Object, ObjectPlayingAnimation, ObjectProperties,
+    ObjectPropertiesFamily, ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, PickInfo,
+    PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, RegionStats, ScriptControl,
+    ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest, ServerError, SetDisplayNameReply,
+    SimulatorTime, SoundFlags, SoundPreload, TaskInventoryReply, TelehubInfo, TeleportFlags,
+    TerrainPatch, Texture, TransferStatus, UserInfo, ViewerEffect, Wearable,
 };
 use sl_types::key::{
     AgentKey, ExperienceKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
@@ -1556,6 +1556,20 @@ pub enum Event {
     /// A region's navmesh build status changed (`NavMeshStatusUpdate`, pushed
     /// over the CAPS event queue). SL-only — OpenSim never sends it.
     NavMeshStatus(NavMeshStatus),
+    /// The simulator dropped this agent from a group (`AgentDropGroup`, pushed
+    /// over the CAPS event queue) — e.g. the agent was ejected or the group was
+    /// dissolved. The client should drop the group from its cached membership.
+    AgentDroppedFromGroup {
+        /// The group the agent is no longer a member of.
+        group: GroupKey,
+    },
+    /// An avatar's display name changed (`DisplayNameUpdate`, pushed over the
+    /// CAPS event queue), so a client mirroring the name cache can refresh it.
+    /// SL-only — OpenSim never pushes it.
+    DisplayNameUpdate(Box<DisplayNameUpdate>),
+    /// The result of this agent's own set-display-name request
+    /// (`SetDisplayNameReply`, pushed over the CAPS event queue). SL-only.
+    SetDisplayNameReply(Box<SetDisplayNameReply>),
     /// The session logged out cleanly (a `LogoutReply` was received).
     LoggedOut,
     /// The session disconnected for the given reason.

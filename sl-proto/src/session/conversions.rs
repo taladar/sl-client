@@ -7,18 +7,19 @@ use crate::types::{
     ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment, AvatarGroupMembership,
     AvatarInterests, AvatarName, AvatarProperties, ChatAudible, ChatMessage, ChatSource, ChatType,
     ClassifiedCategory, ClassifiedInfo, CloudPosDensity, Color, ColorAlpha, DayCycle,
-    DayCycleFrame, EconomyData, EnvironmentSettings, EstateAccessKind, EstateInfo, Event, Friend,
-    FriendRights, Glow, GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
-    GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupMember,
-    GroupMembership, GroupName, GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle,
-    GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
-    MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus,
-    NavMeshStatus, NeighborInfo, Object, ObjectProperties, ParcelCategory, ParcelInfo,
-    ParcelRequestResult, ParcelStatus, PickInfo, PickKey, PlayingAnimation, PrimShapeParams,
-    ProductType, ProposalCandidateId, ProposalVoteId, RegionChatSettings, RegionCombatSettings,
-    RegionIdentity, RegionLimits, Scale, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    SkySettings, WaterSettings, avatar_texture,
+    DayCycleFrame, DisplayNameUpdate, EconomyData, EnvironmentSettings, EstateAccessKind,
+    EstateInfo, Event, Friend, FriendRights, Glow, GroupAccountDetails, GroupAccountDetailsEntry,
+    GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
+    GroupActiveProposalItem, GroupMember, GroupMembership, GroupName, GroupNotice, GroupNoticeKey,
+    GroupProfile, GroupRole, GroupTitle, GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage,
+    InventoryFolder, InventoryItem, LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo,
+    MapRequestFlags, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType,
+    NavMeshBuildStatus, NavMeshStatus, NeighborInfo, Object, ObjectProperties, ParcelCategory,
+    ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey, PlayingAnimation,
+    PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId, RegionChatSettings,
+    RegionCombatSettings, RegionIdentity, RegionLimits, Scale, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply, SkySettings, WaterSettings,
+    avatar_texture,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
@@ -36,6 +37,7 @@ use sl_types::map::GridCoordinates;
 use sl_types::map::GridRectangle;
 use sl_types::map::GridRectangleLike as _;
 use sl_types::map::RegionCoordinates;
+use sl_wire::DisplayName;
 use sl_wire::RegionHandle;
 use sl_wire::messages::{
     AgentDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
@@ -1865,6 +1867,73 @@ pub(crate) fn nav_mesh_status_from_llsd(body: &Llsd) -> Option<NavMeshStatus> {
         version: u32_member(body, "version"),
         status: NavMeshBuildStatus::from_wire(&string_member(body, "status")),
     })
+}
+
+/// Decodes a CAPS `AgentDropGroup` event body into the dropped group's key.
+/// The body is `{ AgentData: [ { AgentID, GroupID } ] }` (the viewer's
+/// `LLAgentDropGroupViewerNode`); the echoed `AgentID` is this agent itself and
+/// is dropped, leaving the `GroupID` the simulator removed the agent from. A
+/// missing/empty `AgentData` or `GroupID` drops the event.
+pub(crate) fn agent_drop_group_from_llsd(body: &Llsd) -> Option<GroupKey> {
+    // The sim sometimes double-wraps the payload in a nested `body`.
+    let body = body.get("body").unwrap_or(body);
+    let first = body.get("AgentData").and_then(Llsd::as_array)?.first()?;
+    let group_id = first.get("GroupID").and_then(Llsd::as_uuid)?;
+    Some(GroupKey::from(group_id))
+}
+
+/// Decodes a CAPS `DisplayNameUpdate` event body into a [`DisplayNameUpdate`].
+/// The body is `{ agent_id: uuid, old_display_name: string, agent: <av record>
+/// }`; the new-name record (`agent`) is required and carries the same People
+/// API fields as a `GetDisplayNames` reply entry — but, unlike that entry, no
+/// embedded `id` (it is `LLAvatarName::asLLSD`, which omits it), so the id is
+/// taken from the body's top-level `agent_id`. `old_display_name` defaults to
+/// empty when absent.
+pub(crate) fn display_name_update_from_llsd(body: &Llsd) -> Option<DisplayNameUpdate> {
+    let agent_id = body.get("agent_id").and_then(Llsd::as_uuid)?;
+    let record = body.get("agent")?;
+    let name = DisplayName {
+        // The record may carry its own `id`; fall back to the body's `agent_id`.
+        id: AgentKey::from(record.get("id").and_then(Llsd::as_uuid).unwrap_or(agent_id)),
+        username: string_member(record, "username"),
+        display_name: string_member(record, "display_name"),
+        legacy_first_name: string_member(record, "legacy_first_name"),
+        legacy_last_name: string_member(record, "legacy_last_name"),
+        is_display_name_default: record
+            .get("is_display_name_default")
+            .and_then(Llsd::as_bool)
+            .unwrap_or(false),
+        display_name_expires: string_member(record, "display_name_expires"),
+        display_name_next_update: string_member(record, "display_name_next_update"),
+        missing: false,
+    };
+    Some(DisplayNameUpdate {
+        old_display_name: string_member(body, "old_display_name"),
+        name,
+    })
+}
+
+/// Decodes a CAPS `SetDisplayNameReply` event body into a [`SetDisplayNameReply`].
+/// The body is `{ status: int, reason: string, content: { display_name } | {
+/// error_tag, error_description } }`: on success `content.display_name` holds the
+/// new name, on failure `content.error_tag` identifies the error (mirroring the
+/// viewer's `LLSetDisplayNameReply`). The fields all degrade gracefully, so this
+/// is infallible.
+pub(crate) fn set_display_name_reply_from_llsd(body: &Llsd) -> SetDisplayNameReply {
+    let content = body.get("content");
+    let content_string = |key: &str| -> Option<String> {
+        content
+            .and_then(|map| map.get(key))
+            .and_then(Llsd::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    };
+    SetDisplayNameReply {
+        status: i32_member(body, "status"),
+        reason: string_member(body, "reason"),
+        new_display_name: content_string("display_name"),
+        error_tag: content_string("error_tag"),
+    }
 }
 
 /// Builds a [`ParcelInfo`] from a CAPS `ParcelProperties` event body.
