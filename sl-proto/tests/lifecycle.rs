@@ -30,13 +30,13 @@ mod test {
         ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate, PointAtType,
         Postcard, PrimShape, PrimShapeParams, ProductType, ProfileUpdate, QueryId,
         ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability,
-        RequiredVoiceVersion, RestoreItem, RezAttachment, SaleType, Scale, ScopedObjectId,
-        ScopedParcelId, ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session,
-        SetDisplayNameReply, SimStatId, SimulatorTime, SkySettings, SoundFlags, TaskInventoryReply,
-        TeleportFlags, TerrainLayerType, TextureEntry, TextureFace, TextureKey, Throttle,
-        TransactionId, TransferStatus, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, WaterSettings, WearableType, avatar_texture, decode_texture_entry,
-        group_powers, pcode,
+        RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+        SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissions,
+        SculptOrMeshKey, Session, SetDisplayNameReply, SimStatId, SimulatorTime, SkySettings,
+        SoundFlags, TaskInventoryReply, TeleportFlags, TerrainLayerType, TextureEntry, TextureFace,
+        TextureKey, Throttle, TransactionId, TransferStatus, Transmit, UserInfo, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
+        decode_texture_entry, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -5817,6 +5817,135 @@ mod test {
         );
         assert!(rez.rez_data.ray_end_is_intersection);
         assert_eq!(rez.inventory_data.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn rez_inventory_and_revoke_commands_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        let item = RestoreItem {
+            item_id: InventoryKey::from(uuid::Uuid::from_u128(0x17E)),
+            folder_id: InventoryFolderKey::from(uuid::Uuid::nil()),
+            creator_id: AgentKey::from(uuid::Uuid::nil()),
+            owner: OwnerKey::Agent(AgentKey::from(uuid::Uuid::nil())),
+            group: None,
+            permissions: Permissions5 {
+                base: Permissions::from_bits(0x0008_e000),
+                owner: Permissions::from_bits(0x0008_e000),
+                group: Permissions::NONE,
+                everyone: Permissions::NONE,
+                next_owner: Permissions::from_bits(0x0008_e000),
+            },
+            transaction_id: uuid::Uuid::nil(),
+            asset_type: 6,
+            inv_type: 6,
+            flags: 0,
+            sale_type: SaleType::NotForSale,
+            sale_price: Some(LindenAmount(0)),
+            name: "Cube".to_owned(),
+            description: "a cube".to_owned(),
+            creation_date: 1_750_000_000,
+            crc: 0,
+        };
+
+        session.rez_object_from_inventory(
+            &RezObjectParams {
+                group_id: None,
+                from_task_id: None,
+                bypass_raycast: false,
+                ray_start: Vector {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 3.0,
+                },
+                ray_end: Vector {
+                    x: 4.0,
+                    y: 5.0,
+                    z: 6.0,
+                },
+                ray_target_id: None,
+                ray_end_is_intersection: true,
+                rez_selected: false,
+                remove_item: false,
+                item_flags: 0,
+                group_mask: 0,
+                everyone_mask: 0,
+                next_owner_mask: 0x0008_e000,
+                item: item.clone(),
+            },
+            now,
+        )?;
+        session.rez_script(
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(77)),
+            &RezScriptParams {
+                group_id: None,
+                enabled: true,
+                item,
+            },
+            now,
+        )?;
+        session.revoke_script_permissions(
+            ObjectKey::from(uuid::Uuid::from_u128(0x0B1E)),
+            ScriptPermissions(
+                ScriptPermissions::TAKE_CONTROLS | ScriptPermissions::TRIGGER_ANIMATION,
+            ),
+            now,
+        )?;
+        session.detach_attachment_into_inventory(
+            InventoryKey::from(uuid::Uuid::from_u128(0xA77AC)),
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+
+        let rez = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RezObject(rez) => Some(rez),
+                _ => None,
+            })
+            .ok_or("expected a RezObject")?;
+        assert_eq!(rez.inventory_data.item_id, uuid::Uuid::from_u128(0x17E));
+        assert_eq!(rez.inventory_data.r#type, 6);
+        assert!(rez.rez_data.ray_end_is_intersection);
+        assert_eq!(rez.rez_data.next_owner_mask, 0x0008_e000);
+
+        let script = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RezScript(script) => Some(script),
+                _ => None,
+            })
+            .ok_or("expected a RezScript")?;
+        assert_eq!(script.update_block.object_local_id, 77);
+        assert!(script.update_block.enabled);
+        assert_eq!(script.inventory_block.item_id, uuid::Uuid::from_u128(0x17E));
+
+        let revoke = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RevokePermissions(revoke) => Some(revoke),
+                _ => None,
+            })
+            .ok_or("expected a RevokePermissions")?;
+        assert_eq!(revoke.data.object_id, uuid::Uuid::from_u128(0x0B1E));
+        assert_eq!(
+            revoke.data.object_permissions,
+            (ScriptPermissions::TAKE_CONTROLS | ScriptPermissions::TRIGGER_ANIMATION)
+                .cast_unsigned()
+        );
+
+        let detach = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::DetachAttachmentIntoInv(detach) => Some(detach),
+                _ => None,
+            })
+            .ok_or("expected a DetachAttachmentIntoInv")?;
+        assert_eq!(detach.object_data.item_id, uuid::Uuid::from_u128(0xA77AC));
         Ok(())
     }
 

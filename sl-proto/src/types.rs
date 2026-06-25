@@ -386,7 +386,7 @@ pub use economy::{EconomyData, MoneyBalance, MoneyTransaction, MoneyTransactionT
 pub use editing::{
     ClickAction, DeRezDestination, Material, Maturity, NotecardRez, ObjectBuyItem,
     ObjectFlagSettings, ObjectTransform, PermissionField, PrimShape, ProductType, RestoreItem,
-    SaleType, TeleportFlags,
+    RezObjectParams, RezScriptParams, SaleType, TeleportFlags,
 };
 pub use environment::{
     CloudPosDensity, Color, ColorAlpha, DayCycle, DayCycleFrame, EnvironmentSettings, Glow, Scale,

@@ -59,10 +59,10 @@ use sl_proto::{
     ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, Permissions,
     Permissions5, PickKey, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams,
     ProfileUpdate, ProposalVoteId, RegionHandle, RegionInfoUpdate, RegionLocalObjectId,
-    RegionLocalParcelId, RestoreItem, RezAttachment, Rotation, SaleType, ScopedObjectId,
-    ScopedParcelId, ScriptPermissions, SculptData, SculptOrMeshKey, TextureEntry, TextureFace,
-    Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    VoiceProvisionRequest, Wearable, WearableType,
+    RegionLocalParcelId, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation,
+    SaleType, ScopedObjectId, ScopedParcelId, ScriptPermissions, SculptData, SculptOrMeshKey,
+    TextureEntry, TextureFace, Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -896,6 +896,85 @@ fn parse_maturity(field: &str, value: &str) -> Result<Maturity, ReplError> {
 }
 
 // ---- struct builders ----------------------------------------------------
+
+/// Build a [`RestoreItem`] (the full inventory-item payload shared by the
+/// `rez_restore_to_world` / `rez_object_from_inventory` / `rez_script` tokens)
+/// from `item_id` plus the twenty optional permission/sale/metadata fields at
+/// the positional indices `base..base + 19` (all are also addressable by name).
+/// The `group_id` field doubles as the item's group and, when `group_owned` is
+/// set, its owning group.
+fn restore_item_from_args(
+    args: &Args,
+    ctx: &dyn ReplContext,
+    item_id: InventoryKey,
+    base: usize,
+) -> Result<RestoreItem, ReplError> {
+    // Positional fallback index for the field `base + offset` slots along, kept
+    // saturating to honour the no-bare-arithmetic restriction lint.
+    let at = |offset: usize| base.saturating_add(offset);
+    let owner_id = args.uuid_or_nil(ctx, "owner_id", at(2))?;
+    let group_id = args.uuid_or_nil(ctx, "group_id", at(3))?;
+    let group_owned = args.bool_or(ctx, "group_owned", at(9), false)?;
+    let owner = if group_owned {
+        OwnerKey::Group(GroupKey::from(group_id))
+    } else {
+        OwnerKey::Agent(AgentKey::from(owner_id))
+    };
+    let group = if group_id.is_nil() {
+        None
+    } else {
+        Some(GroupKey::from(group_id))
+    };
+    Ok(RestoreItem {
+        item_id,
+        folder_id: InventoryFolderKey::from(args.uuid_or_nil(ctx, "folder_id", base)?),
+        creator_id: AgentKey::from(args.uuid_or_nil(ctx, "creator_id", at(1))?),
+        owner,
+        group,
+        permissions: Permissions5 {
+            base: Permissions::from_bits(args.parse_or(ctx, "base_mask", at(4), "u32", 0)?),
+            owner: Permissions::from_bits(args.parse_or(ctx, "owner_mask", at(5), "u32", 0)?),
+            group: Permissions::from_bits(args.parse_or(ctx, "group_mask", at(6), "u32", 0)?),
+            everyone: Permissions::from_bits(args.parse_or(
+                ctx,
+                "everyone_mask",
+                at(7),
+                "u32",
+                0,
+            )?),
+            next_owner: Permissions::from_bits(args.parse_or(
+                ctx,
+                "next_owner_mask",
+                at(8),
+                "u32",
+                0,
+            )?),
+        },
+        transaction_id: args.uuid_or_nil(ctx, "transaction_id", at(10))?,
+        asset_type: args.parse_or(ctx, "asset_type", at(11), "i8", -1)?,
+        inv_type: args.parse_or(ctx, "inv_type", at(12), "i8", -1)?,
+        flags: args.parse_or(ctx, "flags", at(13), "u32", 0)?,
+        sale_type: enum_arg_or(
+            args,
+            ctx,
+            "sale_type",
+            at(14),
+            parse_sale_type,
+            SaleType::NotForSale,
+        )?,
+        sale_price: Some(LindenAmount(args.parse_or(
+            ctx,
+            "sale_price",
+            at(15),
+            "u64",
+            0,
+        )?)),
+        name: args.str_or(ctx, "name", at(16), "")?,
+        description: args.str_or(ctx, "description", at(17), "")?,
+        creation_date: args.parse_or(ctx, "creation_date", at(18), "i32", 0)?,
+        crc: args.parse_or(ctx, "crc", at(19), "u32", 0)?,
+    })
+}
 
 /// Build a [`Throttle`] from seven optional kbps fields (default `0.0`).
 fn build_throttle(args: &Args, ctx: &dyn ReplContext) -> Result<Throttle, ReplError> {
@@ -3466,91 +3545,9 @@ fn all_specs() -> Vec<CommandSpec> {
                     [group_owned=] [transaction_id=] [asset_type=] [inv_type=] [flags=] \
                     [sale_type=] [sale_price=] [name=] [description=] [creation_date=] [crc=]",
             build: |args, ctx| {
-                let owner_id = args.uuid_or_nil(ctx, "owner_id", 102)?;
-                let group_id = args.uuid_or_nil(ctx, "group_id", 103)?;
-                let group_owned = args.bool_or(ctx, "group_owned", 109, false)?;
-                let owner = if group_owned {
-                    OwnerKey::Group(GroupKey::from(group_id))
-                } else {
-                    OwnerKey::Agent(AgentKey::from(owner_id))
-                };
-                let group = if group_id.is_nil() {
-                    None
-                } else {
-                    Some(GroupKey::from(group_id))
-                };
+                let item_id = InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?);
                 Ok(Command::RezRestoreToWorld {
-                    item: RestoreItem {
-                        item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
-                        folder_id: InventoryFolderKey::from(args.uuid_or_nil(
-                            ctx,
-                            "folder_id",
-                            100,
-                        )?),
-                        creator_id: AgentKey::from(args.uuid_or_nil(ctx, "creator_id", 101)?),
-                        owner,
-                        group,
-                        permissions: Permissions5 {
-                            base: Permissions::from_bits(args.parse_or(
-                                ctx,
-                                "base_mask",
-                                104,
-                                "u32",
-                                0,
-                            )?),
-                            owner: Permissions::from_bits(args.parse_or(
-                                ctx,
-                                "owner_mask",
-                                105,
-                                "u32",
-                                0,
-                            )?),
-                            group: Permissions::from_bits(args.parse_or(
-                                ctx,
-                                "group_mask",
-                                106,
-                                "u32",
-                                0,
-                            )?),
-                            everyone: Permissions::from_bits(args.parse_or(
-                                ctx,
-                                "everyone_mask",
-                                107,
-                                "u32",
-                                0,
-                            )?),
-                            next_owner: Permissions::from_bits(args.parse_or(
-                                ctx,
-                                "next_owner_mask",
-                                108,
-                                "u32",
-                                0,
-                            )?),
-                        },
-                        transaction_id: args.uuid_or_nil(ctx, "transaction_id", 110)?,
-                        asset_type: args.parse_or(ctx, "asset_type", 111, "i8", -1)?,
-                        inv_type: args.parse_or(ctx, "inv_type", 112, "i8", -1)?,
-                        flags: args.parse_or(ctx, "flags", 113, "u32", 0)?,
-                        sale_type: enum_arg_or(
-                            args,
-                            ctx,
-                            "sale_type",
-                            114,
-                            parse_sale_type,
-                            SaleType::NotForSale,
-                        )?,
-                        sale_price: Some(LindenAmount(args.parse_or(
-                            ctx,
-                            "sale_price",
-                            115,
-                            "u64",
-                            0,
-                        )?)),
-                        name: args.str_or(ctx, "name", 116, "")?,
-                        description: args.str_or(ctx, "description", 117, "")?,
-                        creation_date: args.parse_or(ctx, "creation_date", 118, "i32", 0)?,
-                        crc: args.parse_or(ctx, "crc", 119, "u32", 0)?,
-                    },
+                    item: restore_item_from_args(args, ctx, item_id, 100)?,
                 })
             },
         },
@@ -3593,6 +3590,93 @@ fn all_specs() -> Vec<CommandSpec> {
                         everyone_mask: args.parse_or(ctx, "everyone_mask", 110, "u32", 0)?,
                         next_owner_mask: args.parse_or(ctx, "next_owner_mask", 111, "u32", 0)?,
                     },
+                })
+            },
+        },
+        CommandSpec {
+            name: "rez_object_from_inventory",
+            usage: "<item_id> <ray_start-vec> <ray_end-vec> [active_group_id=] [from_task_id=] \
+                    [ray_target_id=] [bypass_raycast=] [ray_end_is_intersection=] [rez_selected=] \
+                    [remove_item=] [item_flags=] [apply_group_mask=] [apply_everyone_mask=] \
+                    [apply_next_owner_mask=] [folder_id=] [creator_id=] [owner_id=] [group_id=] \
+                    [base_mask=] [owner_mask=] [group_mask=] [everyone_mask=] [next_owner_mask=] \
+                    [group_owned=] [transaction_id=] [asset_type=] [inv_type=] [flags=] \
+                    [sale_type=] [sale_price=] [name=] [description=] [creation_date=] [crc=]",
+            build: |args, ctx| {
+                let item_id = InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?);
+                Ok(Command::RezObjectFromInventory {
+                    params: Box::new(RezObjectParams {
+                        group_id: args.opt_group(ctx, "active_group_id", 100)?,
+                        from_task_id: args.opt_object(ctx, "from_task_id", 101)?,
+                        bypass_raycast: args.bool_or(ctx, "bypass_raycast", 103, false)?,
+                        ray_start: args.req_vector(ctx, "ray_start", 1)?,
+                        ray_end: args.req_vector(ctx, "ray_end", 2)?,
+                        ray_target_id: args.opt_object(ctx, "ray_target_id", 102)?,
+                        ray_end_is_intersection: args.bool_or(
+                            ctx,
+                            "ray_end_is_intersection",
+                            104,
+                            false,
+                        )?,
+                        rez_selected: args.bool_or(ctx, "rez_selected", 105, false)?,
+                        remove_item: args.bool_or(ctx, "remove_item", 106, false)?,
+                        item_flags: args.parse_or(ctx, "item_flags", 107, "u32", 0)?,
+                        group_mask: args.parse_or(ctx, "apply_group_mask", 108, "u32", 0)?,
+                        everyone_mask: args.parse_or(ctx, "apply_everyone_mask", 109, "u32", 0)?,
+                        next_owner_mask: args.parse_or(
+                            ctx,
+                            "apply_next_owner_mask",
+                            110,
+                            "u32",
+                            0,
+                        )?,
+                        item: restore_item_from_args(args, ctx, item_id, 120)?,
+                    }),
+                })
+            },
+        },
+        CommandSpec {
+            name: "rez_script",
+            usage: "<target-local_id> <item_id> [enabled=] [active_group_id=] [folder_id=] \
+                    [creator_id=] [owner_id=] [group_id=] [base_mask=] [owner_mask=] \
+                    [group_mask=] [everyone_mask=] [next_owner_mask=] [group_owned=] \
+                    [transaction_id=] [asset_type=] [inv_type=] [flags=] [sale_type=] \
+                    [sale_price=] [name=] [description=] [creation_date=] [crc=]",
+            build: |args, ctx| {
+                let target = scoped_object(ctx, args.req_parse(ctx, "target", 0, "u32")?)?;
+                let item_id = InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?);
+                Ok(Command::RezScript {
+                    target,
+                    params: Box::new(RezScriptParams {
+                        group_id: args.opt_group(ctx, "active_group_id", 101)?,
+                        enabled: args.bool_or(ctx, "enabled", 100, true)?,
+                        item: restore_item_from_args(args, ctx, item_id, 120)?,
+                    }),
+                })
+            },
+        },
+        CommandSpec {
+            name: "revoke_script_permissions",
+            usage: "<object_id> <permissions-i32>",
+            build: |args, ctx| {
+                Ok(Command::RevokeScriptPermissions {
+                    object_id: args.req_object(ctx, "object_id", 0)?,
+                    permissions: ScriptPermissions(args.parse_or(
+                        ctx,
+                        "permissions",
+                        1,
+                        "i32",
+                        0,
+                    )?),
+                })
+            },
+        },
+        CommandSpec {
+            name: "detach_attachment_into_inventory",
+            usage: "<item_id>",
+            build: |args, ctx| {
+                Ok(Command::DetachAttachmentIntoInventory {
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
                 })
             },
         },
@@ -4638,7 +4722,7 @@ mod tests {
         Command, ControlFlags, FriendRights, GroupKey, InventoryKey, LandStatReportType,
         LindenAmount, MapItemType, MovementMode, ObjectBuyItem, ObjectKey, OwnerKey, RegionHandle,
         RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId, ScopedParcelId,
-        TransactionId, Uuid,
+        ScriptPermissions, TransactionId, Uuid,
     };
 
     use super::Registry;
@@ -5113,6 +5197,52 @@ mod tests {
             Ok(Command::RezObjectFromNotecard { rez })
                 if rez.notecard_item_id == InventoryKey::from(uuid(ONE))
                     && rez.item_ids == vec![InventoryKey::from(uuid(TWO))]
+        ));
+    }
+
+    #[test]
+    fn rez_object_from_inventory_parses() {
+        assert!(matches!(
+            build(&format!(
+                "rez_object_from_inventory {ONE} <1,2,3> <4,5,6> \
+                 ray_end_is_intersection=true apply_next_owner_mask=581632 asset_type=6"
+            )),
+            Ok(Command::RezObjectFromInventory { params })
+                if params.item.item_id == InventoryKey::from(uuid(ONE))
+                    && params.ray_end_is_intersection
+                    && params.next_owner_mask == 581_632
+                    && params.item.asset_type == 6
+        ));
+    }
+
+    #[test]
+    fn rez_script_parses_scope() {
+        assert!(matches!(
+            build_scoped(&format!("rez_script 77 {ONE} enabled=false")),
+            Ok(Command::RezScript {
+                target: ScopedObjectId { circuit: TEST_CIRCUIT, id: RegionLocalObjectId(77) },
+                params,
+            })
+                if params.item.item_id == InventoryKey::from(uuid(ONE)) && !params.enabled
+        ));
+    }
+
+    #[test]
+    fn revoke_script_permissions_parses() {
+        assert!(matches!(
+            build(&format!("revoke_script_permissions {ONE} 4")),
+            Ok(Command::RevokeScriptPermissions { object_id, permissions })
+                if object_id == ObjectKey::from(uuid(ONE))
+                    && permissions == ScriptPermissions(ScriptPermissions::TAKE_CONTROLS)
+        ));
+    }
+
+    #[test]
+    fn detach_attachment_into_inventory_parses() {
+        assert!(matches!(
+            build(&format!("detach_attachment_into_inventory {ONE}")),
+            Ok(Command::DetachAttachmentIntoInventory { item_id })
+                if item_id == InventoryKey::from(uuid(ONE))
         ));
     }
 

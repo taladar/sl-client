@@ -1903,6 +1903,23 @@ fn advance_running(
             Command::RezObjectFromNotecard { rez } => {
                 session.rez_object_from_notecard(rez, now).ok();
             }
+            Command::RezObjectFromInventory { params } => {
+                session.rez_object_from_inventory(params, now).ok();
+            }
+            Command::RezScript { target, params } => {
+                session.rez_script(*target, params, now).ok();
+            }
+            Command::RevokeScriptPermissions {
+                object_id,
+                permissions,
+            } => {
+                session
+                    .revoke_script_permissions(*object_id, *permissions, now)
+                    .ok();
+            }
+            Command::DetachAttachmentIntoInventory { item_id } => {
+                session.detach_attachment_into_inventory(*item_id, now).ok();
+            }
             Command::RequestScriptRunning { object_id, item_id } => {
                 session
                     .request_script_running(*object_id, *item_id, now)
