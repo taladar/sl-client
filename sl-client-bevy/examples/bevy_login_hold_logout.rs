@@ -362,6 +362,9 @@ fn on_events(
             | SlSessionEvent::LandResourceDetail(_)
             | SlSessionEvent::SimStats(_)
             | SlSessionEvent::SimulatorTime(_)
+            | SlSessionEvent::GenericMessage(_)
+            | SlSessionEvent::LargeGenericMessage(_)
+            | SlSessionEvent::GenericStreamingMessage(_)
             | SlSessionEvent::LandStatReply { .. } => {}
         }
     }

@@ -68,7 +68,7 @@ mod test {
         EstateOwnerMessageParamListBlock, EventInfoReply, EventInfoReplyAgentDataBlock,
         EventInfoReplyEventDataBlock, FindAgent, FindAgentAgentBlockBlock,
         FindAgentLocationBlockBlock, GenericMessage, GenericMessageAgentDataBlock,
-        GenericMessageMethodDataBlock, GenericStreamingMessage,
+        GenericMessageMethodDataBlock, GenericMessageParamListBlock, GenericStreamingMessage,
         GenericStreamingMessageDataBlockBlock, GenericStreamingMessageMethodDataBlock,
         GroupAccountSummaryReply, GroupAccountSummaryReplyAgentDataBlock,
         GroupAccountSummaryReplyMoneyDataBlock, GroupActiveProposalItemReply,
@@ -86,14 +86,15 @@ mod test {
         ImprovedTerseObjectUpdate, ImprovedTerseObjectUpdateObjectDataBlock,
         ImprovedTerseObjectUpdateRegionDataBlock, InventoryDescendents,
         InventoryDescendentsAgentDataBlock, InventoryDescendentsFolderDataBlock,
-        InventoryDescendentsItemDataBlock, KillObject, KillObjectObjectDataBlock, LayerData,
-        LayerDataLayerDataBlock, LayerDataLayerIDBlock, LogoutRequest, LogoutRequestAgentDataBlock,
-        MapBlockReply, MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock,
-        MapItemReply, MapItemReplyAgentDataBlock, MapItemReplyDataBlock,
-        MapItemReplyRequestDataBlock, MapLayerReply, MapLayerReplyAgentDataBlock,
-        MapLayerReplyLayerDataBlock, MoneyBalanceReply, MoneyBalanceReplyMoneyDataBlock,
-        MoneyBalanceReplyTransactionInfoBlock, MuteListUpdate, MuteListUpdateMuteDataBlock,
-        ObjectProperties as WireObjectProperties,
+        InventoryDescendentsItemDataBlock, KillObject, KillObjectObjectDataBlock,
+        LargeGenericMessage, LargeGenericMessageAgentDataBlock, LargeGenericMessageMethodDataBlock,
+        LargeGenericMessageParamListBlock, LayerData, LayerDataLayerDataBlock,
+        LayerDataLayerIDBlock, LogoutRequest, LogoutRequestAgentDataBlock, MapBlockReply,
+        MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapItemReply,
+        MapItemReplyAgentDataBlock, MapItemReplyDataBlock, MapItemReplyRequestDataBlock,
+        MapLayerReply, MapLayerReplyAgentDataBlock, MapLayerReplyLayerDataBlock, MoneyBalanceReply,
+        MoneyBalanceReplyMoneyDataBlock, MoneyBalanceReplyTransactionInfoBlock, MuteListUpdate,
+        MuteListUpdateMuteDataBlock, ObjectProperties as WireObjectProperties,
         ObjectPropertiesFamily as ObjectPropertiesFamilyMessage,
         ObjectPropertiesFamilyObjectDataBlock, ObjectPropertiesObjectDataBlock, ObjectUpdate,
         ObjectUpdateCached, ObjectUpdateCachedObjectDataBlock, ObjectUpdateCachedRegionDataBlock,
@@ -771,6 +772,123 @@ mod test {
                 sun_direction: vec3(0.0, 0.0, 1.0),
                 sun_phase: 1.5,
                 sun_ang_velocity: vec3(0.0, 0.1, 0.0),
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn generic_message_surfaces_method_and_params() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let message = AnyMessage::GenericMessage(GenericMessage {
+            agent_data: GenericMessageAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+                transaction_id: uuid::Uuid::nil(),
+            },
+            method_data: GenericMessageMethodDataBlock {
+                // A method with no special handler falls through to the generic
+                // envelope event; NUL-terminated as the sim sends it.
+                method: b"GrantUserRights\0".to_vec(),
+                invoice: uuid::Uuid::from_u128(0xABCD),
+            },
+            param_list: vec![
+                GenericMessageParamListBlock {
+                    parameter: b"first".to_vec(),
+                },
+                GenericMessageParamListBlock {
+                    parameter: b"second".to_vec(),
+                },
+            ],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+        let received = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::GenericMessage(generic) => Some(generic),
+                _ => None,
+            })
+            .ok_or("expected a GenericMessage event")?;
+        assert_eq!(
+            received,
+            sl_proto::GenericMessage {
+                method: "GrantUserRights".to_owned(),
+                invoice: sl_proto::InvoiceId::from(uuid::Uuid::from_u128(0xABCD)),
+                params: vec![b"first".to_vec(), b"second".to_vec()],
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn large_generic_message_surfaces_method_and_params() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let message = AnyMessage::LargeGenericMessage(LargeGenericMessage {
+            agent_data: LargeGenericMessageAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+                transaction_id: uuid::Uuid::nil(),
+            },
+            method_data: LargeGenericMessageMethodDataBlock {
+                method: b"BigFeature\0".to_vec(),
+                invoice: uuid::Uuid::nil(),
+            },
+            param_list: vec![LargeGenericMessageParamListBlock {
+                parameter: b"payload".to_vec(),
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 10, false)?, now)?;
+        let received = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::LargeGenericMessage(generic) => Some(generic),
+                _ => None,
+            })
+            .ok_or("expected a LargeGenericMessage event")?;
+        assert_eq!(
+            received,
+            sl_proto::GenericMessage {
+                method: "BigFeature".to_owned(),
+                invoice: sl_proto::InvoiceId::default(),
+                params: vec![b"payload".to_vec()],
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn generic_streaming_message_surfaces_method_and_data() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A non-GLTF streaming method falls through to the generic envelope event
+        // (the GLTF material-override method has a dedicated handler arm).
+        let message = AnyMessage::GenericStreamingMessage(GenericStreamingMessage {
+            method_data: GenericStreamingMessageMethodDataBlock { method: 0x9999 },
+            data_block: GenericStreamingMessageDataBlockBlock {
+                data: vec![1, 2, 3, 4],
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 11, false)?, now)?;
+        let received = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::GenericStreamingMessage(streaming) => Some(streaming),
+                _ => None,
+            })
+            .ok_or("expected a GenericStreamingMessage event")?;
+        assert_eq!(
+            received,
+            sl_proto::GenericStreamingMessage {
+                method: 0x9999,
+                data: vec![1, 2, 3, 4],
             }
         );
         Ok(())
