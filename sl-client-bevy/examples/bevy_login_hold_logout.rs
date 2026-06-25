@@ -388,6 +388,10 @@ fn on_events(
             | SlSessionEvent::AgentDroppedFromGroup { .. }
             | SlSessionEvent::DisplayNameUpdate(_)
             | SlSessionEvent::SetDisplayNameReply(_)
+            | SlSessionEvent::WindLightRefresh { .. }
+            | SlSessionEvent::SimConsoleResponse { .. }
+            | SlSessionEvent::RequiredVoiceVersion(_)
+            | SlSessionEvent::OpenRegionInfo(_)
             | SlSessionEvent::LandStatReply { .. } => {}
         }
     }

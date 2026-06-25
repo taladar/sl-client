@@ -790,6 +790,10 @@ impl Survey {
             | Event::AgentDroppedFromGroup { .. }
             | Event::DisplayNameUpdate(_)
             | Event::SetDisplayNameReply(_)
+            | Event::WindLightRefresh { .. }
+            | Event::SimConsoleResponse { .. }
+            | Event::RequiredVoiceVersion(_)
+            | Event::OpenRegionInfo(_)
             | Event::Environment(_) => {}
         }
         Ok(false)

@@ -603,6 +603,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::AgentDroppedFromGroup { .. }
             | Event::DisplayNameUpdate(_)
             | Event::SetDisplayNameReply(_)
+            | Event::WindLightRefresh { .. }
+            | Event::SimConsoleResponse { .. }
+            | Event::RequiredVoiceVersion(_)
+            | Event::OpenRegionInfo(_)
             | Event::LandStatReply { .. } => {}
         }
     }

@@ -23,6 +23,7 @@ mod map;
 mod name;
 mod nearby;
 mod object;
+mod open_region;
 mod parcel;
 mod pathfinding;
 mod region;
@@ -31,6 +32,7 @@ mod script;
 mod server_error;
 mod session;
 mod terrain;
+mod voice;
 
 /// Build an [`OwnerKey`](sl_types::key::OwnerKey) from the wire's raw owner UUID
 /// and its accompanying group flag.
@@ -418,6 +420,7 @@ pub use object::{
     PrimShapeParams, ReflectionProbe, RenderMaterialRef, SculptData, TaskInventoryReply,
     TextureAnimation, particle_pattern, pcode, texture_anim_mode,
 };
+pub use open_region::OpenRegionInfo;
 pub use parcel::{
     LandStatItem, LandStatReportType, LandingType, ParcelAccessEntry, ParcelAccessFlags,
     ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo, ParcelMediaCommand,
@@ -441,6 +444,7 @@ pub use session::{
     Reliability, Throttle, ThrottleBuilder, ThrottleError, Transmit,
 };
 pub use terrain::{TerrainLayerType, TerrainPatch};
+pub use voice::RequiredVoiceVersion;
 
 // Value types migrated to the shared `sl-types` crate, re-exported here so the
 // flat `crate::types::*` surface (and the in-crate `crate::types::X` references)
