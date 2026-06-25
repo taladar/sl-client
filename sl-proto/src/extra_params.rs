@@ -166,6 +166,27 @@ pub(crate) fn extra_params_len(blob: &[u8]) -> usize {
 pub fn encode_extra_params(params: &ObjectExtraParams) -> Vec<u8> {
     // Collect each present parameter as a (type code, payload) pair, in
     // ascending type-code order.
+    let entries = present_entries(params);
+
+    let mut writer = Writer::new();
+    // The container count is a single byte; an object can carry at most one of
+    // each of the seven subtypes, so it never overflows.
+    writer.put_u8(u8::try_from(entries.len()).unwrap_or(u8::MAX));
+    for (param_type, payload) in entries {
+        writer.put_u16(param_type.code());
+        writer.put_u32(u32::try_from(payload.len()).unwrap_or(u32::MAX));
+        writer.bytes(&payload);
+    }
+    writer.into_bytes()
+}
+
+/// Collects each *present* parameter of `params` as a `(type code, payload)`
+/// pair, in ascending type-code order — the shared core of both
+/// [`encode_extra_params`] (which wraps these in the `ExtraParams` container) and
+/// [`extra_param_message_blocks`] (which emits one `ObjectExtraParams` wire block
+/// per parameter). A `None` field (or, for render materials, an empty list) is
+/// omitted. Each payload is a faithful port of the matching `LLNetworkData::pack`.
+fn present_entries(params: &ObjectExtraParams) -> Vec<(ExtraParamType, Vec<u8>)> {
     let mut entries: Vec<(ExtraParamType, Vec<u8>)> = Vec::new();
     if let Some(flexible) = &params.flexible {
         entries.push((ExtraParamType::FLEXIBLE, encode_flexible(flexible)));
@@ -197,17 +218,61 @@ pub fn encode_extra_params(params: &ObjectExtraParams) -> Vec<u8> {
             encode_reflection_probe(reflection_probe),
         ));
     }
+    entries
+}
 
-    let mut writer = Writer::new();
-    // The container count is a single byte; an object can carry at most one of
-    // each of the seven subtypes, so it never overflows.
-    writer.put_u8(u8::try_from(entries.len()).unwrap_or(u8::MAX));
-    for (param_type, payload) in entries {
-        writer.put_u16(param_type.code());
-        writer.put_u32(u32::try_from(payload.len()).unwrap_or(u32::MAX));
-        writer.bytes(&payload);
-    }
-    writer.into_bytes()
+/// One block of an outbound `ObjectExtraParams` message: a parameter's wire type
+/// code, whether it is in use, and its packed payload (empty when not in use).
+pub(crate) struct ExtraParamBlock {
+    /// The `ParamType` wire code (the `LLNetworkData` subtype tag).
+    pub(crate) param_type: u16,
+    /// The `ParamInUse` flag: `true` if the object carries this parameter.
+    pub(crate) in_use: bool,
+    /// The packed `ParamData` payload (empty when not in use; the simulator
+    /// ignores the payload of a not-in-use block).
+    pub(crate) data: Vec<u8>,
+}
+
+/// Builds the full set of `ObjectExtraParams` wire blocks for `params`: one block
+/// per known parameter subtype, with `in_use` reflecting whether `params` carries
+/// it (and the packed payload when it does, an empty payload when it does not).
+///
+/// This mirrors the reference viewer's `LLViewerObject::sendExtraParameters`,
+/// which sends every known subtype each time with its in-use flag, so the message
+/// sets the object's *complete* extra-parameter state: a parameter absent from
+/// `params` is sent as not-in-use, clearing it on the simulator (which drops the
+/// matching entry). Sending an [`ObjectExtraParams::default`] thus clears every
+/// extra parameter from the object.
+pub(crate) fn extra_param_message_blocks(params: &ObjectExtraParams) -> Vec<ExtraParamBlock> {
+    const ALL: [ExtraParamType; 7] = [
+        ExtraParamType::FLEXIBLE,
+        ExtraParamType::LIGHT,
+        ExtraParamType::SCULPT,
+        ExtraParamType::LIGHT_IMAGE,
+        ExtraParamType::EXTENDED_MESH,
+        ExtraParamType::RENDER_MATERIAL,
+        ExtraParamType::REFLECTION_PROBE,
+    ];
+    let present = present_entries(params);
+    ALL.iter()
+        .map(|param_type| {
+            match present
+                .iter()
+                .find(|(present_type, _)| present_type == param_type)
+            {
+                Some((_, payload)) => ExtraParamBlock {
+                    param_type: param_type.code(),
+                    in_use: true,
+                    data: payload.clone(),
+                },
+                None => ExtraParamBlock {
+                    param_type: param_type.code(),
+                    in_use: false,
+                    data: Vec::new(),
+                },
+            }
+        })
+        .collect()
 }
 
 /// Truncates a non-negative `f32` toward zero into a `u8`, the inverse of the

@@ -20,21 +20,23 @@ mod test {
         GroupNoticeAttachment, GroupRequestId, GroupRoleChange, GroupRoleEdit, GroupRoleKey,
         GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImSessionId, ImageCodec,
         InterestsUpdate, InventoryCallbackId, InventoryFolderKey, InventoryItem, InventoryItemMove,
-        InventoryItemOrFolderKey, InventoryKey, LandArea, LandingType, LindenAmount, LindenBalance,
-        LoginAccount, LoginParams, LookAtType, LureId, MapItemType, Material, Maturity,
-        MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
-        NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NotecardRez, ObjectBuyItem,
-        ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
-        ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey,
-        ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
-        PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
-        ProductType, ProfileUpdate, QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle,
-        RegionInfoUpdate, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, SaleType,
-        Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissions,
-        SculptOrMeshKey, Session, SetDisplayNameReply, SimStatId, SimulatorTime, SkySettings,
-        SoundFlags, TaskInventoryReply, TeleportFlags, TerrainLayerType, TextureKey, Throttle,
+        InventoryItemOrFolderKey, InventoryKey, LandArea, LandingType, LightData, LindenAmount,
+        LindenBalance, LoginAccount, LoginParams, LookAtType, LureId, MapItemType, Material,
+        Maturity, MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags,
+        MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NotecardRez, ObjectBuyItem,
+        ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
+        ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
+        ParcelKey, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
+        ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate, PointAtType,
+        Postcard, PrimShape, PrimShapeParams, ProductType, ProfileUpdate, QueryId,
+        ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability,
+        RequiredVoiceVersion, RestoreItem, RezAttachment, SaleType, Scale, ScopedObjectId,
+        ScopedParcelId, ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session,
+        SetDisplayNameReply, SimStatId, SimulatorTime, SkySettings, SoundFlags, TaskInventoryReply,
+        TeleportFlags, TerrainLayerType, TextureEntry, TextureFace, TextureKey, Throttle,
         TransactionId, TransferStatus, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, WaterSettings, WearableType, avatar_texture, group_powers, pcode,
+        ViewerEffectType, WaterSettings, WearableType, avatar_texture, decode_texture_entry,
+        group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -2640,6 +2642,132 @@ mod test {
             })
             .ok_or("expected a DeclineCallingCard")?;
         assert_eq!(decline.transaction_block.transaction_id, decline_tx);
+        Ok(())
+    }
+
+    #[test]
+    fn set_object_shape_packs_object_shape() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        // Start from a cube and hollow it out / twist it.
+        let shape = PrimShapeParams {
+            profile_hollow: 25000,
+            path_twist: 50,
+            ..PrimShapeParams::default()
+        };
+        session.set_object_shape(
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(42)),
+            &shape,
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let object_shape = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectShape(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected an ObjectShape")?;
+        let block = object_shape.object_data.first().ok_or("first object")?;
+        assert_eq!(block.object_local_id, 42);
+        assert_eq!(block.profile_hollow, 25000);
+        assert_eq!(block.path_twist, 50);
+        Ok(())
+    }
+
+    #[test]
+    fn set_object_image_packs_texture_entry() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        let texture = uuid::Uuid::from_u128(0x7E07);
+        session.set_object_image(
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(7)),
+            Some("http://example.com/media"),
+            &TextureEntry {
+                faces: vec![TextureFace::new(TextureKey::from(texture))],
+            },
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let object_image = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectImage(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected an ObjectImage")?;
+        let block = object_image.object_data.first().ok_or("first object")?;
+        assert_eq!(block.object_local_id, 7);
+        assert_eq!(block.media_url, b"http://example.com/media");
+        // The packed TextureEntry round-trips back to the requested texture id
+        // (a single face's value is the default applied to every face).
+        let decoded = decode_texture_entry(&block.texture_entry, 1);
+        assert_eq!(decoded.texture_id(0), Some(TextureKey::from(texture)));
+        Ok(())
+    }
+
+    #[test]
+    fn set_object_extra_params_packs_all_subtypes() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        // A light-only set: the light subtype is in use, every other subtype is
+        // sent not-in-use (clearing it).
+        let params = ObjectExtraParams {
+            light: Some(LightData {
+                color: [255, 128, 0, 255],
+                radius: 5.0,
+                cutoff: 0.0,
+                falloff: 1.0,
+            }),
+            ..ObjectExtraParams::default()
+        };
+        session.set_object_extra_params(
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(9)),
+            &params,
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let extra = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectExtraParams(message) => Some(message),
+                _ => None,
+            })
+            .ok_or("expected an ObjectExtraParams")?;
+        // One block per known subtype, all scoped to the same object.
+        assert_eq!(extra.object_data.len(), 7);
+        assert!(
+            extra
+                .object_data
+                .iter()
+                .all(|block| block.object_local_id == 9)
+        );
+        // The light block (0x20) is in use and carries a payload.
+        let light = extra
+            .object_data
+            .iter()
+            .find(|block| block.param_type == 0x20)
+            .ok_or("expected a light block")?;
+        assert!(light.param_in_use);
+        assert!(!light.param_data.is_empty());
+        assert_eq!(light.param_size, u32::try_from(light.param_data.len())?);
+        // The flexi block (0x10) is absent → not in use, empty payload.
+        let flexi = extra
+            .object_data
+            .iter()
+            .find(|block| block.param_type == 0x10)
+            .ok_or("expected a flexi block")?;
+        assert!(!flexi.param_in_use);
+        assert!(flexi.param_data.is_empty());
         Ok(())
     }
 

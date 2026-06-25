@@ -885,6 +885,15 @@ impl Client {
                         Some(Command::SetObjectFlags { local_id, flags }) => {
                             self.session.set_object_flags(local_id, &flags, Instant::now())?;
                         }
+                        Some(Command::SetObjectShape { local_id, shape }) => {
+                            self.session.set_object_shape(local_id, &shape, Instant::now())?;
+                        }
+                        Some(Command::SetObjectImage { local_id, media_url, texture_entry }) => {
+                            self.session.set_object_image(local_id, media_url.as_deref(), &texture_entry, Instant::now())?;
+                        }
+                        Some(Command::SetObjectExtraParams { local_id, params }) => {
+                            self.session.set_object_extra_params(local_id, &params, Instant::now())?;
+                        }
                         Some(Command::SetObjectGroup { local_ids, group_id }) => {
                             self.session.set_object_group(&local_ids, group_id, Instant::now())?;
                         }

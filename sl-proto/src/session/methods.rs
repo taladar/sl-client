@@ -61,16 +61,17 @@ use crate::types::{
     LandSearchType, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
     LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MeanCollision,
     MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NeighborInfo,
-    NewInventoryItem, NotecardRez, Object, ObjectBuyItem, ObjectFlagSettings,
+    NewInventoryItem, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
     ObjectPlayingAnimation, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
     ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand,
     ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
-    PermissionField, PickKey, PickUpdate, PlacesResult, Postcard, PrimShape, ProfileUpdate,
-    ProposalVoteId, RegionInfoUpdate, RegionStats, Reliability, RestoreItem, RezAttachment,
-    SaleType, ScriptControl, ScriptControlAction, ScriptPermissions, ScriptTeleportRequest,
-    ServerError, SimStatId, SimulatorTime, SoundFlags, SoundPreload, TaskInventoryReply,
-    TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus,
-    Transmit, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
+    PermissionField, PickKey, PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams,
+    ProfileUpdate, ProposalVoteId, RegionInfoUpdate, RegionStats, Reliability, RestoreItem,
+    RezAttachment, SaleType, ScriptControl, ScriptControlAction, ScriptPermissions,
+    ScriptTeleportRequest, ServerError, SimStatId, SimulatorTime, SoundFlags, SoundPreload,
+    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
+    TextureEntry, Throttle, TransferStatus, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -8196,6 +8197,73 @@ impl Session {
         let circuit = self.circuit_for_scope(local_id.circuit)?;
         let local_id = local_id.id;
         circuit.send_object_flag_update(local_id, flags, now)?;
+        Ok(())
+    }
+
+    /// Sets the path/profile geometry of the object `local_id` (an `ObjectShape`).
+    /// The `shape` fields are the quantized wire values (see [`PrimShapeParams`]);
+    /// read an object's current geometry from
+    /// [`Object::shape`](crate::Object::shape).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_object_shape(
+        &mut self,
+        local_id: ScopedObjectId,
+        shape: &PrimShapeParams,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
+        circuit.send_object_shape(local_id, shape, now)?;
+        Ok(())
+    }
+
+    /// Sets the per-face textures of the object `local_id` (an `ObjectImage`).
+    /// `texture_entry` is the new [`TextureEntry`] — build one with a single
+    /// [`TextureFace`](crate::TextureFace) to retexture every face uniformly, or
+    /// one face per prim face to set them individually. `media_url` is the legacy
+    /// parcel-media URL ([`None`] for none).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_object_image(
+        &mut self,
+        local_id: ScopedObjectId,
+        media_url: Option<&str>,
+        texture_entry: &TextureEntry,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
+        circuit.send_object_image(local_id, media_url.unwrap_or(""), texture_entry, now)?;
+        Ok(())
+    }
+
+    /// Sets the complete extra-parameter state of the object `local_id` (an
+    /// `ObjectExtraParams`): flexi/light/sculpt/mesh/light-image/render-material/
+    /// reflection-probe. Every known subtype is sent, in-use when `params` carries
+    /// it — so a subtype left [`None`] (or, for render materials, empty) in
+    /// `params` is *cleared* on the object. Passing
+    /// [`ObjectExtraParams::default`](crate::ObjectExtraParams) clears them all.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_object_extra_params(
+        &mut self,
+        local_id: ScopedObjectId,
+        params: &ObjectExtraParams,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        let local_id = local_id.id;
+        circuit.send_object_extra_params(local_id, params, now)?;
         Ok(())
     }
 

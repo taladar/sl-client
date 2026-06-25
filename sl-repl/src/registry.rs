@@ -49,18 +49,20 @@ use sl_proto::{
     AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentMode, AttachmentPoint,
     Camera, ChatType, ClassifiedCategory, ClassifiedUpdate, Command, ControlFlags,
     CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, EstateAccessDelta,
-    ExperiencePermission, ExperienceUpdate, FriendRights, GestureActivation, GroupNoticeAttachment,
-    GroupNoticeKey, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange, InterestsUpdate,
-    InventoryItem, InventoryOffer, InventoryType, LandSearchType, LandStatReportType, LindenAmount,
-    LookAtType, MapItemType, Material, MaterialOverrideUpdate, Maturity, MediaEntry,
-    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez,
-    ObjectBuyItem, ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
-    ParcelUpdate, PermissionField, Permissions, Permissions5, PickKey, PickUpdate, PointAtType,
-    Postcard, PrimShape, ProfileUpdate, ProposalVoteId, RegionHandle, RegionInfoUpdate,
-    RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment, Rotation, SaleType,
-    ScopedObjectId, ScopedParcelId, ScriptPermissions, Throttle, Uuid, Vector, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
+    ExperiencePermission, ExperienceUpdate, FlexibleData, FriendRights, GestureActivation,
+    GroupNoticeAttachment, GroupNoticeKey, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
+    InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LandSearchType,
+    LandStatReportType, LightData, LindenAmount, LookAtType, MapItemType, Material,
+    MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MovementMode, MuteFlags,
+    MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
+    ObjectPermMasks, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+    ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, Permissions,
+    Permissions5, PickKey, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams,
+    ProfileUpdate, ProposalVoteId, RegionHandle, RegionInfoUpdate, RegionLocalObjectId,
+    RegionLocalParcelId, RestoreItem, RezAttachment, Rotation, SaleType, ScopedObjectId,
+    ScopedParcelId, ScriptPermissions, SculptData, SculptOrMeshKey, TextureEntry, TextureFace,
+    Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -1200,6 +1202,107 @@ fn build_object_flag_settings(
         is_temporary: args.bool_or(ctx, "is_temporary", 2, false)?,
         is_phantom: args.bool_or(ctx, "is_phantom", 3, false)?,
         casts_shadows: args.bool_or(ctx, "casts_shadows", 4, true)?,
+    })
+}
+
+/// Build [`PrimShapeParams`] from keyword fields, defaulting each to a unit
+/// cube's path/profile geometry (square profile, line path, full top size) so
+/// only the differing fields need be given. The values are the quantized wire
+/// integers (see [`PrimShapeParams`]).
+fn build_prim_shape_params(
+    args: &Args,
+    ctx: &dyn ReplContext,
+) -> Result<PrimShapeParams, ReplError> {
+    Ok(PrimShapeParams {
+        path_curve: args.parse_or(ctx, "path_curve", 100, "u8", 0x10)?,
+        profile_curve: args.parse_or(ctx, "profile_curve", 101, "u8", 0x01)?,
+        path_begin: args.parse_or(ctx, "path_begin", 102, "u16", 0)?,
+        path_end: args.parse_or(ctx, "path_end", 103, "u16", 0)?,
+        path_scale_x: args.parse_or(ctx, "path_scale_x", 104, "u8", 100)?,
+        path_scale_y: args.parse_or(ctx, "path_scale_y", 105, "u8", 100)?,
+        path_shear_x: args.parse_or(ctx, "path_shear_x", 106, "u8", 0)?,
+        path_shear_y: args.parse_or(ctx, "path_shear_y", 107, "u8", 0)?,
+        path_twist: args.parse_or(ctx, "path_twist", 108, "i8", 0)?,
+        path_twist_begin: args.parse_or(ctx, "path_twist_begin", 109, "i8", 0)?,
+        path_radius_offset: args.parse_or(ctx, "path_radius_offset", 110, "i8", 0)?,
+        path_taper_x: args.parse_or(ctx, "path_taper_x", 111, "i8", 0)?,
+        path_taper_y: args.parse_or(ctx, "path_taper_y", 112, "i8", 0)?,
+        path_revolutions: args.parse_or(ctx, "path_revolutions", 113, "u8", 0)?,
+        path_skew: args.parse_or(ctx, "path_skew", 114, "i8", 0)?,
+        profile_begin: args.parse_or(ctx, "profile_begin", 115, "u16", 0)?,
+        profile_end: args.parse_or(ctx, "profile_end", 116, "u16", 0)?,
+        profile_hollow: args.parse_or(ctx, "profile_hollow", 117, "u16", 0)?,
+    })
+}
+
+/// Parse an RGBA `r,g,b,a` colour argument into the wire `[u8; 4]`, defaulting
+/// any missing channel to `255` (so an absent field is opaque white).
+fn parse_color(
+    args: &Args,
+    ctx: &dyn ReplContext,
+    field: &str,
+    pos: usize,
+) -> Result<[u8; 4], ReplError> {
+    let values = args.vec_parse::<u8>(ctx, field, pos, "u8")?;
+    let mut color = [255_u8; 4];
+    for (slot, value) in color.iter_mut().zip(values) {
+        *slot = value;
+    }
+    Ok(color)
+}
+
+/// Build [`ObjectExtraParams`] from keyword fields covering the flexi, light, and
+/// sculpt subtypes. A subtype is included only when enabled (`flexi=true`,
+/// `light=true`, or a `sculpt_texture` given); every other subtype is left
+/// absent, which clears it on the object. The light-image, extended-mesh,
+/// render-material, and reflection-probe subtypes are not exposed through the
+/// REPL — set them through
+/// [`Session::set_object_extra_params`](sl_proto::Session::set_object_extra_params).
+fn build_object_extra_params(
+    args: &Args,
+    ctx: &dyn ReplContext,
+) -> Result<ObjectExtraParams, ReplError> {
+    let flexible = if args.bool_or(ctx, "flexi", 100, false)? {
+        Some(FlexibleData {
+            softness: args.parse_or(ctx, "flexi_softness", 101, "u8", 0)?,
+            tension: args.parse_or(ctx, "flexi_tension", 102, "f32", 1.0)?,
+            air_friction: args.parse_or(ctx, "flexi_air_friction", 103, "f32", 0.0)?,
+            gravity: args.parse_or(ctx, "flexi_gravity", 104, "f32", 0.0)?,
+            wind_sensitivity: args.parse_or(ctx, "flexi_wind", 105, "f32", 0.0)?,
+            user_force: args.opt_vector(ctx, "flexi_force", 106)?.unwrap_or(Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            }),
+        })
+    } else {
+        None
+    };
+    let light = if args.bool_or(ctx, "light", 110, false)? {
+        Some(LightData {
+            color: parse_color(args, ctx, "light_color", 111)?,
+            radius: args.parse_or(ctx, "light_radius", 112, "f32", 5.0)?,
+            cutoff: args.parse_or(ctx, "light_cutoff", 113, "f32", 0.0)?,
+            falloff: args.parse_or(ctx, "light_falloff", 114, "f32", 1.0)?,
+        })
+    } else {
+        None
+    };
+    let sculpt = match args.opt_str(ctx, "sculpt_texture", 120)? {
+        Some(value) => Some(SculptData {
+            texture: SculptOrMeshKey::Sculpt(TextureKey::from(args::literal_uuid(
+                "sculpt_texture",
+                &value,
+            )?)),
+            sculpt_type: args.parse_or(ctx, "sculpt_type", 121, "u8", 0)?,
+        }),
+        None => None,
+    };
+    Ok(ObjectExtraParams {
+        flexible,
+        light,
+        sculpt,
+        ..ObjectExtraParams::default()
     })
 }
 
@@ -3108,6 +3211,50 @@ fn all_specs() -> Vec<CommandSpec> {
                 Ok(Command::SetObjectFlags {
                     local_id: scoped_object(ctx, args.req_parse(ctx, "local_id", 0, "u32")?)?,
                     flags: build_object_flag_settings(args, ctx)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "set_object_shape",
+            usage: "<local_id> [path_curve=] [profile_curve=] [path_begin=] [path_end=] \
+                    [path_scale_x=] [path_scale_y=] [path_shear_x=] [path_shear_y=] [path_twist=] \
+                    [path_twist_begin=] [path_radius_offset=] [path_taper_x=] [path_taper_y=] \
+                    [path_revolutions=] [path_skew=] [profile_begin=] [profile_end=] \
+                    [profile_hollow=]",
+            build: |args, ctx| {
+                Ok(Command::SetObjectShape {
+                    local_id: scoped_object(ctx, args.req_parse(ctx, "local_id", 0, "u32")?)?,
+                    shape: build_prim_shape_params(args, ctx)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "set_object_image",
+            usage: "<local_id> <texture_id> [media_url]",
+            build: |args, ctx| {
+                Ok(Command::SetObjectImage {
+                    local_id: scoped_object(ctx, args.req_parse(ctx, "local_id", 0, "u32")?)?,
+                    texture_entry: TextureEntry {
+                        faces: vec![TextureFace::new(TextureKey::from(args.req_uuid(
+                            ctx,
+                            "texture_id",
+                            1,
+                        )?))],
+                    },
+                    media_url: args.opt_str(ctx, "media_url", 2)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "set_object_extra_params",
+            usage: "<local_id> [flexi=] [flexi_softness=] [flexi_tension=] [flexi_air_friction=] \
+                    [flexi_gravity=] [flexi_wind=] [flexi_force=<v>] [light=] [light_color=r,g,b,a] \
+                    [light_radius=] [light_cutoff=] [light_falloff=] [sculpt_texture=] \
+                    [sculpt_type=]",
+            build: |args, ctx| {
+                Ok(Command::SetObjectExtraParams {
+                    local_id: scoped_object(ctx, args.req_parse(ctx, "local_id", 0, "u32")?)?,
+                    params: build_object_extra_params(args, ctx)?,
                 })
             },
         },
