@@ -13,32 +13,28 @@ The full trace from that run is saved (uncommitted) for analysis at:
 These are SL-specific findings: OpenSim never exercised these paths, so they
 only show up against a real Linden Lab simulator.
 
-## 1. RegionInfo formatter prints `$circuitid` instead of numeric values
+## 1. RegionInfo formatter prints `$circuitid` instead of numeric values — RESOLVED
 
-In the `region_info_handshake(...)` event, several numeric fields render as the
-literal placeholder string `$circuitid` rather than their actual values:
+In the `region_info_handshake(...)` event, several numeric fields rendered as
+the literal placeholder `$circuitid` rather than their values
+(`region_protocols: $circuitid`, `cpu_ratio: $circuitid`, `billable_factor:
+$circuitid.0`).
 
-```text
-region_protocols: $circuitid,
-cpu_ratio: $circuitid,
-billable_factor: $circuitid.0
-```
+**Cause:** the REPL formatter reverse-symbolizes bound context values back to
+their `$placeholder` for diffable transcripts. The circuit-instance id
+(`$circuitid`) is a small monotonic counter (here `circuit#1`, so value `1`), so
+matching it by bare value clobbered every coincidental small integer in the
+event's fields.
 
-Meanwhile sibling fields render correctly (e.g. `region_flags: 336626214`,
-`water_height: 20.0`). The `.0` tail on `billable_factor` suggests only the
-integer portion was substituted.
-
-**Hypothesis:** the REPL event formatter performs reverse placeholder
-substitution (replacing values that match a bound context variable with the
-variable's name), and these fields hold a value that coincides with the bound
-`$circuitid`. This is a display-only artifact — the underlying decoded values
-are almost certainly fine — but it makes the formatted output misleading.
-
-**Investigate:** the event-formatting / placeholder-substitution path in
-`sl-repl` (`format_event` and the `SessionContext` placeholder binding) and how
-`$circuitid` is bound and applied. Confirm whether the raw decoded RegionInfo
-values are correct (they should be) and scope the substitution so it does not
-rewrite unrelated numeric fields.
+**Fix:** `$circuitid` is no longer matched by bare value. Because it genuinely
+varies run-to-run (teleports/region crossings mint new circuits) it is still
+worth symbolizing, so the formatter now matches its distinctive `Debug` wrapper
+`CircuitId(<n>)` instead (also the form it takes inside `ScopedObjectId` /
+`ScopedParcelId`) — exact, since no unrelated field renders that way. See
+`sl-repl` `format::symbolize_circuit_id` and the dropped bare-value branch in
+`context::SessionContext::symbolize`, with regression tests in both modules.
+Verified live against aditi: the line now reads `region_protocols: 1, cpu_ratio:
+1, billable_factor: 1.0`.
 
 ## 2. Unhandled inbound UDP messages (warnings)
 
