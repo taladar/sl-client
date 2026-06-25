@@ -1201,6 +1201,28 @@ fn advance_running(
                     .request_parcel_properties(*west, *south, *east, *north, *sequence_id, now)
                     .ok();
             }
+            Command::RequestParcelPropertiesById {
+                local_id,
+                sequence_id,
+            } => {
+                session
+                    .request_parcel_properties_by_id(*local_id, *sequence_id, now)
+                    .ok();
+            }
+            Command::SetParcelOtherCleanTime {
+                local_id,
+                clean_time,
+            } => {
+                session
+                    .set_parcel_other_clean_time(*local_id, *clean_time, now)
+                    .ok();
+            }
+            Command::ModifyLand(edit) => {
+                session.modify_land(edit, now).ok();
+            }
+            Command::UndoLand => {
+                session.undo_land(now).ok();
+            }
             Command::SetDrawDistance(far) => session.set_draw_distance(far.clone()),
             Command::RequestMapBlocks {
                 min_x,

@@ -51,18 +51,19 @@ use sl_proto::{
     CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, EstateAccessDelta,
     ExperiencePermission, ExperienceUpdate, FlexibleData, FriendRights, GestureActivation,
     GroupNoticeAttachment, GroupNoticeKey, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
-    InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LandSearchType,
-    LandStatReportType, LightData, LindenAmount, LookAtType, MapItemType, Material,
-    MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MovementMode, MuteFlags,
-    MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
-    ObjectPermMasks, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-    ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, Permissions,
-    Permissions5, PickKey, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams,
-    ProfileUpdate, ProposalVoteId, RegionHandle, RegionInfoUpdate, RegionLocalObjectId,
-    RegionLocalParcelId, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation,
-    SaleType, ScopedObjectId, ScopedParcelId, ScriptPermissions, SculptData, SculptOrMeshKey,
-    TaskInventoryKey, TextureEntry, TextureFace, Throttle, Uuid, Vector, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
+    InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LandBrushAction, LandBrushSize,
+    LandEdit, LandSearchType, LandStatReportType, LightData, LindenAmount, LookAtType, MapItemType,
+    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MovementMode,
+    MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectExtraParams,
+    ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate,
+    PermissionField, Permissions, Permissions5, PickKey, PickUpdate, PointAtType, Postcard,
+    PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionHandle, RegionInfoUpdate,
+    RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptPermissions,
+    SculptData, SculptOrMeshKey, TaskInventoryKey, TerraformArea, TextureEntry, TextureFace,
+    Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -527,6 +528,31 @@ fn parse_task_inventory_key(field: &str, value: &str) -> Result<TaskInventoryKey
                 .ok()
                 .ok_or_else(|| invalid(field, value, "task inventory key"))?,
         ),
+    })
+}
+
+/// Parse a [`LandBrushAction`] from its name or wire code (`0` = level …
+/// `5` = revert).
+fn parse_land_brush_action(field: &str, value: &str) -> Result<LandBrushAction, ReplError> {
+    Ok(match norm(value).as_str() {
+        "level" | "0" => LandBrushAction::Level,
+        "raise" | "1" => LandBrushAction::Raise,
+        "lower" | "2" => LandBrushAction::Lower,
+        "smooth" | "3" => LandBrushAction::Smooth,
+        "noise" | "4" => LandBrushAction::Noise,
+        "revert" | "5" => LandBrushAction::Revert,
+        _ => return Err(invalid(field, value, "land brush action")),
+    })
+}
+
+/// Parse a [`LandBrushSize`] from its name or index (`0`/`small`, `1`/`medium`,
+/// `2`/`large`).
+fn parse_land_brush_size(field: &str, value: &str) -> Result<LandBrushSize, ReplError> {
+    Ok(match norm(value).as_str() {
+        "small" | "0" => LandBrushSize::Small,
+        "medium" | "1" => LandBrushSize::Medium,
+        "large" | "2" => LandBrushSize::Large,
+        _ => return Err(invalid(field, value, "land brush size")),
     })
 }
 
@@ -2587,6 +2613,56 @@ fn all_specs() -> Vec<CommandSpec> {
                     sequence_id: args.parse_or(ctx, "sequence_id", 4, "i32", 0)?,
                 })
             },
+        },
+        CommandSpec {
+            name: "request_parcel_properties_by_id",
+            usage: "<local_id> [sequence_id=0]",
+            build: |args, ctx| {
+                Ok(Command::RequestParcelPropertiesById {
+                    local_id: scoped_parcel(ctx, args.req_parse(ctx, "local_id", 0, "i32")?)?,
+                    sequence_id: args.parse_or(ctx, "sequence_id", 1, "i32", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "set_parcel_other_clean_time",
+            usage: "<local_id> <minutes>",
+            build: |args, ctx| {
+                Ok(Command::SetParcelOtherCleanTime {
+                    local_id: scoped_parcel(ctx, args.req_parse(ctx, "local_id", 0, "i32")?)?,
+                    clean_time: std::time::Duration::from_secs(
+                        args.req_parse::<u64>(ctx, "minutes", 1, "u64")?
+                            .saturating_mul(60),
+                    ),
+                })
+            },
+        },
+        CommandSpec {
+            name: "modify_land",
+            usage: "<action> <brush_size> <west> <south> <east> <north> [strength=1.0] \
+                    [height=0.0] [parcel=]",
+            build: |args, ctx| {
+                Ok(Command::ModifyLand(LandEdit {
+                    action: enum_arg(args, ctx, "action", 0, parse_land_brush_action)?,
+                    brush_size: enum_arg(args, ctx, "brush_size", 1, parse_land_brush_size)?,
+                    strength: args.parse_or(ctx, "strength", 6, "f32", 1.0)?,
+                    height: args.parse_or(ctx, "height", 7, "f32", 0.0)?,
+                    parcel: args
+                        .opt_parse::<i32>(ctx, "parcel", 8, "i32")?
+                        .map(RegionLocalParcelId),
+                    area: TerraformArea {
+                        west: args.req_parse(ctx, "west", 2, "f32")?,
+                        south: args.req_parse(ctx, "south", 3, "f32")?,
+                        east: args.req_parse(ctx, "east", 4, "f32")?,
+                        north: args.req_parse(ctx, "north", 5, "f32")?,
+                    },
+                }))
+            },
+        },
+        CommandSpec {
+            name: "undo_land",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::UndoLand),
         },
         CommandSpec {
             name: "update_parcel",
@@ -4789,9 +4865,10 @@ mod tests {
     use sl_proto::{
         AbuseReportType, AgentKey, AgentPreferences, AssetType, ChatChannel, ChatType, CircuitId,
         Command, ControlFlags, FriendRights, GroupKey, InventoryFolderKey, InventoryKey,
-        LandStatReportType, LindenAmount, MapItemType, MovementMode, ObjectBuyItem, ObjectKey,
-        OwnerKey, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId,
-        ScopedParcelId, ScriptPermissions, TaskInventoryKey, TransactionId, Uuid,
+        LandBrushAction, LandBrushSize, LandEdit, LandStatReportType, LindenAmount, MapItemType,
+        MovementMode, ObjectBuyItem, ObjectKey, OwnerKey, RegionHandle, RegionLocalObjectId,
+        RegionLocalParcelId, SaleType, ScopedObjectId, ScopedParcelId, ScriptPermissions,
+        TaskInventoryKey, TerraformArea, TransactionId, Uuid,
     };
 
     use super::Registry;
@@ -5365,6 +5442,58 @@ mod tests {
             })
                 if item_id == InventoryKey::from(uuid(ONE))
         ));
+    }
+
+    #[test]
+    fn request_parcel_properties_by_id_parses_scope() {
+        assert!(matches!(
+            build_scoped("request_parcel_properties_by_id 12 sequence_id=3"),
+            Ok(Command::RequestParcelPropertiesById {
+                local_id: ScopedParcelId {
+                    circuit: TEST_CIRCUIT,
+                    id: RegionLocalParcelId(12)
+                },
+                sequence_id: 3,
+            })
+        ));
+    }
+
+    #[test]
+    fn set_parcel_other_clean_time_parses_minutes() {
+        assert!(matches!(
+            build_scoped("set_parcel_other_clean_time 5 30"),
+            Ok(Command::SetParcelOtherCleanTime {
+                local_id: ScopedParcelId { circuit: TEST_CIRCUIT, id: RegionLocalParcelId(5) },
+                clean_time,
+            })
+                if clean_time == std::time::Duration::from_secs(30 * 60)
+        ));
+    }
+
+    #[test]
+    fn modify_land_parses_action_brush_and_area() {
+        assert!(matches!(
+            build("modify_land raise large 16 32 48 64 strength=2.5 height=21 parcel=7"),
+            Ok(Command::ModifyLand(LandEdit {
+                action: LandBrushAction::Raise,
+                brush_size: LandBrushSize::Large,
+                strength,
+                height,
+                parcel: Some(RegionLocalParcelId(7)),
+                area: TerraformArea { west, south, east, north },
+            }))
+                if strength.to_bits() == 2.5_f32.to_bits()
+                    && height.to_bits() == 21.0_f32.to_bits()
+                    && west.to_bits() == 16.0_f32.to_bits()
+                    && south.to_bits() == 32.0_f32.to_bits()
+                    && east.to_bits() == 48.0_f32.to_bits()
+                    && north.to_bits() == 64.0_f32.to_bits()
+        ));
+    }
+
+    #[test]
+    fn undo_land_parses() {
+        assert!(matches!(build("undo_land"), Ok(Command::UndoLand)));
     }
 
     #[test]

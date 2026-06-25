@@ -58,7 +58,7 @@ use crate::types::{
     GenericMessage, GenericStreamingMessage, GestureActivation, GroupNoticeAttachment,
     GroupNoticeKey, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec,
     InterestsUpdate, InventoryFolder, InventoryItem, InventoryItemMove, InventoryOffer, Kick,
-    LandSearchType, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
+    LandEdit, LandSearchType, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
     LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MeanCollision,
     MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NeighborInfo,
     NewInventoryItem, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
@@ -7122,6 +7122,75 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_parcel_properties_request(west, south, east, north, sequence_id, now)?;
+        Ok(())
+    }
+
+    /// Requests `ParcelProperties` for the parcel identified by its region-local
+    /// id via `ParcelPropertiesRequestByID` (rather than by a metre rectangle as
+    /// [`request_parcel_properties`](Self::request_parcel_properties) does).
+    /// `sequence_id` is echoed back in the reply ([`Event::ParcelProperties`]) so
+    /// callers can match outstanding queries.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownCircuit`] if `local_id`'s circuit has gone away,
+    /// or [`Error::Wire`] if the request fails to encode.
+    pub fn request_parcel_properties_by_id(
+        &mut self,
+        local_id: ScopedParcelId,
+        sequence_id: i32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        circuit.send_parcel_properties_request_by_id(local_id.id, sequence_id, now)?;
+        Ok(())
+    }
+
+    /// Sets the parcel `local_id`'s auto-return time for other people's objects
+    /// via `ParcelSetOtherCleanTime`. `clean_time` is rounded down to whole
+    /// minutes; [`Duration::ZERO`](std::time::Duration) disables auto-return.
+    /// Requires parcel ownership / land edit rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownCircuit`] if `local_id`'s circuit has gone away,
+    /// or [`Error::Wire`] if the request fails to encode.
+    pub fn set_parcel_other_clean_time(
+        &mut self,
+        local_id: ScopedParcelId,
+        clean_time: std::time::Duration,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let minutes = i32::try_from(clean_time.as_secs() / 60).unwrap_or(i32::MAX);
+        let circuit = self.circuit_for_scope(local_id.circuit)?;
+        circuit.send_parcel_set_other_clean_time(local_id.id, minutes, now)?;
+        Ok(())
+    }
+
+    /// Terraforms a piece of land via `ModifyLand`, applying a single brush
+    /// stroke described by `edit` to the agent's current region. Requires land
+    /// edit rights on the affected parcel(s).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn modify_land(&mut self, edit: &LandEdit, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_modify_land(edit, now)?;
+        Ok(())
+    }
+
+    /// Undoes the agent's last terraform edit in the current region via
+    /// `UndoLand`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn undo_land(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_undo_land(now)?;
         Ok(())
     }
 

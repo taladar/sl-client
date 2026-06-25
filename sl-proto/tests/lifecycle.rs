@@ -20,23 +20,24 @@ mod test {
         GroupNoticeAttachment, GroupRequestId, GroupRoleChange, GroupRoleEdit, GroupRoleKey,
         GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImSessionId, ImageCodec,
         InterestsUpdate, InventoryCallbackId, InventoryFolderKey, InventoryItem, InventoryItemMove,
-        InventoryItemOrFolderKey, InventoryKey, LandArea, LandingType, LightData, LindenAmount,
-        LindenBalance, LoginAccount, LoginParams, LookAtType, LureId, MapItemType, Material,
-        Maturity, MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags,
-        MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NotecardRez, ObjectBuyItem,
-        ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
-        ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
-        ParcelKey, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-        ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate, PointAtType,
-        Postcard, PrimShape, PrimShapeParams, ProductType, ProfileUpdate, QueryId,
-        ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability,
-        RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
-        SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissions,
-        SculptOrMeshKey, Session, SetDisplayNameReply, SimStatId, SimulatorTime, SkySettings,
-        SoundFlags, TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerrainLayerType,
-        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, TransferStatus, Transmit,
-        UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
-        avatar_texture, decode_texture_entry, group_powers, pcode,
+        InventoryItemOrFolderKey, InventoryKey, LandArea, LandBrushAction, LandBrushSize, LandEdit,
+        LandingType, LightData, LindenAmount, LindenBalance, LoginAccount, LoginParams, LookAtType,
+        LureId, MapItemType, Material, Maturity, MeanCollisionType, MeshKey, MoneyTransactionType,
+        MovementMode, MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem,
+        NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
+        ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+        ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
+        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5,
+        PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
+        QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate,
+        Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
+        RezScriptParams, SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction,
+        ScriptPermissions, SculptOrMeshKey, Session, SetDisplayNameReply, SimStatId, SimulatorTime,
+        SkySettings, SoundFlags, TaskInventoryKey, TaskInventoryReply, TeleportFlags,
+        TerraformArea, TerrainLayerType, TextureEntry, TextureFace, TextureKey, Throttle,
+        TransactionId, TransferStatus, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, WaterSettings, WearableType, avatar_texture, decode_texture_entry,
+        group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -6041,6 +6042,88 @@ mod test {
             .ok_or("expected a RemoveTaskInventory")?;
         assert_eq!(remove.inventory_data.local_id, 55);
         assert_eq!(remove.inventory_data.item_id, uuid::Uuid::from_u128(0x17E));
+        Ok(())
+    }
+
+    #[test]
+    fn land_and_parcel_commands_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        let parcel = ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(12));
+        session.modify_land(
+            &LandEdit {
+                action: LandBrushAction::Raise,
+                brush_size: LandBrushSize::Large,
+                strength: 2.5,
+                height: 21.0,
+                parcel: Some(sl_proto::RegionLocalParcelId(7)),
+                area: TerraformArea::new(16.0, 32.0, 48.0, 64.0),
+            },
+            now,
+        )?;
+        session.undo_land(now)?;
+        session.request_parcel_properties_by_id(parcel, 3, now)?;
+        session.set_parcel_other_clean_time(
+            parcel,
+            std::time::Duration::from_secs(30 * 60),
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+
+        let modify = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ModifyLand(modify) => Some(modify),
+                _ => None,
+            })
+            .ok_or("expected a ModifyLand")?;
+        assert_eq!(modify.modify_block.action, LandBrushAction::Raise.to_code());
+        assert_eq!(
+            modify.modify_block.brush_size,
+            LandBrushSize::Large.to_index()
+        );
+        assert_eq!(modify.modify_block.seconds.to_bits(), 2.5_f32.to_bits());
+        assert_eq!(modify.modify_block.height.to_bits(), 21.0_f32.to_bits());
+        let block = modify.parcel_data.first().ok_or("expected ParcelData")?;
+        assert_eq!(block.local_id, 7);
+        assert_eq!(block.west.to_bits(), 16.0_f32.to_bits());
+        assert_eq!(block.north.to_bits(), 64.0_f32.to_bits());
+        let extended = modify
+            .modify_block_extended
+            .first()
+            .ok_or("expected ModifyBlockExtended")?;
+        assert_eq!(
+            extended.brush_size.to_bits(),
+            LandBrushSize::Large.to_metres().to_bits()
+        );
+
+        assert!(
+            sent.iter().any(|m| matches!(m, AnyMessage::UndoLand(_))),
+            "expected an UndoLand"
+        );
+
+        let by_id = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ParcelPropertiesRequestByID(by_id) => Some(by_id),
+                _ => None,
+            })
+            .ok_or("expected a ParcelPropertiesRequestByID")?;
+        assert_eq!(by_id.parcel_data.local_id, 12);
+        assert_eq!(by_id.parcel_data.sequence_id, 3);
+
+        let clean = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ParcelSetOtherCleanTime(clean) => Some(clean),
+                _ => None,
+            })
+            .ok_or("expected a ParcelSetOtherCleanTime")?;
+        assert_eq!(clean.parcel_data.local_id, 12);
+        assert_eq!(clean.parcel_data.other_clean_time, 30);
         Ok(())
     }
 
