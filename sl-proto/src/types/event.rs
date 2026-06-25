@@ -12,15 +12,16 @@ use super::{
     GenericMessage, GenericStreamingMessage, GroupAccountDetails, GroupAccountSummary,
     GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
     GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, GroupVoteHistoryItem,
-    ImDialog, InstantMessage, InventoryFolder, InventoryItem, Kick, LandStatItem,
-    LandStatReportType, LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapLayer,
+    ImDialog, InstantMessage, InventoryFolder, InventoryItem, InventoryItemMove, Kick,
+    LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapLayer,
     MapRegionInfo, Maturity, MeanCollision, MoneyBalance, MuteEntry, NeighborInfo, Object,
     ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ParcelAccessEntry,
     ParcelAccessScope, ParcelDetails, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
     ParcelObjectOwner, ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation, RegionIdentity,
     RegionLimits, RegionStats, ScriptControl, ScriptDialog, ScriptPermissionRequest,
-    ScriptTeleportRequest, ServerError, SimulatorTime, SoundFlags, SoundPreload, TelehubInfo,
-    TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
+    ScriptTeleportRequest, ServerError, SimulatorTime, SoundFlags, SoundPreload,
+    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainPatch, Texture, TransferStatus,
+    UserInfo, ViewerEffect, Wearable,
 };
 use sl_types::key::{
     AgentKey, ExperienceKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
@@ -575,6 +576,73 @@ pub enum Event {
         /// Correlation id echoed from the original [`Event::CallingCardOffered`]
         /// this agent sent.
         transaction: TransactionId,
+    },
+    /// The simulator removed one or more inventory items server-side
+    /// (`RemoveInventoryItem`) — e.g. an item was deleted from another session or
+    /// moved to the trash. A client mirroring inventory should drop these items.
+    InventoryItemsRemoved {
+        /// The inventory items that no longer exist.
+        items: Vec<InventoryKey>,
+    },
+    /// The simulator removed one or more inventory folders server-side
+    /// (`RemoveInventoryFolder`). A client mirroring inventory should drop these
+    /// folders (and their descendants).
+    InventoryFoldersRemoved {
+        /// The inventory folders that no longer exist.
+        folders: Vec<InventoryFolderKey>,
+    },
+    /// The simulator removed a mixed set of inventory folders and items
+    /// server-side in a single message (`RemoveInventoryObjects`). A client
+    /// mirroring inventory should drop all of them.
+    InventoryObjectsRemoved {
+        /// The inventory folders that no longer exist.
+        folders: Vec<InventoryFolderKey>,
+        /// The inventory items that no longer exist.
+        items: Vec<InventoryKey>,
+    },
+    /// The simulator re-parented (and optionally renamed) one or more inventory
+    /// items server-side (`MoveInventoryItem`). A client mirroring inventory
+    /// should apply each move to match.
+    InventoryItemsMoved {
+        /// Whether the simulator re-timestamped the moved items (`Stamp`).
+        stamp: bool,
+        /// The item relocations to apply.
+        moves: Vec<InventoryItemMove>,
+    },
+    /// The current contents serial and Xfer filename of an in-world object's
+    /// task inventory (`ReplyTaskInventory`), in reply to a
+    /// `RequestTaskInventory`. Download the full listing from the filename via
+    /// the asset Xfer system.
+    TaskInventoryReply(TaskInventoryReply),
+    /// The agent's own account contact preferences (`UserInfoReply`), in reply
+    /// to a `UserInfoRequest`.
+    UserInfo(UserInfo),
+    /// A delayed-derez of an in-world object succeeded with no inventory created
+    /// on the viewer (`DeRezAck`) — e.g. a save into task inventory. Correlate
+    /// it back to the originating derez via the
+    /// [`transaction`](Event::DeRezAck::transaction).
+    DeRezAck {
+        /// Correlation id echoed from the originating derez request.
+        transaction: TransactionId,
+        /// Whether the derez succeeded.
+        success: bool,
+    },
+    /// The simulator forced this agent's object selection (`ForceObjectSelect`),
+    /// e.g. when a god or an LSL `llForceMouselook`-style action selects objects
+    /// on the agent's behalf.
+    ForceObjectSelect {
+        /// Whether to clear the agent's current selection before applying
+        /// [`objects`](Event::ForceObjectSelect::objects) (`ResetList`).
+        reset_list: bool,
+        /// The objects the simulator forced into the selection.
+        objects: Vec<ScopedObjectId>,
+    },
+    /// The simulator granted this agent god-like powers (`GrantGodlikePowers`),
+    /// in response to a god-level request. The wire `Token` is checked on the
+    /// simulator and ignored by the viewer, so it is dropped.
+    GodlikePowersGranted {
+        /// The granted god level (`0` revokes god mode).
+        god_level: u8,
     },
     /// The agent's active group, title, and powers changed (`AgentDataUpdate`):
     /// pushed on login and after [`Session::activate_group`](crate::Session::activate_group).

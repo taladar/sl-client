@@ -596,6 +596,23 @@ pub struct ObjectPlayingAnimation {
     pub sequence_id: i32,
 }
 
+/// Reply to a `RequestTaskInventory` (`ReplyTaskInventory`): the simulator
+/// reports the current contents serial of an in-world object's (task's)
+/// inventory and the temporary Xfer filename from which the full contents
+/// listing is downloaded. Surfaced as
+/// [`Event::TaskInventoryReply`](crate::Event::TaskInventoryReply).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskInventoryReply {
+    /// The in-world object (task) whose inventory this describes.
+    pub task: ObjectKey,
+    /// The inventory contents serial; it increments on every change, so a
+    /// client can tell whether a cached listing is stale.
+    pub serial: i16,
+    /// The temporary asset Xfer filename to download the full contents listing
+    /// from, or empty when the task inventory is empty.
+    pub filename: String,
+}
+
 /// Particle-flow pattern (`mPattern`) values for a [`ParticleSystem`], matching
 /// the reference viewer's `LLPartSysData::LL_PART_SRC_PATTERN_*` enum.
 pub mod particle_pattern {

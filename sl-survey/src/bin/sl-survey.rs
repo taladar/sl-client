@@ -689,6 +689,15 @@ impl Survey {
             | Event::CallingCardOffered { .. }
             | Event::CallingCardAccepted { .. }
             | Event::CallingCardDeclined { .. }
+            | Event::InventoryItemsRemoved { .. }
+            | Event::InventoryFoldersRemoved { .. }
+            | Event::InventoryObjectsRemoved { .. }
+            | Event::InventoryItemsMoved { .. }
+            | Event::TaskInventoryReply(..)
+            | Event::UserInfo(..)
+            | Event::DeRezAck { .. }
+            | Event::ForceObjectSelect { .. }
+            | Event::GodlikePowersGranted { .. }
             | Event::CoarseLocationUpdate { .. }
             | Event::ViewerEffect(_)
             | Event::FindAgentReply { .. }

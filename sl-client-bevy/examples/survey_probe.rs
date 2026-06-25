@@ -206,6 +206,15 @@ fn on_events(
             | SlSessionEvent::CallingCardOffered { .. }
             | SlSessionEvent::CallingCardAccepted { .. }
             | SlSessionEvent::CallingCardDeclined { .. }
+            | SlSessionEvent::InventoryItemsRemoved { .. }
+            | SlSessionEvent::InventoryFoldersRemoved { .. }
+            | SlSessionEvent::InventoryObjectsRemoved { .. }
+            | SlSessionEvent::InventoryItemsMoved { .. }
+            | SlSessionEvent::TaskInventoryReply(..)
+            | SlSessionEvent::UserInfo(..)
+            | SlSessionEvent::DeRezAck { .. }
+            | SlSessionEvent::ForceObjectSelect { .. }
+            | SlSessionEvent::GodlikePowersGranted { .. }
             | SlSessionEvent::CoarseLocationUpdate { .. }
             | SlSessionEvent::ViewerEffect(_)
             | SlSessionEvent::FindAgentReply { .. }

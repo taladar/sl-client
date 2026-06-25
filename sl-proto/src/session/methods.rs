@@ -53,19 +53,20 @@ use crate::types::{
     EventInfo, FeatureDisabled, FollowCamProperty, FollowCamPropertyValue, FriendRights,
     GenericMessage, GenericStreamingMessage, GestureActivation, GroupNoticeAttachment,
     GroupNoticeKey, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec,
-    InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer, Kick, LandSearchType,
-    LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams,
-    MapItemType, Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType,
-    MovementMode, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NotecardRez, Object,
-    ObjectBuyItem, ObjectFlagSettings, ObjectPlayingAnimation, ObjectPropertiesFamily,
-    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult, Postcard,
-    PrimShape, ProfileUpdate, ProposalVoteId, RegionInfoUpdate, RegionStats, Reliability,
-    RestoreItem, RezAttachment, SaleType, ScriptControl, ScriptControlAction, ScriptPermissions,
-    ScriptTeleportRequest, ServerError, SimStatId, SimulatorTime, SoundFlags, SoundPreload,
+    InterestsUpdate, InventoryFolder, InventoryItem, InventoryItemMove, InventoryOffer, Kick,
+    LandSearchType, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
+    LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MeanCollision,
+    MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NeighborInfo,
+    NewInventoryItem, NotecardRez, Object, ObjectBuyItem, ObjectFlagSettings,
+    ObjectPlayingAnimation, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
+    PermissionField, PickKey, PickUpdate, PlacesResult, Postcard, PrimShape, ProfileUpdate,
+    ProposalVoteId, RegionInfoUpdate, RegionStats, Reliability, RestoreItem, RezAttachment,
+    SaleType, ScriptControl, ScriptControlAction, ScriptPermissions, ScriptTeleportRequest,
+    ServerError, SimStatId, SimulatorTime, SoundFlags, SoundPreload, TaskInventoryReply,
     TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus,
-    Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
+    Transmit, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -2329,6 +2330,118 @@ impl Session {
                 self.events.push_back(Event::CallingCardDeclined {
                     agent: AgentKey::from(decline.agent_data.agent_id),
                     transaction: TransactionId::from(decline.transaction_block.transaction_id),
+                });
+            }
+            // The simulator removed inventory items server-side (e.g. a delete
+            // made from another session). The echoed `AgentData.AgentID` is
+            // dropped; a client mirroring inventory drops these items.
+            AnyMessage::RemoveInventoryItem(remove) => {
+                self.events.push_back(Event::InventoryItemsRemoved {
+                    items: remove
+                        .inventory_data
+                        .iter()
+                        .map(|block| InventoryKey::from(block.item_id))
+                        .collect(),
+                });
+            }
+            // The simulator removed inventory folders server-side.
+            AnyMessage::RemoveInventoryFolder(remove) => {
+                self.events.push_back(Event::InventoryFoldersRemoved {
+                    folders: remove
+                        .folder_data
+                        .iter()
+                        .map(|block| InventoryFolderKey::from(block.folder_id))
+                        .collect(),
+                });
+            }
+            // The simulator removed a mixed set of folders and items server-side
+            // in one message.
+            AnyMessage::RemoveInventoryObjects(remove) => {
+                self.events.push_back(Event::InventoryObjectsRemoved {
+                    folders: remove
+                        .folder_data
+                        .iter()
+                        .map(|block| InventoryFolderKey::from(block.folder_id))
+                        .collect(),
+                    items: remove
+                        .item_data
+                        .iter()
+                        .map(|block| InventoryKey::from(block.item_id))
+                        .collect(),
+                });
+            }
+            // The simulator re-parented (and optionally renamed) inventory items
+            // server-side. An empty `NewName` means the move does not rename.
+            AnyMessage::MoveInventoryItem(move_item) => {
+                self.events.push_back(Event::InventoryItemsMoved {
+                    stamp: move_item.agent_data.stamp,
+                    moves: move_item
+                        .inventory_data
+                        .iter()
+                        .map(|block| {
+                            let new_name = trimmed_string(&block.new_name);
+                            InventoryItemMove {
+                                item: InventoryKey::from(block.item_id),
+                                folder: InventoryFolderKey::from(block.folder_id),
+                                new_name: if new_name.is_empty() {
+                                    None
+                                } else {
+                                    Some(new_name)
+                                },
+                            }
+                        })
+                        .collect(),
+                });
+            }
+            // The contents serial and Xfer filename of an in-world object's task
+            // inventory, in reply to a `RequestTaskInventory`.
+            AnyMessage::ReplyTaskInventory(reply) => {
+                self.events
+                    .push_back(Event::TaskInventoryReply(TaskInventoryReply {
+                        task: ObjectKey::from(reply.inventory_data.task_id),
+                        serial: reply.inventory_data.serial,
+                        filename: trimmed_string(&reply.inventory_data.filename),
+                    }));
+            }
+            // The agent's own account contact preferences, in reply to a
+            // `UserInfoRequest`. The echoed `AgentData.AgentID` is dropped.
+            AnyMessage::UserInfoReply(reply) => {
+                self.events.push_back(Event::UserInfo(UserInfo {
+                    im_via_email: reply.user_data.im_via_e_mail,
+                    directory_visibility: trimmed_string(&reply.user_data.directory_visibility),
+                    email: trimmed_string(&reply.user_data.e_mail),
+                }));
+            }
+            // A delayed derez succeeded with no inventory created on the viewer
+            // (e.g. a save into task inventory); correlate via the transaction id.
+            AnyMessage::DeRezAck(ack) => {
+                self.events.push_back(Event::DeRezAck {
+                    transaction: TransactionId::from(ack.transaction_data.transaction_id),
+                    success: ack.transaction_data.success,
+                });
+            }
+            // The simulator forced this agent's object selection. The region-local
+            // ids are scoped to the originating circuit.
+            AnyMessage::ForceObjectSelect(force) => {
+                if let Some(circuit_id) = self.circuit_id_for(from) {
+                    self.events.push_back(Event::ForceObjectSelect {
+                        reset_list: force.header.reset_list,
+                        objects: force
+                            .data
+                            .iter()
+                            .map(|block| {
+                                ScopedObjectId::new(circuit_id, RegionLocalObjectId(block.local_id))
+                            })
+                            .collect(),
+                    });
+                }
+            }
+            // The simulator granted (or revoked, with level 0) this agent's
+            // god-like powers. The wire `Token` is checked on the sim and ignored
+            // by the viewer, so it is dropped.
+            AnyMessage::GrantGodlikePowers(grant) => {
+                self.events.push_back(Event::GodlikePowersGranted {
+                    god_level: grant.grant_data.god_level,
                 });
             }
             // A one-shot spatial sound played at a fixed region-local position
