@@ -57,7 +57,7 @@ Scope reminders:
 
 ## Phase A — plan the permission system (design only; no code yet)
 
-- [ ] **A1. Inventory & classify the permission set.** Enumerate every
+- [x] **A1. Inventory & classify the permission set.** Enumerate every
   `ScriptPermissions` flag and assign the client's role: *record-only* (the sim
   enforces it; the client only mirrors the grant — `DEBIT`, `ATTACH`,
   `CHANGE_LINKS`, `RETURN_OBJECTS`, `SILENT_ESTATE_MANAGEMENT`, `EXPERIENCE`),
@@ -66,7 +66,8 @@ Scope reminders:
   camera), or *client-actionable via existing API* (`TELEPORT` →
   `Session::teleport_to`; `TRIGGER_ANIMATION` / `OVERRIDE_ANIMATIONS` → the sim
   plays them, nothing client-side). Output: a per-flag responsibility table that
-  drives A4.
+  drives A4. **Done — produced the classification reference + task B1 in
+  § Phase B** (8 record-only, 3 cooperation, 1 API action `TELEPORT`).
 - [ ] **A2. Design the state model & keying.** Specify what `Session` stores
   (in `session.rs`, beside `TeleportPhase` / `SitState`): grants keyed by the
   holding script `(task_id: ObjectKey, item_id: InventoryKey)` → granted
@@ -135,5 +136,62 @@ Scope reminders:
   implementation (the exact attachment-detection source; whether to expose an
   explicit deny).
 
-Phases B+ (implementation) are defined once Phase A's design decisions are
-signed off; this document scopes the planning only.
+Phase A scopes the planning only; the implementation tasks each Phase A item
+produces are appended to **Phase B** below as that item is worked.
+
+## Phase B — implementation (tasks produced by Phase A)
+
+Each Phase A item, once checked, appends the concrete implementation tasks it
+implies here (tagged with the producing item). These are *not* started until
+Phase A is signed off; tick a box only when the step builds, is clippy-clean
+(restriction lints), and `cargo test` passes. Keep `sl-client-tokio`,
+`sl-client-bevy`, and the REPL at feature parity; never push client-only types
+into shared `sl-types`.
+
+### Classification reference (from A1)
+
+The 12 grantable `ScriptPermissions` flags by the client's responsibility. The
+simulator stays authoritative; every client record is a mirror, not a security
+boundary. Roles: **record-only** — the sim enforces end-to-end, the client only
+mirrors the grant and takes no action (any effect arrives later on the ordinary
+message path) · **cooperation** — inert unless the runtime routes control inputs
+or applies camera params; `sl-proto` surfaces the grant and tracks the live
+state · **API action** — maps onto an existing `Session` method.
+
+| Flag | Bit | Role |
+|------|-----|------|
+| `DEBIT` | `1<<1` | record-only |
+| `TAKE_CONTROLS` | `1<<2` | cooperation |
+| `TRIGGER_ANIMATION` | `1<<4` | record-only |
+| `ATTACH` | `1<<5` | record-only |
+| `CHANGE_LINKS` | `1<<7` | record-only |
+| `TRACK_CAMERA` | `1<<10` | cooperation |
+| `CONTROL_CAMERA` | `1<<11` | cooperation |
+| `TELEPORT` | `1<<12` | API action |
+| `EXPERIENCE` | `1<<13` | record-only |
+| `SILENT_ESTATE_MANAGEMENT` | `1<<14` | record-only |
+| `OVERRIDE_ANIMATIONS` | `1<<15` | record-only |
+| `RETURN_OBJECTS` | `1<<16` | record-only |
+
+`TRIGGER_ANIMATION` / `OVERRIDE_ANIMATIONS` are record-only (the sim plays them;
+this refines the A1 draft, which listed them as client-actionable but noted
+"nothing client-side"). The 3 cooperation flags reuse event surfaces `sl-proto`
+already emits — `TAKE_CONTROLS` via `Event::ScriptControlChange` /
+`ScriptControl`, `TRACK_CAMERA` / `CONTROL_CAMERA` via the follow-cam events
+(`FollowCamProperty` / `FollowCamPropertyValue`). `TELEPORT` is the only flag
+with an autonomous action, routed through the existing `Event::ScriptTeleport`
+(→ `Session::teleport_to`); its auto-vs-manual policy is A4's call.
+
+### Tasks
+
+- [ ] **B1 (from A1). Encode the per-flag role classifier in `sl-proto`.** Add a
+      `PermissionRole` enum (`RecordOnly` / `Cooperation` / `ApiAction`) plus a
+      total mapping from each `ScriptPermissions` bit to its role, per the table
+      above, in a client-side module (e.g. `sl-proto/src/types/script.rs`) —
+      kept in `sl-proto`, never pushed to shared `sl-types` (the flags
+      themselves stay client-agnostic there). This is the canonical encoding of
+      the A1 classification that A4's auto-act policy branches on; the grant
+      registry (A2) still stores the raw granted `ScriptPermissions` bitfield
+      wholesale, because the 8 record-only flags need no handler, the 3
+      cooperation flags reuse existing event surfaces, and only `TELEPORT`
+      carries an action (via `Event::ScriptTeleport`).
