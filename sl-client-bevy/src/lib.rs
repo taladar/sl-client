@@ -886,6 +886,25 @@ fn advance_running(
             Command::DeclineFriendship(transaction_id) => {
                 session.decline_friendship(*transaction_id, now).ok();
             }
+            Command::OfferCallingCard {
+                to_agent_id,
+                transaction_id,
+            } => {
+                session
+                    .offer_calling_card(*to_agent_id, *transaction_id, now)
+                    .ok();
+            }
+            Command::AcceptCallingCard {
+                transaction_id,
+                calling_card_folder,
+            } => {
+                session
+                    .accept_calling_card(*transaction_id, *calling_card_folder, now)
+                    .ok();
+            }
+            Command::DeclineCallingCard(transaction_id) => {
+                session.decline_calling_card(*transaction_id, now).ok();
+            }
             Command::ActivateGroup(group_id) => {
                 session.activate_group(*group_id, now).ok();
             }
