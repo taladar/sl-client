@@ -54,10 +54,14 @@ cadence was in fact our liveness signal). They are not errors, but:
 - At `WARN` level they dominate the log (the 2-minute run produced ~15 MB of
   output), drowning out signal.
 
-**Investigate:** decide whether to (a) implement handlers/events for `SimStats`
-and `SimulatorViewerTimeMessage`, and/or (b) downgrade the "no handler" log
-level for known-but-intentionally-unhandled messages so they stop flooding the
-output.
+**Status — planned.** This turned out to be the tip of a broader gap: the client
+handles only a subset of the messages a real simulator sends (and sends only a
+subset of those it could). Rather than patch these two in isolation, the full
+bidirectional coverage is catalogued and batched in
+[`MISSING_ROADMAP.md`](MISSING_ROADMAP.md). `SimStats` and
+`SimulatorViewerTimeMessage` are batch 1 there; implementing it closes this
+issue (the two messages become typed `Event`s instead of `WARN
+UnhandledMessage` noise).
 
 ## 3. Unknown CAPS event `AgentStateUpdate`
 
