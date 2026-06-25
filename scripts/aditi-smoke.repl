@@ -1,0 +1,20 @@
+# aditi login/hold/logout smoke test — ~2 minutes, read-only.
+#
+# Run with:
+#   cargo run -p sl-repl-tokio -- \
+#     --credentials credentials.aditi.toml \
+#     --grid aditi \
+#     --script scripts/aditi-smoke.repl \
+#     --log-file aditi-smoke.log
+#
+# The region handshake should land within the first seconds. We then sit idle
+# for ~2 minutes, probing liveness with request_region_info between sleeps, to
+# confirm the circuit is not silently timed out before we log out cleanly.
+sleep 10
+request_region_info
+sleep 50
+request_region_info
+sleep 50
+request_region_info
+sleep 10
+logout

@@ -18,7 +18,10 @@ exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 [dependencies]
 bevy = { version = "0.16.0", default-features = false }
 crossbeam-channel = { version = "0.5.15" }
-reqwest = { version = "0.12.15", default-features = false, features = ["blocking"] }
+reqwest = { version = "0.12.15", default-features = false, features = [
+    "blocking",
+    "rustls-tls",
+] }
 sl-proto = { version = "0.1.0", path = "../sl-proto" }
 sl-wire = { version = "0.1.0", path = "../sl-wire" }
 thiserror = { version = "2.0.18" }
