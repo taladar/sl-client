@@ -29,12 +29,12 @@ mod test {
         ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
         PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
         ProductType, ProfileUpdate, QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle,
-        RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType, Scale, ScopedObjectId,
-        ScopedParcelId, ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session,
-        SetDisplayNameReply, SimStatId, SimulatorTime, SkySettings, SoundFlags, TaskInventoryReply,
-        TeleportFlags, TerrainLayerType, TextureKey, Throttle, TransactionId, TransferStatus,
-        Transmit, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings,
-        WearableType, avatar_texture, group_powers, pcode,
+        RegionInfoUpdate, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, SaleType,
+        Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissions,
+        SculptOrMeshKey, Session, SetDisplayNameReply, SimStatId, SimulatorTime, SkySettings,
+        SoundFlags, TaskInventoryReply, TeleportFlags, TerrainLayerType, TextureKey, Throttle,
+        TransactionId, TransferStatus, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, WaterSettings, WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -3908,6 +3908,126 @@ mod test {
             }
         );
         assert!(reply.succeeded());
+        Ok(())
+    }
+
+    #[test]
+    fn windlight_refresh_caps_surfaces_interpolate_flag() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // The `WindLightRefresh` push: a single `Interpolate` flag.
+        let body = parse_llsd_xml(concat!(
+            "<llsd><map>",
+            "<key>Interpolate</key><integer>1</integer>",
+            "</map></llsd>",
+        ))?;
+        session.handle_caps_event("WindLightRefresh", &body, now)?;
+
+        let interpolate = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::WindLightRefresh { interpolate } => Some(interpolate),
+                _ => None,
+            })
+            .ok_or("expected a WindLightRefresh event")?;
+        assert!(interpolate);
+        Ok(())
+    }
+
+    #[test]
+    fn sim_console_response_caps_surfaces_output_string() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // The `SimConsoleResponse` body is a bare LLSD string, not a map.
+        let body = parse_llsd_xml("<llsd><string>Region restart scheduled.</string></llsd>")?;
+        session.handle_caps_event("SimConsoleResponse", &body, now)?;
+
+        let output = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::SimConsoleResponse { output } => Some(output),
+                _ => None,
+            })
+            .ok_or("expected a SimConsoleResponse event")?;
+        assert_eq!(output, "Region restart scheduled.");
+        Ok(())
+    }
+
+    #[test]
+    fn required_voice_version_caps_surfaces_version() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // The `RequiredVoiceVersion` push: voice protocol version + backend.
+        let body = parse_llsd_xml(concat!(
+            "<llsd><map>",
+            "<key>major_version</key><integer>1</integer>",
+            "<key>region_name</key><string>Hippo Hollow</string>",
+            "<key>voice_server_type</key><string>webrtc</string>",
+            "</map></llsd>",
+        ))?;
+        session.handle_caps_event("RequiredVoiceVersion", &body, now)?;
+
+        let version = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::RequiredVoiceVersion(version) => Some(version),
+                _ => None,
+            })
+            .ok_or("expected a RequiredVoiceVersion event")?;
+        assert_eq!(
+            version,
+            RequiredVoiceVersion {
+                major_version: 1,
+                region_name: "Hippo Hollow".to_owned(),
+                voice_server_type: Some("webrtc".to_owned()),
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn open_region_info_caps_surfaces_present_fields_only() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // OpenSim sends only the keys it overrides; absent keys stay `None`.
+        // Cover an int flag, a real, an int limit, and a grouped position bound.
+        let body = parse_llsd_xml(concat!(
+            "<llsd><map>",
+            "<key>AllowMinimap</key><integer>0</integer>",
+            "<key>DrawDistance</key><real>512.0</real>",
+            "<key>MaxLinkCount</key><integer>64</integer>",
+            "<key>MaxPosX</key><real>256.0</real>",
+            "<key>MaxPosY</key><real>256.0</real>",
+            "<key>MaxPosZ</key><real>4096.0</real>",
+            "</map></llsd>",
+        ))?;
+        session.handle_caps_event("OpenRegionInfo", &body, now)?;
+
+        let info = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::OpenRegionInfo(info) => Some(info),
+                _ => None,
+            })
+            .ok_or("expected an OpenRegionInfo event")?;
+        assert_eq!(info.allow_minimap, Some(false));
+        assert_eq!(info.draw_distance, Some(512.0));
+        assert_eq!(info.max_link_count, Some(64));
+        assert_eq!(
+            info.max_position,
+            Some(RegionCoordinates::new(256.0, 256.0, 4096.0))
+        );
+        // Keys the sim did not send stay absent.
+        assert_eq!(info.min_position, None);
+        assert_eq!(info.max_groups, None);
         Ok(())
     }
 

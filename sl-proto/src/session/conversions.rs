@@ -14,12 +14,12 @@ use crate::types::{
     GroupProfile, GroupRole, GroupTitle, GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage,
     InventoryFolder, InventoryItem, LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo,
     MapRequestFlags, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType,
-    NavMeshBuildStatus, NavMeshStatus, NeighborInfo, Object, ObjectProperties, ParcelCategory,
-    ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey, PlayingAnimation,
-    PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId, RegionChatSettings,
-    RegionCombatSettings, RegionIdentity, RegionLimits, Scale, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply, SkySettings, WaterSettings,
-    avatar_texture,
+    NavMeshBuildStatus, NavMeshStatus, NeighborInfo, Object, ObjectProperties, OpenRegionInfo,
+    ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey,
+    PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
+    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits, RequiredVoiceVersion,
+    Scale, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply,
+    SkySettings, WaterSettings, avatar_texture,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
@@ -1933,6 +1933,91 @@ pub(crate) fn set_display_name_reply_from_llsd(body: &Llsd) -> SetDisplayNameRep
         reason: string_member(body, "reason"),
         new_display_name: content_string("display_name"),
         error_tag: content_string("error_tag"),
+    }
+}
+
+/// Decodes a CAPS `WindLightRefresh` event body into the interpolate flag. The
+/// body is `{ Interpolate: int(0/1) }` (OpenSim `WindlightRefreshEvent`); the
+/// sim asks the client to re-fetch the region's environment, interpolating the
+/// transition when the flag is non-zero. A missing flag defaults to `false`
+/// (apply immediately).
+pub(crate) fn windlight_refresh_from_llsd(body: &Llsd) -> bool {
+    let body = body.get("body").unwrap_or(body);
+    i32_member(body, "Interpolate") != 0
+}
+
+/// Decodes a CAPS `SimConsoleResponse` event body into the console output text.
+/// Unusually, the body is a bare LLSD string — the command's raw output — not a
+/// map (OpenSim `RegionConsoleModule`, Firestorm
+/// `llfloaterregiondebugconsole.cpp`).
+pub(crate) fn sim_console_response_from_llsd(body: &Llsd) -> String {
+    body.as_str().unwrap_or("").to_owned()
+}
+
+/// Decodes a CAPS `RequiredVoiceVersion` event body into a
+/// [`RequiredVoiceVersion`]. The body is `{ major_version: int, region_name:
+/// string, voice_server_type?: string }` (Firestorm
+/// `LLViewerRequiredVoiceVersion`); `voice_server_type` is absent on older
+/// grids. The fields all degrade gracefully, so this is infallible.
+pub(crate) fn required_voice_version_from_llsd(body: &Llsd) -> RequiredVoiceVersion {
+    let body = body.get("body").unwrap_or(body);
+    RequiredVoiceVersion {
+        major_version: i32_member(body, "major_version"),
+        region_name: string_member(body, "region_name"),
+        voice_server_type: body
+            .get("voice_server_type")
+            .and_then(Llsd::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
+    }
+}
+
+/// Decodes a CAPS `OpenRegionInfo` event body into an [`OpenRegionInfo`]. The
+/// body is a map of optional OpenSim per-region settings; only the keys the sim
+/// chooses to override are present (field names mirror Firestorm
+/// `llpanelopenregionsettings.cpp`). Each key is read independently, so this is
+/// infallible — an empty body simply yields all-`None`.
+pub(crate) fn open_region_info_from_llsd(body: &Llsd) -> OpenRegionInfo {
+    let body = body.get("body").unwrap_or(body);
+    let flag = |key: &str| body.get(key).and_then(Llsd::as_i32).map(|value| value != 0);
+    let real = |key: &str| body.get(key).and_then(Llsd::as_f32);
+    let int = |key: &str| body.get(key).and_then(Llsd::as_i32);
+    // A position bound is present only when all three components are; the
+    // reference viewer reads `*PosX`/`*PosY`/`*PosZ` together.
+    let position = |prefix: &str| -> Option<RegionCoordinates> {
+        let x = body.get(&format!("{prefix}X")).and_then(Llsd::as_f32)?;
+        let y = body.get(&format!("{prefix}Y")).and_then(Llsd::as_f32)?;
+        let z = body.get(&format!("{prefix}Z")).and_then(Llsd::as_f32)?;
+        Some(RegionCoordinates::new(x, y, z))
+    };
+    OpenRegionInfo {
+        allow_minimap: flag("AllowMinimap"),
+        allow_physical_prims: flag("AllowPhysicalPrims"),
+        draw_distance: real("DrawDistance"),
+        force_draw_distance: flag("ForceDrawDistance"),
+        terrain_detail_scale: real("TerrainDetailScale"),
+        max_drag_distance: real("MaxDragDistance"),
+        min_hole_size: real("MinHoleSize"),
+        max_hollow_size: real("MaxHollowSize"),
+        max_inventory_items_transfer: int("MaxInventoryItemsTransfer"),
+        max_link_count: int("MaxLinkCount"),
+        max_link_count_phys: int("MaxLinkCountPhys"),
+        max_position: position("MaxPos"),
+        min_position: position("MinPos"),
+        max_prim_scale: real("MaxPrimScale"),
+        max_phys_prim_scale: real("MaxPhysPrimScale"),
+        min_prim_scale: real("MinPrimScale"),
+        offset_of_utc: int("OffsetOfUTC"),
+        offset_of_utc_dst: flag("OffsetOfUTCDST"),
+        render_water: flag("RenderWater"),
+        say_distance: real("SayDistance"),
+        shout_distance: real("ShoutDistance"),
+        whisper_distance: real("WhisperDistance"),
+        teen_mode: flag("ToggleTeenMode"),
+        show_tags: int("ShowTags"),
+        enforce_max_build: flag("EnforceMaxBuild"),
+        max_groups: int("MaxGroups"),
+        allow_parcel_windlight: flag("AllowParcelWindLight"),
     }
 }
 

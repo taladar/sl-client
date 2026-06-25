@@ -16,10 +16,12 @@ use super::conversions::{
     instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
     inventory_item_from_create, inventory_offer_bucket, map_item, map_layer, map_region_info,
     money_balance, nav_mesh_status_from_llsd, neighbor_info, object_from_full_update,
-    object_properties, offline_messages_from_llsd, pack_uuids, parcel_info, parcel_info_from_llsd,
-    parse_lure_region_handle, parse_mute_list, parse_uuid_string, pick_info, region_identity,
-    region_limits, script_dialog, script_permission_request, server_appearance_update_from_llsd,
-    set_display_name_reply_from_llsd, skeleton_folder, teleport_finish_from_llsd, trimmed_string,
+    object_properties, offline_messages_from_llsd, open_region_info_from_llsd, pack_uuids,
+    parcel_info, parcel_info_from_llsd, parse_lure_region_handle, parse_mute_list,
+    parse_uuid_string, pick_info, region_identity, region_limits, required_voice_version_from_llsd,
+    script_dialog, script_permission_request, server_appearance_update_from_llsd,
+    set_display_name_reply_from_llsd, sim_console_response_from_llsd, skeleton_folder,
+    teleport_finish_from_llsd, trimmed_string, windlight_refresh_from_llsd,
 };
 use super::{
     AGENT_UPDATE_INTERVAL, AssetTransfer, AssetUpload, CAP_AGENT_EXPERIENCES,
@@ -685,6 +687,32 @@ impl Session {
                 self.events.push_back(Event::SetDisplayNameReply(Box::new(
                     set_display_name_reply_from_llsd(body),
                 )));
+            }
+            // The simulator asks the client to re-fetch the region's environment
+            // (e.g. after an estate-manager windlight change).
+            "WindLightRefresh" => {
+                self.events.push_back(Event::WindLightRefresh {
+                    interpolate: windlight_refresh_from_llsd(body),
+                });
+            }
+            // The text output of a region debug-console command.
+            "SimConsoleResponse" => {
+                self.events.push_back(Event::SimConsoleResponse {
+                    output: sim_console_response_from_llsd(body),
+                });
+            }
+            // The voice protocol version this region requires. SL-only.
+            "RequiredVoiceVersion" => {
+                self.events.push_back(Event::RequiredVoiceVersion(
+                    required_voice_version_from_llsd(body),
+                ));
+            }
+            // OpenSim's extended per-region settings/limits. OpenSim-only.
+            "OpenRegionInfo" => {
+                self.events
+                    .push_back(Event::OpenRegionInfo(Box::new(open_region_info_from_llsd(
+                        body,
+                    ))));
             }
             _ => {
                 tracing::trace!(event = message, "unhandled CAPS event");

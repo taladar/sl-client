@@ -16,12 +16,13 @@ use super::{
     InventoryItemMove, Kick, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
     MapItem, MapItemType, MapLayer, MapRegionInfo, Maturity, MeanCollision, MoneyBalance,
     MuteEntry, NavMeshStatus, NeighborInfo, Object, ObjectPlayingAnimation, ObjectProperties,
-    ObjectPropertiesFamily, ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, PickInfo,
-    PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, RegionStats, ScriptControl,
-    ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest, ServerError, SetDisplayNameReply,
-    SimulatorTime, SoundFlags, SoundPreload, TaskInventoryReply, TelehubInfo, TeleportFlags,
-    TerrainPatch, Texture, TransferStatus, UserInfo, ViewerEffect, Wearable,
+    ObjectPropertiesFamily, OpenRegionInfo, ParcelAccessEntry, ParcelAccessScope, ParcelDetails,
+    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
+    PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, RegionStats,
+    RequiredVoiceVersion, ScriptControl, ScriptDialog, ScriptPermissionRequest,
+    ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimulatorTime, SoundFlags,
+    SoundPreload, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainPatch, Texture,
+    TransferStatus, UserInfo, ViewerEffect, Wearable,
 };
 use sl_types::key::{
     AgentKey, ExperienceKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
@@ -1570,6 +1571,26 @@ pub enum Event {
     /// The result of this agent's own set-display-name request
     /// (`SetDisplayNameReply`, pushed over the CAPS event queue). SL-only.
     SetDisplayNameReply(Box<SetDisplayNameReply>),
+    /// The simulator asks the client to re-fetch the region's environment
+    /// (`WindLightRefresh`, pushed over the CAPS event queue) — e.g. after an
+    /// estate-manager change to the region's windlight settings.
+    WindLightRefresh {
+        /// Whether the client should interpolate the environment transition
+        /// (the wire `Interpolate` flag) rather than apply it instantly.
+        interpolate: bool,
+    },
+    /// The reply to a region debug-console command (`SimConsoleResponse`, pushed
+    /// over the CAPS event queue), carrying the command's raw text output.
+    SimConsoleResponse {
+        /// The console command's output text.
+        output: String,
+    },
+    /// The voice protocol version a region requires (`RequiredVoiceVersion`,
+    /// pushed over the CAPS event queue when the agent enters the region).
+    RequiredVoiceVersion(RequiredVoiceVersion),
+    /// OpenSim's extended per-region settings/limits (`OpenRegionInfo`, pushed
+    /// over the CAPS event queue). OpenSim-only — Second Life never sends it.
+    OpenRegionInfo(Box<OpenRegionInfo>),
     /// The session logged out cleanly (a `LogoutReply` was received).
     LoggedOut,
     /// The session disconnected for the given reason.
