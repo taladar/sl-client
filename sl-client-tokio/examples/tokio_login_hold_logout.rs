@@ -476,6 +476,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::CachedTextureResponse { .. }
             | Event::ObjectAnimation { .. }
             | Event::RebakeAvatarTextures { .. }
+            | Event::FriendshipTerminated { .. }
+            | Event::CallingCardOffered { .. }
+            | Event::CallingCardAccepted { .. }
+            | Event::CallingCardDeclined { .. }
             | Event::GroupMembers { .. }
             | Event::GroupRoleData { .. }
             | Event::GroupRoleMembers { .. }

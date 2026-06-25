@@ -685,6 +685,10 @@ impl Survey {
             | Event::AvatarAnimation { .. }
             | Event::ObjectAnimation { .. }
             | Event::RebakeAvatarTextures { .. }
+            | Event::FriendshipTerminated { .. }
+            | Event::CallingCardOffered { .. }
+            | Event::CallingCardAccepted { .. }
+            | Event::CallingCardDeclined { .. }
             | Event::CoarseLocationUpdate { .. }
             | Event::ViewerEffect(_)
             | Event::FindAgentReply { .. }

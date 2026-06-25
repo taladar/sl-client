@@ -47,7 +47,7 @@ use sl_wire::SimulatorFeatures;
 use sl_wire::VoiceAccountInfo;
 use uuid::Uuid;
 
-use crate::bookkeeping_ids::InventoryCallbackId;
+use crate::bookkeeping_ids::{InventoryCallbackId, TransactionId};
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 
 /// A high-level event surfaced to the driver/application.
@@ -537,6 +537,44 @@ pub enum Event {
         ///
         /// [`Session::grant_user_rights`]: crate::Session::grant_user_rights
         granted_to_us: bool,
+    },
+    /// A friendship was terminated (`TerminateFriendship`): the simulator
+    /// informs this agent that it is no longer a friend of `other` — either the
+    /// other party removed this agent, or a removal this agent requested has
+    /// been confirmed. A client mirroring the buddy list should drop `other`.
+    FriendshipTerminated {
+        /// The former friend this agent no longer has a friendship with.
+        other: FriendKey,
+    },
+    /// Another agent offered this agent their calling card
+    /// (`OfferCallingCard`) — a reference card to that avatar that, if accepted,
+    /// is filed in this agent's Calling Cards inventory folder. This is not a
+    /// friendship request. Reply by accepting or declining with the same
+    /// [`transaction`](Event::CallingCardOffered::transaction).
+    CallingCardOffered {
+        /// The agent offering their calling card.
+        offering_agent: AgentKey,
+        /// Correlation id for the offer; echo it back when accepting or
+        /// declining so the simulator can match the reply to this offer.
+        transaction: TransactionId,
+    },
+    /// A calling card this agent offered was accepted (`AcceptCallingCard`).
+    /// The accepter's destination inventory folder is theirs, not this agent's,
+    /// so it is dropped.
+    CallingCardAccepted {
+        /// The agent who accepted this agent's calling card offer.
+        agent: AgentKey,
+        /// Correlation id echoed from the original [`Event::CallingCardOffered`]
+        /// this agent sent.
+        transaction: TransactionId,
+    },
+    /// A calling card this agent offered was declined (`DeclineCallingCard`).
+    CallingCardDeclined {
+        /// The agent who declined this agent's calling card offer.
+        agent: AgentKey,
+        /// Correlation id echoed from the original [`Event::CallingCardOffered`]
+        /// this agent sent.
+        transaction: TransactionId,
     },
     /// The agent's active group, title, and powers changed (`AgentDataUpdate`):
     /// pushed on login and after [`Session::activate_group`](crate::Session::activate_group).

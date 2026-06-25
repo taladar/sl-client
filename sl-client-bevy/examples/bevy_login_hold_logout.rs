@@ -309,6 +309,10 @@ fn on_events(
             | SlSessionEvent::AvatarAnimation { .. }
             | SlSessionEvent::ObjectAnimation { .. }
             | SlSessionEvent::RebakeAvatarTextures { .. }
+            | SlSessionEvent::FriendshipTerminated { .. }
+            | SlSessionEvent::CallingCardOffered { .. }
+            | SlSessionEvent::CallingCardAccepted { .. }
+            | SlSessionEvent::CallingCardDeclined { .. }
             | SlSessionEvent::CoarseLocationUpdate { .. }
             | SlSessionEvent::ViewerEffect(_)
             | SlSessionEvent::FindAgentReply { .. }
