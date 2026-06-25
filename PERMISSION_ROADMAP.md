@@ -44,6 +44,16 @@ Scope reminders:
   its grant.
 - A `ScriptControlChange` carrying the release flag is the **only** revoke
   signal the simulator pushes (there is no inbound `RevokePermissions`).
+- **`ScriptControlChange` carries no object id** (wire `Low 189`: a `Data` array
+  of `{ TakeControls: BOOL, Controls: U32, PassToAgent: BOOL }`, with no
+  task/holder field). Firestorm's `LLAgent::processScriptControlChange`
+  accordingly tracks controls **agent-globally**, as a per-control-bit *count*
+  (`mControlsTakenCount` / `mControlsTakenPassedOnCount`, split by
+  `PassToAgent`, incremented on take and decremented on release). So
+  taken-controls state cannot be attributed to a specific holder and lives at
+  the **session level**, not in the per-holder grant registry (A2). This refutes
+  A2's "per-holder set of taken controls" wording; the taken-controls tracker is
+  designed under A6.
 - `RevokePermissions` (wire `message_template.msg`, `Low 193`, client→server,
   `ObjectID` + `ObjectPermissions`; the server honours only the animation /
   override-animation bits per Firestorm) exists on the wire but has **no
@@ -68,7 +78,7 @@ Scope reminders:
   plays them, nothing client-side). Output: a per-flag responsibility table that
   drives A4. **Done — produced the classification reference + task B1 in
   § Phase B** (8 record-only, 3 cooperation, 1 API action `TELEPORT`).
-- [ ] **A2. Design the state model & keying.** Specify what `Session` stores
+- [x] **A2. Design the state model & keying.** Specify what `Session` stores
   (in `session.rs`, beside `TeleportPhase` / `SitState`): grants keyed by the
   holding script `(task_id: ObjectKey, item_id: InventoryKey)` → granted
   `ScriptPermissions`, plus the holder **kind** (attachment vs in-world object)
@@ -76,7 +86,18 @@ Scope reminders:
   the per-holder set of **taken controls** (`ScriptControl`). Decide whether to
   also track outstanding (un-answered) requests. Reuse the typed keys
   (`ObjectKey` / `InventoryKey`). Define how the attachment-vs-in-world kind is
-  determined (the object cache `objects` / attachment tracking).
+  determined (the object cache `objects` / attachment tracking). **Done — see
+  § State-model reference (from A2) + task B2 in § Phase B.** Decided: one
+  `BTreeMap<ScriptHolder, ScriptGrant>` field on `Session`, keyed by
+  `(task_id, item_id)`; each grant carries the raw granted bits, a `HolderKind`
+  (attachment vs in-world, with a conservative in-world default when the holder
+  is not in the object cache), the holder's `CircuitId` for reset scoping, and
+  the optional `experience_id`. **Correction to this item's premise:** taken
+  controls are **not** per-holder — `ScriptControlChange` carries no object id
+  (see § Protocol reality), so taken controls become a *separate session-global*
+  tracker, not a registry field (designed under A6, not A2). Outstanding
+  (un-answered) requests are **not** tracked — the driver already holds the
+  `Event::ScriptPermissionRequest` until it answers.
 - [ ] **A3. Design grant/deny recording & the revoke command.** How
   `answer_script_permissions` records the granted subset into the registry (and
   how a partial grant or an explicit deny is represented). Add the missing
@@ -182,6 +203,83 @@ already emits — `TAKE_CONTROLS` via `Event::ScriptControlChange` /
 with an autonomous action, routed through the existing `Event::ScriptTeleport`
 (→ `Session::teleport_to`); its auto-vs-manual policy is A4's call.
 
+### State-model reference (from A2)
+
+The permission mirror is one new `Session` field (in `session.rs`), beside
+`sit: SitState` / `teleport: TeleportPhase`, private like them and reached only
+through accessors. The simulator stays authoritative; this is an API-convenience
+mirror, not a security boundary.
+
+**The grant registry.**
+
+```text
+script_grants: BTreeMap<ScriptHolder, ScriptGrant>
+```
+
+- **`ScriptHolder`** — the key, the script that holds the grant:
+  `{ task_id: ObjectKey, item_id: InventoryKey }`. A script is uniquely a
+  `(holding object, inventory item within it)` pair — one object may run several
+  scripts, each with its own grant — so both halves are needed. Both fields come
+  straight off the `ScriptQuestion` / `ScriptPermissionRequest`, reusing the
+  existing typed keys (no new key newtype). `BTreeMap` (not `HashMap`) keeps the
+  crate's deterministic-iteration convention; derive `Ord` on `ScriptHolder`.
+- **`ScriptGrant`** — the value:
+  - `granted: ScriptPermissions` — the granted subset, stored **wholesale** as
+    the raw bitfield (per B1: 8 record-only flags need no handler, 3 cooperation
+    flags reuse existing event surfaces, only `TELEPORT` carries an action). A
+    partial grant is just a subset of bits; an explicit deny is the absence of a
+    registry entry (or an entry with empty `granted` — A3 decides which).
+    Replace the whole entry on a re-grant for the same holder (a later
+    `llRequestPermissions` supersedes the earlier grant — matches the sim, which
+    keeps only the latest per script).
+  - `kind: HolderKind` — drives the A5 reset (attachments cross with the avatar;
+    in-world objects are left behind). See below.
+  - `circuit: Option<CircuitId>` — the circuit the holder was last seen on, for
+    scoping the `DisableSimulator` and in-world-teleport resets (A5). `None`
+    when the holder was not in the object cache at grant time (kind `InWorld`
+    fallback). Stale for an attachment once it crosses a border, but attachments
+    are kept on those resets regardless of circuit, so the staleness is inert.
+  - `experience_id: Option<ExperienceKey>` — the experience the grant was made
+    under, copied from the request (`None` outside an experience).
+
+**`HolderKind`** — a private enum:
+
+```text
+enum HolderKind { Attachment, InWorld }
+```
+
+- **`Attachment`** — the script lives in an attachment worn by *this* agent; the
+  grant crosses regions with the avatar (kept on teleport, cleared on detach).
+- **`InWorld`** — the script lives in an in-world object (or another avatar's
+  attachment, which is in-world from our frame); the grant is region/circuit
+  scoped and dropped when the agent leaves it.
+
+No `Unknown` variant: detection failure falls back to `InWorld`, the
+conservative direction (an unrecognised holder is cleared on the next teleport
+rather than kept forever — losing a mirror entry is cheap; the sim still
+enforces).
+
+**Determining the kind** (at grant time, in `answer_script_permissions`): look
+up the holder by `task_id` in the `objects` cache. There is no by-`full_id`
+index, so scan `self.objects` values for `full_id == task_id` (small N — only
+nearby objects are cached; a helper `object_by_full_id(ObjectKey) ->
+Option<&Object>` is worth adding). Classify as `Attachment` **iff** the found
+object `attachment_point().is_some()` **and** it is parented to *our own* avatar
+— i.e. its `parent_id` resolves, within the same circuit, to an avatar object
+whose `full_id` equals `self.agent_id()`. Otherwise `InWorld` (including the
+not-found case). Record the `CircuitId` it was found on into `circuit`. The
+exact own-avatar-parentage plumbing (the session does not yet cache its own
+avatar's region-local id) is the open detail A8 flags for sign-off; the fallback
+keeps the design safe until it is resolved.
+
+**Not stored here:** the **taken-controls** state. `ScriptControlChange` carries
+no object id (see § Protocol reality), so taken controls are agent-global, not
+per-holder; that tracker is a *separate* session field designed under A6, keyed
+by nothing (a single agent-wide `ControlFlags` set, or per-control counts
+mirroring the viewer). Also **not** stored: outstanding un-answered requests —
+the driver holds the `Event::ScriptPermissionRequest` until it calls
+`answer_script_permissions`, so the registry records only answered grants.
+
 ### Tasks
 
 - [ ] **B1 (from A1). Encode the per-flag role classifier in `sl-proto`.** Add a
@@ -195,3 +293,27 @@ with an autonomous action, routed through the existing `Event::ScriptTeleport`
       wholesale, because the 8 record-only flags need no handler, the 3
       cooperation flags reuse existing event surfaces, and only `TELEPORT`
       carries an action (via `Event::ScriptTeleport`).
+- [ ] **B2 (from A2). Add the grant-registry state model to `Session`.** In
+      `sl-proto/src/session.rs`, add the private types `ScriptHolder`
+      (`{ task_id: ObjectKey, item_id: InventoryKey }`, deriving `Ord` for the
+      `BTreeMap` key) and `ScriptGrant` with fields
+      `granted: ScriptPermissions`, `kind: HolderKind`,
+      `circuit: Option<CircuitId>`, and `experience_id: Option<ExperienceKey>`;
+      plus the private `HolderKind` enum (`Attachment` / `InWorld`), and the
+      field `script_grants: BTreeMap<ScriptHolder, ScriptGrant>` beside `sit` /
+      `teleport` (init empty in the constructor at `methods.rs:138`). Add a
+      private `object_by_full_id(&self, ObjectKey) -> Option<&Object>` helper
+      (scan `self.objects`) and a private
+      `holder_kind(&self, task_id: ObjectKey) -> (HolderKind, Option<CircuitId>)`
+      that applies the § State-model reference detection rule (attachment iff
+      the cached object `attachment_point().is_some()` and parented to our own
+      avatar object whose `full_id == agent_id`; else in-world / not-found).
+      Per-flag *behaviour* (recording grants, accessors, the taken-controls
+      tracker, resets) is **not** in B2 — it lands with B1/A3/A4/A5/A6 once
+      those items are signed off; B2 only introduces the data model and the
+      detection helpers, with at least a smoke test constructing a `Session` and
+      asserting `script_grants` starts empty. Clippy note: `HolderKind` /
+      `ScriptGrant` will be `dead_code` until A3 records into them — land B2
+      together with the A3 recording task (or `#[expect(dead_code)]` with a
+      reason) to keep the tree warning-clean, per the no-bare-`#[allow]`
+      convention.
