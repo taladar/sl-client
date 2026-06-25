@@ -16,7 +16,9 @@ categories = ["network-programming", "game-development"]
 exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
 [dependencies]
-reqwest = { version = "0.12.15", default-features = false }
+reqwest = { version = "0.12.15", default-features = false, features = [
+    "rustls-tls",
+] }
 sl-proto = { version = "0.1.0", path = "../sl-proto" }
 sl-wire = { version = "0.1.0", path = "../sl-wire" }
 thiserror = { version = "2.0.18" }

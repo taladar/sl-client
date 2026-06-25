@@ -100,8 +100,12 @@ allow = [
   "LGPL-3.0-or-later",
   "Zlib",
   # "NCSA",
-  # "ISC",
-  # "CDLA-Permissive-2.0",
+  # rustls TLS stack (ring, rustls-webpki, untrusted, subtle, webpki-roots),
+  # pulled in by reqwest's rustls-tls feature so the client can reach the
+  # HTTPS-only Second Life grids.
+  "BSD-3-Clause",
+  "ISC",
+  "CDLA-Permissive-2.0",
 ]
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the
