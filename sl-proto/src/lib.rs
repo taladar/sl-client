@@ -97,11 +97,12 @@ pub use types::{
     Scale, ScriptControl, ScriptControlAction, ScriptDialog, ScriptPermissionRequest,
     ScriptPermissions, ScriptTeleportRequest, SculptData, SculptOrMeshKey, ServerError,
     SetDisplayNameReply, SimStatId, SimulatorTime, SkySettings, SoundFlags, SoundPreload,
-    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
-    TextureAnimation, TextureEntry, TextureFace, Throttle, ThrottleBuilder, ThrottleError,
-    TransferStatus, Transmit, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    WaterSettings, Wearable, WearableType, avatar_texture, global_to_handle, grid_to_handle,
-    group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode, texture_anim_mode,
+    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType,
+    TerrainPatch, Texture, TextureAnimation, TextureEntry, TextureFace, Throttle, ThrottleBuilder,
+    ThrottleError, TransferStatus, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, WaterSettings, Wearable, WearableType, avatar_texture, global_to_handle,
+    grid_to_handle, group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode,
+    texture_anim_mode,
 };
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,

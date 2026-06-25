@@ -1170,6 +1170,18 @@ impl Client {
                         Some(Command::DetachAttachmentIntoInventory { item_id }) => {
                             self.session.detach_attachment_into_inventory(item_id, Instant::now())?;
                         }
+                        Some(Command::RequestTaskInventory { target }) => {
+                            self.session.request_task_inventory(target, Instant::now())?;
+                        }
+                        Some(Command::UpdateTaskInventory { target, key, item }) => {
+                            self.session.update_task_inventory(target, key, &item, Instant::now())?;
+                        }
+                        Some(Command::MoveTaskInventory { target, folder_id, item_id }) => {
+                            self.session.move_task_inventory(target, folder_id, item_id, Instant::now())?;
+                        }
+                        Some(Command::RemoveTaskInventory { target, item_id }) => {
+                            self.session.remove_task_inventory(target, item_id, Instant::now())?;
+                        }
                         Some(Command::RequestScriptRunning { object_id, item_id }) => {
                             self.session.request_script_running(object_id, item_id, Instant::now())?;
                         }

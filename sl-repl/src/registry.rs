@@ -61,8 +61,8 @@ use sl_proto::{
     ProfileUpdate, ProposalVoteId, RegionHandle, RegionInfoUpdate, RegionLocalObjectId,
     RegionLocalParcelId, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation,
     SaleType, ScopedObjectId, ScopedParcelId, ScriptPermissions, SculptData, SculptOrMeshKey,
-    TextureEntry, TextureFace, Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
+    TaskInventoryKey, TextureEntry, TextureFace, Throttle, Uuid, Vector, ViewerEffect,
+    ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -511,6 +511,21 @@ fn parse_sale_type(field: &str, value: &str) -> Result<SaleType, ReplError> {
                 .parse::<u8>()
                 .ok()
                 .ok_or_else(|| invalid(field, value, "sale type"))?,
+        ),
+    })
+}
+
+/// Parse a [`TaskInventoryKey`] from its name or wire code (`0` = item key,
+/// `1` = asset key).
+fn parse_task_inventory_key(field: &str, value: &str) -> Result<TaskInventoryKey, ReplError> {
+    Ok(match norm(value).as_str() {
+        "item" | "0" => TaskInventoryKey::Item,
+        "asset" | "1" => TaskInventoryKey::Asset,
+        _ => TaskInventoryKey::from_code(
+            value
+                .parse::<u8>()
+                .ok()
+                .ok_or_else(|| invalid(field, value, "task inventory key"))?,
         ),
     })
 }
@@ -3681,6 +3696,60 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "request_task_inventory",
+            usage: "<target-local_id>",
+            build: |args, ctx| {
+                Ok(Command::RequestTaskInventory {
+                    target: scoped_object(ctx, args.req_parse(ctx, "target", 0, "u32")?)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "update_task_inventory",
+            usage: "<target-local_id> <item_id> [key=] [folder_id=] [creator_id=] [owner_id=] \
+                    [group_id=] [base_mask=] [owner_mask=] [group_mask=] [everyone_mask=] \
+                    [next_owner_mask=] [group_owned=] [transaction_id=] [asset_type=] [inv_type=] \
+                    [flags=] [sale_type=] [sale_price=] [name=] [description=] [creation_date=] \
+                    [crc=]",
+            build: |args, ctx| {
+                let target = scoped_object(ctx, args.req_parse(ctx, "target", 0, "u32")?)?;
+                let item_id = InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?);
+                Ok(Command::UpdateTaskInventory {
+                    target,
+                    key: enum_arg_or(
+                        args,
+                        ctx,
+                        "key",
+                        100,
+                        parse_task_inventory_key,
+                        TaskInventoryKey::Item,
+                    )?,
+                    item: Box::new(restore_item_from_args(args, ctx, item_id, 120)?),
+                })
+            },
+        },
+        CommandSpec {
+            name: "move_task_inventory",
+            usage: "<target-local_id> <folder_id> <item_id>",
+            build: |args, ctx| {
+                Ok(Command::MoveTaskInventory {
+                    target: scoped_object(ctx, args.req_parse(ctx, "target", 0, "u32")?)?,
+                    folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 1)?),
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 2)?),
+                })
+            },
+        },
+        CommandSpec {
+            name: "remove_task_inventory",
+            usage: "<target-local_id> <item_id>",
+            build: |args, ctx| {
+                Ok(Command::RemoveTaskInventory {
+                    target: scoped_object(ctx, args.req_parse(ctx, "target", 0, "u32")?)?,
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?),
+                })
+            },
+        },
+        CommandSpec {
             name: "request_script_running",
             usage: "<object_id> <item_id>",
             build: |args, ctx| {
@@ -4719,10 +4788,10 @@ mod tests {
 
     use sl_proto::{
         AbuseReportType, AgentKey, AgentPreferences, AssetType, ChatChannel, ChatType, CircuitId,
-        Command, ControlFlags, FriendRights, GroupKey, InventoryKey, LandStatReportType,
-        LindenAmount, MapItemType, MovementMode, ObjectBuyItem, ObjectKey, OwnerKey, RegionHandle,
-        RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId, ScopedParcelId,
-        ScriptPermissions, TransactionId, Uuid,
+        Command, ControlFlags, FriendRights, GroupKey, InventoryFolderKey, InventoryKey,
+        LandStatReportType, LindenAmount, MapItemType, MovementMode, ObjectBuyItem, ObjectKey,
+        OwnerKey, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId,
+        ScopedParcelId, ScriptPermissions, TaskInventoryKey, TransactionId, Uuid,
     };
 
     use super::Registry;
@@ -5242,6 +5311,58 @@ mod tests {
         assert!(matches!(
             build(&format!("detach_attachment_into_inventory {ONE}")),
             Ok(Command::DetachAttachmentIntoInventory { item_id })
+                if item_id == InventoryKey::from(uuid(ONE))
+        ));
+    }
+
+    #[test]
+    fn request_task_inventory_parses_scope() {
+        assert!(matches!(
+            build_scoped("request_task_inventory 42"),
+            Ok(Command::RequestTaskInventory {
+                target: ScopedObjectId {
+                    circuit: TEST_CIRCUIT,
+                    id: RegionLocalObjectId(42)
+                },
+            })
+        ));
+    }
+
+    #[test]
+    fn update_task_inventory_parses_scope_and_key() {
+        assert!(matches!(
+            build_scoped(&format!("update_task_inventory 7 {ONE} key=asset asset_type=10")),
+            Ok(Command::UpdateTaskInventory {
+                target: ScopedObjectId { circuit: TEST_CIRCUIT, id: RegionLocalObjectId(7) },
+                key: TaskInventoryKey::Asset,
+                item,
+            })
+                if item.item_id == InventoryKey::from(uuid(ONE)) && item.asset_type == 10
+        ));
+    }
+
+    #[test]
+    fn move_task_inventory_parses_scope() {
+        assert!(matches!(
+            build_scoped(&format!("move_task_inventory 9 {ONE} {TWO}")),
+            Ok(Command::MoveTaskInventory {
+                target: ScopedObjectId { circuit: TEST_CIRCUIT, id: RegionLocalObjectId(9) },
+                folder_id,
+                item_id,
+            })
+                if folder_id == InventoryFolderKey::from(uuid(ONE))
+                    && item_id == InventoryKey::from(uuid(TWO))
+        ));
+    }
+
+    #[test]
+    fn remove_task_inventory_parses_scope() {
+        assert!(matches!(
+            build_scoped(&format!("remove_task_inventory 3 {ONE}")),
+            Ok(Command::RemoveTaskInventory {
+                target: ScopedObjectId { circuit: TEST_CIRCUIT, id: RegionLocalObjectId(3) },
+                item_id,
+            })
                 if item_id == InventoryKey::from(uuid(ONE))
         ));
     }
