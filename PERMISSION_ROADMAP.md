@@ -216,13 +216,29 @@ Scope reminders:
       A3-reserved `script_controls()` accessor return type is finalized as a
       public `ScriptControlsInfo` view (two `ControlFlags` unions, `taken` /
       `passed_to_agent`; counts stay private).
-- [ ] **A7. Specify the API-surface delta & driver/REPL exposure.** Enumerate
+- [x] **A7. Specify the API-surface delta & driver/REPL exposure.** Enumerate
   the new/changed `Command`s (`RevokePermissions`, an optional grant
   convenience), any `Event` changes (inbound likely unchanged), and the new
   `Session` accessors; and how `sl-client-tokio`, `sl-client-bevy`, and the REPL
   expose the commands and a way to query the granted state, at feature parity.
   Draw the boundary: what is sl-proto `Session` state versus what stays
-  application policy.
+  application policy. **Done — see § API-surface & exposure reference
+  (from A7) + tasks B9–B10 in § Phase B.** Decided: two new `Command`s
+  (`RevokePermissions` from A3, and a new unit `QueryScriptPermissions`); the
+  *optional grant convenience* is **dropped** (a grant only ever *answers* a
+  pending request — `AnswerScriptPermissions` is that path). **Key discovery:**
+  no runtime can call a live `Session` accessor (`tokio`'s `run` loop owns the
+  `Session`; `bevy` boxes it privately in `SlState`; the REPL only caches event
+  bindings), and a `Command` cannot carry a `oneshot` reply (it is `Clone` /
+  REPL-parsed), so read-only state can reach an application **only as an
+  `Event`**. Therefore the grant mirror is exposed by a **query command answered
+  by a reply event** (`QueryScriptPermissions` → a new *synthesized*
+  `Event::ScriptPermissionState(ScriptPermissionState)`, the crate's first
+  local-reply event), keeping all three runtimes at parity via the same
+  command-in / event-out path they already use. The **inbound** event surface is
+  unchanged (as predicted). New `Session` accessors:
+  `granted_permissions` / `script_grants` / `script_controls` (A3/A6) plus an
+  A7 `script_permission_state()` snapshot convenience.
 - [ ] **A8. Define the test & verification strategy.** Plan the
   `sl-proto/tests/lifecycle.rs` and `sim_session.rs` cases (mirroring the new
   `teleport_clears_seat` test): feed a `ScriptQuestion` →
@@ -702,6 +718,121 @@ emitted on a client-sent clear — `release_script_controls` is a local call the
 driver made; the inbound path already emits `Event::ScriptControlChange` for
 every change.
 
+### API-surface & exposure reference (from A7)
+
+The complete public API delta the permission system adds, and how each of the
+three runtimes (`sl-client-tokio`, `sl-client-bevy`, the REPL) surfaces it at
+feature parity. The boundary: everything that *records, resets, and computes*
+the mirror is sl-proto `Session` state; everything that *decides* (cooperate?
+revoke? display?) is application/driver policy. The runtimes stay pure conduits
+— command-in, event-out — and add no policy.
+
+**The exposure constraint (discovered here, the crux of A7).** None of the three
+runtimes can call a *live* `Session` accessor:
+
+- `sl-client-tokio`: `Client::run` takes `self`, and the driver loop then
+  **owns** the `Session` (`sl-client-tokio/src/lib.rs` — no `Arc<Mutex>`, no
+  snapshot channel, no shared state). The pre-`run` accessors (`agent_id`,
+  `session_id`, …) are unreachable once running.
+- `sl-client-bevy`: the `Session` is boxed **privately** inside the `SlState`
+  resource (`SlInner::Running { session: Box<Session>, … }`); there is no
+  `Res<Session>` and no public read accessor on the resource.
+- The REPL: `SessionContext` (`sl-repl/src/context.rs`) caches only bindings it
+  scrapes from the event stream in `apply_event`; it never reads the `Session`.
+
+So today read-only state reaches an application **only as an `Event`**. A
+`Command` cannot carry a `oneshot` reply channel either — `Command` is
+`Clone`/`Debug` and is *parsed* by the REPL (`registry.rs`), so it must stay a
+plain data enum. **Therefore the only parity-preserving way to expose the grant
+mirror is a query `Command` answered by a reply `Event` over the existing events
+channel.** That is the design below; it adds no `Arc<Mutex>` to tokio and no
+`Res<Session>` to bevy.
+
+**New / changed `Command`s** (`sl-proto/src/command.rs`):
+
+1. `RevokePermissions { object_id: ObjectKey, permissions: ScriptPermissions }`
+   — the granular revoke (A3/B4), object-scoped; a struct variant modelled on
+   `AnswerScriptPermissions`.
+2. `QueryScriptPermissions` — a **unit** variant (modelled on
+   `ReleaseScriptControls`) requesting a snapshot of the whole mirror.
+   Fire-and-forget *to the session*; the reply rides back as
+   `Event::ScriptPermissionState`.
+3. **No grant-convenience command.** A1/A4 confirm a grant only ever *answers* a
+   pending `llRequestPermissions`; `AnswerScriptPermissions` (gaining
+   `experience_id`, B3) is that path. Nothing is granted out of band, so the
+   "optional grant convenience" A7 floated is **dropped**.
+4. `AnswerScriptPermissions` is unchanged *on the wire*, but its driver dispatch
+   gains the `experience_id` argument plumbed from the `ScriptPermissionRequest`
+   (B3) — a runtime-wiring change, not a new command.
+
+**`Event` changes** (`sl-proto/src/types/event.rs`):
+
+- **Inbound surface unchanged** (as A7/A3/A6 predicted):
+  `ScriptPermissionRequest` (already carries `experience_id`),
+  `ScriptControlChange`, `ScriptTeleport`, and the follow-cam events
+  (`SetFollowCamProperties` / `ClearFollowCamProperties`) stay exactly as
+  they are. No grant/deny/revoke recording emits an event (A3).
+- **One new *synthesized* event:**
+  `ScriptPermissionState(ScriptPermissionState)` — the reply to
+  `QueryScriptPermissions`. It is **not** produced by `Session::poll` from the
+  wire; each runtime's command dispatch builds it by reading the session and
+  pushes it onto its event sink. This is the crate's **first** synthesized /
+  local-reply event — note the precedent it sets (an `Event` that does not
+  originate from an inbound message). `ScriptPermissionState` is a new public
+  struct:
+
+      #[derive(Debug, Clone)]
+      pub struct ScriptPermissionState {
+          pub grants: Vec<ScriptGrantInfo>,        // the A3/B6 view
+          pub controls: ScriptControlsInfo,        // the A6/B8 view
+      }
+
+**New `Session` accessors** (`sl-proto/src/session/methods.rs`), all read-only,
+following the `seat()` precedent (public signature, public return types, the
+private internal state stays private):
+
+- `granted_permissions(task_id, item_id) -> ScriptPermissions` (A3/B6) — one
+  script's granted subset (empty when absent).
+- `script_grants() -> impl Iterator<Item = ScriptGrantInfo>` (A3/B6) — every
+  current grant.
+- `script_controls() -> ScriptControlsInfo` (A6/B8) — the taken-controls union.
+- `script_permission_state() -> ScriptPermissionState` (A7) — a convenience that
+  collects the two stores into one snapshot (`grants` from `script_grants`,
+  `controls` from `script_controls`); the value each runtime wraps in
+  `Event::ScriptPermissionState` to answer the query.
+
+**Runtime exposure, at parity** — three identical command-in / event-out shapes:
+
+| Concern | sl-client-tokio | sl-client-bevy | REPL |
+|---------|-----------------|----------------|------|
+| Send `RevokePermissions` | `match` arm → `session.revoke_permissions(…)`, beside the `AnswerScriptPermissions` arm | `drive` `match` arm → `session.revoke_permissions(…)` | `CommandSpec { name: "revoke_permissions", usage: "<object_id> <permissions-i32>" }`, beside `release_script_controls` |
+| Send `QueryScriptPermissions` | `match` arm → push `session.script_permission_state()` onto the events `mpsc` | `drive` `match` arm → `write(SlEvent(Event::ScriptPermissionState(session.script_permission_state())))` | `CommandSpec { name: "query_script_permissions", usage: "" }` |
+| Receive the snapshot | the `ScriptPermissionState` event on the events `mpsc::Receiver` | `SlEvent(Event::ScriptPermissionState(..))` Bevy event | a `format_event` arm prints the grants + controls |
+
+- Each runtime already forwards every sl-proto `Event` (tokio over
+  `mpsc::Sender<Event>`; bevy as `SlEvent(SessionEvent)`; the REPL via
+  `format_event`), so the snapshot reply travels the same path and needs
+  **no new transport** — only a `format_event` / `format_command` arm for the
+  REPL and the two `match` arms per driver.
+- No runtime exposes a live accessor directly (the constraint above); they
+  all go command-in / event-out, which keeps them at parity without
+  bevy needing a `Res<Session>` or tokio an `Arc<Mutex<Session>>`.
+
+**The boundary — sl-proto `Session` state vs. application policy.**
+
+- **sl-proto `Session` owns:** the grant registry + the taken-controls tracker;
+  all recording (B3), revoke-mirroring (B4), region-leave resets (B7) and
+  inbound control folds (B8); the four accessors and the
+  `script_permission_state` snapshot. It is the single source of mirror truth
+  and stays sans-IO; the simulator remains authoritative (the mirror is a
+  convenience, never a security boundary).
+- **The application / driver owns:** every *decision* — whether to answer a
+  request and with which bits, whether/when to `revoke_permissions` or
+  `release_script_controls`, whether to cooperate with a `TAKE_CONTROLS` /
+  camera grant (route the avatar's inputs, apply the follow-cam params), and
+  when to `QueryScriptPermissions` and how to display the snapshot. The session
+  **never auto-acts** (A4); the runtimes add **no** policy, only transport.
+
 ### Tasks
 
 - [ ] **B1 (from A1, amended by A4). Encode the per-flag role classifier in
@@ -863,3 +994,41 @@ every change.
       matching `Release` → assert empty; feed two takes of the same bit then one
       release → assert still taken (count model); feed a take with
       `PassToAgent = true` → assert it lands in `passed_to_agent`, not `taken`.
+- [ ] **B9 (from A7). Add the query command, snapshot type, reply event &
+      snapshot accessor in `sl-proto`.** Add the public
+      `ScriptPermissionState { grants: Vec<ScriptGrantInfo>, controls:
+      ScriptControlsInfo }` struct (`#[derive(Debug, Clone)]`); the
+      `Command::QueryScriptPermissions` **unit** variant (`command.rs`, modelled
+      on `ReleaseScriptControls`); the
+      `Event::ScriptPermissionState(ScriptPermissionState)` variant
+      (`types/event.rs`) — documented as a locally-*synthesized* query reply,
+      not a wire event (the first such `Event` in the crate); and the
+      `Session::script_permission_state(&self) -> ScriptPermissionState`
+      accessor collecting `script_grants()` + `script_controls()`. **No
+      `Session::poll` change** — the event is emitted by the runtimes (B10), not
+      by the session. Depends on B6 (`ScriptGrantInfo` / `script_grants`) and B8
+      (`ScriptControlsInfo` / `script_controls`). Test: build a `Session` with a
+      recorded grant + a taken control, call `script_permission_state()`, assert
+      both stores are reflected in the snapshot.
+- [ ] **B10 (from A7). Wire `RevokePermissions` + `QueryScriptPermissions` +
+      the snapshot reply through all three runtimes at parity.**
+      - **sl-client-tokio** (`src/lib.rs`): add the `Command::RevokePermissions`
+      arm (→ `session.revoke_permissions(…)`) and the
+      `Command::QueryScriptPermissions` arm (push
+      `session.script_permission_state()` onto the events `mpsc::Sender`),
+      beside the existing `AnswerScriptPermissions` /
+      `ReleaseScriptControls` arms.
+      - **sl-client-bevy** (`src/lib.rs`): add the same two arms in the `drive`
+      system's `match`; the query arm writes
+      `SlEvent(Event::ScriptPermissionState(session.script_permission_state()))`.
+      - **REPL** (`sl-repl/src/registry.rs`): add `CommandSpec`s
+      `revoke_permissions` (`<object_id> <permissions-i32>`, beside
+      `release_script_controls`) and `query_script_permissions` (no args); add
+      the matching `format_event` / `format_command` arms
+      (`sl-repl/src/format.rs`) for the new event and commands. Optionally
+      cache the snapshot in `SessionContext::apply_event`.
+      Depends on B4 (the `Session::revoke_permissions` method) and B9 (the query
+      command, reply event, snapshot accessor). Keep all three runtimes in
+      lockstep — the parity rule. Verify: in the REPL, `revoke_permissions` then
+      `query_script_permissions`, and confirm the printed snapshot reflects the
+      change (live-grid smoke per the test-avatar setup).
