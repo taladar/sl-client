@@ -77,7 +77,9 @@ Scope reminders:
   `Session::teleport_to`; `TRIGGER_ANIMATION` / `OVERRIDE_ANIMATIONS` → the sim
   plays them, nothing client-side). Output: a per-flag responsibility table that
   drives A4. **Done — produced the classification reference + task B1 in
-  § Phase B** (8 record-only, 3 cooperation, 1 API action `TELEPORT`).
+  § Phase B** (drafted as 8 record-only, 3 cooperation, 1 API action `TELEPORT`;
+  **A4 later reclassified `TELEPORT` as record-only → 9 record-only,
+  3 cooperation, 0 API action** — see the A4 correction).
 - [x] **A2. Design the state model & keying.** Specify what `Session` stores
   (in `session.rs`, beside `TeleportPhase` / `SitState`): grants keyed by the
   holding script `(task_id: ObjectKey, item_id: InventoryKey)` → granted
@@ -124,14 +126,25 @@ Scope reminders:
   `granted_permissions(task_id, item_id)`, a `script_grants` iterator
   yielding a new public `ScriptGrantInfo` view, and the A6-finalized
   `script_controls`.
-- [ ] **A4. Decide the auto-act policy (API-concept grants).** Using A1, decide
+- [x] **A4. Decide the auto-act policy (API-concept grants).** Using A1, decide
   which granted permissions the session acts on autonomously versus surfaces for
   the library user: record-only flags need no action; controls/camera are
   surfaced (the user cooperates) and the session only tracks the taken-controls
   set from `ScriptControlChange`; for `TELEPORT`, decide whether a granted
   script-teleport (`Event::ScriptTeleport`) may auto-call `teleport_to` or stays
   user-driven. Keep the library a conduit where it must be, a convenience where
-  the API already covers the action.
+  the API already covers the action. **Done — see § Auto-act policy reference
+  (from A4) + the B1 amendment in § Phase B.** Decided: the session takes **no
+  autonomous action** on any granted permission — every flag is either a
+  *record-only* mirror (the sim enforces) or a *cooperation* surface (the
+  runtime routes inputs / camera). **Correction to A1's premise:** `TELEPORT` is
+  **not** client-actionable. A granted `llTeleportAgent` is executed
+  *server-side* (`DoLLTeleport → World.RequestTeleportLocation`) and reaches the
+  client as an ordinary teleport already handled by `TeleportPhase`;
+  `Event::ScriptTeleport` is `llMapDestination` — a map beacon that needs **no**
+  permission and must **not** auto-call `teleport_to`. So `TELEPORT` is
+  reclassified *record-only*, there are **zero** auto-act flags, and B1's
+  `PermissionRole` drops its `ApiAction` variant (now two roles).
 - [ ] **A5. Design the client-mirror reset (the crux).** Per the decided
   client-mirror model and the `SitState` precedent, define which signal clears
   which state, distinguishing an attachment (crosses with the avatar) from an
@@ -190,11 +203,13 @@ into shared `sl-types`.
 
 The 12 grantable `ScriptPermissions` flags by the client's responsibility. The
 simulator stays authoritative; every client record is a mirror, not a security
-boundary. Roles: **record-only** — the sim enforces end-to-end, the client only
-mirrors the grant and takes no action (any effect arrives later on the ordinary
-message path) · **cooperation** — inert unless the runtime routes control inputs
-or applies camera params; `sl-proto` surfaces the grant and tracks the live
-state · **API action** — maps onto an existing `Session` method.
+boundary. Roles (final, after A4): **record-only** — the sim enforces
+end-to-end, the client only mirrors the grant and takes no action (any effect
+arrives later on the ordinary message path) · **cooperation** — inert unless the
+runtime routes control inputs or applies camera params; `sl-proto` surfaces the
+grant and tracks the live state. There is **no** autonomous-action role — A4
+established that no granted permission triggers a client-initiated `Session`
+method (see § Auto-act policy reference).
 
 | Flag | Bit | Role |
 |------|-----|------|
@@ -205,7 +220,7 @@ state · **API action** — maps onto an existing `Session` method.
 | `CHANGE_LINKS` | `1<<7` | record-only |
 | `TRACK_CAMERA` | `1<<10` | cooperation |
 | `CONTROL_CAMERA` | `1<<11` | cooperation |
-| `TELEPORT` | `1<<12` | API action |
+| `TELEPORT` | `1<<12` | record-only (was "API action" — see A4) |
 | `EXPERIENCE` | `1<<13` | record-only |
 | `SILENT_ESTATE_MANAGEMENT` | `1<<14` | record-only |
 | `OVERRIDE_ANIMATIONS` | `1<<15` | record-only |
@@ -216,9 +231,12 @@ this refines the A1 draft, which listed them as client-actionable but noted
 "nothing client-side"). The 3 cooperation flags reuse event surfaces `sl-proto`
 already emits — `TAKE_CONTROLS` via `Event::ScriptControlChange` /
 `ScriptControl`, `TRACK_CAMERA` / `CONTROL_CAMERA` via the follow-cam events
-(`FollowCamProperty` / `FollowCamPropertyValue`). `TELEPORT` is the only flag
-with an autonomous action, routed through the existing `Event::ScriptTeleport`
-(→ `Session::teleport_to`); its auto-vs-manual policy is A4's call.
+(`FollowCamProperty` / `FollowCamPropertyValue`). **`TELEPORT` is record-only,
+not an action** (the A1 draft misclassified it): a granted `llTeleportAgent`
+teleports the agent *server-side* and arrives as a normal teleport handled by
+`TeleportPhase`, so the client only mirrors the grant. `Event::ScriptTeleport`
+(`llMapDestination`) is a **separate, permission-less** map beacon — not the
+`TELEPORT` grant — and is left as a passthrough (A4).
 
 ### State-model reference (from A2)
 
@@ -387,19 +405,72 @@ No new `Event` is emitted on recording: a grant/deny/revoke is a *local* API
 call the driver itself just made, so there is nothing inbound to report (A7
 confirms the inbound event surface is unchanged).
 
+### Auto-act policy reference (from A4)
+
+The decision: **the session takes no autonomous action on any granted
+permission.** Every one of the 12 flags is either *record-only* (the sim
+enforces end-to-end; the client mirrors the grant and any effect arrives on the
+ordinary message path) or *cooperation* (inert until the runtime routes control
+inputs or applies camera params). No grant maps onto a client-initiated
+`Session` method — so there is nothing for A4 to "auto-act". This keeps the
+library a pure conduit/mirror and leaves all policy (whether to cooperate, when
+to revoke) to the driver.
+
+**Why `TELEPORT` is not an action (the A1 correction).** A1 drafted `TELEPORT`
+as "API action → `Session::teleport_to` via `Event::ScriptTeleport`". The
+protocol disproves both halves:
+
+- A granted `llTeleportAgent` / `llTeleportAgentGlobalCoords` runs
+  **server-side**: OpenSim's `DoLLTeleport` calls
+  `World.RequestTeleportLocation` / `RequestTeleportLandmark`, i.e. the sim
+  teleports the agent itself. The client receives a normal teleport
+  (`TeleportStart` → `TeleportLocal` / region handoff → `TeleportFinish`)
+  already driven by `TeleportPhase`. There is no client-initiated step, so
+  a granted `TELEPORT` needs **no** auto-act — it is *record-only*.
+- `Event::ScriptTeleport` (`ScriptTeleportRequest`, from `llMapDestination`) is
+  a **map beacon that requires no permission at all** — Firestorm's
+  `process_script_teleport_request` only tracks the location on the world-map
+  floater (gated on `ScriptsCanShowUI`), it does **not** teleport. It is
+  unrelated to the `TELEPORT` grant. The session must therefore **not**
+  auto-call `teleport_to` on it; it stays a passthrough event the driver may act
+  on (open a map, offer a teleport) entirely at its discretion.
+
+**Cooperation flags — surfaced, never auto-acted.** `TAKE_CONTROLS` is surfaced
+via `Event::ScriptControlChange`; the runtime routes the avatar's control inputs
+and `sl-proto` only mirrors the live *taken-controls* set (the A6 tracker, fed
+by `ScriptControlChange` Take/Release). `TRACK_CAMERA` / `CONTROL_CAMERA` are
+surfaced via the follow-cam events (`FollowCamProperty` /
+`FollowCamPropertyValue`); the runtime applies the camera params. The session
+records the grant but initiates nothing.
+
+**Consequence for the registry.** A4 changes only *roles/policy*, not storage:
+the registry still stores all granted bits wholesale (B2/B3 unchanged). Because
+there are now **zero** auto-act flags, B1's `PermissionRole` enum collapses from
+three variants to two (`RecordOnly` / `Cooperation`) — see the B1 amendment.
+
+A4 produces **no new implementation task**: "no autonomous action" is the
+absence of code. Its only code-facing output is the B1 amendment below; the
+`Event::ScriptTeleport` passthrough already exists and is intentionally left
+untouched.
+
 ### Tasks
 
-- [ ] **B1 (from A1). Encode the per-flag role classifier in `sl-proto`.** Add a
-      `PermissionRole` enum (`RecordOnly` / `Cooperation` / `ApiAction`) plus a
-      total mapping from each `ScriptPermissions` bit to its role, per the table
-      above, in a client-side module (e.g. `sl-proto/src/types/script.rs`) —
-      kept in `sl-proto`, never pushed to shared `sl-types` (the flags
-      themselves stay client-agnostic there). This is the canonical encoding of
-      the A1 classification that A4's auto-act policy branches on; the grant
-      registry (A2) still stores the raw granted `ScriptPermissions` bitfield
-      wholesale, because the 8 record-only flags need no handler, the 3
-      cooperation flags reuse existing event surfaces, and only `TELEPORT`
-      carries an action (via `Event::ScriptTeleport`).
+- [ ] **B1 (from A1, amended by A4). Encode the per-flag role classifier in
+      `sl-proto`.** Add a `PermissionRole` enum with **two** variants —
+      `RecordOnly` / `Cooperation` (A4 dropped the planned `ApiAction`: no
+      granted permission is client-actionable) — plus a total mapping from each
+      `ScriptPermissions` bit to its role, per the table above (note `TELEPORT`
+      is `RecordOnly`, not an action), in a client-side module (e.g.
+      `sl-proto/src/types/script.rs`) — kept in `sl-proto`, never pushed to
+      shared `sl-types` (the flags themselves stay client-agnostic there). This
+      is the canonical encoding of the A1/A4 classification; the grant registry
+      (A2) still stores the raw granted `ScriptPermissions` bitfield wholesale,
+      because the 9 record-only flags need no handler and the 3 cooperation
+      flags reuse existing event surfaces (`Event::ScriptControlChange` for
+      `TAKE_CONTROLS`, the follow-cam events for the camera flags). The session
+      takes no autonomous action on any flag, so the classifier exists for the
+      driver's benefit (deciding what to surface), not to branch session
+      behaviour.
 - [ ] **B2 (from A2). Add the grant-registry state model to `Session`.** In
       `sl-proto/src/session.rs`, add the private types `ScriptHolder`
       (`{ task_id: ObjectKey, item_id: InventoryKey }`, deriving `Ord` for the
