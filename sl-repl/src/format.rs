@@ -463,6 +463,8 @@ const fn event_name(event: &Event) -> &'static str {
         Event::ServerAppearanceUpdate { .. } => "server_appearance_update",
         Event::CachedTextureResponse { .. } => "cached_texture_response",
         Event::AvatarAnimation { .. } => "avatar_animation",
+        Event::ObjectAnimation { .. } => "object_animation",
+        Event::RebakeAvatarTextures { .. } => "rebake_avatar_textures",
         Event::CoarseLocationUpdate { .. } => "coarse_location_update",
         Event::ViewerEffect(..) => "viewer_effect",
         Event::FindAgentReply { .. } => "find_agent_reply",

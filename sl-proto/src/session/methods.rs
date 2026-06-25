@@ -57,15 +57,15 @@ use crate::types::{
     LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams,
     MapItemType, Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType,
     MovementMode, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NotecardRez, Object,
-    ObjectBuyItem, ObjectFlagSettings, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
-    PermissionField, PickKey, PickUpdate, PlacesResult, Postcard, PrimShape, ProfileUpdate,
-    ProposalVoteId, RegionInfoUpdate, RegionStats, Reliability, RestoreItem, RezAttachment,
-    SaleType, ScriptControl, ScriptControlAction, ScriptPermissions, ScriptTeleportRequest,
-    ServerError, SimStatId, SimulatorTime, SoundFlags, SoundPreload, TelehubInfo, TeleportFlags,
-    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, Wearable, WearableType,
+    ObjectBuyItem, ObjectFlagSettings, ObjectPlayingAnimation, ObjectPropertiesFamily,
+    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+    ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
+    ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult, Postcard,
+    PrimShape, ProfileUpdate, ProposalVoteId, RegionInfoUpdate, RegionStats, Reliability,
+    RestoreItem, RezAttachment, SaleType, ScriptControl, ScriptControlAction, ScriptPermissions,
+    ScriptTeleportRequest, ServerError, SimStatId, SimulatorTime, SoundFlags, SoundPreload,
+    TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus,
+    Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -2272,6 +2272,29 @@ impl Session {
                         .iter()
                         .map(|block| block.type_data.clone())
                         .collect(),
+                });
+            }
+            // The full authoritative set of animations now signalled on an
+            // animated-mesh (animesh) object; the object analogue of
+            // `AvatarAnimation`.
+            AnyMessage::ObjectAnimation(animation) => {
+                self.events.push_back(Event::ObjectAnimation {
+                    object_id: ObjectKey::from(animation.sender.id),
+                    animations: animation
+                        .animation_list
+                        .iter()
+                        .map(|block| ObjectPlayingAnimation {
+                            anim_id: AnimationKey::from(block.anim_id),
+                            sequence_id: block.anim_sequence_id,
+                        })
+                        .collect(),
+                });
+            }
+            // The simulator could not find one of the agent's temporary baked
+            // textures and is asking the viewer to rebake and re-upload it.
+            AnyMessage::RebakeAvatarTextures(rebake) => {
+                self.events.push_back(Event::RebakeAvatarTextures {
+                    texture_id: TextureKey::from(rebake.texture_data.texture_id),
                 });
             }
             // A one-shot spatial sound played at a fixed region-local position

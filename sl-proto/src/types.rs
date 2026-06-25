@@ -411,9 +411,9 @@ pub use nearby::{
 };
 pub use object::{
     ExtendedMesh, FlexibleData, LightData, LightImage, NameValue, Object, ObjectExtraParams,
-    ObjectMotion, ObjectProperties, ObjectPropertiesFamily, ParticleSystem, PrimShapeParams,
-    ReflectionProbe, RenderMaterialRef, SculptData, TextureAnimation, particle_pattern, pcode,
-    texture_anim_mode,
+    ObjectMotion, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ParticleSystem,
+    PrimShapeParams, ReflectionProbe, RenderMaterialRef, SculptData, TextureAnimation,
+    particle_pattern, pcode, texture_anim_mode,
 };
 pub use parcel::{
     LandStatItem, LandStatReportType, LandingType, ParcelAccessEntry, ParcelAccessFlags,

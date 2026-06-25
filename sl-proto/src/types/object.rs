@@ -13,6 +13,7 @@ use sl_wire::RegionHandle;
 use sl_wire::RegionLocalObjectId;
 use uuid::Uuid;
 
+use crate::asset_keys::AnimationKey;
 use crate::scoped_id::{CircuitId, ScopedObjectId};
 use crate::types::SculptOrMeshKey;
 
@@ -573,6 +574,26 @@ pub struct TextureAnimation {
     pub length: f32,
     /// The playback rate, in frames per second (or radians/second when rotating).
     pub rate: f32,
+}
+
+/// One animation currently signalled on an animated-mesh (animesh) object, from
+/// an `ObjectAnimation` update (surfaced inside
+/// [`Event::ObjectAnimation`](crate::Event::ObjectAnimation)).
+///
+/// This is the object analogue of [`PlayingAnimation`](crate::PlayingAnimation)
+/// for an avatar: the simulator drives an animated object's internal control
+/// avatar with these. Unlike an avatar animation it never names a triggering
+/// source object (the animesh object itself is the source), so there is no
+/// `source_id` field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObjectPlayingAnimation {
+    /// The animation asset id playing on the object (a built-in animation UUID
+    /// or an uploaded animation asset).
+    pub anim_id: AnimationKey,
+    /// The simulator's per-object animation sequence number. It increments each
+    /// time an animation (re)starts, so a viewer can tell a fresh start from an
+    /// animation that has merely been re-listed.
+    pub sequence_id: i32,
 }
 
 /// Particle-flow pattern (`mPattern`) values for a [`ParticleSystem`], matching
