@@ -37,8 +37,8 @@ use super::{
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
 use crate::bookkeeping_ids::{
-    GroupRequestId, ImSessionId, InventoryCallbackId, LureId, PingId, QueryId, TransactionId,
-    TransferId, XferId,
+    GroupRequestId, ImSessionId, InventoryCallbackId, InvoiceId, LureId, PingId, QueryId,
+    TransactionId, TransferId, XferId,
 };
 use crate::error::Error;
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
@@ -50,22 +50,22 @@ use crate::types::{
     CoarseLocation, CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
     DirPeopleResult, DirPlaceResult, DisconnectReason, EstateAccessDelta, EstateCovenant, Event,
-    EventInfo, FollowCamProperty, FollowCamPropertyValue, FriendRights, GestureActivation,
-    GroupNoticeAttachment, GroupNoticeKey, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange,
-    ImDialog, ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer,
-    LandSearchType, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
-    LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MeanCollision,
-    MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NeighborInfo,
-    NewInventoryItem, NotecardRez, Object, ObjectBuyItem, ObjectFlagSettings,
-    ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
-    PickUpdate, PlacesResult, Postcard, PrimShape, ProfileUpdate, ProposalVoteId, RegionInfoUpdate,
-    RegionStats, Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl,
-    ScriptControlAction, ScriptPermissions, ScriptTeleportRequest, SimStatId, SimulatorTime,
-    SoundFlags, SoundPreload, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
-    Throttle, TransferStatus, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
-    WearableType,
+    EventInfo, FollowCamProperty, FollowCamPropertyValue, FriendRights, GenericMessage,
+    GenericStreamingMessage, GestureActivation, GroupNoticeAttachment, GroupNoticeKey,
+    GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate,
+    InventoryFolder, InventoryItem, InventoryOffer, LandSearchType, LandStatItem,
+    LandStatReportType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType,
+    Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode,
+    MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NotecardRez, Object, ObjectBuyItem,
+    ObjectFlagSettings, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
+    PermissionField, PickKey, PickUpdate, PlacesResult, Postcard, PrimShape, ProfileUpdate,
+    ProposalVoteId, RegionInfoUpdate, RegionStats, Reliability, RestoreItem, RezAttachment,
+    SaleType, ScriptControl, ScriptControlAction, ScriptPermissions, ScriptTeleportRequest,
+    SimStatId, SimulatorTime, SoundFlags, SoundPreload, TelehubInfo, TeleportFlags,
+    TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect,
+    ViewerEffectData, ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -2702,6 +2702,44 @@ impl Session {
                 if trimmed_string(&generic.method_data.method) == "emptymutelist" =>
             {
                 self.events.push_back(Event::MuteList(Vec::new()));
+            }
+            // A generic method-name + parameter envelope used for a grab-bag of
+            // loosely-coupled features keyed by `Method` (the feature-specific
+            // ones, like `emptymutelist` above, are matched first); the parameter
+            // blobs are surfaced verbatim for the consumer to parse.
+            AnyMessage::GenericMessage(generic) => {
+                self.events.push_back(Event::GenericMessage(GenericMessage {
+                    method: trimmed_string(&generic.method_data.method),
+                    invoice: InvoiceId::from(generic.method_data.invoice),
+                    params: generic
+                        .param_list
+                        .iter()
+                        .map(|block| block.parameter.clone())
+                        .collect(),
+                }));
+            }
+            // The same envelope as `GenericMessage`, but with a larger per-param
+            // size limit (real grids carry it over HTTP rather than UDP).
+            AnyMessage::LargeGenericMessage(generic) => {
+                self.events
+                    .push_back(Event::LargeGenericMessage(GenericMessage {
+                        method: trimmed_string(&generic.method_data.method),
+                        invoice: InvoiceId::from(generic.method_data.invoice),
+                        params: generic
+                            .param_list
+                            .iter()
+                            .map(|block| block.parameter.clone())
+                            .collect(),
+                    }));
+            }
+            // An optimised streaming envelope: a numeric method id plus a single
+            // opaque data blob (e.g. a GLTF material override), surfaced verbatim.
+            AnyMessage::GenericStreamingMessage(streaming) => {
+                self.events
+                    .push_back(Event::GenericStreamingMessage(GenericStreamingMessage {
+                        method: streaming.method_data.method,
+                        data: streaming.data_block.data.clone(),
+                    }));
             }
             AnyMessage::ScriptDialog(dialog) => {
                 self.events

@@ -283,6 +283,9 @@ fn on_events(
             | SlSessionEvent::LandStatReply { .. }
             | SlSessionEvent::SimStats(_)
             | SlSessionEvent::SimulatorTime(_)
+            | SlSessionEvent::GenericMessage(_)
+            | SlSessionEvent::LargeGenericMessage(_)
+            | SlSessionEvent::GenericStreamingMessage(_)
             | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged {

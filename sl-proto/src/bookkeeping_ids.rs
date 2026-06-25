@@ -213,12 +213,19 @@ uuid_correlation_id!(
     LureId,
     "teleport-lure"
 );
+uuid_correlation_id!(
+    /// The `Invoice` of a `GenericMessage` family envelope (`GenericMessage` /
+    /// `LargeGenericMessage`); a feature-specific id that pairs a generic reply
+    /// with the request that provoked it.
+    InvoiceId,
+    "generic-message invoice"
+);
 
 #[cfg(test)]
 mod tests {
     use super::{
-        GroupRequestId, ImSessionId, InventoryCallbackId, LureId, PingId, QueryId, TransactionId,
-        TransferId, XferId,
+        GroupRequestId, ImSessionId, InventoryCallbackId, InvoiceId, LureId, PingId, QueryId,
+        TransactionId, TransferId, XferId,
     };
     use pretty_assertions::assert_eq;
     use uuid::Uuid;
@@ -231,6 +238,7 @@ mod tests {
         assert_eq!(GroupRequestId::from(id).to_string(), id.to_string());
         assert_eq!(ImSessionId::from(id).get(), id);
         assert_eq!(LureId::from(id).get(), id);
+        assert_eq!(InvoiceId::from(id).get(), id);
         // Distinct types do not unify, so a query id cannot stand in for a
         // transaction id at a call site (checked by construction, not at runtime).
         assert_eq!(LureId::default(), LureId(Uuid::nil()));

@@ -15,6 +15,7 @@ mod economy;
 mod editing;
 mod environment;
 mod event;
+mod generic;
 mod group;
 mod inventory;
 mod map;
@@ -386,6 +387,7 @@ pub use environment::{
     SkySettings, WaterSettings,
 };
 pub use event::Event;
+pub use generic::{GenericMessage, GenericStreamingMessage};
 pub use group::{
     ActiveGroup, CreateGroupParams, GroupAccountDetails, GroupAccountDetailsEntry,
     GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
