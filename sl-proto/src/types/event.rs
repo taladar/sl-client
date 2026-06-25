@@ -15,12 +15,12 @@ use super::{
     ImDialog, InstantMessage, InventoryFolder, InventoryItem, Kick, LandStatItem,
     LandStatReportType, LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapLayer,
     MapRegionInfo, Maturity, MeanCollision, MoneyBalance, MuteEntry, NeighborInfo, Object,
-    ObjectProperties, ObjectPropertiesFamily, ParcelAccessEntry, ParcelAccessScope, ParcelDetails,
-    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
-    PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, RegionStats,
-    ScriptControl, ScriptDialog, ScriptPermissionRequest, ScriptTeleportRequest, ServerError,
-    SimulatorTime, SoundFlags, SoundPreload, TelehubInfo, TeleportFlags, TerrainPatch, Texture,
-    TransferStatus, ViewerEffect, Wearable,
+    ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ParcelAccessEntry,
+    ParcelAccessScope, ParcelDetails, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelObjectOwner, ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation, RegionIdentity,
+    RegionLimits, RegionStats, ScriptControl, ScriptDialog, ScriptPermissionRequest,
+    ScriptTeleportRequest, ServerError, SimulatorTime, SoundFlags, SoundPreload, TelehubInfo,
+    TeleportFlags, TerrainPatch, Texture, TransferStatus, ViewerEffect, Wearable,
 };
 use sl_types::key::{
     AgentKey, ExperienceKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
@@ -1178,6 +1178,15 @@ pub enum Event {
         /// pairs; a nil id means no cached bake for that slot.
         textures: Vec<(u8, Uuid)>,
     },
+    /// The simulator could not find one of the agent's temporary baked-avatar
+    /// textures and is asking the viewer to rebake and re-upload it
+    /// (`RebakeAvatarTextures`). A baking client should regenerate the named
+    /// baked texture and upload it again; a headless bot with no appearance
+    /// pipeline can ignore this.
+    RebakeAvatarTextures {
+        /// The baked texture the simulator is missing and wants re-uploaded.
+        texture_id: TextureKey,
+    },
     /// Another avatar's currently-playing animations (`AvatarAnimation`),
     /// pushed by the simulator whenever an avatar's animation set changes. The
     /// list is the *complete* set of animations that avatar is now playing — an
@@ -1198,6 +1207,18 @@ pub enum Event {
         /// the block and OpenSim never populates it), so the bytes are
         /// surfaced verbatim rather than decoded. Almost always empty.
         physical_events: Vec<Vec<u8>>,
+    },
+    /// An animated-mesh (animesh) object's currently-signalled animations
+    /// (`ObjectAnimation`), pushed by the simulator whenever a scripted object's
+    /// animation set changes (e.g. `llStartObjectAnimation`). As with
+    /// [`Event::AvatarAnimation`], the list is the *complete* authoritative set
+    /// of animations now playing on the object — an animation that stops simply
+    /// drops out of a later update — not a delta.
+    ObjectAnimation {
+        /// The animated object whose animation state this describes.
+        object_id: ObjectKey,
+        /// The animations the object is currently playing.
+        animations: Vec<ObjectPlayingAnimation>,
     },
     /// Coarse (minimap) positions of nearby avatars (`CoarseLocationUpdate`).
     /// The simulator pushes this periodically; each [`CoarseLocation`] gives an

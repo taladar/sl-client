@@ -209,6 +209,17 @@ echoed session id) carry nothing the client needs and are dropped.
 `RebakeAvatarTextures` (Low 87): server request to rebake and re-upload
 appearance.
 
+Implemented as `Event::ObjectAnimation { object_id: ObjectKey, animations:
+Vec<ObjectPlayingAnimation> }` (the object analogue of `Event::AvatarAnimation`;
+the simulator sends the full authoritative set of animations signalled on an
+animesh object's control avatar, not a delta). `ObjectPlayingAnimation {
+anim_id: AnimationKey, sequence_id: i32 }` lives in `types/object.rs`; it omits
+the `source_id` of `PlayingAnimation` because an animesh object is its own
+animation source. `RebakeAvatarTextures` surfaces as
+`Event::RebakeAvatarTextures {
+texture_id: TextureKey }` — the baked texture the simulator could not find and
+wants re-uploaded.
+
 ### Batch 5 — friendship & calling cards
 
 `TerminateFriendship` (Low 300), `OfferCallingCard` (Low 301),
@@ -322,7 +333,7 @@ section with the resulting table before starting outbound batches.
   GenericStreamingMessage)
 - [x] Batch 3 — session errors & forced disconnect (Error, FeatureDisabled,
   KickUser)
-- [ ] Batch 4 — scene & appearance
+- [x] Batch 4 — scene & appearance (ObjectAnimation, RebakeAvatarTextures)
 - [ ] Batch 5 — friendship & calling cards
 - [ ] Batch 6 — inventory sync, task inventory & misc
 - [ ] EQ batch 1 — pathfinding agent state (AgentStateUpdate — closes issue 3)

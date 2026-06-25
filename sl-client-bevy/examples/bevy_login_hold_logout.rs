@@ -307,6 +307,8 @@ fn on_events(
             | SlSessionEvent::AvatarAppearance(_)
             | SlSessionEvent::AgentWearables { .. }
             | SlSessionEvent::AvatarAnimation { .. }
+            | SlSessionEvent::ObjectAnimation { .. }
+            | SlSessionEvent::RebakeAvatarTextures { .. }
             | SlSessionEvent::CoarseLocationUpdate { .. }
             | SlSessionEvent::ViewerEffect(_)
             | SlSessionEvent::FindAgentReply { .. }

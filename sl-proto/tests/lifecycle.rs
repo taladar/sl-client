@@ -97,7 +97,8 @@ mod test {
         MapItemReplyAgentDataBlock, MapItemReplyDataBlock, MapItemReplyRequestDataBlock,
         MapLayerReply, MapLayerReplyAgentDataBlock, MapLayerReplyLayerDataBlock, MoneyBalanceReply,
         MoneyBalanceReplyMoneyDataBlock, MoneyBalanceReplyTransactionInfoBlock, MuteListUpdate,
-        MuteListUpdateMuteDataBlock, ObjectProperties as WireObjectProperties,
+        MuteListUpdateMuteDataBlock, ObjectAnimation, ObjectAnimationAnimationListBlock,
+        ObjectAnimationSenderBlock, ObjectProperties as WireObjectProperties,
         ObjectPropertiesFamily as ObjectPropertiesFamilyMessage,
         ObjectPropertiesFamilyObjectDataBlock, ObjectPropertiesObjectDataBlock, ObjectUpdate,
         ObjectUpdateCached, ObjectUpdateCachedObjectDataBlock, ObjectUpdateCachedRegionDataBlock,
@@ -115,25 +116,26 @@ mod test {
         ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
         PayPriceReply, PayPriceReplyButtonDataBlock, PayPriceReplyObjectDataBlock, PickInfoReply,
         PickInfoReplyAgentDataBlock, PickInfoReplyDataBlock, PreloadSound,
-        PreloadSoundDataBlockBlock, RegionHandshake, RegionHandshakeRegionInfo2Block,
-        RegionHandshakeRegionInfo3Block, RegionHandshakeRegionInfo4Block,
-        RegionHandshakeRegionInfoBlock, RegionInfo, RegionInfoAgentDataBlock,
-        RegionInfoCombatSettingsBlock, RegionInfoRegionInfo2Block, RegionInfoRegionInfo3Block,
-        RegionInfoRegionInfo5Block, RegionInfoRegionInfoBlock, RequestXfer, RequestXferXferIDBlock,
-        ScriptDialog, ScriptDialogButtonsBlock, ScriptDialogDataBlock, ScriptDialogOwnerDataBlock,
-        ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock, ScriptRunningReply,
-        ScriptRunningReplyScriptBlock, ScriptTeleportRequest, ScriptTeleportRequestDataBlock,
-        ScriptTeleportRequestOptionsBlock, SendXferPacket, SendXferPacketDataPacketBlock,
-        SendXferPacketXferIDBlock, SimStats, SimStatsPidStatBlock, SimStatsRegionBlock,
-        SimStatsRegionInfoBlock, SimStatsStatBlock, SimulatorViewerTimeMessage,
-        SimulatorViewerTimeMessageTimeInfoBlock, SoundTrigger, SoundTriggerSoundDataBlock,
-        TelehubInfo as TelehubInfoMessage, TelehubInfoSpawnPointBlockBlock,
-        TelehubInfoTelehubBlockBlock, TeleportFailed, TeleportFailedAlertInfoBlock,
-        TeleportFailedInfoBlock, TeleportFinish, TeleportFinishInfoBlock, TransferInfo,
-        TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
-        UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock, UpdateCreateInventoryItem,
-        UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
-        UseCachedMuteList, UseCachedMuteListAgentDataBlock, ViewerEffect as ViewerEffectMessage,
+        PreloadSoundDataBlockBlock, RebakeAvatarTextures, RebakeAvatarTexturesTextureDataBlock,
+        RegionHandshake, RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
+        RegionHandshakeRegionInfo4Block, RegionHandshakeRegionInfoBlock, RegionInfo,
+        RegionInfoAgentDataBlock, RegionInfoCombatSettingsBlock, RegionInfoRegionInfo2Block,
+        RegionInfoRegionInfo3Block, RegionInfoRegionInfo5Block, RegionInfoRegionInfoBlock,
+        RequestXfer, RequestXferXferIDBlock, ScriptDialog, ScriptDialogButtonsBlock,
+        ScriptDialogDataBlock, ScriptDialogOwnerDataBlock, ScriptQuestion, ScriptQuestionDataBlock,
+        ScriptQuestionExperienceBlock, ScriptRunningReply, ScriptRunningReplyScriptBlock,
+        ScriptTeleportRequest, ScriptTeleportRequestDataBlock, ScriptTeleportRequestOptionsBlock,
+        SendXferPacket, SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock, SimStats,
+        SimStatsPidStatBlock, SimStatsRegionBlock, SimStatsRegionInfoBlock, SimStatsStatBlock,
+        SimulatorViewerTimeMessage, SimulatorViewerTimeMessageTimeInfoBlock, SoundTrigger,
+        SoundTriggerSoundDataBlock, TelehubInfo as TelehubInfoMessage,
+        TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock, TeleportFailed,
+        TeleportFailedAlertInfoBlock, TeleportFailedInfoBlock, TeleportFinish,
+        TeleportFinishInfoBlock, TransferInfo, TransferInfoTransferInfoBlock, TransferPacket,
+        TransferPacketTransferDataBlock, UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock,
+        UpdateCreateInventoryItem, UpdateCreateInventoryItemAgentDataBlock,
+        UpdateCreateInventoryItemInventoryDataBlock, UseCachedMuteList,
+        UseCachedMuteListAgentDataBlock, ViewerEffect as ViewerEffectMessage,
         ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
     };
     use sl_wire::{
@@ -5787,6 +5789,75 @@ mod test {
         assert_eq!(second.anim_id, scripted);
         assert_eq!(second.sequence_id, 2);
         assert_eq!(second.source_id, Some(ObjectKey::from(trigger_object)));
+        Ok(())
+    }
+
+    #[test]
+    fn object_animation_surfaces_signalled_animations() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let object = uuid::Uuid::from_u128(0xB1);
+        let dance = uuid::Uuid::from_u128(0x400);
+        let wave = uuid::Uuid::from_u128(0x401);
+
+        let message = AnyMessage::ObjectAnimation(ObjectAnimation {
+            sender: ObjectAnimationSenderBlock { id: object },
+            animation_list: vec![
+                ObjectAnimationAnimationListBlock {
+                    anim_id: dance,
+                    anim_sequence_id: 3,
+                },
+                ObjectAnimationAnimationListBlock {
+                    anim_id: wave,
+                    anim_sequence_id: 4,
+                },
+            ],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let (object_id, animations) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ObjectAnimation {
+                    object_id,
+                    animations,
+                } => Some((object_id, animations)),
+                _ => None,
+            })
+            .ok_or("expected an ObjectAnimation event")?;
+        assert_eq!(object_id, ObjectKey::from(object));
+        assert_eq!(animations.len(), 2);
+        let first = animations.first().ok_or("first animation")?;
+        assert_eq!(first.anim_id, AnimationKey::from(dance));
+        assert_eq!(first.sequence_id, 3);
+        let second = animations.get(1).ok_or("second animation")?;
+        assert_eq!(second.anim_id, AnimationKey::from(wave));
+        assert_eq!(second.sequence_id, 4);
+        Ok(())
+    }
+
+    #[test]
+    fn rebake_avatar_textures_surfaces_texture_id() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let baked = uuid::Uuid::from_u128(0xBA4E);
+        let message = AnyMessage::RebakeAvatarTextures(RebakeAvatarTextures {
+            texture_data: RebakeAvatarTexturesTextureDataBlock { texture_id: baked },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let texture_id = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::RebakeAvatarTextures { texture_id } => Some(texture_id),
+                _ => None,
+            })
+            .ok_or("expected a RebakeAvatarTextures event")?;
+        assert_eq!(texture_id, TextureKey::from(baked));
         Ok(())
     }
 

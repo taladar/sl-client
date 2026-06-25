@@ -474,6 +474,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::ObjectUpdated(_)
             | Event::ServerAppearanceUpdate { .. }
             | Event::CachedTextureResponse { .. }
+            | Event::ObjectAnimation { .. }
+            | Event::RebakeAvatarTextures { .. }
             | Event::GroupMembers { .. }
             | Event::GroupRoleData { .. }
             | Event::GroupRoleMembers { .. }

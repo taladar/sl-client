@@ -683,6 +683,8 @@ impl Survey {
             | Event::AvatarAppearance(_)
             | Event::AgentWearables { .. }
             | Event::AvatarAnimation { .. }
+            | Event::ObjectAnimation { .. }
+            | Event::RebakeAvatarTextures { .. }
             | Event::CoarseLocationUpdate { .. }
             | Event::ViewerEffect(_)
             | Event::FindAgentReply { .. }
