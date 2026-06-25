@@ -63,10 +63,12 @@ mod test {
         DirPeopleReplyQueryDataBlock, DirPeopleReplyQueryRepliesBlock, DisableSimulator,
         EconomyData, EconomyDataInfoBlock, EjectGroupMemberReply,
         EjectGroupMemberReplyAgentDataBlock, EjectGroupMemberReplyEjectDataBlock,
-        EjectGroupMemberReplyGroupDataBlock, EstateCovenantReply, EstateCovenantReplyDataBlock,
-        EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
+        EjectGroupMemberReplyGroupDataBlock, Error as ErrorMessage, ErrorAgentDataBlock,
+        ErrorDataBlock, EstateCovenantReply, EstateCovenantReplyDataBlock, EstateOwnerMessage,
+        EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
         EstateOwnerMessageParamListBlock, EventInfoReply, EventInfoReplyAgentDataBlock,
-        EventInfoReplyEventDataBlock, FindAgent, FindAgentAgentBlockBlock,
+        EventInfoReplyEventDataBlock, FeatureDisabled as WireFeatureDisabled,
+        FeatureDisabledFailureInfoBlock, FindAgent, FindAgentAgentBlockBlock,
         FindAgentLocationBlockBlock, GenericMessage, GenericMessageAgentDataBlock,
         GenericMessageMethodDataBlock, GenericMessageParamListBlock, GenericStreamingMessage,
         GenericStreamingMessageDataBlockBlock, GenericStreamingMessageMethodDataBlock,
@@ -86,8 +88,9 @@ mod test {
         ImprovedTerseObjectUpdate, ImprovedTerseObjectUpdateObjectDataBlock,
         ImprovedTerseObjectUpdateRegionDataBlock, InventoryDescendents,
         InventoryDescendentsAgentDataBlock, InventoryDescendentsFolderDataBlock,
-        InventoryDescendentsItemDataBlock, KillObject, KillObjectObjectDataBlock,
-        LargeGenericMessage, LargeGenericMessageAgentDataBlock, LargeGenericMessageMethodDataBlock,
+        InventoryDescendentsItemDataBlock, KickUser, KickUserTargetBlockBlock,
+        KickUserUserInfoBlock, KillObject, KillObjectObjectDataBlock, LargeGenericMessage,
+        LargeGenericMessageAgentDataBlock, LargeGenericMessageMethodDataBlock,
         LargeGenericMessageParamListBlock, LayerData, LayerDataLayerDataBlock,
         LayerDataLayerIDBlock, LogoutRequest, LogoutRequestAgentDataBlock, MapBlockReply,
         MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapItemReply,
@@ -891,6 +894,124 @@ mod test {
                 data: vec![1, 2, 3, 4],
             }
         );
+        Ok(())
+    }
+
+    #[test]
+    fn error_message_surfaces_typed_server_error() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let message = AnyMessage::Error(ErrorMessage {
+            agent_data: ErrorAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+            data: ErrorDataBlock {
+                code: 402,
+                token: b"InsufficientFunds\0".to_vec(),
+                id: uuid::Uuid::from_u128(0xFEED),
+                system: b"money/transfer\0".to_vec(),
+                message: b"You do not have enough money.\0".to_vec(),
+                data: vec![1, 2, 3],
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 12, false)?, now)?;
+        let received = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ServerError(error) => Some(error),
+                _ => None,
+            })
+            .ok_or("expected a ServerError event")?;
+        assert_eq!(
+            *received,
+            sl_proto::ServerError {
+                agent: AgentKey::from(uuid::Uuid::from_u128(1)),
+                code: 402,
+                token: "InsufficientFunds".to_owned(),
+                id: uuid::Uuid::from_u128(0xFEED),
+                system: "money/transfer".to_owned(),
+                message: "You do not have enough money.".to_owned(),
+                data: vec![1, 2, 3],
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn feature_disabled_surfaces_typed_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let message = AnyMessage::FeatureDisabled(WireFeatureDisabled {
+            failure_info: FeatureDisabledFailureInfoBlock {
+                error_message: b"That feature is disabled here.\0".to_vec(),
+                agent_id: uuid::Uuid::from_u128(1),
+                transaction_id: uuid::Uuid::from_u128(0xBEEF),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 13, false)?, now)?;
+        let received = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::FeatureDisabled(disabled) => Some(disabled),
+                _ => None,
+            })
+            .ok_or("expected a FeatureDisabled event")?;
+        assert_eq!(
+            received,
+            sl_proto::FeatureDisabled {
+                message: "That feature is disabled here.".to_owned(),
+                agent: AgentKey::from(uuid::Uuid::from_u128(1)),
+                transaction: TransactionId::from(uuid::Uuid::from_u128(0xBEEF)),
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn kick_user_surfaces_kick_and_disconnects() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let message = AnyMessage::KickUser(KickUser {
+            target_block: KickUserTargetBlockBlock {
+                target_ip: [127, 0, 0, 1],
+                target_port: 13000,
+            },
+            user_info: KickUserUserInfoBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+                reason: b"Logged in from another location.\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 14, false)?, now)?;
+        let events = drain_events(&mut session);
+        // The kick is surfaced with its details...
+        let kick = events
+            .iter()
+            .find_map(|event| match event {
+                Event::Kicked(kick) => Some(kick.clone()),
+                _ => None,
+            })
+            .ok_or("expected a Kicked event")?;
+        assert_eq!(
+            kick,
+            sl_proto::Kick {
+                agent: AgentKey::from(uuid::Uuid::from_u128(1)),
+                reason: "Logged in from another location.".to_owned(),
+            }
+        );
+        // ...and the session drives itself to a terminal kicked disconnect.
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::Disconnected(DisconnectReason::Kicked { message })
+                if message == "Logged in from another location."
+        )));
+        assert!(session.is_closed());
         Ok(())
     }
 

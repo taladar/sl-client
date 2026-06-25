@@ -50,20 +50,20 @@ use crate::types::{
     CoarseLocation, CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
     DirPeopleResult, DirPlaceResult, DisconnectReason, EstateAccessDelta, EstateCovenant, Event,
-    EventInfo, FollowCamProperty, FollowCamPropertyValue, FriendRights, GenericMessage,
-    GenericStreamingMessage, GestureActivation, GroupNoticeAttachment, GroupNoticeKey,
-    GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate,
-    InventoryFolder, InventoryItem, InventoryOffer, LandSearchType, LandStatItem,
-    LandStatReportType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType,
-    Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode,
-    MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NotecardRez, Object, ObjectBuyItem,
-    ObjectFlagSettings, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
+    EventInfo, FeatureDisabled, FollowCamProperty, FollowCamPropertyValue, FriendRights,
+    GenericMessage, GenericStreamingMessage, GestureActivation, GroupNoticeAttachment,
+    GroupNoticeKey, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec,
+    InterestsUpdate, InventoryFolder, InventoryItem, InventoryOffer, Kick, LandSearchType,
+    LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams,
+    MapItemType, Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType,
+    MovementMode, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NotecardRez, Object,
+    ObjectBuyItem, ObjectFlagSettings, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
     ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand,
     ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
     PermissionField, PickKey, PickUpdate, PlacesResult, Postcard, PrimShape, ProfileUpdate,
     ProposalVoteId, RegionInfoUpdate, RegionStats, Reliability, RestoreItem, RezAttachment,
     SaleType, ScriptControl, ScriptControlAction, ScriptPermissions, ScriptTeleportRequest,
-    SimStatId, SimulatorTime, SoundFlags, SoundPreload, TelehubInfo, TeleportFlags,
+    ServerError, SimStatId, SimulatorTime, SoundFlags, SoundPreload, TelehubInfo, TeleportFlags,
     TerrainLayerType, TerrainPatch, Texture, Throttle, TransferStatus, Transmit, ViewerEffect,
     ViewerEffectData, ViewerEffectType, Wearable, WearableType,
 };
@@ -2740,6 +2740,40 @@ impl Session {
                         method: streaming.method_data.method,
                         data: streaming.data_block.data.clone(),
                     }));
+            }
+            // A generic UDP error report: an HTTP-like code plus an originating
+            // system path and human-readable message, surfaced verbatim. The
+            // `id` correlation field is deliberately polymorphic on the wire, so
+            // it stays a raw `Uuid`; the binary `data` blob is kept verbatim.
+            AnyMessage::Error(error) => {
+                self.events.push_back(Event::ServerError(Box::new(ServerError {
+                    agent: AgentKey::from(error.agent_data.agent_id),
+                    code: error.data.code,
+                    token: trimmed_string(&error.data.token),
+                    id: error.data.id,
+                    system: trimmed_string(&error.data.system),
+                    message: trimmed_string(&error.data.message),
+                    data: error.data.data.clone(),
+                })));
+            }
+            // A notice that a feature the agent asked for is unavailable.
+            AnyMessage::FeatureDisabled(disabled) => {
+                self.events.push_back(Event::FeatureDisabled(FeatureDisabled {
+                    message: trimmed_string(&disabled.failure_info.error_message),
+                    agent: AgentKey::from(disabled.failure_info.agent_id),
+                    transaction: TransactionId::from(disabled.failure_info.transaction_id),
+                }));
+            }
+            // A server-initiated forced logout: surface the kick details, then
+            // drive the session to its terminal `Disconnected` state (the
+            // routing target address / echoed session id carry nothing useful).
+            AnyMessage::KickUser(kick) => {
+                let reason = trimmed_string(&kick.user_info.reason);
+                self.events.push_back(Event::Kicked(Kick {
+                    agent: AgentKey::from(kick.user_info.agent_id),
+                    reason: reason.clone(),
+                }));
+                self.close(DisconnectReason::Kicked { message: reason });
             }
             AnyMessage::ScriptDialog(dialog) => {
                 self.events

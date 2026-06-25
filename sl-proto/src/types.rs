@@ -26,6 +26,7 @@ mod parcel;
 mod region;
 mod report;
 mod script;
+mod server_error;
 mod session;
 mod terrain;
 
@@ -430,6 +431,7 @@ pub use script::{
     MuteType, ScriptControl, ScriptControlAction, ScriptDialog, ScriptPermissionRequest,
     ScriptPermissions, ScriptTeleportRequest,
 };
+pub use server_error::{FeatureDisabled, Kick, ServerError};
 pub use session::{
     Camera, CameraError, DisconnectReason, Kilobits, LoginHttpRequest, LoginParams, MovementMode,
     Reliability, Throttle, ThrottleBuilder, ThrottleError, Transmit,

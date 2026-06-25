@@ -286,6 +286,9 @@ fn on_events(
             | SlSessionEvent::GenericMessage(_)
             | SlSessionEvent::LargeGenericMessage(_)
             | SlSessionEvent::GenericStreamingMessage(_)
+            | SlSessionEvent::ServerError(_)
+            | SlSessionEvent::FeatureDisabled(_)
+            | SlSessionEvent::Kicked(_)
             | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged {

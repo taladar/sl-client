@@ -736,6 +736,16 @@ pub enum DisconnectReason {
     HandshakeFailed,
     /// An unrecoverable wire-protocol error occurred.
     ProtocolError,
+    /// The simulator forced a logout with a `KickUser` message (e.g. the same
+    /// account logged in elsewhere). Paired with an [`Event::Kicked`] carrying
+    /// the full [`Kick`] details.
+    ///
+    /// [`Event::Kicked`]: crate::types::Event::Kicked
+    /// [`Kick`]: crate::types::Kick
+    Kicked {
+        /// The human-readable reason the simulator gave for the kick.
+        message: String,
+    },
 }
 
 #[cfg(test)]
