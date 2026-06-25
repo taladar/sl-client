@@ -365,6 +365,9 @@ fn on_events(
             | SlSessionEvent::GenericMessage(_)
             | SlSessionEvent::LargeGenericMessage(_)
             | SlSessionEvent::GenericStreamingMessage(_)
+            | SlSessionEvent::ServerError(_)
+            | SlSessionEvent::FeatureDisabled(_)
+            | SlSessionEvent::Kicked(_)
             | SlSessionEvent::LandStatReply { .. } => {}
         }
     }

@@ -580,6 +580,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::GenericMessage(_)
             | Event::LargeGenericMessage(_)
             | Event::GenericStreamingMessage(_)
+            | Event::ServerError(_)
+            | Event::FeatureDisabled(_)
+            | Event::Kicked(_)
             | Event::LandStatReply { .. } => {}
         }
     }

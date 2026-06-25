@@ -192,6 +192,17 @@ existing dedicated arms, matched ahead of the generic fallback.
 `KickUser` (Low 163): surface as a kick event and drive the session toward
 `Event::Disconnected`/`LoggedOut`.
 
+Implemented in `types/server_error.rs` as `Event::ServerError(Box<ServerError>)`
+(HTTP-like `code`, originating `system` path, human-readable `message`, plus the
+deliberately-polymorphic `id` correlation field kept as a raw `Uuid` and the
+binary LLSD `data` blob kept verbatim), `Event::FeatureDisabled(FeatureDisabled
+{ message, agent: AgentKey, transaction: TransactionId })`, and
+`Event::Kicked(Kick { agent: AgentKey, reason: String })`. The `KickUser` arm
+also calls `self.close(DisconnectReason::Kicked { message })` — a new
+`DisconnectReason` variant — so the session reaches its terminal
+`Event::Disconnected` state; the `KickUser` routing fields (target sim address,
+echoed session id) carry nothing the client needs and are dropped.
+
 ### Batch 4 — scene & appearance
 
 `ObjectAnimation` (High 30): per-object animation start/stop (animesh).
@@ -309,7 +320,8 @@ section with the resulting table before starting outbound batches.
 - [x] Batch 1 — region telemetry (SimStats, SimulatorViewerTimeMessage)
 - [x] Batch 2 — generic message family (GenericMessage, LargeGenericMessage,
   GenericStreamingMessage)
-- [ ] Batch 3 — session errors & forced disconnect
+- [x] Batch 3 — session errors & forced disconnect (Error, FeatureDisabled,
+  KickUser)
 - [ ] Batch 4 — scene & appearance
 - [ ] Batch 5 — friendship & calling cards
 - [ ] Batch 6 — inventory sync, task inventory & misc

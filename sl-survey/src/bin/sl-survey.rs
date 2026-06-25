@@ -767,6 +767,9 @@ impl Survey {
             | Event::GenericMessage(_)
             | Event::LargeGenericMessage(_)
             | Event::GenericStreamingMessage(_)
+            | Event::ServerError(_)
+            | Event::FeatureDisabled(_)
+            | Event::Kicked(_)
             | Event::Environment(_) => {}
         }
         Ok(false)
