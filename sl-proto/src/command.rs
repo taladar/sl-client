@@ -358,6 +358,29 @@ pub enum Command {
     /// Decline a friendship offer (`DeclineFriendship`). The `transaction_id` is
     /// the [`InstantMessage::id`](crate::InstantMessage::id) of the incoming friendship-offer IM.
     DeclineFriendship(TransactionId),
+    /// Offer this agent's calling card to an agent (`OfferCallingCard`) — a
+    /// reference card to this avatar, *not* a friendship request. The recipient
+    /// sees an [`Event::CallingCardOffered`](crate::Event::CallingCardOffered).
+    OfferCallingCard {
+        /// The agent to offer the calling card to.
+        to_agent_id: AgentKey,
+        /// Correlation id echoed by the recipient's accept/decline reply.
+        transaction_id: TransactionId,
+    },
+    /// Accept a calling-card offer (`AcceptCallingCard`). The `transaction_id` is
+    /// the one echoed by the incoming
+    /// [`Event::CallingCardOffered`](crate::Event::CallingCardOffered); the card
+    /// goes into `calling_card_folder`.
+    AcceptCallingCard {
+        /// The offer's transaction id.
+        transaction_id: TransactionId,
+        /// The inventory folder to file the calling card in.
+        calling_card_folder: InventoryFolderKey,
+    },
+    /// Decline a calling-card offer (`DeclineCallingCard`). The `transaction_id`
+    /// is the one echoed by the incoming
+    /// [`Event::CallingCardOffered`](crate::Event::CallingCardOffered).
+    DeclineCallingCard(TransactionId),
     /// Make a group the active group (`ActivateGroup`); nil clears it. Confirmed
     /// by [`Event::ActiveGroupChanged`](crate::Event::ActiveGroupChanged).
     ActivateGroup(GroupKey),

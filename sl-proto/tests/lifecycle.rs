@@ -2589,6 +2589,61 @@ mod test {
     }
 
     #[test]
+    fn offer_accept_decline_calling_card_pack_messages() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let dest = uuid::Uuid::from_u128(0xCA11);
+        let offer_tx = uuid::Uuid::from_u128(0xCA12);
+        session.offer_calling_card(AgentKey::from(dest), TransactionId::from(offer_tx), now)?;
+        let sent = drain(&mut session)?;
+        let offer = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::OfferCallingCard(offer) => Some(offer),
+                _ => None,
+            })
+            .ok_or("expected an OfferCallingCard")?;
+        assert_eq!(offer.agent_block.dest_id, dest);
+        assert_eq!(offer.agent_block.transaction_id, offer_tx);
+
+        let accept_tx = uuid::Uuid::from_u128(0xCA13);
+        let folder = uuid::Uuid::from_u128(0xCA14);
+        session.accept_calling_card(
+            TransactionId::from(accept_tx),
+            InventoryFolderKey::from(folder),
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let accept = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AcceptCallingCard(accept) => Some(accept),
+                _ => None,
+            })
+            .ok_or("expected an AcceptCallingCard")?;
+        assert_eq!(accept.transaction_block.transaction_id, accept_tx);
+        assert_eq!(
+            accept.folder_data.first().map(|f| f.folder_id),
+            Some(folder)
+        );
+
+        let decline_tx = uuid::Uuid::from_u128(0xCA15);
+        session.decline_calling_card(TransactionId::from(decline_tx), now)?;
+        let sent = drain(&mut session)?;
+        let decline = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::DeclineCallingCard(decline) => Some(decline),
+                _ => None,
+            })
+            .ok_or("expected a DeclineCallingCard")?;
+        assert_eq!(decline.transaction_block.transaction_id, decline_tx);
+        Ok(())
+    }
+
+    #[test]
     fn agent_data_update_surfaces_active_group() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;

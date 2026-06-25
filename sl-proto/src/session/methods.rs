@@ -4180,6 +4180,69 @@ impl Session {
         Ok(())
     }
 
+    /// Offers this agent's calling card to `to_agent_id` via `OfferCallingCard`
+    /// — a reference card to this avatar, filed in the recipient's Calling Cards
+    /// folder (this is *not* a friendship request; use
+    /// [`Session::send_friendship_offer`] for that). The recipient sees it as an
+    /// [`Event::CallingCardOffered`] and replies with
+    /// [`Session::accept_calling_card`] or [`Session::decline_calling_card`],
+    /// echoing `transaction_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn offer_calling_card(
+        &mut self,
+        to_agent_id: AgentKey,
+        transaction_id: TransactionId,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_offer_calling_card(to_agent_id, transaction_id.get(), now)?;
+        Ok(())
+    }
+
+    /// Accepts a calling-card offer via `AcceptCallingCard`. The `transaction_id`
+    /// is the one echoed by the incoming [`Event::CallingCardOffered`];
+    /// `calling_card_folder` is the inventory folder to file the new card in (use
+    /// the Calling Cards system folder, or the inventory root). The offering
+    /// agent sees an [`Event::CallingCardAccepted`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn accept_calling_card(
+        &mut self,
+        transaction_id: TransactionId,
+        calling_card_folder: InventoryFolderKey,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_accept_calling_card(transaction_id.get(), calling_card_folder.uuid(), now)?;
+        Ok(())
+    }
+
+    /// Declines a calling-card offer via `DeclineCallingCard`. The
+    /// `transaction_id` is the one echoed by the incoming
+    /// [`Event::CallingCardOffered`]. The offering agent sees an
+    /// [`Event::CallingCardDeclined`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn decline_calling_card(
+        &mut self,
+        transaction_id: TransactionId,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_decline_calling_card(transaction_id.get(), now)?;
+        Ok(())
+    }
+
     /// Makes `group_id` the agent's active group (`ActivateGroup`); pass
     /// [`Uuid::nil`] to clear it. The simulator confirms with an
     /// [`Event::ActiveGroupChanged`]. The agent's memberships arrive at login as

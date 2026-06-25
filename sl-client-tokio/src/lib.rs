@@ -612,6 +612,15 @@ impl Client {
                         Some(Command::DeclineFriendship(transaction_id)) => {
                             self.session.decline_friendship(transaction_id, Instant::now())?;
                         }
+                        Some(Command::OfferCallingCard { to_agent_id, transaction_id }) => {
+                            self.session.offer_calling_card(to_agent_id, transaction_id, Instant::now())?;
+                        }
+                        Some(Command::AcceptCallingCard { transaction_id, calling_card_folder }) => {
+                            self.session.accept_calling_card(transaction_id, calling_card_folder, Instant::now())?;
+                        }
+                        Some(Command::DeclineCallingCard(transaction_id)) => {
+                            self.session.decline_calling_card(transaction_id, Instant::now())?;
+                        }
                         Some(Command::ActivateGroup(group_id)) => {
                             self.session.activate_group(group_id, Instant::now())?;
                         }

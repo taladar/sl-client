@@ -32,15 +32,16 @@ use sl_types::map::Distance;
 use sl_types::money::LindenAmount;
 use sl_wire::AbuseReport;
 use sl_wire::messages::{
-    AcceptFriendship, AcceptFriendshipAgentDataBlock, AcceptFriendshipFolderDataBlock,
-    AcceptFriendshipTransactionBlockBlock, ActivateGestures, ActivateGesturesAgentDataBlock,
-    ActivateGesturesDataBlock, ActivateGroup, ActivateGroupAgentDataBlock, AgentAnimation,
-    AgentAnimationAgentDataBlock, AgentAnimationAnimationListBlock,
-    AgentAnimationPhysicalAvatarEventListBlock, AgentCachedTexture,
-    AgentCachedTextureAgentDataBlock, AgentCachedTextureWearableDataBlock, AgentIsNowWearing,
-    AgentIsNowWearingAgentDataBlock, AgentIsNowWearingWearableDataBlock, AgentRequestSit,
-    AgentRequestSitAgentDataBlock, AgentRequestSitTargetObjectBlock, AgentSetAppearance,
-    AgentSetAppearanceAgentDataBlock, AgentSetAppearanceObjectDataBlock,
+    AcceptCallingCard, AcceptCallingCardAgentDataBlock, AcceptCallingCardFolderDataBlock,
+    AcceptCallingCardTransactionBlockBlock, AcceptFriendship, AcceptFriendshipAgentDataBlock,
+    AcceptFriendshipFolderDataBlock, AcceptFriendshipTransactionBlockBlock, ActivateGestures,
+    ActivateGesturesAgentDataBlock, ActivateGesturesDataBlock, ActivateGroup,
+    ActivateGroupAgentDataBlock, AgentAnimation, AgentAnimationAgentDataBlock,
+    AgentAnimationAnimationListBlock, AgentAnimationPhysicalAvatarEventListBlock,
+    AgentCachedTexture, AgentCachedTextureAgentDataBlock, AgentCachedTextureWearableDataBlock,
+    AgentIsNowWearing, AgentIsNowWearingAgentDataBlock, AgentIsNowWearingWearableDataBlock,
+    AgentRequestSit, AgentRequestSitAgentDataBlock, AgentRequestSitTargetObjectBlock,
+    AgentSetAppearance, AgentSetAppearanceAgentDataBlock, AgentSetAppearanceObjectDataBlock,
     AgentSetAppearanceVisualParamBlock, AgentSetAppearanceWearableDataBlock, AgentSit,
     AgentSitAgentDataBlock, AgentThrottle, AgentThrottleAgentDataBlock, AgentThrottleThrottleBlock,
     AgentUpdate, AgentUpdateAgentDataBlock, AgentWearablesRequest,
@@ -65,6 +66,7 @@ use sl_wire::messages::{
     CreateInventoryItemAgentDataBlock, CreateInventoryItemInventoryBlockBlock, DeRezObject,
     DeRezObjectAgentBlockBlock, DeRezObjectAgentDataBlock, DeRezObjectObjectDataBlock,
     DeactivateGestures, DeactivateGesturesAgentDataBlock, DeactivateGesturesDataBlock,
+    DeclineCallingCard, DeclineCallingCardAgentDataBlock, DeclineCallingCardTransactionBlockBlock,
     DeclineFriendship, DeclineFriendshipAgentDataBlock, DeclineFriendshipTransactionBlockBlock,
     DirClassifiedQuery, DirClassifiedQueryAgentDataBlock, DirClassifiedQueryQueryDataBlock,
     DirFindQuery, DirFindQueryAgentDataBlock, DirFindQueryQueryDataBlock, DirLandQuery,
@@ -132,7 +134,8 @@ use sl_wire::messages::{
     ObjectPermissions, ObjectPermissionsAgentDataBlock, ObjectPermissionsHeaderDataBlock,
     ObjectPermissionsObjectDataBlock, ObjectSaleInfo, ObjectSaleInfoAgentDataBlock,
     ObjectSaleInfoObjectDataBlock, ObjectSelect, ObjectSelectAgentDataBlock,
-    ObjectSelectObjectDataBlock, PacketAck, PacketAckPacketsBlock, ParcelAccessListRequest,
+    ObjectSelectObjectDataBlock, OfferCallingCard, OfferCallingCardAgentBlockBlock,
+    OfferCallingCardAgentDataBlock, PacketAck, PacketAckPacketsBlock, ParcelAccessListRequest,
     ParcelAccessListRequestAgentDataBlock, ParcelAccessListRequestDataBlock,
     ParcelAccessListUpdate, ParcelAccessListUpdateAgentDataBlock, ParcelAccessListUpdateDataBlock,
     ParcelAccessListUpdateListBlock, ParcelBuy, ParcelBuyAgentDataBlock, ParcelBuyDataBlock,
@@ -1047,6 +1050,65 @@ impl Circuit {
                 session_id: self.session_id,
             },
             transaction_block: DeclineFriendshipTransactionBlockBlock { transaction_id },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `OfferCallingCard` reliably, offering this agent's calling card
+    /// to `dest_id` (a reference card to this avatar, filed in the recipient's
+    /// Calling Cards folder — not a friendship request). `transaction_id`
+    /// correlates the recipient's accept/decline reply.
+    pub(crate) fn send_offer_calling_card(
+        &mut self,
+        dest_id: AgentKey,
+        transaction_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::OfferCallingCard(OfferCallingCard {
+            agent_data: OfferCallingCardAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            agent_block: OfferCallingCardAgentBlockBlock {
+                dest_id: dest_id.uuid(),
+                transaction_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AcceptCallingCard` reliably for the calling-card-offer
+    /// `transaction_id`, filing the new card in `folder`.
+    pub(crate) fn send_accept_calling_card(
+        &mut self,
+        transaction_id: Uuid,
+        folder: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AcceptCallingCard(AcceptCallingCard {
+            agent_data: AcceptCallingCardAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            transaction_block: AcceptCallingCardTransactionBlockBlock { transaction_id },
+            folder_data: vec![AcceptCallingCardFolderDataBlock { folder_id: folder }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `DeclineCallingCard` reliably for the calling-card-offer
+    /// `transaction_id`.
+    pub(crate) fn send_decline_calling_card(
+        &mut self,
+        transaction_id: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::DeclineCallingCard(DeclineCallingCard {
+            agent_data: DeclineCallingCardAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            transaction_block: DeclineCallingCardTransactionBlockBlock { transaction_id },
         });
         self.send(&message, Reliability::Reliable, now)
     }

@@ -1889,6 +1889,39 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "offer_calling_card",
+            usage: "<to_agent_id> <transaction_id>",
+            build: |args, ctx| {
+                Ok(Command::OfferCallingCard {
+                    to_agent_id: AgentKey::from(args.req_uuid(ctx, "to_agent_id", 0)?),
+                    transaction_id: TransactionId::from(args.req_uuid(ctx, "transaction_id", 1)?),
+                })
+            },
+        },
+        CommandSpec {
+            name: "accept_calling_card",
+            usage: "<transaction_id> <calling_card_folder>",
+            build: |args, ctx| {
+                Ok(Command::AcceptCallingCard {
+                    transaction_id: TransactionId::from(args.req_uuid(ctx, "transaction_id", 0)?),
+                    calling_card_folder: InventoryFolderKey::from(args.req_uuid(
+                        ctx,
+                        "calling_card_folder",
+                        1,
+                    )?),
+                })
+            },
+        },
+        CommandSpec {
+            name: "decline_calling_card",
+            usage: "<transaction_id>",
+            build: |args, ctx| {
+                Ok(Command::DeclineCallingCard(TransactionId::from(
+                    args.req_uuid(ctx, "transaction_id", 0)?,
+                )))
+            },
+        },
+        CommandSpec {
             name: "activate_group",
             usage: "[group_id]",
             build: |args, ctx| {
