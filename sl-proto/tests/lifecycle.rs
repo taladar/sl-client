@@ -37,9 +37,11 @@ mod test {
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
-        AgentDataUpdate, AgentDataUpdateAgentDataBlock, AgentGroupDataUpdate,
-        AgentGroupDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
-        AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
+        AcceptCallingCard, AcceptCallingCardAgentDataBlock, AcceptCallingCardFolderDataBlock,
+        AcceptCallingCardTransactionBlockBlock, AgentDataUpdate, AgentDataUpdateAgentDataBlock,
+        AgentGroupDataUpdate, AgentGroupDataUpdateAgentDataBlock,
+        AgentGroupDataUpdateGroupDataBlock, AgentMovementComplete,
+        AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
         AgentMovementCompleteSimDataBlock, AgentWearablesUpdate,
         AgentWearablesUpdateAgentDataBlock, AgentWearablesUpdateWearableDataBlock,
         AssetUploadComplete, AssetUploadCompleteAssetBlockBlock, AttachedSound,
@@ -59,7 +61,8 @@ mod test {
         CoarseLocationUpdate, CoarseLocationUpdateAgentDataBlock, CoarseLocationUpdateIndexBlock,
         CoarseLocationUpdateLocationBlock, ConfirmXferPacket, ConfirmXferPacketXferIDBlock,
         CrossedRegion, CrossedRegionAgentDataBlock, CrossedRegionInfoBlock,
-        CrossedRegionRegionDataBlock, DirPeopleReply, DirPeopleReplyAgentDataBlock,
+        CrossedRegionRegionDataBlock, DeclineCallingCard, DeclineCallingCardAgentDataBlock,
+        DeclineCallingCardTransactionBlockBlock, DirPeopleReply, DirPeopleReplyAgentDataBlock,
         DirPeopleReplyQueryDataBlock, DirPeopleReplyQueryRepliesBlock, DisableSimulator,
         EconomyData, EconomyDataInfoBlock, EjectGroupMemberReply,
         EjectGroupMemberReplyAgentDataBlock, EjectGroupMemberReplyEjectDataBlock,
@@ -104,7 +107,8 @@ mod test {
         ObjectUpdateCached, ObjectUpdateCachedObjectDataBlock, ObjectUpdateCachedRegionDataBlock,
         ObjectUpdateCompressed, ObjectUpdateCompressedObjectDataBlock,
         ObjectUpdateCompressedRegionDataBlock, ObjectUpdateObjectDataBlock,
-        ObjectUpdateRegionDataBlock, OfflineNotification, OfflineNotificationAgentBlockBlock,
+        ObjectUpdateRegionDataBlock, OfferCallingCard, OfferCallingCardAgentBlockBlock,
+        OfferCallingCardAgentDataBlock, OfflineNotification, OfflineNotificationAgentBlockBlock,
         OnlineNotification, OnlineNotificationAgentBlockBlock, ParcelAccessListReply,
         ParcelAccessListReplyDataBlock, ParcelAccessListReplyListBlock, ParcelDwellReply,
         ParcelDwellReplyAgentDataBlock, ParcelDwellReplyDataBlock, ParcelInfoReply,
@@ -131,11 +135,12 @@ mod test {
         SoundTriggerSoundDataBlock, TelehubInfo as TelehubInfoMessage,
         TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock, TeleportFailed,
         TeleportFailedAlertInfoBlock, TeleportFailedInfoBlock, TeleportFinish,
-        TeleportFinishInfoBlock, TransferInfo, TransferInfoTransferInfoBlock, TransferPacket,
-        TransferPacketTransferDataBlock, UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock,
-        UpdateCreateInventoryItem, UpdateCreateInventoryItemAgentDataBlock,
-        UpdateCreateInventoryItemInventoryDataBlock, UseCachedMuteList,
-        UseCachedMuteListAgentDataBlock, ViewerEffect as ViewerEffectMessage,
+        TeleportFinishInfoBlock, TerminateFriendship, TerminateFriendshipAgentDataBlock,
+        TerminateFriendshipExBlockBlock, TransferInfo, TransferInfoTransferInfoBlock,
+        TransferPacket, TransferPacketTransferDataBlock, UUIDNameReply,
+        UUIDNameReplyUUIDNameBlockBlock, UpdateCreateInventoryItem,
+        UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
+        UseCachedMuteList, UseCachedMuteListAgentDataBlock, ViewerEffect as ViewerEffectMessage,
         ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
     };
     use sl_wire::{
@@ -5858,6 +5863,133 @@ mod test {
             })
             .ok_or("expected a RebakeAvatarTextures event")?;
         assert_eq!(texture_id, TextureKey::from(baked));
+        Ok(())
+    }
+
+    #[test]
+    fn terminate_friendship_surfaces_former_friend() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let other = uuid::Uuid::from_u128(0xF21E);
+        let message = AnyMessage::TerminateFriendship(TerminateFriendship {
+            agent_data: TerminateFriendshipAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(0x1),
+                session_id: uuid::Uuid::from_u128(0x2),
+            },
+            ex_block: TerminateFriendshipExBlockBlock { other_id: other },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let former = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::FriendshipTerminated { other } => Some(other),
+                _ => None,
+            })
+            .ok_or("expected a FriendshipTerminated event")?;
+        assert_eq!(former, FriendKey::from(other));
+        Ok(())
+    }
+
+    #[test]
+    fn offer_calling_card_surfaces_offering_agent() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let offerer = uuid::Uuid::from_u128(0xCA11);
+        let transaction = uuid::Uuid::from_u128(0x7AC);
+        let message = AnyMessage::OfferCallingCard(OfferCallingCard {
+            agent_data: OfferCallingCardAgentDataBlock {
+                agent_id: offerer,
+                session_id: uuid::Uuid::from_u128(0x2),
+            },
+            agent_block: OfferCallingCardAgentBlockBlock {
+                dest_id: uuid::Uuid::from_u128(0x3),
+                transaction_id: transaction,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let (offering_agent, tx) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::CallingCardOffered {
+                    offering_agent,
+                    transaction,
+                } => Some((offering_agent, transaction)),
+                _ => None,
+            })
+            .ok_or("expected a CallingCardOffered event")?;
+        assert_eq!(offering_agent, AgentKey::from(offerer));
+        assert_eq!(tx, TransactionId::from(transaction));
+        Ok(())
+    }
+
+    #[test]
+    fn accept_calling_card_surfaces_accepter() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let accepter = uuid::Uuid::from_u128(0xACC7);
+        let transaction = uuid::Uuid::from_u128(0x7AC);
+        let message = AnyMessage::AcceptCallingCard(AcceptCallingCard {
+            agent_data: AcceptCallingCardAgentDataBlock {
+                agent_id: accepter,
+                session_id: uuid::Uuid::from_u128(0x2),
+            },
+            transaction_block: AcceptCallingCardTransactionBlockBlock {
+                transaction_id: transaction,
+            },
+            folder_data: vec![AcceptCallingCardFolderDataBlock {
+                folder_id: uuid::Uuid::from_u128(0x4),
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let (agent, tx) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::CallingCardAccepted { agent, transaction } => Some((agent, transaction)),
+                _ => None,
+            })
+            .ok_or("expected a CallingCardAccepted event")?;
+        assert_eq!(agent, AgentKey::from(accepter));
+        assert_eq!(tx, TransactionId::from(transaction));
+        Ok(())
+    }
+
+    #[test]
+    fn decline_calling_card_surfaces_decliner() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let decliner = uuid::Uuid::from_u128(0xDEC7);
+        let transaction = uuid::Uuid::from_u128(0x7AC);
+        let message = AnyMessage::DeclineCallingCard(DeclineCallingCard {
+            agent_data: DeclineCallingCardAgentDataBlock {
+                agent_id: decliner,
+                session_id: uuid::Uuid::from_u128(0x2),
+            },
+            transaction_block: DeclineCallingCardTransactionBlockBlock {
+                transaction_id: transaction,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let (agent, tx) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::CallingCardDeclined { agent, transaction } => Some((agent, transaction)),
+                _ => None,
+            })
+            .ok_or("expected a CallingCardDeclined event")?;
+        assert_eq!(agent, AgentKey::from(decliner));
+        assert_eq!(tx, TransactionId::from(transaction));
         Ok(())
     }
 

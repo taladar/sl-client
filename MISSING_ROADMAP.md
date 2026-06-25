@@ -225,6 +225,20 @@ wants re-uploaded.
 `TerminateFriendship` (Low 300), `OfferCallingCard` (Low 301),
 `AcceptCallingCard` (Low 302), `DeclineCallingCard` (Low 303).
 
+Implemented as four inline `Event` variants (all payloads are key +
+transaction-id newtype combos, so no dedicated domain struct was warranted):
+`Event::FriendshipTerminated { other: FriendKey }` (the `AgentData` echo of this
+agent's own id is dropped — only `ExBlock.OtherID`, the former friend, matters);
+`Event::CallingCardOffered { offering_agent: AgentKey, transaction:
+TransactionId }` (`AgentBlock.DestID`, this agent itself, is dropped — note a
+calling card is a reference card to an avatar filed in the Calling Cards folder,
+*not* a friendship request); `Event::CallingCardAccepted { agent: AgentKey,
+transaction: TransactionId }` (the accepter's `FolderData` destination folder is
+their inventory, not this agent's, so it is dropped); and
+`Event::CallingCardDeclined { agent: AgentKey, transaction: TransactionId }`.
+The `transaction` is the existing `TransactionId` newtype, correlating an
+accept/decline back to the original offer.
+
 ### Batch 6 — inventory sync, task inventory & misc
 
 Server-initiated inventory mutations to keep a client mirror current:
@@ -334,7 +348,7 @@ section with the resulting table before starting outbound batches.
 - [x] Batch 3 — session errors & forced disconnect (Error, FeatureDisabled,
   KickUser)
 - [x] Batch 4 — scene & appearance (ObjectAnimation, RebakeAvatarTextures)
-- [ ] Batch 5 — friendship & calling cards
+- [x] Batch 5 — friendship & calling cards
 - [ ] Batch 6 — inventory sync, task inventory & misc
 - [ ] EQ batch 1 — pathfinding agent state (AgentStateUpdate — closes issue 3)
 - [ ] EQ batch 2 — group & display-name pushes

@@ -2297,6 +2297,40 @@ impl Session {
                     texture_id: TextureKey::from(rebake.texture_data.texture_id),
                 });
             }
+            // The simulator informs this agent that a friendship has ended; the
+            // agent's own id in `AgentData` is redundant, only the former
+            // friend (`ExBlock.OtherID`) matters.
+            AnyMessage::TerminateFriendship(terminate) => {
+                self.events.push_back(Event::FriendshipTerminated {
+                    other: FriendKey::from(terminate.ex_block.other_id),
+                });
+            }
+            // Another agent offered this agent their calling card (a reference
+            // card to that avatar, not a friendship request). `AgentData.AgentID`
+            // is the offering agent; `AgentBlock.DestID` is this agent and is
+            // dropped.
+            AnyMessage::OfferCallingCard(offer) => {
+                self.events.push_back(Event::CallingCardOffered {
+                    offering_agent: AgentKey::from(offer.agent_data.agent_id),
+                    transaction: TransactionId::from(offer.agent_block.transaction_id),
+                });
+            }
+            // A calling card this agent offered was accepted. `AgentData.AgentID`
+            // is the accepting agent; the `FolderData` destination folder is the
+            // accepter's own inventory and is dropped.
+            AnyMessage::AcceptCallingCard(accept) => {
+                self.events.push_back(Event::CallingCardAccepted {
+                    agent: AgentKey::from(accept.agent_data.agent_id),
+                    transaction: TransactionId::from(accept.transaction_block.transaction_id),
+                });
+            }
+            // A calling card this agent offered was declined.
+            AnyMessage::DeclineCallingCard(decline) => {
+                self.events.push_back(Event::CallingCardDeclined {
+                    agent: AgentKey::from(decline.agent_data.agent_id),
+                    transaction: TransactionId::from(decline.transaction_block.transaction_id),
+                });
+            }
             // A one-shot spatial sound played at a fixed region-local position
             // (a scripted `llTriggerSound`, a collision sound, …). May originate
             // in a neighbouring region, so it carries its own region handle. The
