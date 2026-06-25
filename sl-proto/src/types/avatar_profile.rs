@@ -353,6 +353,21 @@ pub struct LoginAccount {
     pub library_owner: Option<Uuid>,
 }
 
+/// The agent's own account contact preferences (`UserInfoReply`), sent in reply
+/// to a `UserInfoRequest`: whether offline IMs are forwarded to email, the
+/// agent's directory (search) visibility, and the email address on file.
+/// Surfaced as [`Event::UserInfo`](crate::Event::UserInfo).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserInfo {
+    /// Whether offline instant messages are forwarded to the agent's email.
+    pub im_via_email: bool,
+    /// The agent's directory/search visibility setting (e.g. `"default"` or
+    /// `"hidden"`).
+    pub directory_visibility: String,
+    /// The email address on file for the account.
+    pub email: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

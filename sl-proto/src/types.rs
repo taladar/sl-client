@@ -366,7 +366,7 @@ pub use asset::{Asset, AssetType, ImageCodec, InventoryType, Texture, TransferSt
 pub use avatar_profile::{
     AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,
     ClassifiedInfo, ClassifiedUpdate, Friend, FriendRights, InterestsUpdate, LoginAccount,
-    PickInfo, PickKey, PickUpdate, ProfileUpdate,
+    PickInfo, PickKey, PickUpdate, ProfileUpdate, UserInfo,
 };
 pub use chat::{
     ChatAudible, ChatMessage, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, ImDialog,
@@ -398,8 +398,8 @@ pub use group::{
     ProposalCandidateId, ProposalVoteId, group_powers,
 };
 pub use inventory::{
-    GestureActivation, InventoryFolder, InventoryItem, NewInventoryItem, global_to_handle,
-    grid_to_handle, handle_to_global, handle_to_grid,
+    GestureActivation, InventoryFolder, InventoryItem, InventoryItemMove, NewInventoryItem,
+    global_to_handle, grid_to_handle, handle_to_global, handle_to_grid,
 };
 pub use map::{
     EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, MapItem, MapItemType,
@@ -412,8 +412,8 @@ pub use nearby::{
 pub use object::{
     ExtendedMesh, FlexibleData, LightData, LightImage, NameValue, Object, ObjectExtraParams,
     ObjectMotion, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ParticleSystem,
-    PrimShapeParams, ReflectionProbe, RenderMaterialRef, SculptData, TextureAnimation,
-    particle_pattern, pcode, texture_anim_mode,
+    PrimShapeParams, ReflectionProbe, RenderMaterialRef, SculptData, TaskInventoryReply,
+    TextureAnimation, particle_pattern, pcode, texture_anim_mode,
 };
 pub use parcel::{
     LandStatItem, LandStatReportType, LandingType, ParcelAccessEntry, ParcelAccessFlags,

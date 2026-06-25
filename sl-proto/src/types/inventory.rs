@@ -109,6 +109,20 @@ impl Default for NewInventoryItem {
     }
 }
 
+/// A single item relocation from a `MoveInventoryItem`: the simulator tells the
+/// client to re-parent `item` into `folder`, optionally renaming it. A client
+/// mirroring inventory should move (and rename) the item locally to match.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InventoryItemMove {
+    /// The item being moved.
+    pub item: InventoryKey,
+    /// The destination folder the item now lives in.
+    pub folder: InventoryFolderKey,
+    /// The item's new name, or `None` when the move does not rename it (the wire
+    /// `NewName` field was empty).
+    pub new_name: Option<String>,
+}
+
 /// A gesture to activate via
 /// [`Session::activate_gestures`](crate::Session::activate_gestures)
 /// (`ActivateGestures`), pairing the gesture's inventory item id with the asset

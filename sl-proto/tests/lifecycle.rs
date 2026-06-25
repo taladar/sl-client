@@ -19,21 +19,21 @@ mod test {
         GlobalCoordinates, Glow, GridCoordinates, GroupKey, GroupNoticeAttachment, GroupRequestId,
         GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType,
         ImDialog, ImSessionId, ImageCodec, InterestsUpdate, InventoryCallbackId,
-        InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, LandArea,
-        LandingType, LindenAmount, LindenBalance, LoginAccount, LoginParams, LookAtType, LureId,
-        MapItemType, Material, Maturity, MeanCollisionType, MeshKey, MoneyTransactionType,
-        MovementMode, MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem,
-        ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
-        ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey,
-        ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
-        PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
-        ProductType, ProfileUpdate, QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle,
-        RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, SaleType, Scale, ScopedObjectId,
-        ScopedParcelId, ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session,
-        SimStatId, SimulatorTime, SkySettings, SoundFlags, TeleportFlags, TerrainLayerType,
-        TextureKey, Throttle, TransactionId, TransferStatus, Transmit, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
-        group_powers, pcode,
+        InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
+        InventoryKey, LandArea, LandingType, LindenAmount, LindenBalance, LoginAccount,
+        LoginParams, LookAtType, LureId, MapItemType, Material, Maturity, MeanCollisionType,
+        MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem,
+        NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
+        ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
+        ParcelKey, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
+        ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate, PointAtType,
+        Postcard, PrimShape, ProductType, ProfileUpdate, QueryId, ReflectionProbeFlags,
+        RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment,
+        SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissions,
+        SculptOrMeshKey, Session, SimStatId, SimulatorTime, SkySettings, SoundFlags,
+        TaskInventoryReply, TeleportFlags, TerrainLayerType, TextureKey, Throttle, TransactionId,
+        TransferStatus, Transmit, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        WaterSettings, WearableType, avatar_texture, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -61,20 +61,23 @@ mod test {
         CoarseLocationUpdate, CoarseLocationUpdateAgentDataBlock, CoarseLocationUpdateIndexBlock,
         CoarseLocationUpdateLocationBlock, ConfirmXferPacket, ConfirmXferPacketXferIDBlock,
         CrossedRegion, CrossedRegionAgentDataBlock, CrossedRegionInfoBlock,
-        CrossedRegionRegionDataBlock, DeclineCallingCard, DeclineCallingCardAgentDataBlock,
-        DeclineCallingCardTransactionBlockBlock, DirPeopleReply, DirPeopleReplyAgentDataBlock,
-        DirPeopleReplyQueryDataBlock, DirPeopleReplyQueryRepliesBlock, DisableSimulator,
-        EconomyData, EconomyDataInfoBlock, EjectGroupMemberReply,
-        EjectGroupMemberReplyAgentDataBlock, EjectGroupMemberReplyEjectDataBlock,
-        EjectGroupMemberReplyGroupDataBlock, Error as ErrorMessage, ErrorAgentDataBlock,
-        ErrorDataBlock, EstateCovenantReply, EstateCovenantReplyDataBlock, EstateOwnerMessage,
-        EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
-        EstateOwnerMessageParamListBlock, EventInfoReply, EventInfoReplyAgentDataBlock,
-        EventInfoReplyEventDataBlock, FeatureDisabled as WireFeatureDisabled,
-        FeatureDisabledFailureInfoBlock, FindAgent, FindAgentAgentBlockBlock,
-        FindAgentLocationBlockBlock, GenericMessage, GenericMessageAgentDataBlock,
-        GenericMessageMethodDataBlock, GenericMessageParamListBlock, GenericStreamingMessage,
-        GenericStreamingMessageDataBlockBlock, GenericStreamingMessageMethodDataBlock,
+        CrossedRegionRegionDataBlock, DeRezAck, DeRezAckTransactionDataBlock, DeclineCallingCard,
+        DeclineCallingCardAgentDataBlock, DeclineCallingCardTransactionBlockBlock, DirPeopleReply,
+        DirPeopleReplyAgentDataBlock, DirPeopleReplyQueryDataBlock,
+        DirPeopleReplyQueryRepliesBlock, DisableSimulator, EconomyData, EconomyDataInfoBlock,
+        EjectGroupMemberReply, EjectGroupMemberReplyAgentDataBlock,
+        EjectGroupMemberReplyEjectDataBlock, EjectGroupMemberReplyGroupDataBlock,
+        Error as ErrorMessage, ErrorAgentDataBlock, ErrorDataBlock, EstateCovenantReply,
+        EstateCovenantReplyDataBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
+        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock, EventInfoReply,
+        EventInfoReplyAgentDataBlock, EventInfoReplyEventDataBlock,
+        FeatureDisabled as WireFeatureDisabled, FeatureDisabledFailureInfoBlock, FindAgent,
+        FindAgentAgentBlockBlock, FindAgentLocationBlockBlock, ForceObjectSelect,
+        ForceObjectSelectDataBlock, ForceObjectSelectHeaderBlock, GenericMessage,
+        GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GenericMessageParamListBlock,
+        GenericStreamingMessage, GenericStreamingMessageDataBlockBlock,
+        GenericStreamingMessageMethodDataBlock, GrantGodlikePowers,
+        GrantGodlikePowersAgentDataBlock, GrantGodlikePowersGrantDataBlock,
         GroupAccountSummaryReply, GroupAccountSummaryReplyAgentDataBlock,
         GroupAccountSummaryReplyMoneyDataBlock, GroupActiveProposalItemReply,
         GroupActiveProposalItemReplyAgentDataBlock, GroupActiveProposalItemReplyProposalDataBlock,
@@ -99,7 +102,8 @@ mod test {
         MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapItemReply,
         MapItemReplyAgentDataBlock, MapItemReplyDataBlock, MapItemReplyRequestDataBlock,
         MapLayerReply, MapLayerReplyAgentDataBlock, MapLayerReplyLayerDataBlock, MoneyBalanceReply,
-        MoneyBalanceReplyMoneyDataBlock, MoneyBalanceReplyTransactionInfoBlock, MuteListUpdate,
+        MoneyBalanceReplyMoneyDataBlock, MoneyBalanceReplyTransactionInfoBlock, MoveInventoryItem,
+        MoveInventoryItemAgentDataBlock, MoveInventoryItemInventoryDataBlock, MuteListUpdate,
         MuteListUpdateMuteDataBlock, ObjectAnimation, ObjectAnimationAnimationListBlock,
         ObjectAnimationSenderBlock, ObjectProperties as WireObjectProperties,
         ObjectPropertiesFamily as ObjectPropertiesFamilyMessage,
@@ -125,8 +129,14 @@ mod test {
         RegionHandshakeRegionInfo4Block, RegionHandshakeRegionInfoBlock, RegionInfo,
         RegionInfoAgentDataBlock, RegionInfoCombatSettingsBlock, RegionInfoRegionInfo2Block,
         RegionInfoRegionInfo3Block, RegionInfoRegionInfo5Block, RegionInfoRegionInfoBlock,
-        RequestXfer, RequestXferXferIDBlock, ScriptDialog, ScriptDialogButtonsBlock,
-        ScriptDialogDataBlock, ScriptDialogOwnerDataBlock, ScriptQuestion, ScriptQuestionDataBlock,
+        RemoveInventoryFolder, RemoveInventoryFolderAgentDataBlock,
+        RemoveInventoryFolderFolderDataBlock, RemoveInventoryItem,
+        RemoveInventoryItemAgentDataBlock, RemoveInventoryItemInventoryDataBlock,
+        RemoveInventoryObjects, RemoveInventoryObjectsAgentDataBlock,
+        RemoveInventoryObjectsFolderDataBlock, RemoveInventoryObjectsItemDataBlock,
+        ReplyTaskInventory, ReplyTaskInventoryInventoryDataBlock, RequestXfer,
+        RequestXferXferIDBlock, ScriptDialog, ScriptDialogButtonsBlock, ScriptDialogDataBlock,
+        ScriptDialogOwnerDataBlock, ScriptQuestion, ScriptQuestionDataBlock,
         ScriptQuestionExperienceBlock, ScriptRunningReply, ScriptRunningReplyScriptBlock,
         ScriptTeleportRequest, ScriptTeleportRequestDataBlock, ScriptTeleportRequestOptionsBlock,
         SendXferPacket, SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock, SimStats,
@@ -140,8 +150,9 @@ mod test {
         TransferPacket, TransferPacketTransferDataBlock, UUIDNameReply,
         UUIDNameReplyUUIDNameBlockBlock, UpdateCreateInventoryItem,
         UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
-        UseCachedMuteList, UseCachedMuteListAgentDataBlock, ViewerEffect as ViewerEffectMessage,
-        ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
+        UseCachedMuteList, UseCachedMuteListAgentDataBlock, UserInfoReply,
+        UserInfoReplyAgentDataBlock, UserInfoReplyUserDataBlock,
+        ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
     };
     use sl_wire::{
         AnyMessage, CircuitCode, HomeLocation, Llsd, LoginFailure, LoginRequest, LoginResponse,
@@ -5990,6 +6001,319 @@ mod test {
             .ok_or("expected a CallingCardDeclined event")?;
         assert_eq!(agent, AgentKey::from(decliner));
         assert_eq!(tx, TransactionId::from(transaction));
+        Ok(())
+    }
+
+    #[test]
+    fn remove_inventory_item_surfaces_removed_items() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let item_a = uuid::Uuid::from_u128(0x17EA);
+        let item_b = uuid::Uuid::from_u128(0x17EB);
+        let message = AnyMessage::RemoveInventoryItem(RemoveInventoryItem {
+            agent_data: RemoveInventoryItemAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(0x1),
+                session_id: uuid::Uuid::from_u128(0x2),
+            },
+            inventory_data: vec![
+                RemoveInventoryItemInventoryDataBlock { item_id: item_a },
+                RemoveInventoryItemInventoryDataBlock { item_id: item_b },
+            ],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let items = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InventoryItemsRemoved { items } => Some(items),
+                _ => None,
+            })
+            .ok_or("expected an InventoryItemsRemoved event")?;
+        assert_eq!(
+            items,
+            vec![InventoryKey::from(item_a), InventoryKey::from(item_b)]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn remove_inventory_folder_surfaces_removed_folders() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let folder = uuid::Uuid::from_u128(0xF01DE);
+        let message = AnyMessage::RemoveInventoryFolder(RemoveInventoryFolder {
+            agent_data: RemoveInventoryFolderAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(0x1),
+                session_id: uuid::Uuid::from_u128(0x2),
+            },
+            folder_data: vec![RemoveInventoryFolderFolderDataBlock { folder_id: folder }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let folders = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InventoryFoldersRemoved { folders } => Some(folders),
+                _ => None,
+            })
+            .ok_or("expected an InventoryFoldersRemoved event")?;
+        assert_eq!(folders, vec![InventoryFolderKey::from(folder)]);
+        Ok(())
+    }
+
+    #[test]
+    fn remove_inventory_objects_surfaces_folders_and_items() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let folder = uuid::Uuid::from_u128(0xF01DE);
+        let item = uuid::Uuid::from_u128(0x17E);
+        let message = AnyMessage::RemoveInventoryObjects(RemoveInventoryObjects {
+            agent_data: RemoveInventoryObjectsAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(0x1),
+                session_id: uuid::Uuid::from_u128(0x2),
+            },
+            folder_data: vec![RemoveInventoryObjectsFolderDataBlock { folder_id: folder }],
+            item_data: vec![RemoveInventoryObjectsItemDataBlock { item_id: item }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let (folders, items) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InventoryObjectsRemoved { folders, items } => Some((folders, items)),
+                _ => None,
+            })
+            .ok_or("expected an InventoryObjectsRemoved event")?;
+        assert_eq!(folders, vec![InventoryFolderKey::from(folder)]);
+        assert_eq!(items, vec![InventoryKey::from(item)]);
+        Ok(())
+    }
+
+    #[test]
+    fn move_inventory_item_surfaces_moves_and_rename() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let item_named = uuid::Uuid::from_u128(0x17E1);
+        let item_unnamed = uuid::Uuid::from_u128(0x17E2);
+        let folder = uuid::Uuid::from_u128(0xF01DE);
+        let message = AnyMessage::MoveInventoryItem(MoveInventoryItem {
+            agent_data: MoveInventoryItemAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(0x1),
+                session_id: uuid::Uuid::from_u128(0x2),
+                stamp: true,
+            },
+            inventory_data: vec![
+                MoveInventoryItemInventoryDataBlock {
+                    item_id: item_named,
+                    folder_id: folder,
+                    new_name: b"Renamed\0".to_vec(),
+                },
+                MoveInventoryItemInventoryDataBlock {
+                    item_id: item_unnamed,
+                    folder_id: folder,
+                    new_name: Vec::new(),
+                },
+            ],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let (stamp, moves) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InventoryItemsMoved { stamp, moves } => Some((stamp, moves)),
+                _ => None,
+            })
+            .ok_or("expected an InventoryItemsMoved event")?;
+        assert!(stamp);
+        assert_eq!(
+            moves,
+            vec![
+                InventoryItemMove {
+                    item: InventoryKey::from(item_named),
+                    folder: InventoryFolderKey::from(folder),
+                    new_name: Some("Renamed".to_owned()),
+                },
+                InventoryItemMove {
+                    item: InventoryKey::from(item_unnamed),
+                    folder: InventoryFolderKey::from(folder),
+                    new_name: None,
+                },
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn reply_task_inventory_surfaces_serial_and_filename() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let task = uuid::Uuid::from_u128(0x7A5C);
+        let message = AnyMessage::ReplyTaskInventory(ReplyTaskInventory {
+            inventory_data: ReplyTaskInventoryInventoryDataBlock {
+                task_id: task,
+                serial: 7,
+                filename: b"inventory.tmp\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let reply = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::TaskInventoryReply(reply) => Some(reply),
+                _ => None,
+            })
+            .ok_or("expected a TaskInventoryReply event")?;
+        assert_eq!(
+            reply,
+            TaskInventoryReply {
+                task: ObjectKey::from(task),
+                serial: 7,
+                filename: "inventory.tmp".to_owned(),
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn user_info_reply_surfaces_contact_prefs() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let message = AnyMessage::UserInfoReply(UserInfoReply {
+            agent_data: UserInfoReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(0x1),
+            },
+            user_data: UserInfoReplyUserDataBlock {
+                im_via_e_mail: true,
+                directory_visibility: b"default\0".to_vec(),
+                e_mail: b"resident@example.com\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let info = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::UserInfo(info) => Some(info),
+                _ => None,
+            })
+            .ok_or("expected a UserInfo event")?;
+        assert_eq!(
+            info,
+            UserInfo {
+                im_via_email: true,
+                directory_visibility: "default".to_owned(),
+                email: "resident@example.com".to_owned(),
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn derez_ack_surfaces_transaction_and_success() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let transaction = uuid::Uuid::from_u128(0xDE_E2);
+        let message = AnyMessage::DeRezAck(DeRezAck {
+            transaction_data: DeRezAckTransactionDataBlock {
+                transaction_id: transaction,
+                success: true,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let (tx, success) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::DeRezAck {
+                    transaction,
+                    success,
+                } => Some((transaction, success)),
+                _ => None,
+            })
+            .ok_or("expected a DeRezAck event")?;
+        assert_eq!(tx, TransactionId::from(transaction));
+        assert!(success);
+        Ok(())
+    }
+
+    #[test]
+    fn force_object_select_surfaces_scoped_objects() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        let message = AnyMessage::ForceObjectSelect(ForceObjectSelect {
+            header: ForceObjectSelectHeaderBlock { reset_list: true },
+            data: vec![
+                ForceObjectSelectDataBlock { local_id: 42 },
+                ForceObjectSelectDataBlock { local_id: 43 },
+            ],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let (reset_list, objects) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ForceObjectSelect {
+                    reset_list,
+                    objects,
+                } => Some((reset_list, objects)),
+                _ => None,
+            })
+            .ok_or("expected a ForceObjectSelect event")?;
+        assert!(reset_list);
+        assert_eq!(
+            objects,
+            vec![
+                ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(42)),
+                ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(43)),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn grant_godlike_powers_surfaces_level() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let message = AnyMessage::GrantGodlikePowers(GrantGodlikePowers {
+            agent_data: GrantGodlikePowersAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(0x1),
+                session_id: uuid::Uuid::from_u128(0x2),
+            },
+            grant_data: GrantGodlikePowersGrantDataBlock {
+                god_level: 200,
+                token: uuid::Uuid::from_u128(0x70CE),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, true)?, now)?;
+
+        let god_level = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::GodlikePowersGranted { god_level } => Some(god_level),
+                _ => None,
+            })
+            .ok_or("expected a GodlikePowersGranted event")?;
+        assert_eq!(god_level, 200);
         Ok(())
     }
 

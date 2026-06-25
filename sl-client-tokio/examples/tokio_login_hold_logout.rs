@@ -480,6 +480,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::CallingCardOffered { .. }
             | Event::CallingCardAccepted { .. }
             | Event::CallingCardDeclined { .. }
+            | Event::InventoryItemsRemoved { .. }
+            | Event::InventoryFoldersRemoved { .. }
+            | Event::InventoryObjectsRemoved { .. }
+            | Event::InventoryItemsMoved { .. }
+            | Event::TaskInventoryReply(..)
+            | Event::UserInfo(..)
+            | Event::DeRezAck { .. }
+            | Event::ForceObjectSelect { .. }
+            | Event::GodlikePowersGranted { .. }
             | Event::GroupMembers { .. }
             | Event::GroupRoleData { .. }
             | Event::GroupRoleMembers { .. }
