@@ -21,8 +21,8 @@ use crate::{
     ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams,
     ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates, RegionHandle, RegionInfoUpdate,
     Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
-    ScriptPermissions, TextureEntry, TextureKey, Throttle, TransactionId, Uuid, Vector,
-    ViewerEffect, VoiceProvisionRequest, Wearable,
+    ScriptPermissions, TaskInventoryKey, TextureEntry, TextureKey, Throttle, TransactionId, Uuid,
+    Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1376,6 +1376,41 @@ pub enum Command {
     /// (`DetachAttachmentIntoInv`).
     DetachAttachmentIntoInventory {
         /// The attachment's inventory item id.
+        item_id: InventoryKey,
+    },
+    /// Request an in-world object's task (object) inventory listing
+    /// (`RequestTaskInventory`); the reply arrives as
+    /// [`Event::TaskInventoryReply`](crate::Event::TaskInventoryReply).
+    RequestTaskInventory {
+        /// The object whose task inventory is requested.
+        target: ScopedObjectId,
+    },
+    /// Write (add or replace) an item in an in-world object's task inventory
+    /// (`UpdateTaskInventory`).
+    UpdateTaskInventory {
+        /// The object whose task inventory is updated.
+        target: ScopedObjectId,
+        /// Whether the simulator matches the item by item id or asset id.
+        key: TaskInventoryKey,
+        /// The full inventory item to write.
+        item: Box<RestoreItem>,
+    },
+    /// Move an item out of an in-world object's task inventory into an agent
+    /// inventory folder (`MoveTaskInventory`).
+    MoveTaskInventory {
+        /// The object whose task inventory the item is moved out of.
+        target: ScopedObjectId,
+        /// The destination agent inventory folder.
+        folder_id: InventoryFolderKey,
+        /// The task inventory item to move.
+        item_id: InventoryKey,
+    },
+    /// Remove an item from an in-world object's task inventory
+    /// (`RemoveTaskInventory`).
+    RemoveTaskInventory {
+        /// The object whose task inventory the item is removed from.
+        target: ScopedObjectId,
+        /// The task inventory item to remove.
         item_id: InventoryKey,
     },
     /// Ask whether a task's script is currently running (`GetScriptRunning`);

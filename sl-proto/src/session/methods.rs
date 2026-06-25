@@ -69,9 +69,9 @@ use crate::types::{
     ProfileUpdate, ProposalVoteId, RegionInfoUpdate, RegionStats, Reliability, RestoreItem,
     RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptControl, ScriptControlAction,
     ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId, SimulatorTime, SoundFlags,
-    SoundPreload, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch,
-    Texture, TextureEntry, Throttle, TransferStatus, Transmit, UserInfo, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, Wearable, WearableType,
+    SoundPreload, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags,
+    TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus, Transmit,
+    UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -6226,6 +6226,84 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_detach_attachment_into_inv(item_id, now)?;
+        Ok(())
+    }
+
+    /// Requests the task (object) inventory listing of the in-world object
+    /// `target` via `RequestTaskInventory`. The simulator answers with a
+    /// `ReplyTaskInventory`, surfaced as
+    /// [`Event::TaskInventoryReply`](crate::Event::TaskInventoryReply); the full
+    /// contents are then downloaded over the Xfer path named by its `filename`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownCircuit`] if `target`'s circuit has gone away, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_task_inventory(
+        &mut self,
+        target: ScopedObjectId,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(target.circuit)?;
+        circuit.send_request_task_inventory(target.id, now)?;
+        Ok(())
+    }
+
+    /// Writes the inventory item `item` into the task inventory of the in-world
+    /// object `target` via `UpdateTaskInventory`, adding a new item or replacing
+    /// the existing one the simulator matches by `key` (item id vs. asset id).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownCircuit`] if `target`'s circuit has gone away, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn update_task_inventory(
+        &mut self,
+        target: ScopedObjectId,
+        key: TaskInventoryKey,
+        item: &RestoreItem,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(target.circuit)?;
+        circuit.send_update_task_inventory(target.id, key, item, now)?;
+        Ok(())
+    }
+
+    /// Moves the task inventory item `item_id` out of the in-world object
+    /// `target` into the agent inventory folder `folder_id` via
+    /// `MoveTaskInventory`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownCircuit`] if `target`'s circuit has gone away, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn move_task_inventory(
+        &mut self,
+        target: ScopedObjectId,
+        folder_id: InventoryFolderKey,
+        item_id: InventoryKey,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(target.circuit)?;
+        circuit.send_move_task_inventory(target.id, folder_id, item_id, now)?;
+        Ok(())
+    }
+
+    /// Removes the task inventory item `item_id` from the in-world object
+    /// `target` via `RemoveTaskInventory`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownCircuit`] if `target`'s circuit has gone away, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn remove_task_inventory(
+        &mut self,
+        target: ScopedObjectId,
+        item_id: InventoryKey,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(target.circuit)?;
+        circuit.send_remove_task_inventory(target.id, item_id, now)?;
         Ok(())
     }
 

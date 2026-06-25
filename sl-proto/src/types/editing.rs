@@ -176,6 +176,40 @@ impl SaleType {
     }
 }
 
+/// Which id the simulator matches an `UpdateTaskInventory` against (the
+/// message's `Key` field, LL's `TASK_INVENTORY_*_KEY`), as passed to
+/// [`Session::update_task_inventory`](crate::Session::update_task_inventory).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum TaskInventoryKey {
+    /// Match the item by its inventory item id (`TASK_INVENTORY_ITEM_KEY`) — the
+    /// usual case for editing a known task inventory item.
+    #[default]
+    Item,
+    /// Match the item by its asset id (`TASK_INVENTORY_ASSET_KEY`).
+    Asset,
+}
+
+impl TaskInventoryKey {
+    /// The `Key` wire byte for this variant.
+    #[must_use]
+    pub const fn to_code(self) -> u8 {
+        match self {
+            Self::Item => 0,
+            Self::Asset => 1,
+        }
+    }
+
+    /// Classifies a `Key` wire byte (unknown values map to `Item`).
+    #[must_use]
+    pub const fn from_code(code: u8) -> Self {
+        match code {
+            1 => Self::Asset,
+            _ => Self::Item,
+        }
+    }
+}
+
 /// Where a derezzed object should go (the `Destination` of `DeRezObject`, LL's
 /// `EDeRezDestination` / `DRD_*`), as passed to
 /// [`Session::derez_objects`](crate::Session::derez_objects).

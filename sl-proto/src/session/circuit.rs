@@ -22,13 +22,14 @@ use crate::types::{
     NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectTransform,
     ParcelAccessEntry, ParcelCategory, ParcelUpdate, PermissionField, PickKey, PickUpdate,
     Postcard, PrimShape, PrimShapeParams, ProfileUpdate, Reliability, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, SaleType, ScriptPermissions, TeleportFlags, TextureEntry,
-    Throttle, ViewerEffect, Wearable,
+    RezObjectParams, RezScriptParams, SaleType, ScriptPermissions, TaskInventoryKey, TeleportFlags,
+    TextureEntry, Throttle, ViewerEffect, Wearable,
 };
 use crate::types::{GroupNoticeKey, ProposalVoteId};
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
-    AgentKey, ClassifiedKey, FriendKey, GroupKey, InventoryKey, ObjectKey, ParcelKey, TextureKey,
+    AgentKey, ClassifiedKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
+    ParcelKey, TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::map::Distance;
@@ -243,6 +244,13 @@ use sl_wire::messages::{
     GroupVoteHistoryRequest, GroupVoteHistoryRequestAgentDataBlock,
     GroupVoteHistoryRequestGroupDataBlock, GroupVoteHistoryRequestTransactionDataBlock,
     StartGroupProposal, StartGroupProposalAgentDataBlock, StartGroupProposalProposalDataBlock,
+};
+use sl_wire::messages::{
+    MoveTaskInventory, MoveTaskInventoryAgentDataBlock, MoveTaskInventoryInventoryDataBlock,
+    RemoveTaskInventory, RemoveTaskInventoryAgentDataBlock, RemoveTaskInventoryInventoryDataBlock,
+    RequestTaskInventory, RequestTaskInventoryAgentDataBlock,
+    RequestTaskInventoryInventoryDataBlock, UpdateTaskInventory, UpdateTaskInventoryAgentDataBlock,
+    UpdateTaskInventoryInventoryDataBlock, UpdateTaskInventoryUpdateDataBlock,
 };
 use sl_wire::{
     AnyMessage, CircuitCode, PacketFlags, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber,
@@ -4920,6 +4928,121 @@ impl Circuit {
         let message = AnyMessage::DetachAttachmentIntoInv(DetachAttachmentIntoInv {
             object_data: DetachAttachmentIntoInvObjectDataBlock {
                 agent_id: self.agent_id.uuid(),
+                item_id: item_id.uuid(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RequestTaskInventory` reliably (ask for the task inventory
+    /// listing of the in-world object `local_id`). The reply arrives as a
+    /// `ReplyTaskInventory` (surfaced as
+    /// [`Event::TaskInventoryReply`](crate::Event::TaskInventoryReply)).
+    pub(crate) fn send_request_task_inventory(
+        &mut self,
+        local_id: RegionLocalObjectId,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RequestTaskInventory(RequestTaskInventory {
+            agent_data: RequestTaskInventoryAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            inventory_data: RequestTaskInventoryInventoryDataBlock {
+                local_id: local_id.0,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `UpdateTaskInventory` reliably (write the item `item` into the
+    /// task inventory of the in-world object `local_id`, keyed by `key`).
+    pub(crate) fn send_update_task_inventory(
+        &mut self,
+        local_id: RegionLocalObjectId,
+        key: TaskInventoryKey,
+        item: &RestoreItem,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
+        let message = AnyMessage::UpdateTaskInventory(UpdateTaskInventory {
+            agent_data: UpdateTaskInventoryAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            update_data: UpdateTaskInventoryUpdateDataBlock {
+                local_id: local_id.0,
+                key: key.to_code(),
+            },
+            inventory_data: UpdateTaskInventoryInventoryDataBlock {
+                item_id: item.item_id.uuid(),
+                folder_id: item.folder_id.uuid(),
+                creator_id: item.creator_id.uuid(),
+                owner_id,
+                group_id,
+                base_mask: item.permissions.base.bits(),
+                owner_mask: item.permissions.owner.bits(),
+                group_mask: item.permissions.group.bits(),
+                everyone_mask: item.permissions.everyone.bits(),
+                next_owner_mask: item.permissions.next_owner.bits(),
+                group_owned: item.owner.is_group(),
+                transaction_id: item.transaction_id,
+                r#type: item.asset_type,
+                inv_type: item.inv_type,
+                flags: item.flags,
+                sale_type: item.sale_type.to_code(),
+                sale_price: crate::types::linden_price_to_wire(
+                    "SalePrice",
+                    item.sale_price.as_ref(),
+                )?,
+                name: with_nul(&item.name),
+                description: with_nul(&item.description),
+                creation_date: item.creation_date,
+                crc: item.crc,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `MoveTaskInventory` reliably (move the task inventory item
+    /// `item_id` out of the in-world object `local_id` into the agent inventory
+    /// folder `folder_id`).
+    pub(crate) fn send_move_task_inventory(
+        &mut self,
+        local_id: RegionLocalObjectId,
+        folder_id: InventoryFolderKey,
+        item_id: InventoryKey,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::MoveTaskInventory(MoveTaskInventory {
+            agent_data: MoveTaskInventoryAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+                folder_id: folder_id.uuid(),
+            },
+            inventory_data: MoveTaskInventoryInventoryDataBlock {
+                local_id: local_id.0,
+                item_id: item_id.uuid(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `RemoveTaskInventory` reliably (remove the task inventory item
+    /// `item_id` from the in-world object `local_id`).
+    pub(crate) fn send_remove_task_inventory(
+        &mut self,
+        local_id: RegionLocalObjectId,
+        item_id: InventoryKey,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RemoveTaskInventory(RemoveTaskInventory {
+            agent_data: RemoveTaskInventoryAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            inventory_data: RemoveTaskInventoryInventoryDataBlock {
+                local_id: local_id.0,
                 item_id: item_id.uuid(),
             },
         });

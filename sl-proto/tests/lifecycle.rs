@@ -33,10 +33,10 @@ mod test {
         RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
         SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissions,
         SculptOrMeshKey, Session, SetDisplayNameReply, SimStatId, SimulatorTime, SkySettings,
-        SoundFlags, TaskInventoryReply, TeleportFlags, TerrainLayerType, TextureEntry, TextureFace,
-        TextureKey, Throttle, TransactionId, TransferStatus, Transmit, UserInfo, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
-        decode_texture_entry, group_powers, pcode,
+        SoundFlags, TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerrainLayerType,
+        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, TransferStatus, Transmit,
+        UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
+        avatar_texture, decode_texture_entry, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -5946,6 +5946,101 @@ mod test {
             })
             .ok_or("expected a DetachAttachmentIntoInv")?;
         assert_eq!(detach.object_data.item_id, uuid::Uuid::from_u128(0xA77AC));
+        Ok(())
+    }
+
+    #[test]
+    fn task_inventory_commands_encode() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        let target = ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(55));
+        let item = RestoreItem {
+            item_id: InventoryKey::from(uuid::Uuid::from_u128(0x17E)),
+            folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0xF01D)),
+            creator_id: AgentKey::from(uuid::Uuid::nil()),
+            owner: OwnerKey::Agent(AgentKey::from(uuid::Uuid::nil())),
+            group: None,
+            permissions: Permissions5 {
+                base: Permissions::from_bits(0x0008_e000),
+                owner: Permissions::from_bits(0x0008_e000),
+                group: Permissions::NONE,
+                everyone: Permissions::NONE,
+                next_owner: Permissions::from_bits(0x0008_e000),
+            },
+            transaction_id: uuid::Uuid::nil(),
+            asset_type: 10,
+            inv_type: 10,
+            flags: 0,
+            sale_type: SaleType::NotForSale,
+            sale_price: Some(LindenAmount(0)),
+            name: "script".to_owned(),
+            description: "a script".to_owned(),
+            creation_date: 1_750_000_000,
+            crc: 0,
+        };
+
+        session.request_task_inventory(target, now)?;
+        session.update_task_inventory(target, TaskInventoryKey::Asset, &item, now)?;
+        session.move_task_inventory(
+            target,
+            InventoryFolderKey::from(uuid::Uuid::from_u128(0xF01D)),
+            InventoryKey::from(uuid::Uuid::from_u128(0x17E)),
+            now,
+        )?;
+        session.remove_task_inventory(
+            target,
+            InventoryKey::from(uuid::Uuid::from_u128(0x17E)),
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+
+        let request = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RequestTaskInventory(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("expected a RequestTaskInventory")?;
+        assert_eq!(request.inventory_data.local_id, 55);
+
+        let update = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::UpdateTaskInventory(update) => Some(update),
+                _ => None,
+            })
+            .ok_or("expected an UpdateTaskInventory")?;
+        assert_eq!(update.update_data.local_id, 55);
+        assert_eq!(update.update_data.key, TaskInventoryKey::Asset.to_code());
+        assert_eq!(update.inventory_data.item_id, uuid::Uuid::from_u128(0x17E));
+        assert_eq!(update.inventory_data.r#type, 10);
+
+        let move_msg = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::MoveTaskInventory(move_msg) => Some(move_msg),
+                _ => None,
+            })
+            .ok_or("expected a MoveTaskInventory")?;
+        assert_eq!(move_msg.inventory_data.local_id, 55);
+        assert_eq!(move_msg.agent_data.folder_id, uuid::Uuid::from_u128(0xF01D));
+        assert_eq!(
+            move_msg.inventory_data.item_id,
+            uuid::Uuid::from_u128(0x17E)
+        );
+
+        let remove = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RemoveTaskInventory(remove) => Some(remove),
+                _ => None,
+            })
+            .ok_or("expected a RemoveTaskInventory")?;
+        assert_eq!(remove.inventory_data.local_id, 55);
+        assert_eq!(remove.inventory_data.item_id, uuid::Uuid::from_u128(0x17E));
         Ok(())
     }
 

@@ -1920,6 +1920,24 @@ fn advance_running(
             Command::DetachAttachmentIntoInventory { item_id } => {
                 session.detach_attachment_into_inventory(*item_id, now).ok();
             }
+            Command::RequestTaskInventory { target } => {
+                session.request_task_inventory(*target, now).ok();
+            }
+            Command::UpdateTaskInventory { target, key, item } => {
+                session.update_task_inventory(*target, *key, item, now).ok();
+            }
+            Command::MoveTaskInventory {
+                target,
+                folder_id,
+                item_id,
+            } => {
+                session
+                    .move_task_inventory(*target, *folder_id, *item_id, now)
+                    .ok();
+            }
+            Command::RemoveTaskInventory { target, item_id } => {
+                session.remove_task_inventory(*target, *item_id, now).ok();
+            }
             Command::RequestScriptRunning { object_id, item_id } => {
                 session
                     .request_script_running(*object_id, *item_id, now)
