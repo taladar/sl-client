@@ -399,19 +399,179 @@ not here, to avoid a half-built chat surface.
   `session/conversions.rs` and dispatched by name in
   `Session::handle_caps_event`.
 
-## Outbound gap — Phase 0 audit required
+## Outbound gap — Phase 0 audit (complete)
 
-The outbound gap could **not** be auto-computed: the client builds outbound
-messages through dedicated `send_*` helpers (typed structs → `circuit.send`),
-not `AnyMessage::…` literals, so a name-level diff against the 219 distinct
-messages the Firestorm viewer sends is unreliable. The client already exposes
-312 REPL commands / many `send_*` methods, so the true gap is smaller than 219.
+The outbound gap could **not** be auto-computed by name alone at first: the
+client builds outbound messages through dedicated `send_*` helpers (typed
+structs → `circuit.send`), not bare `AnyMessage::…` literals. Phase 0
+reconciled the two universes by scanning where the client *constructs* an
+`AnyMessage` to send.
 
-**Phase 0 task:** reconcile each of the 219 client-sent messages against the
-client's existing `send_*` methods / `Command` variants, producing a precise
-classified outbound gap (HANDLE / deprecated / sim↔sim). Then batch the
-non-outdated client→server messages using the outbound pattern above. Fill this
-section with the resulting table before starting outbound batches.
+**Audit method (reproducible).** The outbound universe is the Firestorm
+`newMessage`/`newMessageFast` call sites (the command in *Audit method* with
+`setHandlerFunc` replaced by `newMessage`): 216 distinct real messages (after
+dropping C identifier fragments the regex caught — `add`, `char`, `const`,
+`info`, `message`, `msg`, `name`, `mMessageReader`, `LLMessageStringTable`).
+The client's *sent* set is every `AnyMessage::…` variant the client
+constructs (not match-arm dispatches) in `session/circuit.rs` and
+`session/methods.rs`:
+
+```sh
+grep -rhnE 'AnyMessage::[A-Za-z0-9]+' \
+  sl-proto/src/session/circuit.rs sl-proto/src/session/methods.rs |
+  grep -vE '=>' | grep -oE 'AnyMessage::[A-Za-z0-9]+' |
+  sed 's/AnyMessage:://' | sort -u
+```
+
+That yields **182** messages the client already sends. The raw gap is 65
+names; **9** are the C-fragment false positives above and **4**
+(`AckAddCircuitCode`, `EstateOwnerRequest`, `GetScriptExports`, `RedoLand`) are
+absent from the current `sl-wire/message_template.msg`, so — per the same
+template filter the inbound audit used — they fall out of scope. That leaves
+**55** real, in-template outbound gap messages: **41 HANDLE**, **14 SKIP**.
+
+### Outbound gap — 55 messages
+
+`HANDLE` = implement (batched below). `SKIP` = out of scope, rationale in the
+skip list. Direction was confirmed against the Firestorm send sites
+(`indra/newview/*` = viewer-sent; `indra/llmessage/*` infrastructure was
+checked individually).
+
+| Message | Id | Disposition |
+| --- | --- | --- |
+| OfferCallingCard | Low 301 | HANDLE — out batch 1 |
+| AcceptCallingCard | Low 302 | HANDLE — out batch 1 |
+| DeclineCallingCard | Low 303 | HANDLE — out batch 1 |
+| ObjectExtraParams | Low 99 | HANDLE — out batch 2 |
+| ObjectImage | Low 96 | HANDLE — out batch 2 |
+| ObjectShape | Low 98 | HANDLE — out batch 2 |
+| RezObject | Low 293 | HANDLE — out batch 3 |
+| RezScript | Low 304 | HANDLE — out batch 3 |
+| RevokePermissions | Low 193 | HANDLE — out batch 3 |
+| DetachAttachmentIntoInv | Low 397 | HANDLE — out batch 3 |
+| RequestTaskInventory | Low 289 | HANDLE — out batch 4 |
+| UpdateTaskInventory | Low 286 | HANDLE — out batch 4 |
+| MoveTaskInventory | Low 288 | HANDLE — out batch 4 |
+| RemoveTaskInventory | Low 287 | HANDLE — out batch 4 |
+| ModifyLand | Low 124 | HANDLE — out batch 5 |
+| UndoLand | Low 77 | HANDLE — out batch 5 |
+| ParcelPropertiesRequestByID | Low 197 | HANDLE — out batch 5 |
+| ParcelSetOtherCleanTime | Low 200 | HANDLE — out batch 5 |
+| LinkInventoryItem | Low 426 | HANDLE — out batch 6 |
+| GroupTitleUpdate | Low 377 | HANDLE — out batch 6 |
+| UpdateGroupInfo | Low 341 | HANDLE — out batch 6 |
+| TeleportCancel | Low 72 | HANDLE — out batch 7 |
+| TeleportLandmarkRequest | Low 65 | HANDLE — out batch 7 |
+| SetStartLocationRequest | Low 324 | HANDLE — out batch 7 |
+| AgentDataUpdateRequest | Low 386 | HANDLE — out batch 7 |
+| AgentQuitCopy | Low 85 | HANDLE — out batch 7 |
+| VelocityInterpolateOn | Low 125 | HANDLE — out batch 7 |
+| VelocityInterpolateOff | Low 126 | HANDLE — out batch 7 |
+| UserInfoRequest | Low 399 | HANDLE — out batch 8 |
+| UpdateUserInfo | Low 401 | HANDLE — out batch 8 |
+| SoundTrigger | High 29 | HANDLE — out batch 8 |
+| RequestGodlikePowers | Low 257 | HANDLE — out batch 9 |
+| EjectUser | Low 167 | HANDLE — out batch 9 |
+| FreezeUser | Low 168 | HANDLE — out batch 9 |
+| GodUpdateRegionInfo | Low 143 | HANDLE — out batch 9 |
+| SimWideDeletes | Low 129 | HANDLE — out batch 9 |
+| ParcelGodForceOwner | Low 214 | HANDLE — out batch 10 |
+| ParcelGodMarkAsContent | Low 227 | HANDLE — out batch 10 |
+| EventGodDelete | Low 183 | HANDLE — out batch 10 |
+| StateSave | Low 127 | HANDLE — out batch 10 |
+| ViewerStartAuction | Low 228 | HANDLE — out batch 10 |
+| StartPingCheck | High 1 | SKIP — transport |
+| CreateTrustedCircuit | Low 392 | SKIP — sim↔sim trust |
+| DenyTrustedCircuit | Low 393 | SKIP — sim↔sim trust |
+| RequestTrustedCircuit | Low 394 | SKIP — sim↔sim trust |
+| UUIDNameReply | Low 236 | SKIP — sim/service-sent |
+| UUIDGroupNameReply | Low 238 | SKIP — sim/service-sent |
+| Error | Low 423 | SKIP — symmetric error primitive |
+| AbortXfer | Low 157 | SKIP — deprecated (Xfer) |
+| TransferAbort | Low 155 | SKIP — deprecated (transfer/HTTP CAPS) |
+| TransferInfo | Low 154 | SKIP — deprecated (transfer/HTTP CAPS) |
+| TransferPacket | High 17 | SKIP — deprecated (transfer/HTTP CAPS) |
+| AssetUploadComplete | Low 334 | SKIP — deprecated (HTTP asset) |
+| FetchInventory | Low 279 | SKIP — deprecated (AIS3) |
+| RemoveNameValuePair | Low 330 | SKIP — deprecated (NVP) |
+
+### Outbound skip rationale
+
+- **Transport:** `StartPingCheck` is the link-layer circuit ping, paired with
+  `CompletePingCheck` in `session/circuit.rs`; it never goes through a feature
+  `send_*` method.
+- **Sim↔sim trust:** `CreateTrustedCircuit`, `DenyTrustedCircuit`,
+  `RequestTrustedCircuit` negotiate the trusted inter-simulator circuit; a
+  viewer's agent circuit never sends them (the Firestorm sites are in
+  `indra/llmessage`, used by the sim/service build).
+- **Sim/service-sent:** `UUIDNameReply` / `UUIDGroupNameReply` are *replies* to
+  `UUIDNameRequest` / `UUIDGroupNameRequest` (both of which the client already
+  sends); the Firestorm `newMessage` sites are the legacy `llcachename.cpp`
+  peer-name-cache acting as a responder, not a viewer→sim send.
+- **Symmetric error primitive:** `Error` is `LLMessageSystem::sendError`, an
+  infrastructure error-report used by both ends. The viewer's role is to
+  *receive* it — already surfaced inbound as `Event::ServerError` (batch 3);
+  there is no client feature that needs to send one.
+- **Deprecated subsystems:** `AbortXfer` and the `Transfer*` family
+  (`TransferAbort`, `TransferInfo`, `TransferPacket`) plus `AssetUploadComplete`
+  are the legacy UDP Xfer/asset-transfer mechanisms superseded by the HTTP asset
+  CAPS; `FetchInventory` is legacy UDP inventory fetch superseded by AIS3;
+  `RemoveNameValuePair` is the obsolete NVP system. Consistent with the inbound
+  skip list — the client retains a few pre-existing legacy Xfer *requests*
+  (`RequestXfer`, `SendXferPacket`, `ConfirmXferPacket`, `TransferRequest`,
+  `AssetUploadRequest`), but extending these deprecated subsystems is out of
+  scope. Revisit only if a concrete need appears.
+
+### Outbound batches
+
+Each batch is a separate commit covering any new domain structs, the `send_*`
+method(s) on `Session` (mirroring `Session::send_instant_message`), the
+`Command` variant(s), the REPL token(s) in `sl-repl/src/registry.rs`, and tests,
+then `cargo fmt`/`clippy`/`test`. Several god/estate and object-editing messages
+are partially OpenSim-testable (terraform, object edit) while others are SL- or
+god-only; live-verify what the local grid supports and exercise the rest against
+aditi.
+
+- **Out batch 1 — calling cards.** `OfferCallingCard`, `AcceptCallingCard`,
+  `DeclineCallingCard`: the viewer→sim counterparts of the inbound batch-5
+  events. Offer a calling card for an avatar; accept/decline an incoming offer,
+  echoing its `TransactionId`.
+- **Out batch 2 — object prim editing.** `ObjectShape` (prim geometry),
+  `ObjectExtraParams` (sculpt/flexi/light/mesh extra params), `ObjectImage`
+  (per-face textures / TE) — the edit-tool prim-update messages keyed by
+  region-local object id.
+- **Out batch 3 — rez & script permissions.** `RezObject` / `RezScript` (rez an
+  inventory object/script into the world), `RevokePermissions` (revoke
+  previously-granted script permissions), `DetachAttachmentIntoInv` (detach a
+  worn attachment back to inventory).
+- **Out batch 4 — task (object) inventory.** `RequestTaskInventory`,
+  `UpdateTaskInventory`, `MoveTaskInventory`, `RemoveTaskInventory`: read and
+  mutate the inventory contents of an in-world object (the outbound side of the
+  inbound batch-6 `ReplyTaskInventory`).
+- **Out batch 5 — land & parcel.** `ModifyLand` (terraform), `UndoLand` (undo
+  terraform; `RedoLand` is absent from the template),
+  `ParcelPropertiesRequestByID` (fetch a parcel by local id),
+  `ParcelSetOtherCleanTime` (parcel object
+  auto-return time).
+- **Out batch 6 — inventory link & group info.** `LinkInventoryItem` (create an
+  inventory link), `GroupTitleUpdate` (set the agent's active group title),
+  `UpdateGroupInfo` (edit a group's charter/settings).
+- **Out batch 7 — teleport & agent prefs.** `TeleportLandmarkRequest` (teleport
+  to a landmark), `TeleportCancel` (cancel an in-progress teleport),
+  `SetStartLocationRequest` (set home), `AgentDataUpdateRequest`,
+  `AgentQuitCopy` (crash-quit leaving objects), `VelocityInterpolateOn` /
+  `VelocityInterpolateOff`.
+- **Out batch 8 — user info & sound.** `UserInfoRequest` / `UpdateUserInfo`
+  (read/write the email & IM-forwarding prefs — the outbound side of the
+  inbound batch-6 `UserInfoReply`), `SoundTrigger` (trigger a sound at the
+  agent's position).
+- **Out batch 9 — god region/estate admin.** `RequestGodlikePowers`,
+  `EjectUser`, `FreezeUser`, `GodUpdateRegionInfo`, `SimWideDeletes`. All
+  `NotTrusted` and viewer-sent with the god bit set; gated on the agent holding
+  god/estate powers.
+- **Out batch 10 — god parcel/object/land admin.** `ParcelGodForceOwner`,
+  `ParcelGodMarkAsContent`, `EventGodDelete`, `StateSave` (god object state
+  save), `ViewerStartAuction`.
 
 ## Verification
 
@@ -438,5 +598,26 @@ section with the resulting table before starting outbound batches.
   DisplayNameUpdate, SetDisplayNameReply)
 - [x] EQ batch 3 — region/environment/voice misc (WindLightRefresh,
   SimConsoleResponse, RequiredVoiceVersion, OpenRegionInfo)
-- [ ] Phase 0 — outbound audit (fill the outbound gap table)
-- [ ] Outbound batches (defined after Phase 0)
+- [x] Phase 0 — outbound audit (55 in-template gap messages: 41 HANDLE /
+  14 SKIP; 10 outbound batches defined)
+- [ ] Out batch 1 — calling cards (OfferCallingCard, AcceptCallingCard,
+  DeclineCallingCard)
+- [ ] Out batch 2 — object prim editing (ObjectShape, ObjectExtraParams,
+  ObjectImage)
+- [ ] Out batch 3 — rez & script permissions (RezObject, RezScript,
+  RevokePermissions, DetachAttachmentIntoInv)
+- [ ] Out batch 4 — task inventory (RequestTaskInventory, UpdateTaskInventory,
+  MoveTaskInventory, RemoveTaskInventory)
+- [ ] Out batch 5 — land & parcel (ModifyLand, UndoLand,
+  ParcelPropertiesRequestByID, ParcelSetOtherCleanTime)
+- [ ] Out batch 6 — inventory link & group info (LinkInventoryItem,
+  GroupTitleUpdate, UpdateGroupInfo)
+- [ ] Out batch 7 — teleport & agent prefs (TeleportLandmarkRequest,
+  TeleportCancel, SetStartLocationRequest, AgentDataUpdateRequest,
+  AgentQuitCopy, VelocityInterpolateOn, VelocityInterpolateOff)
+- [ ] Out batch 8 — user info & sound (UserInfoRequest, UpdateUserInfo,
+  SoundTrigger)
+- [ ] Out batch 9 — god region/estate admin (RequestGodlikePowers, EjectUser,
+  FreezeUser, GodUpdateRegionInfo, SimWideDeletes)
+- [ ] Out batch 10 — god parcel/object/land admin (ParcelGodForceOwner,
+  ParcelGodMarkAsContent, EventGodDelete, StateSave, ViewerStartAuction)
