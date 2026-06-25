@@ -110,7 +110,7 @@ Scope reminders:
   mirror. Define the library-user query accessors (e.g.
   `granted_permissions(holder) -> ScriptPermissions`,
   `script_controls() -> …`). **Done — see § Grant/deny & revoke reference
-  (from A3) + tasks B3–B6 in § Phase B.** Decided: recording happens *after*
+  (from A3) + task B2 in § Phase B.** Decided: recording happens *after*
   the wire send inside `answer_script_permissions` (gaining one new param,
   `experience_id`, passed back from the request — the only grant datum not
   derivable at answer time, keeping the "no outstanding-request tracking"
@@ -163,7 +163,7 @@ Scope reminders:
     `ScriptControlChange(release)`.
   - The session does **not** message the simulator on teleport; it just clears
     its own tracking (the left-behind object is unreachable anyway).
-  **Done — see § Client-mirror reset reference (from A5) + task B7 in
+  **Done — see § Client-mirror reset reference (from A5) + task B2 in
   § Phase B.**
   Decided: the **grant registry** and the (A6) **taken-controls tracker** reset
   on *different* signals. Grant registry — real teleport drops every
@@ -191,7 +191,7 @@ Scope reminders:
       pushes (no inbound `RevokePermissions`). Decide whether a client-sent
       `release_script_controls` / `RevokePermissions` updates the mirror
       immediately. **Done — see § Inbound control-change reference (from A6) +
-      task B8 in § Phase B (and the now-unblocked B5).** Decided: the
+      task B3 in § Phase B.** Decided: the
       taken-controls tracker is a **session-global** `TakenControls` field (no
       holder/object attribution — `ScriptControlChange` carries no object id),
       modelled exactly as the viewer's per-control-bit
@@ -207,7 +207,7 @@ Scope reminders:
       detach / script release echo a release `ScriptControlChange`, see §
       Inbound control-change reference). Client-sent updates:
       `release_script_controls` clears the tracker to empty
-      **immediately on send** (B5; does not wait for the echo — OpenSim's echo
+      **immediately on send** (B3; does not wait for the echo — OpenSim's echo
       is `Controls = 0xFFFFFFFF, PassToAgent = false`, which would miss the
       passed-on counts, so clear-on-send is the robust choice and the later
       echo's clamped decrement is a harmless no-op); `RevokePermissions` does
@@ -223,7 +223,7 @@ Scope reminders:
   expose the commands and a way to query the granted state, at feature parity.
   Draw the boundary: what is sl-proto `Session` state versus what stays
   application policy. **Done — see § API-surface & exposure reference
-  (from A7) + tasks B9–B10 in § Phase B.** Decided: two new `Command`s
+  (from A7) + task B4 in § Phase B.** Decided: two new `Command`s
   (`RevokePermissions` from A3, and a new unit `QueryScriptPermissions`); the
   *optional grant convenience* is **dropped** (a grant only ever *answers* a
   pending request — `AnswerScriptPermissions` is that path). **Key discovery:**
@@ -249,9 +249,9 @@ Scope reminders:
   taken-controls tracking. List the remaining open questions for sign-off before
   implementation (the exact attachment-detection source; whether to expose an
   explicit deny). **Done — see § Test & verification strategy reference,
-  task B11 in § Phase B, and § Open questions.** Decided: the
-  per-task tests embedded in B3–B10 stay (each lands with its own unit test); A8
-  adds **one** consolidated lifecycle suite (B11) of the cross-cutting
+  task B5 in § Phase B, and § Open questions.** Decided: the
+  per-task tests embedded in B2–B4 stay (each lands with its own unit test); A8
+  adds **one** consolidated lifecycle suite (B5) of the cross-cutting
   reset/recording cases that mirror `teleport_clears_seat`, all built from the
   **existing** test helpers — `established` / `server_message` / `drain` /
   `drain_events`, `object_update[_in]` to seed the `objects` cache, the
@@ -265,8 +265,8 @@ Scope reminders:
   `session/methods.rs`), so `holder_kind` cannot yet classify a holder parented
   to our own avatar. This is promoted from a B2 footnote to the **#1 sign-off
   blocker** (§ Open questions): the attachment-vs-in-world teleport-reset test
-  (the heart of A5/B7) is unwritable until that plumbing is decided, so B2's
-  detection rule must be pinned down before B7 lands. A8 produces **no new
+  (the heart of A5/B2) is unwritable until that plumbing is decided, so B2's
+  detection rule must be pinned down before B2 lands. A8 produces **no new
   protocol** — only the test task and the sign-off list.
 
 Phase A scopes the planning only; the implementation tasks each Phase A item
@@ -274,12 +274,16 @@ produces are appended to **Phase B** below as that item is worked.
 
 ## Phase B — implementation (tasks produced by Phase A)
 
-Each Phase A item, once checked, appends the concrete implementation tasks it
-implies here (tagged with the producing item). These are *not* started until
-Phase A is signed off; tick a box only when the step builds, is clippy-clean
-(restriction lints), and `cargo test` passes. Keep `sl-client-tokio`,
-`sl-client-bevy`, and the REPL at feature parity; never push client-only types
-into shared `sl-types`.
+Each Phase A item, while it was worked, appended the concrete implementation
+tasks it implied here (tagged with the producing item) as a first draft. With
+Phase A complete, that draft was **consolidated** into the five tasks below —
+see § Phase B consolidation for the old→new mapping and the runtime-match
+findings that drove it. The **references** (`### Classification reference`
+… below) are unchanged knowledge; only the task list was reordered/merged. These
+are *not* started until § Open questions are signed off; tick a box only when
+the step builds, is clippy-clean (restriction lints), and `cargo test` passes.
+Keep `sl-client-tokio`, `sl-client-bevy`, and the REPL at feature parity; never
+push client-only types into shared `sl-types`.
 
 ### Classification reference (from A1)
 
@@ -407,7 +411,13 @@ follows the wire, never leads it. The method gains one parameter,
 derivable at answer time (`task_id` / `item_id` are already params; `kind` /
 `circuit` come from the A2 `holder_kind(task_id)` helper), and the driver
 already holds it on the `ScriptPermissionRequest` it is answering — passing it
-back keeps A2's "no outstanding-request tracking" decision intact. New shape:
+back keeps A2's "no outstanding-request tracking" decision intact. The runtime
+callers receive the answer as a `Command::AnswerScriptPermissions`, which today
+carries no experience, so **that command gains the same
+`experience_id: Option<ExperienceKey>` field**: the driver fills it from the
+`ScriptPermissionRequest` it is answering, so the datum reaches the session
+through the command boundary rather than via session-side request tracking
+(consolidated finding 3). New shape:
 
     answer_script_permissions(task_id, item_id, permissions, experience_id, now)
 
@@ -457,7 +467,7 @@ immediately, rather than waiting for the echo. It does **not** touch
 `script_grants`: the `TAKE_CONTROLS` *grant* persists (the script may re-take),
 so "permission granted" (registry) and "controls currently taken" (A6 tracker)
 stay separate concerns. The concrete clear lands with the A6 tracker; A3 only
-fixes the policy (B5 below carries it).
+fixes the policy (B3 below carries it).
 
 **Query accessors (public; A2 registry types stay private).** The library user
 reads the mirror through public signatures returning public types —
@@ -526,7 +536,7 @@ surfaced via the follow-cam events (`FollowCamProperty` /
 records the grant but initiates nothing.
 
 **Consequence for the registry.** A4 changes only *roles/policy*, not storage:
-the registry still stores all granted bits wholesale (B2/B3 unchanged). Because
+the registry still stores all granted bits wholesale (B2 unchanged). Because
 there are now **zero** auto-act flags, B1's `PermissionRole` enum collapses from
 three variants to two (`RecordOnly` / `Cooperation`) — see the B1 amendment.
 
@@ -591,7 +601,7 @@ A6), and they do **not** clear on the same signals:
   the script's inventory item, so it could not key a grant anyway).
 
 **Taken-controls-tracker resets** (policy here; the concrete clear lands with
-the A6 tracker, sequenced like B5):
+the A6 tracker, sequenced like B3):
 
 - **Not** cleared on real teleport, neighbour crossing, or `DisableSimulator`.
   The tracker is agent-global and cannot be attributed to the in-world holder
@@ -602,7 +612,7 @@ the A6 tracker, sequenced like B5):
   survive a teleport in the viewer and must in the mirror.
 - Cleared **per-bit** by an inbound `ScriptControlChange(release)` (A6) — the
   only revoke the sim pushes — and **wholesale** by the explicit
-  `release_script_controls` send (B5). **Detach** needs no dedicated controls
+  `release_script_controls` send (B3). **Detach** needs no dedicated controls
   clear: the sim auto-revokes `TAKE_CONTROLS | CONTROL_CAMERA` on detach and
   echoes a `ScriptControlChange(release)`, so the A6 tracker self-corrects on
   that echo (matching the `KillObject` that clears the grant).
@@ -691,7 +701,7 @@ self-correct the tracker on detach (no dedicated detach hook needed).
 
 - **`release_script_controls` (`ForceScriptControlRelease`)** — clears the
   tracker to empty (`consumed` *and* `passed_on`) **immediately on send**, after
-  queuing the message, without waiting for the echo (the A3 policy; B5 carries
+  queuing the message, without waiting for the echo (the A3 policy; B3 carries
   it). Clearing on send is the *robust* choice, not merely eager: OpenSim's
   `HandleForceReleaseControls` echoes a single release block with
   `Controls = int.MaxValue (0xFFFFFFFF), PassToAgent = false`, which by the fold
@@ -705,7 +715,7 @@ self-correct the tracker on detach (no dedicated detach hook needed).
   OVERRIDE_ANIMATIONS` (verified in OpenSim's `HandleRevokePermissions`, which
   early-returns unless an animation bit is set and never clears controls);
   `TAKE_CONTROLS` is not revocable this way. Its only mirror effect is on
-  `script_grants` (A3/B4).
+  `script_grants` (A3/B2).
 
 **Reset on region-leave signals** — none. Per § Client-mirror reset reference
 (A5), the tracker is **not** cleared on real teleport, neighbour crossing, or
@@ -770,7 +780,7 @@ channel.** That is the design below; it adds no `Arc<Mutex>` to tokio and no
 **New / changed `Command`s** (`sl-proto/src/command.rs`):
 
 1. `RevokePermissions { object_id: ObjectKey, permissions: ScriptPermissions }`
-   — the granular revoke (A3/B4), object-scoped; a struct variant modelled on
+   — the granular revoke (A3/B2), object-scoped; a struct variant modelled on
    `AnswerScriptPermissions`.
 2. `QueryScriptPermissions` — a **unit** variant (modelled on
    `ReleaseScriptControls`) requesting a snapshot of the whole mirror.
@@ -778,11 +788,11 @@ channel.** That is the design below; it adds no `Arc<Mutex>` to tokio and no
    `Event::ScriptPermissionState`.
 3. **No grant-convenience command.** A1/A4 confirm a grant only ever *answers* a
    pending `llRequestPermissions`; `AnswerScriptPermissions` (gaining
-   `experience_id`, B3) is that path. Nothing is granted out of band, so the
+   `experience_id`, B2) is that path. Nothing is granted out of band, so the
    "optional grant convenience" A7 floated is **dropped**.
 4. `AnswerScriptPermissions` is unchanged *on the wire*, but its driver dispatch
    gains the `experience_id` argument plumbed from the `ScriptPermissionRequest`
-   (B3) — a runtime-wiring change, not a new command.
+   (B2) — a runtime-wiring change, not a new command.
 
 **`Event` changes** (`sl-proto/src/types/event.rs`):
 
@@ -802,19 +812,19 @@ channel.** That is the design below; it adds no `Arc<Mutex>` to tokio and no
 
       #[derive(Debug, Clone)]
       pub struct ScriptPermissionState {
-          pub grants: Vec<ScriptGrantInfo>,        // the A3/B6 view
-          pub controls: ScriptControlsInfo,        // the A6/B8 view
+          pub grants: Vec<ScriptGrantInfo>,        // the A3/B2 view
+          pub controls: ScriptControlsInfo,        // the A6/B3 view
       }
 
 **New `Session` accessors** (`sl-proto/src/session/methods.rs`), all read-only,
 following the `seat()` precedent (public signature, public return types, the
 private internal state stays private):
 
-- `granted_permissions(task_id, item_id) -> ScriptPermissions` (A3/B6) — one
+- `granted_permissions(task_id, item_id) -> ScriptPermissions` (A3/B2) — one
   script's granted subset (empty when absent).
-- `script_grants() -> impl Iterator<Item = ScriptGrantInfo>` (A3/B6) — every
+- `script_grants() -> impl Iterator<Item = ScriptGrantInfo>` (A3/B2) — every
   current grant.
-- `script_controls() -> ScriptControlsInfo` (A6/B8) — the taken-controls union.
+- `script_controls() -> ScriptControlsInfo` (A6/B3) — the taken-controls union.
 - `script_permission_state() -> ScriptPermissionState` (A7) — a convenience that
   collects the two stores into one snapshot (`grants` from `script_grants`,
   `controls` from `script_controls`); the value each runtime wraps in
@@ -831,8 +841,17 @@ private internal state stays private):
 - Each runtime already forwards every sl-proto `Event` (tokio over
   `mpsc::Sender<Event>`; bevy as `SlEvent(SessionEvent)`; the REPL via
   `format_event`), so the snapshot reply travels the same path and needs
-  **no new transport** — only a `format_event` / `format_command` arm for the
-  REPL and the two `match` arms per driver.
+  **no new transport**. The per-variant wiring is **not** symmetric, though, so
+  the B-tasks spell each touch-point out (consolidated findings 1–2): a new
+  `Command` variant is a **compile error** in bevy (its `drive` match is
+  exhaustive, no wildcard), is **silently swallowed** by tokio (its
+  `Some(Command::Logout) | None` catch-all), and is invisible to the REPL
+  (manual `CommandSpec` list) — so the tokio + REPL arms are parity-only, added
+  by hand. A new `Event` variant likewise forces arms in
+  `sl-repl/src/format.rs::event_name` (an exhaustive `const fn`) **and**
+  `sl-survey/src/bin/sl-survey.rs::handle_event` (an exhaustive union), beside
+  the REPL `format_event` body; tokio/bevy forward events without an exhaustive
+  match, so they need no per-variant edit there.
 - No runtime exposes a live accessor directly (the constraint above); they
   all go command-in / event-out, which keeps them at parity without
   bevy needing a `Res<Session>` or tokio an `Arc<Mutex<Session>>`.
@@ -840,8 +859,8 @@ private internal state stays private):
 **The boundary — sl-proto `Session` state vs. application policy.**
 
 - **sl-proto `Session` owns:** the grant registry + the taken-controls tracker;
-  all recording (B3), revoke-mirroring (B4), region-leave resets (B7) and
-  inbound control folds (B8); the four accessors and the
+  all recording, revoke-mirroring and region-leave resets (B2) and
+  inbound control folds (B3); the four accessors and the
   `script_permission_state` snapshot. It is the single source of mirror truth
   and stays sans-IO; the simulator remains authoritative (the mirror is a
   convenience, never a security boundary).
@@ -899,7 +918,7 @@ onto a fixture already in `lifecycle.rs`:
 
 Seeding the `objects` cache (for `holder_kind` and the `KillObject` reset) uses
 `object_update[_in]` (`:9316`): the holder must be present so the reset's
-`task_id == full_id` match (B7) and the kind detection (B2) have something to
+`task_id == full_id` match (B2) and the kind detection (B2) have something to
 read. `object_update_in` scopes the object to a chosen `region_handle` /
 circuit, which is exactly what the **circuit-retired** test needs to put a grant
 on the neighbour circuit and assert `DisableSimulator` drops only it.
@@ -911,7 +930,7 @@ parented to **our own** avatar. The session caches `agent_id: AgentKey`
 (`session.rs:678`) but **not** its own avatar's region-local id, and there is no
 `pcode::AVATAR` handling in `session/methods.rs`, so "parented to our avatar"
 cannot be evaluated today. Consequently the **attachment-kept-on-teleport** half
-of the teleport-reset test (the crux of A5/B7) cannot be written against the
+of the teleport-reset test (the crux of A5/B2) cannot be written against the
 current code — only the in-world-cleared half can. The test strategy therefore
 **blocks on resolving the attachment-detection source first** (see § Open
 questions): once B2 pins down how the own-avatar parentage is read (cache the
@@ -919,11 +938,11 @@ avatar's region-local id at `AgentMovementComplete`, or derive `Attachment` from
 a different signal), the attachment object is seeded with `object_update_in`
 carrying the attachment `state` nibble and a `parent_id` resolving to the
 own-avatar object, and the test becomes a straightforward extension of
-`teleport_clears_seat`. Until then, B7's attachment assertion is the suite's
+`teleport_clears_seat`. Until then, B5's attachment assertion is the suite's
 single known gap, called out so it is not silently skipped.
 
-**Coverage discipline.** B3–B10 each carry their own focused unit test (in their
-task bodies); B11 is the *integration* layer that exercises the resets and
+**Coverage discipline.** B2–B4 each carry their own focused unit test (in their
+task bodies); B5 is the *integration* layer that exercises the resets and
 the two-store interaction together (a grant **and** a taken control surviving /
 clearing across the same teleport), the cross-cutting behaviour no single B-task
 owns. The suite asserts the **conservative-mirror** invariants throughout: a
@@ -932,7 +951,7 @@ in-world grants (never controls), and no empty grant entry is ever observable.
 
 ### Open questions for sign-off (from A8)
 
-Resolve these before starting Phase B implementation; the first blocks B2/B7.
+Resolve these before starting Phase B implementation; the first blocks B2/B5.
 
 1. **Attachment-detection source (blocker).** `holder_kind` needs to know which
    region-local id is our own avatar to classify a holder as `Attachment`. The
@@ -953,11 +972,59 @@ Resolve these before starting Phase B implementation; the first blocks B2/B7.
    `close` hook (A5), matching the `objects` cache convention (a closed session
    is dead; relogin rebuilds via the constructor). Confirm this holds, or add a
    reset if a relogin is ever made to reuse a live `Session`.
-4. **First synthesized event precedent.** `Event::ScriptPermissionState` (A7/B9)
+4. **First synthesized event precedent.** `Event::ScriptPermissionState` (A7/B4)
    is the crate's first `Event` not produced from an inbound wire message (the
    runtimes synthesize it from a query). Confirm this precedent is acceptable
-   before B9/B10 set it; the alternative (a live accessor) is ruled out by the
+   before B4 sets it; the alternative (a live accessor) is ruled out by the
    exposure constraint in § API-surface & exposure reference.
+
+### Phase B consolidation (ordering, merges & runtime-match findings)
+
+Phase A appended its implementation tasks incrementally, one batch per item, so
+the first-drafted list (the former B1–B11) carried ordering inconsistencies and
+dead-code windows that only surface at implementation time. Before any Phase B
+code is written, the tasks were consolidated into the five below. Four findings,
+verified against the runtime code, drive the merges:
+
+1. **A new `Command` variant is wired asymmetrically.** `sl-client-bevy`'s
+   `drive` match on `Command` is **exhaustive** (no wildcard; last arm
+   `Command::Logout` at `sl-client-bevy/src/lib.rs:2441`), adding a variant is
+   a **compile error** there until an arm is added. `sl-client-tokio` has a
+   `Some(Command::Logout) | None` catch-all (`sl-client-tokio/src/lib.rs:1438`)
+   that **silently swallows** an unhandled variant, and the REPL builds commands
+   from a manual `CommandSpec` list (`sl-repl/src/registry.rs`); a new command
+   cannot be an sl-proto-only step — it must land with all three runtime arms
+   (bevy forced; tokio + REPL by parity). This folds the former B4/B9 command
+   work into the same task as the former B10 wiring.
+2. **A new `Event` variant breaks two exhaustive matches.**
+   `sl-repl/src/format.rs:292` `event_name` (an exhaustive `const fn`) **and**
+   `sl-survey/src/bin/sl-survey.rs:536` `handle_event` (exhaustive union) have
+   no wildcard, so `Event::ScriptPermissionState` needs an arm in each (plus the
+   REPL `format_event` body). tokio/bevy forward events without matching each
+   variant, and `context.rs::apply_event` has a `_ => {}` — those are safe. The
+   former B10 named only `format_event`; the new B4 lists all three.
+3. **`experience_id` must travel through the answer command.** The runtime
+   callers of `answer_script_permissions` do not have the experience to hand —
+   `Command::AnswerScriptPermissions` (`sl-proto/src/command.rs:563`) carries
+   only `{ task_id, item_id, permissions }`. So that command gains an
+   `experience_id: Option<ExperienceKey>` field, filled by the driver from the
+   `ScriptPermissionRequest` it answers; session keeps no request state (A2).
+4. **`ScriptGrant.circuit` is read only by the circuit-retired reset**
+   (`forget_sim_objects`, `sl-proto/src/session/methods.rs:1439`). Writing it at
+   record time but first reading it at reset is a dead-code window. Resolved by
+   landing the whole grant store — model, record, read, revoke **and** all
+   region-leave resets — as one task (new B2), no field is written in one step
+   and first read in another, and no `#[expect(dead_code)]` shim is needed.
+
+The result is five tasks (was eleven): **B1** the role classifier (unchanged,
+independent); **B2** the complete grant registry (former B2+B3+B4+B6+B7);
+**B3** the complete taken-controls tracker (former B8+B5); **B4** the query
+command, snapshot event and runtime wiring (former B9+B10); **B5** the lifecycle
+test suite (former B11). Each is a self-contained landing unit that builds,
+passes `cargo test`, and is clippy-clean (restriction lints) on its own — no
+cross-task dead-code shim. Dependencies point backwards only: B2 stands on B1's
+independent classifier, B3 on B2's `Session` field neighbourhood, B4 on B2's
+`ScriptGrantInfo` + B3's `ScriptControlsInfo`, B5 on all of them.
 
 ### Tasks
 
@@ -965,136 +1032,108 @@ Resolve these before starting Phase B implementation; the first blocks B2/B7.
       `sl-proto`.** Add a `PermissionRole` enum with **two** variants —
       `RecordOnly` / `Cooperation` (A4 dropped the planned `ApiAction`: no
       granted permission is client-actionable) — plus a total mapping from each
-      `ScriptPermissions` bit to its role, per the table above (note `TELEPORT`
-      is `RecordOnly`, not an action), in a client-side module (e.g.
-      `sl-proto/src/types/script.rs`) — kept in `sl-proto`, never pushed to
-      shared `sl-types` (the flags themselves stay client-agnostic there). This
-      is the canonical encoding of the A1/A4 classification; the grant registry
-      (A2) still stores the raw granted `ScriptPermissions` bitfield wholesale,
-      because the 9 record-only flags need no handler and the 3 cooperation
-      flags reuse existing event surfaces (`Event::ScriptControlChange` for
-      `TAKE_CONTROLS`, the follow-cam events for the camera flags). The session
-      takes no autonomous action on any flag, so the classifier exists for the
-      driver's benefit (deciding what to surface), not to branch session
-      behaviour.
-- [ ] **B2 (from A2). Add the grant-registry state model to `Session`.** In
-      `sl-proto/src/session.rs`, add the private types `ScriptHolder`
+      `ScriptPermissions` bit to its role, per the § Classification reference
+      table (note `TELEPORT` is `RecordOnly`, not an action), in a client-side
+      module (e.g. `sl-proto/src/types/script.rs`) — kept in `sl-proto`, never
+      pushed to shared `sl-types` (the flags themselves stay client-agnostic
+      there). The grant registry (B2) still stores the raw granted
+      `ScriptPermissions` bitfield wholesale, because the 9 record-only flags
+      need no handler and the 3 cooperation flags reuse existing event surfaces
+      (`Event::ScriptControlChange` for `TAKE_CONTROLS`, the follow-cam events
+      for the camera flags). The session takes no autonomous action on any flag,
+      so the classifier exists for the driver's benefit (deciding what to
+      surface), not to branch session behaviour. `pub` and consumed only by
+      drivers, it warns about nothing on its own and depends on nothing — it may
+      land at any point. Smoke test: assert a few representative bit→role
+      mappings.
+- [ ] **B2 (from A2/A3/A4/A5). The complete grant registry — model, recording,
+      read, revoke and all region-leave resets, in one warning-clean unit.**
+      Landing the whole store together is deliberate: `ScriptGrant.circuit` is
+      read only by the circuit-retired reset, so splitting record from reset
+      would leave a written-but-unread field (finding 4). Sub-steps:
+      - **State model** (`sl-proto/src/session.rs`): the private `ScriptHolder`
       (`{ task_id: ObjectKey, item_id: InventoryKey }`, deriving `Ord` for the
-      `BTreeMap` key) and `ScriptGrant` with fields
-      `granted: ScriptPermissions`, `kind: HolderKind`,
-      `circuit: Option<CircuitId>`, and `experience_id: Option<ExperienceKey>`;
-      plus the private `HolderKind` enum (`Attachment` / `InWorld`), and the
-      field `script_grants: BTreeMap<ScriptHolder, ScriptGrant>` beside `sit` /
-      `teleport` (init empty in the constructor at `methods.rs:138`). Add a
-      private `object_by_full_id(&self, ObjectKey) -> Option<&Object>` helper
-      (scan `self.objects`) and a private
-      `holder_kind(&self, task_id: ObjectKey) -> (HolderKind, Option<CircuitId>)`
-      that applies the § State-model reference detection rule (attachment iff
-      the cached object `attachment_point().is_some()` and parented to our own
-      avatar object whose `full_id == agent_id`; else in-world / not-found).
-      Per-flag *behaviour* (recording grants, accessors, the taken-controls
-      tracker, resets) is **not** in B2 — it lands with B1/A3/A4/A5/A6 once
-      those items are signed off; B2 only introduces the data model and the
-      detection helpers, with at least a smoke test constructing a `Session` and
-      asserting `script_grants` starts empty. Clippy note: `HolderKind` /
-      `ScriptGrant` will be `dead_code` until A3 records into them — land B2
-      together with the A3 recording task (or `#[expect(dead_code)]` with a
-      reason) to keep the tree warning-clean, per the no-bare-`#[allow]`
-      convention.
-- [ ] **B3 (from A3). Record grants in `answer_script_permissions`.** Add the
-      `experience_id: Option<ExperienceKey>` parameter to
-      `answer_script_permissions` (`session/methods.rs`), keeping the existing
-      `ScriptAnswerYes` send first, then append the recording: compute
-      `ScriptHolder { task_id, item_id }`, and — using the A2 `holder_kind`
-      helper for `kind` / `circuit` — **insert**
+      `BTreeMap` key); `ScriptGrant` with `granted: ScriptPermissions`,
+      `kind: HolderKind`, `circuit: Option<CircuitId>`,
+      `experience_id: Option<ExperienceKey>`; the private `HolderKind` enum
+      (`Attachment` / `InWorld`); and the field
+      `script_grants: BTreeMap<ScriptHolder, ScriptGrant>` beside `sit` /
+      `teleport` (init empty in constructor at `methods.rs:138`). Add private
+      `object_by_full_id(&self, ObjectKey) -> Option<&Object>` (scan the nested
+      `self.objects` maps) and
+      `holder_kind(task_id: ObjectKey) -> (HolderKind, Option<CircuitId>)`
+      applying the § State-model reference rule (attachment iff cached object
+      `attachment_point().is_some()` and parented to our own avatar; else
+      in-world / not-found; record the circuit it was found on).
+      - **Recording** (`answer_script_permissions`, `session/methods.rs`): add
+      the `experience_id: Option<ExperienceKey>` parameter; keep the existing
+      `ScriptAnswerYes` send first, then append the recording — compute
+      `ScriptHolder { task_id, item_id }` and, using `holder_kind` for `kind` /
+      `circuit`, **insert**
       `ScriptGrant { granted: permissions, kind, circuit, experience_id }`
-      (replacing any prior entry) when `permissions` is non-empty, or **remove**
-      the holder's entry when `permissions.is_empty()` (the deny path; never
-      store an empty entry). Depends on B2's data model + helper. Update every
-      caller for the new parameter (`sl-client-tokio`, `sl-client-bevy`, the
-      REPL — pass the `experience_id` carried on the `ScriptPermissionRequest`),
-      keeping feature parity (see B-tasks from A7). Test: feed a
-      `ScriptQuestion` → answer with a subset → assert `granted_permissions`
-      returns it; answer again with empty → assert the entry is gone (the A8
-      cases).
-- [ ] **B4 (from A3). Add the `RevokePermissions` command (wire `Low 193`).**
-      Add the object-scoped
-      `Command::RevokePermissions { object_id, permissions }` (`command.rs`,
-      with the field types from the reference above), dispatch it in
-      `session/methods.rs` to a new
-      `Session::revoke_permissions(object_id, permissions, now)`, and add
-      `circuit.send_revoke_permissions(...)` (`session/circuit.rs`) building
-      `AnyMessage::RevokePermissions` (`AgentData` +
-      `Data { object_id, object_permissions: permissions.0 }`,
-      `Reliability::Reliable`) — mirroring `send_force_script_control_release`.
-      After the send, update the mirror: across all grants with
-      `holder.task_id == object_id`, clear
-      `permissions & (TRIGGER_ANIMATION | OVERRIDE_ANIMATIONS)` from `granted`,
-      removing any grant left empty. Depends on B2/B3. Test: grant animation +
-      teleport → revoke animation → assert the animation bit cleared but
-      teleport kept; revoke the last bit → assert the entry removed.
-- [ ] **B5 (from A3, lands with A6/B8). Reset the taken-controls mirror on
-      `release_script_controls`.** Once B8's `taken_controls` field exists, have
-      `release_script_controls` (`session/methods.rs`) clear **both** maps
-      (`consumed` and `passed_on`) to empty after queuing
-      `ForceScriptControlRelease`, *without* touching `script_grants` (the
-      `TAKE_CONTROLS` grant persists). Clear on send, not on the echo (per
-      § Inbound control-change reference: OpenSim's echo is
-      `Controls = 0xFFFFFFFF, PassToAgent = false` and would miss `passed_on`).
-      Depends on B8. Test: feed two `ScriptControlChange` takes (one consumed,
-      one passed-on) → assert `script_controls()` reflects both → call
-      `release_script_controls` → assert `script_controls()` is empty but the
-      `TAKE_CONTROLS` grant in `script_grants` is unchanged.
-- [ ] **B6 (from A3). Add the grant query accessors.** Add public
-      `Session::granted_permissions(task_id, item_id) -> ScriptPermissions`
-      (empty when absent) and
-      `Session::script_grants() -> impl Iterator<Item = ScriptGrantInfo>`, plus
-      the public `#[derive(Clone, Copy)] ScriptGrantInfo` view (`task_id`,
+      (replacing any prior entry) when `permissions` is
+      non-empty, or **remove** the holder's entry when `permissions.is_empty()`
+      (the deny path; never store an empty entry). Plumb `experience_id` by
+      adding it to `Command::AnswerScriptPermissions` (`command.rs:563`);
+      the driver fills it from the `Event::ScriptPermissionRequest` it answers.
+      Update the runtime arms (`sl-client-tokio/src/lib.rs`,
+      `sl-client-bevy/src/lib.rs`) and the REPL `CommandSpec`
+      (`sl-repl/src/registry.rs`, a new optional `experience_id` arg defaulting
+      to `None`); update the test caller in `sl-proto/tests/lifecycle.rs`.
+      - **Read accessors** (public; the registry types stay private):
+      `granted_permissions(task_id, item_id) -> ScriptPermissions` (empty when
+      absent) and `script_grants() -> impl Iterator<Item = ScriptGrantInfo>`,
+      plus the public `#[derive(Clone, Copy)] ScriptGrantInfo` view (`task_id`,
       `item_id`, `granted`, `is_attachment` flattening `HolderKind`,
-      `experience_id`; the internal `circuit` is not surfaced).
-      `Session::script_controls() -> ScriptControlsInfo` is finalized by A6 and
-      ships in **B8** (the taken-controls tracker), not here. Depends on B2.
-      This is also what makes B2's `ScriptGrant` / `HolderKind`
-      non-`dead_code`, so it can land alongside B3 to drop the
-      `#[expect(dead_code)]` shim B2 notes.
-- [ ] **B7 (from A5). Reset the grant registry on region-leave signals.** Clear
-      `script_grants` following the § Client-mirror reset reference, at the
-      existing reset sites in `sl-proto/src/session/methods.rs` (no message is
-      sent to the sim):
-      - **Real teleport** — add a private `drop_inworld_grants(&mut self)`
+      `experience_id`; the internal `circuit` is not surfaced). These read
+      `granted` / `kind` / `experience_id`, so those fields are not dead.
+      - **Granular revoke** (wire `Low 193`): add
+      `Command::RevokePermissions { object_id, permissions }` (`command.rs`),
+      dispatch it to `Session::revoke_permissions(object_id, permissions, now)`
+      (`session/methods.rs`), and add `circuit.send_revoke_permissions(...)`
+      (`session/circuit.rs`) build `AnyMessage::RevokePermissions` (`AgentData`
+      + `Data { object_id, object_permissions: permissions.0 }`,
+      `Reliability::Reliable`) — mirroring `send_force_script_control_release`.
+      After the send, across grants with `holder.task_id == object_id`, clear
+      `permissions & (TRIGGER_ANIMATION | OVERRIDE_ANIMATIONS)` from `granted`,
+      removing any grant left empty. Wire all three runtimes (the bevy arm is
+      compiler-forced, the tokio arm is parity-only, plus a REPL `CommandSpec`
+      `revoke_permissions <object_id> <permissions-i32>` beside
+      `release_script_controls`) — consolidated finding 1.
+      - **Region-leave resets** (no message sent to the sim; reading `circuit`
+      here is what makes that field non-dead), at the existing reset sites in
+      `sl-proto/src/session/methods.rs`: add a private
+      `drop_inworld_grants(&mut self)`
       (`script_grants.retain(|_, g| matches!(g.kind, HolderKind::Attachment))`)
       and call it at the two **teleport** `SitState::NotSitting` sites,
       `begin_handover` (`:696`) and `TeleportLocal` (`:1960`) — **not** the
-      sit-timeout (`:3072`) or `stand` (`:3427`) sites.
-      - **Circuit retired** — in `forget_sim_objects` (`:1439`), beside the
-      existing per-circuit drops, add
+      sit-timeout (`:3072`) or `stand` (`:3427`) sites; in `forget_sim_objects`
+      (`:1439`),
       `self.script_grants.retain(|_, g| g.circuit != Some(circuit_id))`
-      (covers both the `DisableSimulator` and child-expiry callers; both
-      child-only).
-      - **Object gone / detach** — in the inbound `KillObject` handler
-      (`:1180`), read the removed object's `full_id` (already resolved there
-      for `region_handle`) and
-      `self.script_grants.retain(|h, _| h.task_id != full_id)`.
-      - **Neighbour crossing** — `promote_child_to_root` is left untouched
-      (keep all grants); assert this in a test.
-
-      Depends on B2 (the `HolderKind` / `circuit` fields) and B3 (so there are
-      grants to clear). The taken-controls-tracker resets are **not** in B7 —
-      per the reference, the tracker is untouched by these signals and is cleared
-      only by the inbound `ScriptControlChange(release)` and
-      `release_script_controls` (A6 / B5). Tests (mirroring `teleport_clears_seat`,
-      in `sl-proto/tests/lifecycle.rs`): grant an in-world script + an attachment
-      script → feed a real teleport → assert the in-world grant gone, the
-      attachment grant kept; feed a neighbour crossing → assert both kept; feed
-      `DisableSimulator` for a child circuit → assert that circuit's grants gone;
-      feed a `KillObject` for a granted object → assert its grant gone.
-- [ ] **B8 (from A6). Add the taken-controls tracker + inbound fold +
-      `script_controls` accessor.** Per § Inbound control-change reference:
-      - **State.** Add the private `TakenControls` struct (two
-      `BTreeMap<u32, u32>` fields, `consumed` / `passed_on`, single-bit-mask
-      key → take count) and the `taken_controls: TakenControls` field on
-      `Session` (`session.rs`), beside `script_grants` / `sit` / `teleport`;
-      init empty in the constructor (`methods.rs:138`). Add a private
+      (both child-only callers); in the inbound `KillObject`
+      handler (`:1180`), read the removed object's `full_id` (already resolved
+      there for `region_handle`) and
+      `self.script_grants.retain(|h, _| h.task_id != full_id)`; leave
+      `promote_child_to_root` (`:790`) untouched (keep all grants). The
+      taken-controls tracker is **not** reset here (B3 owns it).
+      - **Tests** (`lifecycle.rs`): record → `granted_permissions`
+      returns the subset; answer with `ScriptPermissions::empty()` → entry gone;
+      re-grant replaces; revoke animation keeps `TELEPORT`, revoking last bit
+      removes the entry; a real teleport clears the in-world grant and keeps the
+      attachment grant (the attachment half is gated on § Open questions #1 —
+      write the in-world half and mark the attachment half
+      `// TODO(attachment-detection)`); a neighbour crossing keeps all; a
+      `DisableSimulator` for a child circuit drops that circuit's grants; a
+      `KillObject` for a granted object drops its grant.
+- [ ] **B3 (from A6/A3). The complete taken-controls tracker — state, inbound
+      fold, accessor and the release-on-send clear.** Self-contained: the field
+      is written by the fold and read by the accessor in the same unit, so
+      nothing is dead. Per § Inbound control-change reference:
+      - **State** (`sl-proto/src/session.rs`): private `TakenControls` struct
+      (two `BTreeMap<u32, u32>` fields `consumed` / `passed_on`, single-bit-mask
+      key → take count) and the field `taken_controls: TakenControls` beside
+      `script_grants` / `sit` / `teleport` (init empty in the constructor at
+      `methods.rs:138`). Add a private
       `iter_bits(controls: ControlFlags) -> impl Iterator<Item = u32>` helper
       (yield each set bit as its own mask — no raw indexing, clippy-clean).
       - **Inbound fold.** In the existing `AnyMessage::ScriptControlChange`
@@ -1106,62 +1145,63 @@ Resolve these before starting Phase B implementation; the first blocks B2/B7.
       - **Accessor.** Add the public `#[derive(Clone, Copy)] ScriptControlsInfo`
       view (`taken` / `passed_to_agent`, each a `ControlFlags` union of its
       map's keys) and `Session::script_controls(&self) -> ScriptControlsInfo`
-      (folds the counts' keys with `|`; counts stay private). This finalizes
-      B6's reservation.
-      - **No resets here.** The tracker is untouched by the B7 region-leave
-      signals (A5): it self-corrects only on the inbound release echo (this
-      handler) and is cleared on `release_script_controls` (B5).
-      Depends on B2 (the `Session` field neighbourhood). Surface
-      `ScriptControlsInfo` / `script_controls` through `sl-client-tokio`,
-      `sl-client-bevy`, and the REPL at feature parity (see B-tasks from A7).
-      Tests (`sl-proto/tests/lifecycle.rs` / `sim_session.rs`, mirroring the
-      `SimSession::send_script_control_change` path): feed a `Take` for a
-      control set → assert `script_controls().taken` contains them; feed a
-      matching `Release` → assert empty; feed two takes of the same bit then one
-      release → assert still taken (count model); feed a take with
-      `PassToAgent = true` → assert it lands in `passed_to_agent`, not `taken`.
-- [ ] **B9 (from A7). Add the query command, snapshot type, reply event &
-      snapshot accessor in `sl-proto`.** Add the public
-      `ScriptPermissionState { grants: Vec<ScriptGrantInfo>, controls:
-      ScriptControlsInfo }` struct (`#[derive(Debug, Clone)]`); the
+      (folds the counts' keys with `|`; counts stay private).
+      - **Release-on-send.** Have `release_script_controls`
+      (`session/methods.rs`) clear **both** maps (`consumed` and `passed_on`) to
+      empty after queuing `ForceScriptControlRelease`, *without* touching
+      `script_grants` (`TAKE_CONTROLS` grant persists). Clear on send, not on
+      the echo (OpenSim's echo is `Controls = 0xFFFFFFFF, PassToAgent = false`
+      and would miss `passed_on`). Its signature is unchanged, so no runtime
+      caller breaks.
+      - **No resets.** The tracker is untouched by the B2 region-leave signals
+      (A5): it self-corrects only on the inbound release echo (this handler) and
+      the explicit `release_script_controls` send.
+      Depends on B2 (the `Session` field neighbourhood). Tests
+      (`sl-proto/tests/lifecycle.rs` / `sim_session.rs`, mirroring the
+      `SimSession::send_script_control_change` path, `sim_session.rs:1856`): a
+      `Take` → `script_controls().taken` contains them; a matching `Release` →
+      empty; two takes of a bit then a release → still taken (count model); a
+      take with `PassToAgent = true` → lands in `passed_to_agent`, not `taken`;
+      `release_script_controls` after a take → controls empty, the
+      `TAKE_CONTROLS` grant in `script_grants` unchanged.
+- [ ] **B4 (from A7). The query command, snapshot type, reply event and runtime
+      wiring.** The mirror's read-out path; the new `Command` and `Event` force
+      the runtime arms (findings 1–2), so the sl-proto types and the
+      wiring land together.
+      - **sl-proto.** Add the public `ScriptPermissionState` struct (fields
+      `grants: Vec<ScriptGrantInfo>` and `controls: ScriptControlsInfo`, as in
+      the § API-surface & exposure reference); the
       `Command::QueryScriptPermissions` **unit** variant (`command.rs`, modelled
       on `ReleaseScriptControls`); the
       `Event::ScriptPermissionState(ScriptPermissionState)` variant
-      (`types/event.rs`) — documented as a locally-*synthesized* query reply,
-      not a wire event (the first such `Event` in the crate); and the
-      `Session::script_permission_state(&self) -> ScriptPermissionState`
-      accessor collecting `script_grants()` + `script_controls()`. **No
-      `Session::poll` change** — the event is emitted by the runtimes (B10), not
-      by the session. Depends on B6 (`ScriptGrantInfo` / `script_grants`) and B8
+      (`types/event.rs`), documented as a locally-*synthesized* query reply, not
+      a wire event (the crate's first such `Event`); and the
+      `Session::script_permission_state() -> ScriptPermissionState` accessor
+      collecting `script_grants()` + `script_controls()`. **No `Session::poll`
+      change** — the event is emitted by the runtimes, not the session.
+      - **Runtimes** (all three at parity): `sl-client-tokio/src/lib.rs` — a
+      `Command::QueryScriptPermissions` arm pushes
+      `session.script_permission_state()` onto the events `mpsc::Sender` (its
+      `Command::RevokePermissions` arm is already added in B2);
+      `sl-client-bevy`'s `drive` match — the same arm, writing
+      `SlEvent(Event::ScriptPermissionState(session.script_permission_state()))`
+      (compiler-forced). For the new `Event`, add arms in
+      `sl-repl/src/format.rs::event_name` (the exhaustive `const fn` —
+      compiler-forced) and `format_event` (print grants + controls), and
+      ignore arm in `sl-survey/src/bin/sl-survey.rs::handle_event` (exhaustive
+      — compiler-forced). Add the REPL `CommandSpec` `query_script_permissions`
+      (no args). Optionally cache the snapshot in `SessionContext::apply_event`
+      (it has a `_` arm, so this is optional).
+      Depends on B2 (`ScriptGrantInfo` / `script_grants`) and B3
       (`ScriptControlsInfo` / `script_controls`). Test: build a `Session` with a
       recorded grant + a taken control, call `script_permission_state()`, assert
-      both stores are reflected in the snapshot.
-- [ ] **B10 (from A7). Wire `RevokePermissions` + `QueryScriptPermissions` +
-      the snapshot reply through all three runtimes at parity.**
-      - **sl-client-tokio** (`src/lib.rs`): add the `Command::RevokePermissions`
-      arm (→ `session.revoke_permissions(…)`) and the
-      `Command::QueryScriptPermissions` arm (push
-      `session.script_permission_state()` onto the events `mpsc::Sender`),
-      beside the existing `AnswerScriptPermissions` /
-      `ReleaseScriptControls` arms.
-      - **sl-client-bevy** (`src/lib.rs`): add the same two arms in the `drive`
-      system's `match`; the query arm writes
-      `SlEvent(Event::ScriptPermissionState(session.script_permission_state()))`.
-      - **REPL** (`sl-repl/src/registry.rs`): add `CommandSpec`s
-      `revoke_permissions` (`<object_id> <permissions-i32>`, beside
-      `release_script_controls`) and `query_script_permissions` (no args); add
-      the matching `format_event` / `format_command` arms
-      (`sl-repl/src/format.rs`) for the new event and commands. Optionally
-      cache the snapshot in `SessionContext::apply_event`.
-      Depends on B4 (the `Session::revoke_permissions` method) and B9 (the query
-      command, reply event, snapshot accessor). Keep all three runtimes in
-      lockstep — the parity rule. Verify: in the REPL, `revoke_permissions` then
-      `query_script_permissions`, and confirm the printed snapshot reflects the
-      change (live-grid smoke per the test-avatar setup).
-- [ ] **B11 (from A8). Add the lifecycle test suite.** In
+      both stores are reflected. Smoke in the REPL: `revoke_permissions`
+      then `query_script_permissions`, confirm the printed snapshot reflects the
+      change (test-avatar setup).
+- [ ] **B5 (from A8). Add the lifecycle test suite.** In
       `sl-proto/tests/lifecycle.rs` (and one round-trip in
       `sl-proto/tests/sim_session.rs`), add the cross-cutting reset/recording
-      cases from § Test & verification strategy reference, built from the
+      cases from § Test & verification strategy reference, built only from the
       existing helpers (`established`, `server_message`, `drain` /
       `drain_events`, `object_update[_in]`, the `enable_neighbour_b` +
       `CrossedRegion` + `AgentMovementComplete` crossing fixture, `KillObject`,
@@ -1174,13 +1214,13 @@ Resolve these before starting Phase B implementation; the first blocks B2/B7.
       pass-to-agent split, release-on-send, and the `script_permission_state`
       snapshot. Add at least one **two-store** integration case (a grant **and**
       a taken control surviving / clearing across the same teleport) — the
-      behaviour no single B-task owns. Assert the conservative-mirror invariants
+      behaviour no single task owns. Assert the conservative-mirror invariants
       (a revoke clears only the honoured bits, a teleport clears only in-world
-      grants never controls, no empty grant entry observable). Depends on
-      B2–B10 (it exercises the whole surface). **Gate:** the
+      grants never controls, no empty grant entry observable). Depends on B1–B4
+      (it exercises the whole surface). **Gate:** the
       attachment-kept-on-teleport assertion is **blocked** on the
       attachment-detection sign-off (§ Open questions #1) — until that lands,
       write the in-world-cleared half and mark the attachment half with a
-      `// TODO(B2-attachment-detection)` rather than silently omitting it. Run
+      `// TODO(attachment-detection)` rather than silently omitting it. Run
       the full `cargo test -p sl-proto`; clippy-clean (restriction lints) and
-      `cargo fmt` before commit.
+      `cargo fmt` (+ rumdl on this file) before commit.
