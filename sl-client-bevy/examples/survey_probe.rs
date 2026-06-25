@@ -306,6 +306,9 @@ fn on_events(
             | SlSessionEvent::Kicked(_)
             | SlSessionEvent::AgentStateUpdate { .. }
             | SlSessionEvent::NavMeshStatus(_)
+            | SlSessionEvent::AgentDroppedFromGroup { .. }
+            | SlSessionEvent::DisplayNameUpdate(_)
+            | SlSessionEvent::SetDisplayNameReply(_)
             | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged {

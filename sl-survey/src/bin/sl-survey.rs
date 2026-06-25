@@ -787,6 +787,9 @@ impl Survey {
             | Event::Kicked(_)
             | Event::AgentStateUpdate { .. }
             | Event::NavMeshStatus(_)
+            | Event::AgentDroppedFromGroup { .. }
+            | Event::DisplayNameUpdate(_)
+            | Event::SetDisplayNameReply(_)
             | Event::Environment(_) => {}
         }
         Ok(false)

@@ -11,6 +11,7 @@ mod avatar_profile;
 mod chat;
 mod diagnostic;
 pub(crate) mod directory;
+mod display_name;
 mod economy;
 mod editing;
 mod environment;
@@ -378,6 +379,7 @@ pub use directory::{
     AvatarPickerResult, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
     DirLandResult, DirPeopleResult, DirPlaceResult, EventInfo, LandSearchType, PlacesResult,
 };
+pub use display_name::{DisplayNameUpdate, SetDisplayNameReply};
 pub use economy::{EconomyData, MoneyBalance, MoneyTransaction, MoneyTransactionType};
 pub use editing::{
     ClickAction, DeRezDestination, Material, Maturity, NotecardRez, ObjectBuyItem,

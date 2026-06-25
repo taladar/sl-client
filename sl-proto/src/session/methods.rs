@@ -1,15 +1,16 @@
 //! The driver-facing `Session` API: login, UDP/CAPS dispatch, and command methods.
 
 use super::conversions::{
-    OutgoingIm, ZERO_VECTOR, active_group, agent_state_update_from_llsd,
-    ais_inventory_update_from_llsd, avatar_animations, avatar_appearance, avatar_group,
-    avatar_interests, avatar_names, avatar_properties, bulk_update_folder,
-    bulk_update_inventory_from_llsd, bulk_update_item, chat_message,
+    OutgoingIm, ZERO_VECTOR, active_group, agent_drop_group_from_llsd,
+    agent_state_update_from_llsd, ais_inventory_update_from_llsd, avatar_animations,
+    avatar_appearance, avatar_group, avatar_interests, avatar_names, avatar_properties,
+    bulk_update_folder, bulk_update_inventory_from_llsd, bulk_update_item, chat_message,
     chatterbox_invitation_from_llsd, classified_info, created_category_from_llsd,
-    crossed_region_from_caps_llsd, economy_data, enable_simulator_from_caps_llsd,
-    environment_from_llsd, establish_agent_communication_from_llsd, estate_access_from_params,
-    estate_info_from_params, friend, grid_coordinates_from_handle, group_account_details,
-    group_account_summary, group_account_transactions, group_active_proposal_item, group_member,
+    crossed_region_from_caps_llsd, display_name_update_from_llsd, economy_data,
+    enable_simulator_from_caps_llsd, environment_from_llsd,
+    establish_agent_communication_from_llsd, estate_access_from_params, estate_info_from_params,
+    friend, grid_coordinates_from_handle, group_account_details, group_account_summary,
+    group_account_transactions, group_active_proposal_item, group_member,
     group_members_from_caps_llsd, group_membership, group_memberships_from_caps_llsd, group_names,
     group_notice, group_profile, group_role, group_title, group_vote_history_item, index_into,
     instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
@@ -18,7 +19,7 @@ use super::conversions::{
     object_properties, offline_messages_from_llsd, pack_uuids, parcel_info, parcel_info_from_llsd,
     parse_lure_region_handle, parse_mute_list, parse_uuid_string, pick_info, region_identity,
     region_limits, script_dialog, script_permission_request, server_appearance_update_from_llsd,
-    skeleton_folder, teleport_finish_from_llsd, trimmed_string,
+    set_display_name_reply_from_llsd, skeleton_folder, teleport_finish_from_llsd, trimmed_string,
 };
 use super::{
     AGENT_UPDATE_INTERVAL, AssetTransfer, AssetUpload, CAP_AGENT_EXPERIENCES,
@@ -659,6 +660,31 @@ impl Session {
                 } else {
                     self.caps_decode_failed(message);
                 }
+            }
+            // The simulator dropped this agent from a group (ejected, group
+            // dissolved, …); the client should forget its cached membership.
+            "AgentDropGroup" => {
+                if let Some(group) = agent_drop_group_from_llsd(body) {
+                    self.events
+                        .push_back(Event::AgentDroppedFromGroup { group });
+                } else {
+                    self.caps_decode_failed(message);
+                }
+            }
+            // A cached display name changed (for this agent or another). SL-only.
+            "DisplayNameUpdate" => {
+                if let Some(update) = display_name_update_from_llsd(body) {
+                    self.events
+                        .push_back(Event::DisplayNameUpdate(Box::new(update)));
+                } else {
+                    self.caps_decode_failed(message);
+                }
+            }
+            // The result of this agent's own set-display-name request. SL-only.
+            "SetDisplayNameReply" => {
+                self.events.push_back(Event::SetDisplayNameReply(Box::new(
+                    set_display_name_reply_from_llsd(body),
+                )));
             }
             _ => {
                 tracing::trace!(event = message, "unhandled CAPS event");
