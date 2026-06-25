@@ -19,11 +19,12 @@ use crate::types::{
     ClassifiedUpdate, ClickAction, CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags,
     GestureActivation, GroupRoleEdit, GroupRoleMemberChange, ImDialog, InterestsUpdate,
     InventoryItem, LandEdit, LandSearchType, MapRequestFlags, Material, MovementMode,
-    NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
-    ObjectTransform, ParcelAccessEntry, ParcelCategory, ParcelUpdate, PermissionField, PickKey,
-    PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, Reliability, RestoreItem,
-    RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptPermissions, TaskInventoryKey,
-    TeleportFlags, TextureEntry, Throttle, ViewerEffect, Wearable,
+    NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
+    ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelCategory, ParcelUpdate,
+    PermissionField, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate,
+    Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
+    ScriptPermissions, TaskInventoryKey, TeleportFlags, TextureEntry, Throttle,
+    UpdateGroupInfoParams, ViewerEffect, Wearable,
 };
 use crate::types::{GroupNoticeKey, ProposalVoteId};
 use sl_types::chat::ChatChannel;
@@ -99,41 +100,43 @@ use sl_wire::messages::{
     GroupRoleDataRequestAgentDataBlock, GroupRoleDataRequestGroupDataBlock,
     GroupRoleMembersRequest, GroupRoleMembersRequestAgentDataBlock,
     GroupRoleMembersRequestGroupDataBlock, GroupRoleUpdate, GroupRoleUpdateAgentDataBlock,
-    GroupRoleUpdateRoleDataBlock, GroupTitlesRequest, GroupTitlesRequestAgentDataBlock,
-    ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
-    ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
-    InviteGroupRequest, InviteGroupRequestAgentDataBlock, InviteGroupRequestGroupDataBlock,
-    InviteGroupRequestInviteDataBlock, JoinGroupRequest, JoinGroupRequestAgentDataBlock,
-    JoinGroupRequestGroupDataBlock, LandStatRequest, LandStatRequestAgentDataBlock,
-    LandStatRequestRequestDataBlock, LeaveGroupRequest, LeaveGroupRequestAgentDataBlock,
-    LeaveGroupRequestGroupDataBlock, LogoutRequest, LogoutRequestAgentDataBlock, MapBlockRequest,
-    MapBlockRequestAgentDataBlock, MapBlockRequestPositionDataBlock, MapItemRequest,
-    MapItemRequestAgentDataBlock, MapItemRequestRequestDataBlock, MapLayerRequest,
-    MapLayerRequestAgentDataBlock, MapNameRequest, MapNameRequestAgentDataBlock,
-    MapNameRequestNameDataBlock, MoneyBalanceRequest, MoneyBalanceRequestAgentDataBlock,
-    MoneyBalanceRequestMoneyDataBlock, MoneyTransferRequest, MoneyTransferRequestAgentDataBlock,
-    MoneyTransferRequestMoneyDataBlock, MoveInventoryFolder, MoveInventoryFolderAgentDataBlock,
-    MoveInventoryFolderInventoryDataBlock, MoveInventoryItem, MoveInventoryItemAgentDataBlock,
-    MoveInventoryItemInventoryDataBlock, MultipleObjectUpdate, MultipleObjectUpdateAgentDataBlock,
-    MultipleObjectUpdateObjectDataBlock, MuteListRequest, MuteListRequestAgentDataBlock,
-    MuteListRequestMuteDataBlock, ObjectAdd, ObjectAddAgentDataBlock, ObjectAddObjectDataBlock,
-    ObjectAttach, ObjectAttachAgentDataBlock, ObjectAttachObjectDataBlock, ObjectCategory,
-    ObjectCategoryAgentDataBlock, ObjectCategoryObjectDataBlock, ObjectClickAction,
-    ObjectClickActionAgentDataBlock, ObjectClickActionObjectDataBlock, ObjectDeGrab,
-    ObjectDeGrabAgentDataBlock, ObjectDeGrabObjectDataBlock, ObjectDelete,
-    ObjectDeleteAgentDataBlock, ObjectDeleteObjectDataBlock, ObjectDelink,
-    ObjectDelinkAgentDataBlock, ObjectDelinkObjectDataBlock, ObjectDescription,
-    ObjectDescriptionAgentDataBlock, ObjectDescriptionObjectDataBlock, ObjectDeselect,
-    ObjectDeselectAgentDataBlock, ObjectDeselectObjectDataBlock, ObjectDetach,
-    ObjectDetachAgentDataBlock, ObjectDetachObjectDataBlock, ObjectDrop, ObjectDropAgentDataBlock,
-    ObjectDropObjectDataBlock, ObjectDuplicate, ObjectDuplicateAgentDataBlock,
-    ObjectDuplicateObjectDataBlock, ObjectDuplicateSharedDataBlock,
-    ObjectExtraParams as ObjectExtraParamsMessage, ObjectExtraParamsAgentDataBlock,
-    ObjectExtraParamsObjectDataBlock, ObjectFlagUpdate, ObjectFlagUpdateAgentDataBlock, ObjectGrab,
-    ObjectGrabAgentDataBlock, ObjectGrabObjectDataBlock, ObjectGrabUpdate,
-    ObjectGrabUpdateAgentDataBlock, ObjectGrabUpdateObjectDataBlock, ObjectGroup,
-    ObjectGroupAgentDataBlock, ObjectGroupObjectDataBlock, ObjectImage, ObjectImageAgentDataBlock,
-    ObjectImageObjectDataBlock, ObjectIncludeInSearch, ObjectIncludeInSearchAgentDataBlock,
+    GroupRoleUpdateRoleDataBlock, GroupTitleUpdate, GroupTitleUpdateAgentDataBlock,
+    GroupTitlesRequest, GroupTitlesRequestAgentDataBlock, ImprovedInstantMessage,
+    ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
+    ImprovedInstantMessageMessageBlockBlock, InviteGroupRequest, InviteGroupRequestAgentDataBlock,
+    InviteGroupRequestGroupDataBlock, InviteGroupRequestInviteDataBlock, JoinGroupRequest,
+    JoinGroupRequestAgentDataBlock, JoinGroupRequestGroupDataBlock, LandStatRequest,
+    LandStatRequestAgentDataBlock, LandStatRequestRequestDataBlock, LeaveGroupRequest,
+    LeaveGroupRequestAgentDataBlock, LeaveGroupRequestGroupDataBlock, LinkInventoryItem,
+    LinkInventoryItemAgentDataBlock, LinkInventoryItemInventoryBlockBlock, LogoutRequest,
+    LogoutRequestAgentDataBlock, MapBlockRequest, MapBlockRequestAgentDataBlock,
+    MapBlockRequestPositionDataBlock, MapItemRequest, MapItemRequestAgentDataBlock,
+    MapItemRequestRequestDataBlock, MapLayerRequest, MapLayerRequestAgentDataBlock, MapNameRequest,
+    MapNameRequestAgentDataBlock, MapNameRequestNameDataBlock, MoneyBalanceRequest,
+    MoneyBalanceRequestAgentDataBlock, MoneyBalanceRequestMoneyDataBlock, MoneyTransferRequest,
+    MoneyTransferRequestAgentDataBlock, MoneyTransferRequestMoneyDataBlock, MoveInventoryFolder,
+    MoveInventoryFolderAgentDataBlock, MoveInventoryFolderInventoryDataBlock, MoveInventoryItem,
+    MoveInventoryItemAgentDataBlock, MoveInventoryItemInventoryDataBlock, MultipleObjectUpdate,
+    MultipleObjectUpdateAgentDataBlock, MultipleObjectUpdateObjectDataBlock, MuteListRequest,
+    MuteListRequestAgentDataBlock, MuteListRequestMuteDataBlock, ObjectAdd,
+    ObjectAddAgentDataBlock, ObjectAddObjectDataBlock, ObjectAttach, ObjectAttachAgentDataBlock,
+    ObjectAttachObjectDataBlock, ObjectCategory, ObjectCategoryAgentDataBlock,
+    ObjectCategoryObjectDataBlock, ObjectClickAction, ObjectClickActionAgentDataBlock,
+    ObjectClickActionObjectDataBlock, ObjectDeGrab, ObjectDeGrabAgentDataBlock,
+    ObjectDeGrabObjectDataBlock, ObjectDelete, ObjectDeleteAgentDataBlock,
+    ObjectDeleteObjectDataBlock, ObjectDelink, ObjectDelinkAgentDataBlock,
+    ObjectDelinkObjectDataBlock, ObjectDescription, ObjectDescriptionAgentDataBlock,
+    ObjectDescriptionObjectDataBlock, ObjectDeselect, ObjectDeselectAgentDataBlock,
+    ObjectDeselectObjectDataBlock, ObjectDetach, ObjectDetachAgentDataBlock,
+    ObjectDetachObjectDataBlock, ObjectDrop, ObjectDropAgentDataBlock, ObjectDropObjectDataBlock,
+    ObjectDuplicate, ObjectDuplicateAgentDataBlock, ObjectDuplicateObjectDataBlock,
+    ObjectDuplicateSharedDataBlock, ObjectExtraParams as ObjectExtraParamsMessage,
+    ObjectExtraParamsAgentDataBlock, ObjectExtraParamsObjectDataBlock, ObjectFlagUpdate,
+    ObjectFlagUpdateAgentDataBlock, ObjectGrab, ObjectGrabAgentDataBlock,
+    ObjectGrabObjectDataBlock, ObjectGrabUpdate, ObjectGrabUpdateAgentDataBlock,
+    ObjectGrabUpdateObjectDataBlock, ObjectGroup, ObjectGroupAgentDataBlock,
+    ObjectGroupObjectDataBlock, ObjectImage, ObjectImageAgentDataBlock, ObjectImageObjectDataBlock,
+    ObjectIncludeInSearch, ObjectIncludeInSearchAgentDataBlock,
     ObjectIncludeInSearchObjectDataBlock, ObjectLink, ObjectLinkAgentDataBlock,
     ObjectLinkObjectDataBlock, ObjectMaterial, ObjectMaterialAgentDataBlock,
     ObjectMaterialObjectDataBlock, ObjectName, ObjectNameAgentDataBlock, ObjectNameObjectDataBlock,
@@ -195,7 +198,8 @@ use sl_wire::messages::{
     TerminateFriendshipExBlockBlock, TrackAgent, TrackAgentAgentDataBlock,
     TrackAgentTargetDataBlock, TransferRequest, TransferRequestTransferInfoBlock,
     UUIDGroupNameRequest, UUIDGroupNameRequestUUIDNameBlockBlock, UUIDNameRequest,
-    UUIDNameRequestUUIDNameBlockBlock, UpdateInventoryFolder, UpdateInventoryFolderAgentDataBlock,
+    UUIDNameRequestUUIDNameBlockBlock, UpdateGroupInfo, UpdateGroupInfoAgentDataBlock,
+    UpdateGroupInfoGroupDataBlock, UpdateInventoryFolder, UpdateInventoryFolderAgentDataBlock,
     UpdateInventoryFolderFolderDataBlock, UpdateInventoryItem, UpdateInventoryItemAgentDataBlock,
     UpdateInventoryItemInventoryDataBlock, UpdateMuteListEntry, UpdateMuteListEntryAgentDataBlock,
     UpdateMuteListEntryMuteDataBlock, UseCircuitCode, UseCircuitCodeCircuitCodeBlock, UserReport,
@@ -1308,6 +1312,53 @@ impl Circuit {
                 open_enrollment: params.open_enrollment,
                 allow_publish: params.allow_publish,
                 mature_publish: params.mature_publish,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `UpdateGroupInfo` reliably (edit an existing group's profile).
+    pub(crate) fn send_update_group_info(
+        &mut self,
+        params: &UpdateGroupInfoParams,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::UpdateGroupInfo(UpdateGroupInfo {
+            agent_data: UpdateGroupInfoAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            group_data: UpdateGroupInfoGroupDataBlock {
+                group_id: params.group_id.uuid(),
+                charter: with_nul(&params.charter),
+                show_in_list: params.show_in_list,
+                insignia_id: params.insignia_id.map_or_else(Uuid::nil, |i| i.uuid()),
+                membership_fee: crate::types::linden_to_wire(
+                    "MembershipFee",
+                    &params.membership_fee,
+                )?,
+                open_enrollment: params.open_enrollment,
+                allow_publish: params.allow_publish,
+                mature_publish: params.mature_publish,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GroupTitleUpdate` reliably (set the agent's active title in
+    /// `group_id` to the title carried by `title_role_id`).
+    pub(crate) fn send_group_title_update(
+        &mut self,
+        group_id: GroupKey,
+        title_role_id: GroupRoleKey,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::GroupTitleUpdate(GroupTitleUpdate {
+            agent_data: GroupTitleUpdateAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+                group_id: group_id.uuid(),
+                title_role_id: title_role_id.uuid(),
             },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -2838,6 +2889,35 @@ impl Circuit {
                 r#type: new.asset_type,
                 inv_type: new.inv_type,
                 wearable_type: new.wearable_type,
+                name: with_nul(&new.name),
+                description: with_nul(&new.description),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `LinkInventoryItem` reliably (create a link to an existing item
+    /// or folder). The simulator answers with an `UpdateCreateInventoryItem`
+    /// echoing `callback_id` ([`Event::InventoryItemCreated`]). The `TransactionID`
+    /// field is always nil — a link has no backing asset.
+    pub(crate) fn send_link_inventory_item(
+        &mut self,
+        new: &NewInventoryLink,
+        callback_id: InventoryCallbackId,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::LinkInventoryItem(LinkInventoryItem {
+            agent_data: LinkInventoryItemAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            inventory_block: LinkInventoryItemInventoryBlockBlock {
+                callback_id: callback_id.get(),
+                folder_id: new.folder_id.uuid(),
+                transaction_id: Uuid::nil(),
+                old_item_id: new.linked_id.uuid(),
+                r#type: new.link_type,
+                inv_type: new.inv_type,
                 name: with_nul(&new.name),
                 description: with_nul(&new.description),
             },

@@ -401,11 +401,11 @@ pub use group::{
     GroupActiveProposalItem, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
     GroupNoticeKey, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleMember,
     GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, GroupVote, GroupVoteHistoryItem,
-    ProposalCandidateId, ProposalVoteId, group_powers,
+    ProposalCandidateId, ProposalVoteId, UpdateGroupInfoParams, group_powers,
 };
 pub use inventory::{
     GestureActivation, InventoryFolder, InventoryItem, InventoryItemMove, NewInventoryItem,
-    global_to_handle, grid_to_handle, handle_to_global, handle_to_grid,
+    NewInventoryLink, global_to_handle, grid_to_handle, handle_to_global, handle_to_grid,
 };
 pub use land::{LandBrushAction, LandBrushSize, LandEdit, TerraformArea};
 pub use map::{

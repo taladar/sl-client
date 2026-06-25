@@ -234,6 +234,34 @@ pub struct CreateGroupParams {
     pub mature_publish: bool,
 }
 
+/// The parameters for editing an existing group's profile via
+/// [`Session::update_group_info`](crate::Session::update_group_info)
+/// (`UpdateGroupInfo`). Mirrors [`CreateGroupParams`] but targets an existing
+/// [`group_id`](Self::group_id) and carries no name (a group cannot be renamed).
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the four booleans mirror distinct wire flags in UpdateGroupInfo"
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateGroupInfoParams {
+    /// The group to edit.
+    pub group_id: GroupKey,
+    /// The group charter text.
+    pub charter: String,
+    /// Whether the group is shown in search.
+    pub show_in_list: bool,
+    /// The group insignia (texture id; `None` for none).
+    pub insignia_id: Option<TextureKey>,
+    /// The L$ fee to join.
+    pub membership_fee: LindenAmount,
+    /// Whether enrollment is open (no invitation needed).
+    pub open_enrollment: bool,
+    /// Whether the group allows publishing on the web.
+    pub allow_publish: bool,
+    /// Whether the group is flagged mature.
+    pub mature_publish: bool,
+}
+
 /// One group notice header, from a `GroupNoticesListReply` entry. Fetch the full
 /// body/attachment with
 /// [`Session::request_group_notice`](crate::Session::request_group_notice).

@@ -652,6 +652,9 @@ fn advance_running(
             Command::CreateInventoryItem(new) => {
                 session.create_inventory_item(new, now).ok();
             }
+            Command::LinkInventoryItem(new) => {
+                session.link_inventory_item(new, now).ok();
+            }
             Command::UpdateInventoryItem {
                 item,
                 transaction_id,
@@ -931,6 +934,17 @@ fn advance_running(
             }
             Command::CreateGroup(params) => {
                 session.create_group(params, now).ok();
+            }
+            Command::UpdateGroupInfo(params) => {
+                session.update_group_info(params, now).ok();
+            }
+            Command::UpdateGroupTitle {
+                group_id,
+                title_role_id,
+            } => {
+                session
+                    .update_group_title(*group_id, *title_role_id, now)
+                    .ok();
             }
             Command::JoinGroup(group_id) => {
                 session.join_group(*group_id, now).ok();
