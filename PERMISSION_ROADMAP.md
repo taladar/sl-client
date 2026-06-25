@@ -239,7 +239,7 @@ Scope reminders:
   unchanged (as predicted). New `Session` accessors:
   `granted_permissions` / `script_grants` / `script_controls` (A3/A6) plus an
   A7 `script_permission_state()` snapshot convenience.
-- [ ] **A8. Define the test & verification strategy.** Plan the
+- [x] **A8. Define the test & verification strategy.** Plan the
   `sl-proto/tests/lifecycle.rs` and `sim_session.rs` cases (mirroring the new
   `teleport_clears_seat` test): feed a `ScriptQuestion` →
   `answer_script_permissions` → assert the registry; feed a real teleport →
@@ -248,7 +248,26 @@ Scope reminders:
   scoped clears; feed `ScriptControlChange` `Take` / `Release` → assert the
   taken-controls tracking. List the remaining open questions for sign-off before
   implementation (the exact attachment-detection source; whether to expose an
-  explicit deny).
+  explicit deny). **Done — see § Test & verification strategy reference,
+  task B11 in § Phase B, and § Open questions.** Decided: the
+  per-task tests embedded in B3–B10 stay (each lands with its own unit test); A8
+  adds **one** consolidated lifecycle suite (B11) of the cross-cutting
+  reset/recording cases that mirror `teleport_clears_seat`, all built from the
+  **existing** test helpers — `established` / `server_message` / `drain` /
+  `drain_events`, `object_update[_in]` to seed the `objects` cache, the
+  `enable_neighbour_b` + `CrossedRegion` + `AgentMovementComplete` crossing
+  fixture (`lifecycle.rs:1048`), `DisableSimulator` from `sim_b()`
+  (`:10551`), `KillObject` (`:10133`), and `sim.send_script_control_change`
+  (`sim_session.rs:1856`) — so the suite needs **no new harness**. **Key finding
+  the strategy surfaces:** the only case that cannot be written against the
+  current code is the **`HolderKind::Attachment` detection**: the session caches
+  no own-avatar region-local id (no `pcode::AVATAR` handling in
+  `session/methods.rs`), so `holder_kind` cannot yet classify a holder parented
+  to our own avatar. This is promoted from a B2 footnote to the **#1 sign-off
+  blocker** (§ Open questions): the attachment-vs-in-world teleport-reset test
+  (the heart of A5/B7) is unwritable until that plumbing is decided, so B2's
+  detection rule must be pinned down before B7 lands. A8 produces **no new
+  protocol** — only the test task and the sign-off list.
 
 Phase A scopes the planning only; the implementation tasks each Phase A item
 produces are appended to **Phase B** below as that item is worked.
@@ -833,6 +852,113 @@ private internal state stays private):
   when to `QueryScriptPermissions` and how to display the snapshot. The session
   **never auto-acts** (A4); the runtimes add **no** policy, only transport.
 
+### Test & verification strategy reference (from A8)
+
+How the permission mirror is proved correct before sign-off, and how the suite
+is built. The guiding rule mirrors the rest of the crate: **the test drives the
+`Session` exactly as the wire does** — inbound state via `handle_datagram`
+(decoded `AnyMessage`s through `server_message`), outbound via `drain` /
+`drain_events` — and asserts the public accessors (`granted_permissions`,
+`script_grants`, `script_controls`, `script_permission_state`), never the
+private fields. This is the `teleport_clears_seat` pattern (`lifecycle.rs:1271`)
+applied to grants.
+
+**Two layers, matching the two existing test files.**
+
+- **`sl-proto/tests/lifecycle.rs`** — the *client* `Session` in isolation: feed
+  raw server datagrams, drive the answer/revoke/release commands, assert the
+  mirror. This is where every recording and reset case lives (it already hosts
+  `script_question_surfaces_permission_request` `:3399`,
+  `answer_script_permissions_packs_message` `:3467`,
+  `script_control_change_surfaces_event` `:2936`, and `teleport_clears_seat`).
+- **`sl-proto/tests/sim_session.rs`** — the *paired* `Session` ⇄ `SimSession`
+  round-trip via `pump` / `setup`: the sim **produces** the inbound message and
+  the client folds it. Reuse `sim.send_script_control_change`
+  (`sim_session.rs:1856`) to drive the taken-controls tracker end-to-end (a
+  `Take` then a `Release`), proving the fold against a real server-built block,
+  not a hand-rolled `AnyMessage`.
+
+**The existing helpers cover every case — no new harness.** Each scenario maps
+onto a fixture already in `lifecycle.rs`:
+
+| Scenario | Built from | Asserts |
+|----------|-----------|---------|
+| Record a grant | `ScriptQuestion` datagram → `answer_script_permissions(.., experience_id, now)` | `granted_permissions(task,item)` == the subset; `script_grants()` yields it |
+| Deny = no entry | answer with `ScriptPermissions::empty()` | the holder absent from `script_grants()`; `granted_permissions` empty |
+| Re-grant replaces | answer twice for one holder | only the latest subset present |
+| Revoke (animation) | `revoke_permissions(obj, TRIGGER_ANIMATION)` after a grant of anim+teleport | anim bit cleared, `TELEPORT` kept; revoke last bit → entry gone |
+| Real teleport | `teleport_to` → `TeleportFinish` (as `teleport_clears_seat`) | in-world grant gone, attachment grant kept |
+| Neighbour crossing | `enable_neighbour_b` + `CrossedRegion` + `AgentMovementComplete` (`:1048`) | **all** grants kept |
+| Circuit retired | `DisableSimulator` from `sim_b()` (`:10551`) | that circuit's grants gone; root's kept |
+| Object gone / detach | `KillObject` for the granted object (`:10133`) | that object's grants gone |
+| Controls Take/Release | `sim.send_script_control_change` or a `ScriptControlChange` datagram | `script_controls().taken` reflects Take, empties on Release |
+| Count model | two Takes of one bit, one Release | bit still in `taken` (count > 0) |
+| Pass-to-agent split | Take with `pass_to_agent: true` | lands in `passed_to_agent`, not `taken` |
+| Release-on-send | `release_script_controls` after a Take | `script_controls()` empty, the `TAKE_CONTROLS` grant unchanged |
+| Snapshot | `script_permission_state()` with a grant + a taken control | both stores reflected |
+
+Seeding the `objects` cache (for `holder_kind` and the `KillObject` reset) uses
+`object_update[_in]` (`:9316`): the holder must be present so the reset's
+`task_id == full_id` match (B7) and the kind detection (B2) have something to
+read. `object_update_in` scopes the object to a chosen `region_handle` /
+circuit, which is exactly what the **circuit-retired** test needs to put a grant
+on the neighbour circuit and assert `DisableSimulator` drops only it.
+
+**The one case that is not yet writable — and why it gates sign-off.** The
+`HolderKind::Attachment` branch of `holder_kind` (B2) classifies a holder as an
+attachment *iff* the cached object `attachment_point().is_some()` **and** it is
+parented to **our own** avatar. The session caches `agent_id: AgentKey`
+(`session.rs:678`) but **not** its own avatar's region-local id, and there is no
+`pcode::AVATAR` handling in `session/methods.rs`, so "parented to our avatar"
+cannot be evaluated today. Consequently the **attachment-kept-on-teleport** half
+of the teleport-reset test (the crux of A5/B7) cannot be written against the
+current code — only the in-world-cleared half can. The test strategy therefore
+**blocks on resolving the attachment-detection source first** (see § Open
+questions): once B2 pins down how the own-avatar parentage is read (cache the
+avatar's region-local id at `AgentMovementComplete`, or derive `Attachment` from
+a different signal), the attachment object is seeded with `object_update_in`
+carrying the attachment `state` nibble and a `parent_id` resolving to the
+own-avatar object, and the test becomes a straightforward extension of
+`teleport_clears_seat`. Until then, B7's attachment assertion is the suite's
+single known gap, called out so it is not silently skipped.
+
+**Coverage discipline.** B3–B10 each carry their own focused unit test (in their
+task bodies); B11 is the *integration* layer that exercises the resets and
+the two-store interaction together (a grant **and** a taken control surviving /
+clearing across the same teleport), the cross-cutting behaviour no single B-task
+owns. The suite asserts the **conservative-mirror** invariants throughout: a
+revoke clears only the honoured bits (never `TELEPORT`), a teleport clears only
+in-world grants (never controls), and no empty grant entry is ever observable.
+
+### Open questions for sign-off (from A8)
+
+Resolve these before starting Phase B implementation; the first blocks B2/B7.
+
+1. **Attachment-detection source (blocker).** `holder_kind` needs to know which
+   region-local id is our own avatar to classify a holder as `Attachment`. The
+   session does not cache it today. **Proposed:** record the own avatar's
+   region-local id when `AgentMovementComplete` / the object cache first sees an
+   object whose `full_id == agent_id`, and resolve a holder's `parent_id`
+   against it. Decide this (or an alternative signal) before B2 lands, since the
+   `HolderKind` default is `InWorld` — shipping without it means **every**
+   attachment grant is wrongly dropped on the next teleport. Acceptable interim:
+   land B2 with the `InWorld` fallback and a tracked follow-up, but only if
+   sign-off accepts attachments not surviving teleport until then.
+2. **Explicit deny exposure.** The design represents a deny as the *absence* of
+   a registry entry (A3); `granted_permissions` returns empty for both "never
+   asked" and "denied". Confirm no caller needs to distinguish the two (i.e. no
+   "denied" surface on `ScriptGrantInfo`). The decision so far is **no**: a deny
+   is indistinguishable from never-granted, matching the sim.
+3. **`close` / relogin reset.** `script_grants` and `taken_controls` add **no**
+   `close` hook (A5), matching the `objects` cache convention (a closed session
+   is dead; relogin rebuilds via the constructor). Confirm this holds, or add a
+   reset if a relogin is ever made to reuse a live `Session`.
+4. **First synthesized event precedent.** `Event::ScriptPermissionState` (A7/B9)
+   is the crate's first `Event` not produced from an inbound wire message (the
+   runtimes synthesize it from a query). Confirm this precedent is acceptable
+   before B9/B10 set it; the alternative (a live accessor) is ruled out by the
+   exposure constraint in § API-surface & exposure reference.
+
 ### Tasks
 
 - [ ] **B1 (from A1, amended by A4). Encode the per-flag role classifier in
@@ -1032,3 +1158,29 @@ private internal state stays private):
       lockstep — the parity rule. Verify: in the REPL, `revoke_permissions` then
       `query_script_permissions`, and confirm the printed snapshot reflects the
       change (live-grid smoke per the test-avatar setup).
+- [ ] **B11 (from A8). Add the lifecycle test suite.** In
+      `sl-proto/tests/lifecycle.rs` (and one round-trip in
+      `sl-proto/tests/sim_session.rs`), add the cross-cutting reset/recording
+      cases from § Test & verification strategy reference, built from the
+      existing helpers (`established`, `server_message`, `drain` /
+      `drain_events`, `object_update[_in]`, the `enable_neighbour_b` +
+      `CrossedRegion` + `AgentMovementComplete` crossing fixture, `KillObject`,
+      `DisableSimulator` from `sim_b()`, `sim.send_script_control_change`) — no
+      new harness. Cover, at minimum, the rows of the reference table: grant /
+      deny-as-absence / re-grant-replaces, the animation-only revoke, the
+      teleport reset (in-world cleared, attachment kept — see the gate below),
+      the neighbour-crossing keep-all, the circuit-retired and `KillObject`
+      scoped drops, the controls Take/Release fold incl. the count model and the
+      pass-to-agent split, release-on-send, and the `script_permission_state`
+      snapshot. Add at least one **two-store** integration case (a grant **and**
+      a taken control surviving / clearing across the same teleport) — the
+      behaviour no single B-task owns. Assert the conservative-mirror invariants
+      (a revoke clears only the honoured bits, a teleport clears only in-world
+      grants never controls, no empty grant entry observable). Depends on
+      B2–B10 (it exercises the whole surface). **Gate:** the
+      attachment-kept-on-teleport assertion is **blocked** on the
+      attachment-detection sign-off (§ Open questions #1) — until that lands,
+      write the in-world-cleared half and mark the attachment half with a
+      `// TODO(B2-attachment-detection)` rather than silently omitting it. Run
+      the full `cargo test -p sl-proto`; clippy-clean (restriction lints) and
+      `cargo fmt` before commit.
