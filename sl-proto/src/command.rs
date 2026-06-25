@@ -16,12 +16,13 @@ use crate::{
     InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandSearchType,
     LandStatReportType, LindenAmount, LureId, MapItemType, Material, MaterialOverrideUpdate,
     MediaEntry, MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem,
-    NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
-    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
-    ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape, ProfileUpdate,
-    ProposalVoteId, QueryId, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability,
-    RestoreItem, RezAttachment, Rotation, SaleType, ScriptPermissions, TextureKey, Throttle,
-    TransactionId, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
+    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform,
+    OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
+    ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams,
+    ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates, RegionHandle, RegionInfoUpdate,
+    Reliability, RestoreItem, RezAttachment, Rotation, SaleType, ScriptPermissions, TextureEntry,
+    TextureKey, Throttle, TransactionId, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
+    Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1176,6 +1177,30 @@ pub enum Command {
         local_id: ScopedObjectId,
         /// The flag settings to apply.
         flags: ObjectFlagSettings,
+    },
+    /// Set the path/profile geometry of an object (`ObjectShape`).
+    SetObjectShape {
+        /// The object's region-local id.
+        local_id: ScopedObjectId,
+        /// The quantized path/profile shape parameters.
+        shape: PrimShapeParams,
+    },
+    /// Set the per-face textures of an object (`ObjectImage`).
+    SetObjectImage {
+        /// The object's region-local id.
+        local_id: ScopedObjectId,
+        /// The legacy parcel-media URL ([`None`] for none).
+        media_url: Option<String>,
+        /// The new per-face texture entry.
+        texture_entry: TextureEntry,
+    },
+    /// Set the complete extra-parameter state of an object (`ObjectExtraParams`);
+    /// subtypes absent from `params` are cleared.
+    SetObjectExtraParams {
+        /// The object's region-local id.
+        local_id: ScopedObjectId,
+        /// The flexi/light/sculpt/… parameters to apply.
+        params: ObjectExtraParams,
     },
     /// Set the group objects are set to (`ObjectGroup`).
     SetObjectGroup {

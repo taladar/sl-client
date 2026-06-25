@@ -215,6 +215,29 @@ pub struct TextureFace {
 }
 
 impl TextureFace {
+    /// A face showing `texture_id` with neutral defaults: opaque white tint (no
+    /// colour shift), a single un-offset un-rotated texture repeat, and no
+    /// bump/shiny/fullbright, media, glow, or legacy material. Use it to build a
+    /// [`TextureEntry`] that retextures one or (since the wire encoding applies a
+    /// single face's value to every face as the default) all faces of an object
+    /// via [`Session::set_object_image`](crate::Session::set_object_image).
+    #[must_use]
+    pub const fn new(texture_id: TextureKey) -> Self {
+        Self {
+            texture_id,
+            color: [255; 4],
+            scale_s: 1.0,
+            scale_t: 1.0,
+            offset_s: 0.0,
+            offset_t: 0.0,
+            rotation: 0.0,
+            bump_shiny_fullbright: 0,
+            media_flags: 0,
+            glow: 0.0,
+            material_id: None,
+        }
+    }
+
     /// The bump-map (normal/emboss) code packed into
     /// [`bump_shiny_fullbright`](Self::bump_shiny_fullbright) — the low 5 bits
     /// (LL's `getBumpmap()`; `0` = none, otherwise a `BE_*` bump type).

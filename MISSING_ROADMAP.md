@@ -553,8 +553,34 @@ aditi.
   dest/transaction/folder ids.
 - **Out batch 2 — object prim editing.** `ObjectShape` (prim geometry),
   `ObjectExtraParams` (sculpt/flexi/light/mesh extra params), `ObjectImage`
-  (per-face textures / TE) — the edit-tool prim-update messages keyed by
+  (per-face textures / TE) — the edit-tool prim-update messages keyed by the
   region-local object id.
+
+  Implemented as
+  `Session::set_object_shape(local_id: ScopedObjectId, shape: &PrimShapeParams)`,
+  `Session::set_object_image(local_id, media_url: Option<&str>, texture_entry: &TextureEntry)`,
+  and `Session::set_object_extra_params(local_id, params: &ObjectExtraParams)`
+  (mirroring the existing `set_object_*` edit methods, all
+  `ScopedObjectId`-keyed via `circuit_for_scope`). Each reuses an existing
+  domain struct rather than raw wire fields: `ObjectShape` carries the inbound
+  `PrimShapeParams` (the same quantized path/profile values an `ObjectUpdate`
+  decodes to); `ObjectImage` carries a `TextureEntry` packed with the existing
+  `encode_texture_entry` (a new `TextureFace::new` builds a neutral face — one
+  face retextures every face, since the wire run-length default applies to all);
+  `ObjectExtraParams` carries the inbound `ObjectExtraParams` bag and is
+  serialised by a new `extra_param_message_blocks` helper (factored out of
+  `encode_extra_params`'s entry builder) that emits
+  **one block per known subtype** with `ParamInUse` reflecting presence —
+  mirroring the reference viewer's `sendExtraParameters`, so a subtype absent
+  from `params` is *cleared* on the object and `ObjectExtraParams::default`
+  clears them all. Wired as
+  `Command::{SetObjectShape, SetObjectImage, SetObjectExtraParams}` through the
+  tokio and bevy runtimes, the `command_name` formatter, and the
+  `set_object_shape` / `set_object_image` / `set_object_extra_params` REPL
+  tokens (the extra-params token covers the flexi/light/sculpt subtypes — the
+  OpenSim-handled ones; the rarer light-image/extended-mesh/render-material/
+  reflection-probe subtypes remain settable through the typed API). Covered by
+  three pack-the-wire tests; object edit (shape/texture) is OpenSim-testable.
 - **Out batch 3 — rez & script permissions.** `RezObject` / `RezScript` (rez an
   inventory object/script into the world), `RevokePermissions` (revoke
   previously-granted script permissions), `DetachAttachmentIntoInv` (detach a
@@ -617,7 +643,7 @@ aditi.
   14 SKIP; 10 outbound batches defined)
 - [x] Out batch 1 — calling cards (OfferCallingCard, AcceptCallingCard,
   DeclineCallingCard)
-- [ ] Out batch 2 — object prim editing (ObjectShape, ObjectExtraParams,
+- [x] Out batch 2 — object prim editing (ObjectShape, ObjectExtraParams,
   ObjectImage)
 - [ ] Out batch 3 — rez & script permissions (RezObject, RezScript,
   RevokePermissions, DetachAttachmentIntoInv)

@@ -9,6 +9,8 @@ use super::{
 };
 use crate::GroupRoleKey;
 use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
+use crate::encode_texture_entry;
+use crate::extra_params::extra_param_message_blocks;
 use crate::scoped_id::CircuitId;
 use crate::types::EventId;
 use crate::types::directory::category_to_wire;
@@ -17,10 +19,10 @@ use crate::types::{
     ClassifiedUpdate, ClickAction, CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags,
     GestureActivation, GroupRoleEdit, GroupRoleMemberChange, ImDialog, InterestsUpdate,
     InventoryItem, LandSearchType, MapRequestFlags, Material, MovementMode, NewInventoryItem,
-    NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry,
-    ParcelCategory, ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape,
-    ProfileUpdate, Reliability, RestoreItem, RezAttachment, SaleType, TeleportFlags, Throttle,
-    ViewerEffect, Wearable,
+    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectTransform,
+    ParcelAccessEntry, ParcelCategory, ParcelUpdate, PermissionField, PickKey, PickUpdate,
+    Postcard, PrimShape, PrimShapeParams, ProfileUpdate, Reliability, RestoreItem, RezAttachment,
+    SaleType, TeleportFlags, TextureEntry, Throttle, ViewerEffect, Wearable,
 };
 use crate::types::{GroupNoticeKey, ProposalVoteId};
 use sl_types::chat::ChatChannel;
@@ -123,18 +125,21 @@ use sl_wire::messages::{
     ObjectDeselectAgentDataBlock, ObjectDeselectObjectDataBlock, ObjectDetach,
     ObjectDetachAgentDataBlock, ObjectDetachObjectDataBlock, ObjectDrop, ObjectDropAgentDataBlock,
     ObjectDropObjectDataBlock, ObjectDuplicate, ObjectDuplicateAgentDataBlock,
-    ObjectDuplicateObjectDataBlock, ObjectDuplicateSharedDataBlock, ObjectFlagUpdate,
-    ObjectFlagUpdateAgentDataBlock, ObjectGrab, ObjectGrabAgentDataBlock,
-    ObjectGrabObjectDataBlock, ObjectGrabUpdate, ObjectGrabUpdateAgentDataBlock,
-    ObjectGrabUpdateObjectDataBlock, ObjectGroup, ObjectGroupAgentDataBlock,
-    ObjectGroupObjectDataBlock, ObjectIncludeInSearch, ObjectIncludeInSearchAgentDataBlock,
+    ObjectDuplicateObjectDataBlock, ObjectDuplicateSharedDataBlock,
+    ObjectExtraParams as ObjectExtraParamsMessage, ObjectExtraParamsAgentDataBlock,
+    ObjectExtraParamsObjectDataBlock, ObjectFlagUpdate, ObjectFlagUpdateAgentDataBlock, ObjectGrab,
+    ObjectGrabAgentDataBlock, ObjectGrabObjectDataBlock, ObjectGrabUpdate,
+    ObjectGrabUpdateAgentDataBlock, ObjectGrabUpdateObjectDataBlock, ObjectGroup,
+    ObjectGroupAgentDataBlock, ObjectGroupObjectDataBlock, ObjectImage, ObjectImageAgentDataBlock,
+    ObjectImageObjectDataBlock, ObjectIncludeInSearch, ObjectIncludeInSearchAgentDataBlock,
     ObjectIncludeInSearchObjectDataBlock, ObjectLink, ObjectLinkAgentDataBlock,
     ObjectLinkObjectDataBlock, ObjectMaterial, ObjectMaterialAgentDataBlock,
     ObjectMaterialObjectDataBlock, ObjectName, ObjectNameAgentDataBlock, ObjectNameObjectDataBlock,
     ObjectPermissions, ObjectPermissionsAgentDataBlock, ObjectPermissionsHeaderDataBlock,
     ObjectPermissionsObjectDataBlock, ObjectSaleInfo, ObjectSaleInfoAgentDataBlock,
     ObjectSaleInfoObjectDataBlock, ObjectSelect, ObjectSelectAgentDataBlock,
-    ObjectSelectObjectDataBlock, OfferCallingCard, OfferCallingCardAgentBlockBlock,
+    ObjectSelectObjectDataBlock, ObjectShape, ObjectShapeAgentDataBlock,
+    ObjectShapeObjectDataBlock, OfferCallingCard, OfferCallingCardAgentBlockBlock,
     OfferCallingCardAgentDataBlock, PacketAck, PacketAckPacketsBlock, ParcelAccessListRequest,
     ParcelAccessListRequestAgentDataBlock, ParcelAccessListRequestDataBlock,
     ParcelAccessListUpdate, ParcelAccessListUpdateAgentDataBlock, ParcelAccessListUpdateDataBlock,
@@ -4186,6 +4191,98 @@ impl Circuit {
             },
             // No extra-physics (shape-type/density/…) overrides.
             extra_physics: Vec::new(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectShape` reliably (set the path/profile geometry of
+    /// `local_id`). The `shape` fields are the quantized wire values (see
+    /// [`PrimShapeParams`]).
+    pub(crate) fn send_object_shape(
+        &mut self,
+        local_id: RegionLocalObjectId,
+        shape: &PrimShapeParams,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectShape(ObjectShape {
+            agent_data: ObjectShapeAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            object_data: vec![ObjectShapeObjectDataBlock {
+                object_local_id: local_id.0,
+                path_curve: shape.path_curve,
+                profile_curve: shape.profile_curve,
+                path_begin: shape.path_begin,
+                path_end: shape.path_end,
+                path_scale_x: shape.path_scale_x,
+                path_scale_y: shape.path_scale_y,
+                path_shear_x: shape.path_shear_x,
+                path_shear_y: shape.path_shear_y,
+                path_twist: shape.path_twist,
+                path_twist_begin: shape.path_twist_begin,
+                path_radius_offset: shape.path_radius_offset,
+                path_taper_x: shape.path_taper_x,
+                path_taper_y: shape.path_taper_y,
+                path_revolutions: shape.path_revolutions,
+                path_skew: shape.path_skew,
+                profile_begin: shape.profile_begin,
+                profile_end: shape.profile_end,
+                profile_hollow: shape.profile_hollow,
+            }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectImage` reliably (set the per-face textures of `local_id`).
+    /// `texture_entry` is packed to the wire `TextureEntry` blob; `media_url`
+    /// carries the legacy parcel-media URL (empty when none).
+    pub(crate) fn send_object_image(
+        &mut self,
+        local_id: RegionLocalObjectId,
+        media_url: &str,
+        texture_entry: &TextureEntry,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectImage(ObjectImage {
+            agent_data: ObjectImageAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            object_data: vec![ObjectImageObjectDataBlock {
+                object_local_id: local_id.0,
+                media_url: media_url.as_bytes().to_vec(),
+                texture_entry: encode_texture_entry(texture_entry),
+            }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectExtraParams` reliably, setting the complete extra-parameter
+    /// state of `local_id` from `params` — one block per known subtype, in-use
+    /// when `params` carries it (so absent parameters are cleared). See
+    /// [`extra_param_message_blocks`].
+    pub(crate) fn send_object_extra_params(
+        &mut self,
+        local_id: RegionLocalObjectId,
+        params: &ObjectExtraParams,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectExtraParams(ObjectExtraParamsMessage {
+            agent_data: ObjectExtraParamsAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            object_data: extra_param_message_blocks(params)
+                .into_iter()
+                .map(|block| ObjectExtraParamsObjectDataBlock {
+                    object_local_id: local_id.0,
+                    param_type: block.param_type,
+                    param_in_use: block.in_use,
+                    param_size: u32::try_from(block.data.len()).unwrap_or(u32::MAX),
+                    param_data: block.data,
+                })
+                .collect(),
         });
         self.send(&message, Reliability::Reliable, now)
     }

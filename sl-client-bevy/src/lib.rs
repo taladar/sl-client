@@ -1361,6 +1361,21 @@ fn advance_running(
             Command::SetObjectFlags { local_id, flags } => {
                 session.set_object_flags(*local_id, flags, now).ok();
             }
+            Command::SetObjectShape { local_id, shape } => {
+                session.set_object_shape(*local_id, shape, now).ok();
+            }
+            Command::SetObjectImage {
+                local_id,
+                media_url,
+                texture_entry,
+            } => {
+                session
+                    .set_object_image(*local_id, media_url.as_deref(), texture_entry, now)
+                    .ok();
+            }
+            Command::SetObjectExtraParams { local_id, params } => {
+                session.set_object_extra_params(*local_id, params, now).ok();
+            }
             Command::SetObjectGroup {
                 local_ids,
                 group_id,
