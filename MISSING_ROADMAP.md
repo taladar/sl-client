@@ -336,6 +336,17 @@ not here, to avoid a half-built chat surface.
   may rebake this region's navmesh; Firestorm `llpathfindingmanager.cpp`) and
   `NavMeshStatusUpdate` (navmesh dirty/baking status). SL-only — OpenSim emits
   neither, so this only ever shows up against a real grid.
+
+  Implemented as `Event::AgentStateUpdate { can_modify_navmesh: bool }` (an
+  inline variant — a single flag warrants no domain struct) and
+  `Event::NavMeshStatus(NavMeshStatus)`, where `NavMeshStatus { region_id:
+  Uuid, version: u32, status: NavMeshBuildStatus }` lives in
+  `types/pathfinding.rs`. `NavMeshBuildStatus` is an enum over the four wire
+  tokens (`Pending`/`Building`/`Complete`/`Repending`) with a `from_wire`
+  parser that maps any unrecognised or missing value to `Complete`, mirroring
+  the reference viewer's `LLPathfindingNavMeshStatus`. `region_id` stays a raw
+  `Uuid` — this crate has no dedicated region-key newtype and represents region
+  ids as `Uuid` everywhere (see `RegionIdentity`, `EnvironmentSettings`).
 - **EQ batch 2 — group & display-name pushes.** `AgentDropGroup` (the sim
   dropped the agent from a group), `DisplayNameUpdate` (a cached display name
   changed), `SetDisplayNameReply` (result of the agent's own set-display-name).
@@ -378,7 +389,7 @@ section with the resulting table before starting outbound batches.
 - [x] Batch 4 — scene & appearance (ObjectAnimation, RebakeAvatarTextures)
 - [x] Batch 5 — friendship & calling cards
 - [x] Batch 6 — inventory sync, task inventory & misc
-- [ ] EQ batch 1 — pathfinding agent state (AgentStateUpdate — closes issue 3)
+- [x] EQ batch 1 — pathfinding agent state (AgentStateUpdate — closes issue 3)
 - [ ] EQ batch 2 — group & display-name pushes
 - [ ] EQ batch 3 — region/environment/voice misc
 - [ ] Phase 0 — outbound audit (fill the outbound gap table)

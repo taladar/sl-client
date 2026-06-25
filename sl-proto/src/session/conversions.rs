@@ -13,11 +13,12 @@ use crate::types::{
     GroupMembership, GroupName, GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle,
     GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
     LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
-    MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NeighborInfo, Object,
-    ObjectProperties, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo,
-    PickKey, PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
-    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits, Scale, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, SkySettings, WaterSettings, avatar_texture,
+    MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus,
+    NavMeshStatus, NeighborInfo, Object, ObjectProperties, ParcelCategory, ParcelInfo,
+    ParcelRequestResult, ParcelStatus, PickInfo, PickKey, PlayingAnimation, PrimShapeParams,
+    ProductType, ProposalCandidateId, ProposalVoteId, RegionChatSettings, RegionCombatSettings,
+    RegionIdentity, RegionLimits, Scale, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    SkySettings, WaterSettings, avatar_texture,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
@@ -1844,6 +1845,26 @@ pub(crate) fn establish_agent_communication_from_llsd(
     )
     .ok()?;
     Some((sim, seed))
+}
+
+/// Decodes a CAPS `AgentStateUpdate` event body into the pathfinding
+/// `can_modify_navmesh` flag. The body is `{ "can_modify_navmesh": bool }`;
+/// the flag is required (a missing or non-boolean value drops the event).
+pub(crate) fn agent_state_update_from_llsd(body: &Llsd) -> Option<bool> {
+    body.get("can_modify_navmesh").and_then(Llsd::as_bool)
+}
+
+/// Decodes a CAPS `NavMeshStatusUpdate` event body into a [`NavMeshStatus`].
+/// The body is `{ region_id: uuid, version: int, status: string }`; the
+/// `region_id` is required (the version and status default as the reference
+/// viewer does — version `0`, status [`NavMeshBuildStatus::Complete`]).
+pub(crate) fn nav_mesh_status_from_llsd(body: &Llsd) -> Option<NavMeshStatus> {
+    let region_id = body.get("region_id").and_then(Llsd::as_uuid)?;
+    Some(NavMeshStatus {
+        region_id,
+        version: u32_member(body, "version"),
+        status: NavMeshBuildStatus::from_wire(&string_member(body, "status")),
+    })
 }
 
 /// Builds a [`ParcelInfo`] from a CAPS `ParcelProperties` event body.

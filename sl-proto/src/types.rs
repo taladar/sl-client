@@ -23,6 +23,7 @@ mod name;
 mod nearby;
 mod object;
 mod parcel;
+mod pathfinding;
 mod region;
 mod report;
 mod script;
@@ -421,6 +422,7 @@ pub use parcel::{
     ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelRequestResult,
     ParcelReturnType, ParcelStatus, ParcelUpdate,
 };
+pub use pathfinding::{NavMeshBuildStatus, NavMeshStatus};
 pub use region::{
     RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits, RegionStats, SimStatId,
     SimulatorTime,

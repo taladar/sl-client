@@ -598,6 +598,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::ServerError(_)
             | Event::FeatureDisabled(_)
             | Event::Kicked(_)
+            | Event::AgentStateUpdate { .. }
+            | Event::NavMeshStatus(_)
             | Event::LandStatReply { .. } => {}
         }
     }

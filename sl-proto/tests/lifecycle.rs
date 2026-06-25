@@ -22,18 +22,19 @@ mod test {
         InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
         InventoryKey, LandArea, LandingType, LindenAmount, LindenBalance, LoginAccount,
         LoginParams, LookAtType, LureId, MapItemType, Material, Maturity, MeanCollisionType,
-        MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem,
-        NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
-        ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
-        ParcelKey, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-        ParcelUpdate, PermissionField, Permissions, Permissions5, PickUpdate, PointAtType,
-        Postcard, PrimShape, ProductType, ProfileUpdate, QueryId, ReflectionProbeFlags,
-        RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment,
-        SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissions,
-        SculptOrMeshKey, Session, SimStatId, SimulatorTime, SkySettings, SoundFlags,
-        TaskInventoryReply, TeleportFlags, TerrainLayerType, TextureKey, Throttle, TransactionId,
-        TransferStatus, Transmit, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        WaterSettings, WearableType, avatar_texture, group_powers, pcode,
+        MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NavMeshBuildStatus,
+        NavMeshStatus, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectFlagSettings, ObjectKey,
+        ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+        ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
+        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5,
+        PickUpdate, PointAtType, Postcard, PrimShape, ProductType, ProfileUpdate, QueryId,
+        ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability,
+        RestoreItem, RezAttachment, SaleType, Scale, ScopedObjectId, ScopedParcelId,
+        ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session, SimStatId, SimulatorTime,
+        SkySettings, SoundFlags, TaskInventoryReply, TeleportFlags, TerrainLayerType, TextureKey,
+        Throttle, TransactionId, TransferStatus, Transmit, UserInfo, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
+        group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -3733,6 +3734,65 @@ mod test {
         assert_eq!(first.online_status, "Online");
         assert_eq!(first.contribution, LandArea(512));
         assert!(first.is_owner);
+        Ok(())
+    }
+
+    #[test]
+    fn agent_state_update_caps_surfaces_navmesh_permission() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // The pathfinding `AgentStateUpdate` push: a single capability flag.
+        let body = parse_llsd_xml(concat!(
+            "<llsd><map>",
+            "<key>can_modify_navmesh</key><boolean>1</boolean>",
+            "</map></llsd>",
+        ))?;
+        session.handle_caps_event("AgentStateUpdate", &body, now)?;
+
+        let can_modify = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AgentStateUpdate { can_modify_navmesh } => Some(can_modify_navmesh),
+                _ => None,
+            })
+            .ok_or("expected an AgentStateUpdate event")?;
+        assert!(can_modify);
+        Ok(())
+    }
+
+    #[test]
+    fn nav_mesh_status_update_caps_surfaces_status() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // The pathfinding `NavMeshStatusUpdate` push: region, version, status.
+        let body = parse_llsd_xml(concat!(
+            "<llsd><map>",
+            "<key>region_id</key><uuid>00000000-0000-0000-0000-000000009a01</uuid>",
+            "<key>version</key><integer>7</integer>",
+            "<key>status</key><string>building</string>",
+            "</map></llsd>",
+        ))?;
+        session.handle_caps_event("NavMeshStatusUpdate", &body, now)?;
+
+        let status = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::NavMeshStatus(status) => Some(status),
+                _ => None,
+            })
+            .ok_or("expected a NavMeshStatus event")?;
+        assert_eq!(
+            status,
+            NavMeshStatus {
+                region_id: uuid::Uuid::from_u128(0x9a01),
+                version: 7,
+                status: NavMeshBuildStatus::Building,
+            }
+        );
         Ok(())
     }
 

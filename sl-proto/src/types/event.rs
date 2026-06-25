@@ -14,8 +14,8 @@ use super::{
     GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle, GroupVoteHistoryItem,
     ImDialog, InstantMessage, InventoryFolder, InventoryItem, InventoryItemMove, Kick,
     LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapLayer,
-    MapRegionInfo, Maturity, MeanCollision, MoneyBalance, MuteEntry, NeighborInfo, Object,
-    ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ParcelAccessEntry,
+    MapRegionInfo, Maturity, MeanCollision, MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo,
+    Object, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ParcelAccessEntry,
     ParcelAccessScope, ParcelDetails, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
     ParcelObjectOwner, ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation, RegionIdentity,
     RegionLimits, RegionStats, ScriptControl, ScriptDialog, ScriptPermissionRequest,
@@ -1545,6 +1545,17 @@ pub enum Event {
         /// `true` when frozen, `false` when thawed.
         frozen: bool,
     },
+    /// The simulator's view of this agent's pathfinding state changed
+    /// (`AgentStateUpdate`, pushed over the CAPS event queue). Currently this
+    /// carries a single capability flag. SL-only — OpenSim never sends it.
+    AgentStateUpdate {
+        /// Whether the agent is currently permitted to rebake (regenerate)
+        /// this region's navmesh.
+        can_modify_navmesh: bool,
+    },
+    /// A region's navmesh build status changed (`NavMeshStatusUpdate`, pushed
+    /// over the CAPS event queue). SL-only — OpenSim never sends it.
+    NavMeshStatus(NavMeshStatus),
     /// The session logged out cleanly (a `LogoutReply` was received).
     LoggedOut,
     /// The session disconnected for the given reason.
