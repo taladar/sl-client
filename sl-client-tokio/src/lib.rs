@@ -504,6 +504,9 @@ impl Client {
                         Some(Command::CreateInventoryItem(new)) => {
                             self.session.create_inventory_item(&new, Instant::now())?;
                         }
+                        Some(Command::LinkInventoryItem(new)) => {
+                            self.session.link_inventory_item(&new, Instant::now())?;
+                        }
                         Some(Command::UpdateInventoryItem { item, transaction_id }) => {
                             self.session.update_inventory_item(&item, transaction_id, Instant::now())?;
                         }
@@ -647,6 +650,12 @@ impl Client {
                         }
                         Some(Command::CreateGroup(params)) => {
                             self.session.create_group(&params, Instant::now())?;
+                        }
+                        Some(Command::UpdateGroupInfo(params)) => {
+                            self.session.update_group_info(&params, Instant::now())?;
+                        }
+                        Some(Command::UpdateGroupTitle { group_id, title_role_id }) => {
+                            self.session.update_group_title(group_id, title_role_id, Instant::now())?;
                         }
                         Some(Command::JoinGroup(group_id)) => {
                             self.session.join_group(group_id, Instant::now())?;

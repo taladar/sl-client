@@ -61,17 +61,18 @@ use crate::types::{
     LandEdit, LandSearchType, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
     LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MeanCollision,
     MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NeighborInfo,
-    NewInventoryItem, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
-    ObjectPlayingAnimation, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
-    PermissionField, PickKey, PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams,
-    ProfileUpdate, ProposalVoteId, RegionInfoUpdate, RegionStats, Reliability, RestoreItem,
-    RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptControl, ScriptControlAction,
-    ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId, SimulatorTime, SoundFlags,
-    SoundPreload, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags,
-    TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus, Transmit,
-    UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
+    NewInventoryItem, NewInventoryLink, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams,
+    ObjectFlagSettings, ObjectPlayingAnimation, ObjectPropertiesFamily, ObjectTransform,
+    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
+    ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult, Postcard,
+    PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionInfoUpdate, RegionStats,
+    Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
+    ScriptControl, ScriptControlAction, ScriptPermissions, ScriptTeleportRequest, ServerError,
+    SimStatId, SimulatorTime, SoundFlags, SoundPreload, TaskInventoryKey, TaskInventoryReply,
+    TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle,
+    TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -4375,6 +4376,45 @@ impl Session {
         Ok(())
     }
 
+    /// Edits an existing group's profile (`UpdateGroupInfo`): charter, insignia,
+    /// search visibility, membership fee, enrollment, and publish flags. The
+    /// agent must hold the group's change-identity power. A group cannot be
+    /// renamed, so [`UpdateGroupInfoParams`] carries no name.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn update_group_info(
+        &mut self,
+        params: &UpdateGroupInfoParams,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_update_group_info(params, now)?;
+        Ok(())
+    }
+
+    /// Sets the agent's active title within a group (`GroupTitleUpdate`): the
+    /// title shown above the avatar's name is the one carried by `title_role_id`
+    /// (a group role the agent belongs to; query the choices with
+    /// [`Session::request_group_titles`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn update_group_title(
+        &mut self,
+        group_id: GroupKey,
+        title_role_id: GroupRoleKey,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_group_title_update(group_id, title_role_id, now)?;
+        Ok(())
+    }
+
     /// Joins an open-enrollment group (`JoinGroupRequest`). The result arrives as
     /// [`Event::JoinGroupResult`]. Closed groups require an invitation instead
     /// (see [`Session::invite_to_group`]).
@@ -6806,6 +6846,27 @@ impl Session {
         let callback_id = self.next_inventory_callback();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_create_inventory_item(new, callback_id, now)?;
+        Ok(callback_id)
+    }
+
+    /// Creates an inventory **link** to an existing item or folder via
+    /// `LinkInventoryItem`, returning the async callback id the simulator echoes
+    /// in its `UpdateCreateInventoryItem` reply ([`Event::InventoryItemCreated`]).
+    /// The simulator allocates the link item's id. A link is a lightweight
+    /// pointer; removing it leaves the linked target intact.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn link_inventory_item(
+        &mut self,
+        new: &NewInventoryLink,
+        now: Instant,
+    ) -> Result<InventoryCallbackId, Error> {
+        let callback_id = self.next_inventory_callback();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_link_inventory_item(new, callback_id, now)?;
         Ok(callback_id)
     }
 

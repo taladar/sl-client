@@ -24,20 +24,20 @@ mod test {
         LandingType, LightData, LindenAmount, LindenBalance, LoginAccount, LoginParams, LookAtType,
         LureId, MapItemType, Material, Maturity, MeanCollisionType, MeshKey, MoneyTransactionType,
         MovementMode, MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem,
-        NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
-        ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-        ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
-        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5,
-        PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
-        QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate,
-        Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
-        RezScriptParams, SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction,
-        ScriptPermissions, SculptOrMeshKey, Session, SetDisplayNameReply, SimStatId, SimulatorTime,
-        SkySettings, SoundFlags, TaskInventoryKey, TaskInventoryReply, TeleportFlags,
-        TerraformArea, TerrainLayerType, TextureEntry, TextureFace, TextureKey, Throttle,
-        TransactionId, TransferStatus, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, WaterSettings, WearableType, avatar_texture, decode_texture_entry,
-        group_powers, pcode,
+        NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
+        ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
+        ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand,
+        ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField,
+        Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams,
+        ProductType, ProfileUpdate, QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle,
+        RegionInfoUpdate, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment,
+        RezObjectParams, RezScriptParams, SaleType, Scale, ScopedObjectId, ScopedParcelId,
+        ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session, SetDisplayNameReply,
+        SimStatId, SimulatorTime, SkySettings, SoundFlags, TaskInventoryKey, TaskInventoryReply,
+        TeleportFlags, TerraformArea, TerrainLayerType, TextureEntry, TextureFace, TextureKey,
+        Throttle, TransactionId, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
+        ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
+        avatar_texture, decode_texture_entry, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -3229,6 +3229,93 @@ mod test {
             invite.invite_data.first().map(|d| d.invitee_id),
             Some(invitee)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn link_inventory_item_packs_link() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let folder = uuid::Uuid::from_u128(0x6720);
+        let linked = uuid::Uuid::from_u128(0x6721);
+        session.link_inventory_item(
+            &NewInventoryLink {
+                folder_id: InventoryFolderKey::from(folder),
+                linked_id: InventoryItemOrFolderKey::Item(InventoryKey::from(linked)),
+                link_type: 24, // AT_LINK
+                inv_type: 10,
+                name: "My Link".to_owned(),
+                description: "a link".to_owned(),
+            },
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let link = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::LinkInventoryItem(l) => Some(l),
+                _ => None,
+            })
+            .ok_or("expected a LinkInventoryItem")?;
+        assert_eq!(link.inventory_block.folder_id, folder);
+        assert_eq!(link.inventory_block.old_item_id, linked);
+        assert_eq!(link.inventory_block.transaction_id, uuid::Uuid::nil());
+        assert_eq!(link.inventory_block.r#type, 24);
+        assert_eq!(link.inventory_block.inv_type, 10);
+        assert_eq!(trimmed(&link.inventory_block.name), "My Link");
+        assert_eq!(trimmed(&link.inventory_block.description), "a link");
+        Ok(())
+    }
+
+    #[test]
+    fn update_group_info_and_title_pack_messages() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6730);
+        let title_role = uuid::Uuid::from_u128(0x6731);
+        session.update_group_info(
+            &UpdateGroupInfoParams {
+                group_id: GroupKey::from(group),
+                charter: "new charter".to_owned(),
+                show_in_list: false,
+                insignia_id: Some(TextureKey::from(uuid::Uuid::from_u128(0x6732))),
+                membership_fee: LindenAmount(42),
+                open_enrollment: true,
+                allow_publish: false,
+                mature_publish: true,
+            },
+            now,
+        )?;
+        session.update_group_title(GroupKey::from(group), GroupRoleKey::from(title_role), now)?;
+        let sent = drain(&mut session)?;
+
+        let info = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::UpdateGroupInfo(u) => Some(u),
+                _ => None,
+            })
+            .ok_or("expected an UpdateGroupInfo")?;
+        assert_eq!(info.group_data.group_id, group);
+        assert_eq!(trimmed(&info.group_data.charter), "new charter");
+        assert!(!info.group_data.show_in_list);
+        assert_eq!(info.group_data.membership_fee, 42);
+        assert!(info.group_data.open_enrollment);
+        assert!(info.group_data.mature_publish);
+
+        let title = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::GroupTitleUpdate(t) => Some(t),
+                _ => None,
+            })
+            .ok_or("expected a GroupTitleUpdate")?;
+        assert_eq!(title.agent_data.group_id, group);
+        assert_eq!(title.agent_data.title_role_id, title_role);
         Ok(())
     }
 

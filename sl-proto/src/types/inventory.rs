@@ -1,6 +1,8 @@
 //! Inventory structure and region-handle coordinate helpers.
 
-use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, OwnerKey};
+use sl_types::key::{
+    AgentKey, GroupKey, InventoryFolderKey, InventoryItemOrFolderKey, InventoryKey, OwnerKey,
+};
 use sl_types::money::LindenAmount;
 use sl_wire::{Permissions5, RegionHandle};
 use uuid::Uuid;
@@ -107,6 +109,32 @@ impl Default for NewInventoryItem {
             description: String::new(),
         }
     }
+}
+
+/// Parameters for creating an inventory **link** via
+/// [`Session::link_inventory_item`](crate::Session::link_inventory_item)
+/// (`LinkInventoryItem`). A link is a lightweight pointer to an existing item or
+/// folder ([`linked_id`](Self::linked_id)) filed in
+/// [`folder_id`](Self::folder_id); removing the link leaves its target intact.
+/// The simulator allocates the link item's id and echoes the request's async
+/// callback id in its
+/// [`Event::InventoryItemCreated`](crate::Event::InventoryItemCreated) reply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewInventoryLink {
+    /// The folder the new link is created in.
+    pub folder_id: InventoryFolderKey,
+    /// The item or folder the link points to (the wire `OldItemID`).
+    pub linked_id: InventoryItemOrFolderKey,
+    /// The link asset type (`AssetType`): `AT_LINK` (24) for an item link,
+    /// `AT_LINK_FOLDER` (25) for a folder link.
+    pub link_type: i8,
+    /// The inventory type (`InventoryType`) — the viewer mirrors the linked
+    /// object's type (`IT_CATEGORY` for a folder link).
+    pub inv_type: i8,
+    /// The link's name (the viewer copies the linked object's name).
+    pub name: String,
+    /// The link's description.
+    pub description: String,
 }
 
 /// A single item relocation from a `MoveInventoryItem`: the simulator tells the

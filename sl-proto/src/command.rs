@@ -16,14 +16,14 @@ use crate::{
     InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandEdit,
     LandSearchType, LandStatReportType, LindenAmount, LureId, MapItemType, Material,
     MaterialOverrideUpdate, MediaEntry, MeshKey, MoneyTransactionType, MovementMode, MuteFlags,
-    MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
-    ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
-    ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard,
-    PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates,
-    RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, Rotation, SaleType, ScriptPermissions, TaskInventoryKey, TextureEntry,
-    TextureKey, Throttle, TransactionId, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
-    Wearable,
+    MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
+    ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessScope,
+    ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
+    PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId,
+    RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, Rotation, SaleType, ScriptPermissions, TaskInventoryKey,
+    TextureEntry, TextureKey, Throttle, TransactionId, UpdateGroupInfoParams, Uuid, Vector,
+    ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -206,6 +206,10 @@ pub enum Command {
     /// Create an inventory item (`CreateInventoryItem`). The simulator allocates
     /// the id and replies with an [`Event::InventoryItemCreated`](crate::Event::InventoryItemCreated).
     CreateInventoryItem(NewInventoryItem),
+    /// Create an inventory link to an existing item or folder
+    /// (`LinkInventoryItem`). The simulator allocates the link item's id and
+    /// replies with an [`Event::InventoryItemCreated`](crate::Event::InventoryItemCreated).
+    LinkInventoryItem(NewInventoryLink),
     /// Rewrite an item's metadata / permissions (`UpdateInventoryItem`). A non-nil
     /// `transaction_id` binds a freshly uploaded asset to the item.
     UpdateInventoryItem {
@@ -411,6 +415,17 @@ pub enum Command {
     RequestGroupNotice(GroupNoticeKey),
     /// Create a new group. The result arrives as [`Event::CreateGroupResult`](crate::Event::CreateGroupResult).
     CreateGroup(CreateGroupParams),
+    /// Edit an existing group's profile (`UpdateGroupInfo`): charter, insignia,
+    /// search visibility, fee, enrollment, and publish flags.
+    UpdateGroupInfo(UpdateGroupInfoParams),
+    /// Set the agent's active title in a group (`GroupTitleUpdate`) to the title
+    /// carried by the given role.
+    UpdateGroupTitle {
+        /// The group whose title to set.
+        group_id: GroupKey,
+        /// The role carrying the desired title.
+        title_role_id: GroupRoleKey,
+    },
     /// Join an open-enrollment group. The result arrives as
     /// [`Event::JoinGroupResult`](crate::Event::JoinGroupResult).
     JoinGroup(GroupKey),

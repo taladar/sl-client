@@ -54,16 +54,16 @@ use sl_proto::{
     InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LandBrushAction, LandBrushSize,
     LandEdit, LandSearchType, LandStatReportType, LightData, LindenAmount, LookAtType, MapItemType,
     Material, MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MovementMode,
-    MuteFlags, MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectExtraParams,
-    ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate,
-    PermissionField, Permissions, Permissions5, PickKey, PickUpdate, PointAtType, Postcard,
-    PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionHandle, RegionInfoUpdate,
-    RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptPermissions,
-    SculptData, SculptOrMeshKey, TaskInventoryKey, TerraformArea, TextureEntry, TextureFace,
-    Throttle, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    VoiceProvisionRequest, Wearable, WearableType,
+    MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
+    ObjectExtraParams, ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
+    ParcelUpdate, PermissionField, Permissions, Permissions5, PickKey, PickUpdate, PointAtType,
+    Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionHandle,
+    RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
+    ScriptPermissions, SculptData, SculptOrMeshKey, TaskInventoryKey, TerraformArea, TextureEntry,
+    TextureFace, Throttle, UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -1139,6 +1139,23 @@ fn build_create_group_params(
     })
 }
 
+/// Build an [`UpdateGroupInfoParams`] from keyword fields (`group_id` required).
+fn build_update_group_info_params(
+    args: &Args,
+    ctx: &dyn ReplContext,
+) -> Result<UpdateGroupInfoParams, ReplError> {
+    Ok(UpdateGroupInfoParams {
+        group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
+        charter: args.str_or(ctx, "charter", 1, "")?,
+        show_in_list: args.bool_or(ctx, "show_in_list", 2, true)?,
+        insignia_id: args.opt_texture(ctx, "insignia_id", 3)?,
+        membership_fee: LindenAmount(args.parse_or(ctx, "membership_fee", 4, "u64", 0)?),
+        open_enrollment: args.bool_or(ctx, "open_enrollment", 5, false)?,
+        allow_publish: args.bool_or(ctx, "allow_publish", 6, false)?,
+        mature_publish: args.bool_or(ctx, "mature_publish", 7, false)?,
+    })
+}
+
 /// Build a [`NewInventoryItem`] from keyword fields.
 fn build_new_inventory_item(
     args: &Args,
@@ -1153,6 +1170,30 @@ fn build_new_inventory_item(
         wearable_type: args.parse_or(ctx, "wearable_type", 5, "u8", 0)?,
         name: args.str_or(ctx, "name", 6, "")?,
         description: args.str_or(ctx, "description", 7, "")?,
+    })
+}
+
+/// Build a [`NewInventoryLink`] from keyword fields (`linked_id` required). When
+/// `folder_link` is set the target is treated as a folder/category, otherwise as
+/// an item.
+fn build_new_inventory_link(
+    args: &Args,
+    ctx: &dyn ReplContext,
+) -> Result<NewInventoryLink, ReplError> {
+    let linked_uuid = args.req_uuid(ctx, "linked_id", 1)?;
+    let folder_link = args.bool_or(ctx, "folder_link", 5, false)?;
+    let linked_id = if folder_link {
+        InventoryItemOrFolderKey::Folder(InventoryFolderKey::from(linked_uuid))
+    } else {
+        InventoryItemOrFolderKey::Item(InventoryKey::from(linked_uuid))
+    };
+    Ok(NewInventoryLink {
+        folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 0)?),
+        linked_id,
+        link_type: args.parse_or(ctx, "link_type", 2, "i8", 0)?,
+        inv_type: args.parse_or(ctx, "inv_type", 3, "i8", 0)?,
+        name: args.str_or(ctx, "name", 4, "")?,
+        description: args.str_or(ctx, "description", 6, "")?,
     })
 }
 
@@ -1861,6 +1902,15 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "link_inventory_item",
+            usage: "<folder_id> <linked_id> [link_type=] [inv_type=] [name=] [folder_link=] [description=]",
+            build: |args, ctx| {
+                Ok(Command::LinkInventoryItem(build_new_inventory_link(
+                    args, ctx,
+                )?))
+            },
+        },
+        CommandSpec {
             name: "update_inventory_item",
             usage: "item_id=<id> [transaction_id=] [name=] …",
             build: |args, ctx| {
@@ -2229,6 +2279,25 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "create_group",
             usage: "name=<name> [charter=] [open_enrollment=] …",
             build: |args, ctx| Ok(Command::CreateGroup(build_create_group_params(args, ctx)?)),
+        },
+        CommandSpec {
+            name: "update_group_info",
+            usage: "group_id=<id> [charter=] [show_in_list=] [membership_fee=] …",
+            build: |args, ctx| {
+                Ok(Command::UpdateGroupInfo(build_update_group_info_params(
+                    args, ctx,
+                )?))
+            },
+        },
+        CommandSpec {
+            name: "update_group_title",
+            usage: "<group_id> <title_role_id>",
+            build: |args, ctx| {
+                Ok(Command::UpdateGroupTitle {
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
+                    title_role_id: GroupRoleKey::from(args.req_uuid(ctx, "title_role_id", 1)?),
+                })
+            },
         },
         CommandSpec {
             name: "join_group",
@@ -4864,11 +4933,11 @@ mod tests {
 
     use sl_proto::{
         AbuseReportType, AgentKey, AgentPreferences, AssetType, ChatChannel, ChatType, CircuitId,
-        Command, ControlFlags, FriendRights, GroupKey, InventoryFolderKey, InventoryKey,
-        LandBrushAction, LandBrushSize, LandEdit, LandStatReportType, LindenAmount, MapItemType,
-        MovementMode, ObjectBuyItem, ObjectKey, OwnerKey, RegionHandle, RegionLocalObjectId,
-        RegionLocalParcelId, SaleType, ScopedObjectId, ScopedParcelId, ScriptPermissions,
-        TaskInventoryKey, TerraformArea, TransactionId, Uuid,
+        Command, ControlFlags, FriendRights, GroupKey, InventoryFolderKey,
+        InventoryItemOrFolderKey, InventoryKey, LandBrushAction, LandBrushSize, LandEdit,
+        LandStatReportType, LindenAmount, MapItemType, MovementMode, ObjectBuyItem, ObjectKey,
+        OwnerKey, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId,
+        ScopedParcelId, ScriptPermissions, TaskInventoryKey, TerraformArea, TransactionId, Uuid,
     };
 
     use super::Registry;
@@ -5272,6 +5341,49 @@ mod tests {
             build(r#"create_group name="My Group" open_enrollment=true"#),
             Ok(Command::CreateGroup(params))
                 if params.name == "My Group" && params.open_enrollment
+        ));
+    }
+
+    #[test]
+    fn link_inventory_item_parses_item_link() {
+        assert!(matches!(
+            build(&format!("link_inventory_item {ONE} {TWO} link_type=24 inv_type=10 name=Link")),
+            Ok(Command::LinkInventoryItem(link))
+                if link.folder_id.uuid() == uuid(ONE)
+                    && matches!(link.linked_id, InventoryItemOrFolderKey::Item(item) if item.uuid() == uuid(TWO))
+                    && link.link_type == 24
+                    && link.inv_type == 10
+                    && link.name == "Link"
+        ));
+    }
+
+    #[test]
+    fn link_inventory_item_parses_folder_link() {
+        assert!(matches!(
+            build(&format!("link_inventory_item {ONE} {TWO} folder_link=true")),
+            Ok(Command::LinkInventoryItem(link))
+                if matches!(link.linked_id, InventoryItemOrFolderKey::Folder(folder) if folder.uuid() == uuid(TWO))
+        ));
+    }
+
+    #[test]
+    fn update_group_info_parses() {
+        assert!(matches!(
+            build(&format!("update_group_info group_id={ONE} charter=hi membership_fee=42 mature_publish=true")),
+            Ok(Command::UpdateGroupInfo(params))
+                if params.group_id.uuid() == uuid(ONE)
+                    && params.charter == "hi"
+                    && params.membership_fee == LindenAmount(42)
+                    && params.mature_publish
+        ));
+    }
+
+    #[test]
+    fn update_group_title_parses() {
+        assert!(matches!(
+            build(&format!("update_group_title {ONE} {TWO}")),
+            Ok(Command::UpdateGroupTitle { group_id, title_role_id })
+                if group_id.uuid() == uuid(ONE) && title_role_id.uuid() == uuid(TWO)
         ));
     }
 
