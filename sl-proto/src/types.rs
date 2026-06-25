@@ -19,6 +19,7 @@ mod event;
 mod generic;
 mod group;
 mod inventory;
+mod land;
 mod map;
 mod name;
 mod nearby;
@@ -406,6 +407,7 @@ pub use inventory::{
     GestureActivation, InventoryFolder, InventoryItem, InventoryItemMove, NewInventoryItem,
     global_to_handle, grid_to_handle, handle_to_global, handle_to_grid,
 };
+pub use land::{LandBrushAction, LandBrushSize, LandEdit, TerraformArea};
 pub use map::{
     EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, MapItem, MapItemType,
     MapLayer, MapRegionInfo, MapRequestFlags, NeighborInfo, RegionInfoUpdate, TelehubInfo,

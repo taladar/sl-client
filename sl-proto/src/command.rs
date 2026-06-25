@@ -13,16 +13,17 @@ use crate::{
     ExperienceKey, ExperiencePermission, ExperienceUpdate, FriendKey, FriendRights,
     GestureActivation, GroupKey, GroupNoticeAttachment, GroupNoticeKey, GroupRequestId,
     GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate,
-    InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandSearchType,
-    LandStatReportType, LindenAmount, LureId, MapItemType, Material, MaterialOverrideUpdate,
-    MediaEntry, MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem,
-    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform,
-    OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
-    ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams,
-    ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates, RegionHandle, RegionInfoUpdate,
-    Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
-    ScriptPermissions, TaskInventoryKey, TextureEntry, TextureKey, Throttle, TransactionId, Uuid,
-    Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
+    InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandEdit,
+    LandSearchType, LandStatReportType, LindenAmount, LureId, MapItemType, Material,
+    MaterialOverrideUpdate, MediaEntry, MeshKey, MoneyTransactionType, MovementMode, MuteFlags,
+    MuteType, NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
+    ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
+    ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard,
+    PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates,
+    RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, Rotation, SaleType, ScriptPermissions, TaskInventoryKey, TextureEntry,
+    TextureKey, Throttle, TransactionId, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
+    Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -751,6 +752,28 @@ pub enum Command {
         /// A sequence id echoed back in the reply for matching.
         sequence_id: i32,
     },
+    /// Request a parcel's properties by its region-local id
+    /// (`ParcelPropertiesRequestByID`); the reply arrives as
+    /// [`Event::ParcelProperties`](crate::Event::ParcelProperties).
+    RequestParcelPropertiesById {
+        /// The parcel's region-local id.
+        local_id: ScopedParcelId,
+        /// A sequence id echoed back in the reply for matching.
+        sequence_id: i32,
+    },
+    /// Set a parcel's auto-return time for other people's objects
+    /// (`ParcelSetOtherCleanTime`).
+    SetParcelOtherCleanTime {
+        /// The parcel's region-local id.
+        local_id: ScopedParcelId,
+        /// The auto-return time; whole minutes, [`Duration::ZERO`](std::time::Duration)
+        /// disables auto-return.
+        clean_time: std::time::Duration,
+    },
+    /// Terraform a piece of land (`ModifyLand`).
+    ModifyLand(LandEdit),
+    /// Undo the last terraform edit (`UndoLand`).
+    UndoLand,
     /// Edit a parcel's settings (`ParcelPropertiesUpdate`).
     UpdateParcel(ParcelUpdate),
     /// Request a parcel's allow or ban list (`ParcelAccessListRequest`); the

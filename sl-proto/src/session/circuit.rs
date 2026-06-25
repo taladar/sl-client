@@ -18,12 +18,12 @@ use crate::types::{
     AssetType, AttachmentMode, AttachmentPoint, Camera, ChatType, ClassifiedCategory,
     ClassifiedUpdate, ClickAction, CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags,
     GestureActivation, GroupRoleEdit, GroupRoleMemberChange, ImDialog, InterestsUpdate,
-    InventoryItem, LandSearchType, MapRequestFlags, Material, MovementMode, NewInventoryItem,
-    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectTransform,
-    ParcelAccessEntry, ParcelCategory, ParcelUpdate, PermissionField, PickKey, PickUpdate,
-    Postcard, PrimShape, PrimShapeParams, ProfileUpdate, Reliability, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, SaleType, ScriptPermissions, TaskInventoryKey, TeleportFlags,
-    TextureEntry, Throttle, ViewerEffect, Wearable,
+    InventoryItem, LandEdit, LandSearchType, MapRequestFlags, Material, MovementMode,
+    NewInventoryItem, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
+    ObjectTransform, ParcelAccessEntry, ParcelCategory, ParcelUpdate, PermissionField, PickKey,
+    PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, Reliability, RestoreItem,
+    RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptPermissions, TaskInventoryKey,
+    TeleportFlags, TextureEntry, Throttle, ViewerEffect, Wearable,
 };
 use crate::types::{GroupNoticeKey, ProposalVoteId};
 use sl_types::chat::ChatChannel;
@@ -244,6 +244,13 @@ use sl_wire::messages::{
     GroupVoteHistoryRequest, GroupVoteHistoryRequestAgentDataBlock,
     GroupVoteHistoryRequestGroupDataBlock, GroupVoteHistoryRequestTransactionDataBlock,
     StartGroupProposal, StartGroupProposalAgentDataBlock, StartGroupProposalProposalDataBlock,
+};
+use sl_wire::messages::{
+    ModifyLand, ModifyLandAgentDataBlock, ModifyLandModifyBlockBlock,
+    ModifyLandModifyBlockExtendedBlock, ModifyLandParcelDataBlock, ParcelPropertiesRequestByID,
+    ParcelPropertiesRequestByIDAgentDataBlock, ParcelPropertiesRequestByIDParcelDataBlock,
+    ParcelSetOtherCleanTime, ParcelSetOtherCleanTimeAgentDataBlock,
+    ParcelSetOtherCleanTimeParcelDataBlock, UndoLand, UndoLandAgentDataBlock,
 };
 use sl_wire::messages::{
     MoveTaskInventory, MoveTaskInventoryAgentDataBlock, MoveTaskInventoryInventoryDataBlock,
@@ -5044,6 +5051,91 @@ impl Circuit {
             inventory_data: RemoveTaskInventoryInventoryDataBlock {
                 local_id: local_id.0,
                 item_id: item_id.uuid(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ModifyLand` reliably (apply a single terraform brush stroke
+    /// `edit`).
+    pub(crate) fn send_modify_land(
+        &mut self,
+        edit: &LandEdit,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ModifyLand(ModifyLand {
+            agent_data: ModifyLandAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            modify_block: ModifyLandModifyBlockBlock {
+                action: edit.action.to_code(),
+                brush_size: edit.brush_size.to_index(),
+                seconds: edit.strength,
+                height: edit.height,
+            },
+            parcel_data: vec![ModifyLandParcelDataBlock {
+                local_id: edit.parcel.map_or(-1, |parcel| parcel.0),
+                west: edit.area.west,
+                south: edit.area.south,
+                east: edit.area.east,
+                north: edit.area.north,
+            }],
+            modify_block_extended: vec![ModifyLandModifyBlockExtendedBlock {
+                brush_size: edit.brush_size.to_metres(),
+            }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `UndoLand` reliably (undo the agent's last terraform edit).
+    pub(crate) fn send_undo_land(&mut self, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::UndoLand(UndoLand {
+            agent_data: UndoLandAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelPropertiesRequestByID` reliably (fetch the parcel
+    /// `local_id` by its region-local id). The reply is a `ParcelProperties`.
+    pub(crate) fn send_parcel_properties_request_by_id(
+        &mut self,
+        local_id: RegionLocalParcelId,
+        sequence_id: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelPropertiesRequestByID(ParcelPropertiesRequestByID {
+            agent_data: ParcelPropertiesRequestByIDAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            parcel_data: ParcelPropertiesRequestByIDParcelDataBlock {
+                sequence_id,
+                local_id: local_id.0,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelSetOtherCleanTime` reliably (set the parcel `local_id`'s
+    /// auto-return time for other people's objects to `clean_time` minutes).
+    pub(crate) fn send_parcel_set_other_clean_time(
+        &mut self,
+        local_id: RegionLocalParcelId,
+        clean_time: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelSetOtherCleanTime(ParcelSetOtherCleanTime {
+            agent_data: ParcelSetOtherCleanTimeAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            parcel_data: ParcelSetOtherCleanTimeParcelDataBlock {
+                local_id: local_id.0,
+                other_clean_time: clean_time,
             },
         });
         self.send(&message, Reliability::Reliable, now)

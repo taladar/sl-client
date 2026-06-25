@@ -783,6 +783,18 @@ impl Client {
                                 west, south, east, north, sequence_id, Instant::now(),
                             )?;
                         }
+                        Some(Command::RequestParcelPropertiesById { local_id, sequence_id }) => {
+                            self.session.request_parcel_properties_by_id(local_id, sequence_id, Instant::now())?;
+                        }
+                        Some(Command::SetParcelOtherCleanTime { local_id, clean_time }) => {
+                            self.session.set_parcel_other_clean_time(local_id, clean_time, Instant::now())?;
+                        }
+                        Some(Command::ModifyLand(edit)) => {
+                            self.session.modify_land(&edit, Instant::now())?;
+                        }
+                        Some(Command::UndoLand) => {
+                            self.session.undo_land(Instant::now())?;
+                        }
                         Some(Command::SetDrawDistance(far)) => {
                             self.session.set_draw_distance(far);
                         }
