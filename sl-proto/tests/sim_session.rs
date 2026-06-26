@@ -10,7 +10,7 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        AbuseReport, AbuseReportType, AgentKey, AlertInfo, AnimationKey, AttachmentMode,
+        AbuseReport, AbuseReportType, AgentKey, AlertInfo, AnimationKey, AssetKey, AttachmentMode,
         AttachmentPoint, AvatarName, AvatarPickerResult, ChatChannel, ChatSource, ChatType,
         ClassifiedCategory, ClassifiedKey, CoarseLocation, ControlFlags, DetachOrder,
         DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
@@ -34,10 +34,10 @@ mod test {
         RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
         SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction,
         ScriptPermissions, ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession,
-        SimStatId, SimulatorTime, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
-        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, Transmit,
-        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        enable_simulator_to_caps_llsd, parse_event_queue_response,
+        SimStatId, SimulatorTime, StartLocationSlot, TaskInventoryKey, TaskInventoryReply,
+        TelehubInfo, TerraformArea, TextureEntry, TextureFace, TextureKey, Throttle, TransactionId,
+        Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -3000,6 +3000,104 @@ mod test {
             .ok_or("expected an UpdateGroupTitle server event")?;
         assert_eq!(decoded_group, group_id);
         assert_eq!(decoded_role, title_role_id);
+        Ok(())
+    }
+
+    #[test]
+    fn client_teleport_and_agent_prefs_reach_simulator() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        // TeleportLandmarkRequest: a landmark teleport carries the asset id.
+        let landmark = AssetKey::from(uuid::Uuid::from_u128(0x5001));
+        client.teleport_via_landmark(Some(landmark), now)?;
+        // Cancelling returns the client to the active state so the following
+        // requests are accepted.
+        client.cancel_teleport(now)?;
+        // TeleportLandmarkRequest: a home teleport (None) carries a nil asset id.
+        client.teleport_via_landmark(None, now)?;
+        client.cancel_teleport(now)?;
+
+        // SetStartLocationRequest: record "home" at a region-local position.
+        let position = RegionCoordinates::new(64.0, 96.0, 25.0);
+        let look_at = sl_types::lsl::Vector {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        client.set_start_location(StartLocationSlot::Home, position, look_at.clone(), now)?;
+
+        // AgentDataUpdateRequest, AgentQuitCopy, VelocityInterpolateOn/Off.
+        client.request_agent_data_update(now)?;
+        client.quit_copy(now)?;
+        client.set_velocity_interpolation(true, now)?;
+        client.set_velocity_interpolation(false, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+
+        // Both the landmark teleport and the home teleport decode.
+        let landmarks: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ServerEvent::TeleportViaLandmark { landmark } => Some(*landmark),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(landmarks, vec![Some(landmark), None]);
+
+        // Two cancels arrive.
+        let cancels = events
+            .iter()
+            .filter(|e| matches!(e, ServerEvent::CancelTeleport))
+            .count();
+        assert_eq!(cancels, 2);
+
+        let (decoded_slot, decoded_position, decoded_look_at) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::SetStartLocation {
+                    slot,
+                    position,
+                    look_at,
+                } => Some((*slot, *position, look_at.clone())),
+                _ => None,
+            })
+            .ok_or("expected a SetStartLocation server event")?;
+        assert_eq!(decoded_slot, StartLocationSlot::Home);
+        assert_eq!(decoded_position, position);
+        assert_eq!(decoded_look_at.x.to_bits(), look_at.x.to_bits());
+
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::RequestAgentDataUpdate)),
+            "expected a RequestAgentDataUpdate server event"
+        );
+
+        // AgentQuitCopy's FuseBlock echoes the client's own (non-zero) circuit
+        // code.
+        let quit_code = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::QuitCopy {
+                    viewer_circuit_code,
+                } => Some(*viewer_circuit_code),
+                _ => None,
+            })
+            .ok_or("expected a QuitCopy server event")?;
+        assert_eq!(quit_code, CircuitCode(0x0011_2233));
+
+        // Both velocity-interpolation toggles decode, in order.
+        let toggles: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ServerEvent::SetVelocityInterpolation { enabled } => Some(*enabled),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(toggles, vec![true, false]);
         Ok(())
     }
 
