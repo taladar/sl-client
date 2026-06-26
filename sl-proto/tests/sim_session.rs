@@ -15,18 +15,18 @@ mod test {
         ClassifiedCategory, ClassifiedKey, CoarseLocation, ControlFlags, DetachOrder,
         DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
         DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisplayName, DisplayNameUpdate,
-        EstateCovenant, Event, EventId, EventInfo, FeatureDisabled, FollowCamProperty,
-        FollowCamPropertyValue, FriendKey, GenericMessage, GenericStreamingMessage,
-        GestureActivation, GlobalCoordinates, GridCoordinates, GridRectangle, GroupAccountDetails,
-        GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
-        GroupAccountTransactions, GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId,
-        GroupRoleKey, GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey,
-        InventoryItemMove, InventoryItemOrFolderKey, InventoryKey, InvoiceId, Kick, LandArea,
-        LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
-        LightData, LindenAmount, LindenBalance, LoginParams, MAX_FACES, MapItem, MapItemType,
-        MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
-        MovementMode, NavMeshBuildStatus, NavMeshStatus, NewInventoryLink, NotecardRez,
-        ObjectBuyItem, ObjectExtraParams, ObjectKey, ObjectPlayingAnimation,
+        EjectAction, EstateCovenant, Event, EventId, EventInfo, FeatureDisabled, FollowCamProperty,
+        FollowCamPropertyValue, FreezeAction, FriendKey, GenericMessage, GenericStreamingMessage,
+        GestureActivation, GlobalCoordinates, GodRegionUpdate, GridCoordinates, GridRectangle,
+        GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
+        GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupKey,
+        GroupName, GroupRequestId, GroupRoleKey, GroupVote, GroupVoteHistoryItem, ImDialog,
+        InventoryFolderKey, InventoryItemMove, InventoryItemOrFolderKey, InventoryKey, InvoiceId,
+        Kick, LandArea, LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatItem,
+        LandStatReportType, LightData, LindenAmount, LindenBalance, LoginParams, MAX_FACES,
+        MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision,
+        MeanCollisionType, MovementMode, NavMeshBuildStatus, NavMeshStatus, NewInventoryLink,
+        NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectKey, ObjectPlayingAnimation,
         ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey,
         ParcelObjectOwner, ParcelReturnType, Permissions, Permissions5, PingId, PlacesResult,
         PointAtType, Postcard, PrimShapeParams, ProductType, QueryId, RegionCoordinates,
@@ -34,10 +34,11 @@ mod test {
         RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
         SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction,
         ScriptPermissions, ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession,
-        SimStatId, SimulatorTime, StartLocationSlot, TaskInventoryKey, TaskInventoryReply,
-        TelehubInfo, TerraformArea, TextureEntry, TextureFace, TextureKey, Throttle, TransactionId,
-        Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
+        SimStatId, SimWideDeleteFlags, SimulatorTime, StartLocationSlot, TaskInventoryKey,
+        TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry, TextureFace, TextureKey,
+        Throttle, TransactionId, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
+        parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -3155,6 +3156,95 @@ mod test {
         assert_eq!(decoded_gain.to_bits(), 0.75_f32.to_bits());
         assert_eq!(decoded_handle, RegionHandle(REGION_HANDLE));
         assert_eq!(decoded_position, position);
+        Ok(())
+    }
+
+    #[test]
+    fn client_god_region_admin_reaches_simulator() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        // RequestGodlikePowers: ask the simulator to grant god powers.
+        client.request_godlike_powers(true, now)?;
+        // EjectUser: eject and ban an avatar from the agent's land.
+        let ejected = AgentKey::from(uuid::Uuid::from_u128(0x9001));
+        client.eject_user(ejected, EjectAction::EjectAndBan, now)?;
+        // FreezeUser: unfreeze an avatar on the agent's land.
+        let frozen = AgentKey::from(uuid::Uuid::from_u128(0x9002));
+        client.freeze_user(frozen, FreezeAction::Unfreeze, now)?;
+        // SimWideDeletes: return a scripted owner's objects region-wide.
+        let owner = AgentKey::from(uuid::Uuid::from_u128(0x9003));
+        let delete_flags = SimWideDeleteFlags {
+            others_land_only: false,
+            always_return_objects: true,
+            scripted_only: true,
+        };
+        client.sim_wide_deletes(owner, delete_flags, now)?;
+        // GodUpdateRegionInfo: push god-tools region parameters.
+        let update = GodRegionUpdate {
+            sim_name: sl_proto::RegionName::try_new("Da Boom")
+                .map_err(|_invalid| "invalid region name")?,
+            estate_id: 1,
+            parent_estate_id: 1,
+            region_flags: 0x1_0000_0007,
+            billable_factor: 1.0,
+            price_per_meter: 5,
+            redirect_grid: GridCoordinates::new(1000, 1001),
+        };
+        client.god_update_region_info(&update, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+
+        let decoded_godlike = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RequestGodlikePowers { godlike } => Some(*godlike),
+                _ => None,
+            })
+            .ok_or("expected a RequestGodlikePowers server event")?;
+        assert!(decoded_godlike);
+
+        let (eject_target, eject_action) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::EjectUser { target, action } => Some((*target, *action)),
+                _ => None,
+            })
+            .ok_or("expected an EjectUser server event")?;
+        assert_eq!(eject_target, ejected);
+        assert_eq!(eject_action, EjectAction::EjectAndBan);
+
+        let (freeze_target, freeze_action) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::FreezeUser { target, action } => Some((*target, *action)),
+                _ => None,
+            })
+            .ok_or("expected a FreezeUser server event")?;
+        assert_eq!(freeze_target, frozen);
+        assert_eq!(freeze_action, FreezeAction::Unfreeze);
+
+        let (delete_owner, decoded_delete_flags) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::SimWideDeletes { owner, flags } => Some((*owner, *flags)),
+                _ => None,
+            })
+            .ok_or("expected a SimWideDeletes server event")?;
+        assert_eq!(delete_owner, owner);
+        assert_eq!(decoded_delete_flags, delete_flags);
+
+        let decoded_update = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::GodUpdateRegionInfo { update } => Some(update.clone()),
+                _ => None,
+            })
+            .ok_or("expected a GodUpdateRegionInfo server event")?;
+        // The extended flags are recovered from the RegionInfo2 block.
+        assert_eq!(decoded_update, update);
         Ok(())
     }
 
