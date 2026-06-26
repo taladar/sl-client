@@ -14,24 +14,25 @@ mod test {
         AttachmentPoint, AvatarName, AvatarPickerResult, ChatChannel, ChatSource, ChatType,
         ClassifiedCategory, ClassifiedKey, CoarseLocation, ControlFlags, DetachOrder,
         DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-        DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventId, EventInfo,
-        FeatureDisabled, FollowCamProperty, FollowCamPropertyValue, FriendKey, GenericMessage,
-        GenericStreamingMessage, GestureActivation, GlobalCoordinates, GridCoordinates,
-        GridRectangle, GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
-        GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupKey,
-        GroupName, GroupRequestId, GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey,
-        InventoryKey, InvoiceId, Kick, LandArea, LandSearchType, LandStatItem, LandStatReportType,
-        LindenAmount, LindenBalance, LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo,
-        MapRequestFlags, Maturity, MeanCollision, MeanCollisionType, MovementMode, NotecardRez,
-        ObjectBuyItem, ObjectKey, ObjectPlayingAnimation, ObjectPropertiesFamily, OwnerKey,
-        ParcelCategory, ParcelDetails, ParcelKey, ParcelObjectOwner, ParcelReturnType,
-        Permissions5, PingId, PlacesResult, PointAtType, Postcard, ProductType, QueryId,
-        RegionCoordinates, RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId,
-        RegionStats, RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId,
-        ScriptControl, ScriptControlAction, ServerError, ServerEvent, Session, SimSession,
-        SimStatId, SimulatorTime, TelehubInfo, TextureKey, Throttle, TransactionId, Transmit,
-        ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
-        parse_event_queue_response,
+        DirPeopleResult, DirPlaceResult, DirectoryVisibility, EstateCovenant, Event, EventId,
+        EventInfo, FeatureDisabled, FollowCamProperty, FollowCamPropertyValue, FriendKey,
+        GenericMessage, GenericStreamingMessage, GestureActivation, GlobalCoordinates,
+        GridCoordinates, GridRectangle, GroupAccountDetails, GroupAccountDetailsEntry,
+        GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
+        GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId, GroupVote,
+        GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryItemMove, InventoryKey,
+        InvoiceId, Kick, LandArea, LandSearchType, LandStatItem, LandStatReportType, LindenAmount,
+        LindenBalance, LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
+        Maturity, MeanCollision, MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem,
+        ObjectKey, ObjectPlayingAnimation, ObjectPropertiesFamily, OwnerKey, ParcelCategory,
+        ParcelDetails, ParcelKey, ParcelObjectOwner, ParcelReturnType, Permissions5, PingId,
+        PlacesResult, PointAtType, Postcard, ProductType, QueryId, RegionCoordinates, RegionHandle,
+        RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionStats, RestoreItem,
+        RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
+        ScriptControlAction, ServerError, ServerEvent, Session, SimSession, SimStatId,
+        SimulatorTime, TaskInventoryReply, TelehubInfo, TextureKey, Throttle, TransactionId,
+        Transmit, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -2393,6 +2394,166 @@ mod test {
             .ok_or("expected a CallingCardDeclined client event")?;
         assert_eq!(agent, decliner);
         assert_eq!(transaction, decline_txn);
+        Ok(())
+    }
+
+    #[test]
+    fn inventory_sync_reaches_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let removed_item = InventoryKey::from(uuid::Uuid::from_u128(0x1001));
+        let removed_folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0x2001));
+        let mixed_folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0x2002));
+        let mixed_item = InventoryKey::from(uuid::Uuid::from_u128(0x1002));
+        let moved_item = InventoryKey::from(uuid::Uuid::from_u128(0x1003));
+        let dest_folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0x2003));
+        let renamed_item = InventoryKey::from(uuid::Uuid::from_u128(0x1004));
+        let renamed_folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0x2004));
+
+        let moves = vec![
+            InventoryItemMove {
+                item: moved_item,
+                folder: dest_folder,
+                new_name: None,
+            },
+            InventoryItemMove {
+                item: renamed_item,
+                folder: renamed_folder,
+                new_name: Some("renamed".to_owned()),
+            },
+        ];
+
+        sim.send_remove_inventory_item(&[removed_item], now)?;
+        sim.send_remove_inventory_folder(&[removed_folder], now)?;
+        sim.send_remove_inventory_objects(&[mixed_folder], &[mixed_item], now)?;
+        sim.send_move_inventory_item(true, &moves, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_client(&mut client);
+        let items = events
+            .iter()
+            .find_map(|e| match e {
+                Event::InventoryItemsRemoved { items } => Some(items.clone()),
+                _ => None,
+            })
+            .ok_or("expected an InventoryItemsRemoved client event")?;
+        assert_eq!(items, vec![removed_item]);
+
+        let folders = events
+            .iter()
+            .find_map(|e| match e {
+                Event::InventoryFoldersRemoved { folders } => Some(folders.clone()),
+                _ => None,
+            })
+            .ok_or("expected an InventoryFoldersRemoved client event")?;
+        assert_eq!(folders, vec![removed_folder]);
+
+        let (folders, items) = events
+            .iter()
+            .find_map(|e| match e {
+                Event::InventoryObjectsRemoved { folders, items } => {
+                    Some((folders.clone(), items.clone()))
+                }
+                _ => None,
+            })
+            .ok_or("expected an InventoryObjectsRemoved client event")?;
+        assert_eq!(folders, vec![mixed_folder]);
+        assert_eq!(items, vec![mixed_item]);
+
+        let (stamp, got_moves) = events
+            .iter()
+            .find_map(|e| match e {
+                Event::InventoryItemsMoved { stamp, moves } => Some((*stamp, moves.clone())),
+                _ => None,
+            })
+            .ok_or("expected an InventoryItemsMoved client event")?;
+        assert!(stamp);
+        assert_eq!(got_moves, moves);
+        Ok(())
+    }
+
+    #[test]
+    fn task_inventory_user_info_and_misc_reach_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let reply = TaskInventoryReply {
+            task: ObjectKey::from(uuid::Uuid::from_u128(0x7A5C)),
+            serial: 7,
+            filename: "inventory_7A5C.tmp".to_owned(),
+        };
+        let info = UserInfo {
+            im_via_email: true,
+            directory_visibility: DirectoryVisibility::Hidden,
+            email: "agent@example.com".to_owned(),
+        };
+        let derez_txn = TransactionId::from(uuid::Uuid::from_u128(0xDE7E));
+        let selected = [RegionLocalObjectId(101), RegionLocalObjectId(202)];
+
+        sim.send_reply_task_inventory(&reply, now)?;
+        sim.send_user_info_reply(&info, now)?;
+        sim.send_derez_ack(derez_txn, true, now)?;
+        sim.send_force_object_select(true, &selected, now)?;
+        sim.send_grant_godlike_powers(200, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_client(&mut client);
+        let got_reply = events
+            .iter()
+            .find_map(|e| match e {
+                Event::TaskInventoryReply(reply) => Some(reply.clone()),
+                _ => None,
+            })
+            .ok_or("expected a TaskInventoryReply client event")?;
+        assert_eq!(got_reply, reply);
+
+        let got_info = events
+            .iter()
+            .find_map(|e| match e {
+                Event::UserInfo(info) => Some(info.clone()),
+                _ => None,
+            })
+            .ok_or("expected a UserInfo client event")?;
+        assert_eq!(got_info, info);
+
+        let (transaction, success) = events
+            .iter()
+            .find_map(|e| match e {
+                Event::DeRezAck {
+                    transaction,
+                    success,
+                } => Some((*transaction, *success)),
+                _ => None,
+            })
+            .ok_or("expected a DeRezAck client event")?;
+        assert_eq!(transaction, derez_txn);
+        assert!(success);
+
+        let (reset_list, objects) = events
+            .iter()
+            .find_map(|e| match e {
+                Event::ForceObjectSelect {
+                    reset_list,
+                    objects,
+                } => Some((*reset_list, objects.clone())),
+                _ => None,
+            })
+            .ok_or("expected a ForceObjectSelect client event")?;
+        assert!(reset_list);
+        let local_ids: Vec<RegionLocalObjectId> = objects.iter().map(|o| o.id()).collect();
+        assert_eq!(local_ids, selected.to_vec());
+
+        let god_level = events
+            .iter()
+            .find_map(|e| match e {
+                Event::GodlikePowersGranted { god_level } => Some(*god_level),
+                _ => None,
+            })
+            .ok_or("expected a GodlikePowersGranted client event")?;
+        assert_eq!(god_level, 200);
         Ok(())
     }
 
