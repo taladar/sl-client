@@ -54,8 +54,9 @@ use sl_wire::messages::{
     MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapItemReply,
     MapItemReplyAgentDataBlock, MapItemReplyDataBlock, MapItemReplyRequestDataBlock, MapLayerReply,
     MapLayerReplyAgentDataBlock, MapLayerReplyLayerDataBlock, ObjectPropertiesObjectDataBlock,
-    ObjectUpdateObjectDataBlock, ParcelProperties, PickInfoReplyDataBlock, UUIDGroupNameReply,
-    UUIDNameReply, UpdateCreateInventoryItemInventoryDataBlock,
+    ObjectShapeObjectDataBlock, ObjectUpdateObjectDataBlock, ParcelProperties,
+    PickInfoReplyDataBlock, UUIDGroupNameReply, UUIDNameReply,
+    UpdateCreateInventoryItemInventoryDataBlock,
 };
 use sl_wire::{Direction, GlobalCoordinates};
 use sl_wire::{Llsd, SkeletonFolder};
@@ -4122,6 +4123,35 @@ pub(crate) fn object_from_full_update(
 /// single 23-byte blob — see `read_compressed_shape` in
 /// [`crate::object_update`].)
 pub(crate) const fn shape_from_full_block(block: &ObjectUpdateObjectDataBlock) -> PrimShapeParams {
+    PrimShapeParams {
+        path_curve: block.path_curve,
+        profile_curve: block.profile_curve,
+        path_begin: block.path_begin,
+        path_end: block.path_end,
+        path_scale_x: block.path_scale_x,
+        path_scale_y: block.path_scale_y,
+        path_shear_x: block.path_shear_x,
+        path_shear_y: block.path_shear_y,
+        path_twist: block.path_twist,
+        path_twist_begin: block.path_twist_begin,
+        path_radius_offset: block.path_radius_offset,
+        path_taper_x: block.path_taper_x,
+        path_taper_y: block.path_taper_y,
+        path_revolutions: block.path_revolutions,
+        path_skew: block.path_skew,
+        profile_begin: block.profile_begin,
+        profile_end: block.profile_end,
+        profile_hollow: block.profile_hollow,
+    }
+}
+
+/// Reads the path/profile [`PrimShapeParams`] from an `ObjectShape` object-data
+/// block (the client→server edit message). The block carries the same quantized
+/// path/profile fields as a full `ObjectUpdate` block, so this is the
+/// edit-message counterpart of [`shape_from_full_block`].
+pub(crate) const fn shape_from_object_shape_block(
+    block: &ObjectShapeObjectDataBlock,
+) -> PrimShapeParams {
     PrimShapeParams {
         path_curve: block.path_curve,
         profile_curve: block.profile_curve,

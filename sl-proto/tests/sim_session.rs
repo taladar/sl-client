@@ -22,17 +22,18 @@ mod test {
         GroupAccountTransactions, GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId,
         GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryItemMove,
         InventoryKey, InvoiceId, Kick, LandArea, LandSearchType, LandStatItem, LandStatReportType,
-        LindenAmount, LindenBalance, LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo,
-        MapRequestFlags, Maturity, MeanCollision, MeanCollisionType, MovementMode,
-        NavMeshBuildStatus, NavMeshStatus, NotecardRez, ObjectBuyItem, ObjectKey,
-        ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory,
-        ParcelDetails, ParcelKey, ParcelObjectOwner, ParcelReturnType, Permissions5, PingId,
-        PlacesResult, PointAtType, Postcard, ProductType, QueryId, RegionCoordinates, RegionHandle,
-        RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionStats,
-        RequiredVoiceVersion, RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId,
-        ScriptControl, ScriptControlAction, ServerError, ServerEvent, Session, SetDisplayNameReply,
-        SimSession, SimStatId, SimulatorTime, TaskInventoryReply, TelehubInfo, TextureKey,
-        Throttle, TransactionId, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
+        LightData, LindenAmount, LindenBalance, LoginParams, MAX_FACES, MapItem, MapItemType,
+        MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
+        MovementMode, NavMeshBuildStatus, NavMeshStatus, NotecardRez, ObjectBuyItem,
+        ObjectExtraParams, ObjectKey, ObjectPlayingAnimation, ObjectPropertiesFamily,
+        OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey, ParcelObjectOwner,
+        ParcelReturnType, Permissions5, PingId, PlacesResult, PointAtType, Postcard,
+        PrimShapeParams, ProductType, QueryId, RegionCoordinates, RegionHandle, RegionIdentity,
+        RegionLocalObjectId, RegionLocalParcelId, RegionStats, RequiredVoiceVersion, RestoreItem,
+        RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
+        ScriptControlAction, ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession,
+        SimStatId, SimulatorTime, TaskInventoryReply, TelehubInfo, TextureEntry, TextureFace,
+        TextureKey, Throttle, TransactionId, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
         ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
@@ -2468,6 +2469,111 @@ mod test {
             })
             .ok_or("expected a CallingCardDeclined server event")?;
         assert_eq!(transaction, decline_txn);
+        Ok(())
+    }
+
+    #[test]
+    fn client_object_prim_edits_reach_simulator() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
+        let shape_target = ScopedObjectId::new(circuit, RegionLocalObjectId(101));
+        let image_target = ScopedObjectId::new(circuit, RegionLocalObjectId(102));
+        let extra_target = ScopedObjectId::new(circuit, RegionLocalObjectId(103));
+
+        // A distinctive shape so the round-trip cannot pass by accident.
+        let shape = PrimShapeParams {
+            path_curve: 16,
+            profile_curve: 1,
+            path_begin: 1000,
+            path_end: 2000,
+            path_scale_x: 50,
+            path_scale_y: 60,
+            path_shear_x: 70,
+            path_shear_y: 80,
+            path_twist: -5,
+            path_twist_begin: 5,
+            path_radius_offset: -3,
+            path_taper_x: 2,
+            path_taper_y: -2,
+            path_revolutions: 10,
+            path_skew: 4,
+            profile_begin: 3000,
+            profile_end: 4000,
+            profile_hollow: 5000,
+        };
+        client.set_object_shape(shape_target, &shape, now)?;
+
+        // A single neutral face retextures the whole object; the media URL is set.
+        let texture = TextureKey::from(uuid::Uuid::from_u128(0xABCD_1234));
+        let texture_entry = TextureEntry {
+            faces: vec![TextureFace::new(texture)],
+        };
+        let media_url = "http://example.test/media";
+        client.set_object_image(image_target, Some(media_url), &texture_entry, now)?;
+
+        // Extra parameters whose float fields are exactly representable, so the
+        // decode round-trips bit-for-bit.
+        let params = ObjectExtraParams {
+            light: Some(LightData {
+                color: [10, 20, 30, 255],
+                radius: 8.0,
+                cutoff: 0.0,
+                falloff: 1.0,
+            }),
+            ..ObjectExtraParams::default()
+        };
+        client.set_object_extra_params(extra_target, &params, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+
+        let (local_id, set_shape) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::ObjectShapeSet { local_id, shape } => Some((*local_id, *shape)),
+                _ => None,
+            })
+            .ok_or("expected an ObjectShapeSet server event")?;
+        assert_eq!(local_id, RegionLocalObjectId(101));
+        assert_eq!(set_shape, shape);
+
+        let (local_id, set_media, set_entry) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::ObjectImageSet {
+                    local_id,
+                    media_url,
+                    texture_entry,
+                } => Some((*local_id, media_url.clone(), texture_entry.clone())),
+                _ => None,
+            })
+            .ok_or("expected an ObjectImageSet server event")?;
+        assert_eq!(local_id, RegionLocalObjectId(102));
+        assert_eq!(set_media.as_deref(), Some(media_url));
+        // The wire run-length default makes the single sent face cover every face,
+        // so the simulator decodes a full set of faces all carrying that texture.
+        assert_eq!(set_entry.faces.len(), MAX_FACES);
+        assert!(
+            set_entry
+                .faces
+                .iter()
+                .all(|face| face.texture_id == texture)
+        );
+
+        let (local_id, set_params) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::ObjectExtraParamsSet { local_id, params } => {
+                    Some((*local_id, params.clone()))
+                }
+                _ => None,
+            })
+            .ok_or("expected an ObjectExtraParamsSet server event")?;
+        assert_eq!(local_id, RegionLocalObjectId(103));
+        assert_eq!(set_params, params);
         Ok(())
     }
 

@@ -916,7 +916,9 @@ mod circuit;
 mod conversions;
 mod methods;
 
-pub(crate) use conversions::{ZERO_VECTOR, instant_message, region_handshake_message};
+pub(crate) use conversions::{
+    ZERO_VECTOR, instant_message, region_handshake_message, shape_from_object_shape_block,
+};
 pub use conversions::{
     agent_drop_group_to_llsd, agent_state_update_to_llsd, ais_inventory_update_to_llsd,
     build_map_block_reply, build_map_item_reply, build_map_layer_reply,
