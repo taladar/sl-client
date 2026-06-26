@@ -174,6 +174,7 @@ fn on_events(
             | SlSessionEvent::LoadUrl(_)
             | SlSessionEvent::ScriptTeleport(_)
             | SlSessionEvent::ScriptControlChange(_)
+            | SlSessionEvent::ScriptPermissionState(_)
             | SlSessionEvent::SetFollowCamProperties { .. }
             | SlSessionEvent::ClearFollowCamProperties { .. }
             | SlSessionEvent::MuteList(_)

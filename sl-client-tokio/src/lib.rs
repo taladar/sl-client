@@ -1188,6 +1188,13 @@ impl Client {
                         Some(Command::RevokeScriptPermissions { object_id, permissions }) => {
                             self.session.revoke_script_permissions(object_id, permissions, Instant::now())?;
                         }
+                        Some(Command::QueryScriptPermissions) => {
+                            // Local query: synthesize the snapshot from the session
+                            // and surface it on the event stream (no wire send).
+                            events.send(Event::ScriptPermissionState(
+                                self.session.script_permission_state(),
+                            )).await.ok();
+                        }
                         Some(Command::DetachAttachmentIntoInventory { item_id }) => {
                             self.session.detach_attachment_into_inventory(item_id, Instant::now())?;
                         }

@@ -20,9 +20,9 @@ use super::{
     ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
     PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, RegionStats,
     RequiredVoiceVersion, ScriptControl, ScriptDialog, ScriptPermissionRequest,
-    ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimulatorTime, SoundFlags,
-    SoundPreload, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainPatch, Texture,
-    TransferStatus, UserInfo, ViewerEffect, Wearable,
+    ScriptPermissionState, ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimulatorTime,
+    SoundFlags, SoundPreload, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainPatch,
+    Texture, TransferStatus, UserInfo, ViewerEffect, Wearable,
 };
 use sl_types::key::{
     AgentKey, ExperienceKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
@@ -901,6 +901,14 @@ pub enum Event {
     /// Forcibly release all of them with
     /// [`Session::release_script_controls`](crate::Session::release_script_controls).
     ScriptControlChange(Vec<ScriptControl>),
+    /// A snapshot of the session's script-permission mirror, surfaced in reply to
+    /// a [`Command::QueryScriptPermissions`](crate::Command::QueryScriptPermissions).
+    ///
+    /// Unlike every other [`Event`], this is **synthesized locally** — it does
+    /// not originate from an inbound message. Each runtime builds it from
+    /// [`Session::script_permission_state`](crate::Session::script_permission_state)
+    /// when it dispatches the query command, and pushes it onto its event stream.
+    ScriptPermissionState(ScriptPermissionState),
     /// A scripted object set follow-camera parameters (`SetFollowCamProperties`,
     /// i.e. `llSetCameraParams`), after the agent granted it
     /// [`ScriptPermissions::CONTROL_CAMERA`](crate::ScriptPermissions::CONTROL_CAMERA).

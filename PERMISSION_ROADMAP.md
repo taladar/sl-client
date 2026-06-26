@@ -1369,10 +1369,32 @@ neighbourhood; B4 on B2's `ScriptGrantInfo` (+ B2.5's denied status) + B3's
       take with `PassToAgent = true` → lands in `passed_to_agent`, not `taken`;
       `release_script_controls` after a take → controls empty, the
       `TAKE_CONTROLS` grant in `script_grants` unchanged.
-- [ ] **B4 (from A7). The query command, snapshot type, reply event and runtime
+- [x] **B4 (from A7). The query command, snapshot type, reply event and runtime
       wiring.** The mirror's read-out path; the new `Command` and `Event` force
       the runtime arms (findings 1–2), so the sl-proto types and the
-      wiring land together.
+      wiring land together. **Done 2026-06-26** — added the public
+      `ScriptPermissionState` struct (`types/script.rs`, fields
+      `grants: Vec<ScriptGrantInfo>` / `controls: ScriptControlsInfo`,
+      re-exported via `types.rs` / `lib.rs`), the unit
+      `Command::QueryScriptPermissions` (`command.rs`), the synthesized
+      `Event::ScriptPermissionState(ScriptPermissionState)` variant
+      (`types/event.rs`, documented as the crate's first locally-built reply
+      event), and the `Session::script_permission_state()` accessor collecting
+      `script_grants()` + `script_controls()`. Wired all three runtimes at
+      parity: the tokio command arm pushes the snapshot onto the events
+      `mpsc::Sender`; the bevy `advance_running` arm writes
+      `SlEvent(Event::ScriptPermissionState(…))`; `format.rs` gained the
+      `event_name` + `command_name` arms (`format_event` renders via the generic
+      `Debug` path, so no bespoke arm needed) and the REPL `CommandSpec`
+      `query_script_permissions` (no args). The compiler-forced exhaustive
+      matches were updated: the `sl-survey` `handle_event` ignore arm and the
+      three login/survey examples. One `lifecycle.rs` test
+      (`script_permission_state_bundles_grants_and_controls`) records a grant +
+      takes a control and asserts the snapshot reflects both stores and agrees
+      with the individual accessors. `SessionContext::apply_event` caching was
+      left out (the plan marked it optional; it has a `_` arm). Builds,
+      clippy-clean (restriction lints), `cargo test --workspace` green, fmt
+      clean. No deviations from the planned scope.
       - **sl-proto.** Add the public `ScriptPermissionState` struct (fields
       `grants: Vec<ScriptGrantInfo>` and `controls: ScriptControlsInfo`, as in
       the § API-surface & exposure reference; `ScriptGrantInfo` already carries
