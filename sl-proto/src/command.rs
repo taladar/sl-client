@@ -2179,6 +2179,29 @@ pub enum Command {
         /// Whether to enable (`true`) or disable (`false`) interpolation.
         enabled: bool,
     },
+    /// Request the agent's own account contact preferences (`UserInfoRequest`);
+    /// the reply arrives as [`Event::UserInfo`](crate::Event::UserInfo).
+    RequestUserInfo,
+    /// Update the agent's account contact preferences (`UpdateUserInfo`).
+    UpdateUserInfo {
+        /// Whether offline instant messages are forwarded to the agent's email.
+        im_via_email: bool,
+        /// The directory/search visibility setting (e.g. `"default"` or
+        /// `"hidden"`).
+        directory_visibility: String,
+    },
+    /// Trigger a one-shot spatial sound (`SoundTrigger`) at a region-local
+    /// position.
+    TriggerSound {
+        /// The sound asset to play.
+        sound: AssetKey,
+        /// The linear gain (volume), `0.0`..=`1.0`.
+        gain: f32,
+        /// The handle of the region the sound plays in.
+        region_handle: RegionHandle,
+        /// The region-local position to play the sound at.
+        position: RegionCoordinates,
+    },
     /// Begin a clean logout.
     Logout,
 }

@@ -272,6 +272,10 @@ use sl_wire::messages::{
     RequestTaskInventoryInventoryDataBlock, UpdateTaskInventory, UpdateTaskInventoryAgentDataBlock,
     UpdateTaskInventoryInventoryDataBlock, UpdateTaskInventoryUpdateDataBlock,
 };
+use sl_wire::messages::{
+    SoundTrigger, SoundTriggerSoundDataBlock, UpdateUserInfo, UpdateUserInfoAgentDataBlock,
+    UpdateUserInfoUserDataBlock, UserInfoRequest, UserInfoRequestAgentDataBlock,
+};
 use sl_wire::{
     AnyMessage, CircuitCode, PacketFlags, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber,
     WireError, Writer, encode_datagram,
@@ -3243,6 +3247,67 @@ impl Circuit {
             },
         });
         self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `UserInfoRequest` reliably (poll for the agent's own account
+    /// contact preferences; the reply arrives as `UserInfoReply`).
+    pub(crate) fn send_user_info_request(&mut self, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::UserInfoRequest(UserInfoRequest {
+            agent_data: UserInfoRequestAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `UpdateUserInfo` reliably: writes the agent's IM-via-email and
+    /// directory-visibility preferences. The email address itself is not
+    /// settable over this message (the wire block carries no email field).
+    pub(crate) fn send_update_user_info(
+        &mut self,
+        im_via_email: bool,
+        directory_visibility: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::UpdateUserInfo(UpdateUserInfo {
+            agent_data: UpdateUserInfoAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            user_data: UpdateUserInfoUserDataBlock {
+                im_via_e_mail: im_via_email,
+                directory_visibility: with_nul(directory_visibility),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `SoundTrigger` unreliably: plays a one-shot sound at `position`
+    /// (region-local to `handle`) with the given linear `gain`. The owner /
+    /// object / parent ids are left nil — the simulator fills them in for a
+    /// viewer-originated trigger. Sent unreliably, as the reference viewer does
+    /// (sound triggers are best-effort).
+    pub(crate) fn send_sound_trigger(
+        &mut self,
+        sound: AssetKey,
+        gain: f32,
+        handle: u64,
+        position: Vector,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::SoundTrigger(SoundTrigger {
+            sound_data: SoundTriggerSoundDataBlock {
+                sound_id: sound.uuid(),
+                owner_id: Uuid::nil(),
+                object_id: Uuid::nil(),
+                parent_id: Uuid::nil(),
+                handle,
+                position,
+                gain,
+            },
+        });
+        self.send(&message, Reliability::Unreliable, now)
     }
 
     /// Queues a `LogoutRequest` reliably.

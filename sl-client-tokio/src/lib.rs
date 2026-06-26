@@ -1516,6 +1516,15 @@ impl Client {
                         Some(Command::SetVelocityInterpolation { enabled }) => {
                             self.session.set_velocity_interpolation(enabled, Instant::now())?;
                         }
+                        Some(Command::RequestUserInfo) => {
+                            self.session.request_user_info(Instant::now())?;
+                        }
+                        Some(Command::UpdateUserInfo { im_via_email, directory_visibility }) => {
+                            self.session.update_user_info(im_via_email, &directory_visibility, Instant::now())?;
+                        }
+                        Some(Command::TriggerSound { sound, gain, region_handle, position }) => {
+                            self.session.trigger_sound(sound, gain, region_handle, position, Instant::now())?;
+                        }
                         Some(Command::Logout) | None => {
                             self.session.initiate_logout(Instant::now());
                         }

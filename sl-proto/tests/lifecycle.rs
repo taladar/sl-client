@@ -3440,6 +3440,66 @@ mod test {
     }
 
     #[test]
+    fn user_info_request_and_update_pack_prefs() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.request_user_info(now)?;
+        session.update_user_info(true, "hidden", now)?;
+        let sent = drain(&mut session)?;
+
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::UserInfoRequest(_))),
+            "expected a UserInfoRequest"
+        );
+        let update = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::UpdateUserInfo(u) => Some(u),
+                _ => None,
+            })
+            .ok_or("expected an UpdateUserInfo")?;
+        assert!(update.user_data.im_via_e_mail);
+        assert_eq!(trimmed(&update.user_data.directory_visibility), "hidden");
+        Ok(())
+    }
+
+    #[test]
+    fn trigger_sound_packs_asset_gain_handle_and_position() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let sound = uuid::Uuid::from_u128(0x5074_6e64);
+        session.trigger_sound(
+            AssetKey::from(sound),
+            0.5,
+            RegionHandle(1000),
+            region_coords(64.0, 96.0, 25.0),
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let trigger = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::SoundTrigger(t) => Some(t),
+                _ => None,
+            })
+            .ok_or("expected a SoundTrigger")?;
+        assert_eq!(trigger.sound_data.sound_id, sound);
+        assert_eq!(trigger.sound_data.gain.to_bits(), 0.5_f32.to_bits());
+        assert_eq!(trigger.sound_data.handle, 1000);
+        assert_eq!(trigger.sound_data.position.x.to_bits(), 64.0_f32.to_bits());
+        // The owner/object/parent ids are left nil for the simulator to fill in.
+        assert!(trigger.sound_data.owner_id.is_nil());
+        assert!(trigger.sound_data.object_id.is_nil());
+        assert!(trigger.sound_data.parent_id.is_nil());
+        Ok(())
+    }
+
+    #[test]
     fn update_group_roles_packs_role_data() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
