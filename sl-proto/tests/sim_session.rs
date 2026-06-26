@@ -25,11 +25,11 @@ mod test {
         ObjectKey, ObjectPropertiesFamily, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey,
         ParcelObjectOwner, ParcelReturnType, Permissions5, PingId, PlacesResult, PointAtType,
         Postcard, ProductType, QueryId, RegionCoordinates, RegionHandle, RegionIdentity,
-        RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment, SaleType,
-        ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ServerEvent, Session,
-        SimSession, TelehubInfo, TextureKey, Throttle, TransactionId, Transmit, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
-        parse_event_queue_response,
+        RegionLocalObjectId, RegionLocalParcelId, RegionStats, RestoreItem, RezAttachment,
+        SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ServerEvent,
+        Session, SimSession, SimStatId, SimulatorTime, TelehubInfo, TextureKey, Throttle,
+        TransactionId, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -2069,6 +2069,80 @@ mod test {
         assert_eq!(item.task_name, "busy script");
         assert_eq!(item.owner_name, "Test Resident");
         assert_eq!(item.score.to_bits(), 0.85_f32.to_bits());
+        Ok(())
+    }
+
+    #[test]
+    fn sim_stats_and_time_reach_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let stats = RegionStats {
+            grid_coordinates: GridCoordinates::new(1000, 1100),
+            region_flags: 0x0000_0001,
+            object_capacity: 15_000,
+            region_flags_extended: 0x0000_0001_0000_0002,
+            stats: vec![
+                (SimStatId::TimeDilation, 0.98),
+                (SimStatId::SimFps, 44.5),
+                (SimStatId::Agents, 7.0),
+            ],
+        };
+        let time = SimulatorTime {
+            usec_since_start: 1_700_000_000_000,
+            sec_per_day: 14_400,
+            sec_per_year: 5_256_000,
+            sun_direction: sl_types::lsl::Vector {
+                x: 0.0,
+                y: 0.5,
+                z: 0.866,
+            },
+            sun_phase: 1.25,
+            sun_ang_velocity: sl_types::lsl::Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0024,
+            },
+        };
+        sim.send_sim_stats(&stats, now)?;
+        sim.send_simulator_time(&time, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_client(&mut client);
+        let got_stats = events
+            .iter()
+            .find_map(|e| match e {
+                Event::SimStats(stats) => Some(stats.clone()),
+                _ => None,
+            })
+            .ok_or("expected a SimStats client event")?;
+        assert_eq!(got_stats.grid_coordinates, GridCoordinates::new(1000, 1100));
+        assert_eq!(got_stats.region_flags, 0x0000_0001);
+        assert_eq!(got_stats.object_capacity, 15_000);
+        assert_eq!(got_stats.region_flags_extended, 0x0000_0001_0000_0002);
+        assert_eq!(got_stats.stats.len(), 3);
+        assert_eq!(
+            got_stats.stats.first().map(|s| s.0),
+            Some(SimStatId::TimeDilation)
+        );
+        assert_eq!(
+            got_stats.stats.first().map(|s| s.1.to_bits()),
+            Some(0.98_f32.to_bits())
+        );
+
+        let got_time = events
+            .iter()
+            .find_map(|e| match e {
+                Event::SimulatorTime(time) => Some(time.clone()),
+                _ => None,
+            })
+            .ok_or("expected a SimulatorTime client event")?;
+        assert_eq!(got_time.usec_since_start, 1_700_000_000_000);
+        assert_eq!(got_time.sec_per_day, 14_400);
+        assert_eq!(got_time.sec_per_year, 5_256_000);
+        assert_eq!(got_time.sun_phase.to_bits(), 1.25_f32.to_bits());
+        assert_eq!(got_time.sun_direction.z.to_bits(), 0.866_f32.to_bits());
         Ok(())
     }
 
