@@ -1045,7 +1045,7 @@ events / REPL sub-bullets.
 
 ### Documentation status
 
-- [ ] New chapter — `comms/generic-messages.md` (generic message mechanism)
+- [x] New chapter — `comms/generic-messages.md` (generic message mechanism)
 - [ ] New chapter — `content/god-tools.md` (god/estate-admin surface)
 - [ ] Extend `comms/sessions.md` — session errors & forced disconnect
 - [ ] Extend region/telemetry & land/parcel chapters

@@ -12,6 +12,7 @@
 - [CAPS & the Event Queue](comms/caps.md)
 - [LLSD](comms/llsd.md)
 - [Messages & the Template](comms/messages.md)
+- [Generic Messages](comms/generic-messages.md)
 
 ## Content Layer
 
