@@ -23,6 +23,13 @@ The sound *asset* itself is fetched like any other asset (by UUID, over the
 asset [capabilities](../comms/caps.md)); these messages only say *what* to play,
 *where*, and *how loud*.
 
+The client can also **trigger** a one-shot sound itself:
+`Command::TriggerSound { sound, gain, region_handle, position }` plays a sound
+asset at a region-local position and linear `gain` (`0.0`..=`1.0`) — the
+viewer→sim counterpart of the inbound `Event::SoundTrigger`. The
+owner/object/parent ids are left for the simulator to fill, and (like the
+reference viewer) it is sent unreliably as best-effort.
+
 ## Streaming music
 
 Each [parcel](world.md#parcels) can advertise a **streaming audio URL** — an
@@ -74,6 +81,10 @@ the application supplies.
 > - Sound types/flags: `SoundFlags`, `SoundPreload` in
 >   `sl-proto/src/types/appearance.rs`; events `SoundTrigger`, `AttachedSound`,
 >   `AttachedSoundGainChange`, `PreloadSound` in `sl-proto/src/types/event.rs`.
+>   The outbound `Command::TriggerSound` (helper `Session::trigger_sound`,
+>   reusing typed `AssetKey` / `RegionHandle` / `RegionCoordinates`) decodes on
+>   the simulator side as `ServerEvent::TriggerSound`
+>   (`sl-proto/src/sim_session.rs`); REPL token `trigger_sound`.
 > - Media: `ParcelMediaUpdateInfo`, `ParcelMediaCommand` in
 >   `sl-proto/src/types/parcel.rs`; `MediaEntry` / `ObjectMediaResponse` in
 >   `sl-wire/src/llsd.rs`; CAPS driver `sl-client-tokio/src/media.rs`; example

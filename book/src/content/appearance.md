@@ -37,6 +37,12 @@ baked texture set and visual parameters); the client can also answer
 cached-texture queries (`Command::RequestCachedTextures` →
 `Event::CachedTextureResponse`) so unchanged bakes are not recomputed.
 
+If the simulator cannot find one of the agent's temporary baked textures, it
+pushes `Event::RebakeAvatarTextures { texture_id }` asking the viewer to
+regenerate that baked texture and upload it again. A baking client should
+re-bake the named texture; a headless bot with no appearance pipeline can
+ignore it.
+
 ## Animations
 
 Animations are assets the avatar plays. The client starts/stops them
@@ -105,7 +111,9 @@ parameter/value pairs) and releases it with `Event::ClearFollowCamProperties`.
 >   `RequestServerAppearanceUpdate`, `RequestCachedTextures`, `PlayAnimation`,
 >   `StopAnimation`, `SetAnimations`; events `AvatarAppearance`,
 >   `AgentWearables`, `ServerAppearanceUpdate`, `CachedTextureResponse`,
->   `AvatarAnimation`.
+>   `AvatarAnimation`, `RebakeAvatarTextures` (the missing-bake re-upload
+>   request; the sim-side inverse is
+>   `SimSession::send_rebake_avatar_textures`).
 > - Gestures: `Command::ActivateGestures` (with the `GestureActivation`
 >   item-id/asset-id pairs) and `Command::DeactivateGestures`
 >   (`Session::activate_gestures` / `deactivate_gestures`). A simulator sees
