@@ -94,6 +94,38 @@ so many chapters in the next part end with "…delivered via the event queue." A
 notable example: rich parcel data (`ParcelProperties`) arrives here rather than
 over UDP.
 
+### Recognised event-queue events
+
+Most event-queue events are the asynchronous half of a feature and are
+documented in that feature's chapter (`TeleportFinish` →
+[Teleport](../content/teleport.md), `ParcelProperties` →
+[3D World](../content/world.md), `EstablishAgentCommunication` →
+[Circuits](circuits.md), `ChatterBoxInvitation` →
+[Chat](../content/chat.md), `ObjectPhysicsProperties` →
+[Region](../content/region.md), …). Beyond those, the simulator pushes a
+handful of standalone notifications with no UDP equivalent. They are listed here
+together because they do not otherwise belong to a request/reply flow — so an
+unfamiliar `message` name is easy to place:
+
+| `message` | LLSD body | Decodes to | Grid |
+|-----------|-----------|------------|------|
+| `AgentStateUpdate` | `{ can_modify_navmesh: bool }` | `Event::AgentStateUpdate` | SL |
+| `NavMeshStatusUpdate` | `{ region_id: uuid, version: int, status: string }` | `Event::NavMeshStatus` | SL |
+| `AgentDropGroup` | `{ AgentData: [ { AgentID, GroupID } ] }` | `Event::AgentDroppedFromGroup` | both |
+| `DisplayNameUpdate` | `{ agent_id: uuid, old_display_name: string, agent: <name record> }` | `Event::DisplayNameUpdate` | SL |
+| `SetDisplayNameReply` | `{ status: int, reason: string, content: { display_name \| error_tag } }` | `Event::SetDisplayNameReply` | SL |
+| `WindLightRefresh` | `{ Interpolate: int(0/1) }` | `Event::WindLightRefresh` | OpenSim |
+| `SimConsoleResponse` | a bare LLSD **string** (the command output) | `Event::SimConsoleResponse` | OpenSim |
+| `RequiredVoiceVersion` | `{ major_version: int, region_name: string, voice_server_type?: string }` | `Event::RequiredVoiceVersion` | SL |
+| `OpenRegionInfo` | a map of optional OpenSim per-region settings (only overridden keys present) | `Event::OpenRegionInfo` | OpenSim |
+
+Two `message` names differ from their event: the wire `NavMeshStatusUpdate`
+becomes `Event::NavMeshStatus`, and `AgentDropGroup` becomes
+`Event::AgentDroppedFromGroup`. `SimConsoleResponse` is the lone event whose
+body is a bare LLSD scalar rather than a map. Each decoder lives in
+`sl-proto/src/session/conversions.rs` (`*_from_llsd`), and the simulator side
+has a matching `SimSession::enqueue_*` helper that builds the same body.
+
 Because the grid can deliver an event the client does not recognise, or a body
 that does not parse the way the client expects, the event-queue path also
 produces [diagnostics](sessions.md#diagnostics): an event whose `message` name
@@ -127,4 +159,13 @@ enabled.
 >   [diagnostic](sessions.md#diagnostics).
 > - The unknown-event and decode-failure [diagnostics](sessions.md#diagnostics)
 >   (`UnknownCapsEvent`, `CapsDecodeFailed`) are emitted from the event-queue
->   handling in `sl-proto/src/session.rs` (`handle_caps_event`).
+>   handling in `sl-proto/src/session.rs` (`handle_caps_event`), which
+>   dispatches each recognised `message` name to its typed `Event`.
+> - The standalone-notification decoders (`agent_state_update_from_llsd`,
+>   `nav_mesh_status_from_llsd`, `agent_drop_group_from_llsd`,
+>   `display_name_update_from_llsd`, `set_display_name_reply_from_llsd`,
+>   `windlight_refresh_from_llsd`, `sim_console_response_from_llsd`,
+>   `required_voice_version_from_llsd`, `open_region_info_from_llsd`) are in
+>   `sl-proto/src/session/conversions.rs`; the simulator-side inverses are the
+>   matching `SimSession::enqueue_*` helpers (`sl-proto/src/sim_session.rs`),
+>   each building the same LLSD body via `enqueue_caps_event`.
