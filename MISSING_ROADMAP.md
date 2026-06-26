@@ -935,7 +935,12 @@ the encoded buffer across, and assert the peer decodes the expected
   (send_remove_inventory_item / _folder / _objects, send_move_inventory_item,
   send_reply_task_inventory, send_user_info_reply, send_derez_ack,
   send_force_object_select, send_grant_godlike_powers)
-- [ ] Sim EQ batches 1–3 — typed CAPS event-queue enqueue helpers
+- [x] Sim EQ batches 1–3 — typed CAPS event-queue enqueue helpers
+  (enqueue_agent_state_update, enqueue_nav_mesh_status,
+  enqueue_agent_drop_group, enqueue_display_name_update,
+  enqueue_set_display_name_reply, enqueue_windlight_refresh,
+  enqueue_sim_console_response, enqueue_required_voice_version,
+  enqueue_open_region_info)
 - [ ] Sim out batch 1 — calling-card ServerEvents
 - [ ] Sim out batch 2 — object prim-editing ServerEvents
 - [ ] Sim out batch 3 — rez & script-permission ServerEvents

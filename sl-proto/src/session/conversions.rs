@@ -3064,6 +3064,166 @@ pub fn establish_agent_communication_to_llsd(sim: SocketAddr, seed: &str) -> Lls
     ])
 }
 
+/// Serializes the pathfinding `can_modify_navmesh` flag as a CAPS
+/// `AgentStateUpdate` event body (inverse of `agent_state_update_from_llsd`).
+#[must_use]
+pub fn agent_state_update_to_llsd(can_modify_navmesh: bool) -> Llsd {
+    llsd_map(vec![(
+        "can_modify_navmesh",
+        Llsd::Boolean(can_modify_navmesh),
+    )])
+}
+
+/// Serializes a [`NavMeshStatus`] as a CAPS `NavMeshStatusUpdate` event body
+/// (inverse of `nav_mesh_status_from_llsd`).
+#[must_use]
+pub fn nav_mesh_status_to_llsd(status: &NavMeshStatus) -> Llsd {
+    llsd_map(vec![
+        ("region_id", Llsd::Uuid(status.region_id)),
+        ("version", u32_to_llsd(status.version)),
+        ("status", Llsd::String(status.status.to_wire().to_owned())),
+    ])
+}
+
+/// Serializes the agent's own id and the dropped group's key as a CAPS
+/// `AgentDropGroup` event body (inverse of `agent_drop_group_from_llsd`). The
+/// echoed `AgentID` is the agent the simulator removed from `group`.
+#[must_use]
+pub fn agent_drop_group_to_llsd(agent_id: AgentKey, group: GroupKey) -> Llsd {
+    let entry = llsd_map(vec![
+        ("AgentID", Llsd::Uuid(agent_id.uuid())),
+        ("GroupID", Llsd::Uuid(group.uuid())),
+    ]);
+    llsd_map(vec![("AgentData", Llsd::Array(vec![entry]))])
+}
+
+/// Serializes a [`DisplayNameUpdate`] as a CAPS `DisplayNameUpdate` event body
+/// (inverse of `display_name_update_from_llsd`). The top-level `agent_id`
+/// echoes the record's own id, matching the reference viewer's
+/// `LLAvatarNameCache` push.
+#[must_use]
+pub fn display_name_update_to_llsd(update: &DisplayNameUpdate) -> Llsd {
+    llsd_map(vec![
+        ("agent_id", Llsd::Uuid(update.name.id.uuid())),
+        (
+            "old_display_name",
+            Llsd::String(update.old_display_name.clone()),
+        ),
+        ("agent", update.name.to_llsd()),
+    ])
+}
+
+/// Serializes a [`SetDisplayNameReply`] as a CAPS `SetDisplayNameReply` event
+/// body (inverse of `set_display_name_reply_from_llsd`). The `content` map
+/// carries the new name on success or the error tag on failure.
+#[must_use]
+pub fn set_display_name_reply_to_llsd(reply: &SetDisplayNameReply) -> Llsd {
+    let mut content = Vec::new();
+    if let Some(name) = &reply.new_display_name {
+        content.push(("display_name", Llsd::String(name.clone())));
+    }
+    if let Some(tag) = &reply.error_tag {
+        content.push(("error_tag", Llsd::String(tag.clone())));
+    }
+    llsd_map(vec![
+        ("status", Llsd::Integer(reply.status)),
+        ("reason", Llsd::String(reply.reason.clone())),
+        ("content", llsd_map(content)),
+    ])
+}
+
+/// Serializes the windlight-refresh interpolate flag as a CAPS `WindLightRefresh`
+/// event body (inverse of `windlight_refresh_from_llsd`).
+#[must_use]
+pub fn windlight_refresh_to_llsd(interpolate: bool) -> Llsd {
+    llsd_map(vec![("Interpolate", Llsd::Integer(i32::from(interpolate)))])
+}
+
+/// Serializes a region debug-console command's output as a CAPS
+/// `SimConsoleResponse` event body — a bare LLSD string, not a map (inverse of
+/// `sim_console_response_from_llsd`).
+#[must_use]
+pub fn sim_console_response_to_llsd(output: &str) -> Llsd {
+    Llsd::String(output.to_owned())
+}
+
+/// Serializes a [`RequiredVoiceVersion`] as a CAPS `RequiredVoiceVersion` event
+/// body (inverse of `required_voice_version_from_llsd`). `voice_server_type` is
+/// omitted when `None`, matching older grids.
+#[must_use]
+pub fn required_voice_version_to_llsd(version: &RequiredVoiceVersion) -> Llsd {
+    let mut entries = vec![
+        ("major_version", Llsd::Integer(version.major_version)),
+        ("region_name", Llsd::String(version.region_name.clone())),
+    ];
+    if let Some(server_type) = &version.voice_server_type {
+        entries.push(("voice_server_type", Llsd::String(server_type.clone())));
+    }
+    llsd_map(entries)
+}
+
+/// Serializes an [`OpenRegionInfo`] as a CAPS `OpenRegionInfo` event body
+/// (inverse of `open_region_info_from_llsd`). Only the `Some` fields are
+/// emitted, so an all-`None` value yields an empty map — the simulator sends
+/// just the keys it wants to override.
+#[must_use]
+pub fn open_region_info_to_llsd(info: &OpenRegionInfo) -> Llsd {
+    let mut entries: HashMap<String, Llsd> = HashMap::new();
+    let mut flag = |key: &str, value: Option<bool>| {
+        if let Some(value) = value {
+            let _previous = entries.insert(key.to_owned(), Llsd::Integer(i32::from(value)));
+        }
+    };
+    flag("AllowMinimap", info.allow_minimap);
+    flag("AllowPhysicalPrims", info.allow_physical_prims);
+    flag("ForceDrawDistance", info.force_draw_distance);
+    flag("OffsetOfUTCDST", info.offset_of_utc_dst);
+    flag("RenderWater", info.render_water);
+    flag("ToggleTeenMode", info.teen_mode);
+    flag("EnforceMaxBuild", info.enforce_max_build);
+    flag("AllowParcelWindLight", info.allow_parcel_windlight);
+    let mut real = |key: &str, value: Option<f32>| {
+        if let Some(value) = value {
+            let _previous = entries.insert(key.to_owned(), Llsd::Real(f64::from(value)));
+        }
+    };
+    real("DrawDistance", info.draw_distance);
+    real("TerrainDetailScale", info.terrain_detail_scale);
+    real("MaxDragDistance", info.max_drag_distance);
+    real("MinHoleSize", info.min_hole_size);
+    real("MaxHollowSize", info.max_hollow_size);
+    real("MaxPrimScale", info.max_prim_scale);
+    real("MaxPhysPrimScale", info.max_phys_prim_scale);
+    real("MinPrimScale", info.min_prim_scale);
+    real("SayDistance", info.say_distance);
+    real("ShoutDistance", info.shout_distance);
+    real("WhisperDistance", info.whisper_distance);
+    let mut int = |key: &str, value: Option<i32>| {
+        if let Some(value) = value {
+            let _previous = entries.insert(key.to_owned(), Llsd::Integer(value));
+        }
+    };
+    int(
+        "MaxInventoryItemsTransfer",
+        info.max_inventory_items_transfer,
+    );
+    int("MaxLinkCount", info.max_link_count);
+    int("MaxLinkCountPhys", info.max_link_count_phys);
+    int("OffsetOfUTC", info.offset_of_utc);
+    int("ShowTags", info.show_tags);
+    int("MaxGroups", info.max_groups);
+    let mut position = |prefix: &str, value: Option<RegionCoordinates>| {
+        if let Some(value) = value {
+            let _x = entries.insert(format!("{prefix}X"), Llsd::Real(f64::from(value.x())));
+            let _y = entries.insert(format!("{prefix}Y"), Llsd::Real(f64::from(value.y())));
+            let _z = entries.insert(format!("{prefix}Z"), Llsd::Real(f64::from(value.z())));
+        }
+    };
+    position("MaxPos", info.max_position);
+    position("MinPos", info.min_position);
+    Llsd::Map(entries)
+}
+
 /// Serializes an [`Event::ServerAppearanceUpdate`] as an `UpdateAvatarAppearance`
 /// capability reply body (inverse of `server_appearance_update_from_llsd`).
 #[must_use]

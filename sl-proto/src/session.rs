@@ -918,10 +918,14 @@ mod methods;
 
 pub(crate) use conversions::{ZERO_VECTOR, instant_message, region_handshake_message};
 pub use conversions::{
-    ais_inventory_update_to_llsd, build_map_block_reply, build_map_item_reply,
-    build_map_layer_reply, bulk_update_inventory_to_llsd, chatterbox_invitation_to_llsd,
-    created_category_to_llsd, crossed_region_to_caps_llsd, enable_simulator_to_caps_llsd,
+    agent_drop_group_to_llsd, agent_state_update_to_llsd, ais_inventory_update_to_llsd,
+    build_map_block_reply, build_map_item_reply, build_map_layer_reply,
+    bulk_update_inventory_to_llsd, chatterbox_invitation_to_llsd, created_category_to_llsd,
+    crossed_region_to_caps_llsd, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
     environment_to_llsd, establish_agent_communication_to_llsd, group_members_to_caps_llsd,
-    group_memberships_to_caps_llsd, inventory_descendents_to_llsd, offline_messages_to_llsd,
-    parcel_info_to_llsd, server_appearance_update_to_llsd, teleport_finish_to_llsd,
+    group_memberships_to_caps_llsd, inventory_descendents_to_llsd, nav_mesh_status_to_llsd,
+    offline_messages_to_llsd, open_region_info_to_llsd, parcel_info_to_llsd,
+    required_voice_version_to_llsd, server_appearance_update_to_llsd,
+    set_display_name_reply_to_llsd, sim_console_response_to_llsd, teleport_finish_to_llsd,
+    windlight_refresh_to_llsd,
 };
