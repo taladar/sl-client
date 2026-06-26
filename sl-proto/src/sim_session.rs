@@ -159,8 +159,8 @@ use crate::types::{
     ParcelObjectOwner, PlacesResult, Postcard, PrimShapeParams, ProposalVoteId, RegionIdentity,
     RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
     RezScriptParams, SaleType, ScriptControl, ScriptPermissions, ServerError, SetDisplayNameReply,
-    SimulatorTime, TaskInventoryReply, TelehubInfo, TextureEntry, Throttle, Transmit, UserInfo,
-    ViewerEffect, ViewerEffectData, ViewerEffectType,
+    SimulatorTime, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TextureEntry, Throttle,
+    Transmit, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
 
@@ -1029,6 +1029,45 @@ pub enum ServerEvent {
     /// [`Session::detach_attachment_into_inventory`](crate::Session::detach_attachment_into_inventory).
     DetachAttachmentIntoInventory {
         /// The inventory item id of the worn attachment being detached.
+        item_id: InventoryKey,
+    },
+    /// The client asked for the task (object) inventory listing of an in-world
+    /// object (`RequestTaskInventory`). The inverse of the client's
+    /// [`Session::request_task_inventory`](crate::Session::request_task_inventory);
+    /// a simulator answers with a `ReplyTaskInventory`.
+    RequestTaskInventory {
+        /// The region-local id of the object whose task inventory is requested.
+        local_id: RegionLocalObjectId,
+    },
+    /// The client wrote an inventory item into an in-world object's task
+    /// inventory (`UpdateTaskInventory`). The inverse of the client's
+    /// [`Session::update_task_inventory`](crate::Session::update_task_inventory).
+    UpdateTaskInventory {
+        /// The region-local id of the object whose task inventory is written.
+        local_id: RegionLocalObjectId,
+        /// Whether the simulator matches the existing item by item id or asset id.
+        key: TaskInventoryKey,
+        /// The full inventory item being written.
+        item: RestoreItem,
+    },
+    /// The client moved a task inventory item out of an in-world object into an
+    /// agent inventory folder (`MoveTaskInventory`). The inverse of the client's
+    /// [`Session::move_task_inventory`](crate::Session::move_task_inventory).
+    MoveTaskInventory {
+        /// The region-local id of the object the item is moved out of.
+        local_id: RegionLocalObjectId,
+        /// The agent inventory folder the item is moved into.
+        folder_id: InventoryFolderKey,
+        /// The inventory item id being moved.
+        item_id: InventoryKey,
+    },
+    /// The client removed a task inventory item from an in-world object
+    /// (`RemoveTaskInventory`). The inverse of the client's
+    /// [`Session::remove_task_inventory`](crate::Session::remove_task_inventory).
+    RemoveTaskInventory {
+        /// The region-local id of the object the item is removed from.
+        local_id: RegionLocalObjectId,
+        /// The inventory item id being removed.
         item_id: InventoryKey,
     },
     /// Any other decoded client message, surfaced verbatim. This is how the
@@ -4468,6 +4507,31 @@ impl SimSession {
                     .push_back(ServerEvent::DetachAttachmentIntoInventory {
                         item_id: InventoryKey::from(detach.object_data.item_id),
                     });
+            }
+            AnyMessage::RequestTaskInventory(request) => {
+                self.events.push_back(ServerEvent::RequestTaskInventory {
+                    local_id: RegionLocalObjectId(request.inventory_data.local_id),
+                });
+            }
+            AnyMessage::UpdateTaskInventory(update) => {
+                self.events.push_back(ServerEvent::UpdateTaskInventory {
+                    local_id: RegionLocalObjectId(update.update_data.local_id),
+                    key: TaskInventoryKey::from_code(update.update_data.key),
+                    item: restore_item_from_inventory_block!(&update.inventory_data),
+                });
+            }
+            AnyMessage::MoveTaskInventory(move_item) => {
+                self.events.push_back(ServerEvent::MoveTaskInventory {
+                    local_id: RegionLocalObjectId(move_item.inventory_data.local_id),
+                    folder_id: InventoryFolderKey::from(move_item.agent_data.folder_id),
+                    item_id: InventoryKey::from(move_item.inventory_data.item_id),
+                });
+            }
+            AnyMessage::RemoveTaskInventory(remove) => {
+                self.events.push_back(ServerEvent::RemoveTaskInventory {
+                    local_id: RegionLocalObjectId(remove.inventory_data.local_id),
+                    item_id: InventoryKey::from(remove.inventory_data.item_id),
+                });
             }
             AnyMessage::LogoutRequest(_) => {
                 self.send_logout_reply(now)?;

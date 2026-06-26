@@ -949,7 +949,8 @@ the encoded buffer across, and assert the peer decodes the expected
   (RezObjectFromInventory, RezScript, RevokeScriptPermissions,
   DetachAttachmentIntoInventory; new `restore_item_from_inventory_block!` macro
   shared with the existing `RezRestoreToWorld` decode)
-- [ ] Sim out batch 4 — task-inventory ServerEvents
+- [x] Sim out batch 4 — task-inventory ServerEvents (RequestTaskInventory,
+      UpdateTaskInventory, MoveTaskInventory, RemoveTaskInventory)
 - [ ] Sim out batch 5 — land & parcel ServerEvents
 - [ ] Sim out batch 6 — inventory link & group-info ServerEvents
 - [ ] Sim out batch 7 — teleport & agent-prefs ServerEvents
