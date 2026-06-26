@@ -162,6 +162,7 @@ impl Session {
             terrain: BTreeMap::new(),
             regions: BTreeMap::new(),
             time_dilation: BTreeMap::new(),
+            own_avatar: BTreeMap::new(),
             inventory_folders: BTreeMap::new(),
             inventory_items: BTreeMap::new(),
             next_inventory_callback: InventoryCallbackId(1),
@@ -1381,6 +1382,16 @@ impl Session {
         if object.region_handle != RegionHandle(0) {
             self.regions.insert(circuit_id, object.region_handle);
         }
+        // Record our own avatar's region-local id the first time its object is
+        // seen on this circuit, so attachments (objects parented to it) can later
+        // be recognised when classifying script-permission holders.
+        if object.pcode == crate::types::pcode::AVATAR
+            && self
+                .agent_id()
+                .is_some_and(|agent| agent.uuid() == object.full_id.uuid())
+        {
+            self.note_own_avatar(circuit_id, object.local_id);
+        }
         let sim = self.objects.entry(circuit_id).or_default();
         match sim.get(&object.local_id) {
             Some(existing) => {
@@ -1396,6 +1407,29 @@ impl Session {
                 self.events.push_back(Event::ObjectAdded(Box::new(object)));
             }
         }
+    }
+
+    /// Records the agent's own avatar region-local id for circuit `circuit_id`
+    /// the first time it is observed (set-once): a region-local id is stable for
+    /// the life of a circuit, so a later observation never overwrites it. Fed by
+    /// the object-update path ([`Session::upsert_object`]) and the
+    /// `AgentMovementComplete` backstop.
+    fn note_own_avatar(&mut self, circuit_id: CircuitId, local_id: RegionLocalObjectId) {
+        self.own_avatar.entry(circuit_id).or_insert(local_id);
+    }
+
+    /// Scans circuit `circuit_id`'s object cache for the agent's own avatar
+    /// object — an avatar (`pcode::AVATAR`) whose `full_id` is the agent's id —
+    /// returning its region-local id if present. Used by the
+    /// `AgentMovementComplete` backstop, which carries no region-local id of its
+    /// own, to learn the own-avatar id from an avatar object that was cached
+    /// before the slot could be filled.
+    fn cached_own_avatar_local_id(&self, circuit_id: CircuitId) -> Option<RegionLocalObjectId> {
+        let agent = self.agent_id()?;
+        self.objects.get(&circuit_id)?.values().find_map(|object| {
+            (object.pcode == crate::types::pcode::AVATAR && object.full_id.uuid() == agent.uuid())
+                .then_some(object.local_id)
+        })
     }
 
     /// Applies a terse update to an object already cached for simulator `from`,
@@ -1513,15 +1547,34 @@ impl Session {
         self.circuit.as_ref().map(|circuit| circuit.id)
     }
 
+    /// The agent's **own** avatar object on the current root circuit, as a
+    /// [`ScopedObjectId`], once that avatar's object has been observed (its
+    /// `ObjectUpdate` cached, or read back at `AgentMovementComplete`); `None`
+    /// before then or when not logged in.
+    ///
+    /// The region-local id is learned per circuit and is stable for the life of
+    /// that circuit (a fresh one is assigned in each region). The session uses it
+    /// internally to recognise the agent's own attachments — objects parented to
+    /// this avatar — when classifying script-permission holders; a driver may
+    /// also pair it with the region's circuit to act on its own avatar object.
+    #[must_use]
+    pub fn own_avatar_id(&self) -> Option<ScopedObjectId> {
+        let circuit = self.circuit.as_ref()?;
+        self.own_avatar
+            .get(&circuit.id)
+            .map(|&local_id| ScopedObjectId::new(circuit.id, local_id))
+    }
+
     /// Drops every cached object for the circuit instance `circuit_id` (it has
     /// gone away), emitting an [`Event::ObjectRemoved`] for each so consumers
     /// can prune.
     fn forget_sim_objects(&mut self, circuit_id: CircuitId) {
-        // The terrain, region-handle, and time-dilation caches for this circuit
-        // go stale too.
+        // The terrain, region-handle, time-dilation, and own-avatar caches for
+        // this circuit go stale too.
         self.terrain.remove(&circuit_id);
         self.regions.remove(&circuit_id);
         self.time_dilation.remove(&circuit_id);
+        self.own_avatar.remove(&circuit_id);
         let Some(sim) = self.objects.remove(&circuit_id) else {
             return;
         };
@@ -1568,6 +1621,14 @@ impl Session {
                 // and confirms with AgentMovementComplete; it may not re-send a
                 // RegionHandshake, so complete the arrival here too (idempotent).
                 self.complete_arrival(now);
+                // Backstop the own-avatar id for attachment detection: the
+                // message carries no region-local id, so read it from our own
+                // avatar object if it was already cached on this circuit.
+                if let Some(circuit_id) = self.circuit_id_for(from)
+                    && let Some(local_id) = self.cached_own_avatar_local_id(circuit_id)
+                {
+                    self.note_own_avatar(circuit_id, local_id);
+                }
             }
             AnyMessage::RegionInfo(info) => {
                 self.events
