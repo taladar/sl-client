@@ -955,7 +955,11 @@ the encoded buffer across, and assert the peer decodes the expected
   UndoLand, RequestParcelPropertiesById -> RegionLocalParcelId + sequence_id,
   SetParcelOtherCleanTime -> RegionLocalParcelId + Duration; new LandBrushSize
   from_metres/from_index and LandBrushAction::from_code decoders)
-- [ ] Sim out batch 6 — inventory link & group-info ServerEvents
+- [x] Sim out batch 6 — inventory link & group-info ServerEvents
+  (LinkInventoryItem -> NewInventoryLink + callback_id, item/folder selected by
+  the AT_LINK_FOLDER (25) AssetType byte; UpdateGroupInfo ->
+  UpdateGroupInfoParams with nil-insignia -> None and linden_from_wire fee;
+  GroupTitleUpdate -> GroupKey + GroupRoleKey)
 - [ ] Sim out batch 7 — teleport & agent-prefs ServerEvents
 - [ ] Sim out batch 8 — user-info & sound ServerEvents
 - [ ] Sim out batch 9 — god region/estate-admin ServerEvents
