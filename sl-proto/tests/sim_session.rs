@@ -1942,6 +1942,40 @@ mod test {
     }
 
     #[test]
+    fn taken_controls_tracker_folds_sim_control_change() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        // Sim -> client: a script takes a control (consumed), then releases it.
+        // The client's taken-controls tracker folds the real server-built block.
+        sim.send_script_control_change(
+            &[ScriptControl {
+                action: ScriptControlAction::Take,
+                controls: ControlFlags::AT_POS,
+                pass_to_agent: false,
+            }],
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        drain_client(&mut client);
+        assert_eq!(client.script_controls().taken, ControlFlags::AT_POS);
+
+        sim.send_script_control_change(
+            &[ScriptControl {
+                action: ScriptControlAction::Release,
+                controls: ControlFlags::AT_POS,
+                pass_to_agent: false,
+            }],
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        drain_client(&mut client);
+        assert_eq!(client.script_controls().taken, ControlFlags::empty());
+        Ok(())
+    }
+
+    #[test]
     fn alerts_collisions_health_camera_frozen_reach_client() -> Result<(), TestError> {
         let now = Instant::now();
         let (mut client, mut sim) = setup(now)?;

@@ -36,7 +36,7 @@ use super::{
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, Circuit, DEFAULT_DRAW_DISTANCE,
     GrantStatus, HolderKind, IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG,
     LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, ScriptGrant,
-    ScriptHolder, Session, SessionState, SitState, TELEPORT_TIMEOUT, TeleportPhase,
+    ScriptHolder, Session, SessionState, SitState, TELEPORT_TIMEOUT, TakenControls, TeleportPhase,
     TextureDownload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
@@ -69,9 +69,9 @@ use crate::types::{
     ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
     PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
     RegionInfoUpdate, RegionStats, Reliability, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptGrantInfo,
-    ScriptPermissionStatus, ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId,
-    SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot,
+    RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo,
+    ScriptGrantInfo, ScriptPermissionStatus, ScriptPermissions, ScriptTeleportRequest, ServerError,
+    SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot,
     TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType,
     TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams,
     UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
@@ -128,6 +128,22 @@ fn split_scoped_object_ids(
     Ok(Some((circuit, ids)))
 }
 
+/// Yields each set bit of `controls` as its own single-bit mask (e.g. `0b1010`
+/// yields `0b10` then `0b1000`), low bit first. Used to fold a control bitfield
+/// into the per-bit taken-controls counts without raw indexing (clippy-clean),
+/// replacing the viewer's `for i in 0..TOTAL_CONTROLS { if controls & (1<<i) }`.
+fn iter_bits(controls: ControlFlags) -> impl Iterator<Item = u32> {
+    let mut remaining = controls.bits();
+    core::iter::from_fn(move || {
+        if remaining == 0 {
+            return None;
+        }
+        let bit = remaining & remaining.wrapping_neg();
+        remaining &= !bit;
+        Some(bit)
+    })
+}
+
 impl Session {
     /// Creates a new session for the given login parameters.
     #[must_use]
@@ -148,6 +164,10 @@ impl Session {
             sit: SitState::NotSitting,
             teleport: TeleportPhase::Idle,
             script_grants: BTreeMap::new(),
+            taken_controls: TakenControls {
+                consumed: BTreeMap::new(),
+                passed_on: BTreeMap::new(),
+            },
             seed_capability: None,
             inventory_root: None,
             login_account: None,
@@ -1491,6 +1511,42 @@ impl Session {
     fn drop_inworld_grants(&mut self) {
         self.script_grants
             .retain(|_, grant| matches!(grant.kind, HolderKind::Attachment));
+    }
+
+    /// Folds one `ScriptControlChange` block into the session-global
+    /// taken-controls tracker: a [`ScriptControlAction::Take`] increments each
+    /// named control bit's count, a [`ScriptControlAction::Release`] saturating-
+    /// decrements it (the key removed at zero). The `pass_to_agent` flag selects
+    /// the map, mirroring the viewer's two counts. A release for an untracked bit
+    /// is a no-op (never goes negative). Touches no grant — "permission granted"
+    /// (the registry) and "controls currently taken" stay separate concerns.
+    fn note_taken_controls(
+        &mut self,
+        action: ScriptControlAction,
+        controls: ControlFlags,
+        pass_to_agent: bool,
+    ) {
+        let counts = if pass_to_agent {
+            &mut self.taken_controls.passed_on
+        } else {
+            &mut self.taken_controls.consumed
+        };
+        for bit in iter_bits(controls) {
+            match action {
+                ScriptControlAction::Take => {
+                    let count = counts.entry(bit).or_insert(0);
+                    *count = count.saturating_add(1);
+                }
+                ScriptControlAction::Release => {
+                    if let Some(count) = counts.get_mut(&bit) {
+                        *count = count.saturating_sub(1);
+                        if *count == 0 {
+                            counts.remove(&bit);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Applies a terse update to an object already cached for simulator `from`,
@@ -3165,6 +3221,17 @@ impl Session {
                     )));
             }
             AnyMessage::ScriptControlChange(change) => {
+                // Fold every block into the session-global taken-controls tracker
+                // before surfacing the event (the driver still routes the actual
+                // inputs from the unchanged event). A take/release pair can arrive
+                // in one message; they are applied in order.
+                for block in &change.data {
+                    self.note_taken_controls(
+                        ScriptControlAction::from_take_controls(block.take_controls),
+                        ControlFlags::from_bits(block.controls),
+                        block.pass_to_agent,
+                    );
+                }
                 let controls = change
                     .data
                     .iter()
@@ -4872,6 +4939,14 @@ impl Session {
     pub fn release_script_controls(&mut self, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_force_script_control_release(now)?;
+        // Clear the taken-controls mirror to empty on send, not on the echo:
+        // OpenSim's echo is `Controls = 0xFFFFFFFF, PassToAgent = false`, which
+        // would decrement only `consumed` and leak the `passed_on` counts. The
+        // later echo's clamped decrement from an already-empty map is a harmless
+        // no-op. The `TAKE_CONTROLS` *grant* persists (a script may re-take), so
+        // `script_grants` is untouched.
+        self.taken_controls.consumed.clear();
+        self.taken_controls.passed_on.clear();
         Ok(())
     }
 
@@ -5608,6 +5683,28 @@ impl Session {
                 is_attachment: matches!(grant.kind, HolderKind::Attachment),
                 experience_id: grant.experience_id,
             })
+    }
+
+    /// Returns which movement controls scripts are currently holding, split by
+    /// `PassToAgent` (see [`ScriptControlsInfo`]).
+    ///
+    /// The session tracks this from the inbound `ScriptControlChange` (a
+    /// `llTakeControls` adds, a `llReleaseControls` removes) and clears it on
+    /// [`Session::release_script_controls`]. It is **not** reset on a region
+    /// change — controls are agent-global and the viewer keeps them across a
+    /// teleport. The simulator stays authoritative; this is an API-convenience
+    /// mirror.
+    #[must_use]
+    pub fn script_controls(&self) -> ScriptControlsInfo {
+        let union = |counts: &BTreeMap<u32, u32>| {
+            counts.keys().fold(ControlFlags::empty(), |acc, &bit| {
+                acc | ControlFlags::from_bits(bit)
+            })
+        };
+        ScriptControlsInfo {
+            taken: union(&self.taken_controls.consumed),
+            passed_to_agent: union(&self.taken_controls.passed_on),
+        }
     }
 
     /// Requests the agent's mute (block) list (`MuteListRequest` with a zero
