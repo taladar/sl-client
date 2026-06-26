@@ -135,12 +135,19 @@ Scope reminders:
   "drop `other`"). `online` is the **sole** truth — `OnlineNotification`
   inserts, `OfflineNotification` removes, termination removes — and is **never**
   touched by any IM handler (the invariant that dodges the
-  "IM-after-offline → falsely online" bug). The two stores are kept
-  **independent** (no cross-population), so a friendship *added mid-session*
-  reconciles only at relogin's buddy list — an accepted in-memory-mirror limit
-  (avoids offer-tracking). `is_online` = "known-online via a notification";
-  absence ≠ provably offline (a friend who does not grant `CAN_SEE_ONLINE` never
-  notifies). Accessors return the public `Friend` (already `Copy`) directly.
+  "IM-after-offline → falsely online" bug). The stores stay **independent** in
+  the presence sense (`online` is never inferred from `friends` or IM traffic),
+  **but `friends` is maintained live** — a friendship *formed mid-session* is
+  added the moment it forms, **not** deferred to relogin (the 2026-06-27
+  revision): the inbound `FriendshipAccepted` IM carries the new friend's
+  `from_agent_id` (they accepted our offer), and `accept_friendship` gains a
+  `friend_id: FriendKey` arg so the accepter side records it too — both insert a
+  `Friend` with the grid-default rights `CAN_SEE_ONLINE` in **both** directions
+  (grounded in OpenSim `StoreFriendships`; SL matches), reconciled by any later
+  `ChangeUserRights`. `FriendshipTerminated` drops the friend from both stores.
+  `is_online` = "known-online via a notification"; absence ≠ provably offline (a
+  friend who does not grant `CAN_SEE_ONLINE` never notifies). Accessors return
+  the public `Friend` (already `Copy`) directly.
 - [x] **A4. Design the session lifecycle (open / join / send / leave / close).**
   1:1 implicit on the first message; group via `start_group_session` (decide
   whether an inbound group message also opens/tracks it); conference via
@@ -580,13 +587,48 @@ accessors:
   truth. A friend is "online" **iff** present in this set.
 
 **The two stores are independent** — `online` is *not* a subset view of
-`friends` and neither cross-populates the other. This is a deliberate
-simplification: it removes any need to track pending friendship offers (an
-accepted offer's new `FriendKey` is not reliably known at the
-`accept_friendship` method boundary), at the cost that a friendship **added
-mid-session** is absent from `friends` until the next login's buddy list seeds
-it afresh. For an in-memory mirror that is fine; presence for such a friend
-still tracks correctly in `online`.
+`friends` and neither cross-populates the other: presence is never inferred from
+the buddy cache, and (the invariant below) the buddy cache / IM traffic is never
+a presence signal. Independence is about *presence inference only* — it does
+**not** mean the buddy cache is static. `friends` is kept **live** (next
+subsection): a friendship formed mid-session is added when it forms.
+
+**Live friendship additions & removals (the 2026-06-27 revision).** The buddy
+cache must reflect a friendship the moment it forms — **never** wait for next
+login's `FriendList`. Grounded in OpenSim's accept flow
+(`FriendsModule.AddFriendship` / `StoreFriendships`), the two directions:
+
+- **They accepted *our* offer.** We (the original offerer) receive a
+  `FriendshipAccepted` IM (`ImDialog::FriendshipAccepted`, surfaced as
+  `Event::InstantMessageReceived`) whose **`from_agent_id` is the new friend**.
+  The inbound IM handler, on that dialog, inserts the friend into `friends`. No
+  API change — the id is on the wire.
+- **We accepted *their* offer.** The local `accept_friendship(transaction_id,
+  calling_card_folder, now)` call carries **no** friend id (only the offer's
+  `transaction_id`), and the accepter receives **no** `FriendshipAccepted` IM
+  (OpenSim sends it only to the offerer) — just an `OnlineNotification`, not
+  a "new friend" signal (it cannot be distinguished from an existing friend
+  coming online, and presence must not feed the cache). So **`accept_friendship`
+  gains a `friend_id: FriendKey` parameter** (and `Command::AcceptFriendship`
+  gains the same field), and on accept the session inserts the friend. This is
+  the **command-boundary** idiom the PERMISSION roadmap set (its `experience_id`
+  on `AnswerScriptPermissions`): pass the datum the driver already holds — the
+  offerer's id from the `FriendshipOffered` IM it is answering — through the
+  command rather than tracking pending offers in the session.
+- **Default rights on a fresh friendship.** OpenSim `StoreFriendships` writes
+  `FriendRights.CanSeeOnline` for **both** directions and pushes **no**
+  `ChangeUserRights` afterwards (verified — clients learn initial rights only
+  from this default or the next buddy list). So a live-added `Friend` seeds
+  `rights_granted = rights_received = FriendRights::CAN_SEE_ONLINE`; any later
+  `ChangeUserRights` corrects a divergence. (SL's default matches —
+  see-online is the standard new-friendship grant.)
+- **Removal stays symmetric** — `FriendshipTerminated` (and our own
+  `terminate_friendship`) drop the friend from **both** stores. With live
+  add *and* live remove, `friends` tracks the true buddy list for the whole
+  session, not just a login snapshot.
+
+`from_agent_id` is an `AgentKey`; the cache keys on `FriendKey` — both wrap the
+same `Key`/`Uuid`, so the insert converts via that shared id.
 
 **Seeding & updates** (each hooks an *existing* handler, recording alongside
 the event it already emits — the inbound event surface is unchanged):
@@ -594,6 +636,8 @@ the event it already emits — the inbound event surface is unchanged):
 | Signal | Site | Effect |
 |--------|------|--------|
 | `FriendList` (login buddy list) | build site `methods.rs:1078` | `friends` ← the `Vec<Friend>` (same `friend()`-mapped data the event carries); `online` starts **empty** |
+| `FriendshipAccepted` IM (they accepted our offer) | IM dispatch (`ImDialog::FriendshipAccepted`) | insert `from_agent_id` into `friends`, default `CAN_SEE_ONLINE` both ways |
+| `accept_friendship(friend_id, …)` (we accepted their offer) | the method (new `friend_id` arg) | insert `friend_id` into `friends`, default `CAN_SEE_ONLINE` both ways |
 | `OnlineNotification` | `methods.rs:3504` | insert each `FriendKey` into `online` |
 | `OfflineNotification` | `methods.rs:3514` | remove each `FriendKey` from `online` |
 | `ChangeUserRights` | `methods.rs:3524` | mutate the cached `Friend`'s rights (see below) |
@@ -607,9 +651,10 @@ the event it already emits — the inbound event surface is unchanged):
   granted_to_us }`. Map by direction onto the cached `Friend`: `granted_to_us ==
   true` updates `rights_received` (the rights the *friend* grants us);
   `granted_to_us == false` updates `rights_granted` (the echo of our own
-  `grant_user_rights`). If `friend_id` is **absent** from `friends` (the
-  mid-session-add edge), **ignore** it — relogin reconciles; we do
-  not synthesise a half-known entry.
+  `grant_user_rights`). If `friend_id` is **absent** from `friends` (a rare race
+  — a rights change racing ahead of the friendship-add signal), **ignore** it
+  rather than synthesise a half-known entry; the friendship-add path seeds the
+  full `Friend`, and a real rights change always follows an existing friendship.
 - **`TerminateFriendship` →** `Event::FriendshipTerminated { other }` whose own
   doc says a buddy mirror "should drop `other`"; drop it from both stores so
   a former friend can never linger as online or in the roster.
@@ -655,8 +700,9 @@ shapes are confirmed in A10; A3 fixes the four listed in the task.
 
 ### B3. Friend-presence cache (buddy list + online set) (from A3)
 
-Add the two presence stores and wire them into the existing handlers, with
-no new event/command:
+Add the two presence stores and wire them into the existing handlers, plus the
+live friendship-add paths. The only API change is one new field on
+`accept_friendship` / `Command::AcceptFriendship`; no new event:
 
 - Add `friends: BTreeMap<FriendKey, Friend>` + `online: BTreeSet<FriendKey>` to
   `Session` (`session.rs`), beside `chat_sessions` / `sit` / `teleport`.
@@ -667,15 +713,27 @@ no new event/command:
   (`:3514`) removes; `ChangeUserRights` (`:3524`) updates the cached `Friend`'s
   rights by `granted_to_us` (ignore if absent); `TerminateFriendship` (`:2586`)
   removes from both stores.
+- **Live friendship add (both directions):** in the inbound IM dispatch, on
+  `ImDialog::FriendshipAccepted`, insert `from_agent_id` into `friends` with
+  default `CAN_SEE_ONLINE` both ways (still emit `InstantMessageReceived` —
+  surface unchanged); and **add a `friend_id: FriendKey` field** to
+  `Command::AcceptFriendship` + a param to `accept_friendship`, inserting
+  the friend on accept with the same default. Wire the new command field through
+  `sl-client-tokio` / `sl-client-bevy` / the REPL at parity (the driver fills it
+  from the `FriendshipOffered` IM it is answering).
 - Accessors `friends()` / `friend(id)` / `is_online(id)` / `online_friends()`
   returning the public `Friend` / `bool` / `FriendKey`.
 - **Invariant:** no IM / chat-session path mutates `online` — assert this in
   a test (deliver an IM after an `OfflineNotification`; the peer stays offline).
-- **No** A7 chat-reset here (that is B-task A7), **no** persistence/close hook
-  (A9), **no** mid-session friendship *add* synthesis (reconciles at relogin).
+  (The `FriendshipAccepted` add touches `friends`, never `online` — presence for
+  the new friend still arrives via its own `OnlineNotification`.)
+- **No** A7 chat-reset here (B-task A7) and **no** persistence/close hook
+  (A9).
 - Unit tests: `FriendList` seeds the cache (and `online` empty); online/offline
   insert/remove; rights change in each direction mutates the right field; an
   unknown-friend rights change ignored; `TerminateFriendship` drops from both;
+  **a `FriendshipAccepted` IM adds the friend (default rights), and
+  `accept_friendship(friend_id, …)` adds the friend** — both live, no relogin;
   the IM-after-offline invariant above.
 
 This task stays **drafted/blocked** until Phase A is signed off; independent
