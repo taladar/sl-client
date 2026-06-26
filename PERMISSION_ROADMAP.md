@@ -276,12 +276,14 @@ produces are appended to **Phase B** below as that item is worked.
 
 Each Phase A item, while it was worked, appended the concrete implementation
 tasks it implied here (tagged with the producing item) as a first draft. With
-Phase A complete, that draft was **consolidated** into the five tasks below —
-see § Phase B consolidation for the old→new mapping and the runtime-match
-findings that drove it. The **references** (`### Classification reference`
-… below) are unchanged knowledge; only the task list was reordered/merged. These
-are *not* started until § Open questions are signed off; tick a box only when
-the step builds, is clippy-clean (restriction lints), and `cargo test` passes.
+Phase A complete, that draft was **consolidated** into five tasks, then the
+2026-06-26 Open-questions sign-off added three more (**B1.5 / B2.5 / B6**) — see
+§ Phase B consolidation for the old→new mapping and the runtime-match findings
+that drove it. The **references** (`### Classification reference` … below) are
+unchanged knowledge; only the task list was reordered/merged. The § Open
+questions are now **signed off** (decisions recorded inline there), so Phase B
+may start; tick a box only when the step builds, is clippy-clean (restriction
+lints), and `cargo test` passes.
 Keep `sl-client-tokio`, `sl-client-bevy`, and the REPL at feature parity; never
 push client-only types into shared `sl-types`.
 
@@ -949,33 +951,41 @@ owns. The suite asserts the **conservative-mirror** invariants throughout: a
 revoke clears only the honoured bits (never `TELEPORT`), a teleport clears only
 in-world grants (never controls), and no empty grant entry is ever observable.
 
-### Open questions for sign-off (from A8)
+### Open questions for sign-off (from A8) — RESOLVED 2026-06-26
 
-Resolve these before starting Phase B implementation; the first blocks B2/B5.
+All four are decided; each produced a task (see § Tasks). The sign-off is
+recorded inline below.
 
-1. **Attachment-detection source (blocker).** `holder_kind` needs to know which
-   region-local id is our own avatar to classify a holder as `Attachment`. The
-   session does not cache it today. **Proposed:** record the own avatar's
-   region-local id when `AgentMovementComplete` / the object cache first sees an
-   object whose `full_id == agent_id`, and resolve a holder's `parent_id`
-   against it. Decide this (or an alternative signal) before B2 lands, since the
-   `HolderKind` default is `InWorld` — shipping without it means **every**
-   attachment grant is wrongly dropped on the next teleport. Acceptable interim:
-   land B2 with the `InWorld` fallback and a tracked follow-up, but only if
-   sign-off accepts attachments not surviving teleport until then.
-2. **Explicit deny exposure.** The design represents a deny as the *absence* of
-   a registry entry (A3); `granted_permissions` returns empty for both "never
-   asked" and "denied". Confirm no caller needs to distinguish the two (i.e. no
-   "denied" surface on `ScriptGrantInfo`). The decision so far is **no**: a deny
-   is indistinguishable from never-granted, matching the sim.
-3. **`close` / relogin reset.** `script_grants` and `taken_controls` add **no**
-   `close` hook (A5), matching the `objects` cache convention (a closed session
-   is dead; relogin rebuilds via the constructor). Confirm this holds, or add a
-   reset if a relogin is ever made to reuse a live `Session`.
-4. **First synthesized event precedent.** `Event::ScriptPermissionState` (A7/B4)
-   is the crate's first `Event` not produced from an inbound wire message (the
-   runtimes synthesize it from a query). Confirm this precedent is acceptable
-   before B4 sets it; the alternative (a live accessor) is ruled out by the
+1. **Attachment-detection source (was the blocker) — RESOLVED.** `holder_kind`
+   needs to know which region-local id is our own avatar to classify a holder as
+   `Attachment`. The session does not cache it today. **Decided: implement the
+   proposed caching** — a per-circuit `Option<region-local id>`, `None`
+   initially, set the first time either `AgentMovementComplete` fires or the
+   object cache sees an object whose `full_id == agent_id` (whichever happens
+   first while it is still `None`); resolve a holder's `parent_id` against it.
+   This (plus `pcode::AVATAR` handling) is the new **task B1.5**, sequenced
+   **before B2** so B2's `holder_kind` does real attachment detection and B5's
+   attachment-kept-on-teleport test is writable from the start (no `InWorld`
+   interim, no `// TODO(attachment-detection)`).
+2. **Explicit deny exposure — RESOLVED: distinguish the two.** A "denied" script
+   is **not** the same as a "never-asked" one — the driver's UI that prompts the
+   user may want to know it previously denied a script, so the mirror must
+   record an explicit *denied* state, distinct from absence. This **reverses**
+   A3's "deny is the absence of an entry". It is the new **task B2.5** (a
+   tri-state permission status — never-asked / denied / granted-subset —
+   recorded at answer time and exposed to the driver), sequenced **before B4**
+   (the query surface the UI reads).
+3. **`close` / relogin reset — RESOLVED.** A relogin uses a **new** `Session`
+   (the existing caches are not reset on `close`, matching the `objects`
+   convention). To make that safe, **guard login against a `Session` that has
+   already logged out / disconnected** — a closed session must reject a new
+   login rather than half-reuse stale state. That guard is the new **task B6**.
+   No `close` hook is added to `script_grants` / `taken_controls`.
+4. **First synthesized event precedent — RESOLVED: acceptable.**
+   `Event::ScriptPermissionState` (A7/B4) is the crate's first `Event` not
+   produced from an inbound wire message (the runtimes synthesize it from a
+   query). **Decided: synthesized / local-reply events are acceptable**; B4 sets
+   the precedent. The alternative (a live accessor) stays ruled out by the
    exposure constraint in § API-surface & exposure reference.
 
 ### Phase B consolidation (ordering, merges & runtime-match findings)
@@ -1016,15 +1026,21 @@ verified against the runtime code, drive the merges:
    region-leave resets — as one task (new B2), no field is written in one step
    and first read in another, and no `#[expect(dead_code)]` shim is needed.
 
-The result is five tasks (was eleven): **B1** the role classifier (unchanged,
-independent); **B2** the complete grant registry (former B2+B3+B4+B6+B7);
-**B3** the complete taken-controls tracker (former B8+B5); **B4** the query
-command, snapshot event and runtime wiring (former B9+B10); **B5** the lifecycle
-test suite (former B11). Each is a self-contained landing unit that builds,
-passes `cargo test`, and is clippy-clean (restriction lints) on its own — no
-cross-task dead-code shim. Dependencies point backwards only: B2 stands on B1's
-independent classifier, B3 on B2's `Session` field neighbourhood, B4 on B2's
-`ScriptGrantInfo` + B3's `ScriptControlsInfo`, B5 on all of them.
+The consolidation produced five tasks (was eleven): **B1** the role classifier
+(unchanged, independent); **B2** the complete grant registry (former
+B2+B3+B4+B6+B7); **B3** the complete taken-controls tracker (former B8+B5);
+**B4** the query command, snapshot event and runtime wiring (former B9+B10);
+**B5** the lifecycle test suite (former B11). The
+**2026-06-26 Open-questions sign-off** then added three tasks (now eight total):
+**B1.5** (own-avatar id caching + `pcode::AVATAR`, resolving blocker #1, before
+B2), **B2.5** (explicit *denied* vs never-asked, resolving #2, after B2 / before
+B4), and **B6** (the closed-session login guard, from #3, independent). Each is
+a self-contained landing unit that builds, passes `cargo test`, and is
+clippy-clean (restriction lints) on its own — no cross-task dead-code shim.
+Dependencies point backwards only: B1.5 stands alone; B2 on B1's classifier +
+B1.5's own-avatar id; B2.5 on B2's registry; B3 on B2's `Session` field
+neighbourhood; B4 on B2's `ScriptGrantInfo` (+ B2.5's denied status) + B3's
+`ScriptControlsInfo`; B5 on all of them; B6 is independent.
 
 ### Tasks
 
@@ -1054,6 +1070,42 @@ independent classifier, B3 on B2's `Session` field neighbourhood, B4 on B2's
       cooperation and representative record-only flags (incl. `TELEPORT`) plus
       the `None` cases. Landed ahead of the § Open-questions sign-off since
       B1 is independent and gates nothing (the blocker #1 only gates B2/B5).
+- [ ] **B1.5 (from Open-question #1). Cache the own-avatar region-local id, so
+      `holder_kind` can detect attachments.** Resolves the #1 sign-off blocker;
+      B2's attachment detection and B5's attachment-kept-on-teleport test both
+      depend on it, so it lands **before B2**.
+      - **State** (`sl-proto/src/session.rs`): add a per-circuit
+      `Option<region-local id>` for our own avatar — the `LocalID` the simulator
+      assigns our avatar's `ObjectUpdate`, wrapped in the existing
+      `ScopedObjectId` / region-local-id newtype, never a bare `u32`. Hold it
+      beside the rest of the per-circuit state, **initialised `None`** (no id is
+      known until our own avatar object is seen on that circuit). Per-circuit
+      because a region-local id is unique only within a circuit and our avatar
+      gets a fresh one in each region.
+      - **Fill source A — `pcode::AVATAR`** (`session/methods.rs`): today there
+      is no `pcode::AVATAR` arm in the object-update path; add one so an
+      `ObjectUpdate` (or terse update) for an avatar whose
+      `full_id == self.agent_id()` records its region-local id into the
+      circuit's slot (the general "we saw our own avatar object" signal).
+      - **Fill source B — `AgentMovementComplete`** (`session/methods.rs`): when
+      it fires for a circuit whose slot is still `None`, set it from the avatar
+      local id the movement-complete / cached own-avatar object carries (the
+      earliest reliable point, before the first `ObjectUpdate` may arrive).
+      - **Set-once rule**: set the slot the first time *either* source observes
+      it while still `None`, then leave it (our own local id is stable for the
+      life of that circuit).
+      - **Use**: a private `is_own_avatar(parent_local_id, circuit)` (or have
+      `holder_kind` consult the slot) — a holder is parented to *us* iff its
+      `parent_id` resolves, on the same circuit, to the cached own-avatar
+      region-local id. `holder_kind` (B2) uses this for the `Attachment` branch;
+      while the slot is still `None`, detection falls back to `InWorld` (the
+      conservative default) for that brief window only.
+      - **Tests** (`lifecycle.rs` / `sim_session.rs`): seed our own avatar via
+      `object_update[_in]` with `full_id == agent_id` → the slot is set and a
+      holder parented to it classifies as `Attachment`; an
+      `AgentMovementComplete` with no prior own-avatar `ObjectUpdate` also sets
+      it; a holder parented to *another* avatar / an in-world prim stays
+      `InWorld`. No new wire message — a pure session-state addition.
 - [ ] **B2 (from A2/A3/A4/A5). The complete grant registry — model, recording,
       read, revoke and all region-leave resets, in one warning-clean unit.**
       Landing the whole store together is deliberate: `ScriptGrant.circuit` is
@@ -1072,7 +1124,9 @@ independent classifier, B3 on B2's `Session` field neighbourhood, B4 on B2's
       `holder_kind(task_id: ObjectKey) -> (HolderKind, Option<CircuitId>)`
       applying the § State-model reference rule (attachment iff cached object
       `attachment_point().is_some()` and parented to our own avatar; else
-      in-world / not-found; record the circuit it was found on).
+      in-world / not-found; record the circuit found on). "Parented to our own
+      avatar" uses the **B1.5** cached own-avatar region-local id — real
+      attachment detection, no `InWorld`-only interim.
       - **Recording** (`answer_script_permissions`, `session/methods.rs`): add
       the `experience_id: Option<ExperienceKey>` parameter; keep the existing
       `ScriptAnswerYes` send first, then append the recording — compute
@@ -1081,7 +1135,9 @@ independent classifier, B3 on B2's `Session` field neighbourhood, B4 on B2's
       `ScriptGrant { granted: permissions, kind, circuit, experience_id }`
       (replacing any prior entry) when `permissions` is
       non-empty, or **remove** the holder's entry when `permissions.is_empty()`
-      (the deny path; never store an empty entry). Plumb `experience_id` by
+      (the initial deny path — **task B2.5 then upgrades this** to record an
+      explicit *denied* state distinct from never-asked, per Open-question #2).
+      Plumb `experience_id` by
       adding it to `Command::AnswerScriptPermissions` (`command.rs:563`);
       the driver fills it from the `Event::ScriptPermissionRequest` it answers.
       Update the runtime arms (`sl-client-tokio/src/lib.rs`,
@@ -1128,11 +1184,50 @@ independent classifier, B3 on B2's `Session` field neighbourhood, B4 on B2's
       returns the subset; answer with `ScriptPermissions::empty()` → entry gone;
       re-grant replaces; revoke animation keeps `TELEPORT`, revoking last bit
       removes the entry; a real teleport clears the in-world grant and keeps the
-      attachment grant (the attachment half is gated on § Open questions #1 —
-      write the in-world half and mark the attachment half
-      `// TODO(attachment-detection)`); a neighbour crossing keeps all; a
+      attachment grant (**both halves are now writable** — B1.5 supplies the
+      own-avatar id for attachment detection, so the earlier
+      `// TODO(attachment-detection)` gate is lifted: seed the attachment holder
+      with `object_update_in` carrying an `attachment_point` and a `parent_id`
+      resolving to the own-avatar object); a neighbour crossing keeps all; a
       `DisableSimulator` for a child circuit drops that circuit's grants; a
       `KillObject` for a granted object drops its grant.
+- [ ] **B2.5 (from Open-question #2). Distinguish *denied* from *never-asked*.**
+      Reverses A3's "deny is the absence of an entry": the driver's UI that
+      prompts the user may want to know it already denied a script, so the
+      mirror records an explicit denial. Depends on B2 (the registry it
+      extends); sequenced **before B4** (the query surface the UI reads).
+      Sub-steps:
+      - **Model** (`sl-proto/src/session.rs`): make the per-holder state
+      tri-state. Either widen the registry value to a private
+      `ScriptPermissionStatus { Denied, Granted(ScriptGrant) }` (absent key ≡
+      *never-asked* — the third state stays "no entry"), or keep `script_grants`
+      for grants and add a parallel private `denied: BTreeSet<ScriptHolder>`.
+      Prefer the enum (one keyed store, no chance of a holder in both);
+      whichever keeps the existing reset/revoke `retain` closures readable. A
+      denied entry
+      carries the same `circuit` / `HolderKind` as a grant would, so the
+      region-leave resets (B2) treat it identically (a denial on an in-world
+      object is dropped on teleport, an attachment denial is kept).
+      - **Recording** (`answer_script_permissions`): replace B2's "empty grant →
+      remove" with "empty grant → record `Denied` for the holder" (still
+      replacing any prior grant/denial). A subsequent non-empty answer for the
+      same holder supersedes the denial with a grant, and vice-versa — one live
+      state per script, matching the sim.
+      - **Read accessors**: add a public tri-state
+      `script_permission_status(task_id, item_id) -> ScriptPermissionStatus`
+      (a new **public** enum `NeverAsked` / `Denied` /
+      `Granted(ScriptPermissions)` — the internal `ScriptGrant` stays private)
+      and a `denied: bool` (or a `status`) field on `ScriptGrantInfo`/the
+      iterator so a denied holder is visible. `granted_permissions` is unchanged
+      (still empty for both denied and never-asked — it answers "what is
+      granted", the status accessor answers "which of the three").
+      - **Tests** (`lifecycle.rs`): answer empty → `script_permission_status` is
+      `Denied` (not `NeverAsked`); a never-answered holder is `NeverAsked`; a
+      grant-then-deny and deny-then-grant each leave only the latest; a denial
+      on an in-world holder clears on teleport, on an attachment is kept (reuses
+      the
+      B1.5 detection). Update B2's "empty → entry gone" assertion to the denied
+      state.
 - [ ] **B3 (from A6/A3). The complete taken-controls tracker — state, inbound
       fold, accessor and the release-on-send clear.** Self-contained: the field
       is written by the fold and read by the accessor in the same unit, so
@@ -1178,7 +1273,8 @@ independent classifier, B3 on B2's `Session` field neighbourhood, B4 on B2's
       wiring land together.
       - **sl-proto.** Add the public `ScriptPermissionState` struct (fields
       `grants: Vec<ScriptGrantInfo>` and `controls: ScriptControlsInfo`, as in
-      the § API-surface & exposure reference); the
+      the § API-surface & exposure reference; `ScriptGrantInfo` already carries
+      the B2.5 denied status, so the snapshot conveys denials too); the
       `Command::QueryScriptPermissions` **unit** variant (`command.rs`, modelled
       on `ReleaseScriptControls`); the
       `Event::ScriptPermissionState(ScriptPermissionState)` variant
@@ -1215,20 +1311,39 @@ independent classifier, B3 on B2's `Session` field neighbourhood, B4 on B2's
       `CrossedRegion` + `AgentMovementComplete` crossing fixture, `KillObject`,
       `DisableSimulator` from `sim_b()`, `sim.send_script_control_change`) — no
       new harness. Cover, at minimum, the rows of the reference table: grant /
-      deny-as-absence / re-grant-replaces, the animation-only revoke, the
-      teleport reset (in-world cleared, attachment kept — see the gate below),
-      the neighbour-crossing keep-all, the circuit-retired and `KillObject`
-      scoped drops, the controls Take/Release fold incl. the count model and the
+      deny-as-explicit-`Denied` / never-asked-as-`NeverAsked` (B2.5) /
+      re-grant-replaces, the animation-only revoke, the teleport reset (in-world
+      cleared, attachment kept — **both halves**, now unblocked by B1.5), the
+      neighbour-crossing keep-all, the circuit-retired and `KillObject` scoped
+      drops, the controls Take/Release fold incl. the count model and the
       pass-to-agent split, release-on-send, and the `script_permission_state`
-      snapshot. Add at least one **two-store** integration case (a grant **and**
-      a taken control surviving / clearing across the same teleport) — the
-      behaviour no single task owns. Assert the conservative-mirror invariants
-      (a revoke clears only the honoured bits, a teleport clears only in-world
-      grants never controls, no empty grant entry observable). Depends on B1–B4
-      (it exercises the whole surface). **Gate:** the
-      attachment-kept-on-teleport assertion is **blocked** on the
-      attachment-detection sign-off (§ Open questions #1) — until that lands,
-      write the in-world-cleared half and mark the attachment half with a
-      `// TODO(attachment-detection)` rather than silently omitting it. Run
-      the full `cargo test -p sl-proto`; clippy-clean (restriction lints) and
-      `cargo fmt` (+ rumdl on this file) before commit.
+      snapshot (grants + denials + controls). Add at least one **two-store**
+      integration case (a grant **and** a taken control surviving / clearing
+      across the same teleport) — the behaviour no single task owns. Assert the
+      conservative-mirror invariants (a revoke clears only the honoured bits, a
+      teleport clears only in-world grants never controls). Depends on B1–B4
+      (it exercises the whole surface). The earlier attachment-detection gate is
+      **lifted** (B1.5 resolved Open-question #1): write the
+      attachment-kept-on-teleport assertion in full, no `// TODO`. Run the full
+      `cargo test -p sl-proto`; clippy-clean (restriction lints) and `cargo fmt`
+      (+ rumdl on this file) before commit.
+- [ ] **B6 (from Open-question #3). Guard login against a closed / disconnected
+      `Session`.** A relogin uses a **new** `Session` (no live-session reuse, so
+      `script_grants` / `taken_controls` need no `close` hook — matching the
+      `objects`-cache convention). Make that contract enforceable: a `Session`
+      that has reached its terminal `Closed` / `Disconnected` state must
+      **reject** a fresh login rather than half-reuse stale state.
+      - **Where**: the login entry point on `Session` (the constructor /
+      `login`-style method in `sl-proto/src/session`). Check the session
+      lifecycle state (the existing `Closed` / `DisconnectReason` machinery) and
+      return an `Err(Error::…)` (a new descriptive variant, e.g.
+      `SessionClosed`) when login is attempted on an already-closed/disconnected
+      session, instead of proceeding.
+      - **Scope note**: this is a general `Session`-lifecycle guard, not
+      permission-specific; it is tracked here because Open-question #3 surfaced
+      it. It touches no permission state.
+      - **Tests** (`lifecycle.rs`): drive a session to `close` /
+      disconnect, then assert a login attempt returns the new error (and does not
+      mutate state). Wire the new `Error` variant through the runtimes only if their
+      login paths surface `Session` errors (check tokio/bevy/REPL parity). Independent
+      of B1.5–B5; may land at any point after sign-off.
