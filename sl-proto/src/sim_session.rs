@@ -151,19 +151,19 @@ use crate::types::{
     AlertInfo, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatSource,
     ChatType, ClassifiedCategory, CoarseLocation, DetachOrder, DirClassifiedResult, DirEventResult,
     DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
-    DisplayNameUpdate, EstateCovenant, EventInfo, FeatureDisabled, FollowCamPropertyValue,
-    GenericMessage, GenericStreamingMessage, GestureActivation, GroupAccountDetails,
-    GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
-    GroupVoteHistoryItem, InstantMessage, InventoryItemMove, Kick, LandBrushAction, LandBrushSize,
-    LandEdit, LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer,
-    MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NavMeshStatus, NewInventoryLink,
-    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectPlayingAnimation, ObjectPropertiesFamily,
-    OpenRegionInfo, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult, Postcard,
-    PrimShapeParams, ProposalVoteId, RegionIdentity, RegionStats, Reliability,
-    RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
-    ScriptControl, ScriptPermissions, ServerError, SetDisplayNameReply, SimulatorTime,
-    StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
-    TextureEntry, Throttle, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
+    DirectoryVisibility, DisplayNameUpdate, EstateCovenant, EventInfo, FeatureDisabled,
+    FollowCamPropertyValue, GenericMessage, GenericStreamingMessage, GestureActivation,
+    GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem,
+    GroupName, GroupVoteHistoryItem, InstantMessage, InventoryItemMove, Kick, LandBrushAction,
+    LandBrushSize, LandEdit, LandSearchType, LandStatItem, LandStatReportType, MapItem,
+    MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode,
+    NavMeshStatus, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
+    ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails,
+    ParcelObjectOwner, PlacesResult, Postcard, PrimShapeParams, ProposalVoteId, RegionIdentity,
+    RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, SaleType, ScriptControl, ScriptPermissions, ServerError, SetDisplayNameReply,
+    SimulatorTime, StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
+    TerraformArea, TextureEntry, Throttle, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
     ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
@@ -1188,6 +1188,39 @@ pub enum ServerEvent {
         /// `true` for `VelocityInterpolateOn`, `false` for
         /// `VelocityInterpolateOff`.
         enabled: bool,
+    },
+    /// The client requested its own account contact preferences
+    /// (`UserInfoRequest`). The inverse of the client's
+    /// [`Session::request_user_info`](crate::Session::request_user_info); the
+    /// simulator answers with a `UserInfoReply`.
+    RequestUserInfo,
+    /// The client updated its account contact preferences (`UpdateUserInfo`):
+    /// whether offline instant messages are forwarded to email and the
+    /// directory/search visibility. The inverse of the client's
+    /// [`Session::update_user_info`](crate::Session::update_user_info). The email
+    /// address itself is not settable over this message (the wire block carries no
+    /// email field), so it is absent here.
+    UpdateUserInfo {
+        /// Whether offline instant messages are forwarded to the agent's email.
+        im_via_email: bool,
+        /// The agent's directory/search visibility setting.
+        directory_visibility: DirectoryVisibility,
+    },
+    /// The client triggered a one-shot spatial sound (`SoundTrigger`): play
+    /// `sound` at the region-local `position` (within `region_handle`) with linear
+    /// `gain`. The inverse of the client's
+    /// [`Session::trigger_sound`](crate::Session::trigger_sound). The wire
+    /// owner/object/parent ids are nil for a viewer-originated trigger — the
+    /// simulator fills them in — so they are not surfaced here.
+    TriggerSound {
+        /// The sound asset to play.
+        sound: AssetKey,
+        /// The linear gain (`0.0`..=`1.0`).
+        gain: f32,
+        /// The region the sound plays in.
+        region_handle: RegionHandle,
+        /// The region-local position to play the sound at.
+        position: RegionCoordinates,
     },
     /// Any other decoded client message, surfaced verbatim. This is how the
     /// remaining client-only messages reach the simulator: fully decoded but
@@ -4796,6 +4829,30 @@ impl SimSession {
             AnyMessage::VelocityInterpolateOff(_) => {
                 self.events
                     .push_back(ServerEvent::SetVelocityInterpolation { enabled: false });
+            }
+            AnyMessage::UserInfoRequest(_) => {
+                self.events.push_back(ServerEvent::RequestUserInfo);
+            }
+            AnyMessage::UpdateUserInfo(update) => {
+                self.events.push_back(ServerEvent::UpdateUserInfo {
+                    im_via_email: update.user_data.im_via_e_mail,
+                    directory_visibility: DirectoryVisibility::from_wire(&trimmed_string(
+                        &update.user_data.directory_visibility,
+                    )),
+                });
+            }
+            AnyMessage::SoundTrigger(trigger) => {
+                let block = &trigger.sound_data;
+                self.events.push_back(ServerEvent::TriggerSound {
+                    sound: AssetKey::from(block.sound_id),
+                    gain: block.gain,
+                    region_handle: RegionHandle(block.handle),
+                    position: RegionCoordinates::new(
+                        block.position.x,
+                        block.position.y,
+                        block.position.z,
+                    ),
+                });
             }
             AnyMessage::LogoutRequest(_) => {
                 self.send_logout_reply(now)?;

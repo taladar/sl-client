@@ -968,7 +968,11 @@ the encoded buffer across, and assert the peer decodes the expected
   AgentDataUpdateRequest -> RequestAgentDataUpdate; AgentQuitCopy -> QuitCopy
   with typed CircuitCode; VelocityInterpolateOn/Off -> SetVelocityInterpolation
   { enabled })
-- [ ] Sim out batch 8 — user-info & sound ServerEvents
+- [x] Sim out batch 8 — user-info & sound ServerEvents (UserInfoRequest ->
+  RequestUserInfo; UpdateUserInfo -> UpdateUserInfo { im_via_email,
+  directory_visibility } via DirectoryVisibility::from_wire; SoundTrigger ->
+  TriggerSound { sound, gain, region_handle, position } with the region-local
+  pos as RegionCoordinates and nil owner/object/parent ids dropped)
 - [ ] Sim out batch 9 — god region/estate-admin ServerEvents
 - [ ] Sim out batch 10 — god parcel/object/land-admin ServerEvents
 

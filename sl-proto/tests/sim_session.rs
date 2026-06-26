@@ -3102,6 +3102,63 @@ mod test {
     }
 
     #[test]
+    fn client_user_info_and_sound_reach_simulator() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        // UserInfoRequest: poll for the agent's own account preferences.
+        client.request_user_info(now)?;
+        // UpdateUserInfo: forward offline IMs to email and hide from search.
+        client.update_user_info(true, DirectoryVisibility::Hidden, now)?;
+        // SoundTrigger: play a one-shot sound at a region-local position.
+        let sound = AssetKey::from(uuid::Uuid::from_u128(0x5002));
+        let position = RegionCoordinates::new(128.0, 64.0, 30.0);
+        client.trigger_sound(sound, 0.75, RegionHandle(REGION_HANDLE), position, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::RequestUserInfo)),
+            "expected a RequestUserInfo server event"
+        );
+
+        let (decoded_im, decoded_visibility) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::UpdateUserInfo {
+                    im_via_email,
+                    directory_visibility,
+                } => Some((*im_via_email, *directory_visibility)),
+                _ => None,
+            })
+            .ok_or("expected an UpdateUserInfo server event")?;
+        assert!(decoded_im);
+        assert_eq!(decoded_visibility, DirectoryVisibility::Hidden);
+
+        let (decoded_sound, decoded_gain, decoded_handle, decoded_position) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::TriggerSound {
+                    sound,
+                    gain,
+                    region_handle,
+                    position,
+                } => Some((*sound, *gain, *region_handle, *position)),
+                _ => None,
+            })
+            .ok_or("expected a TriggerSound server event")?;
+        assert_eq!(decoded_sound, sound);
+        assert_eq!(decoded_gain.to_bits(), 0.75_f32.to_bits());
+        assert_eq!(decoded_handle, RegionHandle(REGION_HANDLE));
+        assert_eq!(decoded_position, position);
+        Ok(())
+    }
+
+    #[test]
     fn inventory_sync_reaches_client() -> Result<(), TestError> {
         let now = Instant::now();
         let (mut client, mut sim) = setup(now)?;
