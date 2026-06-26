@@ -1048,7 +1048,7 @@ events / REPL sub-bullets.
 - [x] New chapter — `comms/generic-messages.md` (generic message mechanism)
 - [x] New chapter — `content/god-tools.md` (god/estate-admin surface)
 - [x] Extend `comms/sessions.md` — session errors & forced disconnect
-- [ ] Extend region/telemetry & land/parcel chapters
+- [x] Extend region/telemetry & land/parcel chapters
 - [ ] Extend friends/profiles/groups chapters (calling cards, display names,
   user info, group title/info)
 - [ ] Extend world/scripts/inventory/attachments chapters (animations, prim
