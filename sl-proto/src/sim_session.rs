@@ -29,6 +29,7 @@ use sl_types::key::{
     InventoryKey, ObjectKey, ParcelKey, TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
+use sl_types::map::RegionCoordinates;
 use sl_wire::messages::{
     AcceptCallingCard, AcceptCallingCardAgentDataBlock, AcceptCallingCardTransactionBlockBlock,
     DeclineCallingCard, DeclineCallingCardAgentDataBlock, DeclineCallingCardTransactionBlockBlock,
@@ -132,6 +133,7 @@ use sl_wire::{
 };
 use uuid::Uuid;
 
+use crate::AssetKey;
 use crate::appearance::{MAX_FACES, decode_texture_entry};
 use crate::bookkeeping_ids::{PingId, TransactionId};
 use crate::error::Error;
@@ -160,8 +162,9 @@ use crate::types::{
     PrimShapeParams, ProposalVoteId, RegionIdentity, RegionStats, Reliability,
     RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
     ScriptControl, ScriptPermissions, ServerError, SetDisplayNameReply, SimulatorTime,
-    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry, Throttle,
-    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
+    TextureEntry, Throttle, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
+    ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
 
@@ -1133,6 +1136,58 @@ pub enum ServerEvent {
         group_id: GroupKey,
         /// The group role carrying the desired title.
         title_role_id: GroupRoleKey,
+    },
+    /// The client requested a teleport to a landmark (`TeleportLandmarkRequest`).
+    /// The inverse of the client's
+    /// [`Session::teleport_via_landmark`](crate::Session::teleport_via_landmark);
+    /// the simulator resolves the destination and answers with a
+    /// `TeleportFinish`.
+    TeleportViaLandmark {
+        /// The landmark inventory item's *asset* id, or `None` (a nil wire
+        /// `LandmarkID`) to teleport to the agent's home location.
+        landmark: Option<AssetKey>,
+    },
+    /// The client cancelled an in-progress teleport (`TeleportCancel`). The
+    /// inverse of the client's
+    /// [`Session::cancel_teleport`](crate::Session::cancel_teleport).
+    CancelTeleport,
+    /// The client recorded a start location (`SetStartLocationRequest`): stores
+    /// the region-local `position` and `look_at` as the named [`StartLocationSlot`]
+    /// (the everyday case being [`StartLocationSlot::Home`], "set home to here").
+    /// The inverse of the client's
+    /// [`Session::set_start_location`](crate::Session::set_start_location). The
+    /// wire `SimName` is empty — the simulator is expected to fill in the current
+    /// region's name.
+    SetStartLocation {
+        /// Which start-location slot to record.
+        slot: StartLocationSlot,
+        /// The region-local position to record.
+        position: RegionCoordinates,
+        /// The region-local look-at direction to record.
+        look_at: Vector,
+    },
+    /// The client polled for a fresh `AgentDataUpdate` without changing any agent
+    /// data (`AgentDataUpdateRequest`). The inverse of the client's
+    /// [`Session::request_agent_data_update`](crate::Session::request_agent_data_update);
+    /// the simulator answers with an `AgentDataUpdate`.
+    RequestAgentDataUpdate,
+    /// The client quit leaving its in-world objects behind (`AgentQuitCopy`) — the
+    /// "crash quit" the reference viewer sends so a subsequent login can recover
+    /// rezzed objects. The inverse of the client's
+    /// [`Session::quit_copy`](crate::Session::quit_copy).
+    QuitCopy {
+        /// The circuit code carried in the `FuseBlock`, echoing the client's own
+        /// circuit code.
+        viewer_circuit_code: CircuitCode,
+    },
+    /// The client toggled simulator-side velocity interpolation of object motion
+    /// (`VelocityInterpolateOn` / `VelocityInterpolateOff`). The inverse of the
+    /// client's
+    /// [`Session::set_velocity_interpolation`](crate::Session::set_velocity_interpolation).
+    SetVelocityInterpolation {
+        /// `true` for `VelocityInterpolateOn`, `false` for
+        /// `VelocityInterpolateOff`.
+        enabled: bool,
     },
     /// Any other decoded client message, surfaced verbatim. This is how the
     /// remaining client-only messages reach the simulator: fully decoded but
@@ -4696,6 +4751,51 @@ impl SimSession {
                     group_id: GroupKey::from(update.agent_data.group_id),
                     title_role_id: GroupRoleKey::from(update.agent_data.title_role_id),
                 });
+            }
+            AnyMessage::TeleportLandmarkRequest(request) => {
+                // A nil LandmarkID is the wire encoding of "teleport home".
+                let landmark_id = request.info.landmark_id;
+                let landmark = (landmark_id != Uuid::nil()).then(|| AssetKey::from(landmark_id));
+                self.events
+                    .push_back(ServerEvent::TeleportViaLandmark { landmark });
+            }
+            AnyMessage::TeleportCancel(_) => {
+                self.events.push_back(ServerEvent::CancelTeleport);
+            }
+            AnyMessage::SetStartLocationRequest(request) => {
+                let data = &request.start_location_data;
+                // An unrecognised LocationID is malformed; surface the raw
+                // message rather than guessing a slot.
+                if let Some(slot) = StartLocationSlot::from_code(data.location_id) {
+                    self.events.push_back(ServerEvent::SetStartLocation {
+                        slot,
+                        position: RegionCoordinates::new(
+                            data.location_pos.x,
+                            data.location_pos.y,
+                            data.location_pos.z,
+                        ),
+                        look_at: data.location_look_at.clone(),
+                    });
+                } else {
+                    self.events
+                        .push_back(ServerEvent::ClientMessage(Box::new(message.clone())));
+                }
+            }
+            AnyMessage::AgentDataUpdateRequest(_) => {
+                self.events.push_back(ServerEvent::RequestAgentDataUpdate);
+            }
+            AnyMessage::AgentQuitCopy(quit) => {
+                self.events.push_back(ServerEvent::QuitCopy {
+                    viewer_circuit_code: CircuitCode(quit.fuse_block.viewer_circuit_code),
+                });
+            }
+            AnyMessage::VelocityInterpolateOn(_) => {
+                self.events
+                    .push_back(ServerEvent::SetVelocityInterpolation { enabled: true });
+            }
+            AnyMessage::VelocityInterpolateOff(_) => {
+                self.events
+                    .push_back(ServerEvent::SetVelocityInterpolation { enabled: false });
             }
             AnyMessage::LogoutRequest(_) => {
                 self.send_logout_reply(now)?;
