@@ -26,4 +26,17 @@ pub enum Error {
     /// circuit; a single request targets exactly one simulator.
     #[error("the scoped ids belong to more than one circuit")]
     MixedCircuits,
+    /// A login response was fed to a session that has already reached its
+    /// terminal closed/disconnected state. A relogin must use a fresh
+    /// [`Session`](crate::Session); a closed one is never revived, so it would
+    /// otherwise half-reuse stale per-session state.
+    #[error("the session is closed and cannot accept a fresh login")]
+    SessionClosed,
+    /// A login response was fed to a session that is already logged in (its
+    /// circuit is up or in teleport/logout). Login is valid only once, from the
+    /// freshly-constructed state; feeding a second response would tear down the
+    /// live circuit and half-rebuild the session. A new login must use a fresh
+    /// [`Session`](crate::Session).
+    #[error("the session is already logged in and cannot accept a fresh login")]
+    AlreadyLoggedIn,
 }

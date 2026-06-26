@@ -381,6 +381,56 @@ mod test {
     }
 
     #[test]
+    fn closed_session_rejects_relogin() -> Result<(), TestError> {
+        // Drive a fresh session to its terminal closed state via a login
+        // failure.
+        let mut session = new_session()?;
+        let failure = LoginResponse::Failure(LoginFailure {
+            reason: "key".to_owned(),
+            message: "bad password".to_owned(),
+        });
+        session.handle_login_response(failure, Instant::now())?;
+        assert!(session.is_closed());
+        let _disconnect_events = drain_events(&mut session);
+
+        // A closed `Session` is never revived: a fresh login attempt is rejected
+        // rather than half-reusing stale per-session state.
+        let result = session.handle_login_response(success()?, Instant::now());
+        assert!(matches!(result, Err(sl_proto::Error::SessionClosed)));
+        // The reject leaves the session closed and brings up no circuit.
+        assert!(session.is_closed());
+        assert!(
+            !drain_events(&mut session)
+                .iter()
+                .any(|e| matches!(e, Event::CircuitEstablished { .. })),
+            "a rejected relogin must not establish a circuit"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn live_session_rejects_relogin() -> Result<(), TestError> {
+        // An established session is logged in (Active). Login is valid only once,
+        // from the freshly-constructed state, so a second response is rejected
+        // rather than tearing down the live circuit and half-rebuilding.
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let _established_events = drain_events(&mut session);
+
+        let result = session.handle_login_response(success()?, now);
+        assert!(matches!(result, Err(sl_proto::Error::AlreadyLoggedIn)));
+        // The reject leaves the live session intact and rebuilds no circuit.
+        assert!(!session.is_closed());
+        assert!(
+            !drain_events(&mut session)
+                .iter()
+                .any(|e| matches!(e, Event::CircuitEstablished { .. })),
+            "a rejected relogin must not rebuild the circuit"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn login_brings_up_circuit_and_handshake() -> Result<(), TestError> {
         let session = established(Instant::now())?;
         assert!(!session.is_closed());
