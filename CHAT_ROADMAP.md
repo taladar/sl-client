@@ -141,13 +141,28 @@ Scope reminders:
   (avoids offer-tracking). `is_online` = "known-online via a notification";
   absence ≠ provably offline (a friend who does not grant `CAN_SEE_ONLINE` never
   notifies). Accessors return the public `Friend` (already `Copy`) directly.
-- [ ] **A4. Design the session lifecycle (open / join / send / leave / close).**
+- [x] **A4. Design the session lifecycle (open / join / send / leave / close).**
   1:1 implicit on the first message; group via `start_group_session` (decide
   whether an inbound group message also opens/tracks it); conference via
   `start_conference` (caller mints the id) or via accepting an invite. Define
   what marks a session *active/joined* versus *pending* (there is no UDP
   "joined" ack) and what removes it from the registry (an explicit leave,
   logout).
+  **Done — see § Session-lifecycle reference (from A4) + task B4 in § Phase B.**
+  Decided a `lifecycle: ChatSessionLifecycle { Invited | Joined }` field on
+  `ChatSession` (this *is* the A2-deferred "invite status"): **1:1 is always
+  `Joined`** the instant it opens (no handshake); **group / conference open
+  `Joined` optimistically** on our `start_*`/accept *or* on **any inbound
+  message/participant traffic** (yes — an inbound group/conference message opens
+  & tracks the session, promoting an `Invited` entry to `Joined`); **`Invited`**
+  is set *only* by a bare invitation with no traffic yet (A5 feeds it). There is
+  **no UDP "joined" ack**, so `Joined` is *optimistic* ("we believe we
+  are in"), not sim-confirmed. **Removal:** an explicit `leave_group_session` /
+  `leave_conference` **removes** the entry; an A5 decline removes the `Invited`
+  entry; **logout** clears all (constructor rebuild, no `close` hook — the
+  A2/A9 convention). **1:1 is never removed** by a leave (no such op) — it
+  persists to logout (A7 may *mark* it on peer-offline, never remove). No new
+  command (the start/send/leave surface already exists; A5 adds accept/decline).
 - [ ] **A5. Design invitation handling + accept/decline.** A pending-invitations
   registry fed by `Event::ConferenceInvited` (and group invites), plus new
   accept/decline commands. Decide the path: adopt the modern
@@ -666,3 +681,117 @@ no new event/command:
 This task stays **drafted/blocked** until Phase A is signed off; independent
 of B1/B2 (presence is a separate store from the chat-session registry) and may
 land alongside them.
+
+### Session-lifecycle reference (from A4)
+
+The state machine over the A2 `chat_sessions` registry: how each kind opens,
+what "joined" means without a UDP ack, and what removes an entry. A4 adds one
+field to `ChatSession` and wires the transitions into the *existing* outbound
+methods and inbound handlers — no new command (A5 adds accept/decline). The
+simulator stays authoritative; the lifecycle is an optimistic local mirror.
+
+**The lifecycle field** (on `ChatSession`, the A2-deferred "invite status" slot,
+now generalised):
+
+    enum ChatSessionLifecycle { Invited, Joined }
+
+- **`Joined`** — we believe we are an active participant. This is the state for
+  **every 1:1** (the moment it opens), a group/conference we **started**, one
+  we **accepted** an invite to, and any session we have seen **inbound traffic**
+  in. It is **optimistic**: there is **no UDP "joined" ack** (the modern CAPS
+  `ChatSessionRequest` would return one, but it is not implemented — § Protocol
+  reality), so `Joined` means "we acted / saw traffic", not "sim-confirmed".
+- **`Invited`** — a conference/group invite we have **not** acted on and have
+  seen **no** traffic for. Set **only** by the A5 invitation path
+  (`Event::ConferenceInvited`). A bare invite is the *one* non-`Joined` case.
+
+1:1 never carries `Invited` (there is no IM invitation — you just message and it
+opens). `chat_session_mut` (A2) creates with **`Joined`** by default (the common
+"opened by our action / by traffic" case); A5's invite-create is the sole path
+that overrides the new entry to `Invited` before any traffic.
+
+**Open / join transitions** (each maps onto a real site; the inbound rows share
+the handler A6 folds rosters into and A8 folds history into — B4 adds only the
+get-or-create + `lifecycle = Joined` stamp there):
+
+| Trigger | Kind | Effect |
+|---------|------|--------|
+| First inbound *or* outbound 1:1 `Message` IM | Direct | get-or-create, `Joined` |
+| `start_group_session` (outbound) | Group | get-or-create, `Joined` |
+| inbound `GroupSessionMessage` / `GroupSessionParticipant` | Group | get-or-create, `Joined` (promotes `Invited`) |
+| `start_conference` (outbound) | Conference | get-or-create, `Joined` |
+| inbound `ConferenceSessionMessage` / `ConferenceSessionParticipant` | Conference | get-or-create, `Joined` (promotes `Invited`) |
+| `ConferenceInvited` (no traffic yet) | Conf / Group | get-or-create, `Invited` (A5) |
+| accept invite (A5 command) | Conf / Group | `Invited` → `Joined` (+ implicit-join send) |
+
+- **Inbound group/conference traffic opens & tracks the session** (the A4 open
+  question — answered **yes**). The sim routes a group/conference IM only to a
+  participant, so receiving one means we are effectively in it (e.g. auto-joined
+  group chat after login, or a conference we were added to). This matches the
+  viewer opening a session tab on the first inbound message, and it **promotes**
+  any pre-existing `Invited` entry to `Joined`.
+- **Promotion rule:** any session message / participant event sets
+  `lifecycle = Joined` on the (get-or-created) entry — so an `Invited` that
+  later sees traffic becomes `Joined` without an explicit accept (you joined by
+  traffic). A4 needs no separate "joined ack" because traffic *is* the signal.
+- **Optimism caveat:** if a `start_group_session` fails (e.g. not a member) the
+  sim replies with an error event, not a session-close; the entry stays `Joined`
+  until the driver removes it. Surfacing that error is app policy, out of
+  A4's scope.
+
+**Leave / close / remove transitions:**
+
+| Trigger | Kind | Effect on `chat_sessions` |
+|---------|------|---------------------------|
+| `leave_group_session` / `leave_conference` (outbound) | Group / Conf | **remove** the entry |
+| decline invite (A5 command) | Conf / Group | **remove** the `Invited` entry |
+| logout (`SessionState::Closed`) | all | all cleared (constructor rebuild) |
+| 1:1 — *no leave op exists* | Direct | never removed (persists to logout) |
+
+- **Explicit leave removes** — the registry tracks *current* sessions; once we
+  send `SessionLeave` we are out, so the entry goes. (If retaining a left
+  session's log is later wanted, that is an A8 history-retention call; A4 keeps
+  the registry to live sessions.)
+- **1:1 has no leave** — there is no `SessionLeave` for a direct IM; a 1:1 entry
+  lives until logout. A7's peer-offline handling may **mark/close** a 1:1
+  (a lifecycle/annotation change A7 defines) but **never removes** it, so its
+  history survives the peer going offline.
+- **No `close` hook** — a `Closed` session is dead and a relogin rebuilds the
+  registry through the constructor, as A2/A9 decided for the chat stores;
+  A4 adds no logout-time clearing code.
+
+**No new command.** The outbound lifecycle surface already exists —
+`StartGroupSession` / `SendGroupMessage` / `LeaveGroupSession`,
+`StartConference` / `SendConferenceMessage` / `LeaveConference`,
+`InstantMessage` (A1 inventory). A4 only hooks the registry transitions into the
+methods behind them; the **accept/decline** commands (the only genuinely new
+lifecycle verbs) are A5's, because they are inseparable from the invitation
+model. A4's accessor contribution is the `lifecycle` exposed on the A10
+`ChatSessionInfo` view.
+
+### B4. Chat-session lifecycle transitions (from A4)
+
+Add the lifecycle state and wire the open/join/leave/remove transitions, with no
+new command:
+
+- Add `enum ChatSessionLifecycle { Invited, Joined }` and a `lifecycle` field on
+  `ChatSession` (fills the A2-reserved "invite status" slot); `ChatSession::new`
+  defaults it to `Joined`.
+- **Outbound:** in `start_group_session` / `start_conference`, get-or-create the
+  `Group` / `Conference` session as `Joined`; in `send_group_message` /
+  `send_conference_message` / `send_instant_message`, get-or-create (1:1 opens
+  here) and stamp `Joined`; in `leave_group_session` / `leave_conference`,
+  **remove** the entry.
+- **Inbound:** in the `GroupSessionMessage` / `ConferenceSessionMessage` and the
+  participant handlers, get-or-create + set `lifecycle = Joined` (promoting any
+  `Invited`). This is the **same** call site A6 (rosters/typing) and
+  A8 (history) extend — they compose; B4 adds only the lifecycle stamp.
+- **No** `Invited`-creation here (that is A5's invitation task), **no** accept /
+  decline command (A5), **no** logout hook (A9).
+- Unit tests: outbound `start_*` creates `Joined`; an inbound group/conference
+  message opens a `Joined` session and promotes a pre-seeded `Invited` one;
+  `send_instant_message` / inbound 1:1 opens a `Joined` Direct session;
+  `leave_*` removes; a 1:1 is never removed by any leave path.
+
+This task stays **drafted/blocked** until Phase A is signed off; it builds on B2
+(the registry) and shares inbound handler sites with the A6 / A8 tasks.
