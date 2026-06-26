@@ -882,6 +882,37 @@ pub enum ServerEvent {
     /// The client requested a clean logout (`LogoutRequest`); the simulator has
     /// replied with a `LogoutReply` and closed the session.
     LoggedOut,
+    /// The client offered its calling card to another agent
+    /// (`OfferCallingCard`) — a reference card to this client's avatar, to be
+    /// filed in the recipient's Calling Cards folder. This is *not* a friendship
+    /// request. The simulator delivers it to `dest` (e.g. via
+    /// [`SimSession::send_offer_calling_card`]), which replies with an accept or
+    /// decline echoing `transaction`. The inverse of the client's
+    /// [`Session::offer_calling_card`](crate::Session::offer_calling_card).
+    CallingCardOffered {
+        /// The agent the client is offering its calling card to.
+        dest: AgentKey,
+        /// Correlation id for the offer; the recipient echoes it when accepting
+        /// or declining so the simulator can match the reply.
+        transaction: TransactionId,
+    },
+    /// The client accepted a calling-card offer (`AcceptCallingCard`), filing the
+    /// new card in `folder`. `transaction` echoes the original offer. The inverse
+    /// of the client's
+    /// [`Session::accept_calling_card`](crate::Session::accept_calling_card).
+    CallingCardAccepted {
+        /// Correlation id echoed from the original calling-card offer.
+        transaction: TransactionId,
+        /// The client's inventory folder the new calling card is filed in.
+        folder: InventoryFolderKey,
+    },
+    /// The client declined a calling-card offer (`DeclineCallingCard`).
+    /// `transaction` echoes the original offer. The inverse of the client's
+    /// [`Session::decline_calling_card`](crate::Session::decline_calling_card).
+    CallingCardDeclined {
+        /// Correlation id echoed from the original calling-card offer.
+        transaction: TransactionId,
+    },
     /// Any other decoded client message, surfaced verbatim. This is how the
     /// remaining client-only messages reach the simulator: fully decoded but
     /// without a dedicated typed variant.
@@ -4238,6 +4269,27 @@ impl SimSession {
             AnyMessage::MapLayerRequest(request) => {
                 self.events.push_back(ServerEvent::MapLayerRequested {
                     flags: MapRequestFlags(request.agent_data.flags),
+                });
+            }
+            AnyMessage::OfferCallingCard(offer) => {
+                self.events.push_back(ServerEvent::CallingCardOffered {
+                    dest: AgentKey::from(offer.agent_block.dest_id),
+                    transaction: TransactionId::from(offer.agent_block.transaction_id),
+                });
+            }
+            AnyMessage::AcceptCallingCard(accept) => {
+                let folder = accept
+                    .folder_data
+                    .first()
+                    .map_or_else(Uuid::nil, |block| block.folder_id);
+                self.events.push_back(ServerEvent::CallingCardAccepted {
+                    transaction: TransactionId::from(accept.transaction_block.transaction_id),
+                    folder: InventoryFolderKey::from(folder),
+                });
+            }
+            AnyMessage::DeclineCallingCard(decline) => {
+                self.events.push_back(ServerEvent::CallingCardDeclined {
+                    transaction: TransactionId::from(decline.transaction_block.transaction_id),
                 });
             }
             AnyMessage::LogoutRequest(_) => {

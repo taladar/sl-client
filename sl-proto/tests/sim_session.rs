@@ -2418,6 +2418,60 @@ mod test {
     }
 
     #[test]
+    fn client_calling_cards_reach_simulator() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let dest = AgentKey::from(uuid::Uuid::from_u128(0x0FFE));
+        let offer_txn = TransactionId::from(uuid::Uuid::from_u128(0x701));
+        let accept_txn = TransactionId::from(uuid::Uuid::from_u128(0x702));
+        let folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0xCA11));
+        let decline_txn = TransactionId::from(uuid::Uuid::from_u128(0x703));
+
+        client.offer_calling_card(dest, offer_txn, now)?;
+        client.accept_calling_card(accept_txn, folder, now)?;
+        client.decline_calling_card(decline_txn, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+        let (offered_dest, transaction) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::CallingCardOffered { dest, transaction } => {
+                    Some((*dest, *transaction))
+                }
+                _ => None,
+            })
+            .ok_or("expected a CallingCardOffered server event")?;
+        assert_eq!(offered_dest, dest);
+        assert_eq!(transaction, offer_txn);
+
+        let (transaction, accepted_folder) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::CallingCardAccepted {
+                    transaction,
+                    folder,
+                } => Some((*transaction, *folder)),
+                _ => None,
+            })
+            .ok_or("expected a CallingCardAccepted server event")?;
+        assert_eq!(transaction, accept_txn);
+        assert_eq!(accepted_folder, folder);
+
+        let transaction = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::CallingCardDeclined { transaction } => Some(*transaction),
+                _ => None,
+            })
+            .ok_or("expected a CallingCardDeclined server event")?;
+        assert_eq!(transaction, decline_txn);
+        Ok(())
+    }
+
+    #[test]
     fn inventory_sync_reaches_client() -> Result<(), TestError> {
         let now = Instant::now();
         let (mut client, mut sim) = setup(now)?;
