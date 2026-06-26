@@ -275,6 +275,35 @@ pub(crate) fn extra_param_message_blocks(params: &ObjectExtraParams) -> Vec<Extr
         .collect()
 }
 
+/// Decodes the set of inbound `ObjectExtraParams` message blocks for a single
+/// object — one block per subtype, as the reference viewer's
+/// `sendExtraParameters` emits — back into an [`ObjectExtraParams`]. The inverse
+/// of [`extra_param_message_blocks`]: each in-use block's payload is decoded by
+/// its subtype, and a not-in-use block simply omits (clears) that subtype.
+///
+/// The blocks are passed as `(param_type, in_use, payload)` triples. Internally
+/// this reconstructs the `ExtraParams` container blob from the in-use blocks and
+/// reuses [`decode_extra_params`], so it shares the per-subtype decoders exactly.
+#[must_use]
+pub(crate) fn decode_extra_param_blocks(
+    blocks: impl IntoIterator<Item = (u16, bool, Vec<u8>)>,
+) -> ObjectExtraParams {
+    let in_use: Vec<(u16, Vec<u8>)> = blocks
+        .into_iter()
+        .filter_map(|(param_type, used, data)| used.then_some((param_type, data)))
+        .collect();
+    let mut writer = Writer::new();
+    // The container count is a single byte; an object carries at most one of each
+    // of the seven subtypes, so the in-use count never overflows.
+    writer.put_u8(u8::try_from(in_use.len()).unwrap_or(u8::MAX));
+    for (param_type, data) in in_use {
+        writer.put_u16(param_type);
+        writer.put_u32(u32::try_from(data.len()).unwrap_or(u32::MAX));
+        writer.bytes(&data);
+    }
+    decode_extra_params(&writer.into_bytes())
+}
+
 /// Truncates a non-negative `f32` toward zero into a `u8`, the inverse of the
 /// flexi decoder's `byte / 10.0` de-quantization. `as` saturates out-of-range
 /// values, matching the viewer's in-range `(U8)` cast for the small values

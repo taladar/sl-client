@@ -132,14 +132,16 @@ use sl_wire::{
 };
 use uuid::Uuid;
 
+use crate::appearance::{MAX_FACES, decode_texture_entry};
 use crate::bookkeeping_ids::{PingId, TransactionId};
 use crate::error::Error;
+use crate::extra_params::decode_extra_param_blocks;
 use crate::session::{
     agent_drop_group_to_llsd, agent_state_update_to_llsd, build_map_block_reply,
     build_map_item_reply, build_map_layer_reply, display_name_update_to_llsd, instant_message,
     nav_mesh_status_to_llsd, open_region_info_to_llsd, region_handshake_message,
-    required_voice_version_to_llsd, set_display_name_reply_to_llsd, sim_console_response_to_llsd,
-    windlight_refresh_to_llsd,
+    required_voice_version_to_llsd, set_display_name_reply_to_llsd, shape_from_object_shape_block,
+    sim_console_response_to_llsd, windlight_refresh_to_llsd,
 };
 use crate::types::EventId;
 use crate::types::directory::category_from_wire;
@@ -152,12 +154,13 @@ use crate::types::{
     GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
     GroupVoteHistoryItem, InstantMessage, InventoryItemMove, Kick, LandSearchType, LandStatItem,
     LandStatReportType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
-    MeanCollision, MovementMode, NavMeshStatus, NotecardRez, ObjectBuyItem, ObjectPlayingAnimation,
-    ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails, ParcelObjectOwner,
-    PlacesResult, Postcard, ProposalVoteId, RegionIdentity, RegionStats, Reliability,
-    RequiredVoiceVersion, RestoreItem, RezAttachment, SaleType, ScriptControl, ServerError,
-    SetDisplayNameReply, SimulatorTime, TaskInventoryReply, TelehubInfo, Throttle, Transmit,
-    UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    MeanCollision, MovementMode, NavMeshStatus, NotecardRez, ObjectBuyItem, ObjectExtraParams,
+    ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails,
+    ParcelObjectOwner, PlacesResult, Postcard, PrimShapeParams, ProposalVoteId, RegionIdentity,
+    RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, SaleType,
+    ScriptControl, ServerError, SetDisplayNameReply, SimulatorTime, TaskInventoryReply,
+    TelehubInfo, TextureEntry, Throttle, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
+    ViewerEffectType,
 };
 use sl_wire::AbuseReport;
 
@@ -912,6 +915,41 @@ pub enum ServerEvent {
     CallingCardDeclined {
         /// Correlation id echoed from the original calling-card offer.
         transaction: TransactionId,
+    },
+    /// The client set an object's path/profile geometry (`ObjectShape`). The
+    /// inverse of the client's
+    /// [`Session::set_object_shape`](crate::Session::set_object_shape). One event
+    /// is emitted per object block in the message.
+    ObjectShapeSet {
+        /// The region-local id of the object being reshaped.
+        local_id: RegionLocalObjectId,
+        /// The new quantized path/profile geometry.
+        shape: PrimShapeParams,
+    },
+    /// The client set an object's per-face textures / texture entry
+    /// (`ObjectImage`). The inverse of the client's
+    /// [`Session::set_object_image`](crate::Session::set_object_image). One event
+    /// is emitted per object block in the message.
+    ObjectImageSet {
+        /// The region-local id of the object being retextured.
+        local_id: RegionLocalObjectId,
+        /// The legacy parcel-media URL, if any (an empty wire field is [`None`]).
+        media_url: Option<String>,
+        /// The new per-face texture entry.
+        texture_entry: TextureEntry,
+    },
+    /// The client set an object's complete extra-parameter state
+    /// (`ObjectExtraParams`): flexi/light/sculpt/mesh/light-image/render-material/
+    /// reflection-probe. The inverse of the client's
+    /// [`Session::set_object_extra_params`](crate::Session::set_object_extra_params).
+    /// The message carries one block per subtype for an object — they are folded
+    /// back into one [`ObjectExtraParams`], so a subtype sent not-in-use is
+    /// absent (cleared) here. One event is emitted per distinct object.
+    ObjectExtraParamsSet {
+        /// The region-local id of the object whose parameters were set.
+        local_id: RegionLocalObjectId,
+        /// The object's complete extra-parameter state.
+        params: ObjectExtraParams,
     },
     /// Any other decoded client message, surfaced verbatim. This is how the
     /// remaining client-only messages reach the simulator: fully decoded but
@@ -4291,6 +4329,54 @@ impl SimSession {
                 self.events.push_back(ServerEvent::CallingCardDeclined {
                     transaction: TransactionId::from(decline.transaction_block.transaction_id),
                 });
+            }
+            AnyMessage::ObjectShape(shape) => {
+                for block in &shape.object_data {
+                    self.events.push_back(ServerEvent::ObjectShapeSet {
+                        local_id: RegionLocalObjectId(block.object_local_id),
+                        shape: shape_from_object_shape_block(block),
+                    });
+                }
+            }
+            AnyMessage::ObjectImage(image) => {
+                for block in &image.object_data {
+                    let media_url = trimmed_string(&block.media_url);
+                    self.events.push_back(ServerEvent::ObjectImageSet {
+                        local_id: RegionLocalObjectId(block.object_local_id),
+                        media_url: (!media_url.is_empty()).then_some(media_url),
+                        texture_entry: decode_texture_entry(&block.texture_entry, MAX_FACES),
+                    });
+                }
+            }
+            AnyMessage::ObjectExtraParams(params) => {
+                // The viewer's sendExtraParameters emits one block per subtype for
+                // a single object, so collect the distinct object ids (in
+                // first-seen order) and fold each object's blocks back into one
+                // ObjectExtraParams.
+                let mut order: Vec<RegionLocalObjectId> = Vec::new();
+                for block in &params.object_data {
+                    let id = RegionLocalObjectId(block.object_local_id);
+                    if !order.contains(&id) {
+                        order.push(id);
+                    }
+                }
+                for local_id in order {
+                    let blocks = params
+                        .object_data
+                        .iter()
+                        .filter(|block| RegionLocalObjectId(block.object_local_id) == local_id)
+                        .map(|block| {
+                            (
+                                block.param_type,
+                                block.param_in_use,
+                                block.param_data.clone(),
+                            )
+                        });
+                    self.events.push_back(ServerEvent::ObjectExtraParamsSet {
+                        local_id,
+                        params: decode_extra_param_blocks(blocks),
+                    });
+                }
             }
             AnyMessage::LogoutRequest(_) => {
                 self.send_logout_reply(now)?;

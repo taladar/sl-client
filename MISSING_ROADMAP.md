@@ -943,7 +943,8 @@ the encoded buffer across, and assert the peer decodes the expected
   enqueue_open_region_info)
 - [x] Sim out batch 1 — calling-card ServerEvents (CallingCardOffered,
   CallingCardAccepted, CallingCardDeclined)
-- [ ] Sim out batch 2 — object prim-editing ServerEvents
+- [x] Sim out batch 2 — object prim-editing ServerEvents (ObjectShapeSet,
+  ObjectImageSet, ObjectExtraParamsSet)
 - [ ] Sim out batch 3 — rez & script-permission ServerEvents
 - [ ] Sim out batch 4 — task-inventory ServerEvents
 - [ ] Sim out batch 5 — land & parcel ServerEvents
