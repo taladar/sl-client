@@ -70,6 +70,64 @@ impl MovementMode {
     }
 }
 
+/// Which start-location slot a `SetStartLocationRequest` records, mirroring the
+/// reference viewer's `EStartLocation`. The everyday case is
+/// [`Home`](Self::Home) — "set home to here" stores the accompanying region
+/// position and look-at as the agent's home — but the message can target any
+/// named slot.
+///
+/// Distinct from the login [`StartLocation`](crate::StartLocation), which is the
+/// SLURL-style `start=` login parameter (`last` / `home` / `uri:Region&x&y&z`):
+/// that enum names *where to log in*, whereas this one is the wire `LocationID`
+/// of the request that *records* a home/last slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StartLocationSlot {
+    /// The agent's last-location slot (`START_LOCATION_ID_LAST`).
+    Last,
+    /// The agent's home slot (`START_LOCATION_ID_HOME`) — "set home to here".
+    Home,
+    /// A direct coordinate start (`START_LOCATION_ID_DIRECT`).
+    Direct,
+    /// A parcel start point (`START_LOCATION_ID_PARCEL`).
+    Parcel,
+    /// A telehub start point (`START_LOCATION_ID_TELEHUB`).
+    Telehub,
+    /// A SLURL-resolved start (`START_LOCATION_ID_URL`).
+    Url,
+}
+
+impl StartLocationSlot {
+    /// The wire `LocationID` value (the reference viewer's `EStartLocation`
+    /// ordinal).
+    #[must_use]
+    pub const fn to_code(self) -> u32 {
+        match self {
+            Self::Last => 0,
+            Self::Home => 1,
+            Self::Direct => 2,
+            Self::Parcel => 3,
+            Self::Telehub => 4,
+            Self::Url => 5,
+        }
+    }
+
+    /// Classifies a `SetStartLocationRequest` `LocationID`, returning `None` for
+    /// an unrecognised code.
+    #[must_use]
+    pub const fn from_code(code: u32) -> Option<Self> {
+        match code {
+            0 => Some(Self::Last),
+            1 => Some(Self::Home),
+            2 => Some(Self::Direct),
+            3 => Some(Self::Parcel),
+            4 => Some(Self::Telehub),
+            5 => Some(Self::Url),
+            _ => None,
+        }
+    }
+}
+
 /// A non-negative, finite bandwidth rate in **kilobits per second**, used for
 /// the seven per-category rates of a [`Throttle`].
 ///
@@ -1052,5 +1110,25 @@ mod tests {
                 mode
             );
         }
+    }
+
+    #[test]
+    fn start_location_slot_round_trips_its_code() {
+        use super::StartLocationSlot;
+        for location in [
+            StartLocationSlot::Last,
+            StartLocationSlot::Home,
+            StartLocationSlot::Direct,
+            StartLocationSlot::Parcel,
+            StartLocationSlot::Telehub,
+            StartLocationSlot::Url,
+        ] {
+            assert_eq!(
+                StartLocationSlot::from_code(location.to_code()),
+                Some(location)
+            );
+        }
+        assert_eq!(StartLocationSlot::Home.to_code(), 1);
+        assert_eq!(StartLocationSlot::from_code(99), None);
     }
 }

@@ -7,6 +7,7 @@ use super::{
     ACK_FLUSH_DELAY, Circuit, INACTIVITY_TIMEOUT, MAX_ACKS_PER_PACKET, MAX_RESEND_ATTEMPTS,
     RESEND_TIMEOUT, SeenWindow, Timers, UnackedPacket, deadline,
 };
+use crate::AssetKey;
 use crate::GroupRoleKey;
 use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
 use crate::encode_texture_entry;
@@ -23,7 +24,7 @@ use crate::types::{
     ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelCategory, ParcelUpdate,
     PermissionField, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate,
     Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
-    ScriptPermissions, TaskInventoryKey, TeleportFlags, TextureEntry, Throttle,
+    ScriptPermissions, StartLocationSlot, TaskInventoryKey, TeleportFlags, TextureEntry, Throttle,
     UpdateGroupInfoParams, ViewerEffect, Wearable,
 };
 use crate::types::{GroupNoticeKey, ProposalVoteId};
@@ -205,6 +206,14 @@ use sl_wire::messages::{
     UpdateMuteListEntryMuteDataBlock, UseCircuitCode, UseCircuitCodeCircuitCodeBlock, UserReport,
     UserReportAgentDataBlock, UserReportReportDataBlock, ViewerEffect as ViewerEffectMessage,
     ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
+};
+use sl_wire::messages::{
+    AgentDataUpdateRequest, AgentDataUpdateRequestAgentDataBlock, AgentQuitCopy,
+    AgentQuitCopyAgentDataBlock, AgentQuitCopyFuseBlockBlock, SetStartLocationRequest,
+    SetStartLocationRequestAgentDataBlock, SetStartLocationRequestStartLocationDataBlock,
+    TeleportCancel, TeleportCancelInfoBlock, TeleportLandmarkRequest,
+    TeleportLandmarkRequestInfoBlock, VelocityInterpolateOff, VelocityInterpolateOffAgentDataBlock,
+    VelocityInterpolateOn, VelocityInterpolateOnAgentDataBlock,
 };
 use sl_wire::messages::{
     AgentFOV, AgentFOVAgentDataBlock, AgentFOVFOVBlockBlock, AgentHeightWidth,
@@ -3125,6 +3134,112 @@ impl Circuit {
                 region_handle,
                 position,
                 look_at,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `TeleportLandmarkRequest` reliably. `landmark` is the landmark
+    /// asset's id, or [`Uuid::nil`] (the wire encoding of `None`) to teleport to
+    /// the agent's home location.
+    pub(crate) fn send_teleport_landmark_request(
+        &mut self,
+        landmark: Option<AssetKey>,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::TeleportLandmarkRequest(TeleportLandmarkRequest {
+            info: TeleportLandmarkRequestInfoBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+                landmark_id: landmark.map_or_else(Uuid::nil, |id| id.uuid()),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `TeleportCancel` reliably (abort an in-progress teleport).
+    pub(crate) fn send_teleport_cancel(&mut self, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::TeleportCancel(TeleportCancel {
+            info: TeleportCancelInfoBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `SetStartLocationRequest` reliably: records `position` /
+    /// `look_at` (region-local) as the agent's `slot` start location. `SimName`
+    /// is always sent empty — the simulator fills in the current region's name.
+    pub(crate) fn send_set_start_location_request(
+        &mut self,
+        slot: StartLocationSlot,
+        position: Vector,
+        look_at: Vector,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::SetStartLocationRequest(SetStartLocationRequest {
+            agent_data: SetStartLocationRequestAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            start_location_data: SetStartLocationRequestStartLocationDataBlock {
+                sim_name: with_nul(""),
+                location_id: slot.to_code(),
+                location_pos: position,
+                location_look_at: look_at,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AgentDataUpdateRequest` reliably (poll for a fresh
+    /// `AgentDataUpdate` without changing any agent data).
+    pub(crate) fn send_agent_data_update_request(&mut self, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::AgentDataUpdateRequest(AgentDataUpdateRequest {
+            agent_data: AgentDataUpdateRequestAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AgentQuitCopy` reliably: quits the session but leaves the
+    /// agent's in-world objects behind. The `FuseBlock` carries this circuit's
+    /// own code.
+    pub(crate) fn send_agent_quit_copy(&mut self, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::AgentQuitCopy(AgentQuitCopy {
+            agent_data: AgentQuitCopyAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            fuse_block: AgentQuitCopyFuseBlockBlock {
+                viewer_circuit_code: self.code.get(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `VelocityInterpolateOn` reliably (enable simulator-side velocity
+    /// interpolation of object motion).
+    pub(crate) fn send_velocity_interpolate_on(&mut self, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::VelocityInterpolateOn(VelocityInterpolateOn {
+            agent_data: VelocityInterpolateOnAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `VelocityInterpolateOff` reliably (disable simulator-side
+    /// velocity interpolation of object motion).
+    pub(crate) fn send_velocity_interpolate_off(&mut self, now: Instant) -> Result<(), WireError> {
+        let message = AnyMessage::VelocityInterpolateOff(VelocityInterpolateOff {
+            agent_data: VelocityInterpolateOffAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
             },
         });
         self.send(&message, Reliability::Reliable, now)

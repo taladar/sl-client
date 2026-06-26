@@ -33,11 +33,11 @@ mod test {
         RegionInfoUpdate, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment,
         RezObjectParams, RezScriptParams, SaleType, Scale, ScopedObjectId, ScopedParcelId,
         ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session, SetDisplayNameReply,
-        SimStatId, SimulatorTime, SkySettings, SoundFlags, TaskInventoryKey, TaskInventoryReply,
-        TeleportFlags, TerraformArea, TerrainLayerType, TextureEntry, TextureFace, TextureKey,
-        Throttle, TransactionId, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
-        ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
-        avatar_texture, decode_texture_entry, group_powers, pcode,
+        SimStatId, SimulatorTime, SkySettings, SoundFlags, StartLocationSlot, TaskInventoryKey,
+        TaskInventoryReply, TeleportFlags, TerraformArea, TerrainLayerType, TextureEntry,
+        TextureFace, TextureKey, Throttle, TransactionId, TransferStatus, Transmit,
+        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        WaterSettings, WearableType, avatar_texture, decode_texture_entry, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -3316,6 +3316,126 @@ mod test {
             .ok_or("expected a GroupTitleUpdate")?;
         assert_eq!(title.agent_data.group_id, group);
         assert_eq!(title.agent_data.title_role_id, title_role);
+        Ok(())
+    }
+
+    #[test]
+    fn teleport_via_landmark_packs_and_cancel_returns_to_active() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // A landmark teleport carries the asset id and enters the teleporting
+        // state with no destination hint (resolved sim-side).
+        let landmark = uuid::Uuid::from_u128(0x6740);
+        session.teleport_via_landmark(Some(AssetKey::from(landmark)), now)?;
+        let sent = drain(&mut session)?;
+        let request = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::TeleportLandmarkRequest(r) => Some(r),
+                _ => None,
+            })
+            .ok_or("expected a TeleportLandmarkRequest")?;
+        assert_eq!(request.info.landmark_id, landmark);
+
+        // Cancelling returns the session to the active state and packs a
+        // TeleportCancel.
+        session.cancel_teleport(now)?;
+        let sent = drain(&mut session)?;
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::TeleportCancel(_))),
+            "expected a TeleportCancel"
+        );
+
+        // A home teleport (None) packs a nil landmark id; the session is active
+        // again so the request is accepted.
+        session.teleport_via_landmark(None, now)?;
+        let sent = drain(&mut session)?;
+        let home = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::TeleportLandmarkRequest(r) => Some(r),
+                _ => None,
+            })
+            .ok_or("expected a home TeleportLandmarkRequest")?;
+        assert_eq!(home.info.landmark_id, uuid::Uuid::nil());
+        Ok(())
+    }
+
+    #[test]
+    fn set_start_location_packs_slot_and_position() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.set_start_location(
+            StartLocationSlot::Home,
+            region_coords(64.0, 96.0, 25.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let request = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::SetStartLocationRequest(r) => Some(r),
+                _ => None,
+            })
+            .ok_or("expected a SetStartLocationRequest")?;
+        assert_eq!(request.start_location_data.location_id, 1); // HOME
+        let pos = &request.start_location_data.location_pos;
+        assert_eq!(pos.x.to_bits(), 64.0_f32.to_bits());
+        assert_eq!(pos.y.to_bits(), 96.0_f32.to_bits());
+        assert_eq!(pos.z.to_bits(), 25.0_f32.to_bits());
+        assert_eq!(
+            request.start_location_data.location_look_at.x.to_bits(),
+            1.0_f32.to_bits()
+        );
+        // SimName is left empty for the simulator to fill in.
+        assert_eq!(trimmed(&request.start_location_data.sim_name), "");
+        Ok(())
+    }
+
+    #[test]
+    fn agent_prefs_pack_data_request_quit_and_velocity_interp() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        session.request_agent_data_update(now)?;
+        session.quit_copy(now)?;
+        session.set_velocity_interpolation(true, now)?;
+        session.set_velocity_interpolation(false, now)?;
+        let sent = drain(&mut session)?;
+
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::AgentDataUpdateRequest(_))),
+            "expected an AgentDataUpdateRequest"
+        );
+        let quit = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::AgentQuitCopy(q) => Some(q),
+                _ => None,
+            })
+            .ok_or("expected an AgentQuitCopy")?;
+        // The fuse block echoes this circuit's own code (non-zero once
+        // established).
+        assert_ne!(quit.fuse_block.viewer_circuit_code, 0);
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::VelocityInterpolateOn(_))),
+            "expected a VelocityInterpolateOn"
+        );
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::VelocityInterpolateOff(_))),
+            "expected a VelocityInterpolateOff"
+        );
         Ok(())
     }
 

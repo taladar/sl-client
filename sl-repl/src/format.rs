@@ -804,6 +804,12 @@ const fn command_name(command: &Command) -> &'static str {
         Command::LeaveConference { .. } => "leave_conference",
         Command::RetrieveInstantMessages => "retrieve_instant_messages",
         Command::RequestOfflineMessages => "request_offline_messages",
+        Command::TeleportViaLandmark { .. } => "teleport_via_landmark",
+        Command::CancelTeleport => "cancel_teleport",
+        Command::SetStartLocation { .. } => "set_start_location",
+        Command::RequestAgentDataUpdate => "request_agent_data_update",
+        Command::QuitCopy => "quit_copy",
+        Command::SetVelocityInterpolation { .. } => "set_velocity_interpolation",
         Command::Logout => "logout",
     }
 }

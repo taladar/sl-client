@@ -2543,6 +2543,30 @@ fn advance_running(
                     });
                 }
             }
+            Command::TeleportViaLandmark { landmark } => {
+                session.teleport_via_landmark(*landmark, now).ok();
+            }
+            Command::CancelTeleport => {
+                session.cancel_teleport(now).ok();
+            }
+            Command::SetStartLocation {
+                slot,
+                position,
+                look_at,
+            } => {
+                session
+                    .set_start_location(*slot, *position, look_at.clone(), now)
+                    .ok();
+            }
+            Command::RequestAgentDataUpdate => {
+                session.request_agent_data_update(now).ok();
+            }
+            Command::QuitCopy => {
+                session.quit_copy(now).ok();
+            }
+            Command::SetVelocityInterpolation { enabled } => {
+                session.set_velocity_interpolation(*enabled, now).ok();
+            }
             Command::Logout => session.initiate_logout(now),
         }
     }
