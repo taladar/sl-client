@@ -29,8 +29,13 @@ Scope reminders:
 - Keep `sl-client-tokio` and `sl-client-bevy` (and the REPL) at feature parity.
 - Never push client-only protocol types into the shared `sl-types` crate.
 - Local proximity chat (`ChatFromViewer` / `say` → `Event::ChatReceived`) is a
-  **separate** concern and **out of scope** here; this roadmap is about IM /
-  conference / group **sessions**.
+  **separate** concern, **out of scope** for the session-**state** model here
+  (this roadmap is about IM / conference / group **sessions**) — but it **is**
+  included in the optional **chat-log files** (A13), which cover *all* text-chat
+  types (nearby + IM + group + conference).
+- Optional **local chat-log files** (write + read-back, Firestorm-style; A13)
+  in scope for **long-term** history beyond the in-memory cap; this is a
+  **runtime** file-I/O feature (the sans-IO `Session` does no I/O), default off.
 - A session's **voice channel is in scope at SL-signalling level** (has-voice,
   channel info, join/leave-voice, voice membership — A5 / A12), reusing the
   existing voice-signalling feature. The **Vivox/WebRTC audio transport and the
@@ -271,20 +276,44 @@ Scope reminders:
   `SessionLeave`), `SessionLeave` covers everyone; both idempotent. Typing is
   also cleared by the A6 9 s expiry — A7 just does it immediately. No new event
   (the driver already gets `FriendsOffline`).
-- [ ] **A8. Design message history, unread & offline retrieval.** Plan a bounded
+- [x] **A8. Design message history, unread & offline retrieval.** Plan a bounded
   per-session message log (sender, timestamp, text, dialog), an unread /
   last-read marker per session, and offline-IM retrieval — the modern
   `ReadOfflineMsgs` CAPS (and/or the legacy `RetrieveInstantMessages` UDP),
   neither implemented yet. Decide retention bounds (cap the log length), what
   counts as unread, and how login drains queued offline IMs into the right
   sessions.
+  **Done — see § History & unread reference (from A8) + task B8 in § Phase B.**
+  **Correction:** offline-IM *retrieval* already ships (A1) — both
+  `Command::RetrieveInstantMessages` and `Command::RequestOfflineMessages` —
+  so A8 plans only the **bounded log + unread** model and how the replayed IMs
+  **drain** into sessions. Decided: `ChatSession` gains `history:
+  VecDeque<ChatMessage>` (cap `HISTORY_CAP = 256`, pop-front oldest; in-memory
+  only per A9) and `unread: u32`, where `ChatMessage { sender: AgentKey, dialog:
+  ImDialog, text: String, timestamp: Option<u32> }` (the wire Unix `timestamp` —
+  `None` for our own sends, since sans-IO has no wall-clock; insertion order is
+  the sequence). **Logged dialogs:** only conversation — inbound 1:1 `Message`
+  (incl. offline replays) and group/conference `SessionSend`, plus **our own
+  outbound** IM/group/conference sends (`sender = self`); typing / participant /
+  offers / notices / `FromTask` are **not** logged. **Unread:** `+1` per inbound
+  message from another agent (offline IMs included); our own outbound resets it;
+  a new `mark_session_read` (`Command::MarkSessionRead`) also resets. **Offline
+  drain** is automatic: replayed `offline = true` IMs flow through the same
+  inbound logging — opening the `Direct { from_agent_id }` session (A4), append
+  with the original wire `timestamp`, bumping `unread` — so login populates
+  the right sessions once retrieval is fired (driver/runtime policy; viewers
+  auto-request at login). Accessors `history(session)` / `unread(session)` /
+  `total_unread()`.
 - [ ] **A9. Lock the persistence-vs-region behaviour.** Chat sessions, history,
   and presence are **grid-level** and **persist** across teleport
   (`begin_handover`, `TeleportLocal`), neighbour crossing
   (`promote_child_to_root`), and `DisableSimulator` — explicitly **not** reset
   (the inverse of the `SitState` reset at those same sites). All of it clears
-  only on logout (`SessionState::Closed`). Decide whether any persistence beyond
-  a single session is in scope (default: in-memory only).
+  only on logout (`SessionState::Closed`). Persistence **beyond** a single
+  session **is** in scope — the optional local chat-log files (**A13**); the
+  sans-IO `Session` state itself stays in-memory (cleared on logout) and A13's
+  *runtime* file layer is the long-term store. A9 locks the in-memory
+  region-behaviour; A13 owns the on-disk behaviour.
 - [ ] **A10. Specify the API-surface delta & driver/REPL exposure.** Enumerate
   the new/changed `Command`s (accept/decline invitation, an optional open/close
   session, request offline IMs), any `Event` changes, and the new `Session`
@@ -321,6 +350,30 @@ Scope reminders:
   "who-is-currently-speaking" / talk-activity indicators it drives — those live
   in the external voice client, not sl-client. State the boundary: sl-client
   models voice **session state**, not voice **audio**.
+- [ ] **A13. Design optional local chat-log files (read + write, all text
+  chat).** A **runtime** feature (the sans-IO `Session` does no file I/O — this
+  lives in `sl-client-tokio` / `sl-client-bevy`, fed by the event stream) that
+  optionally persists message history to per-conversation log files and reads it
+  back, for **long-term** scrollback beyond the in-memory A8 cap, **similar to
+  the Firestorm viewer** and ideally **format-compatible** with it. **Covers all
+  text-chat types** (user-set scope): **nearby / local chat** (`ChatReceived` —
+  otherwise out of the session-state scope, but **in** scope for logging), 1:1
+  IM, group, and conference. Design, grounded in Firestorm `LLLogChat`
+  (`lllogchat.cpp`): a per-account `chat_logs/` directory; per-conversation
+  transcript filenames (`chat.txt` for nearby; `firstname.lastname.txt` for 1:1,
+  with a legacy display-name option; `<group name> (group).txt` for group; a
+  participant-hash name for ad-hoc / conference — sanitised, optional date
+  suffix); the line format `[YYYY/MM/DD HH:MM]  Name: message` (timestamp / date
+  / seconds toggles; space-prefixed continuation lines); **read-back the tail**
+  (Firestorm recalls the last ~20 KB / a "history lines" count) to **seed the A8
+  in-memory `history`** on session open; plus the optional `conversation.log`
+  metadata index of past conversations. Decide the config surface (enable per
+  text-chat type, log dir, filename scheme, timestamp format, recall size),
+  default **off** (opt-in, as Firestorm defaults nearby logging off), and how
+  the runtime supplies **wall-clock** time (the sans-IO core lacks it — so file
+  lines get real dates even for our own sends, A8's `timestamp = None`). Note
+  the boundary: A8 is the in-memory working set, A13 is the long-term file store
+  that A13 spills to and seeds from.
 
 Phase A scopes the planning only; the implementation tasks each Phase A item
 produces are appended to **Phase B** below as that item is worked, tagged with
@@ -480,10 +533,13 @@ of the three kinds a session is, carrying the kind's *typed* id (never a raw
 Group / Conference), their rosters / typing / history / unread / invitations,
 the per-session **voice channel at the SL-signalling level** (has-voice, channel
 info, join/leave-voice, voice membership — A5 / A12; **scope expanded
-2026-06-27**), and folded-in **friend presence** (buddy cache + online set +
-presence-driven auto-reset). **OUT of scope:** local proximity chat
-(`ChatFromViewer` / `say` → `Event::ChatReceived`) — a separate stateless
-concern; the **Vivox / WebRTC audio transport and the "who is speaking"
+2026-06-27**), folded-in **friend presence** (buddy cache + online set +
+presence-driven auto-reset), and the optional **local chat-log files** (A13 —
+runtime read/write, Firestorm-style, covering **all** text-chat types **incl.
+nearby**). **OUT of scope:** local proximity chat's **session state**
+(`ChatFromViewer` / `say` → `ChatReceived`) — a separate stateless concern
+(though nearby chat **is** logged by A13); the **Vivox / WebRTC audio transport
+and the "who is speaking"
 indicators** (the external voice client — sl-client does voice *signalling*
 only); the full friendship lifecycle and calling-card flows (referenced for
 rosters/presence, but their commands/events are unchanged); and offline-IM
@@ -1336,3 +1392,110 @@ This task stays **drafted/blocked** until Phase A is signed off; it builds on B3
 (the `online` set / `OfflineNotification` hook) and B6 (the `typing` /
 `participants` stores), and is the sole coupling between presence and the
 session registry.
+
+### History & unread reference (from A8)
+
+The per-session conversation log + the unread marker. **Offline-IM retrieval is
+already implemented** (A1 — `Command::RetrieveInstantMessages` UDP +
+`Command::RequestOfflineMessages` CAPS), so A8 designs only the **in-memory**
+bounded log + unread and how replayed offline IMs drain into it. *Long-term*
+persistence to local files (read & write, all text-chat types, Firestorm-style)
+is the separate **A13** item; this in-memory model is its working set and can be
+seeded from A13's file read-back.
+
+**The log entry.** A small public value type:
+
+    struct ChatMessage {
+        sender: AgentKey,          // self for our own outbound sends
+        dialog: ImDialog,          // Message (1:1) or SessionSend (group/conf)
+        text: String,
+        timestamp: Option<u32>,    // the wire Unix time (InstantMessage.timestamp)
+    }
+
+- **`timestamp`** is the wire `InstantMessage.timestamp` (Unix seconds, the sim
+  fills it; the *original* time for an offline IM). It is `None` for our own
+  outbound sends — the sans-IO `Session` has no wall-clock (`SystemTime` is
+  banned), so the driver renders `None` as "now". Message **order** is the
+  `VecDeque` insertion order, not the timestamp.
+- `dialog` is kept for fidelity (per the A8 brief: sender / timestamp / text /
+  dialog); in practice it is `Message` or `SessionSend`.
+
+**The fields on `ChatSession`** (the A2-deferred history/unread slot):
+
+    history: VecDeque<ChatMessage>,   // capped at HISTORY_CAP
+    unread: u32,
+
+- **`history`** is bounded by `HISTORY_CAP = 256`; on overflow the oldest
+  is `pop_front`-ed. In-memory only (A9); A13 adds the optional file spillover
+  long-term scrollback.
+- **`unread`** is a plain count (not a shifting index, which a capped `VecDeque`
+  would invalidate). On a prune that drops an unread message, clamp
+  `unread = min(unread, history.len())` — a negligible edge at cap 256.
+
+**What is logged** — *conversation only*:
+
+- **inbound** 1:1 `Message` (the catch-all arm; this is also where the `Direct`
+  session opens — A4/B4), and group / conference `SessionSend`
+  (`methods.rs:2006` / `:2025`);
+- **our own outbound** `send_instant_message` / `send_group_message` /
+  `send_conference_message` (`sender = self`), so the log is a full transcript;
+- **offline** replays (`offline == true`) ride the inbound `Message` path.
+
+**Not** logged: typing, participant add/leave, inventory/offer/notice dialogs,
+friendship, and `FromTask` (object→agent IM — it belongs to no tracked session).
+
+**Unread.** Incremented by **one per inbound conversational message from another
+agent** (offline IMs included — they are unseen). Our own outbound message
+**resets** `unread` to 0 (replying implies you read it), and a new
+`mark_session_read` / `Command::MarkSessionRead { session }` resets it too
+(the driver calls it when the user views the session). Typing, participant and
+system dialogs never touch `unread`.
+
+**Offline drain (login).** The already-shipped retrieval replays stored IMs as
+ordinary `Event::InstantMessageReceived` with `offline == true`. They flow
+through the **same** inbound logging path: each opens / finds its
+`Direct { from_agent_id }` session (A4), appends a `ChatMessage` carrying its
+**original** wire `timestamp`, and bumps `unread`. So login populates the right
+sessions with the right times — no offline-specific routing. *When*
+retrieval fires is driver/runtime policy (the command exists; viewers
+auto-request at login); A8 only routes the result.
+
+**Accessors** (public; the deque stays private):
+
+    fn history(&self, session: ChatSessionKind)
+        -> impl Iterator<Item = &ChatMessage> + '_
+    fn unread(&self, session: ChatSessionKind) -> u32
+    fn total_unread(&self) -> u32          // sum across sessions, for a badge
+
+**Persistence.** `history` / `unread` live on `ChatSession`, so they persist
+across teleport (grid-level, A9) and clear on logout — *unless* A13's file
+logging is enabled — the long-term store that outlives the session and is
+read back on a later login.
+
+### B8. Per-session history & unread (from A8)
+
+Add the log + unread to `ChatSession` and fold logging into the message paths:
+
+- Add `ChatMessage { sender, dialog, text, timestamp }` (public) and the
+  `history: VecDeque<ChatMessage>` + `unread: u32` fields; `HISTORY_CAP = 256`.
+- **Inbound log:** in the group/conf `SessionSend` arms (`methods.rs:2006` /
+  `:2025`) and the 1:1 `Message` path (the catch-all arm that B4 also hooks to
+  open the `Direct` session), `chat_session_mut` the session, push the
+  `ChatMessage`, `unread += 1` (skip `unread` when `sender == self`, e.g. an
+  echo), and prune to `HISTORY_CAP`.
+- **Outbound log:** in `send_instant_message` / `send_group_message` /
+  `send_conference_message`, append a `ChatMessage { sender: self, … }` and set
+  `unread = 0`.
+- Add `mark_session_read(session)` + `Command::MarkSessionRead { session }`,
+  tokio / bevy / REPL at parity) resetting `unread`.
+- Accessors `history` / `unread` / `total_unread`.
+- Tests: an inbound 1:1 `Message` opens the `Direct` session and logs it with
+  `unread == 1`; a group `SessionSend` logs to the group session; our own
+  outbound logs (`sender = self`) and resets `unread`; `mark_session_read`
+  resets; pushing `HISTORY_CAP + 1` drops oldest; an `offline == true` IM logs
+  with its wire `timestamp` and bumps `unread`; `total_unread` sums across
+  sessions.
+
+This task stays **drafted/blocked** until Phase A is signed off; it builds on B2
+(registry) and B4 (the `Direct`-opening / `SessionSend` handler sites), and its
+working set is the source A13 spills to / seeds from local log files.
