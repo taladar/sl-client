@@ -931,7 +931,10 @@ the encoded buffer across, and assert the peer decodes the expected
 - [x] Sim inbound batch 5 — friendship & calling-card encoders
   (send_terminate_friendship, send_offer_calling_card,
   send_accept_calling_card, send_decline_calling_card)
-- [ ] Sim inbound batch 6 — inventory sync, task inventory & misc encoders
+- [x] Sim inbound batch 6 — inventory sync, task inventory & misc encoders
+  (send_remove_inventory_item / _folder / _objects, send_move_inventory_item,
+  send_reply_task_inventory, send_user_info_reply, send_derez_ack,
+  send_force_object_select, send_grant_godlike_powers)
 - [ ] Sim EQ batches 1–3 — typed CAPS event-queue enqueue helpers
 - [ ] Sim out batch 1 — calling-card ServerEvents
 - [ ] Sim out batch 2 — object prim-editing ServerEvents

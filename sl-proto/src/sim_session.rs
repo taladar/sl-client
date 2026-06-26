@@ -72,6 +72,18 @@ use sl_wire::messages::{
     SetFollowCamPropertiesCameraPropertyBlock, SetFollowCamPropertiesObjectDataBlock,
 };
 use sl_wire::messages::{
+    DeRezAck, DeRezAckTransactionDataBlock, ForceObjectSelect, ForceObjectSelectDataBlock,
+    ForceObjectSelectHeaderBlock, GrantGodlikePowers, GrantGodlikePowersAgentDataBlock,
+    GrantGodlikePowersGrantDataBlock, MoveInventoryItem, MoveInventoryItemAgentDataBlock,
+    MoveInventoryItemInventoryDataBlock, RemoveInventoryFolder,
+    RemoveInventoryFolderAgentDataBlock, RemoveInventoryFolderFolderDataBlock, RemoveInventoryItem,
+    RemoveInventoryItemAgentDataBlock, RemoveInventoryItemInventoryDataBlock,
+    RemoveInventoryObjects, RemoveInventoryObjectsAgentDataBlock,
+    RemoveInventoryObjectsFolderDataBlock, RemoveInventoryObjectsItemDataBlock, ReplyTaskInventory,
+    ReplyTaskInventoryInventoryDataBlock, UserInfoReply, UserInfoReplyAgentDataBlock,
+    UserInfoReplyUserDataBlock,
+};
+use sl_wire::messages::{
     Error as ErrorWire, ErrorAgentDataBlock, ErrorDataBlock,
     FeatureDisabled as FeatureDisabledWire, FeatureDisabledFailureInfoBlock, KickUser,
     KickUserTargetBlockBlock, KickUserUserInfoBlock,
@@ -134,13 +146,14 @@ use crate::types::{
     DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant,
     EventInfo, FeatureDisabled, FollowCamPropertyValue, GenericMessage, GenericStreamingMessage,
     GestureActivation, GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions,
-    GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, InstantMessage, Kick, LandSearchType,
-    LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer, MapRegionInfo,
-    MapRequestFlags, MeanCollision, MovementMode, NotecardRez, ObjectBuyItem,
+    GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, InstantMessage, InventoryItemMove,
+    Kick, LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer,
+    MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NotecardRez, ObjectBuyItem,
     ObjectPlayingAnimation, ObjectPropertiesFamily, ParcelCategory, ParcelDetails,
     ParcelObjectOwner, PlacesResult, Postcard, ProposalVoteId, RegionIdentity, RegionStats,
     Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl, ServerError, SimulatorTime,
-    TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    TaskInventoryReply, TelehubInfo, Throttle, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
+    ViewerEffectType,
 };
 use sl_wire::AbuseReport;
 
@@ -3003,6 +3016,307 @@ impl SimSession {
             },
             transaction_block: DeclineCallingCardTransactionBlockBlock {
                 transaction_id: transaction.get(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `RemoveInventoryItem` — tells the client the simulator deleted one
+    /// or more inventory items server-side, so a client mirroring inventory can
+    /// drop them (the inverse of the client's
+    /// [`Event::InventoryItemsRemoved`](crate::Event::InventoryItemsRemoved)).
+    /// The echoed `AgentData.AgentID` is the recipient agent. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_remove_inventory_item(
+        &mut self,
+        items: &[InventoryKey],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::RemoveInventoryItem(RemoveInventoryItem {
+            agent_data: RemoveInventoryItemAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                session_id: self.session_id.unwrap_or_else(Uuid::nil),
+            },
+            inventory_data: items
+                .iter()
+                .map(|item| RemoveInventoryItemInventoryDataBlock {
+                    item_id: item.uuid(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `RemoveInventoryFolder` — tells the client the simulator deleted
+    /// one or more inventory folders (and their cached descendents) server-side
+    /// (the inverse of the client's
+    /// [`Event::InventoryFoldersRemoved`](crate::Event::InventoryFoldersRemoved)).
+    /// Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_remove_inventory_folder(
+        &mut self,
+        folders: &[InventoryFolderKey],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::RemoveInventoryFolder(RemoveInventoryFolder {
+            agent_data: RemoveInventoryFolderAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                session_id: self.session_id.unwrap_or_else(Uuid::nil),
+            },
+            folder_data: folders
+                .iter()
+                .map(|folder| RemoveInventoryFolderFolderDataBlock {
+                    folder_id: folder.uuid(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `RemoveInventoryObjects` — tells the client the simulator deleted a
+    /// mixed set of inventory folders and items in one message (the inverse of the
+    /// client's
+    /// [`Event::InventoryObjectsRemoved`](crate::Event::InventoryObjectsRemoved)).
+    /// Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_remove_inventory_objects(
+        &mut self,
+        folders: &[InventoryFolderKey],
+        items: &[InventoryKey],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::RemoveInventoryObjects(RemoveInventoryObjects {
+            agent_data: RemoveInventoryObjectsAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                session_id: self.session_id.unwrap_or_else(Uuid::nil),
+            },
+            folder_data: folders
+                .iter()
+                .map(|folder| RemoveInventoryObjectsFolderDataBlock {
+                    folder_id: folder.uuid(),
+                })
+                .collect(),
+            item_data: items
+                .iter()
+                .map(|item| RemoveInventoryObjectsItemDataBlock {
+                    item_id: item.uuid(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `MoveInventoryItem` — tells the client the simulator re-parented
+    /// (and optionally renamed) inventory items server-side (the inverse of the
+    /// client's
+    /// [`Event::InventoryItemsMoved`](crate::Event::InventoryItemsMoved)). Each
+    /// [`InventoryItemMove`] with a `new_name` of `None` packs an empty wire
+    /// `NewName`, which the client reads back as "no rename"; `stamp` echoes the
+    /// re-timestamp flag. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_move_inventory_item(
+        &mut self,
+        stamp: bool,
+        moves: &[InventoryItemMove],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::MoveInventoryItem(MoveInventoryItem {
+            agent_data: MoveInventoryItemAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                session_id: self.session_id.unwrap_or_else(Uuid::nil),
+                stamp,
+            },
+            inventory_data: moves
+                .iter()
+                .map(|item| MoveInventoryItemInventoryDataBlock {
+                    item_id: item.item.uuid(),
+                    folder_id: item.folder.uuid(),
+                    new_name: item
+                        .new_name
+                        .as_deref()
+                        .unwrap_or_default()
+                        .as_bytes()
+                        .to_vec(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `ReplyTaskInventory` — the contents serial and temporary Xfer
+    /// filename of an in-world object's task inventory, in reply to the client's
+    /// `RequestTaskInventory` (the inverse of the client's
+    /// [`Event::TaskInventoryReply`](crate::Event::TaskInventoryReply)). An empty
+    /// filename means the task inventory is empty. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_reply_task_inventory(
+        &mut self,
+        reply: &TaskInventoryReply,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ReplyTaskInventory(ReplyTaskInventory {
+            inventory_data: ReplyTaskInventoryInventoryDataBlock {
+                task_id: reply.task.uuid(),
+                serial: reply.serial,
+                filename: reply.filename.as_bytes().to_vec(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `UserInfoReply` — the agent's own account contact preferences, in
+    /// reply to the client's `UserInfoRequest` (the inverse of the client's
+    /// [`Event::UserInfo`](crate::Event::UserInfo)): whether offline IMs are
+    /// forwarded to email, the agent's directory (search) visibility, and the
+    /// email address on file. The echoed `AgentData.AgentID` is the recipient
+    /// agent. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_user_info_reply(&mut self, info: &UserInfo, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::UserInfoReply(UserInfoReply {
+            agent_data: UserInfoReplyAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+            },
+            user_data: UserInfoReplyUserDataBlock {
+                im_via_e_mail: info.im_via_email,
+                directory_visibility: info.directory_visibility.to_wire().as_bytes().to_vec(),
+                e_mail: info.email.as_bytes().to_vec(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `DeRezAck` — acknowledges that a delayed derez succeeded with no
+    /// inventory created on the viewer (e.g. a save into task inventory),
+    /// correlated to the client's derez by its [`TransactionId`] (the inverse of
+    /// the client's [`Event::DeRezAck`](crate::Event::DeRezAck)). Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_derez_ack(
+        &mut self,
+        transaction: TransactionId,
+        success: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::DeRezAck(DeRezAck {
+            transaction_data: DeRezAckTransactionDataBlock {
+                transaction_id: transaction.get(),
+                success,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `ForceObjectSelect` — forces the client's object selection to the
+    /// given region-local object ids (the inverse of the client's
+    /// [`Event::ForceObjectSelect`](crate::Event::ForceObjectSelect)). `reset_list`
+    /// clears the client's current selection before applying these; the ids are
+    /// region-local [`RegionLocalObjectId`]s, the bare counterpart of the
+    /// [`ScopedObjectId`](crate::ScopedObjectId) the client scopes them to. Sent
+    /// reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_force_object_select(
+        &mut self,
+        reset_list: bool,
+        objects: &[RegionLocalObjectId],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ForceObjectSelect(ForceObjectSelect {
+            header: ForceObjectSelectHeaderBlock { reset_list },
+            data: objects
+                .iter()
+                .map(|object| ForceObjectSelectDataBlock { local_id: object.0 })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `GrantGodlikePowers` — informs the client that the simulator
+    /// granted (or, with `god_level` 0, revoked) its god-like powers (the inverse
+    /// of the client's
+    /// [`Event::GodlikePowersGranted`](crate::Event::GodlikePowersGranted)). The
+    /// `AgentData` echoes the recipient agent; the wire `Token` is checked on the
+    /// sim and ignored by the viewer, so a nil token is sent. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_grant_godlike_powers(&mut self, god_level: u8, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::GrantGodlikePowers(GrantGodlikePowers {
+            agent_data: GrantGodlikePowersAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                session_id: self.session_id.unwrap_or_else(Uuid::nil),
+            },
+            grant_data: GrantGodlikePowersGrantDataBlock {
+                god_level,
+                token: Uuid::nil(),
             },
         });
         self.send(&message, Reliability::Reliable, now)?;
