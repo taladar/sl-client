@@ -21,21 +21,22 @@ mod test {
         GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
         GroupAccountTransactions, GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId,
         GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryItemMove,
-        InventoryKey, InvoiceId, Kick, LandArea, LandSearchType, LandStatItem, LandStatReportType,
-        LightData, LindenAmount, LindenBalance, LoginParams, MAX_FACES, MapItem, MapItemType,
-        MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
-        MovementMode, NavMeshBuildStatus, NavMeshStatus, NotecardRez, ObjectBuyItem,
-        ObjectExtraParams, ObjectKey, ObjectPlayingAnimation, ObjectPropertiesFamily,
-        OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey, ParcelObjectOwner,
-        ParcelReturnType, Permissions, Permissions5, PingId, PlacesResult, PointAtType, Postcard,
-        PrimShapeParams, ProductType, QueryId, RegionCoordinates, RegionHandle, RegionIdentity,
-        RegionLocalObjectId, RegionLocalParcelId, RegionStats, RequiredVoiceVersion, RestoreItem,
-        RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId,
-        ScriptControl, ScriptControlAction, ScriptPermissions, ServerError, ServerEvent, Session,
+        InventoryKey, InvoiceId, Kick, LandArea, LandBrushAction, LandBrushSize, LandEdit,
+        LandSearchType, LandStatItem, LandStatReportType, LightData, LindenAmount, LindenBalance,
+        LoginParams, MAX_FACES, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
+        Maturity, MeanCollision, MeanCollisionType, MovementMode, NavMeshBuildStatus,
+        NavMeshStatus, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectKey,
+        ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory,
+        ParcelDetails, ParcelKey, ParcelObjectOwner, ParcelReturnType, Permissions, Permissions5,
+        PingId, PlacesResult, PointAtType, Postcard, PrimShapeParams, ProductType, QueryId,
+        RegionCoordinates, RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId,
+        RegionStats, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
+        RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
+        ScriptControlAction, ScriptPermissions, ServerError, ServerEvent, Session,
         SetDisplayNameReply, SimSession, SimStatId, SimulatorTime, TaskInventoryKey,
-        TaskInventoryReply, TelehubInfo, TextureEntry, TextureFace, TextureKey, Throttle,
-        TransactionId, Transmit, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        enable_simulator_to_caps_llsd, parse_event_queue_response,
+        TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry, TextureFace, TextureKey,
+        Throttle, TransactionId, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -2812,6 +2813,90 @@ mod test {
             .ok_or("expected a RemoveTaskInventory server event")?;
         assert_eq!(remove_local, RegionLocalObjectId(304));
         assert_eq!(removed_item, remove_item);
+        Ok(())
+    }
+
+    /// The client out-batch-5 land & parcel edits decode into their matching
+    /// [`ServerEvent`] variants on the simulator side.
+    #[test]
+    fn client_land_and_parcel_edits_reach_simulator() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
+
+        // ModifyLand: a whole-parcel raise stroke with a large brush.
+        let edit = LandEdit {
+            action: LandBrushAction::Raise,
+            brush_size: LandBrushSize::Large,
+            strength: 0.5,
+            height: 23.0,
+            parcel: Some(RegionLocalParcelId(9)),
+            area: TerraformArea::new(16.0, 32.0, 48.0, 64.0),
+        };
+        client.modify_land(&edit, now)?;
+
+        // UndoLand: revert the last stroke.
+        client.undo_land(now)?;
+
+        // ParcelPropertiesRequestByID: fetch a parcel by local id.
+        client.request_parcel_properties_by_id(
+            ScopedParcelId::new(circuit, RegionLocalParcelId(9)),
+            42,
+            now,
+        )?;
+
+        // ParcelSetOtherCleanTime: 15 minutes (rounded down on the wire).
+        client.set_parcel_other_clean_time(
+            ScopedParcelId::new(circuit, RegionLocalParcelId(9)),
+            std::time::Duration::from_secs(15 * 60 + 30),
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+
+        let modified = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::ModifyLand { edit } => Some(*edit),
+                _ => None,
+            })
+            .ok_or("expected a ModifyLand server event")?;
+        assert_eq!(modified, edit);
+
+        assert!(
+            events.iter().any(|e| matches!(e, ServerEvent::UndoLand)),
+            "expected an UndoLand server event"
+        );
+
+        let (requested, sequence) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RequestParcelPropertiesById {
+                    local_id,
+                    sequence_id,
+                } => Some((*local_id, *sequence_id)),
+                _ => None,
+            })
+            .ok_or("expected a RequestParcelPropertiesById server event")?;
+        assert_eq!(requested, RegionLocalParcelId(9));
+        assert_eq!(sequence, 42);
+
+        let (clean_parcel, clean_time) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::SetParcelOtherCleanTime {
+                    local_id,
+                    clean_time,
+                } => Some((*local_id, *clean_time)),
+                _ => None,
+            })
+            .ok_or("expected a SetParcelOtherCleanTime server event")?;
+        assert_eq!(clean_parcel, RegionLocalParcelId(9));
+        // The 30 seconds over 15 minutes are dropped by the whole-minute wire field.
+        assert_eq!(clean_time, std::time::Duration::from_secs(15 * 60));
         Ok(())
     }
 
