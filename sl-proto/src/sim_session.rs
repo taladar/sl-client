@@ -135,25 +135,29 @@ use uuid::Uuid;
 use crate::bookkeeping_ids::{PingId, TransactionId};
 use crate::error::Error;
 use crate::session::{
-    build_map_block_reply, build_map_item_reply, build_map_layer_reply, instant_message,
-    region_handshake_message,
+    agent_drop_group_to_llsd, agent_state_update_to_llsd, build_map_block_reply,
+    build_map_item_reply, build_map_layer_reply, display_name_update_to_llsd, instant_message,
+    nav_mesh_status_to_llsd, open_region_info_to_llsd, region_handshake_message,
+    required_voice_version_to_llsd, set_display_name_reply_to_llsd, sim_console_response_to_llsd,
+    windlight_refresh_to_llsd,
 };
 use crate::types::EventId;
 use crate::types::directory::category_from_wire;
 use crate::types::{
     AlertInfo, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatSource,
     ChatType, ClassifiedCategory, CoarseLocation, DetachOrder, DirClassifiedResult, DirEventResult,
-    DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant,
-    EventInfo, FeatureDisabled, FollowCamPropertyValue, GenericMessage, GenericStreamingMessage,
-    GestureActivation, GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions,
-    GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, InstantMessage, InventoryItemMove,
-    Kick, LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer,
-    MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NotecardRez, ObjectBuyItem,
-    ObjectPlayingAnimation, ObjectPropertiesFamily, ParcelCategory, ParcelDetails,
-    ParcelObjectOwner, PlacesResult, Postcard, ProposalVoteId, RegionIdentity, RegionStats,
-    Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl, ServerError, SimulatorTime,
-    TaskInventoryReply, TelehubInfo, Throttle, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
-    ViewerEffectType,
+    DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
+    DisplayNameUpdate, EstateCovenant, EventInfo, FeatureDisabled, FollowCamPropertyValue,
+    GenericMessage, GenericStreamingMessage, GestureActivation, GroupAccountDetails,
+    GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
+    GroupVoteHistoryItem, InstantMessage, InventoryItemMove, Kick, LandSearchType, LandStatItem,
+    LandStatReportType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
+    MeanCollision, MovementMode, NavMeshStatus, NotecardRez, ObjectBuyItem, ObjectPlayingAnimation,
+    ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails, ParcelObjectOwner,
+    PlacesResult, Postcard, ProposalVoteId, RegionIdentity, RegionStats, Reliability,
+    RequiredVoiceVersion, RestoreItem, RezAttachment, SaleType, ScriptControl, ServerError,
+    SetDisplayNameReply, SimulatorTime, TaskInventoryReply, TelehubInfo, Throttle, Transmit,
+    UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
 
@@ -3350,6 +3354,75 @@ impl SimSession {
         });
         self.send(&message, Reliability::Unreliable, now)?;
         Ok(Some(ping_id))
+    }
+
+    // --- CAPS event-queue pushes (typed enqueue helpers) ---------------------
+    //
+    // The following helpers mirror client inbound EQ batches 1–3: each wraps
+    // [`enqueue_caps_event`](Self::enqueue_caps_event) with the `*_to_llsd`
+    // serializer that inverts the client's matching decoder in
+    // `session/conversions.rs`. They are the server-side mirror of the events
+    // the client decodes from its `EventQueueGet` long-poll.
+
+    /// Enqueues a CAPS `AgentStateUpdate` push: whether the agent may currently
+    /// rebake this region's navmesh. SL-only (OpenSim never pushes this).
+    pub fn enqueue_agent_state_update(&mut self, can_modify_navmesh: bool) {
+        self.enqueue_caps_event(
+            "AgentStateUpdate",
+            agent_state_update_to_llsd(can_modify_navmesh),
+        );
+    }
+
+    /// Enqueues a CAPS `NavMeshStatusUpdate` push: the region's navmesh build
+    /// state and version. SL-only.
+    pub fn enqueue_nav_mesh_status(&mut self, status: &NavMeshStatus) {
+        self.enqueue_caps_event("NavMeshStatusUpdate", nav_mesh_status_to_llsd(status));
+    }
+
+    /// Enqueues a CAPS `AgentDropGroup` push: the simulator removed this agent
+    /// from `group`. The echoed `AgentID` is this session's agent.
+    pub fn enqueue_agent_drop_group(&mut self, group: GroupKey) {
+        let agent_id = self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil()));
+        self.enqueue_caps_event("AgentDropGroup", agent_drop_group_to_llsd(agent_id, group));
+    }
+
+    /// Enqueues a CAPS `DisplayNameUpdate` push: an avatar's display name
+    /// changed. SL-only.
+    pub fn enqueue_display_name_update(&mut self, update: &DisplayNameUpdate) {
+        self.enqueue_caps_event("DisplayNameUpdate", display_name_update_to_llsd(update));
+    }
+
+    /// Enqueues a CAPS `SetDisplayNameReply` push: the result of this agent's
+    /// own set-display-name request. SL-only.
+    pub fn enqueue_set_display_name_reply(&mut self, reply: &SetDisplayNameReply) {
+        self.enqueue_caps_event("SetDisplayNameReply", set_display_name_reply_to_llsd(reply));
+    }
+
+    /// Enqueues a CAPS `WindLightRefresh` push: asks the client to re-fetch the
+    /// region's environment, interpolating the transition when `interpolate`.
+    pub fn enqueue_windlight_refresh(&mut self, interpolate: bool) {
+        self.enqueue_caps_event("WindLightRefresh", windlight_refresh_to_llsd(interpolate));
+    }
+
+    /// Enqueues a CAPS `SimConsoleResponse` push: the text output of a region
+    /// debug-console command (a bare LLSD string body).
+    pub fn enqueue_sim_console_response(&mut self, output: &str) {
+        self.enqueue_caps_event("SimConsoleResponse", sim_console_response_to_llsd(output));
+    }
+
+    /// Enqueues a CAPS `RequiredVoiceVersion` push: the voice protocol version
+    /// this region requires. SL-only.
+    pub fn enqueue_required_voice_version(&mut self, version: &RequiredVoiceVersion) {
+        self.enqueue_caps_event(
+            "RequiredVoiceVersion",
+            required_voice_version_to_llsd(version),
+        );
+    }
+
+    /// Enqueues a CAPS `OpenRegionInfo` push: OpenSim's extended per-region
+    /// settings/limits. OpenSim-only.
+    pub fn enqueue_open_region_info(&mut self, info: &OpenRegionInfo) {
+        self.enqueue_caps_event("OpenRegionInfo", open_region_info_to_llsd(info));
     }
 
     /// Enqueues a CAPS `EventQueueGet` event (a `{message, body}` pair) for the

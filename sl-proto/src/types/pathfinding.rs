@@ -40,6 +40,18 @@ impl NavMeshBuildStatus {
             _ => Self::Complete,
         }
     }
+
+    /// The wire `status` token for this state — the inverse of
+    /// [`from_wire`](Self::from_wire). Round-trips for every variant.
+    #[must_use]
+    pub const fn to_wire(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Building => "building",
+            Self::Complete => "complete",
+            Self::Repending => "repending",
+        }
+    }
 }
 
 /// A region's navmesh build status, parsed from a `NavMeshStatusUpdate` CAPS
@@ -80,6 +92,19 @@ mod tests {
             NavMeshBuildStatus::from_wire("repending"),
             NavMeshBuildStatus::Repending
         );
+    }
+
+    /// Every variant's `to_wire` token round-trips back through `from_wire`.
+    #[test]
+    fn nav_mesh_status_to_wire_round_trips() {
+        for status in [
+            NavMeshBuildStatus::Pending,
+            NavMeshBuildStatus::Building,
+            NavMeshBuildStatus::Complete,
+            NavMeshBuildStatus::Repending,
+        ] {
+            assert_eq!(NavMeshBuildStatus::from_wire(status.to_wire()), status);
+        }
     }
 
     /// An unrecognised (or empty) token falls back to `Complete`, as the

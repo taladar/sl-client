@@ -14,25 +14,26 @@ mod test {
         AttachmentPoint, AvatarName, AvatarPickerResult, ChatChannel, ChatSource, ChatType,
         ClassifiedCategory, ClassifiedKey, CoarseLocation, ControlFlags, DetachOrder,
         DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-        DirPeopleResult, DirPlaceResult, DirectoryVisibility, EstateCovenant, Event, EventId,
-        EventInfo, FeatureDisabled, FollowCamProperty, FollowCamPropertyValue, FriendKey,
-        GenericMessage, GenericStreamingMessage, GestureActivation, GlobalCoordinates,
-        GridCoordinates, GridRectangle, GroupAccountDetails, GroupAccountDetailsEntry,
-        GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
-        GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId, GroupVote,
-        GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryItemMove, InventoryKey,
-        InvoiceId, Kick, LandArea, LandSearchType, LandStatItem, LandStatReportType, LindenAmount,
-        LindenBalance, LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
-        Maturity, MeanCollision, MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem,
-        ObjectKey, ObjectPlayingAnimation, ObjectPropertiesFamily, OwnerKey, ParcelCategory,
+        DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisplayName, DisplayNameUpdate,
+        EstateCovenant, Event, EventId, EventInfo, FeatureDisabled, FollowCamProperty,
+        FollowCamPropertyValue, FriendKey, GenericMessage, GenericStreamingMessage,
+        GestureActivation, GlobalCoordinates, GridCoordinates, GridRectangle, GroupAccountDetails,
+        GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
+        GroupAccountTransactions, GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId,
+        GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryItemMove,
+        InventoryKey, InvoiceId, Kick, LandArea, LandSearchType, LandStatItem, LandStatReportType,
+        LindenAmount, LindenBalance, LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo,
+        MapRequestFlags, Maturity, MeanCollision, MeanCollisionType, MovementMode,
+        NavMeshBuildStatus, NavMeshStatus, NotecardRez, ObjectBuyItem, ObjectKey,
+        ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory,
         ParcelDetails, ParcelKey, ParcelObjectOwner, ParcelReturnType, Permissions5, PingId,
         PlacesResult, PointAtType, Postcard, ProductType, QueryId, RegionCoordinates, RegionHandle,
-        RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionStats, RestoreItem,
-        RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
-        ScriptControlAction, ServerError, ServerEvent, Session, SimSession, SimStatId,
-        SimulatorTime, TaskInventoryReply, TelehubInfo, TextureKey, Throttle, TransactionId,
-        Transmit, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        enable_simulator_to_caps_llsd, parse_event_queue_response,
+        RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionStats,
+        RequiredVoiceVersion, RestoreItem, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId,
+        ScriptControl, ScriptControlAction, ServerError, ServerEvent, Session, SetDisplayNameReply,
+        SimSession, SimStatId, SimulatorTime, TaskInventoryReply, TelehubInfo, TextureKey,
+        Throttle, TransactionId, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -176,6 +177,25 @@ mod test {
             out.push(event);
         }
         out
+    }
+
+    /// Delivers the simulator's queued CAPS events to the client over the real
+    /// `EventQueueGet` long-poll path — drain the queue into the response XML,
+    /// parse it, and feed each `{message, body}` to the client's CAPS dispatch —
+    /// then returns the resulting client events. This is the event-queue mirror
+    /// of [`pump`], which carries UDP datagrams.
+    fn deliver_caps(
+        client: &mut Session,
+        sim: &mut SimSession,
+        now: Instant,
+    ) -> Result<Vec<Event>, TestError> {
+        let xml = sim
+            .take_event_queue_response()
+            .ok_or("the simulator queued at least one CAPS event")?;
+        for event in parse_event_queue_response(&xml)?.events {
+            client.handle_caps_event(&event.message, &event.body, now)?;
+        }
+        Ok(drain_client(client))
     }
 
     /// Logs a client in and drives both peers through circuit setup and arrival,
@@ -2792,6 +2812,174 @@ mod test {
         // The queue is drained after a take.
         assert!(!sim.has_caps_events());
         assert!(sim.take_event_queue_response().is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn sim_eq_batch_1_pathfinding_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        // The agent may rebake the navmesh, which is mid-build at version 7.
+        sim.enqueue_agent_state_update(true);
+        let status = NavMeshStatus {
+            region_id: uuid::Uuid::from_u128(0x9a01),
+            version: 7,
+            status: NavMeshBuildStatus::Building,
+        };
+        sim.enqueue_nav_mesh_status(&status);
+
+        let events = deliver_caps(&mut client, &mut sim, now)?;
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::AgentStateUpdate {
+                    can_modify_navmesh: true
+                }
+            )),
+            "expected AgentStateUpdate, got {events:?}"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Event::NavMeshStatus(decoded) if *decoded == status)),
+            "expected NavMeshStatus, got {events:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sim_eq_batch_2_group_and_display_names_round_trip() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let group = GroupKey::from(uuid::Uuid::from_u128(0x67b2));
+        sim.enqueue_agent_drop_group(group);
+
+        let update = DisplayNameUpdate {
+            old_display_name: "Old Name".to_owned(),
+            name: DisplayName {
+                id: AgentKey::from(uuid::Uuid::from_u128(0xa1)),
+                username: "james.linden".to_owned(),
+                display_name: "James the Great".to_owned(),
+                legacy_first_name: "James".to_owned(),
+                legacy_last_name: "Linden".to_owned(),
+                is_display_name_default: false,
+                display_name_expires: String::new(),
+                display_name_next_update: String::new(),
+                missing: false,
+            },
+        };
+        sim.enqueue_display_name_update(&update);
+
+        let reply = SetDisplayNameReply {
+            status: 200,
+            reason: "OK".to_owned(),
+            new_display_name: Some("James the Great".to_owned()),
+            error_tag: None,
+        };
+        sim.enqueue_set_display_name_reply(&reply);
+
+        let events = deliver_caps(&mut client, &mut sim, now)?;
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Event::AgentDroppedFromGroup { group: dropped } if *dropped == group)),
+            "expected AgentDroppedFromGroup, got {events:?}"
+        );
+        assert!(
+            events.iter().any(
+                |event| matches!(event, Event::DisplayNameUpdate(decoded) if **decoded == update)
+            ),
+            "expected DisplayNameUpdate, got {events:?}"
+        );
+        assert!(
+            events.iter().any(
+                |event| matches!(event, Event::SetDisplayNameReply(decoded) if **decoded == reply)
+            ),
+            "expected SetDisplayNameReply, got {events:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sim_eq_batch_3_region_env_voice_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        sim.enqueue_windlight_refresh(true);
+        sim.enqueue_sim_console_response("Region restart scheduled.");
+
+        let voice = RequiredVoiceVersion {
+            major_version: 1,
+            region_name: "Testville".to_owned(),
+            voice_server_type: Some("webrtc".to_owned()),
+        };
+        sim.enqueue_required_voice_version(&voice);
+
+        // A representative subset of the OpenSim per-region overrides: a flag, a
+        // real, an int, and a position triple — enough to exercise each encoder
+        // arm while leaving the rest `None`.
+        let info = OpenRegionInfo {
+            allow_minimap: Some(true),
+            allow_physical_prims: None,
+            draw_distance: Some(256.0),
+            force_draw_distance: None,
+            terrain_detail_scale: None,
+            max_drag_distance: None,
+            min_hole_size: None,
+            max_hollow_size: None,
+            max_inventory_items_transfer: Some(42),
+            max_link_count: None,
+            max_link_count_phys: None,
+            max_position: Some(RegionCoordinates::new(255.0, 255.0, 4096.0)),
+            min_position: None,
+            max_prim_scale: None,
+            max_phys_prim_scale: None,
+            min_prim_scale: None,
+            offset_of_utc: None,
+            offset_of_utc_dst: None,
+            render_water: None,
+            say_distance: None,
+            shout_distance: None,
+            whisper_distance: None,
+            teen_mode: None,
+            show_tags: None,
+            enforce_max_build: None,
+            max_groups: None,
+            allow_parcel_windlight: None,
+        };
+        sim.enqueue_open_region_info(&info);
+
+        let events = deliver_caps(&mut client, &mut sim, now)?;
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Event::WindLightRefresh { interpolate: true })),
+            "expected WindLightRefresh, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::SimConsoleResponse { output } if output == "Region restart scheduled."
+            )),
+            "expected SimConsoleResponse, got {events:?}"
+        );
+        assert!(
+            events.iter().any(
+                |event| matches!(event, Event::RequiredVoiceVersion(decoded) if *decoded == voice)
+            ),
+            "expected RequiredVoiceVersion, got {events:?}"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Event::OpenRegionInfo(decoded) if **decoded == info)),
+            "expected OpenRegionInfo, got {events:?}"
+        );
         Ok(())
     }
 
