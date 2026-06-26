@@ -24,7 +24,9 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use sl_types::chat::ChatChannel;
-use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey, ParcelKey};
+use sl_types::key::{
+    AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey, ParcelKey, TextureKey,
+};
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
     AgentAlertMessage, AgentAlertMessageAgentDataBlock, AgentAlertMessageAlertDataBlock,
@@ -90,6 +92,11 @@ use sl_wire::messages::{
     GroupVoteHistoryItemReplyTransactionDataBlock, GroupVoteHistoryItemReplyVoteItemBlock,
 };
 use sl_wire::messages::{
+    ObjectAnimation as ObjectAnimationWire, ObjectAnimationAnimationListBlock,
+    ObjectAnimationSenderBlock, RebakeAvatarTextures as RebakeAvatarTexturesWire,
+    RebakeAvatarTexturesTextureDataBlock,
+};
+use sl_wire::messages::{
     ObjectPropertiesFamily as ObjectPropertiesFamilyMessage,
     ObjectPropertiesFamilyObjectDataBlock as ObjectPropertiesFamilyObjectDataBlockMessage,
     ParcelInfoReply, ParcelInfoReplyAgentDataBlock, ParcelInfoReplyDataBlock,
@@ -123,10 +130,10 @@ use crate::types::{
     GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, InstantMessage, Kick, LandSearchType,
     LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer, MapRegionInfo,
     MapRequestFlags, MeanCollision, MovementMode, NotecardRez, ObjectBuyItem,
-    ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult,
-    Postcard, ProposalVoteId, RegionIdentity, RegionStats, Reliability, RestoreItem, RezAttachment,
-    SaleType, ScriptControl, ServerError, SimulatorTime, TelehubInfo, Throttle, Transmit,
-    ViewerEffect, ViewerEffectData, ViewerEffectType,
+    ObjectPlayingAnimation, ObjectPropertiesFamily, ParcelCategory, ParcelDetails,
+    ParcelObjectOwner, PlacesResult, Postcard, ProposalVoteId, RegionIdentity, RegionStats,
+    Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl, ServerError, SimulatorTime,
+    TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
 
@@ -2784,6 +2791,73 @@ impl SimSession {
                 agent_id: kick.agent.uuid(),
                 session_id: self.session_id.unwrap_or_else(Uuid::nil),
                 reason: with_nul(&kick.reason),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `ObjectAnimation` — the complete, authoritative set of
+    /// animations now signalled on an animated-mesh (animesh) object (the inverse
+    /// of the client's
+    /// [`Event::ObjectAnimation`](crate::Event::ObjectAnimation)). Pushed whenever
+    /// a scripted object's animation set changes (e.g. `llStartObjectAnimation`).
+    /// As with avatar animations the list is the full state, not a delta: an
+    /// animation that stops simply drops out of a later update. Carries the
+    /// animated [`ObjectKey`] and each playing animation's
+    /// [`AnimationKey`](crate::AnimationKey) and per-object sequence id. Sent
+    /// reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_object_animation(
+        &mut self,
+        object_id: ObjectKey,
+        animations: &[ObjectPlayingAnimation],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ObjectAnimation(ObjectAnimationWire {
+            sender: ObjectAnimationSenderBlock {
+                id: object_id.uuid(),
+            },
+            animation_list: animations
+                .iter()
+                .map(|animation| ObjectAnimationAnimationListBlock {
+                    anim_id: animation.anim_id.uuid(),
+                    anim_sequence_id: animation.sequence_id,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `RebakeAvatarTextures` — a request that the agent regenerate and
+    /// re-upload one of its temporary baked-avatar textures the simulator can no
+    /// longer find (the inverse of the client's
+    /// [`Event::RebakeAvatarTextures`](crate::Event::RebakeAvatarTextures)).
+    /// Carries the [`TextureKey`] of the missing baked texture. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_rebake_avatar_textures(
+        &mut self,
+        texture_id: TextureKey,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::RebakeAvatarTextures(RebakeAvatarTexturesWire {
+            texture_data: RebakeAvatarTexturesTextureDataBlock {
+                texture_id: texture_id.uuid(),
             },
         });
         self.send(&message, Reliability::Reliable, now)?;

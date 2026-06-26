@@ -926,7 +926,8 @@ the encoded buffer across, and assert the peer decodes the expected
   send_generic_streaming_message)
 - [x] Sim inbound batch 3 — session error & disconnect encoders (send_error,
   send_feature_disabled, send_kick_user)
-- [ ] Sim inbound batch 4 — scene & appearance encoders
+- [x] Sim inbound batch 4 — scene & appearance encoders
+  (send_object_animation, send_rebake_avatar_textures)
 - [ ] Sim inbound batch 5 — friendship & calling-card encoders
 - [ ] Sim inbound batch 6 — inventory sync, task inventory & misc encoders
 - [ ] Sim EQ batches 1–3 — typed CAPS event-queue enqueue helpers
