@@ -1049,7 +1049,7 @@ events / REPL sub-bullets.
 - [x] New chapter — `content/god-tools.md` (god/estate-admin surface)
 - [x] Extend `comms/sessions.md` — session errors & forced disconnect
 - [x] Extend region/telemetry & land/parcel chapters
-- [ ] Extend friends/profiles/groups chapters (calling cards, display names,
+- [x] Extend friends/profiles/groups chapters (calling cards, display names,
   user info, group title/info)
 - [ ] Extend world/scripts/inventory/attachments chapters (animations, prim
   editing, task inventory, rez, detach)

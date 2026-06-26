@@ -45,6 +45,13 @@ The write side covers the full lifecycle, gated by the caller's powers:
 
 - **Lifecycle** — `CreateGroup`, `JoinGroup`, `LeaveGroup`, `ActivateGroup`,
   `InviteToGroup`, `EjectGroupMembers`.
+- **Profile** — `UpdateGroupInfo` edits an existing group's profile (charter,
+  insignia, search visibility, join fee, open-enrollment, and publish flags),
+  carried by an `UpdateGroupInfoParams` targeting the group by id (a group
+  cannot be renamed, so there is no name field).
+- **Title** — `UpdateGroupTitle { group_id, title_role_id }` sets the agent's
+  active title in a group to the title carried by the given role (the tag shown
+  over the avatar).
 - **Roles** — `UpdateGroupRoles` (create/edit/delete roles and their powers),
   `ChangeGroupRoleMembers` (assign/remove members to/from roles).
 - **Member settings** — `SetGroupAcceptNotices`, `SetGroupContribution`.
@@ -92,6 +99,8 @@ money module for live balances) present.
 > - Types are in `sl-proto/src/types/group.rs`: `GroupProfile`,
 >   `GroupMembership`, `GroupMember`, `GroupRole`, `GroupRoleMember`,
 >   `GroupTitle`, `GroupNotice`, `GroupNoticeAttachment`, `CreateGroupParams`,
+>   `UpdateGroupInfoParams` (the `UpdateGroupInfo` payload — like
+>   `CreateGroupParams` but targeting an existing `GroupKey`, with no name),
 >   the role-edit helpers (`GroupRoleEdit`, `GroupRoleMemberChange`),
 >   `ActiveGroup`, and the finance/voting types (`GroupAccountSummary`,
 >   `GroupAccountDetails`/`GroupAccountDetailsEntry`,
@@ -103,5 +112,10 @@ money module for live balances) present.
 >   `SimSession::send_group_account_summary_reply` and its siblings.
 > - Commands and events are the `*Group*` variants in `sl-proto/src/command.rs`
 >   and `sl-proto/src/types/event.rs`; the `GroupMemberData` cap is
->   `CAP_GROUP_MEMBER_DATA`.
+>   `CAP_GROUP_MEMBER_DATA`. `UpdateGroupInfo` / `UpdateGroupTitle` have
+>   `Session` helpers `update_group_info` / `update_group_title`.
+> - Server events: the sim side decodes the two client→server admin messages as
+>   `ServerEvent::UpdateGroupInfo` (carrying `UpdateGroupInfoParams`) and
+>   `ServerEvent::UpdateGroupTitle { group_id, title_role_id }`
+>   (`sl-proto/src/sim_session.rs`).
 > - Worked example: `sl-client-tokio/examples/group_admin.rs`.
