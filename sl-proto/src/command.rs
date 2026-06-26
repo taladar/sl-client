@@ -2236,6 +2236,52 @@ pub enum Command {
         /// The region parameters to apply.
         update: GodRegionUpdate,
     },
+    /// Force-reassign the ownership of a parcel to `owner` via
+    /// `ParcelGodForceOwner` (needs grid-god rights).
+    ParcelGodForceOwner {
+        /// The parcel to reassign.
+        parcel: ScopedParcelId,
+        /// The new owner.
+        owner: OwnerKey,
+    },
+    /// Mark a parcel (and the content on it) as owned by the
+    /// governor/maintenance account via `ParcelGodMarkAsContent` (needs
+    /// grid-god rights).
+    ParcelGodMarkAsContent {
+        /// The parcel to mark as content.
+        parcel: ScopedParcelId,
+    },
+    /// Delete an events-directory listing and re-run the search via
+    /// `EventGodDelete` (needs grid-god rights). The `query_*` fields carry the
+    /// current events search so the simulator can send back the refreshed
+    /// result page.
+    EventGodDelete {
+        /// The events-directory listing to delete.
+        event: EventId,
+        /// The search-query id echoed back in the refreshed reply.
+        query_id: QueryId,
+        /// The search text to re-run after the deletion.
+        query_text: String,
+        /// The events-search flags/scope to re-run with.
+        flags: DirFindFlags,
+        /// The 0-based index of the first result of the refreshed page.
+        query_start: i32,
+    },
+    /// Save the region (world) state via `StateSave` (needs grid-god rights).
+    StateSave {
+        /// The destination filename; an empty string lets the simulator pick
+        /// the autosave name, exactly as the reference viewer does.
+        filename: String,
+    },
+    /// Start a land auction on a parcel via `ViewerStartAuction` (needs
+    /// grid-god rights).
+    ViewerStartAuction {
+        /// The parcel to auction.
+        parcel: ScopedParcelId,
+        /// An optional snapshot texture advertising the parcel (`None` for no
+        /// snapshot).
+        snapshot: Option<TextureKey>,
+    },
     /// Begin a clean logout.
     Logout,
 }

@@ -2818,6 +2818,57 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "parcel_god_force_owner",
+            usage: "<local_id> <owner>",
+            build: |args, ctx| {
+                Ok(Command::ParcelGodForceOwner {
+                    parcel: scoped_parcel(ctx, args.req_parse(ctx, "local_id", 0, "i32")?)?,
+                    owner: args.req_owner(ctx, "owner", 1)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "parcel_god_mark_as_content",
+            usage: "<local_id>",
+            build: |args, ctx| {
+                Ok(Command::ParcelGodMarkAsContent {
+                    parcel: scoped_parcel(ctx, args.req_parse(ctx, "local_id", 0, "i32")?)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "event_god_delete",
+            usage: "<event_id:u32> <query_id> <query_text> <flags-u32> [query_start=0]",
+            build: |args, ctx| {
+                Ok(Command::EventGodDelete {
+                    event: EventId::new(args.req_parse(ctx, "event_id", 0, "u32")?),
+                    query_id: QueryId::from(args.req_uuid(ctx, "query_id", 1)?),
+                    query_text: args.req_str(ctx, "query_text", 2)?,
+                    flags: DirFindFlags::from_bits(args.req_parse(ctx, "flags", 3, "u32")?),
+                    query_start: args.parse_or(ctx, "query_start", 4, "i32", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "state_save",
+            usage: "[filename=]",
+            build: |args, ctx| {
+                Ok(Command::StateSave {
+                    filename: args.opt_str(ctx, "filename", 0)?.unwrap_or_default(),
+                })
+            },
+        },
+        CommandSpec {
+            name: "viewer_start_auction",
+            usage: "<local_id> [snapshot=]",
+            build: |args, ctx| {
+                Ok(Command::ViewerStartAuction {
+                    parcel: scoped_parcel(ctx, args.req_parse(ctx, "local_id", 0, "i32")?)?,
+                    snapshot: args.opt_texture(ctx, "snapshot", 1)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "request_region_info",
             usage: "",
             build: |_args, _ctx| Ok(Command::RequestRegionInfo),
@@ -5121,13 +5172,13 @@ mod tests {
 
     use sl_proto::{
         AbuseReportType, AgentKey, AgentPreferences, AssetKey, AssetType, ChatChannel, ChatType,
-        CircuitId, Command, ControlFlags, DirectoryVisibility, EjectAction, FreezeAction,
-        FriendRights, GridCoordinates, GroupKey, InventoryFolderKey, InventoryItemOrFolderKey,
-        InventoryKey, LandBrushAction, LandBrushSize, LandEdit, LandStatReportType, LindenAmount,
-        MapItemType, MovementMode, ObjectBuyItem, ObjectKey, OwnerKey, RegionHandle,
-        RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId, ScopedParcelId,
-        ScriptPermissions, SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey, TerraformArea,
-        TransactionId, Uuid,
+        CircuitId, Command, ControlFlags, DirFindFlags, DirectoryVisibility, EjectAction, EventId,
+        FreezeAction, FriendRights, GridCoordinates, GroupKey, InventoryFolderKey,
+        InventoryItemOrFolderKey, InventoryKey, LandBrushAction, LandBrushSize, LandEdit,
+        LandStatReportType, LindenAmount, MapItemType, MovementMode, ObjectBuyItem, ObjectKey,
+        OwnerKey, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId,
+        ScopedParcelId, ScriptPermissions, SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey,
+        TerraformArea, TextureKey, TransactionId, Uuid,
     };
 
     use super::Registry;
@@ -5703,6 +5754,66 @@ mod tests {
         assert!(matches!(
             build("request_godlike_powers true"),
             Ok(Command::RequestGodlikePowers { godlike: true })
+        ));
+    }
+
+    #[test]
+    fn parcel_god_force_owner_parses_parcel_and_owner() {
+        assert!(matches!(
+            build_scoped(&format!("parcel_god_force_owner 12 {ONE}")),
+            Ok(Command::ParcelGodForceOwner {
+                parcel: ScopedParcelId { circuit: TEST_CIRCUIT, id: RegionLocalParcelId(12) },
+                owner,
+            }) if owner == OwnerKey::Agent(AgentKey::from(uuid(ONE)))
+        ));
+    }
+
+    #[test]
+    fn parcel_god_mark_as_content_parses_parcel() {
+        assert!(matches!(
+            build_scoped("parcel_god_mark_as_content 7"),
+            Ok(Command::ParcelGodMarkAsContent {
+                parcel: ScopedParcelId {
+                    circuit: TEST_CIRCUIT,
+                    id: RegionLocalParcelId(7)
+                },
+            })
+        ));
+    }
+
+    #[test]
+    fn event_god_delete_parses_event_and_query() {
+        assert!(matches!(
+            build(&format!("event_god_delete 99 {ONE} \"music fest\" 32 10")),
+            Ok(Command::EventGodDelete { event, query_text, flags, query_start, .. })
+                if event == EventId::new(99)
+                    && query_text == "music fest"
+                    && flags == DirFindFlags::from_bits(32)
+                    && query_start == 10
+        ));
+    }
+
+    #[test]
+    fn state_save_defaults_to_empty_filename() {
+        assert!(matches!(
+            build("state_save"),
+            Ok(Command::StateSave { filename }) if filename.is_empty()
+        ));
+    }
+
+    #[test]
+    fn viewer_start_auction_parses_parcel_and_snapshot() {
+        assert!(matches!(
+            build_scoped(&format!("viewer_start_auction 5 {ONE}")),
+            Ok(Command::ViewerStartAuction {
+                parcel: ScopedParcelId { circuit: TEST_CIRCUIT, id: RegionLocalParcelId(5) },
+                snapshot: Some(snapshot),
+            }) if snapshot == TextureKey::from(uuid(ONE))
+        ));
+        // No snapshot argument leaves it unset (the wire sentinel is a nil id).
+        assert!(matches!(
+            build_scoped("viewer_start_auction 5"),
+            Ok(Command::ViewerStartAuction { snapshot: None, .. })
         ));
     }
 

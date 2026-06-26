@@ -1540,6 +1540,21 @@ impl Client {
                         Some(Command::GodUpdateRegionInfo { update }) => {
                             self.session.god_update_region_info(&update, Instant::now())?;
                         }
+                        Some(Command::ParcelGodForceOwner { parcel, owner }) => {
+                            self.session.parcel_god_force_owner(parcel, owner, Instant::now())?;
+                        }
+                        Some(Command::ParcelGodMarkAsContent { parcel }) => {
+                            self.session.parcel_god_mark_as_content(parcel, Instant::now())?;
+                        }
+                        Some(Command::EventGodDelete { event, query_id, query_text, flags, query_start }) => {
+                            self.session.event_god_delete(event, query_id, &query_text, flags, query_start, Instant::now())?;
+                        }
+                        Some(Command::StateSave { filename }) => {
+                            self.session.state_save(&filename, Instant::now())?;
+                        }
+                        Some(Command::ViewerStartAuction { parcel, snapshot }) => {
+                            self.session.viewer_start_auction(parcel, snapshot, Instant::now())?;
+                        }
                         Some(Command::Logout) | None => {
                             self.session.initiate_logout(Instant::now());
                         }

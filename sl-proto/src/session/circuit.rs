@@ -248,6 +248,14 @@ use sl_wire::messages::{
     SimWideDeletesAgentDataBlock, SimWideDeletesDataBlockBlock,
 };
 use sl_wire::messages::{
+    EventGodDelete, EventGodDeleteAgentDataBlock, EventGodDeleteEventDataBlock,
+    EventGodDeleteQueryDataBlock, ParcelGodForceOwner, ParcelGodForceOwnerAgentDataBlock,
+    ParcelGodForceOwnerDataBlock, ParcelGodMarkAsContent, ParcelGodMarkAsContentAgentDataBlock,
+    ParcelGodMarkAsContentParcelDataBlock, StateSave, StateSaveAgentDataBlock,
+    StateSaveDataBlockBlock, ViewerStartAuction, ViewerStartAuctionAgentDataBlock,
+    ViewerStartAuctionParcelDataBlock,
+};
+use sl_wire::messages::{
     GetScriptRunning, GetScriptRunningScriptBlock, ScriptReset, ScriptResetAgentDataBlock,
     ScriptResetScriptBlock, SetScriptRunning, SetScriptRunningAgentDataBlock,
     SetScriptRunningScriptBlock,
@@ -3437,6 +3445,117 @@ impl Circuit {
             region_info2: vec![GodUpdateRegionInfoRegionInfo2Block {
                 region_flags_extended: update.region_flags,
             }],
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelGodForceOwner` reliably: force-reassigns the parcel
+    /// `local_id` to `owner`. Needs grid-god rights.
+    pub(crate) fn send_parcel_god_force_owner(
+        &mut self,
+        local_id: RegionLocalParcelId,
+        owner: Uuid,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelGodForceOwner(ParcelGodForceOwner {
+            agent_data: ParcelGodForceOwnerAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            data: ParcelGodForceOwnerDataBlock {
+                owner_id: owner,
+                local_id: local_id.0,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ParcelGodMarkAsContent` reliably: marks the parcel `local_id`
+    /// (and its content) as owned by the governor/maintenance account. Needs
+    /// grid-god rights.
+    pub(crate) fn send_parcel_god_mark_as_content(
+        &mut self,
+        local_id: RegionLocalParcelId,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ParcelGodMarkAsContent(ParcelGodMarkAsContent {
+            agent_data: ParcelGodMarkAsContentAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            parcel_data: ParcelGodMarkAsContentParcelDataBlock {
+                local_id: local_id.0,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `EventGodDelete` reliably: deletes the events-directory listing
+    /// `event_id` and re-runs the search carried in the `query_*` fields so the
+    /// simulator returns the refreshed result page. Needs grid-god rights.
+    pub(crate) fn send_event_god_delete(
+        &mut self,
+        event_id: u32,
+        query_id: Uuid,
+        query_text: &str,
+        flags: DirFindFlags,
+        query_start: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::EventGodDelete(EventGodDelete {
+            agent_data: EventGodDeleteAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            event_data: EventGodDeleteEventDataBlock { event_id },
+            query_data: EventGodDeleteQueryDataBlock {
+                query_id,
+                query_text: with_nul(query_text),
+                query_flags: flags.bits(),
+                query_start,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `StateSave` reliably: saves the region (world) state to
+    /// `filename` (an empty string lets the simulator pick the autosave name,
+    /// as the reference viewer does). Needs grid-god rights.
+    pub(crate) fn send_state_save(
+        &mut self,
+        filename: &str,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::StateSave(StateSave {
+            agent_data: StateSaveAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            data_block: StateSaveDataBlockBlock {
+                filename: with_nul(filename),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `ViewerStartAuction` reliably: starts a land auction on the
+    /// parcel `local_id`, optionally advertised by the `snapshot` texture (nil
+    /// for none). Needs grid-god rights.
+    pub(crate) fn send_viewer_start_auction(
+        &mut self,
+        local_id: RegionLocalParcelId,
+        snapshot: Option<TextureKey>,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ViewerStartAuction(ViewerStartAuction {
+            agent_data: ViewerStartAuctionAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            parcel_data: ViewerStartAuctionParcelDataBlock {
+                local_id: local_id.0,
+                snapshot_id: snapshot.map_or_else(Uuid::nil, |texture| texture.uuid()),
+            },
         });
         self.send(&message, Reliability::Reliable, now)
     }

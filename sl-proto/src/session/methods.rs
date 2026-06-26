@@ -9025,6 +9025,106 @@ impl Session {
         Ok(())
     }
 
+    /// Force-reassigns the ownership of the parcel `parcel` to `owner` via
+    /// `ParcelGodForceOwner`. Needs grid-god rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownCircuit`] if `parcel`'s circuit has gone away, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn parcel_god_force_owner(
+        &mut self,
+        parcel: ScopedParcelId,
+        owner: OwnerKey,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(parcel.circuit)?;
+        circuit.send_parcel_god_force_owner(parcel.id, owner.uuid(), now)?;
+        Ok(())
+    }
+
+    /// Marks the parcel `parcel` (and the content on it) as owned by the
+    /// governor/maintenance account via `ParcelGodMarkAsContent`. Needs
+    /// grid-god rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownCircuit`] if `parcel`'s circuit has gone away, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn parcel_god_mark_as_content(
+        &mut self,
+        parcel: ScopedParcelId,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(parcel.circuit)?;
+        circuit.send_parcel_god_mark_as_content(parcel.id, now)?;
+        Ok(())
+    }
+
+    /// Deletes the events-directory listing `event` and re-runs the search via
+    /// `EventGodDelete`. The `query_id` / `query_text` / `flags` / `query_start`
+    /// arguments carry the current events search so the simulator can return the
+    /// refreshed result page (correlated by `query_id`, exactly as
+    /// [`dir_find_query`](Self::dir_find_query) does). Needs grid-god rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn event_god_delete(
+        &mut self,
+        event: EventId,
+        query_id: QueryId,
+        query_text: &str,
+        flags: DirFindFlags,
+        query_start: i32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_event_god_delete(
+            event.get(),
+            query_id.get(),
+            query_text,
+            flags,
+            query_start,
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// Saves the region (world) state to `filename` via `StateSave`. An empty
+    /// `filename` lets the simulator pick the autosave name, exactly as the
+    /// reference viewer does. Needs grid-god rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn state_save(&mut self, filename: &str, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_state_save(filename, now)?;
+        Ok(())
+    }
+
+    /// Starts a land auction on the parcel `parcel` via `ViewerStartAuction`,
+    /// optionally advertised by the `snapshot` texture (`None` for none). Needs
+    /// grid-god rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownCircuit`] if `parcel`'s circuit has gone away, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn viewer_start_auction(
+        &mut self,
+        parcel: ScopedParcelId,
+        snapshot: Option<TextureKey>,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit_for_scope(parcel.circuit)?;
+        circuit.send_viewer_start_auction(parcel.id, snapshot, now)?;
+        Ok(())
+    }
+
     /// Begins a clean logout: queues a `LogoutRequest` and arms the logout
     /// timeout. Does nothing if the session is already closing or closed.
     pub fn initiate_logout(&mut self, now: Instant) {

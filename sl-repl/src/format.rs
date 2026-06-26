@@ -818,6 +818,11 @@ const fn command_name(command: &Command) -> &'static str {
         Command::FreezeUser { .. } => "freeze_user",
         Command::SimWideDeletes { .. } => "sim_wide_deletes",
         Command::GodUpdateRegionInfo { .. } => "god_update_region_info",
+        Command::ParcelGodForceOwner { .. } => "parcel_god_force_owner",
+        Command::ParcelGodMarkAsContent { .. } => "parcel_god_mark_as_content",
+        Command::EventGodDelete { .. } => "event_god_delete",
+        Command::StateSave { .. } => "state_save",
+        Command::ViewerStartAuction { .. } => "viewer_start_auction",
         Command::Logout => "logout",
     }
 }
