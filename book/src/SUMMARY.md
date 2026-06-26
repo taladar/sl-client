@@ -25,6 +25,7 @@
 - [Object Interaction & Commerce](content/object-commerce.md)
 - [Scripts & Permissions](content/scripts.md)
 - [Region & Estate Information](content/region.md)
+- [God & Estate Admin Tools](content/god-tools.md)
 - [Sound, Music & Media](content/sound-media.md)
 - [Groups](content/groups.md)
 - [Economy & Money](content/economy.md)
