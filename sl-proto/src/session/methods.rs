@@ -70,11 +70,12 @@ use crate::types::{
     PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
     RegionInfoUpdate, RegionStats, Reliability, RestoreItem, RezAttachment, RezObjectParams,
     RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo,
-    ScriptGrantInfo, ScriptPermissionStatus, ScriptPermissions, ScriptTeleportRequest, ServerError,
-    SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot,
-    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType,
-    TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams,
-    UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
+    ScriptGrantInfo, ScriptPermissionState, ScriptPermissionStatus, ScriptPermissions,
+    ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags,
+    SoundPreload, StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
+    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus,
+    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -5704,6 +5705,23 @@ impl Session {
         ScriptControlsInfo {
             taken: union(&self.taken_controls.consumed),
             passed_to_agent: union(&self.taken_controls.passed_on),
+        }
+    }
+
+    /// A complete snapshot of the script-permission mirror: every recorded grant
+    /// or denial ([`Session::script_grants`]) bundled with the currently-held
+    /// movement controls ([`Session::script_controls`]).
+    ///
+    /// This is the read-out behind
+    /// [`Command::QueryScriptPermissions`](crate::Command::QueryScriptPermissions):
+    /// a runtime builds this in reply to that command and surfaces it as
+    /// [`Event::ScriptPermissionState`]. The simulator stays authoritative; this
+    /// is an API-convenience mirror, not a security boundary.
+    #[must_use]
+    pub fn script_permission_state(&self) -> ScriptPermissionState {
+        ScriptPermissionState {
+            grants: self.script_grants().collect(),
+            controls: self.script_controls(),
         }
     }
 

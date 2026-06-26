@@ -1639,6 +1639,13 @@ pub enum Command {
     /// (`ForceScriptControlRelease`), reversing a `ScriptControlChange`.
     /// Fire-and-forget; there is no reply.
     ReleaseScriptControls,
+    /// Request a snapshot of the session's script-permission mirror (the recorded
+    /// grants/denials and the currently-held movement controls). This is a
+    /// local query — it sends nothing on the wire; the runtime answers it by
+    /// building a [`ScriptPermissionState`](crate::ScriptPermissionState) from the
+    /// session and surfacing it as
+    /// [`Event::ScriptPermissionState`](crate::Event::ScriptPermissionState).
+    QueryScriptPermissions,
     /// Attach an in-world object (selected by its region-local id) to the avatar
     /// (`ObjectAttach`). The object is worn at `attachment_point`; `mode` chooses
     /// whether it is added alongside anything already on that point or replaces

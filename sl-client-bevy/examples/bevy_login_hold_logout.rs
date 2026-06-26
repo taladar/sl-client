@@ -223,6 +223,9 @@ fn on_events(
             SlSessionEvent::ScriptControlChange(controls) => {
                 info!("script control change: {} change(s)", controls.len());
             }
+            SlSessionEvent::ScriptPermissionState(state) => {
+                info!("script permission state: {} grant(s)", state.grants.len());
+            }
             SlSessionEvent::SetFollowCamProperties { object_id, .. } => {
                 info!("follow-cam properties set by {object_id}");
             }

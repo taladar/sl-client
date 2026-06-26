@@ -305,6 +305,27 @@ pub struct ScriptControlsInfo {
     pub passed_to_agent: ControlFlags,
 }
 
+/// A complete, read-only snapshot of the session's script-permission mirror,
+/// returned by
+/// [`Session::script_permission_state`](crate::Session::script_permission_state)
+/// and delivered to a driver as
+/// [`Event::ScriptPermissionState`](crate::Event::ScriptPermissionState) in
+/// reply to a [`Command::QueryScriptPermissions`](crate::Command::QueryScriptPermissions).
+///
+/// Bundles the two permission stores: every recorded grant/denial
+/// ([`ScriptGrantInfo`], including explicit denials) and the currently-held
+/// movement controls ([`ScriptControlsInfo`]). The simulator stays
+/// authoritative — this is an API-convenience mirror of what the agent answered,
+/// never a security boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptPermissionState {
+    /// Every recorded grant or denial, in deterministic order (a never-asked
+    /// script is absent).
+    pub grants: Vec<ScriptGrantInfo>,
+    /// Which movement controls scripts currently hold, split by `PassToAgent`.
+    pub controls: ScriptControlsInfo,
+}
+
 /// One follow-camera parameter a scripted object sets via `llSetCameraParams`,
 /// the `Type` field of a `SetFollowCamProperties.CameraProperty` block. The
 /// numeric values match the viewer's `EFollowCamAttributes`

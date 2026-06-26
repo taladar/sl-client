@@ -4736,6 +4736,11 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |_args, _ctx| Ok(Command::ReleaseScriptControls),
         },
         CommandSpec {
+            name: "query_script_permissions",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::QueryScriptPermissions),
+        },
+        CommandSpec {
             name: "upload_asset_udp",
             usage: "<asset_type-code> data=<hex> [temp_file=] [store_local=]",
             build: |args, ctx| {
@@ -5611,6 +5616,14 @@ mod tests {
         assert!(matches!(
             build("release_script_controls"),
             Ok(Command::ReleaseScriptControls)
+        ));
+    }
+
+    #[test]
+    fn query_script_permissions_no_args() {
+        assert!(matches!(
+            build("query_script_permissions"),
+            Ok(Command::QueryScriptPermissions)
         ));
     }
 

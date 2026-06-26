@@ -4102,6 +4102,40 @@ mod test {
     }
 
     #[test]
+    fn script_permission_state_bundles_grants_and_controls() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Record one grant and take one control (both permission stores).
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0xB401));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0xB402));
+        let granted = ScriptPermissions(
+            ScriptPermissions::TAKE_CONTROLS | ScriptPermissions::TRIGGER_ANIMATION,
+        );
+        session.answer_script_permissions(task, item, granted, None, now)?;
+        feed_script_control_change(&mut session, now, 9401, true, ControlFlags::AT_POS, false)?;
+        drain(&mut session)?;
+
+        // The snapshot reflects both stores at once.
+        let state = session.script_permission_state();
+        let grant = state
+            .grants
+            .iter()
+            .find(|g| g.task_id == task && g.item_id == item)
+            .ok_or("expected the recorded grant in the snapshot")?;
+        assert_eq!(grant.granted, granted);
+        assert!(!grant.denied);
+        assert_eq!(state.controls.taken, ControlFlags::AT_POS);
+        assert_eq!(state.controls.passed_to_agent, ControlFlags::empty());
+
+        // The snapshot agrees with the individual accessors.
+        assert_eq!(state.grants, session.script_grants().collect::<Vec<_>>());
+        assert_eq!(state.controls, session.script_controls());
+        Ok(())
+    }
+
+    #[test]
     fn follow_cam_properties_surface_events() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;

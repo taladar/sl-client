@@ -1960,6 +1960,13 @@ fn advance_running(
                     .revoke_script_permissions(*object_id, *permissions, now)
                     .ok();
             }
+            Command::QueryScriptPermissions => {
+                // Local query: synthesize the snapshot from the session and surface
+                // it on the event stream (no wire send).
+                events.write(SlEvent(SessionEvent::ScriptPermissionState(
+                    session.script_permission_state(),
+                )));
+            }
             Command::DetachAttachmentIntoInventory { item_id } => {
                 session.detach_attachment_into_inventory(*item_id, now).ok();
             }

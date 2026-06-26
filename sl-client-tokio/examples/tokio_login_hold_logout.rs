@@ -298,6 +298,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::ScriptControlChange(controls) => {
                 info!("script control change: {} change(s)", controls.len());
             }
+            Event::ScriptPermissionState(state) => {
+                info!("script permission state: {} grant(s)", state.grants.len());
+            }
             Event::SetFollowCamProperties { object_id, .. } => {
                 info!("follow-cam properties set by {object_id}");
             }
