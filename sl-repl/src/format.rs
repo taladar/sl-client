@@ -813,6 +813,11 @@ const fn command_name(command: &Command) -> &'static str {
         Command::RequestUserInfo => "request_user_info",
         Command::UpdateUserInfo { .. } => "update_user_info",
         Command::TriggerSound { .. } => "trigger_sound",
+        Command::RequestGodlikePowers { .. } => "request_godlike_powers",
+        Command::EjectUser { .. } => "eject_user",
+        Command::FreezeUser { .. } => "freeze_user",
+        Command::SimWideDeletes { .. } => "sim_wide_deletes",
+        Command::GodUpdateRegionInfo { .. } => "god_update_region_info",
         Command::Logout => "logout",
     }
 }

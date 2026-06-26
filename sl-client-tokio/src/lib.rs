@@ -1525,6 +1525,21 @@ impl Client {
                         Some(Command::TriggerSound { sound, gain, region_handle, position }) => {
                             self.session.trigger_sound(sound, gain, region_handle, position, Instant::now())?;
                         }
+                        Some(Command::RequestGodlikePowers { godlike }) => {
+                            self.session.request_godlike_powers(godlike, Instant::now())?;
+                        }
+                        Some(Command::EjectUser { target, action }) => {
+                            self.session.eject_user(target, action, Instant::now())?;
+                        }
+                        Some(Command::FreezeUser { target, action }) => {
+                            self.session.freeze_user(target, action, Instant::now())?;
+                        }
+                        Some(Command::SimWideDeletes { owner, flags }) => {
+                            self.session.sim_wide_deletes(owner, flags, Instant::now())?;
+                        }
+                        Some(Command::GodUpdateRegionInfo { update }) => {
+                            self.session.god_update_region_info(&update, Instant::now())?;
+                        }
                         Some(Command::Logout) | None => {
                             self.session.initiate_logout(Instant::now());
                         }

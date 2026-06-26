@@ -9,21 +9,22 @@ use crate::{
     AbuseReport, AgentKey, AgentPreferences, AnimationKey, AnyMessage, AssetKey, AssetType,
     AttachmentMode, AttachmentPoint, Camera, ChatChannel, ChatType, ClassifiedCategory,
     ClassifiedKey, ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams,
-    DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility, Distance, EstateAccessDelta,
-    EventId, ExperienceKey, ExperiencePermission, ExperienceUpdate, FriendKey, FriendRights,
-    GestureActivation, GroupKey, GroupNoticeAttachment, GroupNoticeKey, GroupRequestId,
-    GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate,
-    InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandEdit,
-    LandSearchType, LandStatReportType, LindenAmount, LureId, MapItemType, Material,
-    MaterialOverrideUpdate, MediaEntry, MeshKey, MoneyTransactionType, MovementMode, MuteFlags,
-    MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
-    ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessScope,
-    ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
-    PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId,
-    RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, Rotation, SaleType, ScriptPermissions, StartLocationSlot,
-    TaskInventoryKey, TextureEntry, TextureKey, Throttle, TransactionId, UpdateGroupInfoParams,
-    Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
+    DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility, Distance, EjectAction,
+    EstateAccessDelta, EventId, ExperienceKey, ExperiencePermission, ExperienceUpdate,
+    FreezeAction, FriendKey, FriendRights, GestureActivation, GodRegionUpdate, GroupKey,
+    GroupNoticeAttachment, GroupNoticeKey, GroupRequestId, GroupRoleEdit, GroupRoleKey,
+    GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate, InventoryFolderKey,
+    InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandEdit, LandSearchType,
+    LandStatReportType, LindenAmount, LureId, MapItemType, Material, MaterialOverrideUpdate,
+    MediaEntry, MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem,
+    NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
+    ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey,
+    ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape,
+    PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates, RegionHandle,
+    RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+    Rotation, SaleType, ScriptPermissions, SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey,
+    TextureEntry, TextureKey, Throttle, TransactionId, UpdateGroupInfoParams, Uuid, Vector,
+    ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -2200,6 +2201,40 @@ pub enum Command {
         region_handle: RegionHandle,
         /// The region-local position to play the sound at.
         position: RegionCoordinates,
+    },
+    /// Request that the simulator grant or drop god powers for this agent
+    /// (`RequestGodlikePowers`; needs grid-god rights).
+    RequestGodlikePowers {
+        /// Whether to request (`true`) or relinquish (`false`) god powers.
+        godlike: bool,
+    },
+    /// Eject an agent from the agent's land (`EjectUser`).
+    EjectUser {
+        /// The agent to eject.
+        target: AgentKey,
+        /// Whether to also ban the agent from the parcel.
+        action: EjectAction,
+    },
+    /// Freeze or unfreeze an agent on the agent's land (`FreezeUser`).
+    FreezeUser {
+        /// The agent to freeze or unfreeze.
+        target: AgentKey,
+        /// Whether to freeze or unfreeze.
+        action: FreezeAction,
+    },
+    /// Delete or return all objects an owner has across the region
+    /// (`SimWideDeletes`; needs estate/god rights).
+    SimWideDeletes {
+        /// The owner whose objects to delete.
+        owner: AgentKey,
+        /// Which objects to target.
+        flags: SimWideDeleteFlags,
+    },
+    /// Push god-tools region parameters (`GodUpdateRegionInfo`; needs grid-god
+    /// rights).
+    GodUpdateRegionInfo {
+        /// The region parameters to apply.
+        update: GodRegionUpdate,
     },
     /// Begin a clean logout.
     Logout,

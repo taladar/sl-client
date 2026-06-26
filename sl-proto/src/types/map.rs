@@ -173,6 +173,114 @@ impl Default for RegionInfoUpdate {
     }
 }
 
+/// What to do to a user being removed from the agent's land via
+/// [`Session::eject_user`](crate::Session::eject_user) (`EjectUser`). The wire
+/// `Flags` field is `0` for a plain eject and `0x1` to also add the user to the
+/// parcel ban list, matching the reference viewer's `handleEjectAvatar`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EjectAction {
+    /// Eject the user from the land (send them away).
+    Eject,
+    /// Eject the user *and* add them to the parcel ban list.
+    EjectAndBan,
+}
+
+impl EjectAction {
+    /// The `EjectUser` `Flags` wire value for this action.
+    #[must_use]
+    pub const fn to_wire(self) -> u32 {
+        match self {
+            Self::Eject => 0x0,
+            Self::EjectAndBan => 0x1,
+        }
+    }
+}
+
+/// Whether to freeze or unfreeze a user on the agent's land via
+/// [`Session::freeze_user`](crate::Session::freeze_user) (`FreezeUser`). The
+/// wire `Flags` field is `0` to freeze and `0x1` to unfreeze, matching the
+/// reference viewer's `handleFreezeAvatar`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FreezeAction {
+    /// Freeze the user (prevent them from moving or acting).
+    Freeze,
+    /// Unfreeze the user.
+    Unfreeze,
+}
+
+impl FreezeAction {
+    /// The `FreezeUser` `Flags` wire value for this action.
+    #[must_use]
+    pub const fn to_wire(self) -> u32 {
+        match self {
+            Self::Freeze => 0x0,
+            Self::Unfreeze => 0x1,
+        }
+    }
+}
+
+/// Which objects a sim-wide delete targets, applied via
+/// [`Session::sim_wide_deletes`](crate::Session::sim_wide_deletes)
+/// (`SimWideDeletes`; needs estate/god rights). The wire `Flags` field is the
+/// `SWD_*` bitfield from the reference viewer; an all-`false` value (the
+/// [`Default`]) deletes every object owned by the target across the region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SimWideDeleteFlags {
+    /// Only delete the target's objects on land they do *not* own
+    /// (`SWD_OTHERS_LAND_ONLY`).
+    pub others_land_only: bool,
+    /// Return the objects to their owner instead of deleting them outright
+    /// (`SWD_ALWAYS_RETURN_OBJECTS`).
+    pub always_return_objects: bool,
+    /// Only delete scripted objects (`SWD_SCRIPTED_ONLY`).
+    pub scripted_only: bool,
+}
+
+impl SimWideDeleteFlags {
+    /// The `SimWideDeletes` `Flags` bitfield for this selection.
+    #[must_use]
+    pub const fn to_wire(self) -> u32 {
+        let mut flags = 0_u32;
+        if self.others_land_only {
+            flags |= 0x1;
+        }
+        if self.always_return_objects {
+            flags |= 0x2;
+        }
+        if self.scripted_only {
+            flags |= 0x4;
+        }
+        flags
+    }
+}
+
+/// The region parameters to push with god powers via
+/// [`Session::god_update_region_info`](crate::Session::god_update_region_info)
+/// (`GodUpdateRegionInfo`; needs grid-god rights). Mirrors the god-tools
+/// region floater: the simulator overwrites these fields wholesale, so all of
+/// them are sent on every update.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GodRegionUpdate {
+    /// The region (simulator) name. The reference viewer echoes the region's
+    /// current name; the simulator can rename the region from this field.
+    pub sim_name: RegionName,
+    /// The estate this region belongs to.
+    pub estate_id: u32,
+    /// The parent estate (the "mainland" estate is `1`).
+    pub parent_estate_id: u32,
+    /// The 64-bit `RegionFlagsExtended` bitfield (build it with
+    /// [`sl_wire::RegionFlags`]). The legacy 32-bit `RegionFlags` block is sent
+    /// as the low 32 bits, exactly as the reference viewer truncates it.
+    pub region_flags: u64,
+    /// The billing factor applied to land tier in this region.
+    pub billable_factor: f32,
+    /// The price per square metre of land, in L$.
+    pub price_per_meter: i32,
+    /// The grid coordinates teleports into this region are redirected to
+    /// (`(0, 0)` for no redirect).
+    pub redirect_grid: GridCoordinates,
+}
+
 /// A region reported by the world map (one `MapBlockReply` `Data` entry).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MapRegionInfo {
