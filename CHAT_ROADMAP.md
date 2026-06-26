@@ -115,7 +115,7 @@ Scope reminders:
   field A2 fills), with history/unread (A8) and invite status (A5) added
   additively. Lazy get-or-create via `chat_session_mut(kind, now)`; *which*
   event opens *which* kind is A4's lifecycle call.
-- [ ] **A3. Design the friend-presence state model.** A buddy-list cache
+- [x] **A3. Design the friend-presence state model.** A buddy-list cache
   (`Friend { id, rights_granted, rights_received }`) and an online set keyed by
   `FriendKey`, seeded by `FriendList` at login and updated by `FriendsOnline` /
   `FriendsOffline` and `FriendRightsChanged`. Presence is friends-only /
@@ -125,6 +125,22 @@ Scope reminders:
   to **avoid replicating**: an IM sent immediately after a peer goes offline
   falsely re-marks them online; this design must ignore IM traffic as a presence
   signal.) Accessors: `friends()`, `is_online(friend)`, `online_friends()`.
+  **Done — see § Friend-presence reference (from A3) + task B3 in § Phase B.**
+  Decided: two independent private fields —
+  `friends: BTreeMap<FriendKey, Friend>` (the buddy cache, the value's `id` ≡
+  the key) and `online: BTreeSet<FriendKey>`. `friends` is seeded from the
+  existing `Event::FriendList` build site (`methods.rs:1078`), mutated by
+  `FriendRightsChanged` (`granted_to_us` picks `rights_received` vs
+  `rights_granted`), and dropped by `FriendshipTerminated` (its doc already says
+  "drop `other`"). `online` is the **sole** truth — `OnlineNotification`
+  inserts, `OfflineNotification` removes, termination removes — and is **never**
+  touched by any IM handler (the invariant that dodges the
+  "IM-after-offline → falsely online" bug). The two stores are kept
+  **independent** (no cross-population), so a friendship *added mid-session*
+  reconciles only at relogin's buddy list — an accepted in-memory-mirror limit
+  (avoids offer-tracking). `is_online` = "known-online via a notification";
+  absence ≠ provably offline (a friend who does not grant `CAN_SEE_ONLINE` never
+  notifies). Accessors return the public `Friend` (already `Copy`) directly.
 - [ ] **A4. Design the session lifecycle (open / join / send / leave / close).**
   1:1 implicit on the first message; group via `start_group_session` (decide
   whether an inbound group message also opens/tracks it); conference via
@@ -523,3 +539,130 @@ yet (that arrives with A4/A6's tasks). Concretely:
 
 This task stays **drafted/blocked** until Phase A is signed off; it builds on B1
 (and may absorb it at the Phase B consolidation).
+
+### Friend-presence reference (from A3)
+
+The buddy cache + online set folded in here. Presence is **friends-only
+/ `CAN_SEE_ONLINE`-gated / passive** (the sim pushes it; there is no
+`RequestOnlineNotification`) and **grid-level** (it persists across teleport —
+A9). The simulator stays authoritative; these two stores are an API-convenience
+read model, fed **only** by the authoritative friend signals, never inferred.
+
+**Two independent fields** on `Session` (`session.rs`), beside the A2
+`chat_sessions` and the `sit` / `teleport` enums, private, reached only through
+accessors:
+
+    friends: BTreeMap<FriendKey, Friend>   // buddy-list cache
+    online:  BTreeSet<FriendKey>           // who is currently known-online
+
+- **`friends`** keys by `FriendKey` → the existing public `Friend`
+  (`types/avatar_profile.rs:316`, `#[derive(… Copy …)]`,
+  `{ id, rights_granted, rights_received }`). Storing the whole `Friend` (whose
+  `id` always equals the key — the invariant) lets `friends()` yield the public
+  type with zero conversion, no new view struct. `BTreeMap` keeps the crate's
+  deterministic iteration.
+- **`online`** is a bare `BTreeSet<FriendKey>` — the **sole** source of presence
+  truth. A friend is "online" **iff** present in this set.
+
+**The two stores are independent** — `online` is *not* a subset view of
+`friends` and neither cross-populates the other. This is a deliberate
+simplification: it removes any need to track pending friendship offers (an
+accepted offer's new `FriendKey` is not reliably known at the
+`accept_friendship` method boundary), at the cost that a friendship **added
+mid-session** is absent from `friends` until the next login's buddy list seeds
+it afresh. For an in-memory mirror that is fine; presence for such a friend
+still tracks correctly in `online`.
+
+**Seeding & updates** (each hooks an *existing* handler, recording alongside
+the event it already emits — the inbound event surface is unchanged):
+
+| Signal | Site | Effect |
+|--------|------|--------|
+| `FriendList` (login buddy list) | build site `methods.rs:1078` | `friends` ← the `Vec<Friend>` (same `friend()`-mapped data the event carries); `online` starts **empty** |
+| `OnlineNotification` | `methods.rs:3504` | insert each `FriendKey` into `online` |
+| `OfflineNotification` | `methods.rs:3514` | remove each `FriendKey` from `online` |
+| `ChangeUserRights` | `methods.rs:3524` | mutate the cached `Friend`'s rights (see below) |
+| `TerminateFriendship` | `methods.rs:2586` | remove `other` from **both** `friends` and `online` |
+
+- **`online` starts empty at login** — the buddy list carries *rights*, not
+  online status; presence arrives only as `OnlineNotification`s pushed after
+  login (the passive model). So `friends` is full and `online` is empty,
+  filling as notifications land.
+- **`ChangeUserRights` →** `Event::FriendRightsChanged { friend_id, rights,
+  granted_to_us }`. Map by direction onto the cached `Friend`: `granted_to_us ==
+  true` updates `rights_received` (the rights the *friend* grants us);
+  `granted_to_us == false` updates `rights_granted` (the echo of our own
+  `grant_user_rights`). If `friend_id` is **absent** from `friends` (the
+  mid-session-add edge), **ignore** it — relogin reconciles; we do
+  not synthesise a half-known entry.
+- **`TerminateFriendship` →** `Event::FriendshipTerminated { other }` whose own
+  doc says a buddy mirror "should drop `other`"; drop it from both stores so
+  a former friend can never linger as online or in the roster.
+
+**The presence invariant (the bug this design avoids).** `online` is mutated in
+**only two** handlers — `OnlineNotification` (insert) and `OfflineNotification`
+(remove) — plus `TerminateFriendship` removal. **No IM / chat-session handler
+ever touches `online`.** This guards against the reference-viewer /
+SL-grid bug where an IM just after a peer goes offline re-marks them online:
+the A2 chat-session folding (`chat_session_mut`, message/typing/roster updates)
+and presence are fully decoupled — IM traffic is **never** a presence signal.
+`last_activity` (A2) is the *only* IM-driven timestamp and it lives on the
+`ChatSession`, not on presence.
+
+**Interaction with A7 (presence-driven auto-reset).** A3 maintains the presence
+*state*; **A7** consumes it: when `OfflineNotification` removes a friend from
+`online`, A7 (at the same handler) also clears that friend's typing, closes the
+1:1 `ChatSession` whose peer is that friend, and best-effort drops them from
+conference/group rosters. The two layer — A7 covers only *friend* participants
+(friends-only presence); non-friend participants still rely on the sim's
+`SessionLeave`. A3 only owns the `online` set transition; A7 owns the chat
+fan-out.
+
+**Persistence & reset.** Like `chat_sessions`, both are **grid-level** and
+are **not** cleared at the `SitState` / teleport reset sites — presence does not
+change because the agent teleported (A9). They clear only on logout (a `Closed`
+session is dead; a relogin rebuilds them through the constructor and the fresh
+`FriendList` seed), so no `close` hook is added — the A2/A9 convention.
+
+**Accessors** (public, returning public types; the maps stay private):
+
+    fn friends(&self) -> impl Iterator<Item = Friend> + '_   // the buddy cache
+    fn friend(&self, id: FriendKey) -> Option<Friend>        // single lookup
+    fn is_online(&self, friend: FriendKey) -> bool           // membership in `online`
+    fn online_friends(&self) -> impl Iterator<Item = FriendKey> + '_
+
+`is_online` semantics: **"known-online via an authoritative notification."**
+Absence is *not* provable offline — a friend who does not grant us
+`CAN_SEE_ONLINE` never generates a notification, so they are permanently absent
+from `online` regardless of their real status. Callers must read absence as
+"offline or not visible," never "definitely offline." The final accessor names /
+shapes are confirmed in A10; A3 fixes the four listed in the task.
+
+### B3. Friend-presence cache (buddy list + online set) (from A3)
+
+Add the two presence stores and wire them into the existing handlers, with
+no new event/command:
+
+- Add `friends: BTreeMap<FriendKey, Friend>` + `online: BTreeSet<FriendKey>` to
+  `Session` (`session.rs`), beside `chat_sessions` / `sit` / `teleport`.
+- Seed `friends` at the `FriendList` site (`methods.rs:1078`) from the same
+  `friend()`-mapped data; leave `online` empty at login.
+- Fold each existing handler (record **in addition to** emitting its event):
+  `OnlineNotification` (`:3504`) inserts into `online`; `OfflineNotification`
+  (`:3514`) removes; `ChangeUserRights` (`:3524`) updates the cached `Friend`'s
+  rights by `granted_to_us` (ignore if absent); `TerminateFriendship` (`:2586`)
+  removes from both stores.
+- Accessors `friends()` / `friend(id)` / `is_online(id)` / `online_friends()`
+  returning the public `Friend` / `bool` / `FriendKey`.
+- **Invariant:** no IM / chat-session path mutates `online` — assert this in
+  a test (deliver an IM after an `OfflineNotification`; the peer stays offline).
+- **No** A7 chat-reset here (that is B-task A7), **no** persistence/close hook
+  (A9), **no** mid-session friendship *add* synthesis (reconciles at relogin).
+- Unit tests: `FriendList` seeds the cache (and `online` empty); online/offline
+  insert/remove; rights change in each direction mutates the right field; an
+  unknown-friend rights change ignored; `TerminateFriendship` drops from both;
+  the IM-after-offline invariant above.
+
+This task stays **drafted/blocked** until Phase A is signed off; independent
+of B1/B2 (presence is a separate store from the chat-session registry) and may
+land alongside them.
