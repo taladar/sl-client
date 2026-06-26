@@ -32,10 +32,10 @@ mod test {
         RegionLocalObjectId, RegionLocalParcelId, RegionStats, RequiredVoiceVersion, RestoreItem,
         RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId,
         ScriptControl, ScriptControlAction, ScriptPermissions, ServerError, ServerEvent, Session,
-        SetDisplayNameReply, SimSession, SimStatId, SimulatorTime, TaskInventoryReply, TelehubInfo,
-        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, Transmit, UserInfo,
-        ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
-        parse_event_queue_response,
+        SetDisplayNameReply, SimSession, SimStatId, SimulatorTime, TaskInventoryKey,
+        TaskInventoryReply, TelehubInfo, TextureEntry, TextureFace, TextureKey, Throttle,
+        TransactionId, Transmit, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -2702,6 +2702,116 @@ mod test {
             })
             .ok_or("expected a DetachAttachmentIntoInventory server event")?;
         assert_eq!(detached, detach_item);
+        Ok(())
+    }
+
+    #[test]
+    fn client_task_inventory_edits_reach_simulator() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
+
+        // A fully populated for-sale inventory item, so every RestoreItem field
+        // round-trips through the UpdateTaskInventory item block.
+        let item = RestoreItem {
+            item_id: InventoryKey::from(uuid::Uuid::from_u128(0x17E)),
+            folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0xF01DE)),
+            creator_id: AgentKey::from(uuid::Uuid::from_u128(0xC0EA)),
+            owner: OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(0x0E))),
+            group: Some(GroupKey::from(uuid::Uuid::from_u128(0x6))),
+            permissions: Permissions5 {
+                base: Permissions::from_bits(0x0008_0000),
+                owner: Permissions::from_bits(0x0008_0000),
+                group: Permissions::from_bits(0),
+                everyone: Permissions::from_bits(0),
+                next_owner: Permissions::from_bits(0x0008_2000),
+            },
+            transaction_id: uuid::Uuid::from_u128(0x77A),
+            asset_type: 10,
+            inv_type: 10,
+            flags: 0x21,
+            sale_type: SaleType::Copy,
+            sale_price: Some(LindenAmount(250)),
+            name: "Hello World".to_owned(),
+            description: "a greeting script".to_owned(),
+            creation_date: 1_700_000_000,
+            crc: 0xDEAD_BEEF,
+        };
+
+        // RequestTaskInventory: ask for an object's task inventory listing.
+        let request_target = ScopedObjectId::new(circuit, RegionLocalObjectId(301));
+        client.request_task_inventory(request_target, now)?;
+
+        // UpdateTaskInventory: write the item into an object's task inventory.
+        let update_target = ScopedObjectId::new(circuit, RegionLocalObjectId(302));
+        client.update_task_inventory(update_target, TaskInventoryKey::Asset, &item, now)?;
+
+        // MoveTaskInventory: move a task item back into an agent inventory folder.
+        let move_target = ScopedObjectId::new(circuit, RegionLocalObjectId(303));
+        let move_folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0xF01D3));
+        let move_item = InventoryKey::from(uuid::Uuid::from_u128(0x17E3));
+        client.move_task_inventory(move_target, move_folder, move_item, now)?;
+
+        // RemoveTaskInventory: delete a task item from an object.
+        let remove_target = ScopedObjectId::new(circuit, RegionLocalObjectId(304));
+        let remove_item = InventoryKey::from(uuid::Uuid::from_u128(0x17E4));
+        client.remove_task_inventory(remove_target, remove_item, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+
+        let requested = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RequestTaskInventory { local_id } => Some(*local_id),
+                _ => None,
+            })
+            .ok_or("expected a RequestTaskInventory server event")?;
+        assert_eq!(requested, RegionLocalObjectId(301));
+
+        let (update_local, update_key, update_item) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::UpdateTaskInventory {
+                    local_id,
+                    key,
+                    item,
+                } => Some((*local_id, *key, item.clone())),
+                _ => None,
+            })
+            .ok_or("expected an UpdateTaskInventory server event")?;
+        assert_eq!(update_local, RegionLocalObjectId(302));
+        assert_eq!(update_key, TaskInventoryKey::Asset);
+        assert_eq!(update_item, item);
+
+        let (move_local, moved_folder, moved_item) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::MoveTaskInventory {
+                    local_id,
+                    folder_id,
+                    item_id,
+                } => Some((*local_id, *folder_id, *item_id)),
+                _ => None,
+            })
+            .ok_or("expected a MoveTaskInventory server event")?;
+        assert_eq!(move_local, RegionLocalObjectId(303));
+        assert_eq!(moved_folder, move_folder);
+        assert_eq!(moved_item, move_item);
+
+        let (remove_local, removed_item) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RemoveTaskInventory { local_id, item_id } => {
+                    Some((*local_id, *item_id))
+                }
+                _ => None,
+            })
+            .ok_or("expected a RemoveTaskInventory server event")?;
+        assert_eq!(remove_local, RegionLocalObjectId(304));
+        assert_eq!(removed_item, remove_item);
         Ok(())
     }
 
