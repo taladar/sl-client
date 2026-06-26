@@ -20,23 +20,24 @@ mod test {
         GestureActivation, GlobalCoordinates, GridCoordinates, GridRectangle, GroupAccountDetails,
         GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
         GroupAccountTransactions, GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId,
-        GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryItemMove,
-        InventoryKey, InvoiceId, Kick, LandArea, LandBrushAction, LandBrushSize, LandEdit,
-        LandSearchType, LandStatItem, LandStatReportType, LightData, LindenAmount, LindenBalance,
-        LoginParams, MAX_FACES, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
-        Maturity, MeanCollision, MeanCollisionType, MovementMode, NavMeshBuildStatus,
-        NavMeshStatus, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectKey,
-        ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory,
-        ParcelDetails, ParcelKey, ParcelObjectOwner, ParcelReturnType, Permissions, Permissions5,
-        PingId, PlacesResult, PointAtType, Postcard, PrimShapeParams, ProductType, QueryId,
-        RegionCoordinates, RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId,
-        RegionStats, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
-        RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
-        ScriptControlAction, ScriptPermissions, ServerError, ServerEvent, Session,
-        SetDisplayNameReply, SimSession, SimStatId, SimulatorTime, TaskInventoryKey,
-        TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry, TextureFace, TextureKey,
-        Throttle, TransactionId, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
+        GroupRoleKey, GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey,
+        InventoryItemMove, InventoryItemOrFolderKey, InventoryKey, InvoiceId, Kick, LandArea,
+        LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
+        LightData, LindenAmount, LindenBalance, LoginParams, MAX_FACES, MapItem, MapItemType,
+        MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
+        MovementMode, NavMeshBuildStatus, NavMeshStatus, NewInventoryLink, NotecardRez,
+        ObjectBuyItem, ObjectExtraParams, ObjectKey, ObjectPlayingAnimation,
+        ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey,
+        ParcelObjectOwner, ParcelReturnType, Permissions, Permissions5, PingId, PlacesResult,
+        PointAtType, Postcard, PrimShapeParams, ProductType, QueryId, RegionCoordinates,
+        RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionStats,
+        RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+        SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction,
+        ScriptPermissions, ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession,
+        SimStatId, SimulatorTime, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
+        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, Transmit,
+        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -2897,6 +2898,108 @@ mod test {
         assert_eq!(clean_parcel, RegionLocalParcelId(9));
         // The 30 seconds over 15 minutes are dropped by the whole-minute wire field.
         assert_eq!(clean_time, std::time::Duration::from_secs(15 * 60));
+        Ok(())
+    }
+
+    #[test]
+    fn client_inventory_link_and_group_info_reach_simulator() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        // LinkInventoryItem: an item link (AT_LINK = 24).
+        let item_link = NewInventoryLink {
+            folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0x3001)),
+            linked_id: InventoryItemOrFolderKey::Item(InventoryKey::from(uuid::Uuid::from_u128(
+                0x3002,
+            ))),
+            link_type: 24,
+            inv_type: 10,
+            name: "my link".to_owned(),
+            description: "a link to an item".to_owned(),
+        };
+        let item_callback = client.link_inventory_item(&item_link, now)?;
+
+        // LinkInventoryItem: a folder link (AT_LINK_FOLDER = 25).
+        let folder_link = NewInventoryLink {
+            folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0x3003)),
+            linked_id: InventoryItemOrFolderKey::Folder(InventoryFolderKey::from(
+                uuid::Uuid::from_u128(0x3004),
+            )),
+            link_type: 25,
+            inv_type: -1,
+            name: "my folder link".to_owned(),
+            description: String::new(),
+        };
+        client.link_inventory_item(&folder_link, now)?;
+
+        // UpdateGroupInfo: edit an existing group's profile.
+        let params = UpdateGroupInfoParams {
+            group_id: GroupKey::from(uuid::Uuid::from_u128(0x4001)),
+            charter: "be excellent to each other".to_owned(),
+            show_in_list: true,
+            insignia_id: Some(TextureKey::from(uuid::Uuid::from_u128(0x4002))),
+            membership_fee: LindenAmount(42),
+            open_enrollment: true,
+            allow_publish: false,
+            mature_publish: true,
+        };
+        client.update_group_info(&params, now)?;
+
+        // GroupTitleUpdate: set the active title to a role.
+        let group_id = GroupKey::from(uuid::Uuid::from_u128(0x4001));
+        let title_role_id = GroupRoleKey::from(uuid::Uuid::from_u128(0x4003));
+        client.update_group_title(group_id, title_role_id, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+
+        let (decoded_item, decoded_item_callback) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::LinkInventoryItem { link, callback_id }
+                    if link.linked_id.is_item() =>
+                {
+                    Some((link.clone(), *callback_id))
+                }
+                _ => None,
+            })
+            .ok_or("expected an item LinkInventoryItem server event")?;
+        assert_eq!(decoded_item, item_link);
+        assert_eq!(decoded_item_callback, item_callback.get());
+
+        let decoded_folder = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::LinkInventoryItem { link, .. } if link.linked_id.is_folder() => {
+                    Some(link.clone())
+                }
+                _ => None,
+            })
+            .ok_or("expected a folder LinkInventoryItem server event")?;
+        assert_eq!(decoded_folder, folder_link);
+
+        let decoded_params = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::UpdateGroupInfo { params } => Some(params.clone()),
+                _ => None,
+            })
+            .ok_or("expected an UpdateGroupInfo server event")?;
+        assert_eq!(decoded_params, params);
+
+        let (decoded_group, decoded_role) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::UpdateGroupTitle {
+                    group_id,
+                    title_role_id,
+                } => Some((*group_id, *title_role_id)),
+                _ => None,
+            })
+            .ok_or("expected an UpdateGroupTitle server event")?;
+        assert_eq!(decoded_group, group_id);
+        assert_eq!(decoded_role, title_role_id);
         Ok(())
     }
 

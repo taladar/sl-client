@@ -25,8 +25,8 @@ use std::time::{Duration, Instant};
 
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
-    AgentKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey, ParcelKey,
-    TextureKey,
+    AgentKey, FriendKey, GroupKey, GroupRoleKey, InventoryFolderKey, InventoryItemOrFolderKey,
+    InventoryKey, ObjectKey, ParcelKey, TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_wire::messages::{
@@ -154,14 +154,14 @@ use crate::types::{
     GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
     GroupVoteHistoryItem, InstantMessage, InventoryItemMove, Kick, LandBrushAction, LandBrushSize,
     LandEdit, LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer,
-    MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NavMeshStatus, NotecardRez,
-    ObjectBuyItem, ObjectExtraParams, ObjectPlayingAnimation, ObjectPropertiesFamily,
+    MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NavMeshStatus, NewInventoryLink,
+    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectPlayingAnimation, ObjectPropertiesFamily,
     OpenRegionInfo, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult, Postcard,
     PrimShapeParams, ProposalVoteId, RegionIdentity, RegionStats, Reliability,
     RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
     ScriptControl, ScriptPermissions, ServerError, SetDisplayNameReply, SimulatorTime,
     TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry, Throttle,
-    Transmit, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
 
@@ -1102,6 +1102,37 @@ pub enum ServerEvent {
         ///
         /// [`Duration::ZERO`]: std::time::Duration::ZERO
         clean_time: std::time::Duration,
+    },
+    /// The client created an inventory link (`LinkInventoryItem`). The inverse of
+    /// the client's
+    /// [`Session::link_inventory_item`](crate::Session::link_inventory_item); a
+    /// simulator allocates the link item's id and answers with a
+    /// `BulkUpdateInventory` echoing `callback_id`.
+    LinkInventoryItem {
+        /// The new link's folder, target, name/description, and asset/inv type
+        /// codes.
+        link: NewInventoryLink,
+        /// The client's async callback id, echoed back in the reply so the client
+        /// can correlate it.
+        callback_id: u32,
+    },
+    /// The client edited a group's profile (`UpdateGroupInfo`): charter, insignia,
+    /// search visibility, membership fee, enrollment, and publish flags. The
+    /// inverse of the client's
+    /// [`Session::update_group_info`](crate::Session::update_group_info).
+    UpdateGroupInfo {
+        /// The decoded group-profile edit (a group cannot be renamed, so this
+        /// carries no name).
+        params: UpdateGroupInfoParams,
+    },
+    /// The client set its active title within a group (`GroupTitleUpdate`). The
+    /// inverse of the client's
+    /// [`Session::update_group_title`](crate::Session::update_group_title).
+    UpdateGroupTitle {
+        /// The group whose title is being changed.
+        group_id: GroupKey,
+        /// The group role carrying the desired title.
+        title_role_id: GroupRoleKey,
     },
     /// Any other decoded client message, surfaced verbatim. This is how the
     /// remaining client-only messages reach the simulator: fully decoded but
@@ -4614,6 +4645,56 @@ impl SimSession {
                 self.events.push_back(ServerEvent::SetParcelOtherCleanTime {
                     local_id: RegionLocalParcelId(set.parcel_data.local_id),
                     clean_time: std::time::Duration::from_secs(minutes.saturating_mul(60)),
+                });
+            }
+            AnyMessage::LinkInventoryItem(link) => {
+                // The link target's discriminator is its AssetType: AT_LINK_FOLDER
+                // (25) is a folder link, any other value an item link (AT_LINK is
+                // 24). The wire carries only the OldItemID, so this byte is the
+                // sole signal for item vs folder.
+                const AT_LINK_FOLDER: i8 = 25;
+                let block = &link.inventory_block;
+                let linked_id = if block.r#type == AT_LINK_FOLDER {
+                    InventoryItemOrFolderKey::Folder(InventoryFolderKey::from(block.old_item_id))
+                } else {
+                    InventoryItemOrFolderKey::Item(InventoryKey::from(block.old_item_id))
+                };
+                self.events.push_back(ServerEvent::LinkInventoryItem {
+                    link: NewInventoryLink {
+                        folder_id: InventoryFolderKey::from(block.folder_id),
+                        linked_id,
+                        link_type: block.r#type,
+                        inv_type: block.inv_type,
+                        name: trimmed_string(&block.name),
+                        description: trimmed_string(&block.description),
+                    },
+                    callback_id: block.callback_id,
+                });
+            }
+            AnyMessage::UpdateGroupInfo(update) => {
+                let group = &update.group_data;
+                let insignia_id =
+                    (group.insignia_id != Uuid::nil()).then(|| TextureKey::from(group.insignia_id));
+                self.events.push_back(ServerEvent::UpdateGroupInfo {
+                    params: UpdateGroupInfoParams {
+                        group_id: GroupKey::from(group.group_id),
+                        charter: trimmed_string(&group.charter),
+                        show_in_list: group.show_in_list,
+                        insignia_id,
+                        membership_fee: crate::types::linden_from_wire(
+                            "MembershipFee",
+                            group.membership_fee,
+                        )?,
+                        open_enrollment: group.open_enrollment,
+                        allow_publish: group.allow_publish,
+                        mature_publish: group.mature_publish,
+                    },
+                });
+            }
+            AnyMessage::GroupTitleUpdate(update) => {
+                self.events.push_back(ServerEvent::UpdateGroupTitle {
+                    group_id: GroupKey::from(update.agent_data.group_id),
+                    title_role_id: GroupRoleKey::from(update.agent_data.title_role_id),
                 });
             }
             AnyMessage::LogoutRequest(_) => {
