@@ -49,23 +49,24 @@ use sl_proto::{
     AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentMode, AttachmentPoint,
     Camera, ChatType, ClassifiedCategory, ClassifiedUpdate, Command, ControlFlags,
     CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility,
-    EjectAction, EstateAccessDelta, ExperiencePermission, ExperienceUpdate, FlexibleData,
-    FreezeAction, FriendRights, GestureActivation, GodRegionUpdate, GridCoordinates,
+    EjectAction, EstateAccessDelta, ExperiencePermission, ExperienceUpdate, ExtendedMesh,
+    FlexibleData, FreezeAction, FriendRights, GestureActivation, GodRegionUpdate, GridCoordinates,
     GroupNoticeAttachment, GroupNoticeKey, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
     InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LandBrushAction, LandBrushSize,
-    LandEdit, LandSearchType, LandStatReportType, LightData, LindenAmount, LookAtType, MapItemType,
-    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MovementMode,
-    MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
-    ObjectExtraParams, ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
-    ParcelUpdate, PermissionField, Permissions, Permissions5, PickKey, PickUpdate, PointAtType,
-    Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionHandle,
-    RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId, RegionName, RestoreItem,
-    RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId,
-    ScopedParcelId, ScriptPermissions, SculptData, SculptOrMeshKey, SimWideDeleteFlags,
-    StartLocationSlot, TaskInventoryKey, TerraformArea, TextureEntry, TextureFace, Throttle,
-    UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    VoiceProvisionRequest, Wearable, WearableType,
+    LandEdit, LandSearchType, LandStatReportType, LightData, LightImage, LindenAmount, LookAtType,
+    MapItemType, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType,
+    MovementMode, MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez,
+    ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPermMasks, ObjectTransform,
+    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
+    ParcelReturnType, ParcelUpdate, PermissionField, Permissions, Permissions5, PickKey,
+    PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
+    ReflectionProbe, ReflectionProbeFlags, RegionHandle, RegionInfoUpdate, RegionLocalObjectId,
+    RegionLocalParcelId, RegionName, RenderMaterialRef, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
+    ScriptPermissions, SculptData, SculptOrMeshKey, SimWideDeleteFlags, StartLocationSlot,
+    TaskInventoryKey, TerraformArea, TextureEntry, TextureFace, Throttle, UpdateGroupInfoParams,
+    Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceProvisionRequest,
+    Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -1437,13 +1438,12 @@ fn parse_color(
     Ok(color)
 }
 
-/// Build [`ObjectExtraParams`] from keyword fields covering the flexi, light, and
-/// sculpt subtypes. A subtype is included only when enabled (`flexi=true`,
-/// `light=true`, or a `sculpt_texture` given); every other subtype is left
-/// absent, which clears it on the object. The light-image, extended-mesh,
-/// render-material, and reflection-probe subtypes are not exposed through the
-/// REPL — set them through
-/// [`Session::set_object_extra_params`](sl_proto::Session::set_object_extra_params).
+/// Build [`ObjectExtraParams`] from keyword fields covering every subtype. A
+/// subtype is included only when enabled (`flexi=true`, `light=true`,
+/// `reflection_probe=true`, or a `sculpt_texture` / `projector_texture` /
+/// `extended_mesh_flags` / `material_faces`+`material_ids` given); every subtype
+/// left absent is *cleared* on the object, mirroring the reference viewer's
+/// `sendExtraParameters`.
 fn build_object_extra_params(
     args: &Args,
     ctx: &dyn ReplContext,
@@ -1484,11 +1484,63 @@ fn build_object_extra_params(
         }),
         None => None,
     };
+    // A projected-light texture turns the object's light into a projector; the
+    // params vector is `(field-of-view, focus, ambiance)`.
+    let light_image = match args.opt_str(ctx, "projector_texture", 130)? {
+        Some(value) => Some(LightImage {
+            texture: TextureKey::from(args::literal_uuid("projector_texture", &value)?),
+            params: args
+                .opt_vector(ctx, "projector_params", 131)?
+                .unwrap_or(Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                }),
+        }),
+        None => None,
+    };
+    let extended_mesh = args
+        .opt_parse::<u32>(ctx, "extended_mesh_flags", 132, "u32")?
+        .map(|flags| ExtendedMesh { flags });
+    let reflection_probe = if args.bool_or(ctx, "reflection_probe", 133, false)? {
+        Some(ReflectionProbe {
+            ambiance: args.parse_or(ctx, "probe_ambiance", 134, "f32", 0.0)?,
+            clip_distance: args.parse_or(ctx, "probe_clip_distance", 135, "f32", 0.0)?,
+            flags: ReflectionProbeFlags::from_bits(args.parse_or(
+                ctx,
+                "probe_flags",
+                136,
+                "u8",
+                0,
+            )?),
+        })
+    } else {
+        None
+    };
+    // Per-face GLTF material references are two parallel lists: a face index and
+    // a material asset id per entry.
+    let material_faces = args.vec_parse::<u8>(ctx, "material_faces", 137, "u8")?;
+    let material_ids = args.vec_uuid(ctx, "material_ids", 138)?;
+    if material_faces.len() != material_ids.len() {
+        return Err(invalid(
+            "material_faces",
+            &format!("{} faces, {} ids", material_faces.len(), material_ids.len()),
+            "equal-length material_faces and material_ids lists",
+        ));
+    }
+    let render_material = material_faces
+        .into_iter()
+        .zip(material_ids)
+        .map(|(face, material_id)| RenderMaterialRef { face, material_id })
+        .collect();
     Ok(ObjectExtraParams {
         flexible,
         light,
         sculpt,
-        ..ObjectExtraParams::default()
+        light_image,
+        extended_mesh,
+        render_material,
+        reflection_probe,
     })
 }
 
@@ -3728,7 +3780,10 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<local_id> [flexi=] [flexi_softness=] [flexi_tension=] [flexi_air_friction=] \
                     [flexi_gravity=] [flexi_wind=] [flexi_force=<v>] [light=] [light_color=r,g,b,a] \
                     [light_radius=] [light_cutoff=] [light_falloff=] [sculpt_texture=] \
-                    [sculpt_type=]",
+                    [sculpt_type=] [projector_texture=] [projector_params=<v>] \
+                    [extended_mesh_flags=] [reflection_probe=] [probe_ambiance=] \
+                    [probe_clip_distance=] [probe_flags=] [material_faces=f,…] \
+                    [material_ids=uuid,…]",
             build: |args, ctx| {
                 Ok(Command::SetObjectExtraParams {
                     local_id: scoped_object(ctx, args.req_parse(ctx, "local_id", 0, "u32")?)?,
@@ -5176,9 +5231,10 @@ mod tests {
         FreezeAction, FriendRights, GridCoordinates, GroupKey, InventoryFolderKey,
         InventoryItemOrFolderKey, InventoryKey, LandBrushAction, LandBrushSize, LandEdit,
         LandStatReportType, LindenAmount, MapItemType, MovementMode, ObjectBuyItem, ObjectKey,
-        OwnerKey, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId,
-        ScopedParcelId, ScriptPermissions, SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey,
-        TerraformArea, TextureKey, TransactionId, Uuid,
+        OwnerKey, ReflectionProbeFlags, RegionHandle, RegionLocalObjectId, RegionLocalParcelId,
+        RenderMaterialRef, SaleType, ScopedObjectId, ScopedParcelId, ScriptPermissions,
+        SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey, TerraformArea, TextureKey,
+        TransactionId, Uuid,
     };
 
     use super::Registry;
@@ -5814,6 +5870,39 @@ mod tests {
         assert!(matches!(
             build_scoped("viewer_start_auction 5"),
             Ok(Command::ViewerStartAuction { snapshot: None, .. })
+        ));
+    }
+
+    #[test]
+    fn set_object_extra_params_parses_remaining_subtypes() {
+        assert!(matches!(
+            build_scoped(&format!(
+                "set_object_extra_params 9 projector_texture={ONE} projector_params=<1,2,3> \
+                 extended_mesh_flags=1 reflection_probe=true probe_ambiance=0.5 \
+                 probe_clip_distance=4 probe_flags=1 material_faces=0,2 material_ids={ONE},{TWO}"
+            )),
+            Ok(Command::SetObjectExtraParams { params, .. })
+                if params.light_image.as_ref().is_some_and(|image|
+                        image.texture == TextureKey::from(uuid(ONE))
+                            && image.params.x.to_bits() == 1.0_f32.to_bits())
+                    && params.extended_mesh.is_some_and(|mesh| mesh.flags == 1)
+                    && params.reflection_probe.is_some_and(|probe|
+                        probe.clip_distance.to_bits() == 4.0_f32.to_bits()
+                            && probe.flags == ReflectionProbeFlags::from_bits(1))
+                    && params.render_material == [
+                        RenderMaterialRef { face: 0, material_id: uuid(ONE) },
+                        RenderMaterialRef { face: 2, material_id: uuid(TWO) },
+                    ]
+        ));
+    }
+
+    #[test]
+    fn set_object_extra_params_rejects_mismatched_material_lists() {
+        assert!(matches!(
+            build_scoped(&format!(
+                "set_object_extra_params 9 material_faces=0,1 material_ids={ONE}"
+            )),
+            Err(ReplError::InvalidArg { .. })
         ));
     }
 

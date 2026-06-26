@@ -577,10 +577,13 @@ aditi.
   `Command::{SetObjectShape, SetObjectImage, SetObjectExtraParams}` through the
   tokio and bevy runtimes, the `command_name` formatter, and the
   `set_object_shape` / `set_object_image` / `set_object_extra_params` REPL
-  tokens (the extra-params token covers the flexi/light/sculpt subtypes — the
-  OpenSim-handled ones; the rarer light-image/extended-mesh/render-material/
-  reflection-probe subtypes remain settable through the typed API). Covered by
-  three pack-the-wire tests; object edit (shape/texture) is OpenSim-testable.
+  tokens. The extra-params token now covers **all** subtypes — the
+  OpenSim-handled flexi/light/sculpt plus the (largely SL-only)
+  light-image/extended-mesh/render-material/reflection-probe ones (the projector
+  texture+params, extended-mesh flags, reflection-probe ambiance/clip/flags, and
+  the per-face GLTF material faces+ids as two parallel lists). Covered by three
+  pack-the-wire tests plus two REPL parse tests for the extra-params subtypes;
+  object edit (shape/texture) is OpenSim-testable.
 - **Out batch 3 — rez & script permissions.** `RezObject` / `RezScript` (rez an
   inventory object/script into the world), `RevokePermissions` (revoke
   previously-granted script permissions), `DetachAttachmentIntoInv` (detach a
