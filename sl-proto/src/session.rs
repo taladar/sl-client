@@ -7,8 +7,9 @@ use crate::types::{
     AssetType, Camera, Diagnostic, Event, ImageCodec, InventoryFolder, InventoryItem, LoginAccount,
     LoginParams, Object, TerrainPatch, Throttle,
 };
-use sl_types::key::{AgentKey, InventoryFolderKey, ObjectKey};
+use sl_types::key::{AgentKey, ExperienceKey, InventoryFolderKey, InventoryKey, ObjectKey};
 use sl_types::lsl::Rotation;
+use sl_types::lsl::ScriptPermissions;
 use sl_types::map::Distance;
 use sl_wire::CircuitCode;
 use sl_wire::ControlFlags;
@@ -766,6 +767,77 @@ enum SitState {
     },
 }
 
+/// The key of a script-permission grant: the script that holds it, uniquely a
+/// `(holding object, inventory item within it)` pair (one object may run several
+/// scripts, each with its own grant). Both halves come straight off the
+/// `ScriptQuestion` / [`Event::ScriptPermissionRequest`](crate::Event::ScriptPermissionRequest).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ScriptHolder {
+    /// The task (object) id holding the script.
+    task_id: ObjectKey,
+    /// The script item id within the object.
+    item_id: InventoryKey,
+}
+
+// `ObjectKey` / `InventoryKey` are UUID newtypes without an `Ord` impl, so the
+// `BTreeMap` key order is defined here on the underlying UUIDs (which do order),
+// keeping the crate's deterministic-iteration convention without leaning on a
+// derive the key types do not provide.
+impl PartialOrd for ScriptHolder {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ScriptHolder {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        (self.task_id.uuid(), self.item_id.uuid())
+            .cmp(&(other.task_id.uuid(), other.item_id.uuid()))
+    }
+}
+
+/// Whether the script holding a grant lives in one of *this* agent's
+/// attachments (the grant crosses regions with the avatar) or in an in-world
+/// object (region/circuit scoped, left behind on a real teleport).
+///
+/// Detection failure falls back to [`InWorld`](Self::InWorld) — the
+/// conservative direction (an unrecognised holder is cleared on the next
+/// teleport rather than kept forever; losing a mirror entry is cheap, the
+/// simulator still enforces).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HolderKind {
+    /// The script lives in an attachment worn by this agent; the grant crosses
+    /// regions with the avatar (kept on teleport, cleared on detach).
+    Attachment,
+    /// The script lives in an in-world object (or another avatar's attachment,
+    /// which is in-world from our frame); the grant is region/circuit scoped and
+    /// dropped when the agent leaves it.
+    InWorld,
+}
+
+/// One recorded script-permission grant — the value half of the grant registry.
+///
+/// The simulator stays authoritative; this is an API-convenience mirror of what
+/// the agent granted, never a security boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ScriptGrant {
+    /// The granted subset, stored wholesale as the raw bitfield (the record-only
+    /// flags need no handler, the cooperation flags reuse existing event
+    /// surfaces). Never empty — an empty grant is an absent entry.
+    granted: ScriptPermissions,
+    /// Whether the holder is one of our attachments or an in-world object; drives
+    /// the region-leave reset (attachments cross with the avatar, in-world
+    /// objects are left behind).
+    kind: HolderKind,
+    /// The circuit the holder was last seen on, for scoping the
+    /// `DisableSimulator` / circuit-retired reset. `None` when the holder was not
+    /// in the object cache at grant time (the in-world fallback).
+    circuit: Option<CircuitId>,
+    /// The experience the grant was made under, copied from the request; `None`
+    /// outside an experience.
+    experience_id: Option<ExperienceKey>,
+}
+
 /// A single agent session: login bookkeeping plus one simulator circuit.
 ///
 /// This is a pure state machine. Feed it bytes and the current [`Instant`] via
@@ -818,6 +890,15 @@ pub struct Session {
     /// sending a `TeleportLocationRequest` and the next region's
     /// `RegionHandshake`).
     teleport: TeleportPhase,
+    /// The script-permission grant registry: what the agent has granted each
+    /// script, keyed by the holding `(object, item)` pair. Written by
+    /// [`Session::answer_script_permissions`], cleared on revoke and the
+    /// region-leave signals (a real teleport drops in-world grants, a circuit
+    /// retiring drops that circuit's, an object going away drops its). The
+    /// simulator stays authoritative; this is an API-convenience mirror, not a
+    /// security boundary. Read via [`Session::granted_permissions`] /
+    /// [`Session::script_grants`].
+    script_grants: BTreeMap<ScriptHolder, ScriptGrant>,
     /// The current region's capability-seed URL (from login or a teleport), for
     /// the driver to fetch the CAPS map and event queue.
     seed_capability: Option<url::Url>,

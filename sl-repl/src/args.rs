@@ -15,7 +15,9 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use sl_proto::{AgentKey, GroupKey, ObjectKey, OwnerKey, Rotation, TextureKey, Uuid, Vector};
+use sl_proto::{
+    AgentKey, ExperienceKey, GroupKey, ObjectKey, OwnerKey, Rotation, TextureKey, Uuid, Vector,
+};
 
 use crate::context::ReplContext;
 use crate::error::ReplError;
@@ -377,6 +379,19 @@ impl Args {
     ) -> Result<Option<AgentKey>, ReplError> {
         let raw = self.uuid_or_nil(ctx, field, pos)?;
         Ok((!raw.is_nil()).then(|| AgentKey::from(raw)))
+    }
+
+    /// An optional [`ExperienceKey`] argument: an absent or nil id maps to
+    /// `None` (the in-band "none" sentinel the wire uses for an unset
+    /// experience id).
+    pub(crate) fn opt_experience(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        pos: usize,
+    ) -> Result<Option<ExperienceKey>, ReplError> {
+        let raw = self.uuid_or_nil(ctx, field, pos)?;
+        Ok((!raw.is_nil()).then(|| ExperienceKey::from(raw)))
     }
 
     /// An optional [`GroupKey`] argument: an absent or nil id maps to `None`

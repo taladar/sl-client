@@ -741,8 +741,8 @@ impl Client {
                         Some(Command::ReplyScriptDialog { object_id, chat_channel, button_index, button_label }) => {
                             self.session.reply_script_dialog(object_id, chat_channel, button_index, &button_label, Instant::now())?;
                         }
-                        Some(Command::AnswerScriptPermissions { task_id, item_id, permissions }) => {
-                            self.session.answer_script_permissions(task_id, item_id, permissions, Instant::now())?;
+                        Some(Command::AnswerScriptPermissions { task_id, item_id, permissions, experience_id }) => {
+                            self.session.answer_script_permissions(task_id, item_id, permissions, experience_id, Instant::now())?;
                         }
                         Some(Command::RequestMuteList) => {
                             self.session.request_mute_list(Instant::now())?;

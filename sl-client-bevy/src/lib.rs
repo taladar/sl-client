@@ -1140,9 +1140,16 @@ fn advance_running(
                 task_id,
                 item_id,
                 permissions,
+                experience_id,
             } => {
                 session
-                    .answer_script_permissions(*task_id, *item_id, *permissions, now)
+                    .answer_script_permissions(
+                        *task_id,
+                        *item_id,
+                        *permissions,
+                        *experience_id,
+                        now,
+                    )
                     .ok();
             }
             Command::RequestMuteList => {

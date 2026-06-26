@@ -2645,7 +2645,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "answer_script_permissions",
-            usage: "<task_id> <item_id> <permissions-i32>",
+            usage: "<task_id> <item_id> <permissions-i32> [experience_id]",
             build: |args, ctx| {
                 Ok(Command::AnswerScriptPermissions {
                     task_id: args.req_object(ctx, "task_id", 0)?,
@@ -2657,6 +2657,7 @@ fn all_specs() -> Vec<CommandSpec> {
                         "i32",
                         0,
                     )?),
+                    experience_id: args.opt_experience(ctx, "experience_id", 3)?,
                 })
             },
         },
