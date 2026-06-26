@@ -12877,6 +12877,99 @@ mod test {
     }
 
     #[test]
+    fn teleport_resets_grants_across_both_permission_stores() -> Result<(), TestError> {
+        // The cross-cutting two-store case no single B-task owns: a real teleport
+        // touches the grant registry (drop in-world, keep attachment) but must
+        // leave the taken-controls tracker untouched (controls are agent-global
+        // and the viewer keeps them across a teleport). Drive a grant *and* a
+        // taken control through the same teleport and assert each store's rule.
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Seed our own avatar, an attachment worn by us, and an in-world prim.
+        let avatar = avatar_update(500, 1);
+        session.handle_datagram(sim_addr(), &server_message(&avatar, 5, true)?, now)?;
+        let attach = attachment_update(600, 0xA79, 500);
+        session.handle_datagram(sim_addr(), &server_message(&attach, 6, true)?, now)?;
+        let world = object_update(700, 0xB8A, zero_vec());
+        session.handle_datagram(sim_addr(), &server_message(&world, 7, true)?, now)?;
+        drain_events(&mut session);
+        drain(&mut session)?;
+
+        // Grant registry: one attachment grant (kept) and one in-world grant
+        // (dropped). Both grant TAKE_CONTROLS so the registry and the live
+        // taken-controls tracker are genuinely separate concerns here.
+        let attach_task = ObjectKey::from(uuid::Uuid::from_u128(0xA79));
+        let world_task = ObjectKey::from(uuid::Uuid::from_u128(0xB8A));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0x00C0_FFF0));
+        let granted = ScriptPermissions(ScriptPermissions::TAKE_CONTROLS);
+        session.answer_script_permissions(attach_task, item, granted, None, now)?;
+        session.answer_script_permissions(world_task, item, granted, None, now)?;
+
+        // Taken-controls tracker: one consumed control and one passed to the
+        // agent, so both halves of the tracker carry state across the teleport.
+        feed_script_control_change(&mut session, now, 9501, true, ControlFlags::AT_POS, false)?;
+        feed_script_control_change(&mut session, now, 9502, true, ControlFlags::UP_POS, true)?;
+        drain(&mut session)?;
+        assert_eq!(session.script_controls().taken, ControlFlags::AT_POS);
+        assert_eq!(
+            session.script_controls().passed_to_agent,
+            ControlFlags::UP_POS
+        );
+
+        // A real (cross-region) teleport.
+        let handle = 0x0003_E900_0003_E800;
+        session.teleport_to(
+            RegionHandle(handle),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let finish = AnyMessage::TeleportFinish(TeleportFinish {
+            info: TeleportFinishInfoBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                location_id: 4,
+                sim_ip: [127, 0, 0, 1],
+                sim_port: 9100u16.swap_bytes(),
+                region_handle: handle,
+                seed_capability: b"http://x/permTP2\0".to_vec(),
+                sim_access: sl_wire::sim_access::MATURE,
+                teleport_flags: TeleportFlags::VIA_LURE,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&finish, 20, true)?, now)?;
+
+        // Grant registry: in-world dropped, attachment kept.
+        assert_eq!(
+            session.granted_permissions(world_task, item),
+            ScriptPermissions(0),
+            "the in-world grant should be dropped on a real teleport"
+        );
+        assert_eq!(
+            session.granted_permissions(attach_task, item),
+            granted,
+            "the attachment grant should survive the teleport"
+        );
+
+        // Taken-controls tracker: untouched — a teleport clears only in-world
+        // grants, never controls (the conservative-mirror invariant).
+        assert_eq!(
+            session.script_controls().taken,
+            ControlFlags::AT_POS,
+            "taken controls must survive a teleport (agent-global)"
+        );
+        assert_eq!(
+            session.script_controls().passed_to_agent,
+            ControlFlags::UP_POS,
+            "passed-to-agent controls must survive a teleport too"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn terse_update_applies_trailing_texture_entry() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
