@@ -941,7 +941,8 @@ the encoded buffer across, and assert the peer decodes the expected
   enqueue_set_display_name_reply, enqueue_windlight_refresh,
   enqueue_sim_console_response, enqueue_required_voice_version,
   enqueue_open_region_info)
-- [ ] Sim out batch 1 — calling-card ServerEvents
+- [x] Sim out batch 1 — calling-card ServerEvents (CallingCardOffered,
+  CallingCardAccepted, CallingCardDeclined)
 - [ ] Sim out batch 2 — object prim-editing ServerEvents
 - [ ] Sim out batch 3 — rez & script-permission ServerEvents
 - [ ] Sim out batch 4 — task-inventory ServerEvents
