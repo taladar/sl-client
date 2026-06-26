@@ -61,6 +61,46 @@ and flushes acknowledgements for reliable packets it has received. Conversely,
 if *no* traffic arrives from the region within an inactivity budget, the client
 treats the session as timed out.
 
+## Session errors & forced disconnect
+
+Beyond timing out, a live session can be told — by the simulator or a service
+behind it — that something went wrong, that a feature it asked for is
+unavailable, or that it is being logged out from the server side. These arrive
+as three distinct UDP messages, surfaced as typed events so an application can
+react instead of seeing them dropped as
+[unhandled-message diagnostics](#diagnostics).
+
+The three differ in severity, and only the last ends the session:
+
+- **`Error` → `Event::ServerError`** is the lowest-common-denominator error
+  channel: a generic failure report that does *not* end the session. The
+  `ServerError` carries an HTTP-like `code`, a short machine-readable `token`,
+  the hierarchical `system` path to the originating handler (e.g.
+  `"message/handler"`), a human-readable `message`, the `agent` it is addressed
+  to, and an optional `data` blob of binary-serialised LLSD kept verbatim for
+  the consumer to decode. Its `id` correlates the failed exchange, but the wire
+  field is a deliberately polymorphic "transaction / unique / session id", so it
+  carries no single typed meaning and stays a raw UUID. A minimal client logs
+  the `message`; a richer one keys off `code` and `system` to react to a
+  specific failure — surfacing a failed money transaction in the UI, say.
+- **`FeatureDisabled` → `Event::FeatureDisabled`** reports that a feature the
+  agent just requested is turned off. It carries the human-readable `message`,
+  the `agent` it is addressed to, and the `transaction` the disabled feature
+  would have served (often nil). Like `ServerError`, it is informational — the
+  session continues.
+- **`KickUser` → `Event::Kicked`** is a server-initiated forced logout — for
+  example when the same account logs in elsewhere. `Kick` carries the `agent`
+  being kicked and a human-readable `reason`. Unlike the other two this *ends*
+  the session: receiving it also drives the state machine to
+  `Event::Disconnected` with `DisconnectReason::Kicked { message }`, so
+  observing *either* event is sufficient to learn the session is over. The
+  `KickUser` routing fields — the target sim's address and the agent's own
+  session id — carry nothing the application needs and are dropped.
+
+> `Error` is **receive-only** for a client: there is no client-sent error
+> message. The server side is the mirror — it *emits* these (see below) — so the
+> two directions are not symmetric.
+
 ## Diagnostics
 
 A session also produces, on an opt-in side channel, a stream of **diagnostics**:
@@ -102,7 +142,19 @@ real grid.
 >   `Active`, `Teleporting`, `LoggingOut`, `Closed`.
 > - The reason a session ended is `DisconnectReason`
 >   (`sl-proto/src/types/session.rs`): `LoginFailed`, `Timeout`,
->   `HandshakeFailed`, `ProtocolError`.
+>   `HandshakeFailed`, `ProtocolError`, `Kicked { message }`.
+> - The session-error carriers are `ServerError`, `FeatureDisabled`, and `Kick`
+>   in `sl-proto/src/types/server_error.rs`, surfaced as
+>   `Event::ServerError(Box<ServerError>)`, `Event::FeatureDisabled`, and
+>   `Event::Kicked` (`sl-proto/src/types/event.rs`). The `KickUser` dispatch arm
+>   also calls `Session::close(DisconnectReason::Kicked { … })`, so a kick
+>   reaches the terminal `Event::Disconnected` as well.
+> - Server events: the sim-side inverses are `SimSession::send_error`,
+>   `send_feature_disabled`, and `send_kick_user`
+>   (`sl-proto/src/sim_session.rs`); there is no client-sent `Error`, so these
+>   are encoder-only on the sim side.
+> - In the [REPL](../tools/sl-repl.md) the three render as `server_error`,
+>   `feature_disabled`, and `kicked` (`sl-repl/src/format.rs`).
 > - The server-side mirror is `SimSession` in `sl-proto/src/sim_session.rs`.
 > - Login/connection parameter types live in `sl-proto/src/types/session.rs`
 >   (`LoginParams`, `LoginAccount`, …).
