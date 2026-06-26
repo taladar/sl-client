@@ -12113,6 +12113,135 @@ mod test {
         Ok(())
     }
 
+    /// Builds a one-object `ObjectUpdate` for an avatar (`pcode::AVATAR`) with
+    /// the given region-local id and full id, in the current region.
+    fn avatar_update(local_id: u32, full_id: u128) -> AnyMessage {
+        let AnyMessage::ObjectUpdate(mut update) = object_update(local_id, full_id, zero_vec())
+        else {
+            unreachable!("object_update builds an ObjectUpdate");
+        };
+        if let Some(block) = update.object_data.first_mut() {
+            block.p_code = pcode::AVATAR;
+        }
+        AnyMessage::ObjectUpdate(update)
+    }
+
+    #[test]
+    fn own_avatar_id_learned_from_object_update() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        // Not known until our own avatar object is seen.
+        assert_eq!(session.own_avatar_id(), None);
+
+        // The session's agent id is `from_u128(1)` (see `established`). An avatar
+        // object whose full id matches ours fills the slot.
+        let avatar = avatar_update(500, 1);
+        session.handle_datagram(sim_addr(), &server_message(&avatar, 5, true)?, now)?;
+        drain_events(&mut session);
+
+        assert_eq!(
+            session.own_avatar_id(),
+            Some(ScopedObjectId::new(
+                circuit,
+                sl_proto::RegionLocalObjectId(500)
+            ))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn own_avatar_id_ignores_other_avatars_and_prims() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Another avatar (different full id) is not ours.
+        let other = avatar_update(510, 0x999);
+        session.handle_datagram(sim_addr(), &server_message(&other, 5, true)?, now)?;
+        drain_events(&mut session);
+        assert_eq!(session.own_avatar_id(), None);
+
+        // A prim carrying our own id (which never happens on the wire) is not an
+        // avatar, so the `pcode` guard rejects it.
+        let prim = object_update(511, 1, zero_vec());
+        session.handle_datagram(sim_addr(), &server_message(&prim, 6, true)?, now)?;
+        drain_events(&mut session);
+        assert_eq!(session.own_avatar_id(), None);
+        Ok(())
+    }
+
+    #[test]
+    fn own_avatar_id_is_set_once() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        let first = avatar_update(520, 1);
+        session.handle_datagram(sim_addr(), &server_message(&first, 5, true)?, now)?;
+        drain_events(&mut session);
+
+        // A later own-avatar update with a different region-local id (the id is
+        // really stable for a circuit's life) must not overwrite the slot.
+        let again = avatar_update(521, 1);
+        session.handle_datagram(sim_addr(), &server_message(&again, 6, true)?, now)?;
+        drain_events(&mut session);
+
+        assert_eq!(
+            session.own_avatar_id(),
+            Some(ScopedObjectId::new(
+                circuit,
+                sl_proto::RegionLocalObjectId(520)
+            ))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn own_avatar_id_backstop_at_movement_complete() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        // Cache our own avatar object, then an `AgentMovementComplete` reads it
+        // back from the cache (the message carries no region-local id) and fills
+        // the slot — the backstop for attachment detection.
+        let avatar = avatar_update(530, 1);
+        session.handle_datagram(sim_addr(), &server_message(&avatar, 5, true)?, now)?;
+        drain_events(&mut session);
+
+        let amc = AnyMessage::AgentMovementComplete(AgentMovementComplete {
+            agent_data: AgentMovementCompleteAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            data: AgentMovementCompleteDataBlock {
+                position: vec3(10.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+                region_handle: OBJ_REGION,
+                timestamp: 0,
+            },
+            sim_data: AgentMovementCompleteSimDataBlock {
+                channel_version: b"x\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&amc, 6, true)?, now)?;
+        drain_events(&mut session);
+
+        assert_eq!(
+            session.own_avatar_id(),
+            Some(ScopedObjectId::new(
+                circuit,
+                sl_proto::RegionLocalObjectId(530)
+            ))
+        );
+        Ok(())
+    }
+
     #[test]
     fn terse_update_applies_trailing_texture_entry() -> Result<(), TestError> {
         let now = Instant::now();

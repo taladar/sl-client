@@ -886,6 +886,18 @@ pub struct Session {
     /// (every object-update message carries the field). See
     /// [`Session::note_time_dilation`].
     time_dilation: BTreeMap<CircuitId, u16>,
+    /// The region-local id of the agent's **own** avatar object on each circuit
+    /// instance, learned the first time that avatar's `ObjectUpdate` is cached
+    /// (or read back from the cache at `AgentMovementComplete`). Used to
+    /// recognise an object parented to our own avatar — one of our attachments —
+    /// when classifying a script-permission holder (the permission system's
+    /// `HolderKind`). Per circuit because a region-local id is unique only within
+    /// one simulator and the avatar is assigned a fresh one in each region;
+    /// absent until the avatar object is first observed on that circuit, and set
+    /// once (the id is stable for the life of the circuit). Dropped with the rest
+    /// of a circuit's state in [`Session::forget_sim_objects`]. Surfaced via
+    /// [`Session::own_avatar_id`].
+    own_avatar: BTreeMap<CircuitId, RegionLocalObjectId>,
     /// The live inventory-folder cache, keyed by folder id. Seeded from the
     /// login skeleton ([`Event::InventorySkeleton`]), grown by folder-contents
     /// fetches ([`Event::InventoryDescendents`], both UDP and CAPS) and the
