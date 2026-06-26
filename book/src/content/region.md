@@ -59,6 +59,37 @@ Richer, updatable settings are requested on demand with
 - optional **chat** ranges (`RegionInfo5`, newer Second Life only) and
   **combat/damage** settings, each present only when the grid sends its block.
 
+## Region telemetry (`SimStats` / `SimulatorTime`)
+
+Two messages the simulator **pushes** unsolicited keep the viewer's idea of the
+region current. Neither is requested — they simply arrive.
+
+`SimStats` is the region's periodic **performance telemetry**, pushed roughly
+once a second, and surfaces as `Event::SimStats(Box<RegionStats>)`.
+`RegionStats` carries the region's `grid_coordinates`, the raw 32-bit
+`region_flags` and the full 64-bit `region_flags_extended` (which falls back to
+the zero-extended 32-bit field on older simulators that send no `RegionInfo`
+block), the
+`object_capacity`, and a `stats` list of `(SimStatId, f32)` pairs in the order
+the simulator sent them. `SimStatId` is a typed enum over the individual
+statistics — time dilation, simulator FPS, physics FPS, agent and active-script
+counts, frame times, and so on — whose known ids match both the viewer's
+`ESimStatID` and OpenSim's `StatsID` (the two agree on ids 0–40); ids in the
+1000+ range are OpenSim-only extras, and any id in neither table is preserved as
+`SimStatId::Unknown`.
+
+> Handling `SimStats` is what stops a live session logging it as an unhandled
+> message — the original motivation for the message-coverage audit this surface
+> came from.
+
+`SimulatorViewerTimeMessage` carries the simulator's **world time and sun
+state**, surfaced as `Event::SimulatorTime(Box<SimulatorTime>)`. `SimulatorTime`
+holds the microseconds since the simulator started (its monotonic world clock),
+the seconds per simulated day and year, and the sun's direction unit vector,
+phase angle (radians), and angular velocity. The simulator pushes it so the
+viewer can resynchronise its day-cycle clock and sun position against the
+[environment](#environment-eep) it is rendering.
+
 ## Estate information
 
 A region belongs to an **estate** — a group of regions sharing an owner, access
@@ -107,6 +138,44 @@ each of which is answered by a fresh `Event::TelehubInfo`:
 
 These all travel as `EstateOwnerMessage` `telehub` sub-commands under the hood;
 the simulator rejects them unless the agent has estate-owner or god rights.
+
+## Terraforming & parcel administration
+
+A land owner (or estate manager) can reshape the region's terrain and adjust a
+parcel's settings. These are commands the client *sends*; the simulator enforces
+land rights and silently ignores an edit the agent may not make.
+
+**Terraforming.** `Command::ModifyLand(LandEdit)` applies one terraform **brush
+stroke**; `Command::UndoLand` reverts the last one. A `LandEdit` bundles:
+
+- the brush **action** — a `LandBrushAction` (`Level`, `Raise`, `Lower`,
+  `Smooth`, `Noise`, `Revert`), matching the viewer's `E_LAND_*` codes and the
+  `LAND_LEVEL` … `LAND_REVERT` constants LSL's `llModifyLand` exposes;
+- the brush **size** — a `LandBrushSize` (`Small` / `Medium` / `Large` = 1 / 2 /
+  4 m radius). The radius in metres is what modern simulators read; the legacy
+  index byte is still sent for old simulators;
+- the **strength** (the wire `Seconds` — how long the brush is held, scaled by
+  the configured force; larger values move terrain further per message) and the
+  reference **height** the brush levels toward;
+- the **area** — a `TerraformArea`, the region-local ground rectangle (west /
+  south / east / north metres from the region's south-west corner) the stroke
+  covers. The viewer sends a zero-area rectangle at the cursor for click-drag
+  brushing (`TerraformArea::point`) and a parcel's bounding rectangle for a
+  whole-parcel edit;
+- the optional **parcel** being edited (a `RegionLocalParcelId`), or `None` for
+  an un-targeted free brush stroke (the wire `LocalID` of `-1`).
+
+**Parcel administration.** Two commands act on a single parcel by its
+region-local id (a [`ScopedParcelId`](object-commerce.md), the local id paired
+with its region):
+
+- `Command::RequestParcelPropertiesById { local_id, sequence_id }` fetches a
+  parcel's properties **by its local id** (in contrast to the rectangle-based
+  request); the `sequence_id` is echoed back so the caller can match the reply,
+  which arrives as `Event::ParcelProperties`.
+- `Command::SetParcelOtherCleanTime { local_id, clean_time }` sets the parcel's
+  **auto-return time** for *other* people's objects. `clean_time` is a
+  `Duration` rounded to whole minutes; `Duration::ZERO` disables auto-return.
 
 ## Resolving ids to names
 
@@ -287,6 +356,27 @@ though OpenSim serves them too.
 >   `ResourceSummary`, `ScriptedObjectInfo`, `LandResourcesUrls`,
 >   `ParcelScriptResources`); the UDP `LandStatItem` / `LandStatReportType` are
 >   in `sl-proto/src/types/parcel.rs`.
+> - Telemetry types `RegionStats`, `SimulatorTime`, and the `SimStatId` enum are
+>   in `sl-proto/src/types/region.rs`, surfaced as `Event::SimStats(Box<…>)` and
+>   `Event::SimulatorTime(Box<…>)`; both are pushed (no command). The
+>   server-side inverses are `SimSession::send_sim_stats` /
+>   `send_simulator_time`
+>   (`sl-proto/src/sim_session.rs`). In the [REPL](../tools/sl-repl.md) they
+>   render as `sim_stats` / `simulator_time`.
+> - Terraform types `LandEdit`, `LandBrushAction`, `LandBrushSize`, and
+>   `TerraformArea` are in `sl-proto/src/types/land.rs` (each `LandBrush*` type
+>   carries the `to_code`/`to_metres`/`to_index` ↔ `from_code`/`from_metres`/
+>   `from_index` codec pair). Commands `ModifyLand`, `UndoLand`,
+>   `RequestParcelPropertiesById`, and `SetParcelOtherCleanTime`
+>   (`sl-proto/src/command.rs`) have `Session` helpers `modify_land`,
+>   `undo_land`, `request_parcel_properties_by_id`, and
+>   `set_parcel_other_clean_time`
+>   (`sl-proto/src/session/methods.rs`); the parcel-by-id reply reuses
+>   `Event::ParcelProperties`. The sim side decodes them into
+>   `ServerEvent::{ModifyLand, UndoLand, RequestParcelPropertiesById,
+>   SetParcelOtherCleanTime}` (`sl-proto/src/sim_session.rs`). REPL tokens:
+>   `modify_land`, `undo_land`, `request_parcel_properties_by_id`,
+>   `set_parcel_other_clean_time`.
 > - Commands `RequestRegionInfo`, `RequestEstateInfo`, `RequestEstateCovenant`,
 >   `RequestTelehubInfo`, `ConnectTelehub`, `DisconnectTelehub`,
 >   `AddTelehubSpawnPoint`, `RemoveTelehubSpawnPoint`, `RequestAvatarNames`,
