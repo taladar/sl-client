@@ -132,6 +132,28 @@ pub struct ScriptPermissionRequest {
     pub permissions: ScriptPermissions,
 }
 
+/// A public, read-only view of one recorded script-permission grant, yielded by
+/// [`Session::script_grants`](crate::Session::script_grants).
+///
+/// The grant registry's internal types stay private; this flattens what a driver
+/// needs. The simulator stays authoritative — this only mirrors what the agent
+/// granted, never a security boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScriptGrantInfo {
+    /// The task (object) id holding the script.
+    pub task_id: ObjectKey,
+    /// The script item id within the object.
+    pub item_id: InventoryKey,
+    /// The granted permission subset (never empty — an empty grant is recorded
+    /// as no entry at all).
+    pub granted: ScriptPermissions,
+    /// Whether the holder is one of this agent's attachments (the grant crosses
+    /// regions with the avatar) rather than an in-world object.
+    pub is_attachment: bool,
+    /// The experience the grant was made under, or `None` outside an experience.
+    pub experience_id: Option<ExperienceKey>,
+}
+
 /// A scripted-object request to open a URL (`llLoadURL`), parsed from a
 /// `LoadURL`. There is no reply; the client decides whether to open the URL.
 #[derive(Debug, Clone, PartialEq, Eq)]

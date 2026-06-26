@@ -1129,11 +1129,39 @@ neighbourhood; B4 on B2's `ScriptGrantInfo` (+ B2.5's denied status) + B3's
       `AgentMovementComplete` with no prior own-avatar `ObjectUpdate` also sets
       it; a holder parented to *another* avatar / an in-world prim stays
       `InWorld`. No new wire message — a pure session-state addition.
-- [ ] **B2 (from A2/A3/A4/A5). The complete grant registry — model, recording,
+- [x] **B2 (from A2/A3/A4/A5). The complete grant registry — model, recording,
       read, revoke and all region-leave resets, in one warning-clean unit.**
-      Landing the whole store together is deliberate: `ScriptGrant.circuit` is
-      read only by the circuit-retired reset, so splitting record from reset
-      would leave a written-but-unread field (finding 4). Sub-steps:
+      **Done 2026-06-26** — added the private `ScriptHolder` / `ScriptGrant` /
+      `HolderKind` types and the
+      `script_grants: BTreeMap<ScriptHolder, ScriptGrant>` field on `Session`
+      (session.rs), the `object_by_full_id` / `holder_kind` /
+      `drop_inworld_grants` helpers, recording in `answer_script_permissions`
+      (new `experience_id` param plumbed through
+      `Command::AnswerScriptPermissions` and all three runtimes + the REPL
+      `opt_experience` arg), the public read accessors `granted_permissions` /
+      `script_grants` (+ public `ScriptGrantInfo` view), the revoke mirror
+      update, and the four region-leave resets (two teleport sites,
+      `forget_sim_objects`, `KillObject`). Seven focused `lifecycle.rs` tests
+      cover grant/deny/re-grant, the animation-only revoke, the teleport
+      in-world-cleared/attachment-kept split, neighbour-crossing keep-all, the
+      circuit-retired drop, and `KillObject`. Builds, clippy-clean (restriction
+      lints), `cargo test --workspace` green.
+      **Two adaptations vs the literal plan (no behavioural change):** (1) the
+      granular revoke `Command` / `Session::revoke_script_permissions` /
+      `circuit.send_revoke_permissions` **already existed** (built earlier under
+      `MISSING_ROADMAP`'s outbound coverage as `RevokeScriptPermissions`, wired
+      through every runtime), so B2 only **added the mirror update** to the
+      existing method rather than creating a new `RevokePermissions` command —
+      reusing the existing path, not duplicating it. (2) `ScriptHolder` could
+      not `derive(Ord)` because `ObjectKey` / `InventoryKey` expose no `Ord`;
+      the `BTreeMap` key order is a hand-written `Ord`/`PartialOrd` on the
+      underlying UUIDs instead. **Deferred cleanup (not worth a version bump on
+      its own):** next time functionality is moved into shared `sl-types`,
+      derive `Ord`/`PartialOrd` on the `ObjectKey` / `InventoryKey` (and likely
+      the other UUID key) newtypes there, then drop this hand-written impl and
+      restore `#[derive(... Ord)]` on `ScriptHolder` — fold it into that batch,
+      do not bump `sl-types` solely for it. (B2.5 still upgrades the empty-grant
+      "remove" path to an explicit *denied* state.) Sub-steps (as implemented):
       - **State model** (`sl-proto/src/session.rs`): the private `ScriptHolder`
       (`{ task_id: ObjectKey, item_id: InventoryKey }`, deriving `Ord` for the
       `BTreeMap` key); `ScriptGrant` with `granted: ScriptPermissions`,

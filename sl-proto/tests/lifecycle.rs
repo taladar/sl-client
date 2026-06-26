@@ -4802,6 +4802,7 @@ mod test {
             ObjectKey::from(task),
             InventoryKey::from(item),
             ScriptPermissions(ScriptPermissions::TAKE_CONTROLS),
+            None,
             now,
         )?;
         let sent = drain(&mut session)?;
@@ -12126,6 +12127,23 @@ mod test {
         AnyMessage::ObjectUpdate(update)
     }
 
+    /// Builds an `ObjectUpdate` for an attachment prim worn on attachment point
+    /// 1 (chest), parented to `parent_local_id` (our own avatar's region-local
+    /// id, for the own-attachment classification used by `holder_kind`).
+    fn attachment_update(local_id: u32, full_id: u128, parent_local_id: u32) -> AnyMessage {
+        let AnyMessage::ObjectUpdate(mut update) = object_update(local_id, full_id, zero_vec())
+        else {
+            unreachable!("object_update builds an ObjectUpdate");
+        };
+        if let Some(block) = update.object_data.first_mut() {
+            // State 0x10 decodes (nibble-swapped, per `ATTACHMENT_ID_FROM_STATE`)
+            // to attachment point 1 (chest); a non-zero state marks an attachment.
+            block.state = 0x10;
+            block.parent_id = parent_local_id;
+        }
+        AnyMessage::ObjectUpdate(update)
+    }
+
     #[test]
     fn own_avatar_id_learned_from_object_update() -> Result<(), TestError> {
         let now = Instant::now();
@@ -12238,6 +12256,344 @@ mod test {
                 circuit,
                 sl_proto::RegionLocalObjectId(530)
             ))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn answer_records_grant_and_empty_denies() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0xB201));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0xB202));
+        let granted =
+            ScriptPermissions(ScriptPermissions::TRIGGER_ANIMATION | ScriptPermissions::TELEPORT);
+        session.answer_script_permissions(task, item, granted, None, now)?;
+        drain(&mut session)?;
+
+        assert_eq!(session.granted_permissions(task, item), granted);
+        let grant = session
+            .script_grants()
+            .next()
+            .ok_or("expected one recorded grant")?;
+        assert_eq!(session.script_grants().count(), 1);
+        assert_eq!(grant.task_id, task);
+        assert_eq!(grant.item_id, item);
+        assert_eq!(grant.granted, granted);
+        // An unseen holder is classified in-world (the conservative default).
+        assert!(!grant.is_attachment);
+        assert_eq!(grant.experience_id, None);
+
+        // An empty answer denies: the mirror records that as no entry at all.
+        session.answer_script_permissions(task, item, ScriptPermissions(0), None, now)?;
+        drain(&mut session)?;
+        assert_eq!(
+            session.granted_permissions(task, item),
+            ScriptPermissions(0)
+        );
+        assert_eq!(session.script_grants().count(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn re_grant_replaces_prior_grant() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0xB211));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0xB212));
+        let first = ScriptPermissions(ScriptPermissions::TAKE_CONTROLS);
+        let second =
+            ScriptPermissions(ScriptPermissions::TRIGGER_ANIMATION | ScriptPermissions::DEBIT);
+        session.answer_script_permissions(task, item, first, None, now)?;
+        session.answer_script_permissions(task, item, second, None, now)?;
+        drain(&mut session)?;
+
+        // A later answer for the same holder supersedes the earlier grant.
+        assert_eq!(session.granted_permissions(task, item), second);
+        assert_eq!(session.script_grants().count(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn revoke_clears_only_honoured_animation_bits() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0xB221));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0xB222));
+        let granted =
+            ScriptPermissions(ScriptPermissions::TRIGGER_ANIMATION | ScriptPermissions::TELEPORT);
+        session.answer_script_permissions(task, item, granted, None, now)?;
+        drain(&mut session)?;
+
+        // Revoking the full set only drops the honoured animation bit; the sim
+        // keeps enforcing `TELEPORT`, so the conservative mirror keeps it.
+        session.revoke_script_permissions(task, granted, now)?;
+        drain(&mut session)?;
+        assert_eq!(
+            session.granted_permissions(task, item),
+            ScriptPermissions(ScriptPermissions::TELEPORT)
+        );
+
+        // Revoking a non-honoured bit (`TELEPORT`) changes nothing.
+        session.revoke_script_permissions(
+            task,
+            ScriptPermissions(ScriptPermissions::TELEPORT),
+            now,
+        )?;
+        drain(&mut session)?;
+        assert_eq!(
+            session.granted_permissions(task, item),
+            ScriptPermissions(ScriptPermissions::TELEPORT)
+        );
+
+        // A grant of only animation bits is removed entirely when revoked.
+        let anim_task = ObjectKey::from(uuid::Uuid::from_u128(0xB223));
+        let anim = ScriptPermissions(
+            ScriptPermissions::TRIGGER_ANIMATION | ScriptPermissions::OVERRIDE_ANIMATIONS,
+        );
+        session.answer_script_permissions(anim_task, item, anim, None, now)?;
+        drain(&mut session)?;
+        session.revoke_script_permissions(anim_task, anim, now)?;
+        drain(&mut session)?;
+        assert_eq!(
+            session.granted_permissions(anim_task, item),
+            ScriptPermissions(0)
+        );
+        assert!(
+            !session.script_grants().any(|g| g.task_id == anim_task),
+            "a grant emptied by revoke must be removed"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn teleport_drops_inworld_grants_keeps_attachment() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Seed our own avatar so an attachment parented to it is recognised.
+        let avatar = avatar_update(500, 1);
+        session.handle_datagram(sim_addr(), &server_message(&avatar, 5, true)?, now)?;
+        // An attachment worn by us, and a separate in-world prim.
+        let attach = attachment_update(600, 0xA77, 500);
+        session.handle_datagram(sim_addr(), &server_message(&attach, 6, true)?, now)?;
+        let world = object_update(700, 0xB88, zero_vec());
+        session.handle_datagram(sim_addr(), &server_message(&world, 7, true)?, now)?;
+        drain_events(&mut session);
+        drain(&mut session)?;
+
+        let attach_task = ObjectKey::from(uuid::Uuid::from_u128(0xA77));
+        let world_task = ObjectKey::from(uuid::Uuid::from_u128(0xB88));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0x00C0_FFEE));
+        let anim = ScriptPermissions(ScriptPermissions::TRIGGER_ANIMATION);
+        session.answer_script_permissions(attach_task, item, anim, None, now)?;
+        session.answer_script_permissions(world_task, item, anim, None, now)?;
+        drain(&mut session)?;
+
+        assert!(
+            session
+                .script_grants()
+                .any(|g| g.task_id == attach_task && g.is_attachment),
+            "the attachment holder should be classified as ours"
+        );
+        assert!(
+            session
+                .script_grants()
+                .any(|g| g.task_id == world_task && !g.is_attachment),
+            "the in-world holder should be classified in-world"
+        );
+
+        // A real (cross-region) teleport leaves the in-world object behind but
+        // carries the attachment across the border.
+        let handle = 0x0003_E900_0003_E800;
+        session.teleport_to(
+            RegionHandle(handle),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let finish = AnyMessage::TeleportFinish(TeleportFinish {
+            info: TeleportFinishInfoBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                location_id: 4,
+                sim_ip: [127, 0, 0, 1],
+                sim_port: 9100u16.swap_bytes(),
+                region_handle: handle,
+                seed_capability: b"http://x/permTP\0".to_vec(),
+                sim_access: sl_wire::sim_access::MATURE,
+                teleport_flags: TeleportFlags::VIA_LURE,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&finish, 20, true)?, now)?;
+
+        assert_eq!(
+            session.granted_permissions(world_task, item),
+            ScriptPermissions(0),
+            "the in-world grant should be dropped on a real teleport"
+        );
+        assert_eq!(
+            session.granted_permissions(attach_task, item),
+            anim,
+            "the attachment grant should survive the teleport"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn neighbour_crossing_keeps_grants() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Grant on a root in-world object.
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0xB231));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0xB232));
+        let obj = object_update(810, 0xB231, zero_vec());
+        session.handle_datagram(sim_addr(), &server_message(&obj, 5, true)?, now)?;
+        drain_events(&mut session);
+        let anim = ScriptPermissions(ScriptPermissions::TRIGGER_ANIMATION);
+        session.answer_script_permissions(task, item, anim, None, now)?;
+        drain(&mut session)?;
+
+        // Cross into a neighbour (promote the child to root) — grants are kept,
+        // since an in-world object may still be visible and a vehicle crosses.
+        enable_neighbour_b(&mut session, 9, now)?;
+        while session.poll_transmit().is_some() {}
+        let handle = 0x0003_E900_0003_E800;
+        let crossed = AnyMessage::CrossedRegion(CrossedRegion {
+            agent_data: CrossedRegionAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            region_data: CrossedRegionRegionDataBlock {
+                sim_ip: [127, 0, 0, 1],
+                sim_port: 9001u16.swap_bytes(),
+                region_handle: handle,
+                seed_capability: b"http://x/seedB\0".to_vec(),
+            },
+            info: CrossedRegionInfoBlock {
+                position: vec3(10.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&crossed, 10, true)?, now)?;
+        while session.poll_transmit().is_some() {}
+        let amc = AnyMessage::AgentMovementComplete(AgentMovementComplete {
+            agent_data: AgentMovementCompleteAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            data: AgentMovementCompleteDataBlock {
+                position: vec3(10.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+                region_handle: handle,
+                timestamp: 0,
+            },
+            sim_data: AgentMovementCompleteSimDataBlock {
+                channel_version: b"x\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_b(), &server_message(&amc, 1, true)?, now)?;
+        drain_events(&mut session);
+
+        assert_eq!(
+            session.granted_permissions(task, item),
+            anim,
+            "a neighbour crossing should keep all grants"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn disable_simulator_drops_child_circuit_grants() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0xB242));
+        let anim = ScriptPermissions(ScriptPermissions::TRIGGER_ANIMATION);
+
+        // A grant on a root in-world object.
+        let root_task = ObjectKey::from(uuid::Uuid::from_u128(0xB241));
+        let root_obj = object_update(820, 0xB241, zero_vec());
+        session.handle_datagram(sim_addr(), &server_message(&root_obj, 5, true)?, now)?;
+        drain_events(&mut session);
+        session.answer_script_permissions(root_task, item, anim, None, now)?;
+        drain(&mut session)?;
+
+        // A grant on an object cached on a child (neighbour) circuit.
+        enable_neighbour_b(&mut session, 9, now)?;
+        while session.poll_transmit().is_some() {}
+        let child_task = ObjectKey::from(uuid::Uuid::from_u128(0xB243));
+        let child_obj = object_update_in(0x0003_E900_0003_E800, 920, 0xB243, zero_vec());
+        session.handle_datagram(sim_b(), &server_message(&child_obj, 1, true)?, now)?;
+        drain_events(&mut session);
+        session.answer_script_permissions(child_task, item, anim, None, now)?;
+        drain(&mut session)?;
+        assert!(
+            session.script_grants().any(|g| g.task_id == child_task),
+            "the child-circuit grant should be recorded"
+        );
+
+        // Retiring the child circuit drops only its grants.
+        let disable = server_datagram(MessageId::Low(152), &[], 3, true);
+        session.handle_datagram(sim_b(), &disable, now)?;
+        assert_eq!(
+            session.granted_permissions(child_task, item),
+            ScriptPermissions(0),
+            "the child-circuit grant should drop on DisableSimulator"
+        );
+        assert_eq!(
+            session.granted_permissions(root_task, item),
+            anim,
+            "the root grant should be kept"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn kill_object_drops_grant() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x5678));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0xB252));
+        let obj = object_update(400, 0x5678, zero_vec());
+        session.handle_datagram(sim_addr(), &server_message(&obj, 5, true)?, now)?;
+        drain_events(&mut session);
+        session.answer_script_permissions(
+            task,
+            item,
+            ScriptPermissions(ScriptPermissions::TRIGGER_ANIMATION),
+            None,
+            now,
+        )?;
+        drain(&mut session)?;
+        assert!(session.script_grants().any(|g| g.task_id == task));
+
+        // The object going away (the detach path echoes a `KillObject` too) drops
+        // its grant.
+        let kill = AnyMessage::KillObject(KillObject {
+            object_data: vec![KillObjectObjectDataBlock { id: 400 }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&kill, 6, true)?, now)?;
+        drain_events(&mut session);
+        assert_eq!(
+            session.granted_permissions(task, item),
+            ScriptPermissions(0),
+            "the grant should drop when the object is killed"
         );
         Ok(())
     }

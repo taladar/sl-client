@@ -608,6 +608,12 @@ pub enum Command {
         item_id: InventoryKey,
         /// The permissions to grant.
         permissions: ScriptPermissions,
+        /// The experience the answered request was made under (the
+        /// `experience_id` of the [`ScriptPermissionRequest`](crate::ScriptPermissionRequest)
+        /// being answered, `None` outside an experience). The session keeps no
+        /// outstanding-request state, so the driver passes it back from the
+        /// request for the grant mirror to record.
+        experience_id: Option<ExperienceKey>,
     },
     /// Request the agent's mute (block) list (`MuteListRequest`). The list
     /// arrives as [`Event::MuteList`](crate::Event::MuteList) (or [`Event::MuteListUnchanged`](crate::Event::MuteListUnchanged)).

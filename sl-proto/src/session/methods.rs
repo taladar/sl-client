@@ -34,9 +34,10 @@ use super::{
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
     CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, Circuit, DEFAULT_DRAW_DISTANCE,
-    IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
-    MAX_INLINE_ASSET, SIT_TIMEOUT, Session, SessionState, SitState, TELEPORT_TIMEOUT,
-    TeleportPhase, TextureDownload, deadline, merge_deadline,
+    HolderKind, IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG,
+    LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, ScriptGrant, ScriptHolder, Session,
+    SessionState, SitState, TELEPORT_TIMEOUT, TeleportPhase, TextureDownload, deadline,
+    merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -68,17 +69,17 @@ use crate::types::{
     ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
     PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
     RegionInfoUpdate, RegionStats, Reliability, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptPermissions,
-    ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags,
-    SoundPreload, StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
-    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus,
-    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    Wearable, WearableType,
+    RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptGrantInfo,
+    ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags,
+    SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, TaskInventoryKey,
+    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
+    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
-    AgentKey, ClassifiedKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
-    OwnerKey, ParcelKey, TextureKey,
+    AgentKey, ClassifiedKey, ExperienceKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey,
+    ObjectKey, OwnerKey, ParcelKey, TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::map::{Distance, GridCoordinates, RegionCoordinates};
@@ -146,6 +147,7 @@ impl Session {
             camera: Camera::region_center(),
             sit: SitState::NotSitting,
             teleport: TeleportPhase::Idle,
+            script_grants: BTreeMap::new(),
             seed_capability: None,
             inventory_root: None,
             login_account: None,
@@ -775,6 +777,9 @@ impl Session {
         // region *crossing* — `promote_child_to_root` — keeps the seat, since a
         // vehicle the agent sits on carries it across the border.)
         self.sit = SitState::NotSitting;
+        // A real teleport leaves in-world objects behind in the old simulator;
+        // drop their permission grants (attachments cross with the avatar).
+        self.drop_inworld_grants();
         self.teleport = TeleportPhase::Handover { region_handle };
         self.state = SessionState::AwaitingHandshake;
         Ok(())
@@ -1263,11 +1268,19 @@ impl Session {
                     return Ok(true);
                 };
                 for block in &kill.object_data {
-                    let region_handle = self
+                    let removed = self
                         .objects
                         .get_mut(&circuit_id)
-                        .and_then(|sim| sim.remove(&RegionLocalObjectId(block.id)))
+                        .and_then(|sim| sim.remove(&RegionLocalObjectId(block.id)));
+                    let region_handle = removed
+                        .as_ref()
                         .map_or(RegionHandle(0), |object| object.region_handle);
+                    // The object (or detached attachment, whose detach echoes a
+                    // `KillObject`) is gone; drop any permission grants on it.
+                    if let Some(full_id) = removed.as_ref().map(|object| object.full_id) {
+                        self.script_grants
+                            .retain(|holder, _| holder.task_id != full_id);
+                    }
                     self.events.push_back(Event::ObjectRemoved {
                         region_handle,
                         local_id: ScopedObjectId::new(circuit_id, RegionLocalObjectId(block.id)),
@@ -1432,6 +1445,54 @@ impl Session {
         })
     }
 
+    /// Finds a cached object by its persistent global id ([`ObjectKey`]),
+    /// scanning every circuit's cache (there is no by-`full_id` index; only
+    /// nearby objects are cached, so the scan is small). Used by
+    /// [`Session::holder_kind`] to classify a script-permission holder.
+    fn object_by_full_id(&self, full_id: ObjectKey) -> Option<&Object> {
+        self.objects
+            .values()
+            .flat_map(BTreeMap::values)
+            .find(|object| object.full_id == full_id)
+    }
+
+    /// Classifies the holder of a script-permission grant from the object cache:
+    /// whether the holding object `task_id` is one of *this* agent's attachments
+    /// or an in-world object, plus the circuit it was found on (for reset
+    /// scoping).
+    ///
+    /// A holder is an [`HolderKind::Attachment`] iff its cached object is an
+    /// attachment ([`Object::attachment_point`] is set) *and* it is parented, on
+    /// the same circuit, to our own avatar (the B1.5 cached own-avatar
+    /// region-local id). Anything else — an in-world prim, another avatar's
+    /// attachment, or a holder not in the cache — is [`HolderKind::InWorld`], the
+    /// conservative default (it is then cleared on the next teleport rather than
+    /// kept forever).
+    fn holder_kind(&self, task_id: ObjectKey) -> (HolderKind, Option<CircuitId>) {
+        let Some(object) = self.object_by_full_id(task_id) else {
+            return (HolderKind::InWorld, None);
+        };
+        let circuit = object.circuit;
+        let parented_to_us = object.parent_id != RegionLocalObjectId(0)
+            && self.own_avatar.get(&circuit) == Some(&object.parent_id);
+        let kind = if object.attachment_point().is_some() && parented_to_us {
+            HolderKind::Attachment
+        } else {
+            HolderKind::InWorld
+        };
+        (kind, Some(circuit))
+    }
+
+    /// Drops every in-world script-permission grant, keeping the attachment
+    /// grants. Called at the two real-teleport unseat sites (a left-behind
+    /// in-world object is in the old simulator and unreachable; an attachment
+    /// crosses the border with the avatar). Mirrors the [`SitState`] reset
+    /// precedent — only the real-teleport sites call this, not a sit/stand.
+    fn drop_inworld_grants(&mut self) {
+        self.script_grants
+            .retain(|_, grant| matches!(grant.kind, HolderKind::Attachment));
+    }
+
     /// Applies a terse update to an object already cached for simulator `from`,
     /// emitting [`Event::ObjectUpdated`]. Carries the object's new motion and
     /// state, plus the trailing raw `TextureEntry` blob when the simulator flagged
@@ -1575,6 +1636,11 @@ impl Session {
         self.regions.remove(&circuit_id);
         self.time_dilation.remove(&circuit_id);
         self.own_avatar.remove(&circuit_id);
+        // Drop any permission grants scoped to this retiring (child/neighbour)
+        // circuit; the root is never retired this way, so attachment grants
+        // (root-scoped) are never dropped here.
+        self.script_grants
+            .retain(|_, grant| grant.circuit != Some(circuit_id));
         let Some(sim) = self.objects.remove(&circuit_id) else {
             return;
         };
@@ -2097,8 +2163,10 @@ impl Session {
                 // An intra-region teleport: no new circuit, just resume activity.
                 if matches!(self.state, SessionState::Teleporting) {
                     self.state = SessionState::Active;
-                    // A teleport (even a local one) unseats the agent.
+                    // A teleport (even a local one) unseats the agent and leaves
+                    // in-world objects behind; drop their permission grants.
                     self.sit = SitState::NotSitting;
+                    self.drop_inworld_grants();
                     if let Some(circuit) = self.circuit.as_mut() {
                         circuit.timers.teleport = None;
                     }
@@ -5418,6 +5486,19 @@ impl Session {
     /// subset of those requested) to the script `item_id` in object `task_id`.
     /// Pass [`ScriptPermissions::default`] (an empty set) to deny everything.
     ///
+    /// `experience_id` is the experience the answered request was made under
+    /// (from the [`ScriptPermissionRequest`](crate::ScriptPermissionRequest), or
+    /// `None` outside an experience):
+    /// the session keeps no outstanding-request state, so the driver passes it
+    /// back from the request it is answering, to record on the grant.
+    ///
+    /// The grant is recorded into the session's permission mirror after the wire
+    /// send (the mirror follows the wire): a non-empty `permissions` inserts /
+    /// replaces the holder's grant, and an empty set (a deny) removes any prior
+    /// entry. The simulator stays authoritative — the mirror is an API
+    /// convenience read via [`Session::granted_permissions`] /
+    /// [`Session::script_grants`], never a security boundary.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
@@ -5427,11 +5508,65 @@ impl Session {
         task_id: ObjectKey,
         item_id: InventoryKey,
         permissions: ScriptPermissions,
+        experience_id: Option<ExperienceKey>,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_script_answer_yes(task_id, item_id.uuid(), permissions.0, now)?;
+        // Record the grant into the mirror after the send (it follows the wire).
+        let holder = ScriptHolder { task_id, item_id };
+        if permissions.0 == 0 {
+            // An empty grant is a deny: the faithful mirror is no entry.
+            self.script_grants.remove(&holder);
+        } else {
+            let (kind, circuit) = self.holder_kind(task_id);
+            self.script_grants.insert(
+                holder,
+                ScriptGrant {
+                    granted: permissions,
+                    kind,
+                    circuit,
+                    experience_id,
+                },
+            );
+        }
         Ok(())
+    }
+
+    /// The script permissions currently granted to the script `item_id` in
+    /// object `task_id`, as recorded in the permission mirror. Returns an empty
+    /// [`ScriptPermissions`] when there is no grant (a denied or never-answered
+    /// request both read as empty — the mirror records only live grants).
+    ///
+    /// The simulator stays authoritative; this is an API-convenience mirror of
+    /// what the agent granted, not a security boundary.
+    #[must_use]
+    pub fn granted_permissions(
+        &self,
+        task_id: ObjectKey,
+        item_id: InventoryKey,
+    ) -> ScriptPermissions {
+        self.script_grants
+            .get(&ScriptHolder { task_id, item_id })
+            .map_or(ScriptPermissions(0), |grant| grant.granted)
+    }
+
+    /// Every current script-permission grant in the mirror, as read-only
+    /// [`ScriptGrantInfo`] views (deterministic order). Empty when no script
+    /// holds a grant.
+    ///
+    /// The simulator stays authoritative; this mirrors what the agent granted,
+    /// never a security boundary.
+    pub fn script_grants(&self) -> impl Iterator<Item = ScriptGrantInfo> + '_ {
+        self.script_grants
+            .iter()
+            .map(|(holder, grant)| ScriptGrantInfo {
+                task_id: holder.task_id,
+                item_id: holder.item_id,
+                granted: grant.granted,
+                is_attachment: matches!(grant.kind, HolderKind::Attachment),
+                experience_id: grant.experience_id,
+            })
     }
 
     /// Requests the agent's mute (block) list (`MuteListRequest` with a zero
@@ -6299,6 +6434,14 @@ impl Session {
     /// [`ScriptPermissions::default`] (an empty set) revokes nothing; a full set
     /// revokes every previously granted permission.
     ///
+    /// The full requested bitfield goes on the wire, but the mirror only follows
+    /// what the simulator actually honours for this message: the animation bits
+    /// (`TRIGGER_ANIMATION` / `OVERRIDE_ANIMATIONS`). Those bits are cleared from
+    /// every grant on `object_id` (object-scoped, so possibly several scripts);
+    /// a grant left empty is removed. The other bits (e.g. `TELEPORT`) the
+    /// simulator keeps enforcing, so the conservative mirror leaves them; control
+    /// grants are released via [`Session::release_script_controls`], not here.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
@@ -6311,6 +6454,17 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_revoke_permissions(object_id, permissions, now)?;
+        // Mirror only the bits the simulator honours for `RevokePermissions`.
+        let honoured = permissions.0
+            & (ScriptPermissions::TRIGGER_ANIMATION | ScriptPermissions::OVERRIDE_ANIMATIONS);
+        if honoured != 0 {
+            self.script_grants.retain(|holder, grant| {
+                if holder.task_id == object_id {
+                    grant.granted.0 &= !honoured;
+                }
+                grant.granted.0 != 0
+            });
+        }
         Ok(())
     }
 
