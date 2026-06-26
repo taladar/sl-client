@@ -438,8 +438,8 @@ pub use region::{
 pub use report::Postcard;
 pub use script::{
     AlertInfo, FollowCamProperty, FollowCamPropertyValue, LoadUrlRequest, MuteEntry, MuteFlags,
-    MuteType, ScriptControl, ScriptControlAction, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTeleportRequest,
+    MuteType, PermissionRole, ScriptControl, ScriptControlAction, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest,
 };
 pub use server_error::{FeatureDisabled, Kick, ServerError};
 pub use session::{

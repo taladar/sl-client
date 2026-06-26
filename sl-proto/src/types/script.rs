@@ -56,6 +56,62 @@ impl ScriptDialog {
 // unchanged.
 pub use sl_types::lsl::ScriptPermissions;
 
+/// The client's responsibility for a single granted [`ScriptPermissions`] flag.
+///
+/// The simulator stays authoritative for *every* permission — it enforces the
+/// grant end-to-end and the client's record is only a mirror, never a security
+/// boundary. This classifier exists for a driver's benefit (deciding what to
+/// surface and whether to cooperate), not to branch `Session` behaviour: the
+/// session takes **no** autonomous action on any granted flag.
+///
+/// There are only two roles — there is no autonomous-action role. `TELEPORT` is
+/// [`RecordOnly`](Self::RecordOnly), not an action: a granted `llTeleportAgent`
+/// teleports the agent server-side and arrives as an ordinary teleport handled
+/// by the teleport state machine, so the client merely mirrors the grant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionRole {
+    /// The simulator enforces the permission end-to-end; the client only
+    /// mirrors the grant and takes no action (any effect arrives later on the
+    /// ordinary message path). Covers `DEBIT`, `TRIGGER_ANIMATION`, `ATTACH`,
+    /// `CHANGE_LINKS`, `TELEPORT`, `EXPERIENCE`, `SILENT_ESTATE_MANAGEMENT`,
+    /// `OVERRIDE_ANIMATIONS`, and `RETURN_OBJECTS`.
+    RecordOnly,
+    /// The grant is inert until the runtime cooperates: routing the avatar's
+    /// control inputs (`TAKE_CONTROLS`, surfaced via
+    /// [`Event::ScriptControlChange`](crate::Event::ScriptControlChange)) or
+    /// applying camera parameters (`TRACK_CAMERA` / `CONTROL_CAMERA`, surfaced
+    /// via the follow-cam events). `sl-proto` surfaces the grant and tracks the
+    /// live state, but initiates nothing.
+    Cooperation,
+}
+
+impl PermissionRole {
+    /// Classifies a single [`ScriptPermissions`] flag bit (one of the
+    /// `ScriptPermissions::*` constants) by the client's responsibility for it.
+    ///
+    /// Returns `None` for a value that is not exactly one recognised flag bit
+    /// (zero, an unknown bit, or several bits OR-ed together) — call it per set
+    /// bit of a granted bitfield, not on the whole field.
+    #[must_use]
+    pub const fn for_flag(flag: i32) -> Option<Self> {
+        match flag {
+            ScriptPermissions::TAKE_CONTROLS
+            | ScriptPermissions::TRACK_CAMERA
+            | ScriptPermissions::CONTROL_CAMERA => Some(Self::Cooperation),
+            ScriptPermissions::DEBIT
+            | ScriptPermissions::TRIGGER_ANIMATION
+            | ScriptPermissions::ATTACH
+            | ScriptPermissions::CHANGE_LINKS
+            | ScriptPermissions::TELEPORT
+            | ScriptPermissions::EXPERIENCE
+            | ScriptPermissions::SILENT_ESTATE_MANAGEMENT
+            | ScriptPermissions::OVERRIDE_ANIMATIONS
+            | ScriptPermissions::RETURN_OBJECTS => Some(Self::RecordOnly),
+            _ => None,
+        }
+    }
+}
+
 /// A scripted-object permission request (`llRequestPermissions`), parsed from a
 /// `ScriptQuestion`. Grant (a subset) with
 /// [`Session::answer_script_permissions`](crate::Session::answer_script_permissions).
@@ -397,8 +453,47 @@ pub struct MuteEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::{ChatChannel, ScriptControlAction};
+    use super::{ChatChannel, PermissionRole, ScriptControlAction, ScriptPermissions};
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn permission_role_classifies_representative_flags() {
+        // The three cooperation flags: the runtime routes inputs / camera.
+        assert_eq!(
+            PermissionRole::for_flag(ScriptPermissions::TAKE_CONTROLS),
+            Some(PermissionRole::Cooperation)
+        );
+        assert_eq!(
+            PermissionRole::for_flag(ScriptPermissions::TRACK_CAMERA),
+            Some(PermissionRole::Cooperation)
+        );
+        assert_eq!(
+            PermissionRole::for_flag(ScriptPermissions::CONTROL_CAMERA),
+            Some(PermissionRole::Cooperation)
+        );
+        // Representative record-only flags, including `TELEPORT` (enforced
+        // server-side, not a client action — see `PermissionRole`).
+        assert_eq!(
+            PermissionRole::for_flag(ScriptPermissions::DEBIT),
+            Some(PermissionRole::RecordOnly)
+        );
+        assert_eq!(
+            PermissionRole::for_flag(ScriptPermissions::TELEPORT),
+            Some(PermissionRole::RecordOnly)
+        );
+        assert_eq!(
+            PermissionRole::for_flag(ScriptPermissions::OVERRIDE_ANIMATIONS),
+            Some(PermissionRole::RecordOnly)
+        );
+        // Not exactly one recognised flag bit: zero, two bits at once, an
+        // unknown bit (`1 << 0` is reserved/unused in the LSL constants).
+        assert_eq!(PermissionRole::for_flag(0), None);
+        assert_eq!(
+            PermissionRole::for_flag(ScriptPermissions::DEBIT | ScriptPermissions::TAKE_CONTROLS),
+            None
+        );
+        assert_eq!(PermissionRole::for_flag(1 << 0), None);
+    }
 
     #[test]
     fn script_control_action_maps_to_take_controls_flag() {

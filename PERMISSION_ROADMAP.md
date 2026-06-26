@@ -1028,7 +1028,7 @@ independent classifier, B3 on B2's `Session` field neighbourhood, B4 on B2's
 
 ### Tasks
 
-- [ ] **B1 (from A1, amended by A4). Encode the per-flag role classifier in
+- [x] **B1 (from A1, amended by A4). Encode the per-flag role classifier in
       `sl-proto`.** Add a `PermissionRole` enum with **two** variants —
       `RecordOnly` / `Cooperation` (A4 dropped the planned `ApiAction`: no
       granted permission is client-actionable) — plus a total mapping from each
@@ -1045,7 +1045,15 @@ independent classifier, B3 on B2's `Session` field neighbourhood, B4 on B2's
       surface), not to branch session behaviour. `pub` and consumed only by
       drivers, it warns about nothing on its own and depends on nothing — it may
       land at any point. Smoke test: assert a few representative bit→role
-      mappings.
+      mappings. **Done** — `PermissionRole { RecordOnly, Cooperation }` plus the
+      `const fn PermissionRole::for_flag(i32) -> Option<Self>` total per-bit
+      mapping in `sl-proto/src/types/script.rs` (re-exported via `types.rs` /
+      `lib.rs`); `for_flag` returns `None` for zero / unknown / multi-bit input
+      so a driver calls it per set bit. Smoke test
+      `permission_role_classifies_representative_flags` asserts the 3
+      cooperation and representative record-only flags (incl. `TELEPORT`) plus
+      the `None` cases. Landed ahead of the § Open-questions sign-off since
+      B1 is independent and gates nothing (the blocker #1 only gates B2/B5).
 - [ ] **B2 (from A2/A3/A4/A5). The complete grant registry — model, recording,
       read, revoke and all region-leave resets, in one warning-clean unit.**
       Landing the whole store together is deliberate: `ScriptGrant.circuit` is
