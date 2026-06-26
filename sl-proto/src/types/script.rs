@@ -282,6 +282,29 @@ pub struct ScriptControl {
     pub pass_to_agent: bool,
 }
 
+/// A public, read-only snapshot of which movement controls scripts currently
+/// hold, returned by [`Session::script_controls`](crate::Session::script_controls).
+///
+/// Mirrors the viewer's two taken-control sets, split by `PassToAgent`: controls
+/// the script *consumes* (the avatar does not move from the input) versus
+/// controls *also* passed to the agent. The session tracks this from the inbound
+/// `ScriptControlChange` and clears it on
+/// [`Session::release_script_controls`](crate::Session::release_script_controls).
+/// The per-control take counts stay private; this exposes only the union of
+/// currently-held bits. The simulator stays authoritative — this is an
+/// API-convenience mirror, never a security boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScriptControlsInfo {
+    /// Controls scripts hold and *consume* (`PassToAgent` was clear; the avatar
+    /// does not move from these inputs). The union of every consumed control bit
+    /// a script currently holds.
+    pub taken: ControlFlags,
+    /// Controls scripts hold that are *also* passed to the agent (`PassToAgent`
+    /// was set; the input both drives the avatar and reaches the script). The
+    /// union of every passed-on control bit a script currently holds.
+    pub passed_to_agent: ControlFlags,
+}
+
 /// One follow-camera parameter a scripted object sets via `llSetCameraParams`,
 /// the `Type` field of a `SetFollowCamProperties.CameraProperty` block. The
 /// numeric values match the viewer's `EFollowCamAttributes`

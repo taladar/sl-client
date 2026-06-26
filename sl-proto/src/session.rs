@@ -856,6 +856,31 @@ struct ScriptGrant {
     experience_id: Option<ExperienceKey>,
 }
 
+/// The session-global *taken-controls* tracker: which movement controls scripts
+/// are currently holding, fed by the inbound `ScriptControlChange` and cleared by
+/// [`Session::release_script_controls`].
+///
+/// `ScriptControlChange` carries no object/holder id (only a `Data` array of
+/// `{ TakeControls, Controls, PassToAgent }`), so taken controls cannot be
+/// attributed to a holder and do not live in the per-script grant registry; they
+/// are agent-global. Like the viewer (`LLAgent::mControlsTakenCount` /
+/// `mControlsTakenPassedOnCount`) this is a **per-control-bit count** split by
+/// `PassToAgent`: two scripts may take the same bit, and one releasing it must
+/// not clear it for the other — a single union would lose that.
+///
+/// The simulator stays authoritative; this is an API-convenience mirror.
+#[derive(Debug)]
+struct TakenControls {
+    /// Per-control-bit take count for controls the script *consumes*
+    /// (`PassToAgent` clear; the avatar does not move from the input). Keyed by
+    /// the single-bit mask, the entry removed when the count reaches zero, so a
+    /// present key ≡ a currently-held control (a sparse map, deterministic order).
+    consumed: BTreeMap<u32, u32>,
+    /// Per-control-bit take count for controls *also* passed to the agent
+    /// (`PassToAgent` set). Same single-bit-mask keying and remove-at-zero rule.
+    passed_on: BTreeMap<u32, u32>,
+}
+
 /// A single agent session: login bookkeeping plus one simulator circuit.
 ///
 /// This is a pure state machine. Feed it bytes and the current [`Instant`] via
@@ -918,6 +943,15 @@ pub struct Session {
     /// security boundary. Read via [`Session::granted_permissions`] /
     /// [`Session::script_permission_status`] / [`Session::script_grants`].
     script_grants: BTreeMap<ScriptHolder, ScriptGrant>,
+    /// The session-global taken-controls tracker: which movement controls scripts
+    /// are currently holding (per-bit counts split by `PassToAgent`). Folded from
+    /// the inbound `ScriptControlChange` (a `Take` increments, a `Release`
+    /// decrements), cleared wholesale by [`Session::release_script_controls`].
+    /// Not attributable to a holder (`ScriptControlChange` carries no object id)
+    /// and not reset on a region change — the viewer keeps it across teleport.
+    /// Read via [`Session::script_controls`]. The simulator stays authoritative;
+    /// this is an API-convenience mirror.
+    taken_controls: TakenControls,
     /// The current region's capability-seed URL (from login or a teleport), for
     /// the driver to fetch the CAPS map and event queue.
     seed_capability: Option<url::Url>,

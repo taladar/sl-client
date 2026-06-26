@@ -1308,10 +1308,32 @@ neighbourhood; B4 on B2's `ScriptGrantInfo` (+ B2.5's denied status) + B3's
       the
       B1.5 detection). Update B2's "empty → entry gone" assertion to the denied
       state.
-- [ ] **B3 (from A6/A3). The complete taken-controls tracker — state, inbound
-      fold, accessor and the release-on-send clear.** Self-contained: the field
-      is written by the fold and read by the accessor in the same unit, so
-      nothing is dead. Per § Inbound control-change reference:
+- [x] **B3 (from A6/A3). The complete taken-controls tracker — state, fold,
+      accessor and the release-on-send clear.** Self-contained: the field is
+      written by the fold and read by the accessor in the same unit, so nothing
+      is dead. **Done 2026-06-26** — added the private `TakenControls` struct
+      (two `BTreeMap<u32, u32>` maps `consumed` / `passed_on`, single-bit-mask
+      key → take count) and the `taken_controls` field on `Session`
+      (session.rs), the free `iter_bits` helper and the private
+      `note_taken_controls` fold method, the inbound fold in the
+      `AnyMessage::ScriptControlChange` handler (before the unchanged event
+      push), the public `ScriptControlsInfo` view (types/script.rs, re-exported
+      via `types.rs` / `lib.rs`) and the `Session::script_controls()` accessor,
+      and the clear-both-maps-on-send in `release_script_controls`. Four
+      `lifecycle.rs` tests (take/release, the count model, the pass-to-agent
+      split, release-on-send keeps the grant) plus one `sim_session.rs`
+      round-trip folding the real server-built block. Builds, clippy-clean
+      (restriction lints), `cargo test --workspace` green.
+      **Two adaptations vs the literal plan (no behavioural change):** (1)
+      `iter_bits` is a **free function** (not a method) since it needs no
+      `self`, and it clears the isolated low bit with `remaining &= !bit` rather
+      than `remaining &= remaining - 1` (the `- 1` trips the
+      `arithmetic_side_effects` restriction lint; `& !bit` is equivalent and
+      lint-clean). (2) the per-block fold is factored into a small private
+      `note_taken_controls(action, controls, pass_to_agent)` helper called from
+      the handler, keeping the handler readable; behaviour is exactly the
+      planned increment / saturating-decrement-and-remove-at-zero. Per
+      § Inbound control-change reference:
       - **State** (`sl-proto/src/session.rs`): private `TakenControls` struct
       (two `BTreeMap<u32, u32>` fields `consumed` / `passed_on`, single-bit-mask
       key → take count) and the field `taken_controls: TakenControls` beside

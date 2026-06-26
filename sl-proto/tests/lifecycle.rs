@@ -3992,6 +3992,115 @@ mod test {
         Ok(())
     }
 
+    /// Feeds the client one inbound `ScriptControlChange` with a single data
+    /// block (`take` controls / release them, optionally also passed to the
+    /// agent), so the taken-controls tracker folds it.
+    fn feed_script_control_change(
+        session: &mut Session,
+        now: Instant,
+        sequence: u32,
+        take: bool,
+        controls: ControlFlags,
+        pass_to_agent: bool,
+    ) -> Result<(), TestError> {
+        let message = AnyMessage::ScriptControlChange(sl_wire::messages::ScriptControlChange {
+            data: vec![sl_wire::messages::ScriptControlChangeDataBlock {
+                take_controls: take,
+                controls: controls.bits(),
+                pass_to_agent,
+            }],
+        });
+        let datagram = server_message(&message, sequence, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        drain_events(session);
+        Ok(())
+    }
+
+    #[test]
+    fn taken_controls_track_take_and_release() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A Take records the named controls in the consumed (taken) set.
+        let held = ControlFlags::AT_POS | ControlFlags::FLY;
+        feed_script_control_change(&mut session, now, 9101, true, held, false)?;
+        assert_eq!(session.script_controls().taken, held);
+        assert_eq!(
+            session.script_controls().passed_to_agent,
+            ControlFlags::empty()
+        );
+
+        // A matching Release empties the set.
+        feed_script_control_change(&mut session, now, 9102, false, held, false)?;
+        assert_eq!(session.script_controls().taken, ControlFlags::empty());
+        Ok(())
+    }
+
+    #[test]
+    fn taken_controls_use_a_count_model() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Two scripts take the same control bit; one releasing it must not clear
+        // it for the other (the per-bit count survives the first release).
+        feed_script_control_change(&mut session, now, 9111, true, ControlFlags::AT_POS, false)?;
+        feed_script_control_change(&mut session, now, 9112, true, ControlFlags::AT_POS, false)?;
+        feed_script_control_change(&mut session, now, 9113, false, ControlFlags::AT_POS, false)?;
+        assert_eq!(session.script_controls().taken, ControlFlags::AT_POS);
+
+        // The second release finally clears it.
+        feed_script_control_change(&mut session, now, 9114, false, ControlFlags::AT_POS, false)?;
+        assert_eq!(session.script_controls().taken, ControlFlags::empty());
+        Ok(())
+    }
+
+    #[test]
+    fn taken_controls_split_pass_to_agent() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A take with `PassToAgent = true` lands in the passed-to-agent set, not
+        // the consumed (taken) set.
+        feed_script_control_change(&mut session, now, 9121, true, ControlFlags::LEFT_POS, true)?;
+        assert_eq!(session.script_controls().taken, ControlFlags::empty());
+        assert_eq!(
+            session.script_controls().passed_to_agent,
+            ControlFlags::LEFT_POS
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn release_script_controls_clears_taken_but_keeps_grant() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Record a TAKE_CONTROLS grant and a live taken control (both sets).
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0xB3C1));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0xB3C2));
+        let take_controls = ScriptPermissions(ScriptPermissions::TAKE_CONTROLS);
+        session.answer_script_permissions(task, item, take_controls, None, now)?;
+        feed_script_control_change(&mut session, now, 9131, true, ControlFlags::AT_POS, false)?;
+        feed_script_control_change(&mut session, now, 9132, true, ControlFlags::UP_POS, true)?;
+        drain(&mut session)?;
+
+        // Releasing controls clears both taken sets immediately on send.
+        session.release_script_controls(now)?;
+        assert_eq!(session.script_controls().taken, ControlFlags::empty());
+        assert_eq!(
+            session.script_controls().passed_to_agent,
+            ControlFlags::empty()
+        );
+
+        // The TAKE_CONTROLS grant persists (only the live taken set resets).
+        assert_eq!(session.granted_permissions(task, item), take_controls);
+        Ok(())
+    }
+
     #[test]
     fn follow_cam_properties_surface_events() -> Result<(), TestError> {
         let now = Instant::now();
