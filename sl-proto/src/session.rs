@@ -815,16 +815,34 @@ enum HolderKind {
     InWorld,
 }
 
-/// One recorded script-permission grant — the value half of the grant registry.
+/// The agent's recorded answer to a script-permission request: an explicit deny
+/// (answered with no permissions) or a granted, non-empty subset. The third
+/// state — *never asked* — is the absence of a registry entry, so it has no
+/// variant here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GrantStatus {
+    /// The agent answered with no permissions (an explicit deny). Distinct from
+    /// a never-asked holder, which has no registry entry at all, so the driver's
+    /// prompt UI can tell "already refused this" from "not yet seen".
+    Denied,
+    /// The agent granted this subset, stored wholesale as the raw bitfield (the
+    /// record-only flags need no handler, the cooperation flags reuse existing
+    /// event surfaces). Never empty — an empty answer is [`Denied`](Self::Denied).
+    Granted(ScriptPermissions),
+}
+
+/// One recorded answer to a script-permission request — the value half of the
+/// grant registry. Records both grants and explicit denials (the `status`
+/// distinguishes them); a never-asked holder is simply absent from the map.
 ///
 /// The simulator stays authoritative; this is an API-convenience mirror of what
-/// the agent granted, never a security boundary.
+/// the agent answered, never a security boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ScriptGrant {
-    /// The granted subset, stored wholesale as the raw bitfield (the record-only
-    /// flags need no handler, the cooperation flags reuse existing event
-    /// surfaces). Never empty — an empty grant is an absent entry.
-    granted: ScriptPermissions,
+    /// Whether the agent denied this script outright or granted it a non-empty
+    /// permission subset. A denial still carries the `kind` / `circuit` below so
+    /// the region-leave resets treat it identically to a grant.
+    status: GrantStatus,
     /// Whether the holder is one of our attachments or an in-world object; drives
     /// the region-leave reset (attachments cross with the avatar, in-world
     /// objects are left behind).
@@ -890,14 +908,15 @@ pub struct Session {
     /// sending a `TeleportLocationRequest` and the next region's
     /// `RegionHandshake`).
     teleport: TeleportPhase,
-    /// The script-permission grant registry: what the agent has granted each
-    /// script, keyed by the holding `(object, item)` pair. Written by
+    /// The script-permission registry: what the agent has answered each script
+    /// (a grant or an explicit deny), keyed by the holding `(object, item)`
+    /// pair; a never-asked script is simply absent. Written by
     /// [`Session::answer_script_permissions`], cleared on revoke and the
-    /// region-leave signals (a real teleport drops in-world grants, a circuit
+    /// region-leave signals (a real teleport drops in-world entries, a circuit
     /// retiring drops that circuit's, an object going away drops its). The
     /// simulator stays authoritative; this is an API-convenience mirror, not a
     /// security boundary. Read via [`Session::granted_permissions`] /
-    /// [`Session::script_grants`].
+    /// [`Session::script_permission_status`] / [`Session::script_grants`].
     script_grants: BTreeMap<ScriptHolder, ScriptGrant>,
     /// The current region's capability-seed URL (from login or a teleport), for
     /// the driver to fetch the CAPS map and event queue.

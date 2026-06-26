@@ -34,10 +34,10 @@ use super::{
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
     CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, Circuit, DEFAULT_DRAW_DISTANCE,
-    HolderKind, IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG,
-    LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, ScriptGrant, ScriptHolder, Session,
-    SessionState, SitState, TELEPORT_TIMEOUT, TeleportPhase, TextureDownload, deadline,
-    merge_deadline,
+    GrantStatus, HolderKind, IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG,
+    LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, ScriptGrant,
+    ScriptHolder, Session, SessionState, SitState, TELEPORT_TIMEOUT, TeleportPhase,
+    TextureDownload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -70,11 +70,11 @@ use crate::types::{
     PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
     RegionInfoUpdate, RegionStats, Reliability, RestoreItem, RezAttachment, RezObjectParams,
     RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptGrantInfo,
-    ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags,
-    SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, TaskInventoryKey,
-    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
-    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
+    ScriptPermissionStatus, ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId,
+    SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot,
+    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType,
+    TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams,
+    UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -5492,11 +5492,13 @@ impl Session {
     /// the session keeps no outstanding-request state, so the driver passes it
     /// back from the request it is answering, to record on the grant.
     ///
-    /// The grant is recorded into the session's permission mirror after the wire
-    /// send (the mirror follows the wire): a non-empty `permissions` inserts /
-    /// replaces the holder's grant, and an empty set (a deny) removes any prior
-    /// entry. The simulator stays authoritative — the mirror is an API
-    /// convenience read via [`Session::granted_permissions`] /
+    /// The answer is recorded into the session's permission mirror after the wire
+    /// send (the mirror follows the wire): a non-empty `permissions` records a
+    /// grant, and an empty set records an explicit *deny* (distinct from a
+    /// never-asked holder — see [`Session::script_permission_status`]); either
+    /// replaces any prior answer for the holder. The simulator stays
+    /// authoritative — the mirror is an API convenience read via
+    /// [`Session::granted_permissions`] / [`Session::script_permission_status`] /
     /// [`Session::script_grants`], never a security boundary.
     ///
     /// # Errors
@@ -5513,23 +5515,27 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_script_answer_yes(task_id, item_id.uuid(), permissions.0, now)?;
-        // Record the grant into the mirror after the send (it follows the wire).
+        // Record the answer into the mirror after the send (it follows the
+        // wire). An empty answer is an explicit *deny* (recorded as such, distinct
+        // from never-asked); a non-empty answer is a grant. Either way the entry
+        // replaces any prior one for the holder and carries the holder kind /
+        // circuit so the region-leave resets treat a denial like a grant.
         let holder = ScriptHolder { task_id, item_id };
-        if permissions.0 == 0 {
-            // An empty grant is a deny: the faithful mirror is no entry.
-            self.script_grants.remove(&holder);
+        let status = if permissions.0 == 0 {
+            GrantStatus::Denied
         } else {
-            let (kind, circuit) = self.holder_kind(task_id);
-            self.script_grants.insert(
-                holder,
-                ScriptGrant {
-                    granted: permissions,
-                    kind,
-                    circuit,
-                    experience_id,
-                },
-            );
-        }
+            GrantStatus::Granted(permissions)
+        };
+        let (kind, circuit) = self.holder_kind(task_id);
+        self.script_grants.insert(
+            holder,
+            ScriptGrant {
+                status,
+                kind,
+                circuit,
+                experience_id,
+            },
+        );
         Ok(())
     }
 
@@ -5548,14 +5554,45 @@ impl Session {
     ) -> ScriptPermissions {
         self.script_grants
             .get(&ScriptHolder { task_id, item_id })
-            .map_or(ScriptPermissions(0), |grant| grant.granted)
+            .map_or(ScriptPermissions(0), |grant| match grant.status {
+                GrantStatus::Granted(permissions) => permissions,
+                GrantStatus::Denied => ScriptPermissions(0),
+            })
     }
 
-    /// Every current script-permission grant in the mirror, as read-only
-    /// [`ScriptGrantInfo`] views (deterministic order). Empty when no script
-    /// holds a grant.
+    /// The tri-state status of the script `item_id` in object `task_id`:
+    /// [`ScriptPermissionStatus::NeverAsked`] when the mirror holds no entry,
+    /// [`ScriptPermissionStatus::Denied`] when the agent answered with no
+    /// permissions, or [`ScriptPermissionStatus::Granted`] with the granted
+    /// subset. Distinguishes a never-asked script from an explicitly denied one
+    /// (which [`Session::granted_permissions`] cannot, both reading empty).
     ///
-    /// The simulator stays authoritative; this mirrors what the agent granted,
+    /// The simulator stays authoritative; this is an API-convenience mirror of
+    /// the agent's recorded answer, not a security boundary.
+    #[must_use]
+    pub fn script_permission_status(
+        &self,
+        task_id: ObjectKey,
+        item_id: InventoryKey,
+    ) -> ScriptPermissionStatus {
+        self.script_grants
+            .get(&ScriptHolder { task_id, item_id })
+            .map_or(ScriptPermissionStatus::NeverAsked, |grant| {
+                match grant.status {
+                    GrantStatus::Denied => ScriptPermissionStatus::Denied,
+                    GrantStatus::Granted(permissions) => {
+                        ScriptPermissionStatus::Granted(permissions)
+                    }
+                }
+            })
+    }
+
+    /// Every recorded answer in the mirror, as read-only [`ScriptGrantInfo`]
+    /// views (deterministic order). Includes explicit denials (`denied` set,
+    /// `granted` empty); a never-asked script is absent. Empty when the mirror
+    /// holds no entry.
+    ///
+    /// The simulator stays authoritative; this mirrors what the agent answered,
     /// never a security boundary.
     pub fn script_grants(&self) -> impl Iterator<Item = ScriptGrantInfo> + '_ {
         self.script_grants
@@ -5563,7 +5600,11 @@ impl Session {
             .map(|(holder, grant)| ScriptGrantInfo {
                 task_id: holder.task_id,
                 item_id: holder.item_id,
-                granted: grant.granted,
+                granted: match grant.status {
+                    GrantStatus::Granted(permissions) => permissions,
+                    GrantStatus::Denied => ScriptPermissions(0),
+                },
+                denied: matches!(grant.status, GrantStatus::Denied),
                 is_attachment: matches!(grant.kind, HolderKind::Attachment),
                 experience_id: grant.experience_id,
             })
@@ -6459,10 +6500,16 @@ impl Session {
             & (ScriptPermissions::TRIGGER_ANIMATION | ScriptPermissions::OVERRIDE_ANIMATIONS);
         if honoured != 0 {
             self.script_grants.retain(|holder, grant| {
-                if holder.task_id == object_id {
-                    grant.granted.0 &= !honoured;
+                // Only a grant on this object loses the honoured bits; denials and
+                // grants on other objects are untouched. A grant emptied by the
+                // revoke is dropped (a denial is always kept).
+                if let GrantStatus::Granted(ref mut granted) = grant.status {
+                    if holder.task_id == object_id {
+                        granted.0 &= !honoured;
+                    }
+                    return granted.0 != 0;
                 }
-                grant.granted.0 != 0
+                true
             });
         }
         Ok(())
