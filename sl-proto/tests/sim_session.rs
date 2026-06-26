@@ -27,14 +27,15 @@ mod test {
         MovementMode, NavMeshBuildStatus, NavMeshStatus, NotecardRez, ObjectBuyItem,
         ObjectExtraParams, ObjectKey, ObjectPlayingAnimation, ObjectPropertiesFamily,
         OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey, ParcelObjectOwner,
-        ParcelReturnType, Permissions5, PingId, PlacesResult, PointAtType, Postcard,
+        ParcelReturnType, Permissions, Permissions5, PingId, PlacesResult, PointAtType, Postcard,
         PrimShapeParams, ProductType, QueryId, RegionCoordinates, RegionHandle, RegionIdentity,
         RegionLocalObjectId, RegionLocalParcelId, RegionStats, RequiredVoiceVersion, RestoreItem,
-        RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
-        ScriptControlAction, ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession,
-        SimStatId, SimulatorTime, TaskInventoryReply, TelehubInfo, TextureEntry, TextureFace,
-        TextureKey, Throttle, TransactionId, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
+        RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId,
+        ScriptControl, ScriptControlAction, ScriptPermissions, ServerError, ServerEvent, Session,
+        SetDisplayNameReply, SimSession, SimStatId, SimulatorTime, TaskInventoryReply, TelehubInfo,
+        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, Transmit, UserInfo,
+        ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
+        parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
     use sl_wire::{
@@ -2574,6 +2575,133 @@ mod test {
             .ok_or("expected an ObjectExtraParamsSet server event")?;
         assert_eq!(local_id, RegionLocalObjectId(103));
         assert_eq!(set_params, params);
+        Ok(())
+    }
+
+    #[test]
+    fn client_rez_and_script_permission_edits_reach_simulator() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
+
+        // A fully populated for-sale inventory item, so every RestoreItem field
+        // round-trips (a for-sale item carries the sale price back).
+        let item = RestoreItem {
+            item_id: InventoryKey::from(uuid::Uuid::from_u128(0x17E)),
+            folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0xF01DE)),
+            creator_id: AgentKey::from(uuid::Uuid::from_u128(0xC0EA)),
+            owner: OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(0x0E))),
+            group: Some(GroupKey::from(uuid::Uuid::from_u128(0x6))),
+            permissions: Permissions5 {
+                base: Permissions::from_bits(0x0008_0000),
+                owner: Permissions::from_bits(0x0008_0000),
+                group: Permissions::from_bits(0),
+                everyone: Permissions::from_bits(0),
+                next_owner: Permissions::from_bits(0x0008_2000),
+            },
+            transaction_id: uuid::Uuid::from_u128(0x77A),
+            asset_type: 10,
+            inv_type: 10,
+            flags: 0x21,
+            sale_type: SaleType::Copy,
+            sale_price: Some(LindenAmount(250)),
+            name: "Hello World".to_owned(),
+            description: "a greeting script".to_owned(),
+            creation_date: 1_700_000_000,
+            crc: 0xDEAD_BEEF,
+        };
+
+        // RezObject: rez the item into the world as a new object.
+        let rez_params = RezObjectParams {
+            group_id: Some(GroupKey::from(uuid::Uuid::from_u128(0x6))),
+            from_task_id: Some(ObjectKey::from(uuid::Uuid::from_u128(0x7A5C))),
+            bypass_raycast: true,
+            ray_start: sl_types::lsl::Vector {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+            ray_end: sl_types::lsl::Vector {
+                x: 4.0,
+                y: 5.0,
+                z: 6.0,
+            },
+            ray_target_id: Some(ObjectKey::from(uuid::Uuid::from_u128(0x7A46))),
+            ray_end_is_intersection: true,
+            rez_selected: true,
+            remove_item: false,
+            item_flags: 0x21,
+            group_mask: 0x0008_0000,
+            everyone_mask: 0,
+            next_owner_mask: 0x0008_2000,
+            item: item.clone(),
+        };
+        client.rez_object_from_inventory(&rez_params, now)?;
+
+        // RezScript: drop the script item into an in-world object's task inventory.
+        let script_target = ScopedObjectId::new(circuit, RegionLocalObjectId(202));
+        let script_params = RezScriptParams {
+            group_id: Some(GroupKey::from(uuid::Uuid::from_u128(0x6))),
+            enabled: true,
+            item: item.clone(),
+        };
+        client.rez_script(script_target, &script_params, now)?;
+
+        // RevokePermissions: revoke a couple of granted permissions.
+        let revoke_object = ObjectKey::from(uuid::Uuid::from_u128(0x5C217));
+        let revoked =
+            ScriptPermissions(ScriptPermissions::DEBIT | ScriptPermissions::TAKE_CONTROLS);
+        client.revoke_script_permissions(revoke_object, revoked, now)?;
+
+        // DetachAttachmentIntoInv: detach a worn attachment by its item id.
+        let detach_item = InventoryKey::from(uuid::Uuid::from_u128(0xA77AC));
+        client.detach_attachment_into_inventory(detach_item, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+
+        let rezzed = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RezObjectFromInventory { params } => Some(params.clone()),
+                _ => None,
+            })
+            .ok_or("expected a RezObjectFromInventory server event")?;
+        assert_eq!(rezzed, rez_params);
+
+        let (local_id, script) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RezScript { local_id, params } => Some((*local_id, params.clone())),
+                _ => None,
+            })
+            .ok_or("expected a RezScript server event")?;
+        assert_eq!(local_id, RegionLocalObjectId(202));
+        assert_eq!(script, script_params);
+
+        let (object_id, permissions) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RevokeScriptPermissions {
+                    object_id,
+                    permissions,
+                } => Some((*object_id, *permissions)),
+                _ => None,
+            })
+            .ok_or("expected a RevokeScriptPermissions server event")?;
+        assert_eq!(object_id, revoke_object);
+        assert_eq!(permissions, revoked);
+
+        let detached = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::DetachAttachmentIntoInventory { item_id } => Some(*item_id),
+                _ => None,
+            })
+            .ok_or("expected a DetachAttachmentIntoInventory server event")?;
+        assert_eq!(detached, detach_item);
         Ok(())
     }
 
