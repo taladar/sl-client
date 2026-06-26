@@ -119,9 +119,10 @@ Scope reminders:
   wire-only 1:1 signal keyed by the `XOR` id (`ImTyping`) maps back to the peer.
   `ChatSession` (value) holds only mutable state — `participants` /
   `typing: BTreeSet<AgentKey>` (A6), `last_activity: Instant` (the only
-  field A2 fills), with history/unread (A8) and invite status (A5) added
-  additively. Lazy get-or-create via `chat_session_mut(kind, now)`; *which*
-  event opens *which* kind is A4's lifecycle call.
+  field A2 fills), with history/unread (A8), the lifecycle (A4, enriched A5)
+  and voice-channel state (A12) added additively. Lazy get-or-create via
+  `chat_session_mut(kind, now)`; *which* event opens *which* kind is A4's
+  lifecycle call.
 - [x] **A3. Design the friend-presence state model.** A buddy-list cache
   (`Friend { id, rights_granted, rights_received }`) and an online set keyed by
   `FriendKey`, seeded by `FriendList` at login and updated by `FriendsOnline` /
@@ -164,14 +165,20 @@ Scope reminders:
   logout).
   **Done — see § Session-lifecycle reference (from A4) + task B4 in § Phase B.**
   Decided a `lifecycle: ChatSessionLifecycle { Invited | Joined }` field on
-  `ChatSession` (this *is* the A2-deferred "invite status"): **1:1 is always
+  `ChatSession` (this *is* the A2-deferred "invite status"; **A5 later enriches
+  `Invited` to `Invited(PendingInvite { …, channel })`** to carry the invite +
+  its text/voice channel). This `lifecycle` is the **session-level** membership
+  (driven by the *text* channel / our actions); the **voice** channel's
+  join-state is a *separate* A12 facet on the same session, so the two never
+  conflict. **1:1 is always
   `Joined`** the instant it opens (no handshake); **group / conference open
   `Joined` optimistically** on our `start_*`/accept *or* on **any inbound
   message/participant traffic** (yes — an inbound group/conference message opens
   & tracks the session, promoting an `Invited` entry to `Joined`); **`Invited`**
-  is set *only* by a bare invitation with no traffic yet (A5 feeds it). There is
-  **no UDP "joined" ack**, so `Joined` is *optimistic* ("we believe we
-  are in"), not sim-confirmed. **Removal:** an explicit `leave_group_session` /
+  is set *only* by a bare invitation with no traffic yet (A5 feeds it). On the
+  **UDP** path there is **no "joined" ack**, so `Joined` is *optimistic*; on the
+  **CAPS** path A5's `"accept invitation"` reply confirms it. **Removal:** an
+  explicit `leave_group_session` /
   `leave_conference` **removes** the entry; an A5 decline removes the `Invited`
   entry; **logout** clears all (constructor rebuild, no `close` hook — the
   A2/A9 convention). **1:1 is never removed** by a leave (no such op) — it
@@ -425,7 +432,10 @@ of the three kinds a session is, carrying the kind's *typed* id (never a raw
 - **Conference** is keyed by the minted `ImSessionId`.
 - A `ChatSession` value (designed in A2) wraps a `ChatSessionKind` plus the
   per-session state the later items add (participants A6, typing A6,
-  history/unread A8, invite status A5, `last_activity`).
+  history/unread A8, invite status A5, voice state A12, `last_activity`).
+  A session carries **both a text and a voice channel** (the 2026-06-27 scope
+  expansion); both live under the one `ChatSessionKind` / session id, not as
+  separate sessions.
 - The **buddy/presence concept** reuses the **existing** `Friend` struct +
   `FriendKey` — no new identity type. A3 designs the cache (a `Friend` map +
   an online `BTreeSet<FriendKey>`).
@@ -543,7 +553,8 @@ is the key), each field tagged with the item that fills it:
         /// Monotonic time of the last message / typing / roster change (A2).
         last_activity: Instant,
         // history + unread / last_read: added by A8 (bounded log + marker).
-        // invite status (pending / joined): added by A5.
+        // lifecycle (invited / joined): added by A4, enriched by A5.
+        // voice-channel state (has-voice / joined-voice / membership): added A12.
     }
 
 - **`participants` / `typing`** — reserved here as `BTreeSet<AgentKey>` (typed
@@ -558,9 +569,10 @@ is the key), each field tagged with the item that fills it:
   change. Drives display ordering and any future idle handling; it **never**
   drives presence (A3 — presence comes only from the authoritative
   notifications).
-- **history / unread (A8)** and **invite status (A5)** are deliberately **not**
-  added by A2 — the struct grows additively as those items land, so each can
-  pick its own representation without reworking A2.
+- **history / unread (A8)**, the **lifecycle** (A4, enriched by A5) and the
+  **voice-channel state (A12)** are deliberately **not** added by A2 — the
+  struct grows additively as those items land (text *and* voice channel both
+  hang off this one value), so each picks its own representation; no A2 rework.
 - **No `Default`** — `Instant` has no `Default`; the value is built by
   `ChatSession::new(now)` (empty sets, `last_activity = now`).
 
@@ -601,8 +613,8 @@ yet (that arrives with A4/A6's tasks). Concretely:
 
 - Add `ChatSession` (struct: `participants` / `typing: BTreeSet<AgentKey>`,
   `last_activity: Instant`) with `ChatSession::new(now)` — **not** `Default`
-  (`Instant` has none). History / unread (A8) and invite status (A5) are added
-  by those tasks, not here.
+  (`Instant` has none). History / unread (A8), the lifecycle (A4, enriched A5)
+  and voice-channel state (A12) are added by those tasks, not here.
 - Add the private field `chat_sessions: BTreeMap<ChatSessionKind, ChatSession>`
   to `Session` (`session.rs`), beside `sit` / `teleport`; give
   `ChatSessionKind` the `Ord` derive B1 left to A2 (it **is** the map key).
@@ -808,16 +820,23 @@ methods and inbound handlers — no new command (A5 adds accept/decline). The
 simulator stays authoritative; the lifecycle is an optimistic local mirror.
 
 **The lifecycle field** (on `ChatSession`, the A2-deferred "invite status" slot,
-now generalised):
+now generalised). It tracks **session-level** membership — driven by the *text*
+channel and our own actions; the **voice** channel's join-state is a separate
+A12 facet on the same session. **A5 later enriches the `Invited` variant** to
+carry the invitation payload (`Invited(PendingInvite { inviter, session_name,
+channel })`); A4 fixes the two states and their transitions:
 
-    enum ChatSessionLifecycle { Invited, Joined }
+    enum ChatSessionLifecycle { Invited, Joined }   // A5: Invited(PendingInvite)
 
 - **`Joined`** — we believe we are an active participant. This is the state for
   **every 1:1** (the moment it opens), a group/conference we **started**, one
   we **accepted** an invite to, and any session we have seen **inbound traffic**
-  in. It is **optimistic**: there is **no UDP "joined" ack** (the modern CAPS
-  `ChatSessionRequest` would return one, but it is not implemented — § Protocol
-  reality), so `Joined` means "we acted / saw traffic", not "sim-confirmed".
+  in. On the **UDP** path it is **optimistic** — no UDP "joined" ack,
+  so `Joined` means "we acted / saw traffic", not "sim-confirmed". On the
+  **modern CAPS** path A5 adds, the `ChatSessionRequest` `"accept invitation"`
+  reply **does** confirm the join (and returns the roster — A5/A6), so a
+  CAPS-accepted `Joined` is sim-confirmed. A4 keeps one `Joined` state for both;
+  the optimism is a property of the UDP path, not of the state.
 - **`Invited`** — a conference/group invite we have **not** acted on and have
   seen **no** traffic for. Set **only** by the A5 invitation path
   (`Event::ConferenceInvited`). A bare invite is the *one* non-`Joined` case.
@@ -891,7 +910,8 @@ model. A4's accessor contribution is the `lifecycle` exposed on the A10
 Add the lifecycle state and wire the open/join/leave/remove transitions, with no
 new command:
 
-- Add `enum ChatSessionLifecycle { Invited, Joined }` and a `lifecycle` field on
+- Add `enum ChatSessionLifecycle { Invited, Joined }` (B5 refines `Invited` to
+  carry `PendingInvite`) and a `lifecycle` field on
   `ChatSession` (fills the A2-reserved "invite status" slot); `ChatSession::new`
   defaults it to `Joined`.
 - **Outbound:** in `start_group_session` / `start_conference`, get-or-create the
