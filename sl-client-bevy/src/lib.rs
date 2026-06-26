@@ -2603,6 +2603,29 @@ fn advance_running(
             Command::GodUpdateRegionInfo { update } => {
                 session.god_update_region_info(update, now).ok();
             }
+            Command::ParcelGodForceOwner { parcel, owner } => {
+                session.parcel_god_force_owner(*parcel, *owner, now).ok();
+            }
+            Command::ParcelGodMarkAsContent { parcel } => {
+                session.parcel_god_mark_as_content(*parcel, now).ok();
+            }
+            Command::EventGodDelete {
+                event,
+                query_id,
+                query_text,
+                flags,
+                query_start,
+            } => {
+                session
+                    .event_god_delete(*event, *query_id, query_text, *flags, *query_start, now)
+                    .ok();
+            }
+            Command::StateSave { filename } => {
+                session.state_save(filename, now).ok();
+            }
+            Command::ViewerStartAuction { parcel, snapshot } => {
+                session.viewer_start_auction(*parcel, *snapshot, now).ok();
+            }
             Command::Logout => session.initiate_logout(now),
         }
     }

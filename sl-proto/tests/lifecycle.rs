@@ -3605,6 +3605,93 @@ mod test {
     }
 
     #[test]
+    fn god_parcel_object_land_admin_messages_pack_targets() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        let owner = AgentKey::from(uuid::Uuid::from_u128(0x0_F0E));
+        let snapshot = TextureKey::from(uuid::Uuid::from_u128(0x5_4A9));
+        session.parcel_god_force_owner(
+            ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(12)),
+            OwnerKey::Agent(owner),
+            now,
+        )?;
+        session.parcel_god_mark_as_content(
+            ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(7)),
+            now,
+        )?;
+        session.event_god_delete(
+            EventId::new(99),
+            QueryId::from(uuid::Uuid::from_u128(0xA17)),
+            "music fest",
+            DirFindFlags::from_bits(32),
+            10,
+            now,
+        )?;
+        session.state_save("", now)?;
+        session.viewer_start_auction(
+            ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(5)),
+            Some(snapshot),
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+
+        let force_owner = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ParcelGodForceOwner(p) => Some(p),
+                _ => None,
+            })
+            .ok_or("expected a ParcelGodForceOwner")?;
+        assert_eq!(force_owner.data.local_id, 12);
+        assert_eq!(force_owner.data.owner_id, owner.uuid());
+
+        let mark = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ParcelGodMarkAsContent(p) => Some(p),
+                _ => None,
+            })
+            .ok_or("expected a ParcelGodMarkAsContent")?;
+        assert_eq!(mark.parcel_data.local_id, 7);
+
+        let event = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::EventGodDelete(e) => Some(e),
+                _ => None,
+            })
+            .ok_or("expected an EventGodDelete")?;
+        assert_eq!(event.event_data.event_id, 99);
+        assert_eq!(trimmed(&event.query_data.query_text), "music fest");
+        assert_eq!(event.query_data.query_flags, 32);
+        assert_eq!(event.query_data.query_start, 10);
+
+        let state = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::StateSave(s) => Some(s),
+                _ => None,
+            })
+            .ok_or("expected a StateSave")?;
+        // An empty filename packs as a lone nul terminator, as the viewer sends.
+        assert_eq!(trimmed(&state.data_block.filename), "");
+
+        let auction = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ViewerStartAuction(a) => Some(a),
+                _ => None,
+            })
+            .ok_or("expected a ViewerStartAuction")?;
+        assert_eq!(auction.parcel_data.local_id, 5);
+        assert_eq!(auction.parcel_data.snapshot_id, snapshot.uuid());
+        Ok(())
+    }
+
+    #[test]
     fn update_group_roles_packs_role_data() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
