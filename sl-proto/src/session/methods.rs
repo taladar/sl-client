@@ -53,26 +53,27 @@ use crate::types::{
     AvatarPickerResult, Camera, ChatType, ClassifiedCategory, ClassifiedUpdate, ClickAction,
     CoarseLocation, CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisconnectReason, EstateAccessDelta,
-    EstateCovenant, Event, EventInfo, FeatureDisabled, FollowCamProperty, FollowCamPropertyValue,
-    FriendRights, GenericMessage, GenericStreamingMessage, GestureActivation,
-    GroupNoticeAttachment, GroupNoticeKey, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange,
-    ImDialog, ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem, InventoryItemMove,
-    InventoryOffer, Kick, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
-    LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType, Material, Maturity,
-    MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
-    NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez, Object, ObjectBuyItem,
-    ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation, ObjectPropertiesFamily,
-    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult, Postcard,
-    PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionInfoUpdate, RegionStats,
-    Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
-    ScriptControl, ScriptControlAction, ScriptPermissions, ScriptTeleportRequest, ServerError,
-    SimStatId, SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, TaskInventoryKey,
-    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
-    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
+    DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisconnectReason, EjectAction,
+    EstateAccessDelta, EstateCovenant, Event, EventInfo, FeatureDisabled, FollowCamProperty,
+    FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage, GenericStreamingMessage,
+    GestureActivation, GodRegionUpdate, GroupNoticeAttachment, GroupNoticeKey, GroupRoleEdit,
+    GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder,
+    InventoryItem, InventoryItemMove, InventoryOffer, Kick, LandEdit, LandSearchType, LandStatItem,
+    LandStatReportType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType,
+    Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode,
+    MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez, Object,
+    ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation,
+    ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
+    PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
+    RegionInfoUpdate, RegionStats, Reliability, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptPermissions,
+    ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags,
+    SoundPreload, StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
+    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus,
+    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -8930,6 +8931,97 @@ impl Session {
             z: position.z(),
         };
         circuit.send_sound_trigger(sound, gain, region_handle.0, position, now)?;
+        Ok(())
+    }
+
+    /// Requests that the simulator grant (`godlike = true`) or drop (`false`)
+    /// god powers for this agent via `RequestGodlikePowers`. The grant arrives
+    /// as [`Event::GodlikePowersGranted`]. The agent must actually hold god
+    /// rights on the grid for the request to succeed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_godlike_powers(&mut self, godlike: bool, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_request_godlike_powers(godlike, now)?;
+        Ok(())
+    }
+
+    /// Ejects `target` from the agent's land via `EjectUser`, optionally also
+    /// banning them from the parcel (`action`). The agent must own or manage
+    /// the land the target is standing on.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn eject_user(
+        &mut self,
+        target: AgentKey,
+        action: EjectAction,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_eject_user(target.uuid(), action.to_wire(), now)?;
+        Ok(())
+    }
+
+    /// Freezes or unfreezes `target` on the agent's land via `FreezeUser`
+    /// (`action`). A frozen avatar cannot move or act until unfrozen (or until
+    /// the freeze times out). The agent must own or manage the land.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn freeze_user(
+        &mut self,
+        target: AgentKey,
+        action: FreezeAction,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_freeze_user(target.uuid(), action.to_wire(), now)?;
+        Ok(())
+    }
+
+    /// Deletes (or returns) the objects `owner` has across the whole region via
+    /// `SimWideDeletes`, filtered by `flags`. Needs estate-manager or god
+    /// rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn sim_wide_deletes(
+        &mut self,
+        owner: AgentKey,
+        flags: SimWideDeleteFlags,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_sim_wide_deletes(owner.uuid(), flags.to_wire(), now)?;
+        Ok(())
+    }
+
+    /// Pushes god-tools region parameters via `GodUpdateRegionInfo` (`update`):
+    /// the region name, estate ids, region flags, billing factor, land price,
+    /// and teleport-redirect grid. The simulator overwrites these wholesale.
+    /// Needs grid-god rights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn god_update_region_info(
+        &mut self,
+        update: &GodRegionUpdate,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_god_update_region_info(update, now)?;
         Ok(())
     }
 

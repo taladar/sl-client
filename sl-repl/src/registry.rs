@@ -49,19 +49,20 @@ use sl_proto::{
     AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentMode, AttachmentPoint,
     Camera, ChatType, ClassifiedCategory, ClassifiedUpdate, Command, ControlFlags,
     CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility,
-    EstateAccessDelta, ExperiencePermission, ExperienceUpdate, FlexibleData, FriendRights,
-    GestureActivation, GroupNoticeAttachment, GroupNoticeKey, GroupRoleChange, GroupRoleEdit,
-    GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType,
-    LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatReportType, LightData,
-    LindenAmount, LookAtType, MapItemType, Material, MaterialOverrideUpdate, Maturity, MediaEntry,
-    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NewInventoryLink,
-    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPermMasks,
-    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, Permissions, Permissions5,
-    PickKey, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams, ProfileUpdate,
-    ProposalVoteId, RegionHandle, RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId,
-    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
-    ScopedObjectId, ScopedParcelId, ScriptPermissions, SculptData, SculptOrMeshKey,
+    EjectAction, EstateAccessDelta, ExperiencePermission, ExperienceUpdate, FlexibleData,
+    FreezeAction, FriendRights, GestureActivation, GodRegionUpdate, GridCoordinates,
+    GroupNoticeAttachment, GroupNoticeKey, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
+    InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LandBrushAction, LandBrushSize,
+    LandEdit, LandSearchType, LandStatReportType, LightData, LindenAmount, LookAtType, MapItemType,
+    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MovementMode,
+    MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
+    ObjectExtraParams, ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
+    ParcelUpdate, PermissionField, Permissions, Permissions5, PickKey, PickUpdate, PointAtType,
+    Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionHandle,
+    RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId, RegionName, RestoreItem,
+    RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId,
+    ScopedParcelId, ScriptPermissions, SculptData, SculptOrMeshKey, SimWideDeleteFlags,
     StartLocationSlot, TaskInventoryKey, TerraformArea, TextureEntry, TextureFace, Throttle,
     UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
     VoiceProvisionRequest, Wearable, WearableType,
@@ -2733,6 +2734,90 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "request_godlike_powers",
+            usage: "<godlike:bool>",
+            build: |args, ctx| {
+                Ok(Command::RequestGodlikePowers {
+                    godlike: args.req_bool(ctx, "godlike", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "eject_user",
+            usage: "<target> [ban:bool=false]",
+            build: |args, ctx| {
+                let action = if args.bool_or(ctx, "ban", 1, false)? {
+                    EjectAction::EjectAndBan
+                } else {
+                    EjectAction::Eject
+                };
+                Ok(Command::EjectUser {
+                    target: args.req_agent(ctx, "target", 0)?,
+                    action,
+                })
+            },
+        },
+        CommandSpec {
+            name: "freeze_user",
+            usage: "<target> [unfreeze:bool=false]",
+            build: |args, ctx| {
+                let action = if args.bool_or(ctx, "unfreeze", 1, false)? {
+                    FreezeAction::Unfreeze
+                } else {
+                    FreezeAction::Freeze
+                };
+                Ok(Command::FreezeUser {
+                    target: args.req_agent(ctx, "target", 0)?,
+                    action,
+                })
+            },
+        },
+        CommandSpec {
+            name: "sim_wide_deletes",
+            usage: "<owner> [others_land_only:bool=false] [always_return_objects:bool=false] \
+                    [scripted_only:bool=false]",
+            build: |args, ctx| {
+                Ok(Command::SimWideDeletes {
+                    owner: args.req_agent(ctx, "owner", 0)?,
+                    flags: SimWideDeleteFlags {
+                        others_land_only: args.bool_or(ctx, "others_land_only", 1, false)?,
+                        always_return_objects: args.bool_or(
+                            ctx,
+                            "always_return_objects",
+                            2,
+                            false,
+                        )?,
+                        scripted_only: args.bool_or(ctx, "scripted_only", 3, false)?,
+                    },
+                })
+            },
+        },
+        CommandSpec {
+            name: "god_update_region_info",
+            usage: "<sim_name> <estate_id:u32> <parent_estate_id:u32> <region_flags:u64> \
+                    <billable_factor:f32> <price_per_meter:i32> <redirect_grid_x:u32> \
+                    <redirect_grid_y:u32>",
+            build: |args, ctx| {
+                let sim_name_raw = args.req_str(ctx, "sim_name", 0)?;
+                let sim_name = RegionName::try_new(&sim_name_raw)
+                    .map_err(|_invalid| invalid("sim_name", &sim_name_raw, "region name"))?;
+                Ok(Command::GodUpdateRegionInfo {
+                    update: GodRegionUpdate {
+                        sim_name,
+                        estate_id: args.req_parse(ctx, "estate_id", 1, "u32")?,
+                        parent_estate_id: args.req_parse(ctx, "parent_estate_id", 2, "u32")?,
+                        region_flags: args.req_parse(ctx, "region_flags", 3, "u64")?,
+                        billable_factor: args.req_parse(ctx, "billable_factor", 4, "f32")?,
+                        price_per_meter: args.req_parse(ctx, "price_per_meter", 5, "i32")?,
+                        redirect_grid: GridCoordinates::new(
+                            args.req_parse(ctx, "redirect_grid_x", 6, "u32")?,
+                            args.req_parse(ctx, "redirect_grid_y", 7, "u32")?,
+                        ),
+                    },
+                })
+            },
+        },
+        CommandSpec {
             name: "request_region_info",
             usage: "",
             build: |_args, _ctx| Ok(Command::RequestRegionInfo),
@@ -5036,12 +5121,13 @@ mod tests {
 
     use sl_proto::{
         AbuseReportType, AgentKey, AgentPreferences, AssetKey, AssetType, ChatChannel, ChatType,
-        CircuitId, Command, ControlFlags, DirectoryVisibility, FriendRights, GroupKey,
-        InventoryFolderKey, InventoryItemOrFolderKey, InventoryKey, LandBrushAction, LandBrushSize,
-        LandEdit, LandStatReportType, LindenAmount, MapItemType, MovementMode, ObjectBuyItem,
-        ObjectKey, OwnerKey, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SaleType,
-        ScopedObjectId, ScopedParcelId, ScriptPermissions, StartLocationSlot, TaskInventoryKey,
-        TerraformArea, TransactionId, Uuid,
+        CircuitId, Command, ControlFlags, DirectoryVisibility, EjectAction, FreezeAction,
+        FriendRights, GridCoordinates, GroupKey, InventoryFolderKey, InventoryItemOrFolderKey,
+        InventoryKey, LandBrushAction, LandBrushSize, LandEdit, LandStatReportType, LindenAmount,
+        MapItemType, MovementMode, ObjectBuyItem, ObjectKey, OwnerKey, RegionHandle,
+        RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId, ScopedParcelId,
+        ScriptPermissions, SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey, TerraformArea,
+        TransactionId, Uuid,
     };
 
     use super::Registry;
@@ -5548,6 +5634,75 @@ mod tests {
                     && gain.to_bits() == 0.5_f32.to_bits()
                     && region_handle == RegionHandle(1000)
                     && position.x().to_bits() == 64.0_f32.to_bits()
+        ));
+    }
+
+    #[test]
+    fn eject_user_parses_target_and_ban_flag() {
+        assert!(matches!(
+            build(&format!("eject_user {ONE} true")),
+            Ok(Command::EjectUser { target, action: EjectAction::EjectAndBan })
+                if target == AgentKey::from(uuid(ONE))
+        ));
+        // The ban flag defaults to a plain eject.
+        assert!(matches!(
+            build(&format!("eject_user {ONE}")),
+            Ok(Command::EjectUser {
+                action: EjectAction::Eject,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn freeze_user_parses_target_and_unfreeze_flag() {
+        assert!(matches!(
+            build(&format!("freeze_user {ONE}")),
+            Ok(Command::FreezeUser { target, action: FreezeAction::Freeze })
+                if target == AgentKey::from(uuid(ONE))
+        ));
+        assert!(matches!(
+            build(&format!("freeze_user {ONE} true")),
+            Ok(Command::FreezeUser {
+                action: FreezeAction::Unfreeze,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn sim_wide_deletes_parses_owner_and_flags() {
+        assert!(matches!(
+            build(&format!("sim_wide_deletes {ONE} true false true")),
+            Ok(Command::SimWideDeletes {
+                owner,
+                flags: SimWideDeleteFlags {
+                    others_land_only: true,
+                    always_return_objects: false,
+                    scripted_only: true,
+                },
+            }) if owner == AgentKey::from(uuid(ONE))
+        ));
+    }
+
+    #[test]
+    fn god_update_region_info_parses_region_params() {
+        assert!(matches!(
+            build("god_update_region_info \"Da Boom\" 1 1 7 1.0 5 1000 1001"),
+            Ok(Command::GodUpdateRegionInfo { update })
+                if update.sim_name.as_ref() == "Da Boom"
+                    && update.estate_id == 1
+                    && update.region_flags == 7
+                    && update.price_per_meter == 5
+                    && update.redirect_grid == GridCoordinates::new(1000, 1001)
+        ));
+    }
+
+    #[test]
+    fn request_godlike_powers_parses_flag() {
+        assert!(matches!(
+            build("request_godlike_powers true"),
+            Ok(Command::RequestGodlikePowers { godlike: true })
         ));
     }
 

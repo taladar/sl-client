@@ -18,14 +18,14 @@ use crate::types::directory::category_to_wire;
 use crate::types::{
     AssetType, AttachmentMode, AttachmentPoint, Camera, ChatType, ClassifiedCategory,
     ClassifiedUpdate, ClickAction, CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags,
-    GestureActivation, GroupRoleEdit, GroupRoleMemberChange, ImDialog, InterestsUpdate,
-    InventoryItem, LandEdit, LandSearchType, MapRequestFlags, Material, MovementMode,
-    NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
-    ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelCategory, ParcelUpdate,
-    PermissionField, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate,
-    Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
-    ScriptPermissions, StartLocationSlot, TaskInventoryKey, TeleportFlags, TextureEntry, Throttle,
-    UpdateGroupInfoParams, ViewerEffect, Wearable,
+    GestureActivation, GodRegionUpdate, GroupRoleEdit, GroupRoleMemberChange, ImDialog,
+    InterestsUpdate, InventoryItem, LandEdit, LandSearchType, MapRequestFlags, Material,
+    MovementMode, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
+    ObjectExtraParams, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelCategory,
+    ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams,
+    ProfileUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+    SaleType, ScriptPermissions, StartLocationSlot, TaskInventoryKey, TeleportFlags, TextureEntry,
+    Throttle, UpdateGroupInfoParams, ViewerEffect, Wearable,
 };
 use crate::types::{GroupNoticeKey, ProposalVoteId};
 use sl_types::chat::ChatChannel;
@@ -239,6 +239,13 @@ use sl_wire::messages::{
     RevokePermissionsAgentDataBlock, RevokePermissionsDataBlock, RezObject,
     RezObjectAgentDataBlock, RezObjectInventoryDataBlock, RezObjectRezDataBlock, RezScript,
     RezScriptAgentDataBlock, RezScriptInventoryBlockBlock, RezScriptUpdateBlockBlock,
+};
+use sl_wire::messages::{
+    EjectUser, EjectUserAgentDataBlock, EjectUserDataBlock, FreezeUser, FreezeUserAgentDataBlock,
+    FreezeUserDataBlock, GodUpdateRegionInfo, GodUpdateRegionInfoAgentDataBlock,
+    GodUpdateRegionInfoRegionInfo2Block, GodUpdateRegionInfoRegionInfoBlock, RequestGodlikePowers,
+    RequestGodlikePowersAgentDataBlock, RequestGodlikePowersRequestBlockBlock, SimWideDeletes,
+    SimWideDeletesAgentDataBlock, SimWideDeletesDataBlockBlock,
 };
 use sl_wire::messages::{
     GetScriptRunning, GetScriptRunningScriptBlock, ScriptReset, ScriptResetAgentDataBlock,
@@ -3308,6 +3315,130 @@ impl Circuit {
             },
         });
         self.send(&message, Reliability::Unreliable, now)
+    }
+
+    /// Queues a `RequestGodlikePowers` reliably: asks the simulator to grant
+    /// (`godlike = true`) or drop (`false`) god powers for this agent. The
+    /// `Token` is packed nil, exactly as the reference viewer does (the
+    /// simulator fills it in).
+    pub(crate) fn send_request_godlike_powers(
+        &mut self,
+        godlike: bool,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::RequestGodlikePowers(RequestGodlikePowers {
+            agent_data: RequestGodlikePowersAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            request_block: RequestGodlikePowersRequestBlockBlock {
+                godlike,
+                token: Uuid::nil(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `EjectUser` reliably: removes `target` from the agent's land,
+    /// optionally banning them (per `flags`).
+    pub(crate) fn send_eject_user(
+        &mut self,
+        target: Uuid,
+        flags: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::EjectUser(EjectUser {
+            agent_data: EjectUserAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            data: EjectUserDataBlock {
+                target_id: target,
+                flags,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `FreezeUser` reliably: freezes or unfreezes `target` on the
+    /// agent's land (per `flags`).
+    pub(crate) fn send_freeze_user(
+        &mut self,
+        target: Uuid,
+        flags: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::FreezeUser(FreezeUser {
+            agent_data: FreezeUserAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            data: FreezeUserDataBlock {
+                target_id: target,
+                flags,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `SimWideDeletes` reliably: deletes (or returns) the objects
+    /// `owner` has across the region, filtered by `flags`. Needs estate/god
+    /// rights.
+    pub(crate) fn send_sim_wide_deletes(
+        &mut self,
+        owner: Uuid,
+        flags: u32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::SimWideDeletes(SimWideDeletes {
+            agent_data: SimWideDeletesAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            data_block: SimWideDeletesDataBlockBlock {
+                target_id: owner,
+                flags,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `GodUpdateRegionInfo` reliably: pushes the god-tools region
+    /// parameters in `update`. The legacy 32-bit `RegionFlags` block is the low
+    /// 32 bits of the extended flags (the reference viewer truncates the same
+    /// way); the full 64-bit value goes in `RegionInfo2`. Needs grid-god rights.
+    pub(crate) fn send_god_update_region_info(
+        &mut self,
+        update: &GodRegionUpdate,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        // The legacy field is the low 32 bits of the extended flags.
+        let legacy_flags =
+            u32::try_from(update.region_flags & u64::from(u32::MAX)).unwrap_or(u32::MAX);
+        // The redirect grid coordinates are signed on the wire (`0` for none);
+        // region indices never exceed `i32::MAX` in practice.
+        let redirect_grid_x = i32::try_from(update.redirect_grid.x()).unwrap_or(i32::MAX);
+        let redirect_grid_y = i32::try_from(update.redirect_grid.y()).unwrap_or(i32::MAX);
+        let message = AnyMessage::GodUpdateRegionInfo(GodUpdateRegionInfo {
+            agent_data: GodUpdateRegionInfoAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            region_info: GodUpdateRegionInfoRegionInfoBlock {
+                sim_name: with_nul(update.sim_name.as_ref()),
+                estate_id: update.estate_id,
+                parent_estate_id: update.parent_estate_id,
+                region_flags: legacy_flags,
+                billable_factor: update.billable_factor,
+                price_per_meter: update.price_per_meter,
+                redirect_grid_x,
+                redirect_grid_y,
+            },
+            region_info2: vec![GodUpdateRegionInfoRegionInfo2Block {
+                region_flags_extended: update.region_flags,
+            }],
+        });
+        self.send(&message, Reliability::Reliable, now)
     }
 
     /// Queues a `LogoutRequest` reliably.

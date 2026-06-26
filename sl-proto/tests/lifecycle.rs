@@ -15,30 +15,31 @@ mod test {
         CoarseLocation, Color, ColorAlpha, ControlFlags, CreateGroupParams, DayCycle,
         DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, Direction,
         DirectoryVisibility, DisconnectReason, DisplayName, DisplayNameUpdate, Distance,
-        EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, EventId,
-        FollowCamProperty, FriendKey, FriendRights, GestureActivation, GlobalCoordinates, Glow,
-        GridCoordinates, GroupKey, GroupNoticeAttachment, GroupRequestId, GroupRoleChange,
-        GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog,
-        ImSessionId, ImageCodec, InterestsUpdate, InventoryCallbackId, InventoryFolderKey,
-        InventoryItem, InventoryItemMove, InventoryItemOrFolderKey, InventoryKey, LandArea,
-        LandBrushAction, LandBrushSize, LandEdit, LandingType, LightData, LindenAmount,
-        LindenBalance, LoginAccount, LoginParams, LookAtType, LureId, MapItemType, Material,
-        Maturity, MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags,
-        MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NewInventoryLink,
-        NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
-        ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-        ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
-        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5,
-        PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
-        QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate,
-        Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
-        RezScriptParams, SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction,
-        ScriptPermissions, SculptOrMeshKey, Session, SetDisplayNameReply, SimStatId, SimulatorTime,
-        SkySettings, SoundFlags, StartLocationSlot, TaskInventoryKey, TaskInventoryReply,
-        TeleportFlags, TerraformArea, TerrainLayerType, TextureEntry, TextureFace, TextureKey,
-        Throttle, TransactionId, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
-        ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
-        avatar_texture, decode_texture_entry, group_powers, pcode,
+        EjectAction, EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, EventId,
+        FollowCamProperty, FreezeAction, FriendKey, FriendRights, GestureActivation,
+        GlobalCoordinates, Glow, GodRegionUpdate, GridCoordinates, GroupKey, GroupNoticeAttachment,
+        GroupRequestId, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
+        GroupRoleUpdateType, ImDialog, ImSessionId, ImageCodec, InterestsUpdate,
+        InventoryCallbackId, InventoryFolderKey, InventoryItem, InventoryItemMove,
+        InventoryItemOrFolderKey, InventoryKey, LandArea, LandBrushAction, LandBrushSize, LandEdit,
+        LandingType, LightData, LindenAmount, LindenBalance, LoginAccount, LoginParams, LookAtType,
+        LureId, MapItemType, Material, Maturity, MeanCollisionType, MeshKey, MoneyTransactionType,
+        MovementMode, MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem,
+        NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
+        ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
+        ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand,
+        ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField,
+        Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams,
+        ProductType, ProfileUpdate, QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle,
+        RegionInfoUpdate, RegionName, Reliability, RequiredVoiceVersion, RestoreItem,
+        RezAttachment, RezObjectParams, RezScriptParams, SaleType, Scale, ScopedObjectId,
+        ScopedParcelId, ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session,
+        SetDisplayNameReply, SimStatId, SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags,
+        StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea,
+        TerrainLayerType, TextureEntry, TextureFace, TextureKey, Throttle, TransactionId,
+        TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, WaterSettings, WearableType, avatar_texture, decode_texture_entry,
+        group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -3497,6 +3498,109 @@ mod test {
         assert!(trigger.sound_data.owner_id.is_nil());
         assert!(trigger.sound_data.object_id.is_nil());
         assert!(trigger.sound_data.parent_id.is_nil());
+        Ok(())
+    }
+
+    #[test]
+    fn god_region_estate_admin_messages_pack_targets_and_flags() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let target = AgentKey::from(uuid::Uuid::from_u128(0x0B10_CCED));
+        session.request_godlike_powers(true, now)?;
+        session.eject_user(target, EjectAction::EjectAndBan, now)?;
+        session.freeze_user(target, FreezeAction::Freeze, now)?;
+        session.sim_wide_deletes(
+            target,
+            SimWideDeleteFlags {
+                others_land_only: true,
+                always_return_objects: false,
+                scripted_only: true,
+            },
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+
+        let godlike = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RequestGodlikePowers(g) => Some(g),
+                _ => None,
+            })
+            .ok_or("expected a RequestGodlikePowers")?;
+        assert!(godlike.request_block.godlike);
+        // The viewer packs a nil token; the simulator fills it in.
+        assert!(godlike.request_block.token.is_nil());
+
+        let eject = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::EjectUser(e) => Some(e),
+                _ => None,
+            })
+            .ok_or("expected an EjectUser")?;
+        assert_eq!(eject.data.target_id, target.uuid());
+        assert_eq!(eject.data.flags, 0x1);
+
+        let freeze = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::FreezeUser(f) => Some(f),
+                _ => None,
+            })
+            .ok_or("expected a FreezeUser")?;
+        assert_eq!(freeze.data.target_id, target.uuid());
+        assert_eq!(freeze.data.flags, 0x0);
+
+        let deletes = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::SimWideDeletes(d) => Some(d),
+                _ => None,
+            })
+            .ok_or("expected a SimWideDeletes")?;
+        assert_eq!(deletes.data_block.target_id, target.uuid());
+        // SWD_OTHERS_LAND_ONLY (0x1) | SWD_SCRIPTED_ONLY (0x4).
+        assert_eq!(deletes.data_block.flags, 0x5);
+        Ok(())
+    }
+
+    #[test]
+    fn god_update_region_info_packs_legacy_and_extended_flags() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let update = GodRegionUpdate {
+            sim_name: RegionName::try_new("Da Boom").map_err(|_invalid| "invalid region name")?,
+            estate_id: 1,
+            parent_estate_id: 1,
+            region_flags: 0x1_0000_0007,
+            billable_factor: 1.0,
+            price_per_meter: 5,
+            redirect_grid: GridCoordinates::new(1000, 1001),
+        };
+        session.god_update_region_info(&update, now)?;
+        let sent = drain(&mut session)?;
+        let god = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::GodUpdateRegionInfo(g) => Some(g),
+                _ => None,
+            })
+            .ok_or("expected a GodUpdateRegionInfo")?;
+        assert_eq!(trimmed(&god.region_info.sim_name), "Da Boom");
+        assert_eq!(god.region_info.estate_id, 1);
+        // The legacy field is the low 32 bits of the extended flags.
+        assert_eq!(god.region_info.region_flags, 0x0000_0007);
+        assert_eq!(god.region_info.redirect_grid_x, 1000);
+        assert_eq!(god.region_info.redirect_grid_y, 1001);
+        let extended = god
+            .region_info2
+            .first()
+            .ok_or("expected a RegionInfo2 block")?;
+        assert_eq!(extended.region_flags_extended, 0x1_0000_0007);
         Ok(())
     }
 

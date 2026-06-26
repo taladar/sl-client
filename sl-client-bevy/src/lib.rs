@@ -2588,6 +2588,21 @@ fn advance_running(
                     .trigger_sound(*sound, *gain, *region_handle, *position, now)
                     .ok();
             }
+            Command::RequestGodlikePowers { godlike } => {
+                session.request_godlike_powers(*godlike, now).ok();
+            }
+            Command::EjectUser { target, action } => {
+                session.eject_user(*target, *action, now).ok();
+            }
+            Command::FreezeUser { target, action } => {
+                session.freeze_user(*target, *action, now).ok();
+            }
+            Command::SimWideDeletes { owner, flags } => {
+                session.sim_wide_deletes(*owner, *flags, now).ok();
+            }
+            Command::GodUpdateRegionInfo { update } => {
+                session.god_update_region_info(update, now).ok();
+            }
             Command::Logout => session.initiate_logout(now),
         }
     }
