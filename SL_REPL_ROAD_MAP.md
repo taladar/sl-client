@@ -84,7 +84,13 @@ Scope reminders:
   lowercase name (underscores optional) and/or its numeric wire code.
   Multi-field-`Vec` commands (`update_group_roles`, `modify_material_params`,
   `set_object_media`, `send_voice_signaling`) accept a single element via
-  keyword fields; multi-element forms are deferred. 39 unit tests; clippy-clean
+  keyword fields; multi-element forms are intentionally **not** offered (decided
+  2026-06-26) because each per-element payload embeds free text / JSON / URLs /
+  SDP strings containing the `,` and `:` separators the unescaped `vec_records`
+  parser splits on, so a record syntax would break on realistic input — the
+  full `Vec` stays reachable through the typed `Session` API and the tokio/bevy
+  drivers. (Contrast the `set_object_extra_params` `render_material` faces+ids
+  lists, which tokenize cleanly and *are* exposed.) 39 unit tests; clippy-clean
   under the restriction lints.
 - [x] **C2. Context + placeholders.** `context.rs`: `ReplContext` +
   `SessionContext` (`apply_event`), forward resolution
