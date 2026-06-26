@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
     AgentKey, FriendKey, GroupKey, GroupRoleKey, InventoryFolderKey, InventoryItemOrFolderKey,
-    InventoryKey, ObjectKey, ParcelKey, TextureKey,
+    InventoryKey, ObjectKey, OwnerKey, ParcelKey, TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::map::{GridCoordinates, RegionCoordinates};
@@ -135,7 +135,7 @@ use uuid::Uuid;
 
 use crate::AssetKey;
 use crate::appearance::{MAX_FACES, decode_texture_entry};
-use crate::bookkeeping_ids::{PingId, TransactionId};
+use crate::bookkeeping_ids::{PingId, QueryId, TransactionId};
 use crate::error::Error;
 use crate::extra_params::decode_extra_param_blocks;
 use crate::session::{
@@ -1271,6 +1271,61 @@ pub enum ServerEvent {
     GodUpdateRegionInfo {
         /// The region parameters to apply.
         update: GodRegionUpdate,
+    },
+    /// The client force-reassigned a parcel's ownership (`ParcelGodForceOwner`).
+    /// The inverse of the client's
+    /// [`Session::parcel_god_force_owner`](crate::Session::parcel_god_force_owner).
+    /// Needs grid-god rights.
+    ParcelGodForceOwner {
+        /// The parcel's region-local id.
+        local_id: RegionLocalParcelId,
+        /// The avatar to make the new owner of the parcel.
+        owner: OwnerKey,
+    },
+    /// The client marked a parcel (and its content) as owned by the
+    /// governor/maintenance account (`ParcelGodMarkAsContent`). The inverse of
+    /// the client's
+    /// [`Session::parcel_god_mark_as_content`](crate::Session::parcel_god_mark_as_content).
+    /// Needs grid-god rights.
+    ParcelGodMarkAsContent {
+        /// The parcel's region-local id.
+        local_id: RegionLocalParcelId,
+    },
+    /// The client deleted an events-directory listing and asked the simulator to
+    /// re-run the search (`EventGodDelete`). The inverse of the client's
+    /// [`Session::event_god_delete`](crate::Session::event_god_delete); the
+    /// simulator answers with a refreshed `DirEventsReply` correlated by
+    /// `query_id`. Needs grid-god rights.
+    EventGodDelete {
+        /// The events-directory listing to delete.
+        event: EventId,
+        /// The client-chosen id to echo back in the refreshed reply.
+        query_id: QueryId,
+        /// The events search text to re-run.
+        query_text: String,
+        /// What to search and how to sort/filter.
+        flags: DirFindFlags,
+        /// The 0-based index of the first result the client wants.
+        query_start: i32,
+    },
+    /// The client asked the simulator to save the region (world) state
+    /// (`StateSave`). The inverse of the client's
+    /// [`Session::state_save`](crate::Session::state_save). Needs grid-god rights.
+    StateSave {
+        /// The target filename, or [`None`] to let the simulator pick the
+        /// autosave name (an empty filename on the wire).
+        filename: Option<String>,
+    },
+    /// The client started a land auction on a parcel (`ViewerStartAuction`). The
+    /// inverse of the client's
+    /// [`Session::viewer_start_auction`](crate::Session::viewer_start_auction).
+    /// Needs grid-god rights.
+    ViewerStartAuction {
+        /// The parcel's region-local id.
+        local_id: RegionLocalParcelId,
+        /// The snapshot texture advertising the auction, or [`None`] for none (a
+        /// nil id on the wire).
+        snapshot: Option<TextureKey>,
     },
     /// Any other decoded client message, surfaced verbatim. This is how the
     /// remaining client-only messages reach the simulator: fully decoded but
@@ -4983,6 +5038,44 @@ impl SimSession {
                     self.events
                         .push_back(ServerEvent::ClientMessage(Box::new(message.clone())));
                 }
+            }
+            AnyMessage::ParcelGodForceOwner(force) => {
+                // The wire carries only an `OwnerID` with no group flag, so the
+                // new owner is always decoded as an agent.
+                self.events.push_back(ServerEvent::ParcelGodForceOwner {
+                    local_id: RegionLocalParcelId(force.data.local_id),
+                    owner: OwnerKey::Agent(AgentKey::from(force.data.owner_id)),
+                });
+            }
+            AnyMessage::ParcelGodMarkAsContent(mark) => {
+                self.events.push_back(ServerEvent::ParcelGodMarkAsContent {
+                    local_id: RegionLocalParcelId(mark.parcel_data.local_id),
+                });
+            }
+            AnyMessage::EventGodDelete(delete) => {
+                self.events.push_back(ServerEvent::EventGodDelete {
+                    event: EventId::new(delete.event_data.event_id),
+                    query_id: QueryId::new(delete.query_data.query_id),
+                    query_text: trimmed_string(&delete.query_data.query_text),
+                    flags: DirFindFlags::from_bits(delete.query_data.query_flags),
+                    query_start: delete.query_data.query_start,
+                });
+            }
+            AnyMessage::StateSave(save) => {
+                // The reference viewer sends an empty filename to mean "pick the
+                // autosave name"; surface that as `None`.
+                let filename = trimmed_string(&save.data_block.filename);
+                self.events.push_back(ServerEvent::StateSave {
+                    filename: (!filename.is_empty()).then_some(filename),
+                });
+            }
+            AnyMessage::ViewerStartAuction(auction) => {
+                // A nil snapshot id means "no snapshot advertising the auction".
+                let snapshot_id = auction.parcel_data.snapshot_id;
+                self.events.push_back(ServerEvent::ViewerStartAuction {
+                    local_id: RegionLocalParcelId(auction.parcel_data.local_id),
+                    snapshot: (!snapshot_id.is_nil()).then(|| TextureKey::from(snapshot_id)),
+                });
             }
             AnyMessage::LogoutRequest(_) => {
                 self.send_logout_reply(now)?;
