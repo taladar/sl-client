@@ -973,7 +973,16 @@ the encoded buffer across, and assert the peer decodes the expected
   directory_visibility } via DirectoryVisibility::from_wire; SoundTrigger ->
   TriggerSound { sound, gain, region_handle, position } with the region-local
   pos as RegionCoordinates and nil owner/object/parent ids dropped)
-- [ ] Sim out batch 9 — god region/estate-admin ServerEvents
+- [x] Sim out batch 9 — god region/estate-admin ServerEvents
+  (RequestGodlikePowers -> RequestGodlikePowers { godlike }, nil Token dropped;
+  EjectUser -> EjectUser { target, action } via EjectAction::from_wire;
+  FreezeUser -> FreezeUser { target, action } via FreezeAction::from_wire;
+  SimWideDeletes -> SimWideDeletes { owner, flags } via
+  SimWideDeleteFlags::from_wire; GodUpdateRegionInfo -> GodUpdateRegionInfo {
+  update: GodRegionUpdate } recovering the 64-bit RegionFlagsExtended from
+  RegionInfo2 with a legacy-32-bit fallback and typed RegionName /
+  GridCoordinates; unrecognised eject/freeze/delete flags and an empty/invalid
+  SimName fall through to ClientMessage)
 - [ ] Sim out batch 10 — god parcel/object/land-admin ServerEvents
 
 ## Book documentation

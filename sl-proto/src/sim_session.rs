@@ -29,7 +29,7 @@ use sl_types::key::{
     InventoryKey, ObjectKey, ParcelKey, TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
-use sl_types::map::RegionCoordinates;
+use sl_types::map::{GridCoordinates, RegionCoordinates};
 use sl_wire::messages::{
     AcceptCallingCard, AcceptCallingCardAgentDataBlock, AcceptCallingCardTransactionBlockBlock,
     DeclineCallingCard, DeclineCallingCardAgentDataBlock, DeclineCallingCardTransactionBlockBlock,
@@ -151,17 +151,18 @@ use crate::types::{
     AlertInfo, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatSource,
     ChatType, ClassifiedCategory, CoarseLocation, DetachOrder, DirClassifiedResult, DirEventResult,
     DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
-    DirectoryVisibility, DisplayNameUpdate, EstateCovenant, EventInfo, FeatureDisabled,
-    FollowCamPropertyValue, GenericMessage, GenericStreamingMessage, GestureActivation,
-    GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem,
-    GroupName, GroupVoteHistoryItem, InstantMessage, InventoryItemMove, Kick, LandBrushAction,
-    LandBrushSize, LandEdit, LandSearchType, LandStatItem, LandStatReportType, MapItem,
-    MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode,
-    NavMeshStatus, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
-    ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails,
-    ParcelObjectOwner, PlacesResult, Postcard, PrimShapeParams, ProposalVoteId, RegionIdentity,
-    RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, SaleType, ScriptControl, ScriptPermissions, ServerError, SetDisplayNameReply,
+    DirectoryVisibility, DisplayNameUpdate, EjectAction, EstateCovenant, EventInfo,
+    FeatureDisabled, FollowCamPropertyValue, FreezeAction, GenericMessage, GenericStreamingMessage,
+    GestureActivation, GodRegionUpdate, GroupAccountDetails, GroupAccountSummary,
+    GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem,
+    InstantMessage, InventoryItemMove, Kick, LandBrushAction, LandBrushSize, LandEdit,
+    LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer,
+    MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NavMeshStatus, NewInventoryLink,
+    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectPlayingAnimation, ObjectPropertiesFamily,
+    OpenRegionInfo, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult, Postcard,
+    PrimShapeParams, ProposalVoteId, RegionIdentity, RegionStats, Reliability,
+    RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
+    ScriptControl, ScriptPermissions, ServerError, SetDisplayNameReply, SimWideDeleteFlags,
     SimulatorTime, StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
     TerraformArea, TextureEntry, Throttle, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
     ViewerEffectData, ViewerEffectType,
@@ -1221,6 +1222,55 @@ pub enum ServerEvent {
         region_handle: RegionHandle,
         /// The region-local position to play the sound at.
         position: RegionCoordinates,
+    },
+    /// The client asked the simulator to grant or drop god powers for it
+    /// (`RequestGodlikePowers`). The inverse of the client's
+    /// [`Session::request_godlike_powers`](crate::Session::request_godlike_powers).
+    /// The agent must actually hold god rights on the grid for the request to
+    /// succeed; the grant is delivered to the viewer as a `GrantGodlikePowers`.
+    /// The wire `Token` is nil for a viewer-originated request, so it is not
+    /// surfaced here.
+    RequestGodlikePowers {
+        /// Whether the client is asking to acquire (`true`) or drop (`false`) god
+        /// powers.
+        godlike: bool,
+    },
+    /// The client ejected an avatar from its land (`EjectUser`), optionally also
+    /// banning them. The inverse of the client's
+    /// [`Session::eject_user`](crate::Session::eject_user).
+    EjectUser {
+        /// The avatar being ejected.
+        target: AgentKey,
+        /// Whether to eject only or eject and ban.
+        action: EjectAction,
+    },
+    /// The client froze or unfroze an avatar on its land (`FreezeUser`). The
+    /// inverse of the client's
+    /// [`Session::freeze_user`](crate::Session::freeze_user).
+    FreezeUser {
+        /// The avatar being frozen or unfrozen.
+        target: AgentKey,
+        /// Whether to freeze or unfreeze the avatar.
+        action: FreezeAction,
+    },
+    /// The client requested a region-wide delete (or return) of an owner's
+    /// objects (`SimWideDeletes`). The inverse of the client's
+    /// [`Session::sim_wide_deletes`](crate::Session::sim_wide_deletes). Needs
+    /// estate-manager or god rights.
+    SimWideDeletes {
+        /// The owner whose objects are deleted or returned.
+        owner: AgentKey,
+        /// Which of the owner's objects the operation targets.
+        flags: SimWideDeleteFlags,
+    },
+    /// The client pushed god-tools region parameters (`GodUpdateRegionInfo`). The
+    /// inverse of the client's
+    /// [`Session::god_update_region_info`](crate::Session::god_update_region_info).
+    /// The simulator overwrites the region's parameters wholesale from `update`.
+    /// Needs grid-god rights.
+    GodUpdateRegionInfo {
+        /// The region parameters to apply.
+        update: GodRegionUpdate,
     },
     /// Any other decoded client message, surfaced verbatim. This is how the
     /// remaining client-only messages reach the simulator: fully decoded but
@@ -4853,6 +4903,86 @@ impl SimSession {
                         block.position.z,
                     ),
                 });
+            }
+            AnyMessage::RequestGodlikePowers(request) => {
+                self.events.push_back(ServerEvent::RequestGodlikePowers {
+                    godlike: request.request_block.godlike,
+                });
+            }
+            AnyMessage::EjectUser(eject) => {
+                // An unrecognised Flags value is malformed; surface the raw
+                // message rather than guessing the action.
+                if let Some(action) = EjectAction::from_wire(eject.data.flags) {
+                    self.events.push_back(ServerEvent::EjectUser {
+                        target: AgentKey::from(eject.data.target_id),
+                        action,
+                    });
+                } else {
+                    self.events
+                        .push_back(ServerEvent::ClientMessage(Box::new(message.clone())));
+                }
+            }
+            AnyMessage::FreezeUser(freeze) => {
+                // An unrecognised Flags value is malformed; surface the raw
+                // message rather than guessing the action.
+                if let Some(action) = FreezeAction::from_wire(freeze.data.flags) {
+                    self.events.push_back(ServerEvent::FreezeUser {
+                        target: AgentKey::from(freeze.data.target_id),
+                        action,
+                    });
+                } else {
+                    self.events
+                        .push_back(ServerEvent::ClientMessage(Box::new(message.clone())));
+                }
+            }
+            AnyMessage::SimWideDeletes(deletes) => {
+                // An unrecognised Flags bit is malformed; surface the raw message
+                // rather than dropping the unknown selection.
+                if let Some(flags) = SimWideDeleteFlags::from_wire(deletes.data_block.flags) {
+                    self.events.push_back(ServerEvent::SimWideDeletes {
+                        owner: AgentKey::from(deletes.data_block.target_id),
+                        flags,
+                    });
+                } else {
+                    self.events
+                        .push_back(ServerEvent::ClientMessage(Box::new(message.clone())));
+                }
+            }
+            AnyMessage::GodUpdateRegionInfo(update) => {
+                let info = &update.region_info;
+                // An empty (or invalid) SimName is malformed for a god update;
+                // surface the raw message rather than fabricating a region name.
+                if let Some(sim_name) =
+                    sl_wire::region_name_from_wire("SimName", &trimmed_string(&info.sim_name))?
+                {
+                    // Recover the full 64-bit extended flags from RegionInfo2 when
+                    // present, falling back to the legacy 32-bit block.
+                    let region_flags = update.region_info2.first().map_or_else(
+                        || u64::from(info.region_flags),
+                        |block| block.region_flags_extended,
+                    );
+                    // The redirect grid coordinates are signed on the wire (`0`
+                    // for no redirect); a negative value is meaningless, so clamp
+                    // to `0`.
+                    let redirect_grid = GridCoordinates::new(
+                        u32::try_from(info.redirect_grid_x).unwrap_or(0),
+                        u32::try_from(info.redirect_grid_y).unwrap_or(0),
+                    );
+                    self.events.push_back(ServerEvent::GodUpdateRegionInfo {
+                        update: GodRegionUpdate {
+                            sim_name,
+                            estate_id: info.estate_id,
+                            parent_estate_id: info.parent_estate_id,
+                            region_flags,
+                            billable_factor: info.billable_factor,
+                            price_per_meter: info.price_per_meter,
+                            redirect_grid,
+                        },
+                    });
+                } else {
+                    self.events
+                        .push_back(ServerEvent::ClientMessage(Box::new(message.clone())));
+                }
             }
             AnyMessage::LogoutRequest(_) => {
                 self.send_logout_reply(now)?;

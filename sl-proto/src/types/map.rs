@@ -194,6 +194,17 @@ impl EjectAction {
             Self::EjectAndBan => 0x1,
         }
     }
+
+    /// The action for an `EjectUser` `Flags` wire value, or `None` if `flags` is
+    /// not a recognised eject flag. The inverse of [`EjectAction::to_wire`].
+    #[must_use]
+    pub const fn from_wire(flags: u32) -> Option<Self> {
+        match flags {
+            0x0 => Some(Self::Eject),
+            0x1 => Some(Self::EjectAndBan),
+            _ => None,
+        }
+    }
 }
 
 /// Whether to freeze or unfreeze a user on the agent's land via
@@ -215,6 +226,17 @@ impl FreezeAction {
         match self {
             Self::Freeze => 0x0,
             Self::Unfreeze => 0x1,
+        }
+    }
+
+    /// The action for a `FreezeUser` `Flags` wire value, or `None` if `flags` is
+    /// not a recognised freeze flag. The inverse of [`FreezeAction::to_wire`].
+    #[must_use]
+    pub const fn from_wire(flags: u32) -> Option<Self> {
+        match flags {
+            0x0 => Some(Self::Freeze),
+            0x1 => Some(Self::Unfreeze),
+            _ => None,
         }
     }
 }
@@ -251,6 +273,21 @@ impl SimWideDeleteFlags {
             flags |= 0x4;
         }
         flags
+    }
+
+    /// The selection for a `SimWideDeletes` `Flags` bitfield, or `None` if any
+    /// bit outside the recognised `SWD_*` set (`0x1` / `0x2` / `0x4`) is set.
+    /// The inverse of [`SimWideDeleteFlags::to_wire`].
+    #[must_use]
+    pub const fn from_wire(flags: u32) -> Option<Self> {
+        if flags & !0x7 != 0 {
+            return None;
+        }
+        Some(Self {
+            others_land_only: flags & 0x1 != 0,
+            always_return_objects: flags & 0x2 != 0,
+            scripted_only: flags & 0x4 != 0,
+        })
     }
 }
 
