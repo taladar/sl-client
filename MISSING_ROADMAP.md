@@ -919,7 +919,7 @@ the encoded buffer across, and assert the peer decodes the expected
 
 ### Server-side status
 
-- [ ] Sim inbound batch 1 — region telemetry encoders (send_sim_stats,
+- [x] Sim inbound batch 1 — region telemetry encoders (send_sim_stats,
   send_simulator_time)
 - [ ] Sim inbound batch 2 — generic message family encoders
 - [ ] Sim inbound batch 3 — session error & disconnect encoders

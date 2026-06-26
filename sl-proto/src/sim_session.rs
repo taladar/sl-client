@@ -83,6 +83,10 @@ use sl_wire::messages::{
     ScriptRunningReplyScriptBlock, TelehubInfo as TelehubInfoMessage,
     TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock,
 };
+use sl_wire::messages::{
+    SimStats, SimStatsPidStatBlock, SimStatsRegionBlock, SimStatsRegionInfoBlock,
+    SimStatsStatBlock, SimulatorViewerTimeMessage, SimulatorViewerTimeMessageTimeInfoBlock,
+};
 use sl_wire::{
     AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, GlobalCoordinates, Llsd, MessageId,
     PacketFlags, Permissions, Permissions5, Reader, RegionHandle, RegionLocalObjectId,
@@ -108,9 +112,9 @@ use crate::types::{
     InstantMessage, LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType,
     MapLayer, MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NotecardRez,
     ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner,
-    PlacesResult, Postcard, ProposalVoteId, RegionIdentity, Reliability, RestoreItem,
-    RezAttachment, SaleType, ScriptControl, TelehubInfo, Throttle, Transmit, ViewerEffect,
-    ViewerEffectData, ViewerEffectType,
+    PlacesResult, Postcard, ProposalVoteId, RegionIdentity, RegionStats, Reliability, RestoreItem,
+    RezAttachment, SaleType, ScriptControl, SimulatorTime, TelehubInfo, Throttle, Transmit,
+    ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
 
@@ -2496,6 +2500,72 @@ impl SimSession {
                 .collect(),
         });
         self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `SimStats` carrying the region's periodic performance telemetry
+    /// (the inverse of the client's [`Event::SimStats`](crate::Event::SimStats)).
+    /// The full 64-bit [`RegionStats::region_flags_extended`] is emitted in a
+    /// `RegionInfo` block (so a client reading newer simulators round-trips it),
+    /// and `pid` is reported as `0` (the deprecated process-id field the client
+    /// ignores). Sent unreliably, at the ~1 Hz cadence a simulator uses.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode (e.g. more than 255 stats).
+    pub fn send_sim_stats(&mut self, stats: &RegionStats, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::SimStats(SimStats {
+            region: SimStatsRegionBlock {
+                region_x: stats.grid_coordinates.x(),
+                region_y: stats.grid_coordinates.y(),
+                region_flags: stats.region_flags,
+                object_capacity: stats.object_capacity,
+            },
+            stat: stats
+                .stats
+                .iter()
+                .map(|(id, value)| SimStatsStatBlock {
+                    stat_id: id.id(),
+                    stat_value: *value,
+                })
+                .collect(),
+            pid_stat: SimStatsPidStatBlock { pid: 0 },
+            region_info: vec![SimStatsRegionInfoBlock {
+                region_flags_extended: stats.region_flags_extended,
+            }],
+        });
+        self.send(&message, Reliability::Unreliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `SimulatorViewerTimeMessage` carrying the simulator's world clock
+    /// and sun state (the inverse of the client's
+    /// [`Event::SimulatorTime`](crate::Event::SimulatorTime)), so the client can
+    /// resynchronise its day cycle. Sent unreliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_simulator_time(&mut self, time: &SimulatorTime, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::SimulatorViewerTimeMessage(SimulatorViewerTimeMessage {
+            time_info: SimulatorViewerTimeMessageTimeInfoBlock {
+                usec_since_start: time.usec_since_start,
+                sec_per_day: time.sec_per_day,
+                sec_per_year: time.sec_per_year,
+                sun_direction: time.sun_direction.clone(),
+                sun_phase: time.sun_phase,
+                sun_ang_velocity: time.sun_ang_velocity.clone(),
+            },
+        });
+        self.send(&message, Reliability::Unreliable, now)?;
         Ok(())
     }
 
