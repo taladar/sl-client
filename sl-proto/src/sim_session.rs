@@ -63,6 +63,16 @@ use sl_wire::messages::{
     SetFollowCamPropertiesCameraPropertyBlock, SetFollowCamPropertiesObjectDataBlock,
 };
 use sl_wire::messages::{
+    GenericMessage as GenericMessageWire, GenericMessageAgentDataBlock,
+    GenericMessageMethodDataBlock, GenericMessageParamListBlock,
+    GenericStreamingMessage as GenericStreamingMessageWire, GenericStreamingMessageDataBlockBlock,
+    GenericStreamingMessageMethodDataBlock, LargeGenericMessage as LargeGenericMessageWire,
+    LargeGenericMessageAgentDataBlock, LargeGenericMessageMethodDataBlock,
+    LargeGenericMessageParamListBlock, SimStats, SimStatsPidStatBlock, SimStatsRegionBlock,
+    SimStatsRegionInfoBlock, SimStatsStatBlock, SimulatorViewerTimeMessage,
+    SimulatorViewerTimeMessageTimeInfoBlock,
+};
+use sl_wire::messages::{
     GroupAccountDetailsReply, GroupAccountDetailsReplyAgentDataBlock,
     GroupAccountDetailsReplyHistoryDataBlock, GroupAccountDetailsReplyMoneyDataBlock,
     GroupAccountSummaryReply, GroupAccountSummaryReplyAgentDataBlock,
@@ -82,10 +92,6 @@ use sl_wire::messages::{
     PayPriceReplyButtonDataBlock, PayPriceReplyObjectDataBlock, ScriptRunningReply,
     ScriptRunningReplyScriptBlock, TelehubInfo as TelehubInfoMessage,
     TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock,
-};
-use sl_wire::messages::{
-    SimStats, SimStatsPidStatBlock, SimStatsRegionBlock, SimStatsRegionInfoBlock,
-    SimStatsStatBlock, SimulatorViewerTimeMessage, SimulatorViewerTimeMessageTimeInfoBlock,
 };
 use sl_wire::{
     AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, GlobalCoordinates, Llsd, MessageId,
@@ -107,14 +113,15 @@ use crate::types::{
     AlertInfo, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatSource,
     ChatType, ClassifiedCategory, CoarseLocation, DetachOrder, DirClassifiedResult, DirEventResult,
     DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant,
-    EventInfo, FollowCamPropertyValue, GestureActivation, GroupAccountDetails, GroupAccountSummary,
-    GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem,
-    InstantMessage, LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType,
-    MapLayer, MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NotecardRez,
-    ObjectBuyItem, ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner,
-    PlacesResult, Postcard, ProposalVoteId, RegionIdentity, RegionStats, Reliability, RestoreItem,
-    RezAttachment, SaleType, ScriptControl, SimulatorTime, TelehubInfo, Throttle, Transmit,
-    ViewerEffect, ViewerEffectData, ViewerEffectType,
+    EventInfo, FollowCamPropertyValue, GenericMessage, GenericStreamingMessage, GestureActivation,
+    GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem,
+    GroupName, GroupVoteHistoryItem, InstantMessage, LandSearchType, LandStatItem,
+    LandStatReportType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
+    MeanCollision, MovementMode, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily,
+    ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult, Postcard, ProposalVoteId,
+    RegionIdentity, RegionStats, Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl,
+    SimulatorTime, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
+    ViewerEffectType,
 };
 use sl_wire::AbuseReport;
 
@@ -2566,6 +2573,118 @@ impl SimSession {
             },
         });
         self.send(&message, Reliability::Unreliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `GenericMessage` — the method-name + parameter-list envelope the
+    /// simulator uses for a grab-bag of loosely-coupled features (the inverse of
+    /// the client's
+    /// [`Event::GenericMessage`](crate::Event::GenericMessage)). The method name,
+    /// [`InvoiceId`](crate::InvoiceId) and opaque parameter blobs are carried
+    /// verbatim; the `AgentData` block reports the circuit's agent/session ids
+    /// with a nil transaction id. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode (e.g. more than 255 parameters).
+    pub fn send_generic_message(
+        &mut self,
+        generic: &GenericMessage,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::GenericMessage(GenericMessageWire {
+            agent_data: GenericMessageAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                session_id: self.session_id.unwrap_or_else(Uuid::nil),
+                transaction_id: Uuid::nil(),
+            },
+            method_data: GenericMessageMethodDataBlock {
+                method: generic.method.clone().into_bytes(),
+                invoice: generic.invoice.get(),
+            },
+            param_list: generic
+                .params
+                .iter()
+                .map(|parameter| GenericMessageParamListBlock {
+                    parameter: parameter.clone(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `LargeGenericMessage` — the same method-name + parameter-list
+    /// envelope as [`send_generic_message`](Self::send_generic_message) but with
+    /// a larger per-parameter wire limit (the inverse of the client's
+    /// [`Event::LargeGenericMessage`](crate::Event::LargeGenericMessage)). Sent
+    /// reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode (e.g. more than 255 parameters).
+    pub fn send_large_generic_message(
+        &mut self,
+        generic: &GenericMessage,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::LargeGenericMessage(LargeGenericMessageWire {
+            agent_data: LargeGenericMessageAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                session_id: self.session_id.unwrap_or_else(Uuid::nil),
+                transaction_id: Uuid::nil(),
+            },
+            method_data: LargeGenericMessageMethodDataBlock {
+                method: generic.method.clone().into_bytes(),
+                invoice: generic.invoice.get(),
+            },
+            param_list: generic
+                .params
+                .iter()
+                .map(|parameter| LargeGenericMessageParamListBlock {
+                    parameter: parameter.clone(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `GenericStreamingMessage` — the optimised streaming envelope with
+    /// a numeric method id and a single opaque payload (the inverse of the
+    /// client's
+    /// [`Event::GenericStreamingMessage`](crate::Event::GenericStreamingMessage)),
+    /// used for payloads like a GLTF material override. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_generic_streaming_message(
+        &mut self,
+        streaming: &GenericStreamingMessage,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::GenericStreamingMessage(GenericStreamingMessageWire {
+            method_data: GenericStreamingMessageMethodDataBlock {
+                method: streaming.method,
+            },
+            data_block: GenericStreamingMessageDataBlockBlock {
+                data: streaming.data.clone(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
         Ok(())
     }
 

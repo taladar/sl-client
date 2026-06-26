@@ -15,14 +15,15 @@ mod test {
         ClassifiedKey, CoarseLocation, ControlFlags, DetachOrder, DirClassifiedResult,
         DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult,
         DirPlaceResult, EstateCovenant, Event, EventId, EventInfo, FollowCamProperty,
-        FollowCamPropertyValue, GestureActivation, GlobalCoordinates, GridCoordinates,
-        GridRectangle, GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
-        GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupKey,
-        GroupName, GroupRequestId, GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey,
-        InventoryKey, LandArea, LandSearchType, LandStatItem, LandStatReportType, LindenAmount,
-        LindenBalance, LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
-        Maturity, MeanCollision, MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem,
-        ObjectKey, ObjectPropertiesFamily, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey,
+        FollowCamPropertyValue, GenericMessage, GenericStreamingMessage, GestureActivation,
+        GlobalCoordinates, GridCoordinates, GridRectangle, GroupAccountDetails,
+        GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
+        GroupAccountTransactions, GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId,
+        GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryKey, InvoiceId,
+        LandArea, LandSearchType, LandStatItem, LandStatReportType, LindenAmount, LindenBalance,
+        LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
+        MeanCollision, MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem, ObjectKey,
+        ObjectPropertiesFamily, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey,
         ParcelObjectOwner, ParcelReturnType, Permissions5, PingId, PlacesResult, PointAtType,
         Postcard, ProductType, QueryId, RegionCoordinates, RegionHandle, RegionIdentity,
         RegionLocalObjectId, RegionLocalParcelId, RegionStats, RestoreItem, RezAttachment,
@@ -2143,6 +2144,64 @@ mod test {
         assert_eq!(got_time.sec_per_year, 5_256_000);
         assert_eq!(got_time.sun_phase.to_bits(), 1.25_f32.to_bits());
         assert_eq!(got_time.sun_direction.z.to_bits(), 0.866_f32.to_bits());
+        Ok(())
+    }
+
+    #[test]
+    fn generic_message_family_reaches_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let invoice = InvoiceId::from(uuid::Uuid::from_u128(0x4242));
+        let generic = GenericMessage {
+            method: "GrantUserRights".to_owned(),
+            invoice,
+            params: vec![b"first".to_vec(), b"second".to_vec()],
+        };
+        let large = GenericMessage {
+            method: "BigPayload".to_owned(),
+            invoice: InvoiceId::default(),
+            params: vec![vec![0xAB; 300]],
+        };
+        // A non-GLTF method id so the client surfaces it as the generic
+        // streaming event rather than the dedicated material-override handler.
+        let streaming = GenericStreamingMessage {
+            method: 0x1234,
+            data: b"opaque-streamed-blob".to_vec(),
+        };
+        sim.send_generic_message(&generic, now)?;
+        sim.send_large_generic_message(&large, now)?;
+        sim.send_generic_streaming_message(&streaming, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_client(&mut client);
+        let got_generic = events
+            .iter()
+            .find_map(|e| match e {
+                Event::GenericMessage(generic) => Some(generic.clone()),
+                _ => None,
+            })
+            .ok_or("expected a GenericMessage client event")?;
+        assert_eq!(got_generic, generic);
+
+        let got_large = events
+            .iter()
+            .find_map(|e| match e {
+                Event::LargeGenericMessage(generic) => Some(generic.clone()),
+                _ => None,
+            })
+            .ok_or("expected a LargeGenericMessage client event")?;
+        assert_eq!(got_large, large);
+
+        let got_streaming = events
+            .iter()
+            .find_map(|e| match e {
+                Event::GenericStreamingMessage(streaming) => Some(streaming.clone()),
+                _ => None,
+            })
+            .ok_or("expected a GenericStreamingMessage client event")?;
+        assert_eq!(got_streaming, streaming);
         Ok(())
     }
 
