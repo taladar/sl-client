@@ -983,7 +983,16 @@ the encoded buffer across, and assert the peer decodes the expected
   RegionInfo2 with a legacy-32-bit fallback and typed RegionName /
   GridCoordinates; unrecognised eject/freeze/delete flags and an empty/invalid
   SimName fall through to ClientMessage)
-- [ ] Sim out batch 10 — god parcel/object/land-admin ServerEvents
+- [x] Sim out batch 10 — god parcel/object/land-admin ServerEvents
+  (ParcelGodForceOwner -> RegionLocalParcelId + OwnerKey::Agent, the wire
+  carries no group flag so the new owner is always an agent;
+  ParcelGodMarkAsContent -> RegionLocalParcelId; EventGodDelete -> EventId +
+  QueryId + query_text + DirFindFlags + query_start, mirroring the events
+  re-run; StateSave -> Option<String> filename with empty -> None autosave;
+  ViewerStartAuction -> RegionLocalParcelId + Option<TextureKey> snapshot,
+  nil id -> None. Five dispatch arms ahead of the ClientMessage fall-through,
+  reusing the existing typed keys; no new wire types. Round-trip test
+  client_god_parcel_admin_reaches_simulator)
 
 ## Book documentation
 

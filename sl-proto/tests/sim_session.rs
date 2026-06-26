@@ -3248,6 +3248,121 @@ mod test {
         Ok(())
     }
 
+    /// The client out-batch-10 god parcel/object/land-admin edits decode into
+    /// their matching [`ServerEvent`] variants on the simulator side.
+    #[test]
+    fn client_god_parcel_admin_reaches_simulator() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
+
+        // ParcelGodForceOwner: force-reassign a parcel to a new owner.
+        let new_owner = AgentKey::from(uuid::Uuid::from_u128(0xA001));
+        client.parcel_god_force_owner(
+            ScopedParcelId::new(circuit, RegionLocalParcelId(11)),
+            OwnerKey::Agent(new_owner),
+            now,
+        )?;
+        // ParcelGodMarkAsContent: mark a parcel as governor-owned content.
+        client.parcel_god_mark_as_content(
+            ScopedParcelId::new(circuit, RegionLocalParcelId(12)),
+            now,
+        )?;
+        // EventGodDelete: delete an events listing and re-run the search.
+        let query_id = QueryId::new(uuid::Uuid::from_u128(0xA002));
+        client.event_god_delete(
+            EventId::new(54_321),
+            query_id,
+            "fun event",
+            DirFindFlags::EVENTS.union(DirFindFlags::INC_ADULT),
+            20,
+            now,
+        )?;
+        // StateSave: save the region state with an explicit filename.
+        client.state_save("backup.oar", now)?;
+        // StateSave again with an empty filename (autosave name).
+        client.state_save("", now)?;
+        // ViewerStartAuction: start a land auction advertised by a snapshot.
+        let snapshot = TextureKey::from(uuid::Uuid::from_u128(0xA003));
+        client.viewer_start_auction(
+            ScopedParcelId::new(circuit, RegionLocalParcelId(13)),
+            Some(snapshot),
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+
+        let (force_parcel, force_owner) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::ParcelGodForceOwner { local_id, owner } => Some((*local_id, *owner)),
+                _ => None,
+            })
+            .ok_or("expected a ParcelGodForceOwner server event")?;
+        assert_eq!(force_parcel, RegionLocalParcelId(11));
+        assert_eq!(force_owner, OwnerKey::Agent(new_owner));
+
+        let mark_parcel = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::ParcelGodMarkAsContent { local_id } => Some(*local_id),
+                _ => None,
+            })
+            .ok_or("expected a ParcelGodMarkAsContent server event")?;
+        assert_eq!(mark_parcel, RegionLocalParcelId(12));
+
+        let decoded_delete = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::EventGodDelete {
+                    event,
+                    query_id,
+                    query_text,
+                    flags,
+                    query_start,
+                } => Some((*event, *query_id, query_text.clone(), *flags, *query_start)),
+                _ => None,
+            })
+            .ok_or("expected an EventGodDelete server event")?;
+        assert_eq!(decoded_delete.0, EventId::new(54_321));
+        assert_eq!(decoded_delete.1, query_id);
+        assert_eq!(decoded_delete.2, "fun event");
+        assert_eq!(
+            decoded_delete.3,
+            DirFindFlags::EVENTS.union(DirFindFlags::INC_ADULT)
+        );
+        assert_eq!(decoded_delete.4, 20);
+
+        let filenames: Vec<Option<String>> = events
+            .iter()
+            .filter_map(|e| match e {
+                ServerEvent::StateSave { filename } => Some(filename.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            filenames,
+            vec![Some("backup.oar".to_owned()), None],
+            "explicit filename then autosave (empty -> None)"
+        );
+
+        let (auction_parcel, auction_snapshot) = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::ViewerStartAuction { local_id, snapshot } => {
+                    Some((*local_id, *snapshot))
+                }
+                _ => None,
+            })
+            .ok_or("expected a ViewerStartAuction server event")?;
+        assert_eq!(auction_parcel, RegionLocalParcelId(13));
+        assert_eq!(auction_snapshot, Some(snapshot));
+        Ok(())
+    }
+
     #[test]
     fn inventory_sync_reaches_client() -> Result<(), TestError> {
         let now = Instant::now();
