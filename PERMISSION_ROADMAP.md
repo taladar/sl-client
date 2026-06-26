@@ -1426,7 +1426,7 @@ neighbourhood; B4 on B2's `ScriptGrantInfo` (+ B2.5's denied status) + B3's
       both stores are reflected. Smoke in the REPL: `revoke_permissions`
       then `query_script_permissions`, confirm the printed snapshot reflects the
       change (test-avatar setup).
-- [ ] **B5 (from A8). Add the lifecycle test suite.** In
+- [x] **B5 (from A8). Add the lifecycle test suite.** In
       `sl-proto/tests/lifecycle.rs` (and one round-trip in
       `sl-proto/tests/sim_session.rs`), add the cross-cutting reset/recording
       cases from § Test & verification strategy reference, built only from the
@@ -1445,12 +1445,32 @@ neighbourhood; B4 on B2's `ScriptGrantInfo` (+ B2.5's denied status) + B3's
       integration case (a grant **and** a taken control surviving / clearing
       across the same teleport) — the behaviour no single task owns. Assert the
       conservative-mirror invariants (a revoke clears only the honoured bits, a
-      teleport clears only in-world grants never controls). Depends on B1–B4
-      (it exercises the whole surface). The earlier attachment-detection gate is
+      teleport clears only in-world grants never controls). Depends on B1–B4 (it
+      exercises the whole surface). The earlier attachment-detection gate is
       **lifted** (B1.5 resolved Open-question #1): write the
       attachment-kept-on-teleport assertion in full, no `// TODO`. Run the full
       `cargo test -p sl-proto`; clippy-clean (restriction lints) and `cargo fmt`
-      (+ rumdl on this file) before commit.
+      (+ rumdl on this file) before commit. **Done 2026-06-26.** Every
+      reference-table row had already landed as a focused unit test in its own
+      B2/B2.5/B3/B4 commit (`answer_records_grant_*`, `re_grant_replaces_*`,
+      `revoke_clears_only_honoured_*`,
+      `teleport_drops_inworld_grants_keeps_attachment`,
+      `neighbour_crossing_keeps_grants`,
+      `disable_simulator_drops_child_circuit_grants`, `kill_object_drops_grant`,
+      `never_asked_denied_and_granted_are_distinct`,
+      `teleport_drops_inworld_denial_keeps_attachment_denial`, the
+      `taken_controls_*` set,
+      `release_script_controls_clears_taken_but_keeps_grant`,
+      `script_permission_state_bundles_grants_and_controls`, and the
+      `sim_session.rs` round-trip
+      `taken_controls_tracker_folds_sim_control_change`). As planned, B5's
+      distinct addition is the **two-store integration** case —
+      `teleport_resets_grants_across_both_permission_stores` — which drives a
+      grant *and* a taken control through one teleport and asserts the
+      conservative-mirror invariant that the teleport drops in-world grants but
+      leaves the (agent-global) taken-controls tracker untouched. Full
+      `cargo test -p sl-proto` green (325 lifecycle + 63 sim_session), clippy
+      clean.
 - [ ] **B6 (from Open-question #3). Guard login against a closed / disconnected
       `Session`.** A relogin uses a **new** `Session` (no live-session reuse, so
       `script_grants` / `taken_controls` need no `close` hook — matching the
