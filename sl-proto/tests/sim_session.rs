@@ -14,22 +14,22 @@ mod test {
         AvatarName, AvatarPickerResult, ChatChannel, ChatSource, ChatType, ClassifiedCategory,
         ClassifiedKey, CoarseLocation, ControlFlags, DetachOrder, DirClassifiedResult,
         DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult,
-        DirPlaceResult, EstateCovenant, Event, EventId, EventInfo, FollowCamProperty,
-        FollowCamPropertyValue, GenericMessage, GenericStreamingMessage, GestureActivation,
-        GlobalCoordinates, GridCoordinates, GridRectangle, GroupAccountDetails,
+        DirPlaceResult, EstateCovenant, Event, EventId, EventInfo, FeatureDisabled,
+        FollowCamProperty, FollowCamPropertyValue, GenericMessage, GenericStreamingMessage,
+        GestureActivation, GlobalCoordinates, GridCoordinates, GridRectangle, GroupAccountDetails,
         GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
         GroupAccountTransactions, GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId,
         GroupVote, GroupVoteHistoryItem, ImDialog, InventoryFolderKey, InventoryKey, InvoiceId,
-        LandArea, LandSearchType, LandStatItem, LandStatReportType, LindenAmount, LindenBalance,
-        LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
-        MeanCollision, MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem, ObjectKey,
-        ObjectPropertiesFamily, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey,
+        Kick, LandArea, LandSearchType, LandStatItem, LandStatReportType, LindenAmount,
+        LindenBalance, LoginParams, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
+        Maturity, MeanCollision, MeanCollisionType, MovementMode, NotecardRez, ObjectBuyItem,
+        ObjectKey, ObjectPropertiesFamily, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey,
         ParcelObjectOwner, ParcelReturnType, Permissions5, PingId, PlacesResult, PointAtType,
         Postcard, ProductType, QueryId, RegionCoordinates, RegionHandle, RegionIdentity,
         RegionLocalObjectId, RegionLocalParcelId, RegionStats, RestoreItem, RezAttachment,
-        SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ServerEvent,
-        Session, SimSession, SimStatId, SimulatorTime, TelehubInfo, TextureKey, Throttle,
-        TransactionId, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ServerError,
+        ServerEvent, Session, SimSession, SimStatId, SimulatorTime, TelehubInfo, TextureKey,
+        Throttle, TransactionId, Transmit, ViewerEffect, ViewerEffectData, ViewerEffectType,
         enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
@@ -2202,6 +2202,82 @@ mod test {
             })
             .ok_or("expected a GenericStreamingMessage client event")?;
         assert_eq!(got_streaming, streaming);
+        Ok(())
+    }
+
+    #[test]
+    fn session_error_and_feature_disabled_reach_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let agent = AgentKey::from(uuid::Uuid::from_u128(1));
+        let error = ServerError {
+            agent,
+            code: 402,
+            token: "PaymentRequired".to_owned(),
+            id: uuid::Uuid::from_u128(0xDEAD),
+            system: "message/handler".to_owned(),
+            message: "transaction failed".to_owned(),
+            data: vec![0x01, 0x02, 0x03],
+        };
+        let disabled = FeatureDisabled {
+            message: "feature unavailable here".to_owned(),
+            agent,
+            transaction: TransactionId::from(uuid::Uuid::from_u128(0xBEEF)),
+        };
+        sim.send_error(&error, now)?;
+        sim.send_feature_disabled(&disabled, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_client(&mut client);
+        let got_error = events
+            .iter()
+            .find_map(|e| match e {
+                Event::ServerError(error) => Some((**error).clone()),
+                _ => None,
+            })
+            .ok_or("expected a ServerError client event")?;
+        assert_eq!(got_error, error);
+
+        let got_disabled = events
+            .iter()
+            .find_map(|e| match e {
+                Event::FeatureDisabled(disabled) => Some(disabled.clone()),
+                _ => None,
+            })
+            .ok_or("expected a FeatureDisabled client event")?;
+        assert_eq!(got_disabled, disabled);
+        Ok(())
+    }
+
+    #[test]
+    fn kick_user_reaches_client_and_disconnects() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let kick = Kick {
+            agent: AgentKey::from(uuid::Uuid::from_u128(1)),
+            reason: "logged in elsewhere".to_owned(),
+        };
+        sim.send_kick_user(&kick, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_client(&mut client);
+        let got_kick = events
+            .iter()
+            .find_map(|e| match e {
+                Event::Kicked(kick) => Some(kick.clone()),
+                _ => None,
+            })
+            .ok_or("expected a Kicked client event")?;
+        assert_eq!(got_kick, kick);
+        // The kick also drives the client to its terminal disconnected state.
+        assert!(
+            events.iter().any(|e| matches!(e, Event::Disconnected(_))),
+            "expected a Disconnected client event after a kick"
+        );
         Ok(())
     }
 

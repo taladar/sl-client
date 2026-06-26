@@ -924,7 +924,8 @@ the encoded buffer across, and assert the peer decodes the expected
 - [x] Sim inbound batch 2 — generic message family encoders
   (send_generic_message, send_large_generic_message,
   send_generic_streaming_message)
-- [ ] Sim inbound batch 3 — session error & disconnect encoders
+- [x] Sim inbound batch 3 — session error & disconnect encoders (send_error,
+  send_feature_disabled, send_kick_user)
 - [ ] Sim inbound batch 4 — scene & appearance encoders
 - [ ] Sim inbound batch 5 — friendship & calling-card encoders
 - [ ] Sim inbound batch 6 — inventory sync, task inventory & misc encoders
