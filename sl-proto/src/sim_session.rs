@@ -25,9 +25,16 @@ use std::time::{Duration, Instant};
 
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
-    AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey, ParcelKey, TextureKey,
+    AgentKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey, ParcelKey,
+    TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
+use sl_wire::messages::{
+    AcceptCallingCard, AcceptCallingCardAgentDataBlock, AcceptCallingCardTransactionBlockBlock,
+    DeclineCallingCard, DeclineCallingCardAgentDataBlock, DeclineCallingCardTransactionBlockBlock,
+    OfferCallingCard, OfferCallingCardAgentBlockBlock, OfferCallingCardAgentDataBlock,
+    TerminateFriendship, TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock,
+};
 use sl_wire::messages::{
     AgentAlertMessage, AgentAlertMessageAgentDataBlock, AgentAlertMessageAlertDataBlock,
     AlertMessage, AlertMessageAgentInfoBlock, AlertMessageAlertDataBlock,
@@ -113,7 +120,7 @@ use sl_wire::{
 };
 use uuid::Uuid;
 
-use crate::bookkeeping_ids::PingId;
+use crate::bookkeeping_ids::{PingId, TransactionId};
 use crate::error::Error;
 use crate::session::{
     build_map_block_reply, build_map_item_reply, build_map_layer_reply, instant_message,
@@ -2858,6 +2865,144 @@ impl SimSession {
         let message = AnyMessage::RebakeAvatarTextures(RebakeAvatarTexturesWire {
             texture_data: RebakeAvatarTexturesTextureDataBlock {
                 texture_id: texture_id.uuid(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `TerminateFriendship` — informs the client that a friendship has
+    /// ended (the inverse of the client's
+    /// [`Event::FriendshipTerminated`](crate::Event::FriendshipTerminated)),
+    /// either because the former friend removed this agent or because a removal
+    /// this agent requested has been confirmed. Carries the [`FriendKey`] of the
+    /// former friend in the `ExBlock`; the echoed `AgentData` identifies the
+    /// recipient (this circuit's agent). A client mirroring the buddy list should
+    /// drop `other`. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_terminate_friendship(
+        &mut self,
+        other: FriendKey,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::TerminateFriendship(TerminateFriendship {
+            agent_data: TerminateFriendshipAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                session_id: self.session_id.unwrap_or_else(Uuid::nil),
+            },
+            ex_block: TerminateFriendshipExBlockBlock {
+                other_id: other.uuid(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `OfferCallingCard` — another agent offers this agent their
+    /// calling card (the inverse of the client's
+    /// [`Event::CallingCardOffered`](crate::Event::CallingCardOffered)), a
+    /// reference card to that avatar that, if accepted, is filed in this agent's
+    /// Calling Cards folder. This is not a friendship request. `offering_agent`
+    /// is the avatar making the offer (carried in `AgentData`); the offer is
+    /// addressed to this circuit's agent (the `AgentBlock` destination), and the
+    /// [`TransactionId`] correlates the client's accept/decline reply. Sent
+    /// reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_offer_calling_card(
+        &mut self,
+        offering_agent: AgentKey,
+        transaction: TransactionId,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::OfferCallingCard(OfferCallingCard {
+            agent_data: OfferCallingCardAgentDataBlock {
+                agent_id: offering_agent.uuid(),
+                session_id: Uuid::nil(),
+            },
+            agent_block: OfferCallingCardAgentBlockBlock {
+                dest_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                transaction_id: transaction.get(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `AcceptCallingCard` — a calling card this agent offered was
+    /// accepted (the inverse of the client's
+    /// [`Event::CallingCardAccepted`](crate::Event::CallingCardAccepted)).
+    /// `agent` is the avatar who accepted (carried in `AgentData`), and the
+    /// [`TransactionId`] echoes the original offer. The accepter's destination
+    /// inventory folder is theirs, not this agent's, so an empty `FolderData` is
+    /// sent. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_accept_calling_card(
+        &mut self,
+        agent: AgentKey,
+        transaction: TransactionId,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::AcceptCallingCard(AcceptCallingCard {
+            agent_data: AcceptCallingCardAgentDataBlock {
+                agent_id: agent.uuid(),
+                session_id: Uuid::nil(),
+            },
+            transaction_block: AcceptCallingCardTransactionBlockBlock {
+                transaction_id: transaction.get(),
+            },
+            folder_data: Vec::new(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `DeclineCallingCard` — a calling card this agent offered was
+    /// declined (the inverse of the client's
+    /// [`Event::CallingCardDeclined`](crate::Event::CallingCardDeclined)).
+    /// `agent` is the avatar who declined (carried in `AgentData`), and the
+    /// [`TransactionId`] echoes the original offer. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_decline_calling_card(
+        &mut self,
+        agent: AgentKey,
+        transaction: TransactionId,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::DeclineCallingCard(DeclineCallingCard {
+            agent_data: DeclineCallingCardAgentDataBlock {
+                agent_id: agent.uuid(),
+                session_id: Uuid::nil(),
+            },
+            transaction_block: DeclineCallingCardTransactionBlockBlock {
+                transaction_id: transaction.get(),
             },
         });
         self.send(&message, Reliability::Reliable, now)?;

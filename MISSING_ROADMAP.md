@@ -928,7 +928,9 @@ the encoded buffer across, and assert the peer decodes the expected
   send_feature_disabled, send_kick_user)
 - [x] Sim inbound batch 4 — scene & appearance encoders
   (send_object_animation, send_rebake_avatar_textures)
-- [ ] Sim inbound batch 5 — friendship & calling-card encoders
+- [x] Sim inbound batch 5 — friendship & calling-card encoders
+  (send_terminate_friendship, send_offer_calling_card,
+  send_accept_calling_card, send_decline_calling_card)
 - [ ] Sim inbound batch 6 — inventory sync, task inventory & misc encoders
 - [ ] Sim EQ batches 1–3 — typed CAPS event-queue enqueue helpers
 - [ ] Sim out batch 1 — calling-card ServerEvents
