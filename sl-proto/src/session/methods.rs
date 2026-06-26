@@ -963,12 +963,30 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Wire`] if a bootstrap packet fails to encode.
+    /// Returns [`Error::SessionClosed`] if the session has already reached its
+    /// terminal closed/disconnected state, or [`Error::AlreadyLoggedIn`] if it
+    /// is already logged in — login is valid only once, from the freshly
+    /// constructed state, so a relogin must use a fresh [`Session`]. Returns
+    /// [`Error::Wire`] if a bootstrap packet fails to encode.
     pub fn handle_login_response(
         &mut self,
         response: sl_wire::LoginResponse,
         now: Instant,
     ) -> Result<(), Error> {
+        // Login is valid exactly once, from the freshly-constructed `New` state.
+        // Any other state means a relogin, which must build a fresh `Session`:
+        // a terminal closed session is never revived, and a live one would have
+        // its circuit torn down and half-rebuilt, stranding stale per-session
+        // state (e.g. `script_grants` / `taken_controls`, which carry no `close`
+        // hook precisely because a session is never reused). Reject either way.
+        match self.state {
+            SessionState::New => {}
+            SessionState::Closed => return Err(Error::SessionClosed),
+            SessionState::AwaitingHandshake
+            | SessionState::Active
+            | SessionState::Teleporting
+            | SessionState::LoggingOut => return Err(Error::AlreadyLoggedIn),
+        }
         match response {
             sl_wire::LoginResponse::Failure(failure) => {
                 self.close(DisconnectReason::LoginFailed {
