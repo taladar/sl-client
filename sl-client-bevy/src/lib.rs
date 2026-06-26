@@ -2575,7 +2575,7 @@ fn advance_running(
                 directory_visibility,
             } => {
                 session
-                    .update_user_info(*im_via_email, directory_visibility, now)
+                    .update_user_info(*im_via_email, *directory_visibility, now)
                     .ok();
             }
             Command::TriggerSound {

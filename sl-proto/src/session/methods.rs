@@ -53,18 +53,18 @@ use crate::types::{
     AvatarPickerResult, Camera, ChatType, ClassifiedCategory, ClassifiedUpdate, ClickAction,
     CoarseLocation, CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, DisconnectReason, EstateAccessDelta, EstateCovenant, Event,
-    EventInfo, FeatureDisabled, FollowCamProperty, FollowCamPropertyValue, FriendRights,
-    GenericMessage, GenericStreamingMessage, GestureActivation, GroupNoticeAttachment,
-    GroupNoticeKey, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec,
-    InterestsUpdate, InventoryFolder, InventoryItem, InventoryItemMove, InventoryOffer, Kick,
-    LandEdit, LandSearchType, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
-    LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MeanCollision,
-    MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NeighborInfo,
-    NewInventoryItem, NewInventoryLink, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams,
-    ObjectFlagSettings, ObjectPlayingAnimation, ObjectPropertiesFamily, ObjectTransform,
-    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
+    DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisconnectReason, EstateAccessDelta,
+    EstateCovenant, Event, EventInfo, FeatureDisabled, FollowCamProperty, FollowCamPropertyValue,
+    FriendRights, GenericMessage, GenericStreamingMessage, GestureActivation,
+    GroupNoticeAttachment, GroupNoticeKey, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange,
+    ImDialog, ImageCodec, InterestsUpdate, InventoryFolder, InventoryItem, InventoryItemMove,
+    InventoryOffer, Kick, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
+    LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType, Material, Maturity,
+    MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
+    NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez, Object, ObjectBuyItem,
+    ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation, ObjectPropertiesFamily,
+    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+    ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
     ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult, Postcard,
     PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionInfoUpdate, RegionStats,
     Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
@@ -2485,7 +2485,9 @@ impl Session {
             AnyMessage::UserInfoReply(reply) => {
                 self.events.push_back(Event::UserInfo(UserInfo {
                     im_via_email: reply.user_data.im_via_e_mail,
-                    directory_visibility: trimmed_string(&reply.user_data.directory_visibility),
+                    directory_visibility: DirectoryVisibility::from_wire(&trimmed_string(
+                        &reply.user_data.directory_visibility,
+                    )),
                     email: trimmed_string(&reply.user_data.e_mail),
                 }));
             }
@@ -8880,10 +8882,10 @@ impl Session {
 
     /// Updates the agent's account contact preferences (`UpdateUserInfo`):
     /// whether offline instant messages are forwarded to email (`im_via_email`)
-    /// and the directory/search visibility (`directory_visibility`, e.g.
-    /// `"default"` or `"hidden"`). Mirrors the writable fields of
-    /// [`Event::UserInfo`]; the email address itself is not settable over UDP
-    /// (the wire message carries no email field), so it is left unchanged.
+    /// and the directory/search visibility (`directory_visibility`). Mirrors the
+    /// writable fields of [`Event::UserInfo`]; the email address itself is not
+    /// settable over UDP (the wire message carries no email field), so it is
+    /// left unchanged.
     ///
     /// # Errors
     ///
@@ -8892,11 +8894,11 @@ impl Session {
     pub fn update_user_info(
         &mut self,
         im_via_email: bool,
-        directory_visibility: &str,
+        directory_visibility: DirectoryVisibility,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_update_user_info(im_via_email, directory_visibility, now)?;
+        circuit.send_update_user_info(im_via_email, directory_visibility.to_wire(), now)?;
         Ok(())
     }
 

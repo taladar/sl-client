@@ -14,30 +14,31 @@ mod test {
         ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction, CloudPosDensity,
         CoarseLocation, Color, ColorAlpha, ControlFlags, CreateGroupParams, DayCycle,
         DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, Direction,
-        DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EnvironmentSettings,
-        EstateAccessDelta, EstateAccessKind, Event, EventId, FollowCamProperty, FriendKey,
-        FriendRights, GestureActivation, GlobalCoordinates, Glow, GridCoordinates, GroupKey,
-        GroupNoticeAttachment, GroupRequestId, GroupRoleChange, GroupRoleEdit, GroupRoleKey,
-        GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImSessionId, ImageCodec,
-        InterestsUpdate, InventoryCallbackId, InventoryFolderKey, InventoryItem, InventoryItemMove,
-        InventoryItemOrFolderKey, InventoryKey, LandArea, LandBrushAction, LandBrushSize, LandEdit,
-        LandingType, LightData, LindenAmount, LindenBalance, LoginAccount, LoginParams, LookAtType,
-        LureId, MapItemType, Material, Maturity, MeanCollisionType, MeshKey, MoneyTransactionType,
-        MovementMode, MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem,
-        NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
-        ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
-        ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand,
-        ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField,
-        Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams,
-        ProductType, ProfileUpdate, QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle,
-        RegionInfoUpdate, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment,
-        RezObjectParams, RezScriptParams, SaleType, Scale, ScopedObjectId, ScopedParcelId,
-        ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session, SetDisplayNameReply,
-        SimStatId, SimulatorTime, SkySettings, SoundFlags, StartLocationSlot, TaskInventoryKey,
-        TaskInventoryReply, TeleportFlags, TerraformArea, TerrainLayerType, TextureEntry,
-        TextureFace, TextureKey, Throttle, TransactionId, TransferStatus, Transmit,
-        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        WaterSettings, WearableType, avatar_texture, decode_texture_entry, group_powers, pcode,
+        DirectoryVisibility, DisconnectReason, DisplayName, DisplayNameUpdate, Distance,
+        EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, EventId,
+        FollowCamProperty, FriendKey, FriendRights, GestureActivation, GlobalCoordinates, Glow,
+        GridCoordinates, GroupKey, GroupNoticeAttachment, GroupRequestId, GroupRoleChange,
+        GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType, ImDialog,
+        ImSessionId, ImageCodec, InterestsUpdate, InventoryCallbackId, InventoryFolderKey,
+        InventoryItem, InventoryItemMove, InventoryItemOrFolderKey, InventoryKey, LandArea,
+        LandBrushAction, LandBrushSize, LandEdit, LandingType, LightData, LindenAmount,
+        LindenBalance, LoginAccount, LoginParams, LookAtType, LureId, MapItemType, Material,
+        Maturity, MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags,
+        MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NewInventoryLink,
+        NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
+        ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+        ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
+        ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField, Permissions, Permissions5,
+        PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
+        QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate,
+        Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
+        RezScriptParams, SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction,
+        ScriptPermissions, SculptOrMeshKey, Session, SetDisplayNameReply, SimStatId, SimulatorTime,
+        SkySettings, SoundFlags, StartLocationSlot, TaskInventoryKey, TaskInventoryReply,
+        TeleportFlags, TerraformArea, TerrainLayerType, TextureEntry, TextureFace, TextureKey,
+        Throttle, TransactionId, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
+        ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, WearableType,
+        avatar_texture, decode_texture_entry, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -3446,7 +3447,7 @@ mod test {
         drain(&mut session)?;
 
         session.request_user_info(now)?;
-        session.update_user_info(true, "hidden", now)?;
+        session.update_user_info(true, DirectoryVisibility::Hidden, now)?;
         let sent = drain(&mut session)?;
 
         assert!(
@@ -7266,7 +7267,7 @@ mod test {
             info,
             UserInfo {
                 im_via_email: true,
-                directory_visibility: "default".to_owned(),
+                directory_visibility: DirectoryVisibility::Default,
                 email: "resident@example.com".to_owned(),
             }
         );
