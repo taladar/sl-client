@@ -63,6 +63,11 @@ use sl_wire::messages::{
     SetFollowCamPropertiesCameraPropertyBlock, SetFollowCamPropertiesObjectDataBlock,
 };
 use sl_wire::messages::{
+    Error as ErrorWire, ErrorAgentDataBlock, ErrorDataBlock,
+    FeatureDisabled as FeatureDisabledWire, FeatureDisabledFailureInfoBlock, KickUser,
+    KickUserTargetBlockBlock, KickUserUserInfoBlock,
+};
+use sl_wire::messages::{
     GenericMessage as GenericMessageWire, GenericMessageAgentDataBlock,
     GenericMessageMethodDataBlock, GenericMessageParamListBlock,
     GenericStreamingMessage as GenericStreamingMessageWire, GenericStreamingMessageDataBlockBlock,
@@ -113,15 +118,15 @@ use crate::types::{
     AlertInfo, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatSource,
     ChatType, ClassifiedCategory, CoarseLocation, DetachOrder, DirClassifiedResult, DirEventResult,
     DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, EstateCovenant,
-    EventInfo, FollowCamPropertyValue, GenericMessage, GenericStreamingMessage, GestureActivation,
-    GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem,
-    GroupName, GroupVoteHistoryItem, InstantMessage, LandSearchType, LandStatItem,
-    LandStatReportType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
-    MeanCollision, MovementMode, NotecardRez, ObjectBuyItem, ObjectPropertiesFamily,
-    ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult, Postcard, ProposalVoteId,
-    RegionIdentity, RegionStats, Reliability, RestoreItem, RezAttachment, SaleType, ScriptControl,
-    SimulatorTime, TelehubInfo, Throttle, Transmit, ViewerEffect, ViewerEffectData,
-    ViewerEffectType,
+    EventInfo, FeatureDisabled, FollowCamPropertyValue, GenericMessage, GenericStreamingMessage,
+    GestureActivation, GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions,
+    GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, InstantMessage, Kick, LandSearchType,
+    LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer, MapRegionInfo,
+    MapRequestFlags, MeanCollision, MovementMode, NotecardRez, ObjectBuyItem,
+    ObjectPropertiesFamily, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult,
+    Postcard, ProposalVoteId, RegionIdentity, RegionStats, Reliability, RestoreItem, RezAttachment,
+    SaleType, ScriptControl, ServerError, SimulatorTime, TelehubInfo, Throttle, Transmit,
+    ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
 
@@ -2682,6 +2687,103 @@ impl SimSession {
             },
             data_block: GenericStreamingMessageDataBlockBlock {
                 data: streaming.data.clone(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `Error` — the lowest-common-denominator UDP error channel a
+    /// simulator (or a service behind it) uses to report a failed exchange (the
+    /// inverse of the client's
+    /// [`Event::ServerError`](crate::Event::ServerError)). The recipient
+    /// [`AgentKey`], HTTP-like [`code`](crate::ServerError::code), short
+    /// [`token`](crate::ServerError::token), polymorphic correlation
+    /// [`id`](crate::ServerError::id), originating
+    /// [`system`](crate::ServerError::system) path, human-readable
+    /// [`message`](crate::ServerError::message), and verbatim binary-LLSD
+    /// [`data`](crate::ServerError::data) blob are all carried as supplied. Sent
+    /// reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_error(&mut self, error: &ServerError, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::Error(ErrorWire {
+            agent_data: ErrorAgentDataBlock {
+                agent_id: error.agent.uuid(),
+            },
+            data: ErrorDataBlock {
+                code: error.code,
+                token: with_nul(&error.token),
+                id: error.id,
+                system: with_nul(&error.system),
+                message: with_nul(&error.message),
+                data: error.data.clone(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `FeatureDisabled` — a notice that a feature the agent asked for is
+    /// unavailable (the inverse of the client's
+    /// [`Event::FeatureDisabled`](crate::Event::FeatureDisabled)). Carries the
+    /// human-readable reason, the recipient [`AgentKey`], and the
+    /// [`TransactionId`](crate::TransactionId) of the exchange the feature would
+    /// have served (often nil). Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_feature_disabled(
+        &mut self,
+        disabled: &FeatureDisabled,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::FeatureDisabled(FeatureDisabledWire {
+            failure_info: FeatureDisabledFailureInfoBlock {
+                error_message: with_nul(&disabled.message),
+                agent_id: disabled.agent.uuid(),
+                transaction_id: disabled.transaction.get(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `KickUser` — a server-initiated forced logout (the inverse of the
+    /// client's [`Event::Kicked`](crate::Event::Kicked)), for example when the
+    /// same account logs in elsewhere. Carries the kicked [`AgentKey`] and the
+    /// human-readable reason; the `SessionID` echo is filled from the circuit and
+    /// the routing `TargetBlock` (target sim address) is zeroed, since the client
+    /// drops both. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_kick_user(&mut self, kick: &Kick, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::KickUser(KickUser {
+            target_block: KickUserTargetBlockBlock {
+                target_ip: [0; 4],
+                target_port: 0,
+            },
+            user_info: KickUserUserInfoBlock {
+                agent_id: kick.agent.uuid(),
+                session_id: self.session_id.unwrap_or_else(Uuid::nil),
+                reason: with_nul(&kick.reason),
             },
         });
         self.send(&message, Reliability::Reliable, now)?;
