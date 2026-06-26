@@ -157,12 +157,56 @@ use crate::types::{
     MeanCollision, MovementMode, NavMeshStatus, NotecardRez, ObjectBuyItem, ObjectExtraParams,
     ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails,
     ParcelObjectOwner, PlacesResult, Postcard, PrimShapeParams, ProposalVoteId, RegionIdentity,
-    RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, SaleType,
-    ScriptControl, ServerError, SetDisplayNameReply, SimulatorTime, TaskInventoryReply,
-    TelehubInfo, TextureEntry, Throttle, Transmit, UserInfo, ViewerEffect, ViewerEffectData,
-    ViewerEffectType,
+    RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, SaleType, ScriptControl, ScriptPermissions, ServerError, SetDisplayNameReply,
+    SimulatorTime, TaskInventoryReply, TelehubInfo, TextureEntry, Throttle, Transmit, UserInfo,
+    ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
+
+/// Decodes a [`RestoreItem`] from one of the field-identical inventory-item
+/// blocks the rez messages carry (`RezRestoreToWorld`, `RezObject`, `RezScript`).
+/// The blocks are distinct generated wire types but share the same field names,
+/// so a macro reuses the decode without a 21-field helper or a trait over the
+/// three blocks. Expands to a `RestoreItem`; the `?` on the sale-price decode
+/// propagates a [`WireError`](sl_wire::WireError) to the enclosing method.
+macro_rules! restore_item_from_inventory_block {
+    ($block:expr) => {{
+        let block = $block;
+        RestoreItem {
+            item_id: InventoryKey::from(block.item_id),
+            folder_id: InventoryFolderKey::from(block.folder_id),
+            creator_id: AgentKey::from(block.creator_id),
+            owner: crate::types::inventory_owner_from_wire(
+                block.owner_id,
+                block.group_id,
+                block.group_owned,
+            ),
+            group: crate::types::group_from_wire(block.group_id),
+            permissions: Permissions5 {
+                base: Permissions::from_bits(block.base_mask),
+                owner: Permissions::from_bits(block.owner_mask),
+                group: Permissions::from_bits(block.group_mask),
+                everyone: Permissions::from_bits(block.everyone_mask),
+                next_owner: Permissions::from_bits(block.next_owner_mask),
+            },
+            transaction_id: block.transaction_id,
+            asset_type: block.r#type,
+            inv_type: block.inv_type,
+            flags: block.flags,
+            sale_type: SaleType::from_code(block.sale_type),
+            sale_price: crate::types::linden_price_from_wire(
+                block.sale_type != 0,
+                "SalePrice",
+                block.sale_price,
+            )?,
+            name: trimmed_string(&block.name),
+            description: trimmed_string(&block.description),
+            creation_date: block.creation_date,
+            crc: block.crc,
+        }
+    }};
+}
 
 /// How long to batch owed acknowledgements before flushing them as a `PacketAck`
 /// (matches the client [`Session`](crate::Session)).
@@ -950,6 +994,42 @@ pub enum ServerEvent {
         local_id: RegionLocalObjectId,
         /// The object's complete extra-parameter state.
         params: ObjectExtraParams,
+    },
+    /// The client rezzed an inventory item into the world as a new object
+    /// (`RezObject`). The inverse of the client's
+    /// [`Session::rez_object_from_inventory`](crate::Session::rez_object_from_inventory)
+    /// (distinct from [`RezObjectFromNotecard`](Self::RezObjectFromNotecard),
+    /// which rezzes objects embedded in a notecard).
+    RezObjectFromInventory {
+        /// The ray placement, applied permission masks and the source inventory
+        /// item being rezzed.
+        params: RezObjectParams,
+    },
+    /// The client dropped a script inventory item into an in-world object's task
+    /// inventory (`RezScript`). The inverse of the client's
+    /// [`Session::rez_script`](crate::Session::rez_script).
+    RezScript {
+        /// The region-local id of the object whose task inventory receives the
+        /// script.
+        local_id: RegionLocalObjectId,
+        /// The running flag, active group and the script inventory item.
+        params: RezScriptParams,
+    },
+    /// The client revoked LSL script permissions previously granted to an object
+    /// (`RevokePermissions`). The inverse of the client's
+    /// [`Session::revoke_script_permissions`](crate::Session::revoke_script_permissions).
+    RevokeScriptPermissions {
+        /// The object whose granted permissions are revoked.
+        object_id: ObjectKey,
+        /// The permissions being revoked (an empty set revokes nothing).
+        permissions: ScriptPermissions,
+    },
+    /// The client detached a worn attachment back into inventory, named by its
+    /// inventory item id (`DetachAttachmentIntoInv`). The inverse of the client's
+    /// [`Session::detach_attachment_into_inventory`](crate::Session::detach_attachment_into_inventory).
+    DetachAttachmentIntoInventory {
+        /// The inventory item id of the worn attachment being detached.
+        item_id: InventoryKey,
     },
     /// Any other decoded client message, surfaced verbatim. This is how the
     /// remaining client-only messages reach the simulator: fully decoded but
@@ -4046,40 +4126,8 @@ impl SimSession {
                 });
             }
             AnyMessage::RezRestoreToWorld(restore) => {
-                let data = &restore.inventory_data;
                 self.events.push_back(ServerEvent::RezRestoreToWorld {
-                    item: RestoreItem {
-                        item_id: InventoryKey::from(data.item_id),
-                        folder_id: InventoryFolderKey::from(data.folder_id),
-                        creator_id: AgentKey::from(data.creator_id),
-                        owner: crate::types::inventory_owner_from_wire(
-                            data.owner_id,
-                            data.group_id,
-                            data.group_owned,
-                        ),
-                        group: crate::types::group_from_wire(data.group_id),
-                        permissions: Permissions5 {
-                            base: Permissions::from_bits(data.base_mask),
-                            owner: Permissions::from_bits(data.owner_mask),
-                            group: Permissions::from_bits(data.group_mask),
-                            everyone: Permissions::from_bits(data.everyone_mask),
-                            next_owner: Permissions::from_bits(data.next_owner_mask),
-                        },
-                        transaction_id: data.transaction_id,
-                        asset_type: data.r#type,
-                        inv_type: data.inv_type,
-                        flags: data.flags,
-                        sale_type: SaleType::from_code(data.sale_type),
-                        sale_price: crate::types::linden_price_from_wire(
-                            data.sale_type != 0,
-                            "SalePrice",
-                            data.sale_price,
-                        )?,
-                        name: trimmed_string(&data.name),
-                        description: trimmed_string(&data.description),
-                        creation_date: data.creation_date,
-                        crc: data.crc,
-                    },
+                    item: restore_item_from_inventory_block!(&restore.inventory_data),
                 });
             }
             AnyMessage::RezObjectFromNotecard(rez) => {
@@ -4377,6 +4425,49 @@ impl SimSession {
                         params: decode_extra_param_blocks(blocks),
                     });
                 }
+            }
+            AnyMessage::RezObject(rez) => {
+                let rez_data = &rez.rez_data;
+                self.events.push_back(ServerEvent::RezObjectFromInventory {
+                    params: RezObjectParams {
+                        group_id: crate::types::optional_key_from_wire(rez.agent_data.group_id),
+                        from_task_id: crate::types::optional_key_from_wire(rez_data.from_task_id),
+                        bypass_raycast: rez_data.bypass_raycast != 0,
+                        ray_start: rez_data.ray_start.clone(),
+                        ray_end: rez_data.ray_end.clone(),
+                        ray_target_id: crate::types::optional_key_from_wire(rez_data.ray_target_id),
+                        ray_end_is_intersection: rez_data.ray_end_is_intersection,
+                        rez_selected: rez_data.rez_selected,
+                        remove_item: rez_data.remove_item,
+                        item_flags: rez_data.item_flags,
+                        group_mask: rez_data.group_mask,
+                        everyone_mask: rez_data.everyone_mask,
+                        next_owner_mask: rez_data.next_owner_mask,
+                        item: restore_item_from_inventory_block!(&rez.inventory_data),
+                    },
+                });
+            }
+            AnyMessage::RezScript(rez) => {
+                self.events.push_back(ServerEvent::RezScript {
+                    local_id: RegionLocalObjectId(rez.update_block.object_local_id),
+                    params: RezScriptParams {
+                        group_id: crate::types::optional_key_from_wire(rez.agent_data.group_id),
+                        enabled: rez.update_block.enabled,
+                        item: restore_item_from_inventory_block!(&rez.inventory_block),
+                    },
+                });
+            }
+            AnyMessage::RevokePermissions(revoke) => {
+                self.events.push_back(ServerEvent::RevokeScriptPermissions {
+                    object_id: ObjectKey::from(revoke.data.object_id),
+                    permissions: ScriptPermissions(revoke.data.object_permissions.cast_signed()),
+                });
+            }
+            AnyMessage::DetachAttachmentIntoInv(detach) => {
+                self.events
+                    .push_back(ServerEvent::DetachAttachmentIntoInventory {
+                        item_id: InventoryKey::from(detach.object_data.item_id),
+                    });
             }
             AnyMessage::LogoutRequest(_) => {
                 self.send_logout_reply(now)?;

@@ -945,7 +945,10 @@ the encoded buffer across, and assert the peer decodes the expected
   CallingCardAccepted, CallingCardDeclined)
 - [x] Sim out batch 2 — object prim-editing ServerEvents (ObjectShapeSet,
   ObjectImageSet, ObjectExtraParamsSet)
-- [ ] Sim out batch 3 — rez & script-permission ServerEvents
+- [x] Sim out batch 3 — rez & script-permission ServerEvents
+  (RezObjectFromInventory, RezScript, RevokeScriptPermissions,
+  DetachAttachmentIntoInventory; new `restore_item_from_inventory_block!` macro
+  shared with the existing `RezRestoreToWorld` decode)
 - [ ] Sim out batch 4 — task-inventory ServerEvents
 - [ ] Sim out batch 5 — land & parcel ServerEvents
 - [ ] Sim out batch 6 — inventory link & group-info ServerEvents
