@@ -58,18 +58,52 @@ forms:
   (`GiveInventory` / `GiveInventoryFolder`); incoming offers arrive as
   [instant messages](chat.md#instant-messages) and are accepted/declined with
   `AcceptInventoryOffer` / `DeclineInventoryOffer`.
+- **Links** — `LinkInventoryItem` creates a *link* item that points at an
+  existing item **or** folder (the wire `OldItemID`), filed in a destination
+  folder. The payload is a `NewInventoryLink`; the simulator allocates the link
+  item's real id, so `link_inventory_item` returns an `InventoryCallbackId` to
+  correlate the confirming `Event::InventoryItemCreated`.
 
 When the simulator creates an item, it allocates the real id and confirms via
 `Event::InventoryItemCreated`. Changes the server makes (including ones it made
 on your behalf) arrive as `Event::InventoryBulkUpdate`.
+
+## Rezzing an inventory item into the world
+
+`Command::RezObjectFromInventory { params }` takes an inventory item and rezzes
+it into the world as a new in-world object (`RezObject`). The `RezObjectParams`
+describes the ray placement, the permission masks the new object is created
+with, and the source inventory item (shared with the `RezRestoreToWorld`
+restore path). ([Wearing](attachments.md) an item onto the avatar instead is a
+separate command, and [dropping a script](scripts.md) into an existing object is
+`RezScript`.)
+
+## Server-pushed inventory changes
+
+The simulator can change inventory on its own — an item deleted from another
+session, moved to trash, or re-parented — and pushes the change so a client
+mirroring inventory stays in sync. None has a reply; a mirror simply applies it:
+
+- `Event::InventoryItemsRemoved { items }` — these items no longer exist.
+- `Event::InventoryFoldersRemoved { folders }` — these folders (and their
+  descendants) no longer exist.
+- `Event::InventoryObjectsRemoved { folders, items }` — a mixed removal of both
+  in a single message.
+- `Event::InventoryItemsMoved { stamp, moves }` — each `InventoryItemMove`
+  re-parents an item into a folder, optionally renaming it; `stamp` says whether
+  the simulator re-timestamped the moved items.
 
 ---
 
 > **In this codebase**
 >
 > - Core types are in `sl-proto/src/types/inventory.rs`: `InventoryFolder`,
->   `InventoryItem`, `NewInventoryItem`, `InventoryType`, plus `InventoryOffer`
->   for offers in IM binary buckets.
+>   `InventoryItem`, `NewInventoryItem`, `NewInventoryLink` (the
+>   `LinkInventoryItem` payload, pointing at an `InventoryItemOrFolderKey`),
+>   `InventoryItemMove` (the `InventoryItemsMoved` relocation), `InventoryType`,
+>   plus `InventoryOffer` for offers in IM binary buckets. `RezObjectParams`
+>   (the `RezObjectFromInventory` payload) is in
+>   `sl-proto/src/types/editing.rs`.
 > - The capability names are `CAP_FETCH_INVENTORY`
 >   (`FetchInventoryDescendents2`), `CAP_INVENTORY_API_V3` (`InventoryAPIv3`),
 >   `CAP_CREATE_INVENTORY_CATEGORY`, in `sl-proto/src/session.rs`. The AIS3

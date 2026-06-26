@@ -39,7 +39,10 @@ The client can:
   attachment mode.
 - **Detach back to inventory** by region-local id (`Command::DetachObjects`,
   `ObjectDetach`) or by inventory item id (`Command::RemoveAttachment`,
-  `RemoveAttachment`).
+  `RemoveAttachment`, or the equivalent
+  `Command::DetachAttachmentIntoInventory`, `DetachAttachmentIntoInv` — a
+  distinct wire message the viewer also uses to detach a worn attachment into
+  inventory by its item id).
 - **Drop onto the ground** by region-local id (`Command::DropAttachments`,
   `ObjectDrop`): the object becomes an ordinary in-world prim at the avatar's
   location.
@@ -51,8 +54,8 @@ attached the region also kills its in-world copy.
 
 The server side mirrors every inbound attachment message as a `ServerEvent`
 (`AttachObject`, `DetachObjects`, `DropAttachments`, `RemoveAttachment`,
-`RezAttachment`, `RezAttachments`), so a simulator built on `SimSession`
-observes exactly what a client wears.
+`RezAttachment`, `RezAttachments`, `DetachAttachmentIntoInventory`), so a
+simulator built on `SimSession` observes exactly what a client wears.
 
 ---
 
@@ -64,12 +67,14 @@ observes exactly what a client wears.
 >   `Keep`, the `RezAttachments` `FirstDetachAll` flag), and `RezAttachment`.
 >   The attachment list on `AvatarAppearance` uses `AvatarAttachment`.
 > - Commands `AttachObject`, `DetachObjects`, `DropAttachments`,
->   `RemoveAttachment`, `RezAttachment`, `RezAttachments`; the `Session` methods
->   are `attach_object`, `detach_objects`, `drop_attachments`,
->   `remove_attachment`, `rez_attachment`, `rez_attachments`; the wire encoders
->   are `send_object_attach` / `send_object_detach` / `send_object_drop` /
->   `send_remove_attachment` / `send_rez_single_attachment` /
->   `send_rez_multiple_attachments` in `sl-proto/src/session/circuit.rs`.
+>   `RemoveAttachment`, `RezAttachment`, `RezAttachments`,
+>   `DetachAttachmentIntoInventory`; the `Session` methods are `attach_object`,
+>   `detach_objects`, `drop_attachments`, `remove_attachment`, `rez_attachment`,
+>   `rez_attachments`, `detach_attachment_into_inventory` (the last takes the
+>   attachment's `InventoryKey`); the wire encoders are `send_object_attach` /
+>   `send_object_detach` / `send_object_drop` / `send_remove_attachment` /
+>   `send_rez_single_attachment` / `send_rez_multiple_attachments` in
+>   `sl-proto/src/session/circuit.rs`.
 > - Server events of the same names are decoded in
 >   `sl-proto/src/sim_session.rs`.
 > - REPL commands `attach_object`, `detach_objects`, `drop_attachments`,

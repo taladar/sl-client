@@ -1051,7 +1051,7 @@ events / REPL sub-bullets.
 - [x] Extend region/telemetry & land/parcel chapters
 - [x] Extend friends/profiles/groups chapters (calling cards, display names,
   user info, group title/info)
-- [ ] Extend world/scripts/inventory/attachments chapters (animations, prim
+- [x] Extend world/scripts/inventory/attachments chapters (animations, prim
   editing, task inventory, rez, detach)
 - [ ] Extend teleport & sound-media & appearance chapters
 - [ ] EventQueue event reference in `comms/caps.md`

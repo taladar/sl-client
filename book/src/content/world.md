@@ -48,6 +48,37 @@ Object updates also carry a **time dilation** value: when a region is overloaded
 it runs physics slower than real time, and the dilation lets the client
 interpolate correctly.
 
+### Object animations
+
+An **animated-mesh** (animesh) object can play skeletal animations of its own,
+driven by `llStartObjectAnimation`. The simulator pushes the object's current
+animation set as `Event::ObjectAnimation { object_id, animations }`, the object
+analogue of an avatar's [`AvatarAnimation`](#avatars-in-the-region). Like that
+event, the list is the *complete* authoritative set now playing — an animation
+that stops simply drops out of a later update — not a delta. Each
+`ObjectPlayingAnimation` pairs the animation's `anim_id` (an `AnimationKey`)
+with its `sequence_id`.
+
+### Editing objects
+
+A client with build rights reshapes a prim by sending edit messages that target
+it by [`ScopedObjectId`](#objects). Three rewrite the parts of an object that a
+full update carries:
+
+- `Command::SetObjectShape { local_id, shape }` sets the path/profile geometry —
+  the quantized `PrimShapeParams` that an `ObjectUpdate` decodes to.
+- `Command::SetObjectImage { local_id, media_url, texture_entry }` sets the
+  per-face textures and colours (a `TextureEntry`), plus the legacy parcel-media
+  URL (`None` for none).
+- `Command::SetObjectExtraParams { local_id, params }` sets the *complete*
+  extra-parameter state (flexi, light, sculpt, …). It is wholesale: any subtype
+  **absent** from `params` is cleared, so `ObjectExtraParams::default()` strips
+  every extra parameter from the prim.
+
+These join the other object-edit commands (material, flags, group, …); the
+simulator confirms each the usual way, by pushing the changed object's
+`ObjectUpdate`.
+
 ## The region handshake
 
 When a [circuit](../comms/circuits.md) to a region comes up, the region
@@ -209,7 +240,18 @@ None of these has a reply; the client just acts on them.
 >   `sl-proto/src/types/object.rs` (extra params in
 >   `sl-proto/src/extra_params.rs`, particles in `sl-proto/src/particles.rs`).
 >   Events: `ObjectAdded`, `ObjectUpdated`, `ObjectRemoved`, `ObjectProperties`,
->   `TimeDilation`.
+>   `TimeDilation`. Animesh animation pushes are
+>   `Event::ObjectAnimation { object_id, animations }` carrying
+>   `ObjectPlayingAnimation` (`anim_id` / `sequence_id`); the sim-side inverse
+>   is `SimSession::send_object_animation`.
+> - Object editing: `Command::SetObjectShape` / `SetObjectImage` /
+>   `SetObjectExtraParams` have `Session` helpers `set_object_shape` /
+>   `set_object_image` / `set_object_extra_params`
+>   (`sl-proto/src/session/methods.rs`), reusing the inbound `PrimShapeParams` /
+>   `TextureEntry` / `ObjectExtraParams` domain types. The simulator decodes
+>   them into `ServerEvent::ObjectShapeSet` / `ObjectImageSet` /
+>   `ObjectExtraParamsSet` (`sl-proto/src/sim_session.rs`); REPL tokens
+>   `set_object_shape` / `set_object_image` / `set_object_extra_params`.
 > - The region handshake yields `Event::RegionHandshakeComplete` then
 >   `Event::RegionInfoHandshake(RegionIdentity)`
 >   (`sl-proto/src/types/region.rs`); `Command::RequestRegionInfo` fetches
