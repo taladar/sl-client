@@ -152,14 +152,15 @@ use crate::types::{
     DisplayNameUpdate, EstateCovenant, EventInfo, FeatureDisabled, FollowCamPropertyValue,
     GenericMessage, GenericStreamingMessage, GestureActivation, GroupAccountDetails,
     GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
-    GroupVoteHistoryItem, InstantMessage, InventoryItemMove, Kick, LandSearchType, LandStatItem,
-    LandStatReportType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
-    MeanCollision, MovementMode, NavMeshStatus, NotecardRez, ObjectBuyItem, ObjectExtraParams,
-    ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails,
-    ParcelObjectOwner, PlacesResult, Postcard, PrimShapeParams, ProposalVoteId, RegionIdentity,
-    RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, SaleType, ScriptControl, ScriptPermissions, ServerError, SetDisplayNameReply,
-    SimulatorTime, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TextureEntry, Throttle,
+    GroupVoteHistoryItem, InstantMessage, InventoryItemMove, Kick, LandBrushAction, LandBrushSize,
+    LandEdit, LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer,
+    MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NavMeshStatus, NotecardRez,
+    ObjectBuyItem, ObjectExtraParams, ObjectPlayingAnimation, ObjectPropertiesFamily,
+    OpenRegionInfo, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult, Postcard,
+    PrimShapeParams, ProposalVoteId, RegionIdentity, RegionStats, Reliability,
+    RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
+    ScriptControl, ScriptPermissions, ServerError, SetDisplayNameReply, SimulatorTime,
+    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry, Throttle,
     Transmit, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
@@ -1069,6 +1070,38 @@ pub enum ServerEvent {
         local_id: RegionLocalObjectId,
         /// The inventory item id being removed.
         item_id: InventoryKey,
+    },
+    /// The client applied a terraform brush stroke (`ModifyLand`). The inverse
+    /// of the client's
+    /// [`Session::modify_land`](crate::Session::modify_land).
+    ModifyLand {
+        /// The decoded terraform edit (action, brush, strength, area, parcel).
+        edit: LandEdit,
+    },
+    /// The client undid its last terraform edit (`UndoLand`). The inverse of the
+    /// client's [`Session::undo_land`](crate::Session::undo_land).
+    UndoLand,
+    /// The client requested a parcel's properties by its region-local id
+    /// (`ParcelPropertiesRequestByID`). The inverse of the client's
+    /// [`Session::request_parcel_properties_by_id`](crate::Session::request_parcel_properties_by_id);
+    /// a simulator answers with a `ParcelProperties`.
+    RequestParcelPropertiesById {
+        /// The parcel's region-local id.
+        local_id: RegionLocalParcelId,
+        /// The query sequence id, echoed back in the reply.
+        sequence_id: i32,
+    },
+    /// The client set a parcel's auto-return time for other people's objects
+    /// (`ParcelSetOtherCleanTime`). The inverse of the client's
+    /// [`Session::set_parcel_other_clean_time`](crate::Session::set_parcel_other_clean_time).
+    SetParcelOtherCleanTime {
+        /// The parcel's region-local id.
+        local_id: RegionLocalParcelId,
+        /// The auto-return time, in whole minutes on the wire. [`Duration::ZERO`]
+        /// disables auto-return.
+        ///
+        /// [`Duration::ZERO`]: std::time::Duration::ZERO
+        clean_time: std::time::Duration,
     },
     /// Any other decoded client message, surfaced verbatim. This is how the
     /// remaining client-only messages reach the simulator: fully decoded but
@@ -4531,6 +4564,56 @@ impl SimSession {
                 self.events.push_back(ServerEvent::RemoveTaskInventory {
                     local_id: RegionLocalObjectId(remove.inventory_data.local_id),
                     item_id: InventoryKey::from(remove.inventory_data.item_id),
+                });
+            }
+            AnyMessage::ModifyLand(modify) => {
+                let block = &modify.modify_block;
+                // Prefer the authoritative metre radius from the extended block,
+                // falling back to the deprecated legacy index byte, then the
+                // default brush for an unrecognised value.
+                let brush_size = modify
+                    .modify_block_extended
+                    .first()
+                    .and_then(|extended| LandBrushSize::from_metres(extended.brush_size))
+                    .or_else(|| LandBrushSize::from_index(block.brush_size))
+                    .unwrap_or_default();
+                // The viewer sends exactly one ParcelData block; treat a missing
+                // block as a free brush stroke at the region origin.
+                let (parcel, area) = modify.parcel_data.first().map_or_else(
+                    || (None, TerraformArea::point(0.0, 0.0)),
+                    |data| {
+                        let parcel =
+                            (data.local_id >= 0).then_some(RegionLocalParcelId(data.local_id));
+                        let area = TerraformArea::new(data.west, data.south, data.east, data.north);
+                        (parcel, area)
+                    },
+                );
+                self.events.push_back(ServerEvent::ModifyLand {
+                    edit: LandEdit {
+                        action: LandBrushAction::from_code(block.action).unwrap_or_default(),
+                        brush_size,
+                        strength: block.seconds,
+                        height: block.height,
+                        parcel,
+                        area,
+                    },
+                });
+            }
+            AnyMessage::UndoLand(_) => {
+                self.events.push_back(ServerEvent::UndoLand);
+            }
+            AnyMessage::ParcelPropertiesRequestByID(request) => {
+                self.events
+                    .push_back(ServerEvent::RequestParcelPropertiesById {
+                        local_id: RegionLocalParcelId(request.parcel_data.local_id),
+                        sequence_id: request.parcel_data.sequence_id,
+                    });
+            }
+            AnyMessage::ParcelSetOtherCleanTime(set) => {
+                let minutes = u64::try_from(set.parcel_data.other_clean_time).unwrap_or(0);
+                self.events.push_back(ServerEvent::SetParcelOtherCleanTime {
+                    local_id: RegionLocalParcelId(set.parcel_data.local_id),
+                    clean_time: std::time::Duration::from_secs(minutes.saturating_mul(60)),
                 });
             }
             AnyMessage::LogoutRequest(_) => {

@@ -951,7 +951,10 @@ the encoded buffer across, and assert the peer decodes the expected
   shared with the existing `RezRestoreToWorld` decode)
 - [x] Sim out batch 4 — task-inventory ServerEvents (RequestTaskInventory,
       UpdateTaskInventory, MoveTaskInventory, RemoveTaskInventory)
-- [ ] Sim out batch 5 — land & parcel ServerEvents
+- [x] Sim out batch 5 — land & parcel ServerEvents (ModifyLand -> LandEdit,
+  UndoLand, RequestParcelPropertiesById -> RegionLocalParcelId + sequence_id,
+  SetParcelOtherCleanTime -> RegionLocalParcelId + Duration; new LandBrushSize
+  from_metres/from_index and LandBrushAction::from_code decoders)
 - [ ] Sim out batch 6 — inventory link & group-info ServerEvents
 - [ ] Sim out batch 7 — teleport & agent-prefs ServerEvents
 - [ ] Sim out batch 8 — user-info & sound ServerEvents

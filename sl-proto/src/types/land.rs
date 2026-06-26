@@ -92,6 +92,32 @@ impl LandBrushSize {
             Self::Large => 2,
         }
     }
+
+    /// Classifies a `ModifyBlockExtended` metre radius back into a brush size,
+    /// the inverse of [`to_metres`](Self::to_metres). Returns `None` for a
+    /// radius that is not one of the three viewer sizes.
+    #[must_use]
+    pub const fn from_metres(metres: f32) -> Option<Self> {
+        match metres.to_bits() {
+            bits if bits == 1.0_f32.to_bits() => Some(Self::Small),
+            bits if bits == 2.0_f32.to_bits() => Some(Self::Medium),
+            bits if bits == 4.0_f32.to_bits() => Some(Self::Large),
+            _ => None,
+        }
+    }
+
+    /// Classifies a legacy `BrushSize` index byte back into a brush size, the
+    /// inverse of [`to_index`](Self::to_index). Returns `None` for an
+    /// unrecognised index.
+    #[must_use]
+    pub const fn from_index(index: u8) -> Option<Self> {
+        match index {
+            0 => Some(Self::Small),
+            1 => Some(Self::Medium),
+            2 => Some(Self::Large),
+            _ => None,
+        }
+    }
 }
 
 /// The region-local ground rectangle a `ModifyLand` brush stroke covers, in
@@ -198,6 +224,22 @@ mod tests {
         );
         assert_eq!(LandBrushSize::Small.to_index(), 0);
         assert_eq!(LandBrushSize::Large.to_index(), 2);
+    }
+
+    /// [`LandBrushSize`] round-trips through both its metre radius and its
+    /// legacy index byte, and rejects values that are neither.
+    #[test]
+    fn land_brush_size_decodes_metres_and_index() {
+        for size in [
+            LandBrushSize::Small,
+            LandBrushSize::Medium,
+            LandBrushSize::Large,
+        ] {
+            assert_eq!(LandBrushSize::from_metres(size.to_metres()), Some(size));
+            assert_eq!(LandBrushSize::from_index(size.to_index()), Some(size));
+        }
+        assert_eq!(LandBrushSize::from_metres(3.0), None);
+        assert_eq!(LandBrushSize::from_index(3), None);
     }
 
     /// [`TerraformArea::point`] makes a zero-area rectangle at the point.
