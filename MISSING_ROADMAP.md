@@ -921,7 +921,9 @@ the encoded buffer across, and assert the peer decodes the expected
 
 - [x] Sim inbound batch 1 — region telemetry encoders (send_sim_stats,
   send_simulator_time)
-- [ ] Sim inbound batch 2 — generic message family encoders
+- [x] Sim inbound batch 2 — generic message family encoders
+  (send_generic_message, send_large_generic_message,
+  send_generic_streaming_message)
 - [ ] Sim inbound batch 3 — session error & disconnect encoders
 - [ ] Sim inbound batch 4 — scene & appearance encoders
 - [ ] Sim inbound batch 5 — friendship & calling-card encoders
