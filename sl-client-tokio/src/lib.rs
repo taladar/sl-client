@@ -1498,6 +1498,24 @@ impl Client {
                                 tokio::spawn(get_caps_llsd(url, CAP_READ_OFFLINE_MSGS, http.clone(), caps_tx.clone()));
                             }
                         }
+                        Some(Command::TeleportViaLandmark { landmark }) => {
+                            self.session.teleport_via_landmark(landmark, Instant::now())?;
+                        }
+                        Some(Command::CancelTeleport) => {
+                            self.session.cancel_teleport(Instant::now())?;
+                        }
+                        Some(Command::SetStartLocation { slot, position, look_at }) => {
+                            self.session.set_start_location(slot, position, look_at, Instant::now())?;
+                        }
+                        Some(Command::RequestAgentDataUpdate) => {
+                            self.session.request_agent_data_update(Instant::now())?;
+                        }
+                        Some(Command::QuitCopy) => {
+                            self.session.quit_copy(Instant::now())?;
+                        }
+                        Some(Command::SetVelocityInterpolation { enabled }) => {
+                            self.session.set_velocity_interpolation(enabled, Instant::now())?;
+                        }
                         Some(Command::Logout) | None => {
                             self.session.initiate_logout(Instant::now());
                         }

@@ -21,9 +21,9 @@ use crate::{
     ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
     PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId,
     RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, Rotation, SaleType, ScriptPermissions, TaskInventoryKey,
-    TextureEntry, TextureKey, Throttle, TransactionId, UpdateGroupInfoParams, Uuid, Vector,
-    ViewerEffect, VoiceProvisionRequest, Wearable,
+    RezObjectParams, RezScriptParams, Rotation, SaleType, ScriptPermissions, StartLocationSlot,
+    TaskInventoryKey, TextureEntry, TextureKey, Throttle, TransactionId, UpdateGroupInfoParams,
+    Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -2149,6 +2149,36 @@ pub enum Command {
     /// Read stored offline instant messages over the modern `ReadOfflineMsgs`
     /// capability; they arrive as offline [`Event::InstantMessageReceived`](crate::Event::InstantMessageReceived)s.
     RequestOfflineMessages,
+    /// Teleport to a landmark (`TeleportLandmarkRequest`). `None` teleports to
+    /// the agent's home location.
+    TeleportViaLandmark {
+        /// The landmark inventory item's asset id, or `None` for home.
+        landmark: Option<AssetKey>,
+    },
+    /// Cancel an in-progress teleport (`TeleportCancel`).
+    CancelTeleport,
+    /// Record a start location (`SetStartLocationRequest`): store `position` /
+    /// `look_at` as the named slot. The everyday use is
+    /// [`StartLocationSlot::Home`] ("set home to here").
+    SetStartLocation {
+        /// Which start-location slot to record.
+        slot: StartLocationSlot,
+        /// The region-local position to store.
+        position: RegionCoordinates,
+        /// The region-local look-at direction to store.
+        look_at: Vector,
+    },
+    /// Poll for a fresh `AgentDataUpdate` without changing any agent data
+    /// (`AgentDataUpdateRequest`).
+    RequestAgentDataUpdate,
+    /// Quit leaving the agent's in-world objects behind (`AgentQuitCopy`).
+    QuitCopy,
+    /// Toggle simulator-side velocity interpolation of object motion
+    /// (`VelocityInterpolateOn` / `VelocityInterpolateOff`).
+    SetVelocityInterpolation {
+        /// Whether to enable (`true`) or disable (`false`) interpolation.
+        enabled: bool,
+    },
     /// Begin a clean logout.
     Logout,
 }

@@ -69,10 +69,10 @@ use crate::types::{
     PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionInfoUpdate, RegionStats,
     Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
     ScriptControl, ScriptControlAction, ScriptPermissions, ScriptTeleportRequest, ServerError,
-    SimStatId, SimulatorTime, SoundFlags, SoundPreload, TaskInventoryKey, TaskInventoryReply,
-    TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle,
-    TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, Wearable, WearableType,
+    SimStatId, SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, TaskInventoryKey,
+    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
+    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -8732,6 +8732,135 @@ impl Session {
             target: region_handle,
         };
         self.state = SessionState::Teleporting;
+        Ok(())
+    }
+
+    /// Requests a teleport to a landmark (`TeleportLandmarkRequest`). `landmark`
+    /// is the landmark inventory item's *asset* id, or `None` to teleport to the
+    /// agent's home location (the wire `LandmarkID` is then nil). On success the
+    /// session re-establishes its circuit at the destination simulator and emits
+    /// [`Event::RegionChanged`]; on failure it emits [`Event::TeleportFailed`].
+    /// The destination region handle is unknown until the `TeleportFinish`
+    /// arrives, so the in-flight teleport phase carries no target hint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotActive`] if the session is not in the active state,
+    /// [`Error::NoCircuit`] if no circuit is established, or [`Error::Wire`] if
+    /// the request fails to encode.
+    pub fn teleport_via_landmark(
+        &mut self,
+        landmark: Option<AssetKey>,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if !matches!(self.state, SessionState::Active) {
+            return Err(Error::NotActive);
+        }
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_teleport_landmark_request(landmark, now)?;
+        circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
+        // A landmark teleport's destination is resolved sim-side; the
+        // authoritative handle arrives with the TeleportFinish.
+        self.teleport = TeleportPhase::Requested {
+            target: RegionHandle(0),
+        };
+        self.state = SessionState::Teleporting;
+        Ok(())
+    }
+
+    /// Cancels an in-progress teleport (`TeleportCancel`). If the session is
+    /// currently teleporting it returns to the active state and disarms the
+    /// teleport timeout; if no teleport is in flight the message is still sent
+    /// but has no local effect.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn cancel_teleport(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_teleport_cancel(now)?;
+        if matches!(self.state, SessionState::Teleporting) {
+            circuit.timers.teleport = None;
+            self.teleport = TeleportPhase::Idle;
+            self.state = SessionState::Active;
+        }
+        Ok(())
+    }
+
+    /// Records a start location (`SetStartLocationRequest`): stores `position`
+    /// and `look_at` (region-local) as the named [`StartLocationSlot`]. The
+    /// everyday use is [`StartLocationSlot::Home`] ("set home to here"). The
+    /// simulator fills in the region name, so none is taken here.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_start_location(
+        &mut self,
+        slot: StartLocationSlot,
+        position: RegionCoordinates,
+        look_at: Vector,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        // The wire blocks carry plain vectors; unwrap the typed region-local
+        // coordinates at the codec boundary.
+        let position = Vector {
+            x: position.x(),
+            y: position.y(),
+            z: position.z(),
+        };
+        circuit.send_set_start_location_request(slot, position, look_at, now)?;
+        Ok(())
+    }
+
+    /// Polls for a fresh `AgentDataUpdate` (`AgentDataUpdateRequest`) without
+    /// changing any agent data. The reply arrives as the already-handled
+    /// active-group update.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_agent_data_update(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_agent_data_update_request(now)?;
+        Ok(())
+    }
+
+    /// Quits the session leaving the agent's in-world objects behind
+    /// (`AgentQuitCopy`) — the "crash quit" the reference viewer sends so a
+    /// subsequent login can recover rezzed objects. Sends the message only; the
+    /// caller still drives the local shutdown (e.g. [`Session::initiate_logout`]
+    /// is the clean alternative).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn quit_copy(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_agent_quit_copy(now)?;
+        Ok(())
+    }
+
+    /// Toggles simulator-side velocity interpolation of object motion
+    /// (`VelocityInterpolateOn` / `VelocityInterpolateOff`): when enabled the
+    /// simulator smooths object positions between updates from their velocities.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_velocity_interpolation(&mut self, enabled: bool, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        if enabled {
+            circuit.send_velocity_interpolate_on(now)?;
+        } else {
+            circuit.send_velocity_interpolate_off(now)?;
+        }
         Ok(())
     }
 

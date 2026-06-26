@@ -61,9 +61,10 @@ use sl_proto::{
     Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionHandle,
     RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment,
     RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
-    ScriptPermissions, SculptData, SculptOrMeshKey, TaskInventoryKey, TerraformArea, TextureEntry,
-    TextureFace, Throttle, UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
+    ScriptPermissions, SculptData, SculptOrMeshKey, StartLocationSlot, TaskInventoryKey,
+    TerraformArea, TextureEntry, TextureFace, Throttle, UpdateGroupInfoParams, Uuid, Vector,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable,
+    WearableType,
 };
 
 use crate::args::{self, Args};
@@ -553,6 +554,20 @@ fn parse_land_brush_size(field: &str, value: &str) -> Result<LandBrushSize, Repl
         "medium" | "1" => LandBrushSize::Medium,
         "large" | "2" => LandBrushSize::Large,
         _ => return Err(invalid(field, value, "land brush size")),
+    })
+}
+
+/// Parse a [`StartLocationSlot`] from its name or wire code (`0` = last …
+/// `5` = url).
+fn parse_start_location_slot(field: &str, value: &str) -> Result<StartLocationSlot, ReplError> {
+    Ok(match norm(value).as_str() {
+        "last" | "0" => StartLocationSlot::Last,
+        "home" | "1" => StartLocationSlot::Home,
+        "direct" | "2" => StartLocationSlot::Direct,
+        "parcel" | "3" => StartLocationSlot::Parcel,
+        "telehub" | "4" => StartLocationSlot::Telehub,
+        "url" | "5" => StartLocationSlot::Url,
+        _ => return Err(invalid(field, value, "start location slot")),
     })
 }
 
@@ -2626,6 +2641,52 @@ fn all_specs() -> Vec<CommandSpec> {
                         y: 0.0,
                         z: 0.0,
                     }),
+                })
+            },
+        },
+        CommandSpec {
+            name: "teleport_via_landmark",
+            usage: "[landmark=<asset-id>]  (omit for home)",
+            build: |args, ctx| {
+                Ok(Command::TeleportViaLandmark {
+                    landmark: args
+                        .opt_parse::<Uuid>(ctx, "landmark", 0, "uuid")?
+                        .map(AssetKey::from),
+                })
+            },
+        },
+        CommandSpec {
+            name: "cancel_teleport",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::CancelTeleport),
+        },
+        CommandSpec {
+            name: "set_start_location",
+            usage: "<slot:last|home|direct|parcel|telehub|url> <position-vec> <look_at-vec>",
+            build: |args, ctx| {
+                Ok(Command::SetStartLocation {
+                    slot: enum_arg(args, ctx, "slot", 0, parse_start_location_slot)?,
+                    position: RegionCoordinates::from(args.req_vector(ctx, "position", 1)?),
+                    look_at: args.req_vector(ctx, "look_at", 2)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_agent_data_update",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::RequestAgentDataUpdate),
+        },
+        CommandSpec {
+            name: "quit_copy",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::QuitCopy),
+        },
+        CommandSpec {
+            name: "set_velocity_interpolation",
+            usage: "<enabled>",
+            build: |args, ctx| {
+                Ok(Command::SetVelocityInterpolation {
+                    enabled: args.req_bool(ctx, "enabled", 0)?,
                 })
             },
         },
@@ -4932,12 +4993,13 @@ mod tests {
     use std::collections::BTreeMap;
 
     use sl_proto::{
-        AbuseReportType, AgentKey, AgentPreferences, AssetType, ChatChannel, ChatType, CircuitId,
-        Command, ControlFlags, FriendRights, GroupKey, InventoryFolderKey,
+        AbuseReportType, AgentKey, AgentPreferences, AssetKey, AssetType, ChatChannel, ChatType,
+        CircuitId, Command, ControlFlags, FriendRights, GroupKey, InventoryFolderKey,
         InventoryItemOrFolderKey, InventoryKey, LandBrushAction, LandBrushSize, LandEdit,
         LandStatReportType, LindenAmount, MapItemType, MovementMode, ObjectBuyItem, ObjectKey,
         OwnerKey, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId,
-        ScopedParcelId, ScriptPermissions, TaskInventoryKey, TerraformArea, TransactionId, Uuid,
+        ScopedParcelId, ScriptPermissions, StartLocationSlot, TaskInventoryKey, TerraformArea,
+        TransactionId, Uuid,
     };
 
     use super::Registry;
@@ -5384,6 +5446,43 @@ mod tests {
             build(&format!("update_group_title {ONE} {TWO}")),
             Ok(Command::UpdateGroupTitle { group_id, title_role_id })
                 if group_id.uuid() == uuid(ONE) && title_role_id.uuid() == uuid(TWO)
+        ));
+    }
+
+    #[test]
+    fn teleport_via_landmark_parses_asset_and_home() {
+        assert!(matches!(
+            build(&format!("teleport_via_landmark {ONE}")),
+            Ok(Command::TeleportViaLandmark { landmark: Some(id) }) if id == AssetKey::from(uuid(ONE))
+        ));
+        // No argument means a home teleport (nil landmark).
+        assert!(matches!(
+            build("teleport_via_landmark"),
+            Ok(Command::TeleportViaLandmark { landmark: None })
+        ));
+    }
+
+    #[test]
+    fn set_start_location_parses_slot_and_vectors() {
+        assert!(matches!(
+            build("set_start_location home <64,96,25> <1,0,0>"),
+            Ok(Command::SetStartLocation { slot, position, look_at })
+                if slot == StartLocationSlot::Home
+                    && position.x().to_bits() == 64.0_f32.to_bits()
+                    && position.y().to_bits() == 96.0_f32.to_bits()
+                    && look_at.x.to_bits() == 1.0_f32.to_bits()
+        ));
+    }
+
+    #[test]
+    fn set_velocity_interpolation_parses() {
+        assert!(matches!(
+            build("set_velocity_interpolation true"),
+            Ok(Command::SetVelocityInterpolation { enabled: true })
+        ));
+        assert!(matches!(
+            build("set_velocity_interpolation false"),
+            Ok(Command::SetVelocityInterpolation { enabled: false })
         ));
     }
 

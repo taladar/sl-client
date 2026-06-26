@@ -443,7 +443,7 @@ pub use script::{
 pub use server_error::{FeatureDisabled, Kick, ServerError};
 pub use session::{
     Camera, CameraError, DisconnectReason, Kilobits, LoginHttpRequest, LoginParams, MovementMode,
-    Reliability, Throttle, ThrottleBuilder, ThrottleError, Transmit,
+    Reliability, StartLocationSlot, Throttle, ThrottleBuilder, ThrottleError, Transmit,
 };
 pub use terrain::{TerrainLayerType, TerrainPatch};
 pub use voice::RequiredVoiceVersion;
