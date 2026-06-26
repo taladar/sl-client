@@ -8864,6 +8864,73 @@ impl Session {
         Ok(())
     }
 
+    /// Requests the agent's own account contact preferences
+    /// (`UserInfoRequest`). The reply arrives as [`Event::UserInfo`] carrying the
+    /// IM-via-email flag, directory visibility, and the email address on file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_user_info(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_user_info_request(now)?;
+        Ok(())
+    }
+
+    /// Updates the agent's account contact preferences (`UpdateUserInfo`):
+    /// whether offline instant messages are forwarded to email (`im_via_email`)
+    /// and the directory/search visibility (`directory_visibility`, e.g.
+    /// `"default"` or `"hidden"`). Mirrors the writable fields of
+    /// [`Event::UserInfo`]; the email address itself is not settable over UDP
+    /// (the wire message carries no email field), so it is left unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn update_user_info(
+        &mut self,
+        im_via_email: bool,
+        directory_visibility: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_update_user_info(im_via_email, directory_visibility, now)?;
+        Ok(())
+    }
+
+    /// Triggers a one-shot spatial sound (`SoundTrigger`): plays `sound` at
+    /// `position` (region-local to `region_handle`) with linear `gain`
+    /// (`0.0`..=`1.0`). This is the viewer→sim counterpart of the inbound
+    /// [`Event::SoundTrigger`]; the simulator fills in the owner/object ids, so
+    /// only the asset, gain, and location are supplied. Sent unreliably, as the
+    /// reference viewer does.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn trigger_sound(
+        &mut self,
+        sound: AssetKey,
+        gain: f32,
+        region_handle: RegionHandle,
+        position: RegionCoordinates,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        // The wire block carries a plain vector; unwrap the typed region-local
+        // coordinates at the codec boundary.
+        let position = Vector {
+            x: position.x(),
+            y: position.y(),
+            z: position.z(),
+        };
+        circuit.send_sound_trigger(sound, gain, region_handle.0, position, now)?;
+        Ok(())
+    }
+
     /// Begins a clean logout: queues a `LogoutRequest` and arms the logout
     /// timeout. Does nothing if the session is already closing or closed.
     pub fn initiate_logout(&mut self, now: Instant) {

@@ -719,9 +719,29 @@ aditi.
   and velocity interpolation are OpenSim-testable; `AgentQuitCopy` is an
   inter-sim quit best exercised against SL.
 - **Out batch 8 — user info & sound.** `UserInfoRequest` / `UpdateUserInfo`
-  (read/write the email & IM-forwarding prefs — the outbound side of the
-  inbound batch-6 `UserInfoReply`), `SoundTrigger` (trigger a sound at the
-  agent's position).
+  (read/write the IM-forwarding & directory-visibility prefs — the outbound
+  side of the inbound batch-6 `UserInfoReply`), `SoundTrigger` (trigger a
+  one-shot spatial sound).
+
+  Implemented as `Session::request_user_info` (polls the agent's contact
+  prefs; the reply arrives as the already-handled [`Event::UserInfo`]),
+  `Session::update_user_info(im_via_email: bool, directory_visibility: &str)`
+  (the email address is *not* settable over UDP — the `UpdateUserInfo` wire
+  block carries no email field, only the writable IM-forwarding flag and the
+  directory-visibility string, so it mirrors the writable subset of
+  `Event::UserInfo`), and `Session::trigger_sound(sound: AssetKey, gain: f32,
+  region_handle: RegionHandle, position: RegionCoordinates)` (the viewer→sim
+  counterpart of the inbound `Event::SoundTrigger`; owner/object/parent ids
+  are left nil for the simulator to fill in, and it is sent **unreliably** as
+  the reference viewer's `send_sound_trigger` does — sound triggers are
+  best-effort). No new domain types: directory visibility stays a string
+  (symmetric with the inbound `UserInfo`), and the typed `AssetKey` /
+  `RegionHandle` / `RegionCoordinates` cover the sound trigger. Wired as
+  `Command::{RequestUserInfo, UpdateUserInfo, TriggerSound}` through the tokio
+  and bevy runtimes, the `command_name` formatter, and the `request_user_info`
+  / `update_user_info` / `trigger_sound` REPL tokens. Covered by two
+  pack-the-wire lifecycle tests and two REPL parse tests; user-info read/write
+  is OpenSim-testable, sound triggering exercises against either grid.
 - **Out batch 9 — god region/estate admin.** `RequestGodlikePowers`,
   `EjectUser`, `FreezeUser`, `GodUpdateRegionInfo`, `SimWideDeletes`. All
   `NotTrusted` and viewer-sent with the god bit set; gated on the agent holding
@@ -772,7 +792,7 @@ aditi.
 - [x] Out batch 7 — teleport & agent prefs (TeleportLandmarkRequest,
   TeleportCancel, SetStartLocationRequest, AgentDataUpdateRequest,
   AgentQuitCopy, VelocityInterpolateOn, VelocityInterpolateOff)
-- [ ] Out batch 8 — user info & sound (UserInfoRequest, UpdateUserInfo,
+- [x] Out batch 8 — user info & sound (UserInfoRequest, UpdateUserInfo,
   SoundTrigger)
 - [ ] Out batch 9 — god region/estate admin (RequestGodlikePowers, EjectUser,
   FreezeUser, GodUpdateRegionInfo, SimWideDeletes)

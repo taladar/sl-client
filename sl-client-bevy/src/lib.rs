@@ -2567,6 +2567,27 @@ fn advance_running(
             Command::SetVelocityInterpolation { enabled } => {
                 session.set_velocity_interpolation(*enabled, now).ok();
             }
+            Command::RequestUserInfo => {
+                session.request_user_info(now).ok();
+            }
+            Command::UpdateUserInfo {
+                im_via_email,
+                directory_visibility,
+            } => {
+                session
+                    .update_user_info(*im_via_email, directory_visibility, now)
+                    .ok();
+            }
+            Command::TriggerSound {
+                sound,
+                gain,
+                region_handle,
+                position,
+            } => {
+                session
+                    .trigger_sound(*sound, *gain, *region_handle, *position, now)
+                    .ok();
+            }
             Command::Logout => session.initiate_logout(now),
         }
     }

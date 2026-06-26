@@ -810,6 +810,9 @@ const fn command_name(command: &Command) -> &'static str {
         Command::RequestAgentDataUpdate => "request_agent_data_update",
         Command::QuitCopy => "quit_copy",
         Command::SetVelocityInterpolation { .. } => "set_velocity_interpolation",
+        Command::RequestUserInfo => "request_user_info",
+        Command::UpdateUserInfo { .. } => "update_user_info",
+        Command::TriggerSound { .. } => "trigger_sound",
         Command::Logout => "logout",
     }
 }

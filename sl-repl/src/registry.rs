@@ -2691,6 +2691,33 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "request_user_info",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::RequestUserInfo),
+        },
+        CommandSpec {
+            name: "update_user_info",
+            usage: "<im_via_email:bool> <directory_visibility:default|hidden>",
+            build: |args, ctx| {
+                Ok(Command::UpdateUserInfo {
+                    im_via_email: args.req_bool(ctx, "im_via_email", 0)?,
+                    directory_visibility: args.req_str(ctx, "directory_visibility", 1)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "trigger_sound",
+            usage: "<sound:asset-id> <gain:f32> <region_handle:u64> <position-vec>",
+            build: |args, ctx| {
+                Ok(Command::TriggerSound {
+                    sound: AssetKey::from(args.req_uuid(ctx, "sound", 0)?),
+                    gain: args.req_parse(ctx, "gain", 1, "f32")?,
+                    region_handle: RegionHandle(args.req_parse(ctx, "region_handle", 2, "u64")?),
+                    position: RegionCoordinates::from(args.req_vector(ctx, "position", 3)?),
+                })
+            },
+        },
+        CommandSpec {
             name: "request_region_info",
             usage: "",
             build: |_args, _ctx| Ok(Command::RequestRegionInfo),
@@ -5483,6 +5510,27 @@ mod tests {
         assert!(matches!(
             build("set_velocity_interpolation false"),
             Ok(Command::SetVelocityInterpolation { enabled: false })
+        ));
+    }
+
+    #[test]
+    fn update_user_info_parses_flag_and_visibility() {
+        assert!(matches!(
+            build("update_user_info true hidden"),
+            Ok(Command::UpdateUserInfo { im_via_email: true, directory_visibility })
+                if directory_visibility == "hidden"
+        ));
+    }
+
+    #[test]
+    fn trigger_sound_parses_asset_gain_handle_and_position() {
+        assert!(matches!(
+            build(&format!("trigger_sound {ONE} 0.5 1000 <64,96,25>")),
+            Ok(Command::TriggerSound { sound, gain, region_handle, position })
+                if sound == AssetKey::from(uuid(ONE))
+                    && gain.to_bits() == 0.5_f32.to_bits()
+                    && region_handle == RegionHandle(1000)
+                    && position.x().to_bits() == 64.0_f32.to_bits()
         ));
     }
 
