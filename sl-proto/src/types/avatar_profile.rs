@@ -353,6 +353,42 @@ pub struct LoginAccount {
     pub library_owner: Option<Uuid>,
 }
 
+/// The agent's directory (search) visibility — whether the account's online
+/// status is shown in the people-search directory. The wire field is a free
+/// string, but the only two values the reference viewer ever uses are
+/// `"default"` (shown) and `"hidden"`; it is driven by a single "hide my online
+/// status" toggle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectoryVisibility {
+    /// The default visibility — the account's online status is shown in search.
+    Default,
+    /// The account's online status is hidden from search.
+    Hidden,
+}
+
+impl DirectoryVisibility {
+    /// The wire token for this visibility (`"default"` or `"hidden"`).
+    #[must_use]
+    pub const fn to_wire(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Hidden => "hidden",
+        }
+    }
+
+    /// Parses the wire visibility token. Mirrors the reference viewer, which
+    /// treats only `"default"` as shown and maps `"hidden"` — and any
+    /// unrecognised value — to [`Hidden`](Self::Hidden) (a conservative
+    /// fallback).
+    #[must_use]
+    pub fn from_wire(visibility: &str) -> Self {
+        match visibility {
+            "default" => Self::Default,
+            _ => Self::Hidden,
+        }
+    }
+}
+
 /// The agent's own account contact preferences (`UserInfoReply`), sent in reply
 /// to a `UserInfoRequest`: whether offline IMs are forwarded to email, the
 /// agent's directory (search) visibility, and the email address on file.
@@ -361,9 +397,8 @@ pub struct LoginAccount {
 pub struct UserInfo {
     /// Whether offline instant messages are forwarded to the agent's email.
     pub im_via_email: bool,
-    /// The agent's directory/search visibility setting (e.g. `"default"` or
-    /// `"hidden"`).
-    pub directory_visibility: String,
+    /// The agent's directory/search visibility setting.
+    pub directory_visibility: DirectoryVisibility,
     /// The email address on file for the account.
     pub email: String,
 }

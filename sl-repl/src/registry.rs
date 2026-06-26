@@ -48,23 +48,23 @@ use sl_proto::TransactionId;
 use sl_proto::{
     AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentMode, AttachmentPoint,
     Camera, ChatType, ClassifiedCategory, ClassifiedUpdate, Command, ControlFlags,
-    CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, EstateAccessDelta,
-    ExperiencePermission, ExperienceUpdate, FlexibleData, FriendRights, GestureActivation,
-    GroupNoticeAttachment, GroupNoticeKey, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
-    InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LandBrushAction, LandBrushSize,
-    LandEdit, LandSearchType, LandStatReportType, LightData, LindenAmount, LookAtType, MapItemType,
-    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MovementMode,
-    MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
-    ObjectExtraParams, ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
-    ParcelUpdate, PermissionField, Permissions, Permissions5, PickKey, PickUpdate, PointAtType,
-    Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionHandle,
-    RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
-    ScriptPermissions, SculptData, SculptOrMeshKey, StartLocationSlot, TaskInventoryKey,
-    TerraformArea, TextureEntry, TextureFace, Throttle, UpdateGroupInfoParams, Uuid, Vector,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable,
-    WearableType,
+    CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility,
+    EstateAccessDelta, ExperiencePermission, ExperienceUpdate, FlexibleData, FriendRights,
+    GestureActivation, GroupNoticeAttachment, GroupNoticeKey, GroupRoleChange, GroupRoleEdit,
+    GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType,
+    LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatReportType, LightData,
+    LindenAmount, LookAtType, MapItemType, Material, MaterialOverrideUpdate, Maturity, MediaEntry,
+    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NewInventoryLink,
+    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPermMasks,
+    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+    ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, Permissions, Permissions5,
+    PickKey, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams, ProfileUpdate,
+    ProposalVoteId, RegionHandle, RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId,
+    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
+    ScopedObjectId, ScopedParcelId, ScriptPermissions, SculptData, SculptOrMeshKey,
+    StartLocationSlot, TaskInventoryKey, TerraformArea, TextureEntry, TextureFace, Throttle,
+    UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -554,6 +554,15 @@ fn parse_land_brush_size(field: &str, value: &str) -> Result<LandBrushSize, Repl
         "medium" | "1" => LandBrushSize::Medium,
         "large" | "2" => LandBrushSize::Large,
         _ => return Err(invalid(field, value, "land brush size")),
+    })
+}
+
+/// Parse a [`DirectoryVisibility`] from its wire token (`default` / `hidden`).
+fn parse_directory_visibility(field: &str, value: &str) -> Result<DirectoryVisibility, ReplError> {
+    Ok(match norm(value).as_str() {
+        "default" => DirectoryVisibility::Default,
+        "hidden" => DirectoryVisibility::Hidden,
+        _ => return Err(invalid(field, value, "directory visibility")),
     })
 }
 
@@ -2701,7 +2710,13 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::UpdateUserInfo {
                     im_via_email: args.req_bool(ctx, "im_via_email", 0)?,
-                    directory_visibility: args.req_str(ctx, "directory_visibility", 1)?,
+                    directory_visibility: enum_arg(
+                        args,
+                        ctx,
+                        "directory_visibility",
+                        1,
+                        parse_directory_visibility,
+                    )?,
                 })
             },
         },
@@ -5021,12 +5036,12 @@ mod tests {
 
     use sl_proto::{
         AbuseReportType, AgentKey, AgentPreferences, AssetKey, AssetType, ChatChannel, ChatType,
-        CircuitId, Command, ControlFlags, FriendRights, GroupKey, InventoryFolderKey,
-        InventoryItemOrFolderKey, InventoryKey, LandBrushAction, LandBrushSize, LandEdit,
-        LandStatReportType, LindenAmount, MapItemType, MovementMode, ObjectBuyItem, ObjectKey,
-        OwnerKey, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SaleType, ScopedObjectId,
-        ScopedParcelId, ScriptPermissions, StartLocationSlot, TaskInventoryKey, TerraformArea,
-        TransactionId, Uuid,
+        CircuitId, Command, ControlFlags, DirectoryVisibility, FriendRights, GroupKey,
+        InventoryFolderKey, InventoryItemOrFolderKey, InventoryKey, LandBrushAction, LandBrushSize,
+        LandEdit, LandStatReportType, LindenAmount, MapItemType, MovementMode, ObjectBuyItem,
+        ObjectKey, OwnerKey, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SaleType,
+        ScopedObjectId, ScopedParcelId, ScriptPermissions, StartLocationSlot, TaskInventoryKey,
+        TerraformArea, TransactionId, Uuid,
     };
 
     use super::Registry;
@@ -5517,8 +5532,10 @@ mod tests {
     fn update_user_info_parses_flag_and_visibility() {
         assert!(matches!(
             build("update_user_info true hidden"),
-            Ok(Command::UpdateUserInfo { im_via_email: true, directory_visibility })
-                if directory_visibility == "hidden"
+            Ok(Command::UpdateUserInfo {
+                im_via_email: true,
+                directory_visibility: DirectoryVisibility::Hidden,
+            })
         ));
     }
 

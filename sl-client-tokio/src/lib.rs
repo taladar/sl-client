@@ -1520,7 +1520,7 @@ impl Client {
                             self.session.request_user_info(Instant::now())?;
                         }
                         Some(Command::UpdateUserInfo { im_via_email, directory_visibility }) => {
-                            self.session.update_user_info(im_via_email, &directory_visibility, Instant::now())?;
+                            self.session.update_user_info(im_via_email, directory_visibility, Instant::now())?;
                         }
                         Some(Command::TriggerSound { sound, gain, region_handle, position }) => {
                             self.session.trigger_sound(sound, gain, region_handle, position, Instant::now())?;

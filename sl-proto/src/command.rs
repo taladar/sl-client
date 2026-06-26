@@ -9,8 +9,8 @@ use crate::{
     AbuseReport, AgentKey, AgentPreferences, AnimationKey, AnyMessage, AssetKey, AssetType,
     AttachmentMode, AttachmentPoint, Camera, ChatChannel, ChatType, ClassifiedCategory,
     ClassifiedKey, ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams,
-    DeRezDestination, DetachOrder, DirFindFlags, Distance, EstateAccessDelta, EventId,
-    ExperienceKey, ExperiencePermission, ExperienceUpdate, FriendKey, FriendRights,
+    DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility, Distance, EstateAccessDelta,
+    EventId, ExperienceKey, ExperiencePermission, ExperienceUpdate, FriendKey, FriendRights,
     GestureActivation, GroupKey, GroupNoticeAttachment, GroupNoticeKey, GroupRequestId,
     GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate,
     InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandEdit,
@@ -2186,9 +2186,8 @@ pub enum Command {
     UpdateUserInfo {
         /// Whether offline instant messages are forwarded to the agent's email.
         im_via_email: bool,
-        /// The directory/search visibility setting (e.g. `"default"` or
-        /// `"hidden"`).
-        directory_visibility: String,
+        /// The directory/search visibility setting.
+        directory_visibility: DirectoryVisibility,
     },
     /// Trigger a one-shot spatial sound (`SoundTrigger`) at a region-local
     /// position.
