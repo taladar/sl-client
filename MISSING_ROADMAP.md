@@ -855,3 +855,147 @@ aditi.
   FreezeUser, GodUpdateRegionInfo, SimWideDeletes)
 - [x] Out batch 10 — god parcel/object/land admin (ParcelGodForceOwner,
   ParcelGodMarkAsContent, EventGodDelete, StateSave, ViewerStartAuction)
+
+## Server-side (SimSession) parity
+
+The batches above made the **client** (`Session`) handle every relevant message
+in both directions. `SimSession` (`sl-proto/src/sim_session.rs`) is the sans-IO
+**mirror** of `Session`, and the workspace's goal is a fully bidirectional
+surface tested by pairing the two and passing buffers between them (see
+`book/src/architecture.md`). Today `SimSession` has **no inverse for any of the
+batches above**, so this part tracks closing that gap. Two rules invert the
+client audit:
+
+- A message the **client receives** (inbound batches 1–6 / EQ batches 1–3) must
+  be **emittable** by `SimSession` — a typed `send_*` UDP encoder or a typed
+  `enqueue_*` CAPS event-queue helper, built on the existing
+  `SimSession::push` and `enqueue_caps_event` primitives and mirroring
+  `send_chat_from_simulator` / `send_region_handshake`. No new `ServerEvent` is
+  needed (these are server→client only).
+- A message the **client sends** (outbound batches 1–10) must be **decoded** by
+  `SimSession` into a typed `ServerEvent` variant (extend the `ServerEvent` enum
+  and add a dispatch arm), replacing the lossy
+  `ServerEvent::ClientMessage(Box<AnyMessage>)` fall-through and mirroring the
+  existing `AgentUpdate` arm.
+
+All sim-side work **reuses the client-side domain structs** already defined
+(`GenericMessage`, `ServerError`, `RestoreItem`, `GodRegionUpdate`,
+`EjectAction`, `SimWideDeleteFlags`, etc.) — no new wire types. Each batch is
+exercised by a **round-trip** test: pair a `Session` with a `SimSession`, pass
+the encoded buffer across, and assert the peer decodes the expected
+`Event` / `ServerEvent`.
+
+- **Sim inbound batches 1–6 — `send_*` encoders** for the 23 server→client
+  messages, mirroring client inbound batches 1–6: batch 1 `send_sim_stats` /
+  `send_simulator_time`; batch 2 `send_generic_message` /
+  `send_large_generic_message` / `send_generic_streaming_message`; batch 3
+  `send_error` / `send_feature_disabled` / `send_kick_user`; batch 4
+  `send_object_animation` / `send_rebake_avatar_textures`; batch 5
+  `send_terminate_friendship` plus the calling-card trio (`send_offer_` /
+  `send_accept_` / `send_decline_calling_card`); batch 6 the inventory
+  remove/move set (`send_remove_inventory_item` / `_folder` / `_objects`,
+  `send_move_inventory_item`), `send_reply_task_inventory`,
+  `send_user_info_reply`, `send_derez_ack`, `send_force_object_select`,
+  `send_grant_godlike_powers`.
+- **Sim EQ batches 1–3 — typed `enqueue_*` CAPS helpers** for the 9 push events,
+  mirroring client EQ batches 1–3 (AgentStateUpdate, NavMeshStatus,
+  AgentDropGroup, DisplayNameUpdate, SetDisplayNameReply, WindLightRefresh,
+  SimConsoleResponse, RequiredVoiceVersion, OpenRegionInfo). Each wraps
+  `enqueue_caps_event` with an LLSD builder that **inverts** the client's
+  matching `*_from_llsd` conversion in `session/conversions.rs`.
+- **Sim outbound batches 1–10 — decode + `ServerEvent` variants** for the 40
+  client→server messages, grouped exactly as client out-batches 1–10 (calling
+  cards; prim editing; rez & script perms; task inventory; land & parcel;
+  inventory link & group info; teleport & agent prefs; user info & sound; god
+  region/estate admin; god parcel/object/land admin). Each adds one
+  `ServerEvent` variant carrying the decoded domain payload and one dispatch
+  arm ahead of the `ClientMessage` fall-through.
+- **SKIP (no sim mirror), carried over from the client audit:** transport
+  (ping/circuit — already handled in `SimSession`'s circuit management),
+  sim↔sim trust, and the deprecated Xfer/AIS3/NVP families. `Error` is
+  encoder-only on the sim side: the client treats it as receive-only
+  (`Event::ServerError`), so the sim needs `send_error` but no client-sent
+  `Error` handler.
+
+### Server-side status
+
+- [ ] Sim inbound batch 1 — region telemetry encoders (send_sim_stats,
+  send_simulator_time)
+- [ ] Sim inbound batch 2 — generic message family encoders
+- [ ] Sim inbound batch 3 — session error & disconnect encoders
+- [ ] Sim inbound batch 4 — scene & appearance encoders
+- [ ] Sim inbound batch 5 — friendship & calling-card encoders
+- [ ] Sim inbound batch 6 — inventory sync, task inventory & misc encoders
+- [ ] Sim EQ batches 1–3 — typed CAPS event-queue enqueue helpers
+- [ ] Sim out batch 1 — calling-card ServerEvents
+- [ ] Sim out batch 2 — object prim-editing ServerEvents
+- [ ] Sim out batch 3 — rez & script-permission ServerEvents
+- [ ] Sim out batch 4 — task-inventory ServerEvents
+- [ ] Sim out batch 5 — land & parcel ServerEvents
+- [ ] Sim out batch 6 — inventory link & group-info ServerEvents
+- [ ] Sim out batch 7 — teleport & agent-prefs ServerEvents
+- [ ] Sim out batch 8 — user-info & sound ServerEvents
+- [ ] Sim out batch 9 — god region/estate-admin ServerEvents
+- [ ] Sim out batch 10 — god parcel/object/land-admin ServerEvents
+
+## Book documentation
+
+The mdBook (`book/`) lags the protocol surface the batches above added. The
+book's convention is to fold the server-side encoders into each feature
+chapter's `> **In this codebase**` note (see `content/search.md`,
+`content/groups.md`, `content/object-commerce.md`), so these doc steps pair
+with the SimSession parity work — document a feature's server side as its
+encoders/handlers land. Follow the house style: kebab-case filenames, a single
+`#` title, `##` / `###` sections, 80-column wrap (rumdl `reflow = true`),
+backticked type/path references, relative-link cross-references, and the
+`> **In this codebase**` blockquote with Types / Commands / Events / Server
+events / REPL sub-bullets.
+
+- **New chapter `comms/generic-messages.md` (Part 1 — Communication Layer,
+  immediately after `Messages & the Template`).** The generic message
+  mechanism. Sections: motivation (loosely-coupled features that don't warrant
+  a dedicated message); the method-envelope shape; the three flavours
+  (`GenericMessage` Low 261 — method name + invoice + variable param list;
+  `LargeGenericMessage` Low 430 — same shape, larger per-param wire limit;
+  `GenericStreamingMessage` High 31 — numeric method id + a single binary
+  blob); worked examples (`emptymutelist`, `GrantUserRights`, the `0x4175` GLTF
+  material override); the "parameter parsing is the feature handler's job"
+  contract; and an `> **In this codebase**` note citing
+  `sl-proto/src/types/generic.rs`, the `Event::GenericMessage` /
+  `Event::LargeGenericMessage` / `Event::GenericStreamingMessage` variants, and
+  the `SimSession::send_generic_*` encoders once they land. Add the
+  `SUMMARY.md` entry under `[Messages & the Template](comms/messages.md)`.
+- **New chapter `content/god-tools.md` (Part 2 — Content Layer, after
+  `Region & Estate Information`).** The god/estate-admin surface: inbound
+  `GrantGodlikePowers` / `ForceObjectSelect` plus out-batches 9–10
+  (RequestGodlikePowers, Eject/Freeze, GodUpdateRegionInfo, SimWideDeletes,
+  ParcelGodForceOwner / ParcelGodMarkAsContent, EventGodDelete, StateSave,
+  ViewerStartAuction). Add the `SUMMARY.md` entry after
+  `[Region & Estate Information](content/region.md)`.
+- **Extend existing chapters** for the remaining new families, per the audit's
+  per-chapter map: `comms/sessions.md` (Error / FeatureDisabled / KickUser
+  error handling); `content/region.md` (SimStats / SimulatorTime telemetry +
+  land & parcel out-batch 5); `content/friends.md` (calling cards +
+  TerminateFriendship); `content/profiles.md` (UserInfo + display-name EQ
+  events + UpdateUserInfo); `content/world.md` (ObjectAnimation + prim-edit
+  out-batch 2); `content/inventory.md` + `content/scripts.md` (task inventory,
+  inventory remove/move, LinkInventoryItem); `content/groups.md` (group title /
+  info); `content/teleport.md` (out-batch 7); `content/sound-media.md`
+  (SoundTrigger); `content/appearance.md` (RebakeAvatarTextures);
+  `content/attachments.md` (DetachAttachmentIntoInv).
+- **EventQueue reference** — extend `comms/caps.md` with a table of the
+  recognised event-queue event names and their LLSD bodies (the 9 EQ-batch
+  events), so an unrecognised event is easy to place.
+
+### Documentation status
+
+- [ ] New chapter — `comms/generic-messages.md` (generic message mechanism)
+- [ ] New chapter — `content/god-tools.md` (god/estate-admin surface)
+- [ ] Extend `comms/sessions.md` — session errors & forced disconnect
+- [ ] Extend region/telemetry & land/parcel chapters
+- [ ] Extend friends/profiles/groups chapters (calling cards, display names,
+  user info, group title/info)
+- [ ] Extend world/scripts/inventory/attachments chapters (animations, prim
+  editing, task inventory, rez, detach)
+- [ ] Extend teleport & sound-media & appearance chapters
+- [ ] EventQueue event reference in `comms/caps.md`
