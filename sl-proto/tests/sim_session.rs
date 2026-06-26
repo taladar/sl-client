@@ -15,7 +15,7 @@ mod test {
         ClassifiedCategory, ClassifiedKey, CoarseLocation, ControlFlags, DetachOrder,
         DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
         DirPeopleResult, DirPlaceResult, EstateCovenant, Event, EventId, EventInfo,
-        FeatureDisabled, FollowCamProperty, FollowCamPropertyValue, GenericMessage,
+        FeatureDisabled, FollowCamProperty, FollowCamPropertyValue, FriendKey, GenericMessage,
         GenericStreamingMessage, GestureActivation, GlobalCoordinates, GridCoordinates,
         GridRectangle, GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
         GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupKey,
@@ -2328,6 +2328,71 @@ mod test {
             })
             .ok_or("expected a RebakeAvatarTextures client event")?;
         assert_eq!(texture_id, baked);
+        Ok(())
+    }
+
+    #[test]
+    fn friendship_and_calling_cards_reach_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let former_friend = FriendKey::from(uuid::Uuid::from_u128(0xF1E0));
+        let offerer = AgentKey::from(uuid::Uuid::from_u128(0x0FFE));
+        let offer_txn = TransactionId::from(uuid::Uuid::from_u128(0x701));
+        let accepter = AgentKey::from(uuid::Uuid::from_u128(0xACCE));
+        let accept_txn = TransactionId::from(uuid::Uuid::from_u128(0x702));
+        let decliner = AgentKey::from(uuid::Uuid::from_u128(0xDEC1));
+        let decline_txn = TransactionId::from(uuid::Uuid::from_u128(0x703));
+
+        sim.send_terminate_friendship(former_friend, now)?;
+        sim.send_offer_calling_card(offerer, offer_txn, now)?;
+        sim.send_accept_calling_card(accepter, accept_txn, now)?;
+        sim.send_decline_calling_card(decliner, decline_txn, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_client(&mut client);
+        let other = events
+            .iter()
+            .find_map(|e| match e {
+                Event::FriendshipTerminated { other } => Some(*other),
+                _ => None,
+            })
+            .ok_or("expected a FriendshipTerminated client event")?;
+        assert_eq!(other, former_friend);
+
+        let (offering_agent, transaction) = events
+            .iter()
+            .find_map(|e| match e {
+                Event::CallingCardOffered {
+                    offering_agent,
+                    transaction,
+                } => Some((*offering_agent, *transaction)),
+                _ => None,
+            })
+            .ok_or("expected a CallingCardOffered client event")?;
+        assert_eq!(offering_agent, offerer);
+        assert_eq!(transaction, offer_txn);
+
+        let (agent, transaction) = events
+            .iter()
+            .find_map(|e| match e {
+                Event::CallingCardAccepted { agent, transaction } => Some((*agent, *transaction)),
+                _ => None,
+            })
+            .ok_or("expected a CallingCardAccepted client event")?;
+        assert_eq!(agent, accepter);
+        assert_eq!(transaction, accept_txn);
+
+        let (agent, transaction) = events
+            .iter()
+            .find_map(|e| match e {
+                Event::CallingCardDeclined { agent, transaction } => Some((*agent, *transaction)),
+                _ => None,
+            })
+            .ok_or("expected a CallingCardDeclined client event")?;
+        assert_eq!(agent, decliner);
+        assert_eq!(transaction, decline_txn);
         Ok(())
     }
 
