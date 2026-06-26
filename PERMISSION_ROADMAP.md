@@ -1242,12 +1242,41 @@ neighbourhood; B4 on B2's `ScriptGrantInfo` (+ B2.5's denied status) + B3's
       resolving to the own-avatar object); a neighbour crossing keeps all; a
       `DisableSimulator` for a child circuit drops that circuit's grants; a
       `KillObject` for a granted object drops its grant.
-- [ ] **B2.5 (from Open-question #2). Distinguish *denied* from *never-asked*.**
+- [x] **B2.5 (from Open-question #2). Distinguish *denied* from *never-asked*.**
       Reverses A3's "deny is the absence of an entry": the driver's UI that
       prompts the user may want to know it already denied a script, so the
       mirror records an explicit denial. Depends on B2 (the registry it
       extends); sequenced **before B4** (the query surface the UI reads).
-      Sub-steps:
+      **Done 2026-06-26** — the per-holder registry value is now tri-state: a
+      new private `GrantStatus { Denied, Granted(ScriptPermissions) }` field
+      `status` on `ScriptGrant` (replacing the bare `granted` field), with
+      `kind` / `circuit` / `experience_id` staying at the struct level so a
+      denial carries the same reset-scoping data as a grant and the region-leave
+      / revoke `retain` closures read those fields **unchanged**.
+      `answer_script_permissions` now records `Denied` for an empty answer (was
+      "remove the entry"), always inserting (replacing any prior answer); a
+      never-asked holder stays absent. Added the public
+      `script_permission_status(task_id, item_id) -> ScriptPermissionStatus`
+      accessor (new public enum `NeverAsked` / `Denied` /
+      `Granted(ScriptPermissions)` in `types/script.rs`, re-exported) and a
+      `denied: bool` field on `ScriptGrantInfo` (set on denials, `granted` then
+      empty), so `script_grants()` now also yields denials. `revoke` only
+      touches `Granted` entries (a denial is always kept). Two new
+      `lifecycle.rs` tests (`never_asked_denied_and_granted_are_distinct`,
+      `teleport_drops_inworld_denial_keeps_attachment_denial`) plus the updated
+      `answer_records_grant_and_empty_denies` deny half. Builds, clippy-clean
+      (restriction lints), `cargo test --workspace` green.
+      **One adaptation vs the literal plan (no behavioural change):** the plan's
+      preferred enum was
+      `ScriptPermissionStatus { Denied, Granted(ScriptGrant) }` as the *whole*
+      map value; instead the status enum (`GrantStatus`) is a *field* of
+      `ScriptGrant`, keeping the common `kind` / `circuit` / `experience_id`
+      shared between the two states. This is the variant the plan's own
+      tiebreaker selects ("whichever keeps the existing reset/revoke `retain`
+      closures readable" — they stay literally unchanged) and avoids a name
+      clash with the public `ScriptPermissionState` snapshot (B4); the public
+      API (`script_permission_status` / `ScriptPermissionStatus` /
+      `ScriptGrantInfo.denied`) is exactly as specified. Sub-steps:
       - **Model** (`sl-proto/src/session.rs`): make the per-holder state
       tri-state. Either widen the registry value to a private
       `ScriptPermissionStatus { Denied, Granted(ScriptGrant) }` (absent key ≡

@@ -144,14 +144,38 @@ pub struct ScriptGrantInfo {
     pub task_id: ObjectKey,
     /// The script item id within the object.
     pub item_id: InventoryKey,
-    /// The granted permission subset (never empty — an empty grant is recorded
-    /// as no entry at all).
+    /// The granted permission subset. Empty when `denied` is set (an explicit
+    /// deny grants nothing).
     pub granted: ScriptPermissions,
+    /// `true` when the agent explicitly *denied* this script (answered with no
+    /// permissions); `granted` is then empty. Distinct from a never-asked
+    /// holder, which yields no [`ScriptGrantInfo`] at all.
+    pub denied: bool,
     /// Whether the holder is one of this agent's attachments (the grant crosses
     /// regions with the avatar) rather than an in-world object.
     pub is_attachment: bool,
     /// The experience the grant was made under, or `None` outside an experience.
     pub experience_id: Option<ExperienceKey>,
+}
+
+/// The tri-state status of a script's permission request in the session's
+/// permission mirror, returned by
+/// [`Session::script_permission_status`](crate::Session::script_permission_status).
+///
+/// Distinguishes a script the agent has never been asked about from one it
+/// explicitly denied — a distinction the driver's prompt UI needs (it may want
+/// to surface "you previously refused this script"). The simulator stays
+/// authoritative; this mirrors the agent's recorded answer, never a security
+/// boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptPermissionStatus {
+    /// No answer from this script's permission request has been recorded (the
+    /// holder is absent from the mirror).
+    NeverAsked,
+    /// The agent explicitly denied this script (answered with no permissions).
+    Denied,
+    /// The agent granted this (non-empty) permission subset.
+    Granted(ScriptPermissions),
 }
 
 /// A scripted-object request to open a URL (`llLoadURL`), parsed from a

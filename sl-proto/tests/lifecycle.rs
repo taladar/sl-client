@@ -33,13 +33,13 @@ mod test {
         ProductType, ProfileUpdate, QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle,
         RegionInfoUpdate, RegionName, Reliability, RequiredVoiceVersion, RestoreItem,
         RezAttachment, RezObjectParams, RezScriptParams, SaleType, Scale, ScopedObjectId,
-        ScopedParcelId, ScriptControlAction, ScriptPermissions, SculptOrMeshKey, Session,
-        SetDisplayNameReply, SimStatId, SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags,
-        StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea,
-        TerrainLayerType, TextureEntry, TextureFace, TextureKey, Throttle, TransactionId,
-        TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, WaterSettings, WearableType, avatar_texture, decode_texture_entry,
-        group_powers, pcode,
+        ScopedParcelId, ScriptControlAction, ScriptPermissionStatus, ScriptPermissions,
+        SculptOrMeshKey, Session, SetDisplayNameReply, SimStatId, SimWideDeleteFlags,
+        SimulatorTime, SkySettings, SoundFlags, StartLocationSlot, TaskInventoryKey,
+        TaskInventoryReply, TeleportFlags, TerraformArea, TerrainLayerType, TextureEntry,
+        TextureFace, TextureKey, Throttle, TransactionId, TransferStatus, Transmit,
+        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        WaterSettings, WearableType, avatar_texture, decode_texture_entry, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -12282,18 +12282,34 @@ mod test {
         assert_eq!(grant.task_id, task);
         assert_eq!(grant.item_id, item);
         assert_eq!(grant.granted, granted);
+        assert!(!grant.denied);
         // An unseen holder is classified in-world (the conservative default).
         assert!(!grant.is_attachment);
         assert_eq!(grant.experience_id, None);
+        assert_eq!(
+            session.script_permission_status(task, item),
+            ScriptPermissionStatus::Granted(granted)
+        );
 
-        // An empty answer denies: the mirror records that as no entry at all.
+        // An empty answer denies: the mirror records an explicit `Denied` entry
+        // (distinct from never-asked), with no granted permissions.
         session.answer_script_permissions(task, item, ScriptPermissions(0), None, now)?;
         drain(&mut session)?;
         assert_eq!(
             session.granted_permissions(task, item),
             ScriptPermissions(0)
         );
-        assert_eq!(session.script_grants().count(), 0);
+        assert_eq!(
+            session.script_permission_status(task, item),
+            ScriptPermissionStatus::Denied
+        );
+        let denial = session
+            .script_grants()
+            .next()
+            .ok_or("expected the denial recorded")?;
+        assert_eq!(session.script_grants().count(), 1);
+        assert!(denial.denied);
+        assert_eq!(denial.granted, ScriptPermissions(0));
         Ok(())
     }
 
@@ -12594,6 +12610,125 @@ mod test {
             session.granted_permissions(task, item),
             ScriptPermissions(0),
             "the grant should drop when the object is killed"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn never_asked_denied_and_granted_are_distinct() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0xB261));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0xB262));
+
+        // A holder no request has been answered for is never-asked, not denied.
+        assert_eq!(
+            session.script_permission_status(task, item),
+            ScriptPermissionStatus::NeverAsked
+        );
+
+        // An empty answer records an explicit denial (distinct from never-asked).
+        session.answer_script_permissions(task, item, ScriptPermissions(0), None, now)?;
+        drain(&mut session)?;
+        assert_eq!(
+            session.script_permission_status(task, item),
+            ScriptPermissionStatus::Denied
+        );
+        // `granted_permissions` cannot tell the two empty states apart.
+        assert_eq!(
+            session.granted_permissions(task, item),
+            ScriptPermissions(0)
+        );
+
+        // A grant supersedes the denial; a later denial supersedes the grant —
+        // one live state per script, the latest answer winning.
+        let granted = ScriptPermissions(ScriptPermissions::TRIGGER_ANIMATION);
+        session.answer_script_permissions(task, item, granted, None, now)?;
+        drain(&mut session)?;
+        assert_eq!(
+            session.script_permission_status(task, item),
+            ScriptPermissionStatus::Granted(granted)
+        );
+        assert_eq!(session.script_grants().count(), 1);
+
+        session.answer_script_permissions(task, item, ScriptPermissions(0), None, now)?;
+        drain(&mut session)?;
+        assert_eq!(
+            session.script_permission_status(task, item),
+            ScriptPermissionStatus::Denied
+        );
+        assert_eq!(session.script_grants().count(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn teleport_drops_inworld_denial_keeps_attachment_denial() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Seed our own avatar so an attachment parented to it is recognised.
+        let avatar = avatar_update(500, 1);
+        session.handle_datagram(sim_addr(), &server_message(&avatar, 5, true)?, now)?;
+        let attach = attachment_update(600, 0xA78, 500);
+        session.handle_datagram(sim_addr(), &server_message(&attach, 6, true)?, now)?;
+        let world = object_update(700, 0xB89, zero_vec());
+        session.handle_datagram(sim_addr(), &server_message(&world, 7, true)?, now)?;
+        drain_events(&mut session);
+        drain(&mut session)?;
+
+        // Deny both holders (empty answers) — a denial is region-scoped exactly
+        // like a grant: in-world is left behind, an attachment crosses.
+        let attach_task = ObjectKey::from(uuid::Uuid::from_u128(0xA78));
+        let world_task = ObjectKey::from(uuid::Uuid::from_u128(0xB89));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0x00C0_FFEF));
+        session.answer_script_permissions(attach_task, item, ScriptPermissions(0), None, now)?;
+        session.answer_script_permissions(world_task, item, ScriptPermissions(0), None, now)?;
+        drain(&mut session)?;
+        assert_eq!(
+            session.script_permission_status(attach_task, item),
+            ScriptPermissionStatus::Denied
+        );
+        assert_eq!(
+            session.script_permission_status(world_task, item),
+            ScriptPermissionStatus::Denied
+        );
+
+        // A real teleport drops the in-world denial and keeps the attachment one.
+        let handle = 0x0003_E900_0003_E800;
+        session.teleport_to(
+            RegionHandle(handle),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let finish = AnyMessage::TeleportFinish(TeleportFinish {
+            info: TeleportFinishInfoBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                location_id: 4,
+                sim_ip: [127, 0, 0, 1],
+                sim_port: 9100u16.swap_bytes(),
+                region_handle: handle,
+                seed_capability: b"http://x/permTPd\0".to_vec(),
+                sim_access: sl_wire::sim_access::MATURE,
+                teleport_flags: TeleportFlags::VIA_LURE,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&finish, 20, true)?, now)?;
+
+        assert_eq!(
+            session.script_permission_status(world_task, item),
+            ScriptPermissionStatus::NeverAsked,
+            "the in-world denial should be dropped on a real teleport"
+        );
+        assert_eq!(
+            session.script_permission_status(attach_task, item),
+            ScriptPermissionStatus::Denied,
+            "the attachment denial should survive the teleport"
         );
         Ok(())
     }
