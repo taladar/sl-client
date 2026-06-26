@@ -16,10 +16,45 @@ and the position/orientation within it. There are a few flavours:
 - **Lure** handling: you can offer another avatar a teleport
   (`Command::OfferTeleport`) and accept or decline an offered lure
   (`Command::AcceptTeleportLure` / `Command::DeclineTeleportLure`).
+- **Landmark teleport** (`Command::TeleportViaLandmark { landmark }`) teleports
+  to a landmark inventory item's *asset* id; a `landmark` of `None` teleports to
+  the agent's **home** location. Unlike a direct teleport the destination is
+  resolved simulator-side, so the region handle only becomes known when the
+  teleport finishes.
+- **Cancel** (`Command::CancelTeleport`) aborts a teleport already in progress;
+  the session reverts to its prior active state.
 
 Why the teleport is happening is captured by a set of **teleport flags** (via a
 landmark, a lure, a login, a telehub, going home, …), which ride along in the
 progress and finish notifications.
+
+## Setting your home / start location
+
+`Command::SetStartLocation { slot, position, look_at }` records a start
+location (`SetStartLocationRequest`): it stores the region-local `position` and
+`look_at` direction under a `StartLocationSlot`. The everyday use is
+`StartLocationSlot::Home` — "set home to here" — but the slot also names the
+viewer's other `EStartLocation` ordinals (`Last`, `Direct`, `Parcel`,
+`Telehub`, `Url`).
+
+> The login-time `start=` parameter is a *different* type — the SLURL-style
+> [`StartLocation`](login.md) (`last` / `home` / `uri:Region&x&y&z`) that says
+> *where to log in*. `StartLocationSlot` is the wire `LocationID` of the request
+> that *records* a slot, and the two are kept deliberately distinct.
+
+## Related agent commands
+
+Three small session commands ride alongside the teleport surface (none has a
+reply event):
+
+- `Command::RequestAgentDataUpdate` polls for a fresh `AgentDataUpdate` (the
+  active group / title / name data) without changing anything
+  (`AgentDataUpdateRequest`).
+- `Command::QuitCopy` logs out while *leaving the agent's in-world objects
+  behind* (`AgentQuitCopy`), reusing the circuit's own code.
+- `Command::SetVelocityInterpolation { enabled }` toggles simulator-side
+  velocity interpolation of object motion (`VelocityInterpolateOn` /
+  `VelocityInterpolateOff`).
 
 ## The event sequence
 
@@ -73,8 +108,20 @@ region seamlessly — a deliberate teleport is just the long-distance version.
 > **In this codebase**
 >
 > - Teleport commands are `Command::Teleport`, `RequestTeleport`,
->   `OfferTeleport`, `AcceptTeleportLure`, `DeclineTeleportLure` in
->   `sl-proto/src/command.rs`.
+>   `OfferTeleport`, `AcceptTeleportLure`, `DeclineTeleportLure`,
+>   `TeleportViaLandmark`, `CancelTeleport`, and `SetStartLocation` in
+>   `sl-proto/src/command.rs` (helpers `teleport_via_landmark`,
+>   `cancel_teleport`, `set_start_location`); `StartLocationSlot` (with
+>   `to_code`/`from_code`) is in `sl-proto/src/types/session.rs`. The related
+>   agent commands `RequestAgentDataUpdate`, `QuitCopy`, and
+>   `SetVelocityInterpolation` (helpers `request_agent_data_update` /
+>   `quit_copy` / `set_velocity_interpolation`) live there too.
+> - Server events: the sim side decodes these into
+>   `ServerEvent::{TeleportViaLandmark, CancelTeleport, SetStartLocation,
+>   RequestAgentDataUpdate, QuitCopy, SetVelocityInterpolation}`
+>   (`sl-proto/src/sim_session.rs`); REPL tokens `teleport_via_landmark`,
+>   `cancel_teleport`, `set_start_location`, `request_agent_data_update`,
+>   `quit_copy`, `set_velocity_interpolation`.
 > - The events are `TeleportStarted`, `TeleportProgress`, `TeleportLocal`,
 >   `TeleportFinished`, `TeleportFailed`, and `RegionChanged` in
 >   `sl-proto/src/types/event.rs`; `TeleportFlags` is in

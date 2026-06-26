@@ -1053,5 +1053,5 @@ events / REPL sub-bullets.
   user info, group title/info)
 - [x] Extend world/scripts/inventory/attachments chapters (animations, prim
   editing, task inventory, rez, detach)
-- [ ] Extend teleport & sound-media & appearance chapters
+- [x] Extend teleport & sound-media & appearance chapters
 - [ ] EventQueue event reference in `comms/caps.md`
