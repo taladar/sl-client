@@ -48,15 +48,68 @@ For the local avatar, the write commands are `UpdateProfile`, `UpdateInterests`,
 > profiles service is enabled and the profile service URL is configured; without
 > that, these requests return nothing.
 
+## Account contact preferences (`UserInfo`)
+
+Distinct from the *public* profile above, every account has a few private
+**contact preferences**. `Command::RequestUserInfo` reads them; the reply is
+`Event::UserInfo(UserInfo)`, carrying:
+
+- **`im_via_email`** — whether offline instant messages are forwarded to the
+  account's email;
+- **`directory_visibility`** — a `DirectoryVisibility` (`Default` = the
+  account's online status is shown in people search, or `Hidden`), driven by the
+  "hide my online status" toggle;
+- **`email`** — the email address on file.
+
+`Command::UpdateUserInfo { im_via_email, directory_visibility }` writes the two
+toggles. The email address is **not** settable over UDP — the `UpdateUserInfo`
+message has no email field — so only the writable subset is exposed.
+
+## Display name changes
+
+An avatar's [display name](region.md#display-names) — the mutable, user-chosen
+name layered over the legacy `First Last` — is resolved in bulk over the
+`GetDisplayNames` capability (see
+[Region & Estate Information](region.md#display-names)). Beyond that read path,
+the simulator also **pushes** two display-name events over the
+[CAPS event queue](../comms/caps.md):
+
+- `Event::DisplayNameUpdate(Box<DisplayNameUpdate>)` — a cached display name
+  changed (for this agent or another). It carries the previous
+  `old_display_name` (handy for a "X is now known as Y" notice) and the full new
+  `DisplayName` record, so a client mirroring the name cache can refresh its
+  entry.
+- `Event::SetDisplayNameReply(Box<SetDisplayNameReply>)` — the asynchronous
+  result of *this* agent's own set-display-name request. The set is a `POST` to
+  the `SetDisplayName` capability that returns immediately; this push later
+  reports the outcome via an HTTP-like `status` (`200` success, `409` a
+  stale-name conflict to re-fetch), a `reason` phrase, and either the
+  `new_display_name` or an `error_tag`. A `succeeded()` helper checks for `200`.
+
+Both pushes are Second-Life-only: OpenSim resolves display names but never
+pushes these.
+
 ---
 
 > **In this codebase**
 >
 > - Types are in `sl-proto/src/types/avatar_profile.rs`: `AvatarProperties`,
 >   `AvatarInterests`, `AvatarGroupMembership`, `AvatarPick`, `PickInfo`,
->   `AvatarClassified`, `ClassifiedInfo`, and the update structs
->   (`ProfileUpdate`, `InterestsUpdate`, `PickUpdate`, `ClassifiedUpdate`).
+>   `AvatarClassified`, `ClassifiedInfo`, the update structs
+>   (`ProfileUpdate`, `InterestsUpdate`, `PickUpdate`, `ClassifiedUpdate`), and
+>   the contact-preference types `UserInfo` and `DirectoryVisibility` (with its
+>   `to_wire`/`from_wire` codec). The display-name push structs
+>   `DisplayNameUpdate` and `SetDisplayNameReply` are in
+>   `sl-proto/src/types/display_name.rs`.
 > - The `Request*`/`Update*`/`Delete*` commands are in
->   `sl-proto/src/command.rs`; the matching events in
->   `sl-proto/src/types/event.rs`.
+>   `sl-proto/src/command.rs` (incl. `RequestUserInfo` / `UpdateUserInfo`); the
+>   matching events in `sl-proto/src/types/event.rs` (incl. `UserInfo`,
+>   `DisplayNameUpdate`, `SetDisplayNameReply`).
+> - Server events: the sim-side inverses are
+>   `SimSession::send_user_info_reply` (the `UserInfo` reply) and the
+>   event-queue helpers `enqueue_display_name_update` /
+>   `enqueue_set_display_name_reply`;
+>   `UpdateUserInfo` / `RequestUserInfo` decode client-side as
+>   `ServerEvent::UpdateUserInfo` / `RequestUserInfo`
+>   (`sl-proto/src/sim_session.rs`).
 > - Worked example: `sl-client-tokio/examples/profile_edit.rs`.
