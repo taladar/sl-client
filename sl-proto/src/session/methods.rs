@@ -33,8 +33,8 @@ use super::{
     CAP_LIBRARY_API_V3, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
     CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, Circuit, DEFAULT_DRAW_DISTANCE,
-    GrantStatus, HolderKind, IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, ChatSession, ChatSessionKind, Circuit,
+    DEFAULT_DRAW_DISTANCE, GrantStatus, HolderKind, IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG,
     LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, ScriptGrant,
     ScriptHolder, Session, SessionState, SitState, TELEPORT_TIMEOUT, TakenControls, TeleportPhase,
     TextureDownload, deadline, merge_deadline,
@@ -171,6 +171,7 @@ impl Session {
             },
             friends: BTreeMap::new(),
             online: BTreeSet::new(),
+            chat_sessions: BTreeMap::new(),
             seed_capability: None,
             inventory_root: None,
             login_account: None,
@@ -2008,9 +2009,13 @@ impl Session {
                         });
                     }
                     // Group IM session traffic (the session id is the group id).
+                    // Inbound traffic means we are effectively a participant, so
+                    // open/track the session (the registry mirrors live sessions).
                     ImDialog::SessionSend if block.from_group => {
+                        let group_id = GroupKey::from(block.id);
+                        self.chat_session_mut(ChatSessionKind::Group { group_id }, now);
                         self.events.push_back(Event::GroupSessionMessage {
-                            group_id: GroupKey::from(block.id),
+                            group_id,
                             from_agent_id: AgentKey::from(im.agent_data.agent_id),
                             from_name: trimmed_string(&block.from_agent_name),
                             message: trimmed_string(&block.message),
@@ -2019,8 +2024,10 @@ impl Session {
                     dialog @ (ImDialog::SessionAdd | ImDialog::SessionLeave)
                         if block.from_group =>
                     {
+                        let group_id = GroupKey::from(block.id);
+                        self.chat_session_mut(ChatSessionKind::Group { group_id }, now);
                         self.events.push_back(Event::GroupSessionParticipant {
-                            group_id: GroupKey::from(block.id),
+                            group_id,
                             agent_id: AgentKey::from(im.agent_data.agent_id),
                             joined: matches!(dialog, ImDialog::SessionAdd),
                         });
@@ -2029,6 +2036,8 @@ impl Session {
                     // arms above but with `from_group` clear (#28); the session id
                     // is the conference id, not a group id.
                     ImDialog::SessionSend => {
+                        let id = ImSessionId::from(block.id);
+                        self.chat_session_mut(ChatSessionKind::Conference { id }, now);
                         self.events.push_back(Event::ConferenceSessionMessage {
                             session_id: block.id,
                             from_agent_id: AgentKey::from(im.agent_data.agent_id),
@@ -2037,6 +2046,8 @@ impl Session {
                         });
                     }
                     dialog @ (ImDialog::SessionAdd | ImDialog::SessionLeave) => {
+                        let id = ImSessionId::from(block.id);
+                        self.chat_session_mut(ChatSessionKind::Conference { id }, now);
                         self.events.push_back(Event::ConferenceSessionParticipant {
                             session_id: block.id,
                             agent_id: AgentKey::from(im.agent_data.agent_id),
@@ -2053,6 +2064,19 @@ impl Session {
                     ImDialog::FriendshipAccepted => {
                         let friend_id = FriendKey::from(im.agent_data.agent_id);
                         self.add_friend(friend_id);
+                        self.events
+                            .push_back(Event::InstantMessageReceived(Box::new(instant_message(
+                                &im.agent_data,
+                                block,
+                            ))));
+                    }
+                    // An ordinary 1:1 instant message opens/tracks the direct
+                    // session keyed by the peer (the sender), then surfaces the IM
+                    // unchanged. Only `Message` does this — the other non-session
+                    // dialogs (offers, lures, system notices) carry no session.
+                    ImDialog::Message => {
+                        let peer = AgentKey::from(im.agent_data.agent_id);
+                        self.chat_session_mut(ChatSessionKind::Direct { peer }, now);
                         self.events
                             .push_back(Event::InstantMessageReceived(Box::new(instant_message(
                                 &im.agent_data,
@@ -3866,6 +3890,8 @@ impl Session {
             &from_name,
             now,
         )?;
+        // Sending a 1:1 IM opens/tracks the direct session keyed by the peer.
+        self.chat_session_mut(ChatSessionKind::Direct { peer: to_agent_id }, now);
         Ok(())
     }
 
@@ -4486,6 +4512,42 @@ impl Session {
         self.online.iter().copied()
     }
 
+    /// Get-or-create the chat session for `kind`, stamping its `last_activity` to
+    /// `now`, and return it for the caller to mutate. The single lazy-open
+    /// primitive: every site that observes traffic for a session (an outbound
+    /// send, an inbound session message / participant change, a 1:1 IM) routes
+    /// through here, so the open semantics live in one place. A freshly-created
+    /// session starts empty (`ChatSession::new`).
+    fn chat_session_mut(&mut self, kind: ChatSessionKind, now: Instant) -> &mut ChatSession {
+        let session = self
+            .chat_sessions
+            .entry(kind)
+            .or_insert_with(|| ChatSession::new(now));
+        session.last_activity = now;
+        session
+    }
+
+    /// The currently-open chat sessions (1:1 direct, group, ad-hoc conference),
+    /// ordered **newest-first** by last activity (the most recently active
+    /// session leads), with the typed [`ChatSessionKind`] breaking ties for a
+    /// deterministic order. A session opens lazily on the first inbound *or*
+    /// outbound traffic and is removed on an explicit `SessionLeave` (1:1 has no
+    /// leave, so it persists to logout); the store is grid-level and survives
+    /// teleport.
+    pub fn chat_sessions(&self) -> impl Iterator<Item = ChatSessionKind> {
+        let mut entries: Vec<(ChatSessionKind, Instant)> = self
+            .chat_sessions
+            .iter()
+            .map(|(&kind, session)| (kind, session.last_activity))
+            .collect();
+        entries.sort_by(|(left_kind, left_at), (right_kind, right_at)| {
+            right_at
+                .cmp(left_at)
+                .then_with(|| left_kind.cmp(right_kind))
+        });
+        entries.into_iter().map(|(kind, _)| kind)
+    }
+
     /// Declines a friendship offer via `DeclineFriendship`. The `transaction_id`
     /// is the [`InstantMessage::id`](crate::InstantMessage::id) of the incoming
     /// [`ImDialog::FriendshipOffered`] IM.
@@ -4838,6 +4900,8 @@ impl Session {
             &from_name,
             now,
         )?;
+        // Starting a group session opens/tracks it (keyed by the group id).
+        self.chat_session_mut(ChatSessionKind::Group { group_id }, now);
         Ok(())
     }
 
@@ -4858,6 +4922,8 @@ impl Session {
         let from_name = self.agent_name();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_session_im(group_id, ImDialog::SessionSend, message, &from_name, now)?;
+        // Sending into a group session opens/tracks it (keyed by the group id).
+        self.chat_session_mut(ChatSessionKind::Group { group_id }, now);
         Ok(())
     }
 
@@ -4873,6 +4939,9 @@ impl Session {
         let from_name = self.agent_name();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_session_im(group_id, ImDialog::SessionLeave, "", &from_name, now)?;
+        // Leaving removes the entry — the registry tracks only live sessions.
+        self.chat_sessions
+            .remove(&ChatSessionKind::Group { group_id });
         Ok(())
     }
 
@@ -5575,6 +5644,8 @@ impl Session {
             },
             now,
         )?;
+        // Starting a conference opens/tracks it (keyed by the minted session id).
+        self.chat_session_mut(ChatSessionKind::Conference { id: session_id }, now);
         Ok(())
     }
 
@@ -5606,6 +5677,8 @@ impl Session {
             },
             now,
         )?;
+        // Sending into a conference opens/tracks it (keyed by the session id).
+        self.chat_session_mut(ChatSessionKind::Conference { id: session_id }, now);
         Ok(())
     }
 
@@ -5631,6 +5704,9 @@ impl Session {
             },
             now,
         )?;
+        // Leaving removes the entry — the registry tracks only live sessions.
+        self.chat_sessions
+            .remove(&ChatSessionKind::Conference { id: session_id });
         Ok(())
     }
 
