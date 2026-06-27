@@ -1080,7 +1080,7 @@ mod circuit;
 mod conversions;
 mod methods;
 
-use self::chat_session::ChatSession;
+use self::chat_session::{ChatSession, TYPING_TIMEOUT};
 pub use chat_session::ChatSessionKind;
 
 pub(crate) use conversions::{

@@ -11,8 +11,16 @@
 use super::conversions::compute_im_session_id;
 use crate::bookkeeping_ids::ImSessionId;
 use sl_types::key::{AgentKey, GroupKey};
-use std::time::Instant;
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::{Duration, Instant};
 use uuid::Uuid;
+
+/// How long a remote "X is typing…" entry survives without a refresh before it
+/// is pruned (see [`ChatSession::typing`]). A lost `TypingStop` (packet loss, a
+/// crashed peer) would otherwise strand the indicator forever; senders re-emit a
+/// typing-start every ~4 s, so this tolerates a couple of missed refreshes. The
+/// value matches Firestorm's `OTHER_TYPING_TIMEOUT` (`fsfloaterim.cpp:88`).
+pub(crate) const TYPING_TIMEOUT: Duration = Duration::from_secs(9);
 
 /// Which of the three IM-session kinds a chat session is, carrying that kind's
 /// *typed* canonical id. This is the key of the chat-session registry: the enum
@@ -74,11 +82,29 @@ pub(crate) struct ChatSession {
     /// future idle handling; it **never** drives presence (presence comes only
     /// from the authoritative friend notifications).
     pub(crate) last_activity: Instant,
+    /// The session roster: who the simulator reports is in this group /
+    /// conference (it **includes self** once we have joined). Folded from the
+    /// `SessionAdd` / `SessionLeave` participant events. A 1:1 `Direct` session
+    /// never materialises a roster — its participants are implicitly
+    /// `{ self, peer }` and the accessor synthesises `{ peer }` from the key —
+    /// so this set stays empty for `Direct`.
+    pub(crate) participants: BTreeSet<AgentKey>,
+    /// Remote typers in this session, each mapped to the monotonic time its last
+    /// typing-start was seen. Holds **other** avatars only (never our own
+    /// outbound typing). Entries older than [`TYPING_TIMEOUT`] are pruned on the
+    /// timed loop so a lost `TypingStop` cannot strand the indicator; an explicit
+    /// `TypingStop` removes immediately.
+    pub(crate) typing: BTreeMap<AgentKey, Instant>,
 }
 
 impl ChatSession {
-    /// Creates a session whose last activity is `now`.
+    /// Creates a session whose last activity is `now`, with an empty roster and
+    /// no typers.
     pub(crate) const fn new(now: Instant) -> Self {
-        Self { last_activity: now }
+        Self {
+            last_activity: now,
+            participants: BTreeSet::new(),
+            typing: BTreeMap::new(),
+        }
     }
 }
