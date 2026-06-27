@@ -959,6 +959,16 @@ pub struct Session {
     /// or not visible", never provably offline (a friend who does not grant us
     /// `CAN_SEE_ONLINE` never generates a notification).
     online: BTreeSet<FriendKey>,
+    /// The chat-session registry: one entry per open IM session (1:1 direct,
+    /// group, or ad-hoc conference), keyed by the typed [`ChatSessionKind`] (which
+    /// *is* the canonical session id, keeping the three id spaces disjoint). Each
+    /// value mirrors that session's mutable state. Opened lazily on the first
+    /// inbound *or* outbound traffic for a session and removed on an explicit
+    /// `SessionLeave` (1:1 has no leave, so it persists to logout). Grid-level
+    /// like the buddy cache: it survives teleport / region handover, cleared only
+    /// by a relogin through the constructor. The simulator stays authoritative;
+    /// this is an API-convenience read model. Read via [`Session::chat_sessions`].
+    chat_sessions: BTreeMap<ChatSessionKind, ChatSession>,
     /// The current region's capability-seed URL (from login or a teleport), for
     /// the driver to fetch the CAPS map and event queue.
     seed_capability: Option<url::Url>,
@@ -1065,9 +1075,13 @@ pub struct Session {
     diagnostics: VecDeque<Diagnostic>,
 }
 
+mod chat_session;
 mod circuit;
 mod conversions;
 mod methods;
+
+use self::chat_session::ChatSession;
+pub use chat_session::ChatSessionKind;
 
 pub(crate) use conversions::{
     ZERO_VECTOR, instant_message, region_handshake_message, shape_from_object_shape_block,

@@ -10,7 +10,7 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AnimationKey, AssetKey, AssetType, AttachmentMode,
-        AttachmentPoint, Camera, ChatAudible, ChatChannel, ChatSource, ChatType,
+        AttachmentPoint, Camera, ChatAudible, ChatChannel, ChatSessionKind, ChatSource, ChatType,
         ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction, CloudPosDensity,
         CoarseLocation, Color, ColorAlpha, ControlFlags, CreateGroupParams, DayCycle,
         DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, Direction,
@@ -15907,6 +15907,268 @@ mod test {
                 reason: None,
             }]
         );
+        Ok(())
+    }
+
+    // -- B2: chat-session registry + open/track mechanics ------------------
+
+    /// Builds an inbound group IM (`from_group` set) with a chosen dialog,
+    /// sender, and group id (the group id is the session id on the wire).
+    fn inbound_group_im(dialog: u8, from: uuid::Uuid, group: uuid::Uuid) -> AnyMessage {
+        AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
+            agent_data: ImprovedInstantMessageAgentDataBlock {
+                agent_id: from,
+                session_id: uuid::Uuid::nil(),
+            },
+            message_block: ImprovedInstantMessageMessageBlockBlock {
+                from_group: true,
+                to_agent_id: uuid::Uuid::from_u128(1),
+                parent_estate_id: 0,
+                region_id: uuid::Uuid::nil(),
+                position: vec3(0.0, 0.0, 0.0),
+                offline: 0,
+                dialog,
+                id: group,
+                timestamp: 0,
+                from_agent_name: b"Group Member\0".to_vec(),
+                message: b"hello group\0".to_vec(),
+                binary_bucket: Vec::new(),
+            },
+            estate_block: ImprovedInstantMessageEstateBlockBlock { estate_id: 0 },
+            meta_data: Vec::new(),
+        })
+    }
+
+    /// The chat sessions currently in the registry, in the accessor's
+    /// newest-first order.
+    fn chat_sessions(session: &Session) -> Vec<ChatSessionKind> {
+        session.chat_sessions().collect()
+    }
+
+    #[test]
+    fn inbound_one_to_one_im_opens_direct_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // An ordinary 1:1 IM (dialog 0) from 0x55 opens a Direct session keyed by
+        // the peer (the sender), not the wire XOR id.
+        let im = inbound_im(0, b"Friendly Bot\0", b"hi there\0");
+        let datagram = server_message(&im, 9, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        assert_eq!(
+            chat_sessions(&session),
+            vec![ChatSessionKind::Direct {
+                peer: AgentKey::from(uuid::Uuid::from_u128(0x55)),
+            }]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn non_message_im_does_not_open_a_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A friendship offer (dialog 38) is not session traffic: no session opens.
+        let im = inbound_offer_im(
+            38,
+            uuid::Uuid::from_u128(0x55),
+            uuid::Uuid::from_u128(0x1),
+            Vec::new(),
+        );
+        let datagram = server_message(&im, 9, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        assert!(chat_sessions(&session).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn outbound_one_to_one_im_opens_direct_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let peer = uuid::Uuid::from_u128(0x99);
+        session.send_instant_message(AgentKey::from(peer), "hi there", now)?;
+
+        assert_eq!(
+            chat_sessions(&session),
+            vec![ChatSessionKind::Direct {
+                peer: AgentKey::from(peer),
+            }]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn one_to_one_session_has_no_leave_and_persists() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Open a 1:1, then leave a group and a conference: the 1:1 survives (there
+        // is no SessionLeave for a direct IM).
+        let peer = uuid::Uuid::from_u128(0x99);
+        session.send_instant_message(AgentKey::from(peer), "hi", now)?;
+        session.start_group_session(GroupKey::from(uuid::Uuid::from_u128(0x6700)), now)?;
+        session.leave_group_session(GroupKey::from(uuid::Uuid::from_u128(0x6700)), now)?;
+        drain(&mut session)?;
+
+        assert_eq!(
+            chat_sessions(&session),
+            vec![ChatSessionKind::Direct {
+                peer: AgentKey::from(peer),
+            }]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn inbound_group_traffic_opens_group_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6708);
+        // A group send (dialog 17) opens the session…
+        let send = inbound_group_im(17, uuid::Uuid::from_u128(0x6709), group);
+        session.handle_datagram(sim_addr(), &server_message(&send, 9, true)?, now)?;
+        assert_eq!(
+            chat_sessions(&session),
+            vec![ChatSessionKind::Group {
+                group_id: GroupKey::from(group),
+            }]
+        );
+
+        // …and a participant change (dialog 13) on the same group does not open a
+        // second entry.
+        let add = inbound_group_im(13, uuid::Uuid::from_u128(0x670A), group);
+        session.handle_datagram(sim_addr(), &server_message(&add, 10, true)?, now)?;
+        assert_eq!(chat_sessions(&session).len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn outbound_group_session_opens_then_leave_removes() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = GroupKey::from(uuid::Uuid::from_u128(0x670B));
+        session.start_group_session(group, now)?;
+        session.send_group_message(group, "hi all", now)?;
+        assert_eq!(
+            chat_sessions(&session),
+            vec![ChatSessionKind::Group { group_id: group }]
+        );
+
+        session.leave_group_session(group, now)?;
+        assert!(chat_sessions(&session).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn inbound_conference_traffic_opens_conference_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Dialog 17 with from_group clear is a conference; the id is the session id.
+        let conference = uuid::Uuid::from_u128(0xABC);
+        let im = inbound_offer_im(17, uuid::Uuid::from_u128(0x55), conference, Vec::new());
+        session.handle_datagram(sim_addr(), &server_message(&im, 9, false)?, now)?;
+
+        assert_eq!(
+            chat_sessions(&session),
+            vec![ChatSessionKind::Conference {
+                id: ImSessionId::from(conference),
+            }]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn outbound_conference_opens_then_leave_removes() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let conference = ImSessionId::from(uuid::Uuid::from_u128(0x5E51));
+        session.start_conference(
+            conference,
+            &[AgentKey::from(uuid::Uuid::from_u128(0xA1))],
+            "hi",
+            now,
+        )?;
+        assert_eq!(
+            chat_sessions(&session),
+            vec![ChatSessionKind::Conference { id: conference }]
+        );
+
+        session.leave_conference(conference, now)?;
+        assert!(chat_sessions(&session).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn chat_session_creates_once_and_restamps_for_ordering() -> Result<(), TestError> {
+        let start = Instant::now();
+        let mut session = established(start)?;
+        drain(&mut session)?;
+
+        // Open Direct at t0, then Group at t1 (Group is newest → leads).
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x99));
+        let group = GroupKey::from(uuid::Uuid::from_u128(0x6700));
+        session.send_instant_message(peer, "first", start)?;
+        let t1 = after(start, 10)?;
+        session.start_group_session(group, t1)?;
+        drain(&mut session)?;
+        assert_eq!(
+            chat_sessions(&session),
+            vec![
+                ChatSessionKind::Group { group_id: group },
+                ChatSessionKind::Direct { peer },
+            ]
+        );
+
+        // Touching the Direct session again at t2 restamps its activity (so it now
+        // leads) without creating a second Direct entry.
+        let t2 = after(start, 20)?;
+        session.send_instant_message(peer, "second", t2)?;
+        drain(&mut session)?;
+        assert_eq!(
+            chat_sessions(&session),
+            vec![
+                ChatSessionKind::Direct { peer },
+                ChatSessionKind::Group { group_id: group },
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn canonical_session_id_round_trips_per_kind() -> Result<(), TestError> {
+        let own = AgentKey::from(uuid::Uuid::from_u128(1));
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x99));
+        let group = GroupKey::from(uuid::Uuid::from_u128(0x6700));
+        let conference = ImSessionId::from(uuid::Uuid::from_u128(0x5E51));
+
+        // Group → the group id; Conference → the minted id; Direct → the XOR of
+        // the two agent ids (self-inverse, so XOR-ing again recovers the peer).
+        assert_eq!(
+            ChatSessionKind::Group { group_id: group }.canonical_session_id(own),
+            uuid::Uuid::from_u128(0x6700)
+        );
+        assert_eq!(
+            ChatSessionKind::Conference { id: conference }.canonical_session_id(own),
+            uuid::Uuid::from_u128(0x5E51)
+        );
+        let direct_id = ChatSessionKind::Direct { peer }.canonical_session_id(own);
+        assert_eq!(direct_id, uuid::Uuid::from_u128(1u128 ^ 0x99u128));
         Ok(())
     }
 }
