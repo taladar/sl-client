@@ -2168,6 +2168,26 @@ pub enum Command {
         /// Which chat session (1:1 direct, group, or conference) to mark read.
         session: ChatSessionKind,
     },
+    /// Accept a pending chat-session invitation
+    /// ([`Event::ConferenceInvited`](crate::Event::ConferenceInvited)), promoting
+    /// its registry entry to joined. Where the `ChatSessionRequest` capability is
+    /// present (Second Life) this POSTs `accept invitation` and the reply roster
+    /// seeds the participants; on OpenSim the local optimistic join suffices.
+    AcceptChatInvite {
+        /// The invited session id (the group id for a group IM).
+        session_id: ImSessionId,
+        /// Whether the invitation is to a group IM (vs. an ad-hoc conference).
+        from_group: bool,
+    },
+    /// Decline a pending chat-session invitation, removing its registry entry.
+    /// Where the `ChatSessionRequest` capability is present this POSTs `decline
+    /// invitation`; otherwise it sends a UDP `SessionLeave` as the fallback.
+    DeclineChatInvite {
+        /// The invited session id (the group id for a group IM).
+        session_id: ImSessionId,
+        /// Whether the invitation is to a group IM (vs. an ad-hoc conference).
+        from_group: bool,
+    },
     /// Flush stored offline instant messages over the legacy UDP trigger
     /// (`RetrieveInstantMessages`); they arrive as offline
     /// [`Event::InstantMessageReceived`](crate::Event::InstantMessageReceived)s.

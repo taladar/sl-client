@@ -805,6 +805,8 @@ const fn command_name(command: &Command) -> &'static str {
         Command::SendConferenceMessage { .. } => "send_conference_message",
         Command::LeaveConference { .. } => "leave_conference",
         Command::MarkSessionRead { .. } => "mark_session_read",
+        Command::AcceptChatInvite { .. } => "accept_chat_invite",
+        Command::DeclineChatInvite { .. } => "decline_chat_invite",
         Command::RetrieveInstantMessages => "retrieve_instant_messages",
         Command::RequestOfflineMessages => "request_offline_messages",
         Command::TeleportViaLandmark { .. } => "teleport_via_landmark",

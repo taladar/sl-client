@@ -1,6 +1,7 @@
 //! Wire/LLSD <-> value-type converters shared by the session impls, plus the
 //! server-side CAPS serializers and their round-trip tests.
 
+use super::chat_session::InviteChannel;
 use crate::GroupRoleKey;
 use crate::appearance;
 use crate::types::{
@@ -2519,31 +2520,113 @@ pub(crate) fn offline_message_position(record: &Llsd) -> RegionCoordinates {
 /// timestamp source fields, and the `binary_bucket` (nested under
 /// `message_params.data`, as both OpenSim and the reference viewer encode it).
 pub(crate) fn chatterbox_invitation_from_llsd(body: &Llsd) -> Option<Event> {
-    let params = body.get("instantmessage")?.get("message_params")?;
-    // OpenSim/SL nest the bucket under `data`; tolerate a flat `binary_bucket`.
-    let binary_bucket = params
-        .get("data")
-        .and_then(|data| data.get("binary_bucket"))
-        .or_else(|| params.get("binary_bucket"))
-        .and_then(Llsd::as_binary)
-        .map_or_else(Vec::new, <[u8]>::to_vec);
+    // A text invite carries its fields under `instantmessage.message_params`; a
+    // voice / immediate invite carries `session_id`/`from_id`/`from_name` at the
+    // top level of `body` instead (Firestorm `llimview.cpp:5047`/`:5196`/`:5215`).
+    // Prefer the text params when present, else fall back to the top-level shape.
+    if let Some(params) = body
+        .get("instantmessage")
+        .and_then(|im| im.get("message_params"))
+    {
+        // OpenSim/SL nest the bucket under `data`; tolerate a flat `binary_bucket`.
+        let binary_bucket = params
+            .get("data")
+            .and_then(|data| data.get("binary_bucket"))
+            .or_else(|| params.get("binary_bucket"))
+            .and_then(Llsd::as_binary)
+            .map_or_else(Vec::new, <[u8]>::to_vec);
+        return Some(Event::ConferenceInvited {
+            session_id: uuid_member_lenient(params, "id"),
+            from_agent_id: AgentKey::from(uuid_member_lenient(params, "from_id")),
+            from_name: string_member(params, "from_name"),
+            dialog: ImDialog::from_u8(u8::try_from(i32_member(params, "type")).unwrap_or(0)),
+            from_group: params
+                .get("from_group")
+                .and_then(Llsd::as_bool)
+                .unwrap_or(false),
+            session_name: string_member(body, "session_name"),
+            message: string_member(params, "message"),
+            region_id: uuid_member_lenient(params, "region_id"),
+            position: llsd_position(params),
+            parent_estate_id: u32_member(params, "parent_estate_id"),
+            timestamp: crate::types::optional_u32_from_wire(u32_member(params, "timestamp")),
+            binary_bucket,
+        });
+    }
+    // Voice / immediate path: require at least a top-level session id; the
+    // text-only fields (message, region, estate, bucket) are absent here and
+    // default. The dialog defaults to the ad-hoc conference start.
+    let session_id = body.get("session_id")?;
     Some(Event::ConferenceInvited {
-        session_id: uuid_member_lenient(params, "id"),
-        from_agent_id: AgentKey::from(uuid_member_lenient(params, "from_id")),
-        from_name: string_member(params, "from_name"),
-        dialog: ImDialog::from_u8(u8::try_from(i32_member(params, "type")).unwrap_or(0)),
-        from_group: params
+        session_id: session_id.as_uuid().unwrap_or_default(),
+        from_agent_id: AgentKey::from(uuid_member_lenient(body, "from_id")),
+        from_name: string_member(body, "from_name"),
+        dialog: ImDialog::SessionConferenceStart,
+        from_group: body
             .get("from_group")
             .and_then(Llsd::as_bool)
             .unwrap_or(false),
         session_name: string_member(body, "session_name"),
-        message: string_member(params, "message"),
-        region_id: uuid_member_lenient(params, "region_id"),
-        position: llsd_position(params),
-        parent_estate_id: u32_member(params, "parent_estate_id"),
-        timestamp: crate::types::optional_u32_from_wire(u32_member(params, "timestamp")),
-        binary_bucket,
+        message: String::new(),
+        region_id: Uuid::nil(),
+        position: RegionCoordinates::new(0.0, 0.0, 0.0),
+        parent_estate_id: 0,
+        timestamp: None,
+        binary_bucket: Vec::new(),
     })
+}
+
+/// Classifies which channel(s) a `ChatterBoxInvitation` body invites us to: a
+/// top-level `instantmessage` sub-map is a **text** invite, a `voice` sub-map a
+/// **voice** invite, and both present is [`InviteChannel::Both`] (Firestorm
+/// `llimview.cpp:5047`/`:5196`). A body with neither defaults to text — OpenSim's
+/// group/conference invites carry only `instantmessage`.
+pub(crate) fn invite_channel_from_llsd(body: &Llsd) -> InviteChannel {
+    let has_text = body.get("instantmessage").is_some();
+    let has_voice = body.get("voice").is_some();
+    match (has_text, has_voice) {
+        (true, true) => InviteChannel::Both,
+        (false, true) => InviteChannel::Voice,
+        _ => InviteChannel::Text,
+    }
+}
+
+/// Builds a `ChatSessionRequest` capability POST body: `{ "method": <method>,
+/// "session-id": <session_id> }`, the shape Firestorm's `chatterBoxInvitationCoro`
+/// sends to accept or decline a chat-session invitation (`llimview.cpp:673`). The
+/// `method` is [`CHAT_SESSION_ACCEPT`](crate::CHAT_SESSION_ACCEPT) or
+/// [`CHAT_SESSION_DECLINE`](crate::CHAT_SESSION_DECLINE).
+#[must_use]
+pub fn chat_session_request_body(method: &str, session_id: Uuid) -> String {
+    llsd_map(vec![
+        ("method", Llsd::String(method.to_owned())),
+        ("session-id", Llsd::Uuid(session_id)),
+    ])
+    .to_llsd_xml()
+}
+
+/// Decodes the agent roster carried by a `ChatSessionRequest` `"accept
+/// invitation"` reply into the participant agent ids. Handles both the modern
+/// `agent_info` map (whose keys are the agent uuids) and the deprecated `agents`
+/// array (Firestorm `LLIMSpeakerMgr::setSpeakers`, `llspeakers.cpp:687`). OpenSim
+/// stubs the cap (the reply is a bare `<llsd>true</llsd>`), so this yields an
+/// empty roster there.
+pub(crate) fn chat_session_roster_from_llsd(body: &Llsd) -> Vec<AgentKey> {
+    if let Some(Llsd::Map(agents)) = body.get("agent_info") {
+        return agents
+            .keys()
+            .filter_map(|key| Uuid::parse_str(key).ok())
+            .map(AgentKey::from)
+            .collect();
+    }
+    if let Some(Llsd::Array(agents)) = body.get("agents") {
+        return agents
+            .iter()
+            .filter_map(Llsd::as_uuid)
+            .map(AgentKey::from)
+            .collect();
+    }
+    Vec::new()
 }
 
 /// Reads a region-local position from an LLSD map's `position` member, encoded

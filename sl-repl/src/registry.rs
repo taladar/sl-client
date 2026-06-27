@@ -5189,6 +5189,26 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "accept_chat_invite",
+            usage: "<session_id> <from_group>",
+            build: |args, ctx| {
+                Ok(Command::AcceptChatInvite {
+                    session_id: ImSessionId::from(args.req_uuid(ctx, "session_id", 0)?),
+                    from_group: args.req_bool(ctx, "from_group", 1)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "decline_chat_invite",
+            usage: "<session_id> <from_group>",
+            build: |args, ctx| {
+                Ok(Command::DeclineChatInvite {
+                    session_id: ImSessionId::from(args.req_uuid(ctx, "session_id", 0)?),
+                    from_group: args.req_bool(ctx, "from_group", 1)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "retrieve_instant_messages",
             usage: "",
             build: |_args, _ctx| Ok(Command::RetrieveInstantMessages),

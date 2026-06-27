@@ -12,10 +12,10 @@ use tokio::sync::mpsc;
 
 use sl_proto::{
     CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
-    CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT,
-    CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET,
-    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
-    CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_OBJECT_COST,
+    CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
+    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME,
+    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
+    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_OBJECT_COST,
     CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
     CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
     CAP_LAND_RESOURCES, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
@@ -23,21 +23,22 @@ use sl_proto::{
     CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
-    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, Llsd, RECV_BUFFER_SIZE, SelectedCostKind,
-    Session, ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, build_agent_preferences_request,
-    build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
-    build_ais_update_item_body, build_create_inventory_category_request,
-    build_get_object_cost_request, build_get_object_physics_data_request,
-    build_modify_material_params_request, build_new_file_agent_inventory_request,
-    build_object_media_navigate_request, build_object_media_update_request,
-    build_parcel_voice_info_request, build_provision_voice_account_request,
-    build_region_experiences_request, build_remote_parcel_request,
-    build_resource_cost_selected_request, build_send_user_report,
+    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, Llsd,
+    RECV_BUFFER_SIZE, SelectedCostKind, Session, ais_category_children_fetch_url,
+    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
+    build_agent_preferences_request, build_ais_create_category_body, build_ais_move_body,
+    build_ais_rename_category_body, build_ais_update_item_body,
+    build_create_inventory_category_request, build_get_object_cost_request,
+    build_get_object_physics_data_request, build_modify_material_params_request,
+    build_new_file_agent_inventory_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_parcel_voice_info_request,
+    build_provision_voice_account_request, build_region_experiences_request,
+    build_remote_parcel_request, build_resource_cost_selected_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_upload_baked_texture_request,
-    build_voice_signaling_request, display_names_query, experience_id_query, experience_info_query,
-    find_experience_query, forget_experience_query, group_experiences_query, parse_login_response,
+    build_voice_signaling_request, chat_session_request_body, display_names_query,
+    experience_id_query, experience_info_query, find_experience_query, forget_experience_query,
+    group_experiences_query, parse_login_response,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
@@ -51,8 +52,8 @@ pub use sl_proto::{
     CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic, Direction, DisconnectReason,
     Distance, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, Event, ExperienceInfo,
     ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData,
-    Friend, FriendRights, GlobalCoordinates, GltfMaterialOverride, GridCoordinates, GroupMember,
-    GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
+    Friend, FriendRights, GlobalCoordinates, GltfMaterialOverride, GridCoordinates, GroupKey,
+    GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
     GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
     GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
     ImSessionId, ImageCodec, InstantMessage, InterestsUpdate, InventoryCallbackId, InventoryFolder,
@@ -106,7 +107,7 @@ use crate::experiences::{
 use crate::fetch::{fetch_asset_http, fetch_mesh_http, fetch_texture_http};
 use crate::http::{
     delete_caps_llsd, fetch_land_resources, get_caps_llsd, patch_caps_llsd, post_caps_oneway,
-    put_caps_llsd,
+    post_chat_session_request, put_caps_llsd,
 };
 use crate::inventory::{fetch_group_members, fetch_inventory};
 use crate::materials::{fetch_render_materials, post_modify_material_params};
@@ -1499,6 +1500,31 @@ impl Client {
                         }
                         Some(Command::MarkSessionRead { session }) => {
                             self.session.mark_session_read(session);
+                        }
+                        Some(Command::AcceptChatInvite { session_id, from_group }) => {
+                            // Promote the registry entry to joined, then drive the
+                            // modern accept over the cap when present (its reply
+                            // roster seeds the participants); on a grid without the
+                            // cap the optimistic local join is the whole accept.
+                            self.session.accept_chat_invite(session_id, from_group, Instant::now());
+                            if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
+                                let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_id.get());
+                                tokio::spawn(post_chat_session_request(url, body, session_id.get(), from_group, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::DeclineChatInvite { session_id, from_group }) => {
+                            // Remove the registry entry, then refuse on the wire:
+                            // the cap `decline invitation` POST when present, else
+                            // a UDP `SessionLeave` as the OpenSim fallback.
+                            self.session.decline_chat_invite(session_id, from_group, Instant::now());
+                            if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
+                                let body = chat_session_request_body(CHAT_SESSION_DECLINE, session_id.get());
+                                tokio::spawn(post_chat_session_request(url, body, session_id.get(), from_group, http.clone(), caps_tx.clone()));
+                            } else if from_group {
+                                self.session.leave_group_session(GroupKey::from(session_id.get()), Instant::now())?;
+                            } else {
+                                self.session.leave_conference(session_id, Instant::now())?;
+                            }
                         }
                         Some(Command::RetrieveInstantMessages) => {
                             self.session.retrieve_instant_messages(Instant::now())?;

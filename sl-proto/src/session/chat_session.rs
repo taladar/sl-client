@@ -75,6 +75,52 @@ impl ChatSessionKind {
     }
 }
 
+/// Which channel(s) a chat-session invitation offers. A group or conference can
+/// expose both a text channel and a voice channel under one session id, so the
+/// two are tracked together rather than as separate sessions: a text-only invite
+/// is [`Text`](Self::Text), a voice-call invite is [`Voice`](Self::Voice), and an
+/// invite to both is [`Both`](Self::Both). Classified from the `ChatterBoxInvitation`
+/// body — an `instantmessage` sub-map is a text invite, a `voice` sub-map a voice
+/// invite (Firestorm `llimview.cpp:5047`/`:5196`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InviteChannel {
+    /// A text-session invite (the viewer auto-joins these).
+    Text,
+    /// A voice-call invite (the viewer prompts the user).
+    Voice,
+    /// An invite to both the text and the voice channel of one session.
+    Both,
+}
+
+/// The payload an [`Invited`](ChatSessionLifecycle::Invited) chat session carries:
+/// who invited us, the session's display name, and which channel(s) the invite is
+/// for. There is no separate pending-invitation registry — a pending invitation is
+/// exactly a chat-session entry whose lifecycle is `Invited`, so the registry is
+/// self-describing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingInvite {
+    /// The inviting agent (the `ConferenceInvited.from_agent_id`).
+    pub inviter: AgentKey,
+    /// The session's human-readable name (the group or conference name).
+    pub session_name: String,
+    /// Which channel(s) the invitation is to.
+    pub channel: InviteChannel,
+}
+
+/// Whether a chat session is a still-pending invitation or one we have joined.
+/// Born here with its only constructor (the invite path sets
+/// [`Invited`](Self::Invited)) and the promotion rule (any session message or
+/// participant traffic, and an explicit accept, set [`Joined`](Self::Joined)), so
+/// the `Invited` variant is never a dead, never-constructed state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatSessionLifecycle {
+    /// A session we were invited to but have not yet joined; carries the invite.
+    Invited(PendingInvite),
+    /// A session we are in — opened by our own send, by inbound traffic, or by an
+    /// explicit accept. A 1:1 direct session is always `Joined`.
+    Joined,
+}
+
 /// One logged conversation message in a chat session's history — a 1:1 IM, a
 /// group-session message, or a conference message, plus our own outbound sends.
 /// Read back via [`Session::history`](crate::Session::history). Distinct from the
@@ -135,11 +181,17 @@ pub(crate) struct ChatSession {
     /// Bumped per inbound message from another agent; reset to zero by our own
     /// outbound send and by [`Session::mark_session_read`](crate::Session::mark_session_read).
     pub(crate) unread: u32,
+    /// Whether this session is a still-pending invitation or one we have joined.
+    /// A session opened by traffic (the `chat_session_mut` lazy-open) or an
+    /// explicit accept is [`Joined`](ChatSessionLifecycle::Joined); only the
+    /// invite path sets [`Invited`](ChatSessionLifecycle::Invited).
+    pub(crate) lifecycle: ChatSessionLifecycle,
 }
 
 impl ChatSession {
     /// Creates a session whose last activity is `now`, with an empty roster, no
-    /// typers, an empty log, and nothing unread.
+    /// typers, an empty log, nothing unread, and a [`Joined`](ChatSessionLifecycle::Joined)
+    /// lifecycle (the invite path overrides this to `Invited` before any traffic).
     pub(crate) const fn new(now: Instant) -> Self {
         Self {
             last_activity: now,
@@ -147,6 +199,7 @@ impl ChatSession {
             typing: BTreeMap::new(),
             history: VecDeque::new(),
             unread: 0,
+            lifecycle: ChatSessionLifecycle::Joined,
         }
     }
 
