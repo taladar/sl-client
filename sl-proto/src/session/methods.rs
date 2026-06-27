@@ -5,39 +5,41 @@ use super::conversions::{
     agent_state_update_from_llsd, ais_inventory_update_from_llsd, avatar_animations,
     avatar_appearance, avatar_group, avatar_interests, avatar_names, avatar_properties,
     bulk_update_folder, bulk_update_inventory_from_llsd, bulk_update_item, chat_message,
-    chatterbox_invitation_from_llsd, classified_info, created_category_from_llsd,
-    crossed_region_from_caps_llsd, display_name_update_from_llsd, economy_data,
-    enable_simulator_from_caps_llsd, environment_from_llsd,
+    chat_session_roster_from_llsd, chatterbox_invitation_from_llsd, classified_info,
+    created_category_from_llsd, crossed_region_from_caps_llsd, display_name_update_from_llsd,
+    economy_data, enable_simulator_from_caps_llsd, environment_from_llsd,
     establish_agent_communication_from_llsd, estate_access_from_params, estate_info_from_params,
     friend, grid_coordinates_from_handle, group_account_details, group_account_summary,
     group_account_transactions, group_active_proposal_item, group_member,
     group_members_from_caps_llsd, group_membership, group_memberships_from_caps_llsd, group_names,
     group_notice, group_profile, group_role, group_title, group_vote_history_item, index_into,
     instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
-    inventory_item_from_create, inventory_offer_bucket, map_item, map_layer, map_region_info,
-    money_balance, nav_mesh_status_from_llsd, neighbor_info, object_from_full_update,
-    object_properties, offline_messages_from_llsd, open_region_info_from_llsd, pack_uuids,
-    parcel_info, parcel_info_from_llsd, parse_lure_region_handle, parse_mute_list,
-    parse_uuid_string, pick_info, region_identity, region_limits, required_voice_version_from_llsd,
-    script_dialog, script_permission_request, server_appearance_update_from_llsd,
-    set_display_name_reply_from_llsd, sim_console_response_from_llsd, skeleton_folder,
-    teleport_finish_from_llsd, trimmed_string, windlight_refresh_from_llsd,
+    inventory_item_from_create, inventory_offer_bucket, invite_channel_from_llsd, map_item,
+    map_layer, map_region_info, money_balance, nav_mesh_status_from_llsd, neighbor_info,
+    object_from_full_update, object_properties, offline_messages_from_llsd,
+    open_region_info_from_llsd, pack_uuids, parcel_info, parcel_info_from_llsd,
+    parse_lure_region_handle, parse_mute_list, parse_uuid_string, pick_info, region_identity,
+    region_limits, required_voice_version_from_llsd, script_dialog, script_permission_request,
+    server_appearance_update_from_llsd, set_display_name_reply_from_llsd,
+    sim_console_response_from_llsd, skeleton_folder, teleport_finish_from_llsd, trimmed_string,
+    windlight_refresh_from_llsd,
 };
 use super::{
     AGENT_UPDATE_INTERVAL, AssetTransfer, AssetUpload, CAP_AGENT_EXPERIENCES,
-    CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES, CAP_CREATE_INVENTORY_CATEGORY,
-    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
-    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
-    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST,
-    CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES,
-    CAP_LIBRARY_API_V3, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
-    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, ChatSession, ChatSessionKind, Circuit,
-    DEFAULT_DRAW_DISTANCE, GrantStatus, HolderKind, IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG,
-    LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, ScriptGrant,
-    ScriptHolder, Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT,
-    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, deadline, merge_deadline,
+    CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST,
+    CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT,
+    CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
+    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
+    CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA,
+    CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_MODIFY_MATERIAL_PARAMS,
+    CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
+    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED,
+    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, ChatSession,
+    ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE, GrantStatus, HolderKind,
+    IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
+    MAX_INLINE_ASSET, PendingInvite, SIT_TIMEOUT, ScriptGrant, ScriptHolder, Session,
+    SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls,
+    TeleportPhase, TextureDownload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -143,6 +145,21 @@ fn iter_bits(controls: ControlFlags) -> impl Iterator<Item = u32> {
         remaining &= !bit;
         Some(bit)
     })
+}
+
+/// Maps an IM session id + `from_group` flag (the two fields of a
+/// [`ConferenceInvited`](Event::ConferenceInvited) the driver is answering) to the
+/// typed [`ChatSessionKind`] key: a group IM session reinterprets the id as a
+/// group id, an ad-hoc conference keeps it as the conference id. Shared by the
+/// accept / decline invite methods.
+fn invite_session_kind(session_id: ImSessionId, from_group: bool) -> ChatSessionKind {
+    if from_group {
+        ChatSessionKind::Group {
+            group_id: GroupKey::from(session_id.get()),
+        }
+    } else {
+        ChatSessionKind::Conference { id: session_id }
+    }
 }
 
 impl Session {
@@ -685,9 +702,74 @@ impl Session {
             // with [`Session::send_conference_message`].
             "ChatterBoxInvitation" => {
                 if let Some(event) = chatterbox_invitation_from_llsd(body) {
+                    // Record the invitation as a pending `Invited` chat-session
+                    // entry (the registry is the pending-invitation read model)
+                    // before surfacing the event unchanged for the driver to act
+                    // on. The session is keyed by the group id for a group IM or
+                    // the conference id otherwise; the channel(s) are classified
+                    // from the body's `instantmessage` / `voice` sub-maps.
+                    if let Event::ConferenceInvited {
+                        session_id,
+                        from_agent_id,
+                        from_group,
+                        session_name,
+                        ..
+                    } = &event
+                    {
+                        let kind = if *from_group {
+                            ChatSessionKind::Group {
+                                group_id: GroupKey::from(*session_id),
+                            }
+                        } else {
+                            ChatSessionKind::Conference {
+                                id: ImSessionId::from(*session_id),
+                            }
+                        };
+                        self.mark_chat_session_invited(
+                            kind,
+                            PendingInvite {
+                                inviter: *from_agent_id,
+                                session_name: session_name.clone(),
+                                channel: invite_channel_from_llsd(body),
+                            },
+                            now,
+                        );
+                    }
                     self.events.push_back(event);
                 } else {
                     self.caps_decode_failed(message);
+                }
+            }
+            // The reply to a `ChatSessionRequest` accept/decline POST (#28). The
+            // accept reply carries the session's current agent roster, which the
+            // runtime tags with the session id + `from_group`; fold it into that
+            // session's participants (the modern equivalent of replaying the
+            // `SessionAdd` stream). The decline reply and OpenSim's stubbed
+            // `<llsd>true</llsd>` carry no roster, so this is then a no-op.
+            CAP_CHAT_SESSION_REQUEST => {
+                let roster = chat_session_roster_from_llsd(body);
+                if !roster.is_empty() {
+                    let session_uuid = body
+                        .get("session-id")
+                        .and_then(Llsd::as_uuid)
+                        .unwrap_or_default();
+                    let from_group = body
+                        .get("from_group")
+                        .and_then(Llsd::as_bool)
+                        .unwrap_or(false);
+                    let kind = if from_group {
+                        ChatSessionKind::Group {
+                            group_id: GroupKey::from(session_uuid),
+                        }
+                    } else {
+                        ChatSessionKind::Conference {
+                            id: ImSessionId::from(session_uuid),
+                        }
+                    };
+                    let session = self.chat_session_mut(kind, now);
+                    for agent in roster {
+                        session.participants.insert(agent);
+                    }
                 }
             }
             // A pathfinding agent-state push: whether the agent may currently
@@ -4644,7 +4726,38 @@ impl Session {
             .entry(kind)
             .or_insert_with(|| ChatSession::new(now));
         session.last_activity = now;
+        // Every site routing through here observes real session traffic (an
+        // outbound send, an inbound message / participant change, an accept's
+        // roster), which is the "joined" signal: promote a pending `Invited`
+        // entry to `Joined` (a no-op for an already-joined session). Typing,
+        // which must not open or join a session, uses the non-creating
+        // `chat_session_get_mut` instead and so never reaches this promotion.
+        session.lifecycle = ChatSessionLifecycle::Joined;
         session
+    }
+
+    /// Get-or-create the chat session for `kind` as a pending **invitation**,
+    /// stamping its `last_activity` to `now` and recording `invite`. Unlike
+    /// [`Self::chat_session_mut`] this does **not** promote to `Joined`: it is the
+    /// sole path that sets [`ChatSessionLifecycle::Invited`]. An entry that is
+    /// already `Joined` (we have since seen traffic / accepted) is left joined —
+    /// an invitation never demotes a live session; only a fresh or still-invited
+    /// entry takes the invite payload.
+    fn mark_chat_session_invited(
+        &mut self,
+        kind: ChatSessionKind,
+        invite: PendingInvite,
+        now: Instant,
+    ) {
+        let fresh = !self.chat_sessions.contains_key(&kind);
+        let session = self
+            .chat_sessions
+            .entry(kind)
+            .or_insert_with(|| ChatSession::new(now));
+        session.last_activity = now;
+        if fresh || matches!(session.lifecycle, ChatSessionLifecycle::Invited(_)) {
+            session.lifecycle = ChatSessionLifecycle::Invited(invite);
+        }
     }
 
     /// Logs an inbound conversation message into `kind`'s history, opening the
@@ -4773,6 +4886,54 @@ impl Session {
         if let Some(chat_session) = self.chat_session_get_mut(session) {
             chat_session.unread = 0;
         }
+    }
+
+    /// The lifecycle of `session` — whether it is a still-pending invitation
+    /// ([`ChatSessionLifecycle::Invited`], carrying the
+    /// [`PendingInvite`](crate::PendingInvite)) or one we have joined
+    /// ([`ChatSessionLifecycle::Joined`]) — or `None` if no session is open for
+    /// `session`. The pending invitations are exactly the open sessions whose
+    /// lifecycle is `Invited`.
+    #[must_use]
+    pub fn chat_session_lifecycle(
+        &self,
+        session: ChatSessionKind,
+    ) -> Option<&ChatSessionLifecycle> {
+        self.chat_session(session)
+            .map(|chat_session| &chat_session.lifecycle)
+    }
+
+    /// Accepts a pending chat-session invitation, promoting its registry entry to
+    /// [`Joined`](ChatSessionLifecycle::Joined) (get-or-creating it as joined if
+    /// it is somehow absent). This is the pure-state half of the accept; the
+    /// runtime additionally POSTs `{ "method": "accept invitation", "session-id" }`
+    /// to the `ChatSessionRequest` capability when present (whose reply roster
+    /// seeds the participants), and on a grid without the cap relies on the
+    /// optimistic local join (the simulator added us when it routed the invite).
+    /// `from_group` selects whether `session_id` keys a [`Group`](ChatSessionKind::Group)
+    /// or a [`Conference`](ChatSessionKind::Conference) session, mirroring the
+    /// [`Event::ConferenceInvited`](crate::Event::ConferenceInvited) being answered.
+    pub fn accept_chat_invite(&mut self, session_id: ImSessionId, from_group: bool, now: Instant) {
+        let kind = invite_session_kind(session_id, from_group);
+        // `chat_session_mut` stamps activity and promotes `Invited` → `Joined`.
+        let _session = self.chat_session_mut(kind, now);
+    }
+
+    /// Declines a pending chat-session invitation, **removing** its registry
+    /// entry (the registry tracks only live sessions). This is the pure-state
+    /// half of the decline; the runtime additionally POSTs `{ "method": "decline
+    /// invitation", "session-id" }` to the `ChatSessionRequest` capability when
+    /// present, or sends a UDP `SessionLeave` as the fallback on a grid without
+    /// the cap. `from_group` selects [`Group`](ChatSessionKind::Group) vs
+    /// [`Conference`](ChatSessionKind::Conference), as for [`Self::accept_chat_invite`].
+    pub fn decline_chat_invite(
+        &mut self,
+        session_id: ImSessionId,
+        from_group: bool,
+        _now: Instant,
+    ) {
+        let kind = invite_session_kind(session_id, from_group);
+        let _removed = self.chat_sessions.remove(&kind);
     }
 
     /// Declines a friendship offer via `DeclineFriendship`. The `transaction_id`

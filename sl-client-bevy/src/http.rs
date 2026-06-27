@@ -6,9 +6,11 @@ use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::{
-    CAP_LAND_RESOURCES, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, Llsd, ParcelKey,
-    build_land_resources_request, parse_land_resources_reply, parse_llsd_xml,
+    CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, LAND_RESOURCE_DETAIL_TAG,
+    LAND_RESOURCE_SUMMARY_TAG, Llsd, ParcelKey, Uuid, build_land_resources_request,
+    parse_land_resources_reply, parse_llsd_xml,
 };
+use std::collections::HashMap;
 
 /// GETs `url` and parses the LLSD-XML reply, returning `None` on any
 /// transport/parse failure. Shared by the experience capability fetches.
@@ -40,6 +42,55 @@ pub(crate) fn run_caps_oneway(cap_url: &str, body: String) {
         .header("Content-Type", "application/llsd+xml")
         .body(body)
         .send()
+        .ok();
+}
+
+/// POSTs a `ChatSessionRequest` accept / decline `body` (blocking) and forwards
+/// the LLSD reply to `caps_tx` tagged [`CAP_CHAT_SESSION_REQUEST`], stamping the
+/// answered invitation's `session-id` + `from_group` into the reply map so the
+/// session can route the accept roster to the right participants (the reply
+/// carries no session id of its own). A non-map reply (decline ack / OpenSim's
+/// stubbed `true`) carries no roster, so the fold is then a no-op. Mirrors the
+/// tokio `post_chat_session_request`.
+pub(crate) fn run_chat_session_request(
+    cap_url: &str,
+    body: String,
+    session_id: Uuid,
+    from_group: bool,
+    caps_tx: &Sender<(String, Llsd)>,
+) {
+    let Ok(http) = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    else {
+        report_caps_failure(caps_tx, CAP_CHAT_SESSION_REQUEST);
+        return;
+    };
+    let Ok(response) = http
+        .post(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+    else {
+        report_caps_failure(caps_tx, CAP_CHAT_SESSION_REQUEST);
+        return;
+    };
+    let Ok(text) = response.text() else {
+        report_caps_failure(caps_tx, CAP_CHAT_SESSION_REQUEST);
+        return;
+    };
+    let Ok(reply) = parse_llsd_xml(&text) else {
+        report_caps_failure(caps_tx, CAP_CHAT_SESSION_REQUEST);
+        return;
+    };
+    let mut map = match reply {
+        Llsd::Map(map) => map,
+        _ => HashMap::new(),
+    };
+    let _previous = map.insert("session-id".to_owned(), Llsd::Uuid(session_id));
+    let _previous = map.insert("from_group".to_owned(), Llsd::Boolean(from_group));
+    caps_tx
+        .send((CAP_CHAT_SESSION_REQUEST.to_owned(), Llsd::Map(map)))
         .ok();
 }
 

@@ -275,6 +275,25 @@ pub const CAP_REGION_EXPERIENCES: &str = "RegionExperiences";
 /// one [`Event::InstantMessageReceived`] per stored message.
 pub const CAP_READ_OFFLINE_MSGS: &str = "ReadOfflineMsgs";
 
+/// Completing the IM surface (#28): the modern Second Life capability for
+/// accepting or declining a chat-session invitation. A POST of `{ "method":
+/// "accept invitation" | "decline invitation", "session-id": <uuid> }`; the
+/// `"accept invitation"` reply body is the session's current agent roster (the
+/// modern equivalent of replaying the UDP `SessionAdd` stream). OpenSim stubs this
+/// cap (returns `<llsd>true</llsd>`), so the UDP `SessionLeave` fallback is what
+/// the local grid exercises for a decline. Decoded by the runtimes' chat-invite
+/// commands; the roster reply seeds the session participants.
+pub const CAP_CHAT_SESSION_REQUEST: &str = "ChatSessionRequest";
+
+/// The `ChatSessionRequest` method that accepts (joins) a chat-session invitation,
+/// for both text and voice channels (the voice-join signalling is layered on top
+/// — see chat task B8). The reply carries the session's current agent roster.
+pub const CHAT_SESSION_ACCEPT: &str = "accept invitation";
+
+/// The `ChatSessionRequest` method that declines (refuses) a multi-agent
+/// chat-session invitation, text or voice.
+pub const CHAT_SESSION_DECLINE: &str = "decline invitation";
+
 /// Inventory mutation (#30): the modern Second Life **AIS3** REST inventory
 /// capability (`InventoryAPIv3`). Folder/item create/update/move/remove are HTTP
 /// verbs against path suffixes under this base URL (see `sl_wire::inventory`).
@@ -449,6 +468,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_UPDATE_EXPERIENCE,
     CAP_REGION_EXPERIENCES,
     CAP_READ_OFFLINE_MSGS,
+    CAP_CHAT_SESSION_REQUEST,
     CAP_INVENTORY_API_V3,
     CAP_LIBRARY_API_V3,
     CAP_CREATE_INVENTORY_CATEGORY,
@@ -1081,7 +1101,9 @@ mod conversions;
 mod methods;
 
 use self::chat_session::{ChatSession, TYPING_TIMEOUT};
-pub use chat_session::{ChatSessionKind, SessionMessage};
+pub use chat_session::{
+    ChatSessionKind, ChatSessionLifecycle, InviteChannel, PendingInvite, SessionMessage,
+};
 
 pub(crate) use conversions::{
     ZERO_VECTOR, instant_message, region_handshake_message, shape_from_object_shape_block,
@@ -1089,12 +1111,12 @@ pub(crate) use conversions::{
 pub use conversions::{
     agent_drop_group_to_llsd, agent_state_update_to_llsd, ais_inventory_update_to_llsd,
     build_map_block_reply, build_map_item_reply, build_map_layer_reply,
-    bulk_update_inventory_to_llsd, chatterbox_invitation_to_llsd, created_category_to_llsd,
-    crossed_region_to_caps_llsd, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
-    environment_to_llsd, establish_agent_communication_to_llsd, group_members_to_caps_llsd,
-    group_memberships_to_caps_llsd, inventory_descendents_to_llsd, nav_mesh_status_to_llsd,
-    offline_messages_to_llsd, open_region_info_to_llsd, parcel_info_to_llsd,
-    required_voice_version_to_llsd, server_appearance_update_to_llsd,
+    bulk_update_inventory_to_llsd, chat_session_request_body, chatterbox_invitation_to_llsd,
+    created_category_to_llsd, crossed_region_to_caps_llsd, display_name_update_to_llsd,
+    enable_simulator_to_caps_llsd, environment_to_llsd, establish_agent_communication_to_llsd,
+    group_members_to_caps_llsd, group_memberships_to_caps_llsd, inventory_descendents_to_llsd,
+    nav_mesh_status_to_llsd, offline_messages_to_llsd, open_region_info_to_llsd,
+    parcel_info_to_llsd, required_voice_version_to_llsd, server_appearance_update_to_llsd,
     set_display_name_reply_to_llsd, sim_console_response_to_llsd, teleport_finish_to_llsd,
     windlight_refresh_to_llsd,
 };

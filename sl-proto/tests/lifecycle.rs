@@ -10,36 +10,37 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AnimationKey, AssetKey, AssetType, AttachmentMode,
-        AttachmentPoint, Camera, ChatAudible, ChatChannel, ChatSessionKind, ChatSource, ChatType,
-        ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction, CloudPosDensity,
-        CoarseLocation, Color, ColorAlpha, ControlFlags, CreateGroupParams, DayCycle,
-        DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, Direction,
-        DirectoryVisibility, DisconnectReason, DisplayName, DisplayNameUpdate, Distance,
+        AttachmentPoint, Camera, ChatAudible, ChatChannel, ChatSessionKind, ChatSessionLifecycle,
+        ChatSource, ChatType, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction,
+        CloudPosDensity, CoarseLocation, Color, ColorAlpha, ControlFlags, CreateGroupParams,
+        DayCycle, DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirFindFlags,
+        Direction, DirectoryVisibility, DisconnectReason, DisplayName, DisplayNameUpdate, Distance,
         EjectAction, EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, EventId,
         FollowCamProperty, FreezeAction, FriendKey, FriendRights, GestureActivation,
         GlobalCoordinates, Glow, GodRegionUpdate, GridCoordinates, GroupKey, GroupNoticeAttachment,
         GroupRequestId, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
         GroupRoleUpdateType, ImDialog, ImSessionId, ImageCodec, InterestsUpdate,
         InventoryCallbackId, InventoryFolderKey, InventoryItem, InventoryItemMove,
-        InventoryItemOrFolderKey, InventoryKey, LandArea, LandBrushAction, LandBrushSize, LandEdit,
-        LandingType, LightData, LindenAmount, LindenBalance, LoginAccount, LoginParams, LookAtType,
-        LureId, MapItemType, Material, Maturity, MeanCollisionType, MeshKey, MoneyTransactionType,
-        MovementMode, MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem,
-        NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
-        ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
-        ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand,
-        ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PermissionField,
-        Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams,
-        ProductType, ProfileUpdate, QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle,
-        RegionInfoUpdate, RegionName, Reliability, RequiredVoiceVersion, RestoreItem,
-        RezAttachment, RezObjectParams, RezScriptParams, SaleType, Scale, ScopedObjectId,
-        ScopedParcelId, ScriptControlAction, ScriptPermissionStatus, ScriptPermissions,
-        SculptOrMeshKey, Session, SessionMessage, SetDisplayNameReply, SimStatId,
-        SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags, StartLocationSlot,
-        TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea, TerrainLayerType,
-        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, TransferStatus, Transmit,
-        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        WaterSettings, WearableType, avatar_texture, decode_texture_entry, group_powers, pcode,
+        InventoryItemOrFolderKey, InventoryKey, InviteChannel, LandArea, LandBrushAction,
+        LandBrushSize, LandEdit, LandingType, LightData, LindenAmount, LindenBalance, LoginAccount,
+        LoginParams, LookAtType, LureId, MapItemType, Material, Maturity, MeanCollisionType,
+        MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NavMeshBuildStatus,
+        NavMeshStatus, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
+        ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
+        ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
+        ParcelKey, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
+        ParcelUpdate, PendingInvite, PermissionField, Permissions, Permissions5, PickUpdate,
+        PointAtType, Postcard, PrimShape, PrimShapeParams, ProductType, ProfileUpdate, QueryId,
+        ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate, RegionName,
+        Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
+        RezScriptParams, SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction,
+        ScriptPermissionStatus, ScriptPermissions, SculptOrMeshKey, Session, SessionMessage,
+        SetDisplayNameReply, SimStatId, SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags,
+        StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea,
+        TerrainLayerType, TextureEntry, TextureFace, TextureKey, Throttle, TransactionId,
+        TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, WaterSettings, WearableType, avatar_texture, chat_session_request_body,
+        decode_texture_entry, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -15424,6 +15425,289 @@ mod test {
         assert_eq!(timestamp, Some(1_700_000_000));
         // "My Group" base64-decoded — the group/session label.
         assert_eq!(binary_bucket, b"My Group");
+        Ok(())
+    }
+
+    /// A text `ChatterBoxInvitation` records a pending `Invited` chat-session
+    /// entry — keyed by the group id for a group IM (from_group, type 15) and by
+    /// the conference id otherwise (type 16) — carrying the inviter / name and the
+    /// text channel classification.
+    #[test]
+    fn chatterbox_invitation_records_pending_invite() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x60_01);
+        let inviter = uuid::Uuid::from_u128(0x60_02);
+        let group_xml = format!(
+            "<llsd><map>\
+               <key>session_name</key><string>My Group</string>\
+               <key>instantmessage</key><map><key>message_params</key><map>\
+                 <key>id</key><uuid>{group}</uuid>\
+                 <key>from_id</key><uuid>{inviter}</uuid>\
+                 <key>from_name</key><string>Inviter</string>\
+                 <key>type</key><integer>15</integer>\
+                 <key>from_group</key><boolean>1</boolean>\
+               </map></map></map></llsd>"
+        );
+        session.handle_caps_event("ChatterBoxInvitation", &parse_llsd_xml(&group_xml)?, now)?;
+        let kind = ChatSessionKind::Group {
+            group_id: GroupKey::from(group),
+        };
+        match session.chat_session_lifecycle(kind) {
+            Some(ChatSessionLifecycle::Invited(PendingInvite {
+                inviter: got,
+                session_name,
+                channel,
+            })) => {
+                assert_eq!(*got, AgentKey::from(inviter));
+                assert_eq!(session_name, "My Group");
+                assert_eq!(*channel, InviteChannel::Text);
+            }
+            other => return Err(format!("expected Invited, got {other:?}").into()),
+        }
+
+        // An ad-hoc conference invite (type 16, from_group clear) keys by the
+        // conference id instead.
+        let conf = uuid::Uuid::from_u128(0x60_03);
+        let conf_xml = format!(
+            "<llsd><map>\
+               <key>session_name</key><string>Chat</string>\
+               <key>instantmessage</key><map><key>message_params</key><map>\
+                 <key>id</key><uuid>{conf}</uuid>\
+                 <key>from_id</key><uuid>{inviter}</uuid>\
+                 <key>from_name</key><string>Inviter</string>\
+                 <key>type</key><integer>16</integer>\
+                 <key>from_group</key><boolean>0</boolean>\
+               </map></map></map></llsd>"
+        );
+        session.handle_caps_event("ChatterBoxInvitation", &parse_llsd_xml(&conf_xml)?, now)?;
+        let conf_kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(conf),
+        };
+        assert!(matches!(
+            session.chat_session_lifecycle(conf_kind),
+            Some(ChatSessionLifecycle::Invited(_))
+        ));
+        Ok(())
+    }
+
+    /// The invite channel is classified from the body's `instantmessage` /
+    /// `voice` sub-maps: both present is [`InviteChannel::Both`]; a `voice`-only
+    /// body (no `instantmessage`, fields at the top level) is
+    /// [`InviteChannel::Voice`].
+    #[test]
+    fn chatterbox_invitation_classifies_voice_channels() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Both channels: an `instantmessage` text body plus a `voice` sub-map.
+        let both = uuid::Uuid::from_u128(0x61_01);
+        let both_xml = format!(
+            "<llsd><map>\
+               <key>session_name</key><string>Call</string>\
+               <key>voice</key><map><key>invitation_type</key><integer>0</integer></map>\
+               <key>instantmessage</key><map><key>message_params</key><map>\
+                 <key>id</key><uuid>{both}</uuid>\
+                 <key>from_id</key><uuid>{both}</uuid>\
+                 <key>type</key><integer>16</integer>\
+                 <key>from_group</key><boolean>0</boolean>\
+               </map></map></map></llsd>"
+        );
+        session.handle_caps_event("ChatterBoxInvitation", &parse_llsd_xml(&both_xml)?, now)?;
+        let both_kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(both),
+        };
+        assert!(matches!(
+            session.chat_session_lifecycle(both_kind),
+            Some(ChatSessionLifecycle::Invited(PendingInvite {
+                channel: InviteChannel::Both,
+                ..
+            }))
+        ));
+
+        // Voice only: no `instantmessage`; the session fields live at the top
+        // level of the body (the SL voice-invite shape).
+        let voice = uuid::Uuid::from_u128(0x61_02);
+        let voice_xml = format!(
+            "<llsd><map>\
+               <key>session_id</key><uuid>{voice}</uuid>\
+               <key>from_id</key><uuid>{voice}</uuid>\
+               <key>session_name</key><string>Call</string>\
+               <key>voice</key><map><key>invitation_type</key><integer>0</integer></map>\
+             </map></llsd>"
+        );
+        session.handle_caps_event("ChatterBoxInvitation", &parse_llsd_xml(&voice_xml)?, now)?;
+        let voice_kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(voice),
+        };
+        assert!(matches!(
+            session.chat_session_lifecycle(voice_kind),
+            Some(ChatSessionLifecycle::Invited(PendingInvite {
+                channel: InviteChannel::Voice,
+                ..
+            }))
+        ));
+        Ok(())
+    }
+
+    /// `accept_chat_invite` promotes a pending `Invited` entry to `Joined`;
+    /// `decline_chat_invite` removes the entry entirely.
+    #[test]
+    fn accept_and_decline_chat_invite_transition() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x62_01);
+        let inviter = uuid::Uuid::from_u128(0x62_02);
+        let xml = format!(
+            "<llsd><map>\
+               <key>session_name</key><string>My Group</string>\
+               <key>instantmessage</key><map><key>message_params</key><map>\
+                 <key>id</key><uuid>{group}</uuid>\
+                 <key>from_id</key><uuid>{inviter}</uuid>\
+                 <key>type</key><integer>15</integer>\
+                 <key>from_group</key><boolean>1</boolean>\
+               </map></map></map></llsd>"
+        );
+        let body = parse_llsd_xml(&xml)?;
+        let kind = ChatSessionKind::Group {
+            group_id: GroupKey::from(group),
+        };
+
+        // Accept → Joined.
+        session.handle_caps_event("ChatterBoxInvitation", &body, now)?;
+        session.accept_chat_invite(ImSessionId::from(group), true, now);
+        assert_eq!(
+            session.chat_session_lifecycle(kind),
+            Some(&ChatSessionLifecycle::Joined)
+        );
+
+        // Re-invite then decline → entry removed.
+        session.handle_caps_event("ChatterBoxInvitation", &body, now)?;
+        session.decline_chat_invite(ImSessionId::from(group), true, now);
+        assert_eq!(session.chat_session_lifecycle(kind), None);
+        Ok(())
+    }
+
+    /// Inbound group-session traffic promotes a still-pending `Invited` entry to
+    /// `Joined` without an explicit accept (traffic *is* the join signal).
+    #[test]
+    fn inbound_traffic_promotes_invited_to_joined() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x63_01);
+        let inviter = uuid::Uuid::from_u128(0x63_02);
+        let xml = format!(
+            "<llsd><map>\
+               <key>session_name</key><string>My Group</string>\
+               <key>instantmessage</key><map><key>message_params</key><map>\
+                 <key>id</key><uuid>{group}</uuid>\
+                 <key>from_id</key><uuid>{inviter}</uuid>\
+                 <key>type</key><integer>15</integer>\
+                 <key>from_group</key><boolean>1</boolean>\
+               </map></map></map></llsd>"
+        );
+        session.handle_caps_event("ChatterBoxInvitation", &parse_llsd_xml(&xml)?, now)?;
+        let kind = ChatSessionKind::Group {
+            group_id: GroupKey::from(group),
+        };
+        assert!(matches!(
+            session.chat_session_lifecycle(kind),
+            Some(ChatSessionLifecycle::Invited(_))
+        ));
+
+        // A group message in that session promotes it to Joined.
+        let message = AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
+            agent_data: ImprovedInstantMessageAgentDataBlock {
+                agent_id: inviter,
+                session_id: uuid::Uuid::nil(),
+            },
+            message_block: ImprovedInstantMessageMessageBlockBlock {
+                from_group: true,
+                to_agent_id: uuid::Uuid::from_u128(1),
+                parent_estate_id: 0,
+                region_id: uuid::Uuid::nil(),
+                position: Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                offline: 0,
+                dialog: 17,
+                id: group,
+                timestamp: 0,
+                from_agent_name: b"Inviter\0".to_vec(),
+                message: b"welcome\0".to_vec(),
+                binary_bucket: Vec::new(),
+            },
+            estate_block: ImprovedInstantMessageEstateBlockBlock { estate_id: 0 },
+            meta_data: Vec::new(),
+        });
+        let datagram = server_message(&message, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        assert_eq!(
+            session.chat_session_lifecycle(kind),
+            Some(&ChatSessionLifecycle::Joined)
+        );
+        Ok(())
+    }
+
+    /// A `ChatSessionRequest` accept reply carrying the session's agent roster
+    /// (tagged with the answered session id + `from_group`, as the runtime does)
+    /// seeds that session's participants. Both the modern `agent_info` map and the
+    /// deprecated `agents` array are decoded.
+    #[test]
+    fn chat_session_request_roster_seeds_participants() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let conf = uuid::Uuid::from_u128(0x64_01);
+        let agent_a = uuid::Uuid::from_u128(0x64_0A);
+        let agent_b = uuid::Uuid::from_u128(0x64_0B);
+        let xml = format!(
+            "<llsd><map>\
+               <key>session-id</key><uuid>{conf}</uuid>\
+               <key>from_group</key><boolean>0</boolean>\
+               <key>agent_info</key><map>\
+                 <key>{agent_a}</key><map><key>is_moderator</key><boolean>0</boolean></map>\
+                 <key>{agent_b}</key><map><key>is_moderator</key><boolean>1</boolean></map>\
+               </map></map></llsd>"
+        );
+        session.handle_caps_event("ChatSessionRequest", &parse_llsd_xml(&xml)?, now)?;
+        let kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(conf),
+        };
+        let mut participants: Vec<AgentKey> = session.participants(kind).collect();
+        participants.sort();
+        let mut expected = vec![AgentKey::from(agent_a), AgentKey::from(agent_b)];
+        expected.sort();
+        assert_eq!(participants, expected);
+        Ok(())
+    }
+
+    /// The `ChatSessionRequest` accept / decline POST body encodes the method and
+    /// the flat session id (the shape Firestorm's `chatterBoxInvitationCoro`
+    /// sends), round-tripping through the LLSD parser.
+    #[test]
+    fn chat_session_request_body_encodes_method_and_session() -> Result<(), TestError> {
+        let session_id = uuid::Uuid::from_u128(0x65_01);
+        let body = chat_session_request_body("accept invitation", session_id);
+        let parsed = parse_llsd_xml(&body)?;
+        assert_eq!(
+            parsed.get("method").and_then(Llsd::as_str),
+            Some("accept invitation")
+        );
+        assert_eq!(
+            parsed.get("session-id").and_then(Llsd::as_uuid),
+            Some(session_id)
+        );
         Ok(())
     }
 
