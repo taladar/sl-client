@@ -11,7 +11,7 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 use bevy::prelude::*;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use sl_proto::{
     CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
@@ -28,16 +28,16 @@ use sl_proto::{
     CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
     CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
     CHAT_SESSION_DECLINE_P2P_VOICE, ChatSessionKind, Event as SessionEvent, GroupKey, Llsd,
-    LoginResponse, RECV_BUFFER_SIZE, SelectedCostKind, Session, ais_category_children_fetch_url,
-    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
-    build_agent_preferences_request, build_ais_create_category_body, build_ais_move_body,
-    build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request, build_get_object_cost_request,
-    build_get_object_physics_data_request, build_modify_material_params_request,
-    build_object_media_navigate_request, build_object_media_update_request,
-    build_parcel_voice_info_request, build_provision_voice_account_request,
-    build_region_experiences_request, build_remote_parcel_request,
-    build_resource_cost_selected_request, build_send_user_report,
+    LoginResponse, MessageCursor, RECV_BUFFER_SIZE, SelectedCostKind, Session, SessionMessage,
+    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    ais_create_category_url, ais_item_url, build_agent_preferences_request,
+    build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
+    build_ais_update_item_body, build_create_inventory_category_request,
+    build_get_object_cost_request, build_get_object_physics_data_request,
+    build_modify_material_params_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_parcel_voice_info_request,
+    build_provision_voice_account_request, build_region_experiences_request,
+    build_remote_parcel_request, build_resource_cost_selected_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_upload_baked_texture_request,
     build_voice_signaling_request, chat_session_request_body, display_names_query,
@@ -51,41 +51,43 @@ use sl_proto::{
 pub use sl_proto::{
     ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnimationKey,
     AnyMessage, AssetKey, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick,
-    AvatarProperties, Camera, CameraError, ChatAudible, ChatChannel, ChatMessage, ChatSource,
-    ChatSourceType, ChatType, ChatTypeNotAVolume, CircuitCode, CircuitId, ClassifiedCategory,
-    ClassifiedInfo, ClassifiedUpdate, ClickAction, Command, ControlFlags, CreateGroupParams,
-    DeRezDestination, DetachOrder, Diagnostic, Direction, DisconnectReason, Distance, EconomyData,
-    EstateAccessDelta, EstateAccessKind, EstateInfo, ExperienceInfo, ExperiencePermission,
-    ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights,
-    GlobalCoordinates, GltfMaterialOverride, GridCoordinates, GroupMember, GroupMembership,
-    GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole,
-    GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange,
-    GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog, ImSessionId,
-    InstantMessage, InterestsUpdate, InventoryCallbackId, InventoryFolder, InventoryFolderKey,
-    InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryType, Key,
-    Kilobits, LandArea, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount,
-    LindenBalance, LoadUrlRequest, LoginAccount, LoginParams, LoginRequest, LureId, MEDIA_PERM_ALL,
-    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
-    MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge,
-    MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags,
-    MuteType, NegativeBalanceError, NeighborInfo, NewInventoryItem, Object, ObjectExtraParams,
-    ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties,
-    ObjectTransform, OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-    ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, PhysicsShapeTypes, PickInfo,
-    PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape, PrimShapeParams, ProductType,
-    ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId, ReflectionProbe,
-    ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionCoordinates, RegionFlags,
-    RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId,
-    RegionLocalParcelId, RegionName, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation,
-    SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData, SculptOrMeshKey,
-    SequenceNumber, SimulatorFeatures, SoundFlags, SoundPreload, StartLocation,
-    StartLocationParseError, TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry,
-    TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TransactionId, TransferId,
-    Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType,
-    XferId, avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
+    AvatarProperties, Camera, CameraError, ChatAudible, ChatChannel, ChatLogConfig, ChatMessage,
+    ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, CircuitCode, CircuitId,
+    ClassifiedCategory, ClassifiedInfo, ClassifiedUpdate, ClickAction, ClockStyle, Command,
+    ControlFlags, ConversationKind, CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic,
+    Direction, DisconnectReason, Distance, EconomyData, EstateAccessDelta, EstateAccessKind,
+    EstateInfo, ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate,
+    ExtendedMesh, FlexibleData, Friend, FriendRights, GlobalCoordinates, GltfMaterialOverride,
+    GridCoordinates, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
+    GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit,
+    GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
+    HomeLocation, IceCandidate, ImDialog, ImSessionId, InstantMessage, InterestsUpdate,
+    InventoryCallbackId, InventoryFolder, InventoryFolderKey, InventoryItem,
+    InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryType, Key, Kilobits, LandArea,
+    LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance,
+    LoadUrlRequest, LoggedChatType, LoginAccount, LoginParams, LoginRequest, LureId,
+    MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER,
+    MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry,
+    MeshKey, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode,
+    MuteEntry, MuteFlags, MuteType, NegativeBalanceError, NeighborInfo, NewInventoryItem, Object,
+    ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks,
+    ObjectProperties, ObjectTransform, OpenSimExtras, OwnerKey, ParcelAccessEntry,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
+    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
+    PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape,
+    PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId,
+    ReflectionProbe, ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings,
+    RegionCoordinates, RegionFlags, RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits,
+    RegionLocalObjectId, RegionLocalParcelId, RegionName, Reliability, RenderMaterialEntry,
+    RenderMaterialRef, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
+    ScriptControlAction, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest, SculptData, SculptOrMeshKey, SequenceNumber, SimulatorFeatures,
+    SoundFlags, SoundPreload, StartLocation, StartLocationParseError, TerrainLayerType,
+    TerrainPatch, TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle,
+    ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit, Uuid,
+    Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, XferId,
+    avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
     grid_to_handle, group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode,
     sim_access, texture_anim_mode,
 };
@@ -94,6 +96,7 @@ pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 
 mod caps;
+mod chat_log;
 mod experiences;
 mod fetch;
 mod http;
@@ -103,6 +106,7 @@ mod media;
 mod upload;
 mod voice;
 use crate::caps::{CAPS_FAILURE_PREFIX, post_neighbour_seed, start_caps};
+use crate::chat_log::ChatLog;
 use crate::experiences::{run_experience_status, run_group_experiences};
 use crate::fetch::{emit_disconnect, run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
 use crate::http::{
@@ -132,6 +136,10 @@ pub struct SlClientPlugin {
     /// the session records [`Diagnostic`]s for anomalies it would otherwise
     /// silently drop, surfaced as [`SlDiagnostic`] events.
     pub diagnostics: bool,
+    /// The local chat-log configuration (default off). When any text-chat type is
+    /// enabled, the driver writes Firestorm-compatible transcripts and serves the
+    /// older, file-backed pages of `QueryChatHistoryPage`.
+    pub chat_log_config: ChatLogConfig,
 }
 
 impl Plugin for SlClientPlugin {
@@ -145,6 +153,7 @@ impl Plugin for SlClientPlugin {
             .insert_resource(SlConfig {
                 params: self.params.clone(),
                 diagnostics: self.diagnostics,
+                chat_log_config: self.chat_log_config.clone(),
             })
             .add_systems(Startup, start_login)
             .add_systems(Update, drive);
@@ -207,6 +216,8 @@ struct SlConfig {
     params: LoginParams,
     /// Whether to collect protocol diagnostics.
     diagnostics: bool,
+    /// The local chat-log configuration (default off).
+    chat_log_config: ChatLogConfig,
 }
 
 /// The driver's runtime state resource.
@@ -236,6 +247,8 @@ enum SlInner {
         /// The CAPS subsystem for the current region, if a seed capability is
         /// known. Restarted on each region change.
         caps: Option<Caps>,
+        /// The local chat-log writer/reader (a no-op when disabled).
+        chat_log: Box<ChatLog>,
     },
     /// The session is finished.
     Done,
@@ -309,8 +322,14 @@ fn perform_login(url: &str, user_agent: &str, body: String) -> Result<String, St
 }
 
 /// Update system: advances the session each frame.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected ECS resources and event \
+              writers/readers; the chat-log config is one more such resource"
+)]
 fn drive(
     mut state: ResMut<SlState>,
+    config: Res<SlConfig>,
     mut events: EventWriter<SlEvent>,
     mut diagnostics: EventWriter<SlDiagnostic>,
     mut capabilities: EventWriter<SlCapabilities>,
@@ -321,19 +340,27 @@ fn drive(
     let now = Instant::now();
     let inner = std::mem::replace(&mut state.inner, SlInner::Done);
     state.inner = match inner {
-        SlInner::LoggingIn { session, rx } => {
-            advance_login(session, rx, now, &mut events, &mut identity, &mut mfa)
-        }
+        SlInner::LoggingIn { session, rx } => advance_login(
+            session,
+            rx,
+            &config.chat_log_config,
+            now,
+            &mut events,
+            &mut identity,
+            &mut mfa,
+        ),
         SlInner::Running {
             session,
             socket,
             recv_buf,
             caps,
+            chat_log,
         } => advance_running(
             session,
             socket,
             recv_buf,
             caps,
+            chat_log,
             now,
             &mut events,
             &mut diagnostics,
@@ -349,6 +376,7 @@ fn drive(
 fn advance_login(
     mut session: Box<Session>,
     rx: Receiver<Result<String, String>>,
+    chat_log_config: &ChatLogConfig,
     now: Instant,
     events: &mut EventWriter<SlEvent>,
     identity: &mut EventWriter<SlIdentity>,
@@ -373,11 +401,17 @@ fn advance_login(
                             seed_capability: session.seed_capability().cloned(),
                         });
                         let caps = start_caps(&session);
+                        let chat_log = Box::new(ChatLog::new(
+                            chat_log_config.clone(),
+                            session.agent_legacy_name(),
+                            session.agent_id(),
+                        ));
                         SlInner::Running {
                             session,
                             socket,
                             recv_buf: vec![0u8; RECV_BUFFER_SIZE],
                             caps,
+                            chat_log,
                         }
                     }
                     Err(()) => {
@@ -432,6 +466,7 @@ fn advance_running(
     socket: UdpSocket,
     mut recv_buf: Vec<u8>,
     mut caps: Option<Caps>,
+    mut chat_log: Box<ChatLog>,
     now: Instant,
     events: &mut EventWriter<SlEvent>,
     diagnostics: &mut EventWriter<SlDiagnostic>,
@@ -515,6 +550,7 @@ fn advance_running(
                 session
                     .send_instant_message(*to_agent_id, message, now)
                     .ok();
+                chat_log.log_outbound_im(*to_agent_id, message);
             }
             Command::ImTyping {
                 to_agent_id,
@@ -980,6 +1016,10 @@ fn advance_running(
             }
             Command::SendGroupMessage { group_id, message } => {
                 session.send_group_message(*group_id, message, now).ok();
+                if let Some(own) = session.agent_id() {
+                    let name = session.agent_legacy_name();
+                    chat_log.log_group(*group_id, own, &name, message);
+                }
             }
             Command::LeaveGroupSession(group_id) => {
                 session.leave_group_session(*group_id, now).ok();
@@ -2543,6 +2583,13 @@ fn advance_running(
                 session
                     .send_conference_message(*session_id, message, now)
                     .ok();
+                if let Some(own) = session.agent_id() {
+                    let name = session.agent_legacy_name();
+                    let roster: BTreeSet<_> = session
+                        .participants(ChatSessionKind::Conference { id: *session_id })
+                        .collect();
+                    chat_log.log_conference(*session_id, &roster, own, &name, message);
+                }
             }
             Command::LeaveConference { session_id } => {
                 session.leave_conference(*session_id, now).ok();
@@ -2671,10 +2718,28 @@ fn advance_running(
                 before,
                 limit,
             } => {
-                // Local query: clone one bounded, newest-first page into an
-                // `Arc<[_]>` and surface it with its `prev` cursor.
-                let (page, prev) = session.history_page(*chat_session, *before, *limit);
-                let messages: std::sync::Arc<[_]> = page.cloned().collect();
+                // Newest-first paging across the unified memory→archive view: the
+                // in-memory ring first, then older pages from the transcript (B9).
+                let consumed = before.map_or(0, MessageCursor::consumed_count);
+                let mem_len = session.history_len(*chat_session);
+                let (messages, prev): (std::sync::Arc<[SessionMessage]>, _) = if consumed < mem_len
+                {
+                    let (page, mem_prev) = session.history_page(*chat_session, *before, *limit);
+                    let collected: std::sync::Arc<[_]> = page.cloned().collect();
+                    let next = consumed.saturating_add(collected.len());
+                    let prev = mem_prev.or_else(|| {
+                        chat_log
+                            .read_older_page(*chat_session, mem_len, next, 1)
+                            .filter(|(probe, _)| !probe.is_empty())
+                            .map(|_more| MessageCursor::from_consumed(next))
+                    });
+                    (collected, prev)
+                } else {
+                    match chat_log.read_older_page(*chat_session, mem_len, consumed, *limit) {
+                        Some((msgs, prev)) => (msgs.into(), prev),
+                        None => (Vec::new().into(), None),
+                    }
+                };
                 events.write(SlEvent(SessionEvent::ChatHistoryPage {
                     session: *chat_session,
                     messages,
@@ -2824,6 +2889,11 @@ fn advance_running(
             } => post_neighbour_seed(seed_capability.clone()),
             _ => {}
         }
+        // Tap the event for the local chat log (no-op when disabled) before
+        // forwarding it on.
+        if chat_log.any_enabled() {
+            chat_log.observe_event(&session, &event);
+        }
         events.write(SlEvent(event));
     }
     if region_changed {
@@ -2838,6 +2908,7 @@ fn advance_running(
             socket,
             recv_buf,
             caps,
+            chat_log,
         }
     }
 }

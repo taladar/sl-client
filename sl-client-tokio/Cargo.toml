@@ -16,12 +16,14 @@ categories = ["network-programming", "game-development"]
 exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
 [dependencies]
+fs-err = { version = "3.3.0" }
 reqwest = { version = "0.12.15", default-features = false, features = [
     "rustls-tls",
 ] }
 sl-proto = { version = "0.1.0", path = "../sl-proto" }
 sl-wire = { version = "0.1.0", path = "../sl-wire" }
 thiserror = { version = "2.0.18" }
+time = { version = "0.3.49", features = ["local-offset"] }
 tokio = { version = "1.44.2", features = ["net", "time", "rt", "macros", "sync"] }
 tracing = { version = "0.1.44" }
 url = { version = "2.5.8" }

@@ -131,6 +131,9 @@ pub struct RunArgs {
     /// Record the interactive session to a replayable `.repl` transcript.
     #[clap(long)]
     script_out: Option<PathBuf>,
+    /// The optional local chat-log toggles (all off by default).
+    #[clap(flatten)]
+    chat_log: sl_repl::ChatLogArgs,
 }
 
 /// The packaging sub-commands (the absence of a sub-command runs a session).
@@ -553,6 +556,7 @@ async fn run_repl(args: RunArgs) -> Result<(), Error> {
     let mut client = connect_with_mfa(&login_uri, request, avatar).await?;
     tracing::info!("login succeeded");
     client.set_diagnostics(true);
+    client.set_chat_log_config(args.chat_log.to_config());
     let (caps_tx, mut caps_rx) = mpsc::channel::<HashMap<String, String>>(8);
     client.set_caps_reporter(caps_tx);
 

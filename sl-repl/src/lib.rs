@@ -25,6 +25,7 @@
 
 pub mod args;
 pub mod auth;
+pub mod chat_log_args;
 pub mod context;
 pub mod error;
 pub mod format;
@@ -36,6 +37,7 @@ pub mod smoke;
 
 pub use args::Args;
 pub use auth::{AuthError, Avatar, Credentials, Secret, acquire_mfa_token};
+pub use chat_log_args::ChatLogArgs;
 pub use context::{NoContext, ReplContext, SessionContext};
 pub use error::ReplError;
 pub use format::{format_command, format_diagnostic, format_event, hexdump};

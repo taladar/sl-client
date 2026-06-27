@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::prelude::*;
 use sl_client_bevy::{
-    Command, Distance, LoginParams, LoginRequest, SessionDisconnectReason, SlClientPlugin,
-    SlCommand, SlEvent, SlSessionEvent,
+    ChatLogConfig, Command, Distance, LoginParams, LoginRequest, SessionDisconnectReason,
+    SlClientPlugin, SlCommand, SlEvent, SlSessionEvent,
 };
 use tracing::{info, warn};
 
@@ -65,6 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_plugins(SlClientPlugin {
             params,
             diagnostics: false,
+            chat_log_config: ChatLogConfig::default(),
         })
         .insert_resource(ProbeState {
             collect: Duration::from_secs(collect_secs),
