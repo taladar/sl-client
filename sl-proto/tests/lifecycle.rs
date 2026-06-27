@@ -16603,6 +16603,134 @@ mod test {
         Ok(())
     }
 
+    #[test]
+    fn offline_notification_clears_typing_and_roster_keeping_sessions() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A friend who is both a conference participant and typing in a 1:1.
+        let friend = uuid::Uuid::from_u128(0xF3);
+        let friend_key = AgentKey::from(friend);
+        let conference = uuid::Uuid::from_u128(0xABC);
+        let conf_kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(conference),
+        };
+        let direct_kind = ChatSessionKind::Direct { peer: friend_key };
+
+        // Seed the conference roster (SessionAdd, dialog 13) and a 1:1 typing
+        // entry (open the 1:1 with a message, then TypingStart, dialog 41).
+        let add = inbound_offer_im(13, friend, conference, Vec::new());
+        session.handle_datagram(sim_addr(), &server_message(&add, 9, false)?, now)?;
+        // Open the 1:1 with a message from the friend, then a TypingStart — both
+        // keyed by the sender, so they must come *from* the friend's id.
+        let open = inbound_offer_im(0, friend, uuid::Uuid::nil(), Vec::new());
+        session.handle_datagram(sim_addr(), &server_message(&open, 10, false)?, now)?;
+        let start = inbound_offer_im(41, friend, uuid::Uuid::nil(), Vec::new());
+        session.handle_datagram(sim_addr(), &server_message(&start, 11, false)?, now)?;
+        assert_eq!(participants(&session, conf_kind), vec![friend_key]);
+        assert_eq!(typers(&session, direct_kind), vec![friend_key]);
+
+        // The friend goes offline.
+        let offline = AnyMessage::OfflineNotification(OfflineNotification {
+            agent_block: vec![OfflineNotificationAgentBlockBlock { agent_id: friend }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&offline, 12, true)?, now)?;
+
+        // The friend is dropped from the conference roster and the 1:1 typing
+        // set, but neither session is removed and presence reads offline.
+        assert!(participants(&session, conf_kind).is_empty());
+        assert!(typers(&session, direct_kind).is_empty());
+        assert_eq!(
+            chat_sessions(&session),
+            vec![direct_kind, conf_kind],
+            "both sessions still exist after the offline notification"
+        );
+        assert!(!session.is_online(FriendKey::from(friend)));
+        Ok(())
+    }
+
+    #[test]
+    fn offline_notification_leaves_other_participants_untouched() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Two participants in one conference; only the friend who goes offline is
+        // removed — a non-offlined participant (a non-friend) relies on the sim's
+        // SessionLeave, which the presence fast path must not pre-empt.
+        let friend = uuid::Uuid::from_u128(0xF3);
+        let other = uuid::Uuid::from_u128(0xF4);
+        let conference = uuid::Uuid::from_u128(0xABC);
+        let conf_kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(conference),
+        };
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(
+                &inbound_offer_im(13, friend, conference, Vec::new()),
+                9,
+                false,
+            )?,
+            now,
+        )?;
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(
+                &inbound_offer_im(13, other, conference, Vec::new()),
+                10,
+                false,
+            )?,
+            now,
+        )?;
+
+        let offline = AnyMessage::OfflineNotification(OfflineNotification {
+            agent_block: vec![OfflineNotificationAgentBlockBlock { agent_id: friend }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&offline, 11, true)?, now)?;
+
+        assert_eq!(
+            participants(&session, conf_kind),
+            vec![AgentKey::from(other)],
+            "only the offlined agent is dropped; the other participant remains"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn online_notification_changes_no_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let friend = uuid::Uuid::from_u128(0xF3);
+        let friend_key = AgentKey::from(friend);
+        let conference = uuid::Uuid::from_u128(0xABC);
+        let conf_kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(conference),
+        };
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(
+                &inbound_offer_im(13, friend, conference, Vec::new()),
+                9,
+                false,
+            )?,
+            now,
+        )?;
+
+        // A FriendsOnline notification only updates presence — no chat action.
+        let online = AnyMessage::OnlineNotification(OnlineNotification {
+            agent_block: vec![OnlineNotificationAgentBlockBlock { agent_id: friend }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&online, 10, true)?, now)?;
+
+        assert_eq!(participants(&session, conf_kind), vec![friend_key]);
+        assert_eq!(chat_sessions(&session), vec![conf_kind]);
+        assert!(session.is_online(FriendKey::from(friend)));
+        Ok(())
+    }
+
     /// The logged conversation history of `session`, oldest-first.
     fn history(session: &Session, kind: ChatSessionKind) -> Vec<SessionMessage> {
         session.history(kind).cloned().collect()
