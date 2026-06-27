@@ -8566,7 +8566,7 @@ mod test {
         let now = Instant::now();
         let mut session = new_session()?;
         let lib_root = InventoryFolderKey::from(uuid::Uuid::from_u128(0x0112));
-        let lib_owner = uuid::Uuid::from_u128(0xAB);
+        let lib_owner = AgentKey::from(uuid::Uuid::from_u128(0xAB));
         let login = LoginResponse::Success(Box::new(LoginSuccess {
             agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
             session_id: uuid::Uuid::from_u128(2),

@@ -390,7 +390,7 @@ pub struct LoginSuccess {
     /// The agent id that owns the shared Library inventory, from the
     /// `inventory-lib-owner` response field (if requested and provided). The
     /// library's folder contents are fetched as that owner's inventory.
-    pub library_owner: Option<Uuid>,
+    pub library_owner: Option<AgentKey>,
     /// The shared Library inventory's folder skeleton, from the
     /// `inventory-skel-lib` response field. Empty if not requested/provided.
     pub library_skeleton: Vec<SkeletonFolder>,
@@ -547,7 +547,8 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
             .and_then(|g| g.trim().parse().ok()),
         library_root: parse_array_struct_uuid(response_struct, "inventory-lib-root", "folder_id")
             .map(InventoryFolderKey::from),
-        library_owner: parse_array_struct_uuid(response_struct, "inventory-lib-owner", "agent_id"),
+        library_owner: parse_array_struct_uuid(response_struct, "inventory-lib-owner", "agent_id")
+            .map(AgentKey::from),
         library_skeleton: parse_skeleton(response_struct, "inventory-skel-lib"),
     })))
 }
@@ -1020,7 +1021,7 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
         push_id_array_member(out, "inventory-lib-root", "folder_id", root.uuid());
     }
     if let Some(owner) = success.library_owner {
-        push_id_array_member(out, "inventory-lib-owner", "agent_id", owner);
+        push_id_array_member(out, "inventory-lib-owner", "agent_id", owner.uuid());
     }
     push_skeleton_member(out, "inventory-skel-lib", &success.library_skeleton);
 }

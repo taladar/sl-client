@@ -350,7 +350,7 @@ pub struct LoginAccount {
     pub library_root: Option<InventoryFolderKey>,
     /// The agent id owning the shared Library (`inventory-lib-owner`), if
     /// provided. Library folder contents are fetched as this owner's inventory.
-    pub library_owner: Option<Uuid>,
+    pub library_owner: Option<AgentKey>,
 }
 
 /// The agent's directory (search) visibility — whether the account's online
