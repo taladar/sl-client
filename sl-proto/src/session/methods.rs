@@ -946,6 +946,12 @@ impl Session {
         // A real teleport leaves in-world objects behind in the old simulator;
         // drop their permission grants (attachments cross with the avatar).
         self.drop_inworld_grants();
+        // Deliberately NOT reset here (nor at any region boundary): `chat_sessions`
+        // / `friends` / `online` are grid-level state routed by the grid's IM /
+        // group / presence services, not the region simulator, so they survive
+        // every teleport and crossing (the inverse of the region-local `sit` /
+        // script grants above). They are seeded empty only in `Session::new` and
+        // die solely when the `Session` is dropped — see CHAT_ROADMAP B10/A9.
         self.teleport = TeleportPhase::Handover { region_handle };
         self.state = SessionState::AwaitingHandshake;
         Ok(())
