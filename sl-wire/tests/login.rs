@@ -5,7 +5,7 @@ mod test {
     use std::net::Ipv4Addr;
 
     use pretty_assertions::assert_eq;
-    use sl_types::key::InventoryFolderKey;
+    use sl_types::key::{AgentKey, InventoryFolderKey};
     use sl_types::map::RegionCoordinates;
     use sl_wire::{
         Direction, LoginRequest, LoginResponse, RegionHandle, StartLocation, build_login_request,
@@ -329,7 +329,9 @@ mod test {
         );
         assert_eq!(
             success.library_owner,
-            Some("11111111-1111-0000-0000-000000000000".parse::<uuid::Uuid>()?)
+            Some(AgentKey::from(
+                "11111111-1111-0000-0000-000000000000".parse::<uuid::Uuid>()?
+            ))
         );
         assert_eq!(success.library_skeleton.len(), 1);
         let root = success.library_skeleton.first().ok_or("library root")?;
@@ -573,7 +575,9 @@ mod test {
             library_root: Some(InventoryFolderKey::from(
                 "00000112-000f-0000-0000-000100bba000".parse::<uuid::Uuid>()?,
             )),
-            library_owner: Some("11111111-1111-0000-0000-000000000000".parse()?),
+            library_owner: Some(AgentKey::from(
+                "11111111-1111-0000-0000-000000000000".parse::<uuid::Uuid>()?,
+            )),
             library_skeleton: vec![folder(
                 "00000112-000f-0000-0000-000100bba000",
                 "00000000-0000-0000-0000-000000000000",
