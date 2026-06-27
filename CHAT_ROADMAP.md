@@ -2027,33 +2027,42 @@ at feature parity; never push client-only types into shared `sl-types`.
 **Ask the user before starting Phase B** (the standing "ask before new roadmap
 work" rule).
 
-### B1. Friend-presence cache (buddy list + online set)
+### B1. Friend-presence cache (buddy list + online set) — DONE 2026-06-27
 
 *(was old B3 — from A3.)* Fully standalone (no registry dependency); first
 because it is clean on its own and B6 consumes it. See § Friend-presence
 reference (from A3).
 
-- [ ] Add `friends: BTreeMap<FriendKey, Friend>` + `online: BTreeSet<FriendKey>`
+- [x] Add `friends: BTreeMap<FriendKey, Friend>` + `online: BTreeSet<FriendKey>`
   to `Session` (`session.rs`), const-empty in `Session::new`.
-- [ ] Seed `friends` at the `FriendList` site (`methods.rs:1078`) from the same
+- [x] Seed `friends` at the `FriendList` site (`methods.rs:1078`) from the same
   `friend()`-mapped data; leave `online` empty at login.
-- [ ] Fold each existing handler (record in addition to emitting its event):
+- [x] Fold each existing handler (record in addition to emitting its event):
   `OnlineNotification` (`:3504`) inserts into `online`; `OfflineNotification`
   (`:3514`) removes; `ChangeUserRights` (`:3524`) updates the cached `Friend`'s
   rights by `granted_to_us` (ignore if absent); `TerminateFriendship` (`:2586`)
   removes from both stores.
-- [ ] Live friendship add (both directions): on `ImDialog::FriendshipAccepted`
+- [x] Live friendship add (both directions): on `ImDialog::FriendshipAccepted`
   in the inbound IM dispatch, insert `from_agent_id` with default
   `CAN_SEE_ONLINE` both ways; add a `friend_id: FriendKey` field to
   `Command::AcceptFriendship` + a param to `accept_friendship`, inserting the
   friend on accept with the same default. Wire the changed command 6-site
   (tokio / bevy / REPL) at parity.
-- [ ] Accessors `friends()` / `friend(id)` / `is_online(id)` /
+- [x] Accessors `friends()` / `friend(id)` / `is_online(id)` /
       `online_friends()` returning public `Friend` / `bool` / `FriendKey`.
-- [ ] Invariant: no IM / chat-session path mutates `online`; assert it (deliver
+- [x] Invariant: no IM / chat-session path mutates `online`; assert it (deliver
   an IM after an `OfflineNotification`; the peer stays offline). Unit tests for
   every handler above (seed, online/offline, rights by direction, unknown-friend
   ignored, terminate drops both, both live-add paths).
+
+**Deviation (needs review):** the design assumed `FriendKey` was `Ord` (it is
+the `BTreeMap`/`BTreeSet` key), but the sl-types key newtypes derive no `Ord`.
+Rather than the local-`Ord`-wrapper workaround (`ScriptHolder` precedent —
+impossible for a *bare* foreign key), added `PartialOrd, Ord` derives to `Key`
+and `FriendKey` in the shared **sl-map-tools/sl-types** crate (purely additive).
+This honours the roadmap-literal `BTreeMap<FriendKey, Friend>` and the
+newtype-over-raw preference; B2 will need the same on `AgentKey` / `GroupKey` /
+`ImSessionId` for `ChatSessionKind: derive(Ord)`.
 
 ### B2. Chat-session registry + open/track mechanics
 

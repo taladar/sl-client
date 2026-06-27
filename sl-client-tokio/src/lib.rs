@@ -609,8 +609,8 @@ impl Client {
                         Some(Command::TerminateFriendship(other)) => {
                             self.session.terminate_friendship(other, Instant::now())?;
                         }
-                        Some(Command::AcceptFriendship { transaction_id, calling_card_folder }) => {
-                            self.session.accept_friendship(transaction_id, calling_card_folder, Instant::now())?;
+                        Some(Command::AcceptFriendship { transaction_id, friend_id, calling_card_folder }) => {
+                            self.session.accept_friendship(transaction_id, friend_id, calling_card_folder, Instant::now())?;
                         }
                         Some(Command::DeclineFriendship(transaction_id)) => {
                             self.session.decline_friendship(transaction_id, Instant::now())?;

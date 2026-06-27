@@ -4,10 +4,12 @@
 use crate::bookkeeping_ids::{InventoryCallbackId, TransferId, XferId};
 use crate::scoped_id::CircuitId;
 use crate::types::{
-    AssetType, Camera, Diagnostic, Event, ImageCodec, InventoryFolder, InventoryItem, LoginAccount,
-    LoginParams, Object, TerrainPatch, Throttle,
+    AssetType, Camera, Diagnostic, Event, Friend, ImageCodec, InventoryFolder, InventoryItem,
+    LoginAccount, LoginParams, Object, TerrainPatch, Throttle,
 };
-use sl_types::key::{AgentKey, ExperienceKey, InventoryFolderKey, InventoryKey, ObjectKey};
+use sl_types::key::{
+    AgentKey, ExperienceKey, FriendKey, InventoryFolderKey, InventoryKey, ObjectKey,
+};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::ScriptPermissions;
 use sl_types::map::Distance;
@@ -16,7 +18,7 @@ use sl_wire::ControlFlags;
 use sl_wire::RegionHandle;
 use sl_wire::RegionLocalObjectId;
 use sl_wire::SequenceNumber;
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -771,29 +773,12 @@ enum SitState {
 /// `(holding object, inventory item within it)` pair (one object may run several
 /// scripts, each with its own grant). Both halves come straight off the
 /// `ScriptQuestion` / [`Event::ScriptPermissionRequest`](crate::Event::ScriptPermissionRequest).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct ScriptHolder {
     /// The task (object) id holding the script.
     task_id: ObjectKey,
     /// The script item id within the object.
     item_id: InventoryKey,
-}
-
-// `ObjectKey` / `InventoryKey` are UUID newtypes without an `Ord` impl, so the
-// `BTreeMap` key order is defined here on the underlying UUIDs (which do order),
-// keeping the crate's deterministic-iteration convention without leaning on a
-// derive the key types do not provide.
-impl PartialOrd for ScriptHolder {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for ScriptHolder {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        (self.task_id.uuid(), self.item_id.uuid())
-            .cmp(&(other.task_id.uuid(), other.item_id.uuid()))
-    }
 }
 
 /// Whether the script holding a grant lives in one of *this* agent's
@@ -952,6 +937,28 @@ pub struct Session {
     /// Read via [`Session::script_controls`]. The simulator stays authoritative;
     /// this is an API-convenience mirror.
     taken_controls: TakenControls,
+    /// The buddy-list cache: every current friend keyed by id, with the
+    /// friendship rights in both directions. Seeded from the login buddy list
+    /// (`FriendList`) and kept live — a friendship formed mid-session is added
+    /// the moment it forms (we accepted via [`Session::accept_friendship`], or
+    /// they accepted our offer via an inbound `FriendshipAccepted` IM), a
+    /// `ChangeUserRights` updates the cached rights, and a terminated friendship
+    /// drops the entry. Grid-level: it survives teleport, cleared only by a
+    /// relogin through the constructor. The simulator stays authoritative; this
+    /// is an API-convenience read model. Read via [`Session::friends`] /
+    /// [`Session::friend`].
+    friends: BTreeMap<FriendKey, Friend>,
+    /// The set of friends currently known to be online. The **sole** source of
+    /// presence truth (a friend is online iff present here), fed only by the
+    /// authoritative `OnlineNotification` / `OfflineNotification` signals (and a
+    /// terminated friendship removal) — never inferred from buddy-list or IM
+    /// traffic, so an IM just after a peer goes offline cannot re-mark them
+    /// online. Starts empty at login (the buddy list carries rights, not
+    /// presence) and is grid-level like [`friends`](Self::friends). Read via
+    /// [`Session::is_online`] / [`Session::online_friends`]. Absence is "offline
+    /// or not visible", never provably offline (a friend who does not grant us
+    /// `CAN_SEE_ONLINE` never generates a notification).
+    online: BTreeSet<FriendKey>,
     /// The current region's capability-seed URL (from login or a teleport), for
     /// the driver to fetch the CAPS map and event queue.
     seed_capability: Option<url::Url>,

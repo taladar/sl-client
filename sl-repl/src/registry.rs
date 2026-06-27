@@ -2217,14 +2217,15 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "accept_friendship",
-            usage: "<transaction_id> <calling_card_folder>",
+            usage: "<transaction_id> <friend_id> <calling_card_folder>",
             build: |args, ctx| {
                 Ok(Command::AcceptFriendship {
                     transaction_id: TransactionId::from(args.req_uuid(ctx, "transaction_id", 0)?),
+                    friend_id: FriendKey::from(args.req_uuid(ctx, "friend_id", 1)?),
                     calling_card_folder: InventoryFolderKey::from(args.req_uuid(
                         ctx,
                         "calling_card_folder",
-                        1,
+                        2,
                     )?),
                 })
             },
