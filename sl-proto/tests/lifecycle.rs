@@ -17462,4 +17462,301 @@ mod test {
         assert!(std::sync::Arc::ptr_eq(&infos, shipped));
         Ok(())
     }
+
+    /// The `QueryFriends` and `QueryChatHistoryPage` reply payloads are also
+    /// `Arc<[…]>` shared across the channel, never deep-copied — the friends and
+    /// history-page counterparts to the `ChatSessions` assertion above. Together
+    /// the three cover every chat/presence query command.
+    #[test]
+    fn friends_and_history_replies_share_an_arc_without_deep_copy() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established_with_friends(
+            now,
+            vec![sl_wire::BuddyListEntry {
+                buddy_id: uuid::Uuid::from_u128(0xF1),
+                rights_granted: FriendRights::CAN_SEE_ONLINE,
+                rights_has: FriendRights::CAN_SEE_ONLINE,
+            }],
+        )?;
+        drain(&mut session)?;
+
+        // The friends snapshot: built once, shipped as an `Arc` clone.
+        let friends: std::sync::Arc<[FriendPresence]> = session.friends_presence().collect();
+        let friends_direct: Vec<FriendPresence> = session.friends_presence().collect();
+        assert_eq!(friends.as_ref(), friends_direct.as_slice());
+        let friends_event = Event::FriendsSnapshot(std::sync::Arc::clone(&friends));
+        let Event::FriendsSnapshot(shipped) = &friends_event else {
+            return Err("expected a FriendsSnapshot event".into());
+        };
+        assert!(std::sync::Arc::ptr_eq(&friends, shipped));
+
+        // A history page: the bounded window is an `Arc` clone too.
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x55));
+        let kind = ChatSessionKind::Direct { peer };
+        let im = inbound_im(0, b"Friendly Bot\0", b"hi\0");
+        session.handle_datagram(sim_addr(), &server_message(&im, 9, false)?, now)?;
+        let (page, prev) = session.history_page(kind, None, 10);
+        let messages: std::sync::Arc<[SessionMessage]> = page.cloned().collect();
+        let page_event = Event::ChatHistoryPage {
+            session: kind,
+            messages: std::sync::Arc::clone(&messages),
+            prev,
+        };
+        let Event::ChatHistoryPage {
+            messages: shipped, ..
+        } = &page_event
+        else {
+            return Err("expected a ChatHistoryPage event".into());
+        };
+        assert!(std::sync::Arc::ptr_eq(&messages, shipped));
+        Ok(())
+    }
+
+    // ---- Persistence / region guard (B10) -----------------------------------
+    //
+    // The grid-level chat/presence stores (`chat_sessions` / `friends` /
+    // `online`) are routed by the grid's IM / group / presence services, never
+    // by the region simulator, so they survive every region boundary — the exact
+    // inverse of `teleport_clears_seat` (which proves the *region-local* seat is
+    // dropped). These tests seed the stores, drive each of the four reset sites,
+    // and assert nothing changed.
+
+    /// The 1:1 peer the persistence fixture seeds (its inbound IM's sender id).
+    const GUARD_PEER: u128 = 0x55;
+    /// The buddy the fixture marks online.
+    const GUARD_FRIEND: u128 = 0xF1;
+    /// The conference the fixture seeds a roster in.
+    const GUARD_CONF: u128 = 0xABC;
+    /// The agent who is both a conference participant and typing in a 1:1.
+    const GUARD_TYPER: u128 = 0xF3;
+
+    /// Seeds the grid-level chat/presence stores on a fresh active session: a 1:1
+    /// direct session (one inbound IM → history + unread), a conference roster
+    /// member who is also typing in a separate 1:1, and a buddy who is online.
+    fn seed_chat_and_presence(now: Instant) -> Result<Session, TestError> {
+        let mut session = established_with_friends(
+            now,
+            vec![sl_wire::BuddyListEntry {
+                buddy_id: uuid::Uuid::from_u128(GUARD_FRIEND),
+                rights_granted: FriendRights::CAN_SEE_ONLINE,
+                rights_has: FriendRights::CAN_SEE_ONLINE,
+            }],
+        )?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // A 1:1 direct session with one inbound message (history + unread).
+        let im = inbound_im(0, b"Friendly Bot\0", b"hi there\0");
+        session.handle_datagram(sim_addr(), &server_message(&im, 9, false)?, now)?;
+
+        // A conference roster member (SessionAdd, dialog 13) who is also typing in
+        // a separate 1:1 (open it with a message, then TypingStart, dialog 41 —
+        // both keyed by the sender, so they come *from* the typer).
+        let typer = uuid::Uuid::from_u128(GUARD_TYPER);
+        let conference = uuid::Uuid::from_u128(GUARD_CONF);
+        let add = inbound_offer_im(13, typer, conference, Vec::new());
+        session.handle_datagram(sim_addr(), &server_message(&add, 10, false)?, now)?;
+        let open = inbound_offer_im(0, typer, uuid::Uuid::nil(), Vec::new());
+        session.handle_datagram(sim_addr(), &server_message(&open, 11, false)?, now)?;
+        let start = inbound_offer_im(41, typer, uuid::Uuid::nil(), Vec::new());
+        session.handle_datagram(sim_addr(), &server_message(&start, 12, false)?, now)?;
+
+        // The buddy comes online.
+        let online = AnyMessage::OnlineNotification(OnlineNotification {
+            agent_block: vec![OnlineNotificationAgentBlockBlock {
+                agent_id: uuid::Uuid::from_u128(GUARD_FRIEND),
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&online, 13, true)?, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        Ok(session)
+    }
+
+    /// Asserts the full `seed_chat_and_presence` seed is present and unchanged —
+    /// after a region transition (which must leave the grid-level stores intact)
+    /// or on a logged-out session (which keeps them readable).
+    fn assert_chat_and_presence_intact(session: &Session) -> Result<(), TestError> {
+        let direct = ChatSessionKind::Direct {
+            peer: AgentKey::from(uuid::Uuid::from_u128(GUARD_PEER)),
+        };
+        let conf = ChatSessionKind::Conference {
+            id: ImSessionId::from(uuid::Uuid::from_u128(GUARD_CONF)),
+        };
+        let typer = AgentKey::from(uuid::Uuid::from_u128(GUARD_TYPER));
+        let typer_direct = ChatSessionKind::Direct { peer: typer };
+
+        // The 1:1 history and unread survive.
+        assert_eq!(history(session, direct).len(), 1, "1:1 history survives");
+        assert_eq!(session.unread(direct), 1, "1:1 unread survives");
+        // The conference roster and the 1:1 typing survive.
+        assert_eq!(participants(session, conf), vec![typer], "roster survives");
+        assert_eq!(
+            typers(session, typer_direct),
+            vec![typer],
+            "typing survives"
+        );
+        // The buddy presence and the buddy cache survive.
+        assert!(
+            session.is_online(FriendKey::from(uuid::Uuid::from_u128(GUARD_FRIEND))),
+            "friend presence survives"
+        );
+        assert_eq!(session.friends().count(), 1, "the friend cache survives");
+        Ok(())
+    }
+
+    /// A real (cross-region) teleport via `TeleportFinish` (`begin_handover`)
+    /// leaves every chat/presence store untouched — the inverse of
+    /// `teleport_clears_seat`.
+    #[test]
+    fn teleport_preserves_chat_and_presence() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = seed_chat_and_presence(now)?;
+
+        let handle = 0x0003_E900_0003_E800;
+        session.teleport_to(
+            RegionHandle(handle),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let finish = AnyMessage::TeleportFinish(TeleportFinish {
+            info: TeleportFinishInfoBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                location_id: 4,
+                sim_ip: [127, 0, 0, 1],
+                sim_port: 9100u16.swap_bytes(),
+                region_handle: handle,
+                seed_capability: b"http://x/chatTP\0".to_vec(),
+                sim_access: sl_wire::sim_access::MATURE,
+                teleport_flags: TeleportFlags::VIA_LURE,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&finish, 20, true)?, now)?;
+
+        assert_chat_and_presence_intact(&session)
+    }
+
+    /// A neighbour crossing (`CrossedRegion` → `promote_child_to_root`) keeps the
+    /// chat/presence stores, like the seat it carries across the border.
+    #[test]
+    fn neighbour_crossing_preserves_chat_and_presence() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = seed_chat_and_presence(now)?;
+
+        enable_neighbour_b(&mut session, 20, now)?;
+        while session.poll_transmit().is_some() {}
+        let handle = 0x0003_E900_0003_E800;
+        let crossed = AnyMessage::CrossedRegion(CrossedRegion {
+            agent_data: CrossedRegionAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            region_data: CrossedRegionRegionDataBlock {
+                sim_ip: [127, 0, 0, 1],
+                sim_port: 9001u16.swap_bytes(),
+                region_handle: handle,
+                seed_capability: b"http://x/seedB\0".to_vec(),
+            },
+            info: CrossedRegionInfoBlock {
+                position: vec3(10.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&crossed, 21, true)?, now)?;
+        while session.poll_transmit().is_some() {}
+        let amc = AnyMessage::AgentMovementComplete(AgentMovementComplete {
+            agent_data: AgentMovementCompleteAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            data: AgentMovementCompleteDataBlock {
+                position: vec3(10.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+                region_handle: handle,
+                timestamp: 0,
+            },
+            sim_data: AgentMovementCompleteSimDataBlock {
+                channel_version: b"x\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_b(), &server_message(&amc, 1, true)?, now)?;
+        drain_events(&mut session);
+
+        assert_chat_and_presence_intact(&session)
+    }
+
+    /// An intra-region teleport (`TeleportLocal`) leaves the chat/presence stores
+    /// untouched (it only unseats the agent and drops in-world grants).
+    #[test]
+    fn local_teleport_preserves_chat_and_presence() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = seed_chat_and_presence(now)?;
+
+        // Begin a teleport so the session is `Teleporting`, then the simulator
+        // answers with a `TeleportLocal` (same-region). The handler reads no
+        // fields, so a well-formed zeroed Info block is enough.
+        session.teleport_to(
+            RegionHandle(0x0003_E800_0003_E800),
+            region_coords(64.0, 64.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let local = server_datagram(MessageId::Low(64), &[0u8; 48], 20, true);
+        session.handle_datagram(sim_addr(), &local, now)?;
+        drain_events(&mut session);
+
+        assert_chat_and_presence_intact(&session)
+    }
+
+    /// Retiring a child circuit (`DisableSimulator`) touches only that neighbour's
+    /// region-local caches; the grid-level chat/presence stores are untouched.
+    #[test]
+    fn disable_simulator_preserves_chat_and_presence() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = seed_chat_and_presence(now)?;
+
+        enable_neighbour_b(&mut session, 20, now)?;
+        while session.poll_transmit().is_some() {}
+        let disable = server_datagram(MessageId::Low(152), &[], 1, true);
+        session.handle_datagram(sim_b(), &disable, now)?;
+
+        assert_chat_and_presence_intact(&session)
+    }
+
+    /// Logout is terminal, not a reset: the chat/presence stores stay readable on
+    /// the `Closed` session so the user can inspect the conversation from just
+    /// before logout. A relogin builds a fresh, empty `Session`. (The read
+    /// accessors are pure getters that do not gate on `state`; this pins it.)
+    #[test]
+    fn logout_keeps_chat_and_presence_readable() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = seed_chat_and_presence(now)?;
+
+        session.initiate_logout(now);
+        drain(&mut session)?;
+        // LogoutReply Low 253: AgentData (2 uuids) + InventoryData variable (count).
+        let reply = server_datagram(MessageId::Low(253), &[0u8; 33], 30, true);
+        session.handle_datagram(sim_addr(), &reply, now)?;
+        assert!(session.is_closed(), "the session is closed after logout");
+
+        // Everything seeded before logout is still readable on the closed session.
+        assert_chat_and_presence_intact(&session)?;
+
+        // A relogin constructs a fresh session that starts empty — there is no
+        // logout-time clearing; the stores die only with the dropped struct.
+        let fresh = new_session()?;
+        assert_eq!(fresh.chat_sessions().count(), 0, "a fresh session is empty");
+        assert_eq!(fresh.friends().count(), 0, "a fresh session has no friends");
+        assert_eq!(
+            fresh.online_friends().count(),
+            0,
+            "a fresh session has no presence"
+        );
+        Ok(())
+    }
 }

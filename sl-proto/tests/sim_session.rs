@@ -40,7 +40,16 @@ mod test {
         ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
         parse_event_queue_response,
     };
-    use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
+    use sl_proto::{
+        ChatLifecycleView, ChatSessionKind, ImSessionId, InviteChannel, Reliability,
+        chatterbox_invitation_to_llsd,
+    };
+    use sl_wire::messages::{
+        ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
+        ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
+        OfflineNotification, OfflineNotificationAgentBlockBlock, OnlineNotification,
+        OnlineNotificationAgentBlockBlock, StartPingCheck, StartPingCheckPingIDBlock,
+    };
     use sl_wire::{
         AnyMessage, CircuitCode, LoginRequest, LoginResponse, LoginSuccess, MessageId, PacketFlags,
         Reader, SequenceNumber, StartLocation, Writer, encode_datagram, parse_datagram,
@@ -3590,6 +3599,144 @@ mod test {
         assert_eq!(chat.message, "welcome");
         assert_eq!(chat.from_name, "Region");
         assert_eq!(chat.chat_type, ChatType::Normal);
+        Ok(())
+    }
+
+    // ---- Inbound chat/presence reach the client store (B10) -----------------
+    //
+    // The inbound mirror of `friendship_and_calling_cards_reach_client`: a real
+    // `SimSession` sends an IM / presence notification / `ChatterBoxInvitation`
+    // and the client's grid-level chat/presence stores reflect it. These guard
+    // the wire decode + fold under a real peer, not just the in-memory fold that
+    // `lifecycle.rs` exercises directly.
+
+    /// A simulator-sent 1:1 IM opens a `Direct` session on the client keyed by the
+    /// sender, logs the message, and bumps the unread count.
+    #[test]
+    fn inbound_instant_message_reaches_client_store() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let peer = uuid::Uuid::from_u128(0x77);
+        let im = AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
+            agent_data: ImprovedInstantMessageAgentDataBlock {
+                agent_id: peer,
+                session_id: uuid::Uuid::nil(),
+            },
+            message_block: ImprovedInstantMessageMessageBlockBlock {
+                from_group: false,
+                to_agent_id: uuid::Uuid::from_u128(1),
+                parent_estate_id: 1,
+                region_id: uuid::Uuid::from_u128(0x7),
+                position: sl_types::lsl::Vector {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 3.0,
+                },
+                offline: 0,
+                dialog: 0,
+                id: uuid::Uuid::from_u128(0xABC),
+                timestamp: 0,
+                from_agent_name: b"Sim Peer\0".to_vec(),
+                message: b"ping from the sim\0".to_vec(),
+                binary_bucket: Vec::new(),
+            },
+            estate_block: ImprovedInstantMessageEstateBlockBlock { estate_id: 1 },
+            meta_data: Vec::new(),
+        });
+        sim.push(&im, Reliability::Reliable, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let kind = ChatSessionKind::Direct {
+            peer: AgentKey::from(peer),
+        };
+        let logged: Vec<_> = client.history(kind).cloned().collect();
+        assert_eq!(logged.len(), 1, "the IM was logged to the 1:1 session");
+        let entry = logged.first().ok_or("expected a logged message")?;
+        assert_eq!(entry.sender, AgentKey::from(peer));
+        assert_eq!(entry.dialog, ImDialog::Message);
+        assert_eq!(entry.text, "ping from the sim");
+        assert_eq!(client.unread(kind), 1);
+        Ok(())
+    }
+
+    /// Simulator-sent `OnlineNotification` / `OfflineNotification` toggle the
+    /// client's presence store.
+    #[test]
+    fn inbound_presence_notifications_reach_client_store() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let friend = uuid::Uuid::from_u128(0xF1);
+        let online = AnyMessage::OnlineNotification(OnlineNotification {
+            agent_block: vec![OnlineNotificationAgentBlockBlock { agent_id: friend }],
+        });
+        sim.push(&online, Reliability::Reliable, now)?;
+        pump(&mut client, &mut sim, now)?;
+        assert!(
+            client.is_online(FriendKey::from(friend)),
+            "the OnlineNotification marked the buddy online"
+        );
+
+        let offline = AnyMessage::OfflineNotification(OfflineNotification {
+            agent_block: vec![OfflineNotificationAgentBlockBlock { agent_id: friend }],
+        });
+        sim.push(&offline, Reliability::Reliable, after(now, 10)?)?;
+        pump(&mut client, &mut sim, after(now, 10)?)?;
+        assert!(
+            !client.is_online(FriendKey::from(friend)),
+            "the OfflineNotification marked the buddy offline"
+        );
+        Ok(())
+    }
+
+    /// A simulator-queued `ChatterBoxInvitation` (over the CAPS event queue)
+    /// records a pending `Invited` conference session on the client.
+    #[test]
+    fn inbound_chatterbox_invitation_reaches_client_store() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let conference = uuid::Uuid::from_u128(0x6801);
+        let inviter = AgentKey::from(uuid::Uuid::from_u128(0x6802));
+        let invitation = Event::ConferenceInvited {
+            session_id: conference,
+            from_agent_id: inviter,
+            from_name: "Inviter".to_owned(),
+            dialog: ImDialog::SessionConferenceStart,
+            from_group: false,
+            session_name: "Chat".to_owned(),
+            message: "join us".to_owned(),
+            region_id: uuid::Uuid::nil(),
+            position: RegionCoordinates::new(1.0, 2.0, 3.0),
+            parent_estate_id: 1,
+            timestamp: None,
+            binary_bucket: Vec::new(),
+        };
+        sim.enqueue_caps_event(
+            "ChatterBoxInvitation",
+            chatterbox_invitation_to_llsd(&invitation),
+        );
+        deliver_caps(&mut client, &mut sim, now)?;
+
+        let kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(conference),
+        };
+        let info = client
+            .chat_sessions_info()
+            .find(|info| info.kind == kind)
+            .ok_or("expected the invited conference session on the client")?;
+        assert_eq!(
+            info.lifecycle,
+            ChatLifecycleView::Invited {
+                inviter,
+                session_name: "Chat".to_owned(),
+                channel: InviteChannel::Text,
+            }
+        );
         Ok(())
     }
 
