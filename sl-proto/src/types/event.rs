@@ -1,6 +1,7 @@
 //! The high-level [`Event`] enum surfaced to the driver/application.
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use super::{
     ActiveGroup, AlertInfo, Asset, AssetType, AvatarAppearance, AvatarClassified,
@@ -51,6 +52,7 @@ use uuid::Uuid;
 
 use crate::bookkeeping_ids::{InventoryCallbackId, TransactionId};
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
+use crate::{ChatSessionInfo, ChatSessionKind, FriendPresence, MessageCursor, SessionMessage};
 
 /// A high-level event surfaced to the driver/application.
 #[derive(Debug, Clone, PartialEq)]
@@ -909,6 +911,37 @@ pub enum Event {
     /// [`Session::script_permission_state`](crate::Session::script_permission_state)
     /// when it dispatches the query command, and pushes it onto its event stream.
     ScriptPermissionState(ScriptPermissionState),
+    /// The light chat-session list, surfaced in reply to a
+    /// [`Command::QueryChatSessions`](crate::Command::QueryChatSessions). Ordered
+    /// newest-first and carrying no history (page it separately with
+    /// [`Command::QueryChatHistoryPage`](crate::Command::QueryChatHistoryPage)).
+    ///
+    /// Like [`Event::ScriptPermissionState`], this is **synthesized locally** —
+    /// each runtime builds it from
+    /// [`Session::chat_sessions_info`](crate::Session::chat_sessions_info) when it
+    /// dispatches the query. The payload is an `Arc<[…]>` so handing it across the
+    /// channel is an `Arc` clone, never a deep copy.
+    ChatSessions(Arc<[ChatSessionInfo]>),
+    /// One bounded, newest-first page of a chat session's history, surfaced in
+    /// reply to a [`Command::QueryChatHistoryPage`](crate::Command::QueryChatHistoryPage)
+    /// and **synthesized locally** from
+    /// [`Session::history_page`](crate::Session::history_page). `prev` pages older
+    /// when `Some`. The `messages` payload is an `Arc<[…]>` (an `Arc` clone across
+    /// the channel, never a deep copy).
+    ChatHistoryPage {
+        /// Which chat session this page is of (echoes the query).
+        session: ChatSessionKind,
+        /// The page's messages, newest first, bounded to the requested limit.
+        messages: Arc<[SessionMessage]>,
+        /// A cursor for the next (older) page, or `None` at the oldest retained
+        /// message.
+        prev: Option<MessageCursor>,
+    },
+    /// The buddy cache with each friend's online flag, surfaced in reply to a
+    /// [`Command::QueryFriends`](crate::Command::QueryFriends) and **synthesized
+    /// locally** from [`Session::friends_presence`](crate::Session::friends_presence).
+    /// The payload is an `Arc<[…]>` (an `Arc` clone across the channel).
+    FriendsSnapshot(Arc<[FriendPresence]>),
     /// A scripted object set follow-camera parameters (`SetFollowCamProperties`,
     /// i.e. `llSetCameraParams`), after the agent granted it
     /// [`ScriptPermissions::CONTROL_CAMERA`](crate::ScriptPermissions::CONTROL_CAMERA).

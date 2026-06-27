@@ -5209,6 +5209,29 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "query_chat_sessions",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::QueryChatSessions),
+        },
+        CommandSpec {
+            name: "query_chat_history_page",
+            usage: "<direct|group|conference> <id> [limit]",
+            // The `before` page cursor is opaque (the runtime mints it on a reply),
+            // so the REPL always requests the newest page; `limit` defaults to 50.
+            build: |args, ctx| {
+                Ok(Command::QueryChatHistoryPage {
+                    session: build_chat_session_kind(args, ctx, 0)?,
+                    before: None,
+                    limit: args.parse_or(ctx, "limit", 2, "usize", 50)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "query_friends",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::QueryFriends),
+        },
+        CommandSpec {
             name: "retrieve_instant_messages",
             usage: "",
             build: |_args, _ctx| Ok(Command::RetrieveInstantMessages),

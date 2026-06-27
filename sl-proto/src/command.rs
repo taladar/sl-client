@@ -16,15 +16,15 @@ use crate::{
     GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate, InventoryFolderKey,
     InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandEdit, LandSearchType,
     LandStatReportType, LindenAmount, LureId, MapItemType, Material, MaterialOverrideUpdate,
-    MediaEntry, MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem,
-    NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
-    ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey,
-    ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape,
-    PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates, RegionHandle,
-    RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
-    Rotation, SaleType, ScriptPermissions, SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey,
-    TextureEntry, TextureKey, Throttle, TransactionId, UpdateGroupInfoParams, Uuid, Vector,
-    ViewerEffect, VoiceProvisionRequest, Wearable,
+    MediaEntry, MeshKey, MessageCursor, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
+    NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
+    ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessScope,
+    ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
+    PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId,
+    RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, Rotation, SaleType, ScriptPermissions, SimWideDeleteFlags,
+    StartLocationSlot, TaskInventoryKey, TextureEntry, TextureKey, Throttle, TransactionId,
+    UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -2188,6 +2188,30 @@ pub enum Command {
         /// Whether the invitation is to a group IM (vs. an ad-hoc conference).
         from_group: bool,
     },
+    /// Query the light chat-session list (no history). The runtime replies with
+    /// [`Event::ChatSessions`](crate::Event::ChatSessions) built from
+    /// [`Session::chat_sessions_info`](crate::Session::chat_sessions_info); no wire
+    /// send. A bevy reader may instead borrow the `Session` and call the builder
+    /// directly.
+    QueryChatSessions,
+    /// Query one bounded, newest-first page of a chat session's history. The
+    /// runtime replies with [`Event::ChatHistoryPage`](crate::Event::ChatHistoryPage)
+    /// built from [`Session::history_page`](crate::Session::history_page); no wire
+    /// send.
+    QueryChatHistoryPage {
+        /// Which chat session to page.
+        session: ChatSessionKind,
+        /// The page boundary: `None` for the newest page, or a `prev` cursor from
+        /// an earlier reply to continue older.
+        before: Option<MessageCursor>,
+        /// The maximum number of messages in the page.
+        limit: usize,
+    },
+    /// Query the buddy cache with each friend's online flag. The runtime replies
+    /// with [`Event::FriendsSnapshot`](crate::Event::FriendsSnapshot) built from
+    /// [`Session::friends_presence`](crate::Session::friends_presence); no wire
+    /// send.
+    QueryFriends,
     /// Flush stored offline instant messages over the legacy UDP trigger
     /// (`RetrieveInstantMessages`); they arrive as offline
     /// [`Event::InstantMessageReceived`](crate::Event::InstantMessageReceived)s.

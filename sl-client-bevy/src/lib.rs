@@ -2594,6 +2594,35 @@ fn advance_running(
                     session.leave_conference(*session_id, now).ok();
                 }
             }
+            Command::QueryChatSessions => {
+                // Local query: build the light session list and surface it on the
+                // event stream. (A bevy system may instead borrow the Session and
+                // call `chat_sessions_info()` directly, skipping the round-trip.)
+                events.write(SlEvent(SessionEvent::ChatSessions(
+                    session.chat_sessions_info().collect(),
+                )));
+            }
+            Command::QueryChatHistoryPage {
+                session: chat_session,
+                before,
+                limit,
+            } => {
+                // Local query: clone one bounded, newest-first page into an
+                // `Arc<[_]>` and surface it with its `prev` cursor.
+                let (page, prev) = session.history_page(*chat_session, *before, *limit);
+                let messages: std::sync::Arc<[_]> = page.cloned().collect();
+                events.write(SlEvent(SessionEvent::ChatHistoryPage {
+                    session: *chat_session,
+                    messages,
+                    prev,
+                }));
+            }
+            Command::QueryFriends => {
+                // Local query: build the buddy snapshot with online flags.
+                events.write(SlEvent(SessionEvent::FriendsSnapshot(
+                    session.friends_presence().collect(),
+                )));
+            }
             Command::RetrieveInstantMessages => {
                 session.retrieve_instant_messages(now).ok();
             }

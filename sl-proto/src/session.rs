@@ -1102,7 +1102,8 @@ mod methods;
 
 use self::chat_session::{ChatSession, TYPING_TIMEOUT};
 pub use chat_session::{
-    ChatSessionKind, ChatSessionLifecycle, InviteChannel, PendingInvite, SessionMessage,
+    ChatLifecycleView, ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, FriendPresence,
+    InviteChannel, MessageCursor, PendingInvite, SessionMessage,
 };
 
 pub(crate) use conversions::{
