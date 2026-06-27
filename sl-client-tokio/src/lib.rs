@@ -48,40 +48,41 @@ pub use sl_proto::{
     ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnimationKey,
     AnyMessage, Asset, AssetKey, AssetType, AvatarClassified, AvatarGroupMembership,
     AvatarInterests, AvatarPick, AvatarProperties, Camera, CameraError, ChatAudible, ChatChannel,
-    ChatLifecycleView, ChatMessage, ChatSessionInfo, ChatSessionKind, ChatSource, ChatSourceType,
-    ChatType, ChatTypeNotAVolume, CircuitCode, CircuitId, ClassifiedCategory, ClassifiedInfo,
-    ClassifiedUpdate, ClickAction, Command, ControlFlags, CreateGroupParams, DeRezDestination,
-    DetachOrder, Diagnostic, Direction, DisconnectReason, Distance, EconomyData, EstateAccessDelta,
-    EstateAccessKind, EstateInfo, Event, ExperienceInfo, ExperiencePermission,
-    ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights,
-    GlobalCoordinates, GltfMaterialOverride, GridCoordinates, GroupKey, GroupMember,
-    GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
-    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
-    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
-    ImSessionId, ImageCodec, InstantMessage, InterestsUpdate, InventoryCallbackId, InventoryFolder,
-    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
-    InventoryType, Key, Kilobits, LandArea, LandingType, LegacyMaterial, LightData, LightImage,
-    LindenAmount, LindenBalance, LoadUrlRequest, LoginAccount, LoginParams, LoginRequest,
-    LoginResponse, LureId, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
-    MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate,
-    Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType, NegativeBalanceError,
-    NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings,
-    ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties, ObjectTransform,
-    OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-    ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
-    ParcelVoiceInfo, ParticleSystem, PermissionField, PhysicsShapeTypes, PickInfo, PickKey,
-    PickUpdate, PingId, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
-    ProposalCandidateId, ProposalVoteId, QueryId, ReflectionProbe, ReflectionProbeFlags,
-    RegionChatSettings, RegionCombatSettings, RegionCoordinates, RegionFlags, RegionHandle,
-    RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
-    RegionName, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType,
-    ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData, SculptOrMeshKey,
-    SequenceNumber, SimulatorFeatures, SoundFlags, SoundPreload, StartLocation,
-    StartLocationParseError, TerrainLayerType, TerrainPatch, Texture, TextureAnimation,
-    TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TransactionId,
+    ChatLifecycleView, ChatLogConfig, ChatMessage, ChatSessionInfo, ChatSessionKind, ChatSource,
+    ChatSourceType, ChatType, ChatTypeNotAVolume, CircuitCode, CircuitId, ClassifiedCategory,
+    ClassifiedInfo, ClassifiedUpdate, ClickAction, ClockStyle, Command, ControlFlags,
+    ConversationKind, CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic, Direction,
+    DisconnectReason, Distance, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo,
+    Event, ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate,
+    ExtendedMesh, FlexibleData, Friend, FriendRights, GlobalCoordinates, GltfMaterialOverride,
+    GridCoordinates, GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
+    GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit,
+    GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
+    HomeLocation, IceCandidate, ImDialog, ImSessionId, ImageCodec, InstantMessage, InterestsUpdate,
+    InventoryCallbackId, InventoryFolder, InventoryFolderKey, InventoryItem,
+    InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryType, Key, Kilobits, LandArea,
+    LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance,
+    LoadUrlRequest, LoggedChatType, LoginAccount, LoginParams, LoginRequest, LoginResponse, LureId,
+    MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER,
+    MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry,
+    MeshKey, MessageCursor, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
+    MovementMode, MuteEntry, MuteFlags, MuteType, NegativeBalanceError, NeighborInfo,
+    NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse,
+    ObjectMotion, ObjectPermMasks, ObjectProperties, ObjectTransform, OpenSimExtras, OwnerKey,
+    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
+    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
+    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
+    PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape,
+    PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId,
+    ReflectionProbe, ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings,
+    RegionCoordinates, RegionFlags, RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits,
+    RegionLocalObjectId, RegionLocalParcelId, RegionName, Reliability, RenderMaterialEntry,
+    RenderMaterialRef, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
+    ScriptControlAction, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest, SculptData, SculptOrMeshKey, SequenceNumber, SessionMessage,
+    SimulatorFeatures, SoundFlags, SoundPreload, StartLocation, StartLocationParseError,
+    TerrainLayerType, TerrainPatch, Texture, TextureAnimation, TextureEntry, TextureFace,
+    TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId,
     TransferId, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest,
     Wearable, WearableType, XferId, avatar_texture, decode_particle_system, decode_texture_anim,
     decode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
@@ -90,6 +91,7 @@ pub use sl_proto::{
 
 mod appearance;
 mod caps;
+mod chat_log;
 mod experiences;
 mod fetch;
 mod http;
@@ -103,6 +105,7 @@ use crate::caps::{
     CAPS_FAILURE_PREFIX, abort_task, fetch_capabilities, make_sleep, spawn_event_queue,
     spawn_simulator_features,
 };
+use crate::chat_log::ChatLog;
 use crate::experiences::{
     fetch_experience_admin, fetch_experience_contributor, fetch_group_experiences,
 };
@@ -166,6 +169,10 @@ pub struct Client {
     /// every region change), for a driver that wants to resolve/symbolize
     /// `$cap:Name` placeholders.
     caps_reporter: Option<mpsc::Sender<HashMap<String, String>>>,
+    /// The optional local chat-log configuration (default off). When any text-chat
+    /// type is enabled, [`Client::run`] writes Firestorm-compatible transcripts and
+    /// serves file-backed history pages.
+    chat_log_config: ChatLogConfig,
 }
 
 impl Client {
@@ -208,6 +215,7 @@ impl Client {
             socket,
             recv_buf: vec![0u8; RECV_BUFFER_SIZE],
             caps_reporter: None,
+            chat_log_config: ChatLogConfig::default(),
         })
     }
 
@@ -262,6 +270,16 @@ impl Client {
         self.caps_reporter = Some(reporter);
     }
 
+    /// Sets the local chat-log configuration. Off by default; once any text-chat
+    /// type is enabled, [`Client::run`] writes Firestorm-compatible transcripts for
+    /// nearby chat / IMs / group / conference sessions (per the enabled set) and
+    /// serves the older, file-backed pages of
+    /// [`Command::QueryChatHistoryPage`](sl_proto::Command::QueryChatHistoryPage).
+    /// Call before [`Client::run`].
+    pub fn set_chat_log_config(&mut self, config: ChatLogConfig) {
+        self.chat_log_config = config;
+    }
+
     /// Runs the session until it is disconnected or logged out, forwarding
     /// events to `events`, diagnostics to `diagnostics` (only when enabled via
     /// [`Client::set_diagnostics`]), and applying commands from `commands`.
@@ -289,6 +307,15 @@ impl Client {
         }
         spawn_simulator_features(&caps, &http, &caps_tx);
         let mut caps_task = spawn_event_queue(&caps, &http, &caps_tx);
+
+        // The optional local chat-log writer. Constructed even when disabled (its
+        // methods short-circuit on the empty enabled-set) so the tap sites stay
+        // unconditional; it owns the only file I/O in the runtime.
+        let mut chat_log = ChatLog::new(
+            self.chat_log_config.clone(),
+            self.session.agent_legacy_name(),
+            self.session.agent_id(),
+        );
 
         loop {
             while let Some(transmit) = self.session.poll_transmit() {
@@ -319,6 +346,11 @@ impl Client {
                     tokio::spawn(async move {
                         let _ignored = fetch_capabilities(Some(&seed), &http).await;
                     });
+                }
+                // Tap the event for the local chat log (best-effort, no-op when
+                // disabled) before forwarding it on.
+                if chat_log.any_enabled() {
+                    chat_log.observe_event(&self.session, &event);
                 }
                 events.send(event).await.ok();
                 if region_changed {
@@ -387,6 +419,7 @@ impl Client {
                         }
                         Some(Command::InstantMessage { to_agent_id, message }) => {
                             self.session.send_instant_message(to_agent_id, &message, Instant::now())?;
+                            chat_log.log_outbound_im(to_agent_id, &message);
                         }
                         Some(Command::ImTyping { to_agent_id, typing }) => {
                             self.session.send_im_typing(to_agent_id, typing, Instant::now())?;
@@ -680,6 +713,10 @@ impl Client {
                         }
                         Some(Command::SendGroupMessage { group_id, message }) => {
                             self.session.send_group_message(group_id, &message, Instant::now())?;
+                            if let Some(own) = self.session.agent_id() {
+                                let name = self.session.agent_legacy_name();
+                                chat_log.log_group(group_id, own, &name, &message);
+                            }
                         }
                         Some(Command::LeaveGroupSession(group_id)) => {
                             self.session.leave_group_session(group_id, Instant::now())?;
@@ -1496,6 +1533,14 @@ impl Client {
                         }
                         Some(Command::SendConferenceMessage { session_id, message }) => {
                             self.session.send_conference_message(session_id, &message, Instant::now())?;
+                            if let Some(own) = self.session.agent_id() {
+                                let name = self.session.agent_legacy_name();
+                                let roster: std::collections::BTreeSet<_> = self
+                                    .session
+                                    .participants(ChatSessionKind::Conference { id: session_id })
+                                    .collect();
+                                chat_log.log_conference(session_id, &roster, own, &name, &message);
+                            }
                         }
                         Some(Command::LeaveConference { session_id }) => {
                             self.session.leave_conference(session_id, Instant::now())?;
@@ -1575,10 +1620,32 @@ impl Client {
                             )).await.ok();
                         }
                         Some(Command::QueryChatHistoryPage { session, before, limit }) => {
-                            // Local query: clone one bounded, newest-first page into
-                            // an `Arc<[_]>` and surface it with its `prev` cursor.
-                            let (page, prev) = self.session.history_page(session, before, limit);
-                            let messages: std::sync::Arc<[_]> = page.cloned().collect();
+                            // Newest-first paging across the unified memory→archive
+                            // view: serve the in-memory ring first, then continue
+                            // older pages from the on-disk transcript (B9).
+                            let consumed = before.map_or(0, MessageCursor::consumed_count);
+                            let mem_len = self.session.history_len(session);
+                            let (messages, prev): (std::sync::Arc<[SessionMessage]>, _) =
+                                if consumed < mem_len {
+                                    let (page, mem_prev) =
+                                        self.session.history_page(session, before, limit);
+                                    let collected: std::sync::Arc<[_]> = page.cloned().collect();
+                                    let next = consumed.saturating_add(collected.len());
+                                    // When the ring is exhausted, hand a file cursor
+                                    // if the transcript holds anything older.
+                                    let prev = mem_prev.or_else(|| {
+                                        chat_log
+                                            .read_older_page(session, mem_len, next, 1)
+                                            .filter(|(probe, _)| !probe.is_empty())
+                                            .map(|_more| MessageCursor::from_consumed(next))
+                                    });
+                                    (collected, prev)
+                                } else {
+                                    match chat_log.read_older_page(session, mem_len, consumed, limit) {
+                                        Some((msgs, prev)) => (msgs.into(), prev),
+                                        None => (Vec::new().into(), None),
+                                    }
+                                };
                             events.send(Event::ChatHistoryPage { session, messages, prev }).await.ok();
                         }
                         Some(Command::QueryFriends) => {

@@ -378,12 +378,15 @@ pub struct FriendPresence {
     pub online: bool,
 }
 
-/// An opaque page token for [`Session::history_page`](crate::Session::history_page)
-/// — a `prev` cursor returned by one page is fed back as the `before` argument of
-/// the next to walk older windows. Consumers never interpret it; the inner
-/// representation is private so the memory→archive boundary (the on-disk chat log
-/// added later) can change it transparently. Today it is a count of how many of
-/// the newest in-memory messages a page already consumed.
+/// A page token for [`Session::history_page`](crate::Session::history_page) — a
+/// `prev` cursor returned by one page is fed back as the `before` argument of the
+/// next to walk older windows. It counts how many messages, from the newest end, a
+/// page already consumed over the **unified** memory→archive view: the in-memory
+/// ring supplies the newest messages, and the runtime's on-disk chat log continues
+/// older pages from the same count once the ring is exhausted. The count is exposed
+/// (rather than fully
+/// opaque) precisely so the runtime can cross that boundary; ordinary in-memory
+/// consumers still need not interpret it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MessageCursor(usize);
 
@@ -395,6 +398,21 @@ impl MessageCursor {
 
     /// The number of newest in-memory messages this cursor skips past.
     pub(crate) const fn consumed(self) -> usize {
+        self.0
+    }
+
+    /// Builds a cursor from a newest-first consumed count — the constructor the
+    /// runtime's file-backed paging uses to continue older pages past the in-memory
+    /// ring.
+    #[must_use]
+    pub const fn from_consumed(consumed: usize) -> Self {
+        Self(consumed)
+    }
+
+    /// This cursor's newest-first consumed count, for the runtime to resume
+    /// file-backed paging at the right offset.
+    #[must_use]
+    pub const fn consumed_count(self) -> usize {
         self.0
     }
 }

@@ -5025,6 +5025,17 @@ impl Session {
         })
     }
 
+    /// The number of messages currently retained in `session`'s **in-memory**
+    /// history ring (`0` for an unknown session). The runtime's file-backed paging
+    /// uses it as the boundary between the in-memory tail and the on-disk archive:
+    /// a [`MessageCursor`] whose count reaches this length has exhausted memory and
+    /// continues from the transcript.
+    #[must_use]
+    pub fn history_len(&self, session: ChatSessionKind) -> usize {
+        self.chat_session(session)
+            .map_or(0, |chat| chat.history.len())
+    }
+
     /// One bounded, **newest-first** page of `session`'s in-memory conversation
     /// history, plus a `prev` cursor for the next (older) page — the read-out
     /// behind [`Command::QueryChatHistoryPage`](crate::Command::QueryChatHistoryPage)
@@ -5034,7 +5045,7 @@ impl Session {
     /// earlier call to continue older. At most `limit` messages are yielded,
     /// newest first; the returned cursor is `Some` while older in-memory messages
     /// remain and `None` once the window reaches the oldest retained message (the
-    /// on-disk chat log added later continues older pages from there). The iterator
+    /// runtime's on-disk chat log continues older pages from there). The iterator
     /// borrows the session, so a bevy reader pages with zero copies; the channel
     /// runtimes clone the bounded window into an `Arc<[_]>`.
     pub fn history_page(
@@ -7754,6 +7765,16 @@ impl Session {
     #[must_use]
     pub fn agent_id(&self) -> Option<AgentKey> {
         self.circuit.as_ref().map(|circuit| circuit.agent_id)
+    }
+
+    /// The agent's legacy name (`"First Last"`) from the login request — the same
+    /// `FromAgentName` carried by outgoing instant messages. Available before the
+    /// circuit is up (it comes from the login parameters), so a runtime can derive
+    /// its per-account chat-log directory and label its own outbound lines without
+    /// waiting on a server round-trip.
+    #[must_use]
+    pub fn agent_legacy_name(&self) -> String {
+        self.agent_name()
     }
 
     /// The session id, once login has established the circuit. The companion to

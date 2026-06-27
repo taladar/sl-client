@@ -12,9 +12,9 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, ExternalPrinter};
 use sl_client_bevy::{
-    AgentKey, Command, LoginParams, LoginRequest, MfaChallenge, SlCapabilities, SlClientPlugin,
-    SlCommand, SlDiagnostic, SlEvent, SlIdentity, SlMfaChallenge, SlSessionEvent, StartLocation,
-    Uuid,
+    AgentKey, ChatLogConfig, Command, LoginParams, LoginRequest, MfaChallenge, SlCapabilities,
+    SlClientPlugin, SlCommand, SlDiagnostic, SlEvent, SlIdentity, SlMfaChallenge, SlSessionEvent,
+    StartLocation, Uuid,
 };
 use sl_repl::{
     Avatar, Credentials, MetaCommand, ReplAction, ScriptRecorder, SessionContext, format_command,
@@ -125,6 +125,9 @@ pub struct RunArgs {
     /// Record the interactive session to a replayable `.repl` transcript.
     #[clap(long)]
     script_out: Option<PathBuf>,
+    /// The optional local chat-log toggles (all off by default).
+    #[clap(flatten)]
+    chat_log: sl_repl::ChatLogArgs,
 }
 
 /// The packaging sub-commands (the absence of a sub-command runs a session).
@@ -602,6 +605,7 @@ fn repl_driver(
 /// and the recorder for reuse on a subsequent (MFA-driven) restart.
 fn run_session(
     params: &LoginParams,
+    chat_log_config: &ChatLogConfig,
     smoke: bool,
     line_rx: &Receiver<String>,
     recorder: Option<ScriptRecorder>,
@@ -611,6 +615,7 @@ fn run_session(
         .add_plugins(SlClientPlugin {
             params: params.clone(),
             diagnostics: true,
+            chat_log_config: chat_log_config.clone(),
         })
         .insert_resource(ReplState {
             ctx: SessionContext::new(),
@@ -692,6 +697,7 @@ fn run_repl(args: RunArgs) -> Result<(), Error> {
         args.channel.clone(),
         args.version.clone(),
     );
+    let chat_log_config = args.chat_log.to_config();
     loop {
         info!(
             "logging in as {} {} to {login_uri}",
@@ -702,7 +708,13 @@ fn run_repl(args: RunArgs) -> Result<(), Error> {
             login_uri: login_uri.parse()?,
             request: request.clone(),
         };
-        let outcome = run_session(&params, args.smoke, &line_rx, recorder.take());
+        let outcome = run_session(
+            &params,
+            &chat_log_config,
+            args.smoke,
+            &line_rx,
+            recorder.take(),
+        );
         recorder = outcome.recorder;
         match outcome.challenge {
             Some(challenge) => {
