@@ -21,6 +21,7 @@ use sl_proto::AgentKey;
 use sl_proto::AnimationKey;
 use sl_proto::AssetKey;
 use sl_proto::ChatChannel;
+use sl_proto::ChatSessionKind;
 use sl_proto::CircuitId;
 use sl_proto::ClassifiedKey;
 use sl_proto::Direction;
@@ -1600,6 +1601,29 @@ fn build_experience_update(
         properties: args.parse_or(ctx, "properties", 4, "i32", 0)?,
         slurl: args.opt_url(ctx, "slurl", 5)?,
         extended_metadata: args.str_or(ctx, "extended_metadata", 6, "")?,
+    })
+}
+
+/// Build a [`ChatSessionKind`] from a `kind` keyword (`direct` / `group` /
+/// `conference`) at `kind_pos` and its id at the following position.
+fn build_chat_session_kind(
+    args: &Args,
+    ctx: &dyn ReplContext,
+    kind_pos: usize,
+) -> Result<ChatSessionKind, ReplError> {
+    let kind = args.req_str(ctx, "kind", kind_pos)?;
+    let id = args.req_uuid(ctx, "id", kind_pos.saturating_add(1))?;
+    Ok(match norm(&kind).as_str() {
+        "direct" => ChatSessionKind::Direct {
+            peer: AgentKey::from(id),
+        },
+        "group" => ChatSessionKind::Group {
+            group_id: GroupKey::from(id),
+        },
+        "conference" => ChatSessionKind::Conference {
+            id: ImSessionId::from(id),
+        },
+        _ => return Err(invalid("kind", &kind, "chat session kind")),
     })
 }
 
@@ -5152,6 +5176,15 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::LeaveConference {
                     session_id: ImSessionId::from(args.req_uuid(ctx, "session_id", 0)?),
+                })
+            },
+        },
+        CommandSpec {
+            name: "mark_session_read",
+            usage: "<direct|group|conference> <id>",
+            build: |args, ctx| {
+                Ok(Command::MarkSessionRead {
+                    session: build_chat_session_kind(args, ctx, 0)?,
                 })
             },
         },

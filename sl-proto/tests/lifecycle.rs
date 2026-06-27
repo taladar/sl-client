@@ -34,10 +34,10 @@ mod test {
         RegionInfoUpdate, RegionName, Reliability, RequiredVoiceVersion, RestoreItem,
         RezAttachment, RezObjectParams, RezScriptParams, SaleType, Scale, ScopedObjectId,
         ScopedParcelId, ScriptControlAction, ScriptPermissionStatus, ScriptPermissions,
-        SculptOrMeshKey, Session, SetDisplayNameReply, SimStatId, SimWideDeleteFlags,
-        SimulatorTime, SkySettings, SoundFlags, StartLocationSlot, TaskInventoryKey,
-        TaskInventoryReply, TeleportFlags, TerraformArea, TerrainLayerType, TextureEntry,
-        TextureFace, TextureKey, Throttle, TransactionId, TransferStatus, Transmit,
+        SculptOrMeshKey, Session, SessionMessage, SetDisplayNameReply, SimStatId,
+        SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags, StartLocationSlot,
+        TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea, TerrainLayerType,
+        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, TransferStatus, Transmit,
         UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
         WaterSettings, WearableType, avatar_texture, decode_texture_entry, group_powers, pcode,
     };
@@ -16316,6 +16316,195 @@ mod test {
         session.handle_datagram(sim_addr(), &server_message(&start, 10, true)?, now)?;
 
         assert_eq!(typers(&session, kind), vec![AgentKey::from(typer)]);
+        Ok(())
+    }
+
+    /// The logged conversation history of `session`, oldest-first.
+    fn history(session: &Session, kind: ChatSessionKind) -> Vec<SessionMessage> {
+        session.history(kind).cloned().collect()
+    }
+
+    #[test]
+    fn inbound_one_to_one_im_logs_and_bumps_unread() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x55));
+        let kind = ChatSessionKind::Direct { peer };
+        let im = inbound_im(0, b"Friendly Bot\0", b"hi there\0");
+        session.handle_datagram(sim_addr(), &server_message(&im, 9, false)?, now)?;
+
+        let logged = history(&session, kind);
+        assert_eq!(logged.len(), 1);
+        let entry = logged.first().ok_or("expected a logged message")?;
+        assert_eq!(entry.sender, peer);
+        assert_eq!(entry.dialog, ImDialog::Message);
+        assert_eq!(entry.text, "hi there");
+        assert_eq!(entry.timestamp, None);
+        assert_eq!(session.unread(kind), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn inbound_group_send_logs_to_group_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6708);
+        let sender = uuid::Uuid::from_u128(0x6709);
+        let kind = ChatSessionKind::Group {
+            group_id: GroupKey::from(group),
+        };
+        let send = inbound_group_im(17, sender, group);
+        session.handle_datagram(sim_addr(), &server_message(&send, 9, true)?, now)?;
+
+        let logged = history(&session, kind);
+        assert_eq!(logged.len(), 1);
+        let entry = logged.first().ok_or("expected a logged message")?;
+        assert_eq!(entry.sender, AgentKey::from(sender));
+        assert_eq!(entry.dialog, ImDialog::SessionSend);
+        assert_eq!(entry.text, "hello group");
+        assert_eq!(session.unread(kind), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn outbound_one_to_one_im_logs_as_self_and_resets_unread() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x55));
+        let kind = ChatSessionKind::Direct { peer };
+        // An inbound message first leaves one unread…
+        let im = inbound_im(0, b"Friendly Bot\0", b"hi there\0");
+        session.handle_datagram(sim_addr(), &server_message(&im, 9, false)?, now)?;
+        assert_eq!(session.unread(kind), 1);
+
+        // …then our own reply logs as self (the login agent id) and clears unread.
+        session.send_instant_message(peer, "hello back", now)?;
+        let logged = history(&session, kind);
+        assert_eq!(logged.len(), 2);
+        let reply = logged.get(1).ok_or("expected our reply")?;
+        assert_eq!(reply.sender, AgentKey::from(uuid::Uuid::from_u128(1)));
+        assert_eq!(reply.dialog, ImDialog::Message);
+        assert_eq!(reply.text, "hello back");
+        assert_eq!(reply.timestamp, None);
+        assert_eq!(session.unread(kind), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn mark_session_read_resets_unread_keeping_history() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x55));
+        let kind = ChatSessionKind::Direct { peer };
+        let im = inbound_im(0, b"Friendly Bot\0", b"hi\0");
+        session.handle_datagram(sim_addr(), &server_message(&im, 9, false)?, now)?;
+        assert_eq!(session.unread(kind), 1);
+
+        session.mark_session_read(kind);
+        assert_eq!(session.unread(kind), 0);
+        // Marking read clears the counter but leaves the logged history intact.
+        assert_eq!(history(&session, kind).len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn history_is_capped_dropping_the_oldest() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x55));
+        let kind = ChatSessionKind::Direct { peer };
+        // HISTORY_CAP is 256; sending one more (messages 0..=256) drops message 0.
+        for index in 0..=256u32 {
+            let text = format!("msg {index}\0");
+            let im = inbound_im(0, b"Friendly Bot\0", text.as_bytes());
+            let sequence = index.checked_add(100).ok_or("sequence overflow")?;
+            session.handle_datagram(sim_addr(), &server_message(&im, sequence, false)?, now)?;
+        }
+
+        let logged = history(&session, kind);
+        assert_eq!(logged.len(), 256);
+        // The oldest surviving entry is message 1 (message 0 was evicted), and the
+        // newest is message 256.
+        assert_eq!(
+            logged.first().ok_or("expected a first entry")?.text,
+            "msg 1"
+        );
+        assert_eq!(
+            logged.last().ok_or("expected a last entry")?.text,
+            "msg 256"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn offline_im_logs_wire_timestamp_and_bumps_unread() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let from = uuid::Uuid::from_u128(0x55);
+        let kind = ChatSessionKind::Direct {
+            peer: AgentKey::from(from),
+        };
+        // A stored offline IM (dialog 0 = Message) replayed over the CAPS path.
+        let xml = format!(
+            "<llsd><array><map>\
+               <key>from_agent_id</key><uuid>{from}</uuid>\
+               <key>from_agent_name</key><string>Sender Name</string>\
+               <key>to_agent_id</key><uuid>{}</uuid>\
+               <key>dialog</key><integer>0</integer>\
+               <key>message</key><string>stored hello</string>\
+               <key>timestamp</key><integer>1700000000</integer>\
+               <key>transaction-id</key><uuid>{}</uuid>\
+             </map></array></llsd>",
+            uuid::Uuid::from_u128(1),
+            uuid::Uuid::from_u128(0xABC),
+        );
+        let body = parse_llsd_xml(&xml)?;
+        session.handle_caps_event("ReadOfflineMsgs", &body, now)?;
+
+        let logged = history(&session, kind);
+        assert_eq!(logged.len(), 1);
+        let entry = logged.first().ok_or("expected a logged offline message")?;
+        assert_eq!(entry.sender, AgentKey::from(from));
+        assert_eq!(entry.text, "stored hello");
+        assert_eq!(entry.timestamp, Some(1_700_000_000));
+        assert_eq!(session.unread(kind), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn total_unread_sums_across_sessions() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Two inbound 1:1 messages from one peer and one group send: 3 unread.
+        let im = inbound_im(0, b"Friendly Bot\0", b"hi\0");
+        session.handle_datagram(sim_addr(), &server_message(&im, 9, false)?, now)?;
+        let im2 = inbound_im(0, b"Friendly Bot\0", b"again\0");
+        session.handle_datagram(sim_addr(), &server_message(&im2, 10, false)?, now)?;
+        let group = uuid::Uuid::from_u128(0x6708);
+        let send = inbound_group_im(17, uuid::Uuid::from_u128(0x6709), group);
+        session.handle_datagram(sim_addr(), &server_message(&send, 11, true)?, now)?;
+
+        assert_eq!(session.total_unread(), 3);
+
+        // Reading the 1:1 (2 unread) leaves only the group's 1.
+        session.mark_session_read(ChatSessionKind::Direct {
+            peer: AgentKey::from(uuid::Uuid::from_u128(0x55)),
+        });
+        assert_eq!(session.total_unread(), 1);
         Ok(())
     }
 }

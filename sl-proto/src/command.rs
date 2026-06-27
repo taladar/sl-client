@@ -7,10 +7,10 @@
 use crate::scoped_id::{ScopedObjectId, ScopedParcelId};
 use crate::{
     AbuseReport, AgentKey, AgentPreferences, AnimationKey, AnyMessage, AssetKey, AssetType,
-    AttachmentMode, AttachmentPoint, Camera, ChatChannel, ChatType, ClassifiedCategory,
-    ClassifiedKey, ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams,
-    DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility, Distance, EjectAction,
-    EstateAccessDelta, EventId, ExperienceKey, ExperiencePermission, ExperienceUpdate,
+    AttachmentMode, AttachmentPoint, Camera, ChatChannel, ChatSessionKind, ChatType,
+    ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction, ControlFlags,
+    CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility, Distance,
+    EjectAction, EstateAccessDelta, EventId, ExperienceKey, ExperiencePermission, ExperienceUpdate,
     FreezeAction, FriendKey, FriendRights, GestureActivation, GodRegionUpdate, GroupKey,
     GroupNoticeAttachment, GroupNoticeKey, GroupRequestId, GroupRoleEdit, GroupRoleKey,
     GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate, InventoryFolderKey,
@@ -2160,6 +2160,13 @@ pub enum Command {
     LeaveConference {
         /// The conference session id.
         session_id: ImSessionId,
+    },
+    /// Mark a chat session as read, resetting its unread-message count to zero
+    /// (the counterpart of the unread bump on each inbound message). A no-op if
+    /// the session is not open.
+    MarkSessionRead {
+        /// Which chat session (1:1 direct, group, or conference) to mark read.
+        session: ChatSessionKind,
     },
     /// Flush stored offline instant messages over the legacy UDP trigger
     /// (`RetrieveInstantMessages`); they arrive as offline
