@@ -14,3 +14,8 @@ Delink = "Delink"
 # `Xsiz`/… fields), used by the `sl-proto::j2c` header parser; not a typo.
 SIZ = "SIZ"
 siz = "siz"
+
+[default.extend-identifiers]
+# `flate2` is the gzip crate (used for the inventory disk cache); not a typo
+# of "flat".
+flate2 = "flate2"
