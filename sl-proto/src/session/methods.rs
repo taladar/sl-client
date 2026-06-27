@@ -36,8 +36,8 @@ use super::{
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, ChatSession, ChatSessionKind, Circuit,
     DEFAULT_DRAW_DISTANCE, GrantStatus, HolderKind, IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG,
     LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, ScriptGrant,
-    ScriptHolder, Session, SessionState, SitState, TELEPORT_TIMEOUT, TakenControls, TeleportPhase,
-    TextureDownload, deadline, merge_deadline,
+    ScriptHolder, Session, SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls,
+    TeleportPhase, TextureDownload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -2001,11 +2001,43 @@ impl Session {
                     // Typing notifications carry no real text; surface them as a
                     // distinct signal rather than an empty instant message.
                     dialog @ (ImDialog::TypingStart | ImDialog::TypingStop) => {
+                        let from_agent_id = AgentKey::from(im.agent_data.agent_id);
+                        let typing = matches!(dialog, ImDialog::TypingStart);
+                        // The wire carries the session id but no `from_group`, so
+                        // resolve by the registry: a tracked group / conference
+                        // keyed by `block.id`, otherwise a 1:1 keyed by the peer
+                        // (`from_agent_id` always identifies the typer — the 1:1
+                        // `id` field is not reliably the XOR id across senders).
+                        let group_kind = ChatSessionKind::Group {
+                            group_id: GroupKey::from(block.id),
+                        };
+                        let conference_kind = ChatSessionKind::Conference {
+                            id: ImSessionId::from(block.id),
+                        };
+                        let kind = if self.chat_session(group_kind).is_some() {
+                            group_kind
+                        } else if self.chat_session(conference_kind).is_some() {
+                            conference_kind
+                        } else {
+                            ChatSessionKind::Direct {
+                                peer: from_agent_id,
+                            }
+                        };
+                        // Typing never opens a session (a non-creating lookup):
+                        // if it is not already open, the event still fires but
+                        // nothing is stored.
+                        if let Some(chat_session) = self.chat_session_get_mut(kind) {
+                            if typing {
+                                chat_session.typing.insert(from_agent_id, now);
+                            } else {
+                                chat_session.typing.remove(&from_agent_id);
+                            }
+                        }
                         self.events.push_back(Event::ImTyping {
-                            from_agent_id: AgentKey::from(im.agent_data.agent_id),
+                            from_agent_id,
                             from_agent_name: trimmed_string(&block.from_agent_name),
                             session_id: block.id,
-                            typing: matches!(dialog, ImDialog::TypingStart),
+                            typing,
                         });
                     }
                     // Group IM session traffic (the session id is the group id).
@@ -2025,11 +2057,21 @@ impl Session {
                         if block.from_group =>
                     {
                         let group_id = GroupKey::from(block.id);
-                        self.chat_session_mut(ChatSessionKind::Group { group_id }, now);
+                        let agent_id = AgentKey::from(im.agent_data.agent_id);
+                        let joined = matches!(dialog, ImDialog::SessionAdd);
+                        // Participant traffic also opens the session (it is
+                        // "joined" traffic — the A4 rule), then folds the roster.
+                        let chat_session =
+                            self.chat_session_mut(ChatSessionKind::Group { group_id }, now);
+                        if joined {
+                            chat_session.participants.insert(agent_id);
+                        } else {
+                            chat_session.participants.remove(&agent_id);
+                        }
                         self.events.push_back(Event::GroupSessionParticipant {
                             group_id,
-                            agent_id: AgentKey::from(im.agent_data.agent_id),
-                            joined: matches!(dialog, ImDialog::SessionAdd),
+                            agent_id,
+                            joined,
                         });
                     }
                     // Ad-hoc conference session traffic mirrors the group-session
@@ -2047,11 +2089,21 @@ impl Session {
                     }
                     dialog @ (ImDialog::SessionAdd | ImDialog::SessionLeave) => {
                         let id = ImSessionId::from(block.id);
-                        self.chat_session_mut(ChatSessionKind::Conference { id }, now);
+                        let agent_id = AgentKey::from(im.agent_data.agent_id);
+                        let joined = matches!(dialog, ImDialog::SessionAdd);
+                        // Conference participant traffic mirrors the group arm:
+                        // open the session, then fold the roster.
+                        let chat_session =
+                            self.chat_session_mut(ChatSessionKind::Conference { id }, now);
+                        if joined {
+                            chat_session.participants.insert(agent_id);
+                        } else {
+                            chat_session.participants.remove(&agent_id);
+                        }
                         self.events.push_back(Event::ConferenceSessionParticipant {
                             session_id: block.id,
-                            agent_id: AgentKey::from(im.agent_data.agent_id),
-                            joined: matches!(dialog, ImDialog::SessionAdd),
+                            agent_id,
+                            joined,
                         });
                     }
                     // They accepted *our* friendship offer: the `from_agent_id`
@@ -3643,6 +3695,15 @@ impl Session {
             return Ok(());
         }
 
+        // Prune stale "X is typing…" entries: a lost `TypingStop` would otherwise
+        // strand the indicator. The accessor stays `now`-free by pruning here on
+        // the timed loop (an explicit `TypingStop` still clears immediately).
+        for chat_session in self.chat_sessions.values_mut() {
+            chat_session
+                .typing
+                .retain(|_, last_seen| now.saturating_duration_since(*last_seen) < TYPING_TIMEOUT);
+        }
+
         if self
             .circuit
             .as_ref()
@@ -4527,6 +4588,22 @@ impl Session {
         session
     }
 
+    /// Mutable access to an *already-open* chat session, **without** creating one
+    /// — the non-opening counterpart to [`Self::chat_session_mut`]. Used by the
+    /// typing fold, which must never conjure a session: a stray "typing…" then
+    /// cancelled would otherwise pollute the registry with an empty session.
+    /// Returns `None` if no session is open for `kind`.
+    fn chat_session_get_mut(&mut self, kind: ChatSessionKind) -> Option<&mut ChatSession> {
+        self.chat_sessions.get_mut(&kind)
+    }
+
+    /// Read-only access to an already-open chat session, or `None` if none is
+    /// open for `kind`. Backs the roster / typing accessors and the typing fold's
+    /// session resolution.
+    fn chat_session(&self, kind: ChatSessionKind) -> Option<&ChatSession> {
+        self.chat_sessions.get(&kind)
+    }
+
     /// The currently-open chat sessions (1:1 direct, group, ad-hoc conference),
     /// ordered **newest-first** by last activity (the most recently active
     /// session leads), with the typed [`ChatSessionKind`] breaking ties for a
@@ -4546,6 +4623,33 @@ impl Session {
                 .then_with(|| left_kind.cmp(right_kind))
         });
         entries.into_iter().map(|(kind, _)| kind)
+    }
+
+    /// The participants of `session`: the simulator-reported roster for a group
+    /// or conference (which includes self once we have joined), or the implicit
+    /// `{ peer }` synthesised from a `Direct` key (a 1:1's roster is never
+    /// materialised — its members are `{ self, peer }`). Returns an empty
+    /// iterator for a group / conference that is not open.
+    pub fn participants(&self, session: ChatSessionKind) -> impl Iterator<Item = AgentKey> {
+        let participants: Vec<AgentKey> = match session {
+            ChatSessionKind::Direct { peer } => vec![peer],
+            group_or_conference => self
+                .chat_session(group_or_conference)
+                .map(|chat_session| chat_session.participants.iter().copied().collect())
+                .unwrap_or_default(),
+        };
+        participants.into_iter()
+    }
+
+    /// The avatars currently typing in `session` (remote typers only — our own
+    /// outbound typing is never mirrored). Stale entries are pruned on the timed
+    /// loop, so this read is `now`-free; an unopened session yields nothing.
+    pub fn typing(&self, session: ChatSessionKind) -> impl Iterator<Item = AgentKey> {
+        let typing: Vec<AgentKey> = self
+            .chat_session(session)
+            .map(|chat_session| chat_session.typing.keys().copied().collect())
+            .unwrap_or_default();
+        typing.into_iter()
     }
 
     /// Declines a friendship offer via `DeclineFriendship`. The `transaction_id`

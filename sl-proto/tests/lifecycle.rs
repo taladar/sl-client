@@ -16171,4 +16171,151 @@ mod test {
         assert_eq!(direct_id, uuid::Uuid::from_u128(1u128 ^ 0x99u128));
         Ok(())
     }
+
+    /// The roster of `session`, in the accessor's order.
+    fn participants(session: &Session, kind: ChatSessionKind) -> Vec<AgentKey> {
+        session.participants(kind).collect()
+    }
+
+    /// The live typers in `session`, in the accessor's order.
+    fn typers(session: &Session, kind: ChatSessionKind) -> Vec<AgentKey> {
+        session.typing(kind).collect()
+    }
+
+    #[test]
+    fn group_participant_events_fold_roster_and_open_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6708);
+        let member = uuid::Uuid::from_u128(0x670A);
+        let kind = ChatSessionKind::Group {
+            group_id: GroupKey::from(group),
+        };
+
+        // A SessionAdd (dialog 13) opens the session and inserts the member.
+        let add = inbound_group_im(13, member, group);
+        session.handle_datagram(sim_addr(), &server_message(&add, 9, true)?, now)?;
+        assert_eq!(chat_sessions(&session), vec![kind]);
+        assert_eq!(participants(&session, kind), vec![AgentKey::from(member)]);
+
+        // A SessionLeave (dialog 18) removes the member again.
+        let leave = inbound_group_im(18, member, group);
+        session.handle_datagram(sim_addr(), &server_message(&leave, 10, true)?, now)?;
+        assert!(participants(&session, kind).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn direct_session_participants_synthesised_as_peer() -> Result<(), TestError> {
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x99));
+        let session = new_session()?;
+
+        // A 1:1's roster is never materialised — it is synthesised `{ peer }`
+        // straight from the key, so no traffic is needed.
+        assert_eq!(
+            participants(&session, ChatSessionKind::Direct { peer }),
+            vec![peer]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn inbound_typing_start_and_stop_track_one_to_one() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x55));
+        let kind = ChatSessionKind::Direct { peer };
+
+        // Open the 1:1 with an ordinary message (typing alone never opens one).
+        let message = inbound_im(0, b"Friendly Bot\0", b"hi\0");
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, false)?, now)?;
+
+        // TypingStart (dialog 41) marks the peer typing; the 1:1 is keyed by the
+        // sender, not the wire `id` field.
+        let start = inbound_im(41, b"Friendly Bot\0", b"typing\0");
+        session.handle_datagram(sim_addr(), &server_message(&start, 10, false)?, now)?;
+        assert_eq!(typers(&session, kind), vec![peer]);
+
+        // TypingStop (dialog 42) clears it immediately (no waiting on expiry).
+        let stop = inbound_im(42, b"Friendly Bot\0", b"\0");
+        session.handle_datagram(sim_addr(), &server_message(&stop, 11, false)?, now)?;
+        assert!(typers(&session, kind).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn typing_does_not_open_a_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A typing notification for an unopened 1:1 stores nothing and conjures
+        // no session (the event still fires for the driver to react to).
+        let start = inbound_im(41, b"Friendly Bot\0", b"typing\0");
+        session.handle_datagram(sim_addr(), &server_message(&start, 9, false)?, now)?;
+
+        assert!(chat_sessions(&session).is_empty());
+        assert!(
+            typers(
+                &session,
+                ChatSessionKind::Direct {
+                    peer: AgentKey::from(uuid::Uuid::from_u128(0x55)),
+                }
+            )
+            .is_empty()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn typing_expires_after_timeout() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x55));
+        let kind = ChatSessionKind::Direct { peer };
+
+        // Open the 1:1 and mark the peer typing.
+        let message = inbound_im(0, b"Friendly Bot\0", b"hi\0");
+        session.handle_datagram(sim_addr(), &server_message(&message, 9, false)?, now)?;
+        let start = inbound_im(41, b"Friendly Bot\0", b"typing\0");
+        session.handle_datagram(sim_addr(), &server_message(&start, 10, false)?, now)?;
+
+        // A timed tick before the 9 s timeout keeps the entry…
+        session.handle_timeout(after(now, 8_000)?);
+        assert_eq!(typers(&session, kind), vec![peer]);
+
+        // …and one at the timeout prunes the stale typer (a lost TypingStop).
+        session.handle_timeout(after(now, 9_000)?);
+        assert!(typers(&session, kind).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn group_typing_keys_by_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6708);
+        let typer = uuid::Uuid::from_u128(0x670A);
+        let kind = ChatSessionKind::Group {
+            group_id: GroupKey::from(group),
+        };
+
+        // Open the group session, then a typing notification whose `id` is the
+        // group id resolves to that session (keyed by the typer).
+        let send = inbound_group_im(17, uuid::Uuid::from_u128(0x6709), group);
+        session.handle_datagram(sim_addr(), &server_message(&send, 9, true)?, now)?;
+        let start = inbound_group_im(41, typer, group);
+        session.handle_datagram(sim_addr(), &server_message(&start, 10, true)?, now)?;
+
+        assert_eq!(typers(&session, kind), vec![AgentKey::from(typer)]);
+        Ok(())
+    }
 }
