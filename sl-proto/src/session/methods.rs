@@ -3751,6 +3751,23 @@ impl Session {
                     .collect::<Vec<_>>();
                 for id in &ids {
                     self.online.remove(id);
+                    // Presence-driven auto-reset (A7): an offlined friend can no
+                    // longer be typing, and a friend who crashed without a
+                    // `SessionLeave` would otherwise linger in every group /
+                    // conference roster. Drop them from `typing` and
+                    // `participants` in each session — the fast path for friends
+                    // that grant see-online, layering with the sim's
+                    // `SessionLeave` (which covers non-friends too) and the 9 s
+                    // typing expiry. No session is removed and no per-session
+                    // "offline" marker is stored: a 1:1 persists to logout (its
+                    // peer-offline state is `!is_online(peer)`), so `FriendsOnline`
+                    // needs no chat action. The `FriendKey` and the roster's
+                    // `AgentKey` share the same `Key` identity.
+                    let agent = AgentKey(id.0);
+                    for chat_session in self.chat_sessions.values_mut() {
+                        chat_session.typing.remove(&agent);
+                        chat_session.participants.remove(&agent);
+                    }
                 }
                 if !ids.is_empty() {
                     self.events.push_back(Event::FriendsOffline(ids));
