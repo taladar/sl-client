@@ -10,10 +10,18 @@
 
 use super::conversions::compute_im_session_id;
 use crate::bookkeeping_ids::ImSessionId;
+use crate::types::ImDialog;
 use sl_types::key::{AgentKey, GroupKey};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
+
+/// The most recent messages retained per chat session. Older messages are
+/// dropped front-first once the log exceeds this many entries — the log is an
+/// in-memory display convenience, not the durable store (that is the optional
+/// on-disk chat log), so a fixed bound keeps a busy session from growing without
+/// limit. Matches the order of magnitude viewers keep in a conversation pane.
+pub(crate) const HISTORY_CAP: usize = 256;
 
 /// How long a remote "X is typing…" entry survives without a refresh before it
 /// is pruned (see [`ChatSession::typing`]). A lost `TypingStop` (packet loss, a
@@ -67,11 +75,33 @@ impl ChatSessionKind {
     }
 }
 
+/// One logged conversation message in a chat session's history — a 1:1 IM, a
+/// group-session message, or a conference message, plus our own outbound sends.
+/// Read back via [`Session::history`](crate::Session::history). Distinct from the
+/// nearby-chat [`ChatMessage`](crate::ChatMessage) (region-local spoken chat);
+/// this is the IM/session conversation log entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionMessage {
+    /// Who sent the message: the remote avatar for inbound traffic, or our own
+    /// agent for messages we sent.
+    pub sender: AgentKey,
+    /// The IM dialog the message arrived on (`Message` for a 1:1, `SessionSend`
+    /// for a group / conference message).
+    pub dialog: ImDialog,
+    /// The message text (trailing NUL padding already stripped).
+    pub text: String,
+    /// The sender's wire Unix timestamp, when the simulator supplied one (notably
+    /// for replayed offline IMs). `None` for our own sends and for live messages
+    /// that carry no timestamp — the sans-IO layer has no wall-clock of its own,
+    /// so insertion order is the authoritative sequence.
+    pub timestamp: Option<u32>,
+}
+
 /// The mutable per-session state mirror — the value half of the chat-session
 /// registry (the kind/id lives in the [`ChatSessionKind`] key). It grows
 /// additively as later chat tasks land their facets (participants/typing,
-/// history/unread, lifecycle, voice-channel state); for now it carries only the
-/// activity stamp.
+/// history/unread, lifecycle, voice-channel state); for now it carries the
+/// activity stamp, the roster, the typing set, and the message log.
 ///
 /// No `Default`: [`Instant`] has none, so the value is built by
 /// [`ChatSession::new`].
@@ -95,16 +125,55 @@ pub(crate) struct ChatSession {
     /// timed loop so a lost `TypingStop` cannot strand the indicator; an explicit
     /// `TypingStop` removes immediately.
     pub(crate) typing: BTreeMap<AgentKey, Instant>,
+    /// The bounded conversation log, oldest-first. Capped at [`HISTORY_CAP`]
+    /// entries; the oldest is dropped front-first once the cap is exceeded. Holds
+    /// only conversation messages (inbound 1:1 / group / conference and our own
+    /// outbound sends) — typing, participant, offer, and notice dialogs are not
+    /// logged.
+    pub(crate) history: VecDeque<SessionMessage>,
+    /// The number of inbound messages received since the session was last read.
+    /// Bumped per inbound message from another agent; reset to zero by our own
+    /// outbound send and by [`Session::mark_session_read`](crate::Session::mark_session_read).
+    pub(crate) unread: u32,
 }
 
 impl ChatSession {
-    /// Creates a session whose last activity is `now`, with an empty roster and
-    /// no typers.
+    /// Creates a session whose last activity is `now`, with an empty roster, no
+    /// typers, an empty log, and nothing unread.
     pub(crate) const fn new(now: Instant) -> Self {
         Self {
             last_activity: now,
             participants: BTreeSet::new(),
             typing: BTreeMap::new(),
+            history: VecDeque::new(),
+            unread: 0,
         }
+    }
+
+    /// Appends `message` to the log, dropping the oldest entry if that pushes the
+    /// log past [`HISTORY_CAP`]. Shared by the inbound and outbound log paths;
+    /// the unread bookkeeping is the caller's (it differs between the two).
+    fn push_history(&mut self, message: SessionMessage) {
+        self.history.push_back(message);
+        while self.history.len() > HISTORY_CAP {
+            self.history.pop_front();
+        }
+    }
+
+    /// Logs an inbound message and, unless it is our own echo (`own_agent` equals
+    /// the sender), bumps the unread counter. Offline-IM replays ride this same
+    /// path, carrying their original wire timestamp.
+    pub(crate) fn log_inbound(&mut self, message: SessionMessage, own_agent: Option<AgentKey>) {
+        if own_agent != Some(message.sender) {
+            self.unread = self.unread.saturating_add(1);
+        }
+        self.push_history(message);
+    }
+
+    /// Logs one of our own outbound messages and clears the unread counter
+    /// (sending implies we have seen the conversation).
+    pub(crate) fn log_outbound(&mut self, message: SessionMessage) {
+        self.unread = 0;
+        self.push_history(message);
     }
 }

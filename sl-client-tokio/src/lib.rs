@@ -1497,6 +1497,9 @@ impl Client {
                         Some(Command::LeaveConference { session_id }) => {
                             self.session.leave_conference(session_id, Instant::now())?;
                         }
+                        Some(Command::MarkSessionRead { session }) => {
+                            self.session.mark_session_read(session);
+                        }
                         Some(Command::RetrieveInstantMessages) => {
                             self.session.retrieve_instant_messages(Instant::now())?;
                         }

@@ -1081,7 +1081,7 @@ mod conversions;
 mod methods;
 
 use self::chat_session::{ChatSession, TYPING_TIMEOUT};
-pub use chat_session::ChatSessionKind;
+pub use chat_session::{ChatSessionKind, SessionMessage};
 
 pub(crate) use conversions::{
     ZERO_VECTOR, instant_message, region_handshake_message, shape_from_object_shape_block,

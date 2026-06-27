@@ -2545,6 +2545,11 @@ fn advance_running(
             Command::LeaveConference { session_id } => {
                 session.leave_conference(*session_id, now).ok();
             }
+            Command::MarkSessionRead {
+                session: chat_session,
+            } => {
+                session.mark_session_read(*chat_session);
+            }
             Command::RetrieveInstantMessages => {
                 session.retrieve_instant_messages(now).ok();
             }

@@ -36,8 +36,8 @@ use super::{
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, ChatSession, ChatSessionKind, Circuit,
     DEFAULT_DRAW_DISTANCE, GrantStatus, HolderKind, IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG,
     LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_INLINE_ASSET, SIT_TIMEOUT, ScriptGrant,
-    ScriptHolder, Session, SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls,
-    TeleportPhase, TextureDownload, deadline, merge_deadline,
+    ScriptHolder, Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT,
+    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -659,6 +659,23 @@ impl Session {
             // instead).
             CAP_READ_OFFLINE_MSGS => {
                 for im in offline_messages_from_llsd(body) {
+                    // A replayed offline IM drains into the 1:1 session keyed by
+                    // its sender, logged with the original wire timestamp (only
+                    // conversation `Message` dialogs are logged — a stored group
+                    // notice is surfaced as an event but not logged to a session).
+                    if im.dialog == ImDialog::Message {
+                        let peer = im.from_agent_id;
+                        self.log_inbound_message(
+                            ChatSessionKind::Direct { peer },
+                            SessionMessage {
+                                sender: peer,
+                                dialog: ImDialog::Message,
+                                text: im.message.clone(),
+                                timestamp: im.timestamp,
+                            },
+                            now,
+                        );
+                    }
                     self.events
                         .push_back(Event::InstantMessageReceived(Box::new(im)));
                 }
@@ -2045,12 +2062,23 @@ impl Session {
                     // open/track the session (the registry mirrors live sessions).
                     ImDialog::SessionSend if block.from_group => {
                         let group_id = GroupKey::from(block.id);
-                        self.chat_session_mut(ChatSessionKind::Group { group_id }, now);
+                        let from_agent_id = AgentKey::from(im.agent_data.agent_id);
+                        let message = trimmed_string(&block.message);
+                        self.log_inbound_message(
+                            ChatSessionKind::Group { group_id },
+                            SessionMessage {
+                                sender: from_agent_id,
+                                dialog: ImDialog::SessionSend,
+                                text: message.clone(),
+                                timestamp: crate::types::optional_u32_from_wire(block.timestamp),
+                            },
+                            now,
+                        );
                         self.events.push_back(Event::GroupSessionMessage {
                             group_id,
-                            from_agent_id: AgentKey::from(im.agent_data.agent_id),
+                            from_agent_id,
                             from_name: trimmed_string(&block.from_agent_name),
-                            message: trimmed_string(&block.message),
+                            message,
                         });
                     }
                     dialog @ (ImDialog::SessionAdd | ImDialog::SessionLeave)
@@ -2079,12 +2107,23 @@ impl Session {
                     // is the conference id, not a group id.
                     ImDialog::SessionSend => {
                         let id = ImSessionId::from(block.id);
-                        self.chat_session_mut(ChatSessionKind::Conference { id }, now);
+                        let from_agent_id = AgentKey::from(im.agent_data.agent_id);
+                        let message = trimmed_string(&block.message);
+                        self.log_inbound_message(
+                            ChatSessionKind::Conference { id },
+                            SessionMessage {
+                                sender: from_agent_id,
+                                dialog: ImDialog::SessionSend,
+                                text: message.clone(),
+                                timestamp: crate::types::optional_u32_from_wire(block.timestamp),
+                            },
+                            now,
+                        );
                         self.events.push_back(Event::ConferenceSessionMessage {
                             session_id: block.id,
-                            from_agent_id: AgentKey::from(im.agent_data.agent_id),
+                            from_agent_id,
                             from_name: trimmed_string(&block.from_agent_name),
-                            message: trimmed_string(&block.message),
+                            message,
                         });
                     }
                     dialog @ (ImDialog::SessionAdd | ImDialog::SessionLeave) => {
@@ -2128,12 +2167,19 @@ impl Session {
                     // dialogs (offers, lures, system notices) carry no session.
                     ImDialog::Message => {
                         let peer = AgentKey::from(im.agent_data.agent_id);
-                        self.chat_session_mut(ChatSessionKind::Direct { peer }, now);
+                        let received = instant_message(&im.agent_data, block);
+                        self.log_inbound_message(
+                            ChatSessionKind::Direct { peer },
+                            SessionMessage {
+                                sender: peer,
+                                dialog: ImDialog::Message,
+                                text: received.message.clone(),
+                                timestamp: received.timestamp,
+                            },
+                            now,
+                        );
                         self.events
-                            .push_back(Event::InstantMessageReceived(Box::new(instant_message(
-                                &im.agent_data,
-                                block,
-                            ))));
+                            .push_back(Event::InstantMessageReceived(Box::new(received)));
                     }
                     _ => self
                         .events
@@ -3943,6 +3989,7 @@ impl Session {
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
+        let own_agent = self.agent_id();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_instant_message_raw(
             to_agent_id,
@@ -3951,8 +3998,20 @@ impl Session {
             &from_name,
             now,
         )?;
-        // Sending a 1:1 IM opens/tracks the direct session keyed by the peer.
-        self.chat_session_mut(ChatSessionKind::Direct { peer: to_agent_id }, now);
+        // Sending a 1:1 IM opens/tracks the direct session keyed by the peer and
+        // logs our own message (timestamp `None` — the sans-IO layer has no clock).
+        if let Some(sender) = own_agent {
+            self.log_outbound_message(
+                ChatSessionKind::Direct { peer: to_agent_id },
+                SessionMessage {
+                    sender,
+                    dialog: ImDialog::Message,
+                    text: message.to_owned(),
+                    timestamp: None,
+                },
+                now,
+            );
+        }
         Ok(())
     }
 
@@ -4588,6 +4647,33 @@ impl Session {
         session
     }
 
+    /// Logs an inbound conversation message into `kind`'s history, opening the
+    /// session if needed, and bumps its unread count unless the message is our
+    /// own echo. Shared by the 1:1, group, and conference inbound arms and the
+    /// offline-IM drain.
+    fn log_inbound_message(
+        &mut self,
+        kind: ChatSessionKind,
+        message: SessionMessage,
+        now: Instant,
+    ) {
+        let own_agent = self.agent_id();
+        self.chat_session_mut(kind, now)
+            .log_inbound(message, own_agent);
+    }
+
+    /// Logs one of our own outbound messages into `kind`'s history, opening the
+    /// session if needed, and clears its unread count. Shared by the 1:1, group,
+    /// and conference send paths.
+    fn log_outbound_message(
+        &mut self,
+        kind: ChatSessionKind,
+        message: SessionMessage,
+        now: Instant,
+    ) {
+        self.chat_session_mut(kind, now).log_outbound(message);
+    }
+
     /// Mutable access to an *already-open* chat session, **without** creating one
     /// — the non-opening counterpart to [`Self::chat_session_mut`]. Used by the
     /// typing fold, which must never conjure a session: a stray "typing…" then
@@ -4650,6 +4736,43 @@ impl Session {
             .map(|chat_session| chat_session.typing.keys().copied().collect())
             .unwrap_or_default();
         typing.into_iter()
+    }
+
+    /// The logged conversation history of `session`, oldest-first (insertion
+    /// order is the sequence), bounded to the most recent `HISTORY_CAP` messages.
+    /// Yields nothing for a session that is not open.
+    pub fn history(&self, session: ChatSessionKind) -> impl Iterator<Item = &SessionMessage> {
+        self.chat_session(session)
+            .into_iter()
+            .flat_map(|chat_session| chat_session.history.iter())
+    }
+
+    /// The number of unread inbound messages in `session` (zero if the session is
+    /// not open). Reset by our own outbound send and by [`Self::mark_session_read`].
+    #[must_use]
+    pub fn unread(&self, session: ChatSessionKind) -> u32 {
+        self.chat_session(session)
+            .map_or(0, |chat_session| chat_session.unread)
+    }
+
+    /// The total unread message count across every open chat session — the badge
+    /// number a viewer shows on its conversations button. Saturates rather than
+    /// overflowing.
+    #[must_use]
+    pub fn total_unread(&self) -> u32 {
+        self.chat_sessions
+            .values()
+            .map(|chat_session| chat_session.unread)
+            .fold(0, u32::saturating_add)
+    }
+
+    /// Marks `session` as read, resetting its unread count to zero. A no-op if no
+    /// session is open for `session` (nothing has been received to read). Backs
+    /// [`Command::MarkSessionRead`](crate::Command::MarkSessionRead).
+    pub fn mark_session_read(&mut self, session: ChatSessionKind) {
+        if let Some(chat_session) = self.chat_session_get_mut(session) {
+            chat_session.unread = 0;
+        }
     }
 
     /// Declines a friendship offer via `DeclineFriendship`. The `transaction_id`
@@ -5024,10 +5147,23 @@ impl Session {
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
+        let own_agent = self.agent_id();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_group_session_im(group_id, ImDialog::SessionSend, message, &from_name, now)?;
-        // Sending into a group session opens/tracks it (keyed by the group id).
-        self.chat_session_mut(ChatSessionKind::Group { group_id }, now);
+        // Sending into a group session opens/tracks it (keyed by the group id) and
+        // logs our own message.
+        if let Some(sender) = own_agent {
+            self.log_outbound_message(
+                ChatSessionKind::Group { group_id },
+                SessionMessage {
+                    sender,
+                    dialog: ImDialog::SessionSend,
+                    text: message.to_owned(),
+                    timestamp: None,
+                },
+                now,
+            );
+        }
         Ok(())
     }
 
@@ -5768,6 +5904,7 @@ impl Session {
         now: Instant,
     ) -> Result<(), Error> {
         let from_name = self.agent_name();
+        let own_agent = self.agent_id();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_im(
             &OutgoingIm {
@@ -5781,8 +5918,20 @@ impl Session {
             },
             now,
         )?;
-        // Sending into a conference opens/tracks it (keyed by the session id).
-        self.chat_session_mut(ChatSessionKind::Conference { id: session_id }, now);
+        // Sending into a conference opens/tracks it (keyed by the session id) and
+        // logs our own message.
+        if let Some(sender) = own_agent {
+            self.log_outbound_message(
+                ChatSessionKind::Conference { id: session_id },
+                SessionMessage {
+                    sender,
+                    dialog: ImDialog::SessionSend,
+                    text: message.to_owned(),
+                    timestamp: None,
+                },
+                now,
+            );
+        }
         Ok(())
     }
 
