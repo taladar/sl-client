@@ -23,17 +23,18 @@ use sl_proto::{
     CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
-    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, Llsd,
-    RECV_BUFFER_SIZE, SelectedCostKind, Session, ais_category_children_fetch_url,
-    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
-    build_agent_preferences_request, build_ais_create_category_body, build_ais_move_body,
-    build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request, build_get_object_cost_request,
-    build_get_object_physics_data_request, build_modify_material_params_request,
-    build_new_file_agent_inventory_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_parcel_voice_info_request,
-    build_provision_voice_account_request, build_region_experiences_request,
-    build_remote_parcel_request, build_resource_cost_selected_request, build_send_user_report,
+    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
+    CHAT_SESSION_DECLINE_P2P_VOICE, Llsd, RECV_BUFFER_SIZE, SelectedCostKind, Session,
+    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    ais_create_category_url, ais_item_url, build_agent_preferences_request,
+    build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
+    build_ais_update_item_body, build_create_inventory_category_request,
+    build_get_object_cost_request, build_get_object_physics_data_request,
+    build_modify_material_params_request, build_new_file_agent_inventory_request,
+    build_object_media_navigate_request, build_object_media_update_request,
+    build_parcel_voice_info_request, build_provision_voice_account_request,
+    build_region_experiences_request, build_remote_parcel_request,
+    build_resource_cost_selected_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_upload_baked_texture_request,
     build_voice_signaling_request, chat_session_request_body, display_names_query,
@@ -47,13 +48,14 @@ pub use sl_proto::{
     ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnimationKey,
     AnyMessage, Asset, AssetKey, AssetType, AvatarClassified, AvatarGroupMembership,
     AvatarInterests, AvatarPick, AvatarProperties, Camera, CameraError, ChatAudible, ChatChannel,
-    ChatMessage, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, CircuitCode, CircuitId,
-    ClassifiedCategory, ClassifiedInfo, ClassifiedUpdate, ClickAction, Command, ControlFlags,
-    CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic, Direction, DisconnectReason,
-    Distance, EconomyData, EstateAccessDelta, EstateAccessKind, EstateInfo, Event, ExperienceInfo,
-    ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData,
-    Friend, FriendRights, GlobalCoordinates, GltfMaterialOverride, GridCoordinates, GroupKey,
-    GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
+    ChatLifecycleView, ChatMessage, ChatSessionInfo, ChatSessionKind, ChatSource, ChatSourceType,
+    ChatType, ChatTypeNotAVolume, CircuitCode, CircuitId, ClassifiedCategory, ClassifiedInfo,
+    ClassifiedUpdate, ClickAction, Command, ControlFlags, CreateGroupParams, DeRezDestination,
+    DetachOrder, Diagnostic, Direction, DisconnectReason, Distance, EconomyData, EstateAccessDelta,
+    EstateAccessKind, EstateInfo, Event, ExperienceInfo, ExperiencePermission,
+    ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, Friend, FriendRights,
+    GlobalCoordinates, GltfMaterialOverride, GridCoordinates, GroupKey, GroupMember,
+    GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
     GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
     GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
     ImSessionId, ImageCodec, InstantMessage, InterestsUpdate, InventoryCallbackId, InventoryFolder,
@@ -1524,6 +1526,45 @@ impl Client {
                                 self.session.leave_group_session(GroupKey::from(session_id.get()), Instant::now())?;
                             } else {
                                 self.session.leave_conference(session_id, Instant::now())?;
+                            }
+                        }
+                        Some(Command::JoinSessionVoice { session }) => {
+                            // Optimistic local join, then drive the signalling: ensure
+                            // a voice account, then signal into the session's channel
+                            // over `ChatSessionRequest` (accept invitation). Signalling
+                            // only — the audio session is the caller's concern.
+                            self.session.join_session_voice(session, Instant::now());
+                            if let Some(own) = self.session.agent_id() {
+                                let session_uuid = session.canonical_session_id(own);
+                                let from_group = matches!(session, ChatSessionKind::Group { .. });
+                                if let Some(url) = caps.get(CAP_PROVISION_VOICE_ACCOUNT).cloned() {
+                                    let body = build_provision_voice_account_request(&VoiceProvisionRequest::vivox());
+                                    tokio::spawn(post_voice_cap(url, body, CAP_PROVISION_VOICE_ACCOUNT, http.clone(), caps_tx.clone()));
+                                }
+                                if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
+                                    let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_uuid);
+                                    tokio::spawn(post_chat_session_request(url, body, session_uuid, from_group, http.clone(), caps_tx.clone()));
+                                }
+                            }
+                        }
+                        Some(Command::LeaveSessionVoice { session }) => {
+                            // Optimistic local leave (keeps the text conversation),
+                            // then signal the voice decline on the wire: a 1:1 P2P
+                            // call uses `decline p2p voice`, a group / conference the
+                            // multi-agent `decline invitation`.
+                            self.session.leave_session_voice(session);
+                            if let Some(own) = self.session.agent_id() {
+                                let session_uuid = session.canonical_session_id(own);
+                                let from_group = matches!(session, ChatSessionKind::Group { .. });
+                                let method = if matches!(session, ChatSessionKind::Direct { .. }) {
+                                    CHAT_SESSION_DECLINE_P2P_VOICE
+                                } else {
+                                    CHAT_SESSION_DECLINE
+                                };
+                                if let Some(url) = caps.get(CAP_CHAT_SESSION_REQUEST).cloned() {
+                                    let body = chat_session_request_body(method, session_uuid);
+                                    tokio::spawn(post_chat_session_request(url, body, session_uuid, from_group, http.clone(), caps_tx.clone()));
+                                }
                             }
                         }
                         Some(Command::QueryChatSessions) => {

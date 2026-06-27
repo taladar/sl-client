@@ -294,6 +294,11 @@ pub const CHAT_SESSION_ACCEPT: &str = "accept invitation";
 /// chat-session invitation, text or voice.
 pub const CHAT_SESSION_DECLINE: &str = "decline invitation";
 
+/// The `ChatSessionRequest` method that declines / leaves a **1:1 P2P** voice
+/// call (a `Direct` session's voice channel), as distinct from the multi-agent
+/// [`CHAT_SESSION_DECLINE`] (Firestorm `llimview.cpp` voice-call teardown).
+pub const CHAT_SESSION_DECLINE_P2P_VOICE: &str = "decline p2p voice";
+
 /// Inventory mutation (#30): the modern Second Life **AIS3** REST inventory
 /// capability (`InventoryAPIv3`). Folder/item create/update/move/remove are HTTP
 /// verbs against path suffixes under this base URL (see `sl_wire::inventory`).
@@ -1103,7 +1108,8 @@ mod methods;
 use self::chat_session::{ChatSession, TYPING_TIMEOUT};
 pub use chat_session::{
     ChatLifecycleView, ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, FriendPresence,
-    InviteChannel, MessageCursor, PendingInvite, SessionMessage,
+    InviteChannel, MessageCursor, PendingInvite, SessionMessage, VoiceChannelInfo,
+    VoiceChannelState,
 };
 
 pub(crate) use conversions::{

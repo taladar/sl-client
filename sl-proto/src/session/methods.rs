@@ -2,12 +2,13 @@
 
 use super::conversions::{
     OutgoingIm, ZERO_VECTOR, active_group, agent_drop_group_from_llsd,
-    agent_state_update_from_llsd, ais_inventory_update_from_llsd, avatar_animations,
-    avatar_appearance, avatar_group, avatar_interests, avatar_names, avatar_properties,
-    bulk_update_folder, bulk_update_inventory_from_llsd, bulk_update_item, chat_message,
-    chat_session_roster_from_llsd, chatterbox_invitation_from_llsd, classified_info,
-    created_category_from_llsd, crossed_region_from_caps_llsd, display_name_update_from_llsd,
-    economy_data, enable_simulator_from_caps_llsd, environment_from_llsd,
+    agent_list_voice_updates_from_llsd, agent_state_update_from_llsd,
+    ais_inventory_update_from_llsd, avatar_animations, avatar_appearance, avatar_group,
+    avatar_interests, avatar_names, avatar_properties, bulk_update_folder,
+    bulk_update_inventory_from_llsd, bulk_update_item, chat_message, chat_session_roster_from_llsd,
+    chatterbox_invitation_from_llsd, classified_info, created_category_from_llsd,
+    crossed_region_from_caps_llsd, display_name_update_from_llsd, economy_data,
+    enable_simulator_from_caps_llsd, environment_from_llsd,
     establish_agent_communication_from_llsd, estate_access_from_params, estate_info_from_params,
     friend, grid_coordinates_from_handle, group_account_details, group_account_summary,
     group_account_transactions, group_active_proposal_item, group_member,
@@ -22,7 +23,7 @@ use super::conversions::{
     region_limits, required_voice_version_from_llsd, script_dialog, script_permission_request,
     server_appearance_update_from_llsd, set_display_name_reply_from_llsd,
     sim_console_response_from_llsd, skeleton_folder, teleport_finish_from_llsd, trimmed_string,
-    windlight_refresh_from_llsd,
+    voice_channel_info_from_llsd, windlight_refresh_from_llsd,
 };
 use super::{
     AGENT_UPDATE_INTERVAL, AssetTransfer, AssetUpload, CAP_AGENT_EXPERIENCES,
@@ -40,7 +41,7 @@ use super::{
     LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_INLINE_ASSET,
     MessageCursor, PendingInvite, SIT_TIMEOUT, ScriptGrant, ScriptHolder, Session, SessionMessage,
     SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase,
-    TextureDownload, deadline, merge_deadline,
+    TextureDownload, VoiceChannelInfo, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -735,6 +736,17 @@ impl Session {
                             },
                             now,
                         );
+                        // A voice invitation carries a `voice` body (B8): record
+                        // that the session offers voice and decode whatever channel
+                        // coordinates the invite supplied. `has_voice` is set from
+                        // the body's presence even when the coordinates are empty
+                        // (the full coordinates arrive in the accept reply).
+                        if let Some(voice) = body.get("voice")
+                            && let Some(chat_session) = self.chat_session_get_mut(kind)
+                        {
+                            chat_session.voice.has_voice = true;
+                            chat_session.voice.channel = Some(voice_channel_info_from_llsd(voice));
+                        }
                     }
                     self.events.push_back(event);
                 } else {
@@ -745,11 +757,14 @@ impl Session {
             // accept reply carries the session's current agent roster, which the
             // runtime tags with the session id + `from_group`; fold it into that
             // session's participants (the modern equivalent of replaying the
-            // `SessionAdd` stream). The decline reply and OpenSim's stubbed
-            // `<llsd>true</llsd>` carry no roster, so this is then a no-op.
+            // `SessionAdd` stream). A voice accept reply also carries a
+            // `voice_channel_info` block — record the channel coordinates and that
+            // the session offers voice (B8). The decline reply and OpenSim's
+            // stubbed `<llsd>true</llsd>` carry neither, so this is then a no-op.
             CAP_CHAT_SESSION_REQUEST => {
                 let roster = chat_session_roster_from_llsd(body);
-                if !roster.is_empty() {
+                let voice = body.get("voice_channel_info");
+                if !roster.is_empty() || voice.is_some() {
                     let session_uuid = body
                         .get("session-id")
                         .and_then(Llsd::as_uuid)
@@ -770,6 +785,33 @@ impl Session {
                     let session = self.chat_session_mut(kind, now);
                     for agent in roster {
                         session.participants.insert(agent);
+                    }
+                    if let Some(voice) = voice {
+                        session.voice.has_voice = true;
+                        session.voice.channel = Some(voice_channel_info_from_llsd(voice));
+                    }
+                }
+            }
+            // A `ChatterBoxSessionAgentListUpdates` push (#28): the modern voice
+            // participant list for a session we are in. Fold the per-agent voice
+            // flag into that session's `voice.members` (B8) — adding the
+            // voice-connected, dropping those who left or are text-only. The
+            // talk-activity / "is now speaking" flag is out of scope. The session
+            // is resolved from the wire id against the existing registry (the
+            // event carries no group/conference discriminator); an update for an
+            // unknown session is ignored.
+            "ChatterBoxSessionAgentListUpdates" => {
+                if let Some((session_uuid, updates)) = agent_list_voice_updates_from_llsd(body)
+                    && let Some(kind) = self.chat_session_kind_for_session_id(session_uuid)
+                {
+                    let session = self.chat_session_mut(kind, now);
+                    for (agent, in_voice) in updates {
+                        if in_voice {
+                            session.voice.has_voice = true;
+                            session.voice.members.insert(agent);
+                        } else {
+                            session.voice.members.remove(&agent);
+                        }
                     }
                 }
             }
@@ -3768,6 +3810,10 @@ impl Session {
                     for chat_session in self.chat_sessions.values_mut() {
                         chat_session.typing.remove(&agent);
                         chat_session.participants.remove(&agent);
+                        // An offlined friend can no longer be voice-connected
+                        // either (B8): drop them from the voice roster on the same
+                        // fan-out, idempotent with the agent-list voice updates.
+                        chat_session.voice.members.remove(&agent);
                     }
                 }
                 if !ids.is_empty() {
@@ -4821,6 +4867,20 @@ impl Session {
         self.chat_sessions.get(&kind)
     }
 
+    /// Resolves a wire IM-session uuid to the [`ChatSessionKind`] of an *already-
+    /// open* session, by matching each registered session's canonical wire id
+    /// against `session_id`. Used by CAPS pushes (the voice agent-list updates)
+    /// that carry only the bare session uuid with no group/conference
+    /// discriminator. Returns `None` when no open session matches (the update is
+    /// for a session we are not tracking).
+    fn chat_session_kind_for_session_id(&self, session_id: Uuid) -> Option<ChatSessionKind> {
+        let own_agent = self.agent_id()?;
+        self.chat_sessions
+            .keys()
+            .copied()
+            .find(|kind| kind.canonical_session_id(own_agent) == session_id)
+    }
+
     /// The currently-open chat sessions (1:1 direct, group, ad-hoc conference),
     /// ordered **newest-first** by last activity (the most recently active
     /// session leads), with the typed [`ChatSessionKind`] breaking ties for a
@@ -4934,6 +4994,9 @@ impl Session {
             participants: self.participants(kind).collect(),
             typing: self.typing(kind).collect(),
             unread: self.unread(kind),
+            has_voice: self.session_has_voice(kind),
+            voice_joined: self.session_voice_joined(kind),
+            voice_members: self.session_voice_members(kind).collect(),
         }
     }
 
@@ -5028,6 +5091,89 @@ impl Session {
     ) {
         let kind = invite_session_kind(session_id, from_group);
         let _removed = self.chat_sessions.remove(&kind);
+    }
+
+    /// Records that we have joined `session`'s voice channel — the pure-state half
+    /// of [`Command::JoinSessionVoice`](crate::Command::JoinSessionVoice), set
+    /// **optimistically** at the signalling level (there is no audio ack, exactly
+    /// as the text [`Joined`](ChatSessionLifecycle::Joined) lifecycle is
+    /// optimistic). Get-or-creates the session (joining voice implies an active
+    /// conversation — a 1:1 P2P call may have no text traffic yet) and sets both
+    /// `voice.joined` and `voice.has_voice`. The runtime additionally provisions a
+    /// voice account and signals into the channel via `ChatSessionRequest`.
+    pub fn join_session_voice(&mut self, session: ChatSessionKind, now: Instant) {
+        let chat_session = self.chat_session_mut(session, now);
+        chat_session.voice.joined = true;
+        chat_session.voice.has_voice = true;
+    }
+
+    /// Records that we have left `session`'s voice channel — the pure-state half of
+    /// [`Command::LeaveSessionVoice`](crate::Command::LeaveSessionVoice). Clears
+    /// `voice.joined` (optimistically), leaving the rest of the session — its text
+    /// channel, history, and roster — intact: leaving voice is not leaving the
+    /// conversation. A no-op if no session is open for `session`. The runtime
+    /// additionally signals the voice decline / logout on the wire.
+    pub fn leave_session_voice(&mut self, session: ChatSessionKind) {
+        if let Some(chat_session) = self.chat_session_get_mut(session) {
+            chat_session.voice.joined = false;
+        }
+    }
+
+    /// Whether `session` offers a voice channel (signalling only) — `false` for a
+    /// session that is not open or has seen no voice invite / accept / join.
+    #[must_use]
+    pub fn session_has_voice(&self, session: ChatSessionKind) -> bool {
+        self.chat_session(session)
+            .is_some_and(|chat_session| chat_session.voice.has_voice)
+    }
+
+    /// The voice-channel coordinates of `session` (the room uri / credentials /
+    /// backend / handle), or `None` when the session is not open or carries no
+    /// known channel coordinates yet.
+    #[must_use]
+    pub fn session_voice_channel(&self, session: ChatSessionKind) -> Option<&VoiceChannelInfo> {
+        self.chat_session(session)
+            .and_then(|chat_session| chat_session.voice.channel.as_ref())
+    }
+
+    /// Whether *we* have joined `session`'s voice channel (optimistic, at the
+    /// signalling level) — `false` for a session that is not open.
+    #[must_use]
+    pub fn session_voice_joined(&self, session: ChatSessionKind) -> bool {
+        self.chat_session(session)
+            .is_some_and(|chat_session| chat_session.voice.joined)
+    }
+
+    /// The avatars currently voice-connected in `session` (never the speaking
+    /// state). For a `Direct` 1:1 the implicit voice pair is `{ self, peer }` once
+    /// we have joined; for a group / conference it is the subset the agent-list
+    /// voice updates report. Empty for a session that is not open or has no voice
+    /// members.
+    pub fn session_voice_members(
+        &self,
+        session: ChatSessionKind,
+    ) -> impl Iterator<Item = AgentKey> {
+        let members: Vec<AgentKey> = match session {
+            // A 1:1 P2P voice call's members are implicitly { self, peer } once we
+            // have joined; the agent-list updates never materialise a roster for a
+            // direct session.
+            ChatSessionKind::Direct { peer } => self
+                .chat_session(session)
+                .filter(|chat_session| chat_session.voice.joined)
+                .map(|_| {
+                    let mut pair = vec![peer];
+                    if let Some(own) = self.agent_id() {
+                        pair.push(own);
+                    }
+                    pair
+                })
+                .unwrap_or_default(),
+            group_or_conference => self
+                .chat_session(group_or_conference)
+                .map(|chat_session| chat_session.voice.members.iter().copied().collect())
+                .unwrap_or_default(),
+        };
+        members.into_iter()
     }
 
     /// Declines a friendship offer via `DeclineFriendship`. The `transaction_id`

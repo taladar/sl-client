@@ -2188,6 +2188,26 @@ pub enum Command {
         /// Whether the invitation is to a group IM (vs. an ad-hoc conference).
         from_group: bool,
     },
+    /// Join a chat session's voice channel (signalling only). Sets the session's
+    /// optimistic `voice.joined` via
+    /// [`Session::join_session_voice`](crate::Session::join_session_voice); the
+    /// runtime then ensures a voice account
+    /// ([`Command::RequestVoiceAccount`](crate::Command::RequestVoiceAccount)) and
+    /// signals into the channel over the `ChatSessionRequest` capability. Models
+    /// the grid *signalling* only — the audio session is the caller's concern.
+    JoinSessionVoice {
+        /// Which chat session (1:1 direct, group, or conference) to join voice on.
+        session: ChatSessionKind,
+    },
+    /// Leave a chat session's voice channel (signalling only), clearing the
+    /// session's optimistic `voice.joined` via
+    /// [`Session::leave_session_voice`](crate::Session::leave_session_voice)
+    /// without leaving the text conversation. The runtime then signals the voice
+    /// decline / logout on the wire.
+    LeaveSessionVoice {
+        /// Which chat session (1:1 direct, group, or conference) to leave voice on.
+        session: ChatSessionKind,
+    },
     /// Query the light chat-session list (no history). The runtime replies with
     /// [`Event::ChatSessions`](crate::Event::ChatSessions) built from
     /// [`Session::chat_sessions_info`](crate::Session::chat_sessions_info); no wire

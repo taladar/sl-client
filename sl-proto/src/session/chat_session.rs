@@ -143,11 +143,62 @@ pub struct SessionMessage {
     pub timestamp: Option<u32>,
 }
 
+/// The coordinates of a chat session's voice channel — the SL `voice_channel_info`
+/// block carried by a voice invitation and the `ChatSessionRequest "accept
+/// invitation"` reply. A small **client-local** struct (not a reuse of
+/// [`sl_wire::ParcelVoiceInfo`], whose `parcel_local_id` / `region_name` are
+/// spatial-voice-only): it mirrors only the per-session room's connection
+/// coordinates. All fields are optional, so it [`Default`]s to an empty,
+/// no-coordinates channel. Signalling only — never the audio stream.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VoiceChannelInfo {
+    /// The voice room URI to connect to (`sip:…` for Vivox, the session room for
+    /// WebRTC), or `None` when the grid carried an empty/absent uri.
+    pub channel_uri: Option<url::Url>,
+    /// Optional per-channel credentials (a token the voice client presents when
+    /// connecting; rarely sent — OpenSim leaves it unset).
+    pub channel_credentials: Option<String>,
+    /// The backend the channel uses (`"vivox"` | `"webrtc"`), when the grid
+    /// echoes it.
+    pub voice_server_type: Option<String>,
+    /// The SL voice session handle the signalling correlates on, when present.
+    pub session_handle: Option<String>,
+}
+
+/// The per-session **voice** facet — at the SL *signalling* level only. A group,
+/// conference, or 1:1 session can carry a voice channel beside its text channel;
+/// this records *that the session offers voice*, the channel coordinates, whether
+/// we have joined (optimistically, at the signalling level), and who is voice-
+/// connected. It **never** models the audio stream nor the talk-activity /
+/// "who is speaking" state (the standing project rule — that lives in an external
+/// voice client). [`Default`]s to an empty, no-voice facet (all `false` / `None` /
+/// empty), so a freshly opened chat session starts without voice.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VoiceChannelState {
+    /// Whether this session offers a voice channel at all (set from a voice
+    /// invitation or an accept reply that carried channel coordinates).
+    pub has_voice: bool,
+    /// The channel coordinates, once known (from the invite's `voice` body or the
+    /// accept reply's `voice_channel_info`).
+    pub channel: Option<VoiceChannelInfo>,
+    /// Whether *we* have joined the voice channel, tracked **optimistically** at
+    /// the signalling level (set by [`Session::join_session_voice`](crate::Session::join_session_voice)
+    /// / a voice-accept, cleared by [`Session::leave_session_voice`](crate::Session::leave_session_voice)
+    /// / a voice-decline). There is no audio ack — this is the request state, not
+    /// a confirmed media connection.
+    pub joined: bool,
+    /// The voice-connected subset of the text roster — who is currently in voice,
+    /// folded from the `ChatterBoxSessionAgentListUpdates` agent-list voice flag.
+    /// Strictly a membership set, **never** the speaking / talk-activity state.
+    pub members: BTreeSet<AgentKey>,
+}
+
 /// The mutable per-session state mirror — the value half of the chat-session
 /// registry (the kind/id lives in the [`ChatSessionKind`] key). It grows
 /// additively as later chat tasks land their facets (participants/typing,
 /// history/unread, lifecycle, voice-channel state); for now it carries the
-/// activity stamp, the roster, the typing set, and the message log.
+/// activity stamp, the roster, the typing set, the message log, the lifecycle,
+/// and the voice-channel facet.
 ///
 /// No `Default`: [`Instant`] has none, so the value is built by
 /// [`ChatSession::new`].
@@ -186,12 +237,19 @@ pub(crate) struct ChatSession {
     /// explicit accept is [`Joined`](ChatSessionLifecycle::Joined); only the
     /// invite path sets [`Invited`](ChatSessionLifecycle::Invited).
     pub(crate) lifecycle: ChatSessionLifecycle,
+    /// The per-session voice-channel facet (signalling only): whether the session
+    /// offers voice, its channel coordinates, whether we have joined, and who is
+    /// voice-connected. Empty / no-voice until a voice invite, accept reply, or
+    /// join sets it. Persists across teleport with the rest of the session and is
+    /// folded by the presence-driven reset (an offlined friend leaves `members`).
+    pub(crate) voice: VoiceChannelState,
 }
 
 impl ChatSession {
     /// Creates a session whose last activity is `now`, with an empty roster, no
-    /// typers, an empty log, nothing unread, and a [`Joined`](ChatSessionLifecycle::Joined)
-    /// lifecycle (the invite path overrides this to `Invited` before any traffic).
+    /// typers, an empty log, nothing unread, a [`Joined`](ChatSessionLifecycle::Joined)
+    /// lifecycle (the invite path overrides this to `Invited` before any traffic),
+    /// and an empty no-voice channel facet.
     pub(crate) const fn new(now: Instant) -> Self {
         Self {
             last_activity: now,
@@ -200,6 +258,14 @@ impl ChatSession {
             history: VecDeque::new(),
             unread: 0,
             lifecycle: ChatSessionLifecycle::Joined,
+            // `VoiceChannelState::default()` is not `const`; spell out the empty
+            // no-voice facet so the constructor stays `const`.
+            voice: VoiceChannelState {
+                has_voice: false,
+                channel: None,
+                joined: false,
+                members: BTreeSet::new(),
+            },
         }
     }
 
@@ -288,6 +354,14 @@ pub struct ChatSessionInfo {
     pub typing: Vec<AgentKey>,
     /// The number of unread inbound messages.
     pub unread: u32,
+    /// Whether the session offers a voice channel (signalling only).
+    pub has_voice: bool,
+    /// Whether *we* have joined the session's voice channel (optimistic, at the
+    /// signalling level — there is no audio ack).
+    pub voice_joined: bool,
+    /// Who is currently voice-connected (never the speaking state). Empty when the
+    /// session has no voice or no agent-list voice update has been seen.
+    pub voice_members: Vec<AgentKey>,
 }
 
 /// A friend paired with whether they are currently known-online — the element of

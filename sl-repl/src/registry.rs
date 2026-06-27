@@ -5209,6 +5209,24 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "join_session_voice",
+            usage: "<direct|group|conference> <id>",
+            build: |args, ctx| {
+                Ok(Command::JoinSessionVoice {
+                    session: build_chat_session_kind(args, ctx, 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "leave_session_voice",
+            usage: "<direct|group|conference> <id>",
+            build: |args, ctx| {
+                Ok(Command::LeaveSessionVoice {
+                    session: build_chat_session_kind(args, ctx, 0)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "query_chat_sessions",
             usage: "",
             build: |_args, _ctx| Ok(Command::QueryChatSessions),

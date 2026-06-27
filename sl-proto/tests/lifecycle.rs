@@ -16732,6 +16732,330 @@ mod test {
         Ok(())
     }
 
+    // ---- Per-session voice-channel state (B8) -------------------------------
+
+    /// The voice-connected members of `session`, sorted for a stable assertion.
+    fn voice_members(session: &Session, kind: ChatSessionKind) -> Vec<AgentKey> {
+        let mut members: Vec<AgentKey> = session.session_voice_members(kind).collect();
+        members.sort();
+        members
+    }
+
+    /// A voice `ChatterBoxInvitation` (a top-level `voice` sub-map) records that
+    /// the session offers voice and decodes the channel coordinates it carries.
+    #[test]
+    fn voice_invitation_sets_has_voice_and_channel() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let conf = uuid::Uuid::from_u128(0x68_01);
+        let from = uuid::Uuid::from_u128(0x68_02);
+        let xml = format!(
+            "<llsd><map>\
+               <key>session_id</key><uuid>{conf}</uuid>\
+               <key>from_id</key><uuid>{from}</uuid>\
+               <key>session_name</key><string>Call</string>\
+               <key>voice</key><map>\
+                 <key>channel_uri</key><string>sip:conf@example.com</string>\
+                 <key>channel_credentials</key><string>tok123</string>\
+                 <key>voice_server_type</key><string>vivox</string>\
+                 <key>session_handle</key><string>handle-1</string>\
+               </map></map></llsd>"
+        );
+        session.handle_caps_event("ChatterBoxInvitation", &parse_llsd_xml(&xml)?, now)?;
+        let kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(conf),
+        };
+        assert!(session.session_has_voice(kind), "the session offers voice");
+        let channel = session
+            .session_voice_channel(kind)
+            .ok_or("expected a voice channel")?;
+        assert_eq!(
+            channel.channel_uri,
+            url::Url::parse("sip:conf@example.com").ok()
+        );
+        assert_eq!(channel.channel_credentials.as_deref(), Some("tok123"));
+        assert_eq!(channel.voice_server_type.as_deref(), Some("vivox"));
+        assert_eq!(channel.session_handle.as_deref(), Some("handle-1"));
+        // No voice join has been signalled yet.
+        assert!(!session.session_voice_joined(kind));
+        Ok(())
+    }
+
+    /// A `ChatSessionRequest` accept reply carrying a `voice_channel_info` block
+    /// records the channel coordinates and marks the session voice-capable, even
+    /// when the reply carries no agent roster.
+    #[test]
+    fn accept_reply_populates_voice_channel() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let conf = uuid::Uuid::from_u128(0x69_01);
+        let xml = format!(
+            "<llsd><map>\
+               <key>session-id</key><uuid>{conf}</uuid>\
+               <key>from_group</key><boolean>0</boolean>\
+               <key>voice_channel_info</key><map>\
+                 <key>channel_uri</key><string>sip:room@example.com</string>\
+                 <key>voice_server_type</key><string>webrtc</string>\
+               </map></map></llsd>"
+        );
+        session.handle_caps_event("ChatSessionRequest", &parse_llsd_xml(&xml)?, now)?;
+        let kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(conf),
+        };
+        assert!(session.session_has_voice(kind));
+        let channel = session
+            .session_voice_channel(kind)
+            .ok_or("expected a voice channel")?;
+        assert_eq!(
+            channel.channel_uri,
+            url::Url::parse("sip:room@example.com").ok()
+        );
+        assert_eq!(channel.voice_server_type.as_deref(), Some("webrtc"));
+        assert_eq!(channel.channel_credentials, None);
+        Ok(())
+    }
+
+    /// `join_session_voice` / `leave_session_voice` flip the optimistic
+    /// `voice.joined` flag without removing the text conversation.
+    #[test]
+    fn join_and_leave_session_voice_flip_joined() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6A_01);
+        let kind = ChatSessionKind::Group {
+            group_id: GroupKey::from(group),
+        };
+        // Open the group session with an inbound message.
+        let send = inbound_group_im(17, uuid::Uuid::from_u128(0x6A_02), group);
+        session.handle_datagram(sim_addr(), &server_message(&send, 9, true)?, now)?;
+        assert!(!session.session_voice_joined(kind));
+
+        session.join_session_voice(kind, now);
+        assert!(session.session_voice_joined(kind), "join sets voice.joined");
+        assert!(
+            session.session_has_voice(kind),
+            "join marks the session voice-capable"
+        );
+
+        session.leave_session_voice(kind);
+        assert!(
+            !session.session_voice_joined(kind),
+            "leave clears voice.joined"
+        );
+        // Leaving voice does not leave the conversation.
+        assert_eq!(chat_sessions(&session), vec![kind]);
+        Ok(())
+    }
+
+    /// A `ChatterBoxSessionAgentListUpdates` push folds the per-agent voice flag
+    /// into `voice.members`: a voice-capable agent is added (regardless of the
+    /// out-of-scope speaking flag), a text-only agent is not, and a `LEAVE`
+    /// transition removes a member.
+    #[test]
+    fn agent_list_voice_update_folds_members() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let conf = uuid::Uuid::from_u128(0x6B_01);
+        let kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(conf),
+        };
+        // The session must already be open for the update to resolve to it.
+        let add = inbound_offer_im(13, uuid::Uuid::from_u128(0x6B_09), conf, Vec::new());
+        session.handle_datagram(sim_addr(), &server_message(&add, 9, false)?, now)?;
+
+        let voice_agent = uuid::Uuid::from_u128(0x6B_0A);
+        let text_agent = uuid::Uuid::from_u128(0x6B_0B);
+        // `voice_agent` is voice-capable but *not* speaking; `text_agent` is
+        // speaking but not voice-capable — only the former is a voice member.
+        let updates = format!(
+            "<llsd><map>\
+               <key>session_id</key><uuid>{conf}</uuid>\
+               <key>agent_updates</key><map>\
+                 <key>{voice_agent}</key><map>\
+                   <key>info</key><map>\
+                     <key>can_voice_chat</key><boolean>1</boolean>\
+                     <key>is_now_speaking</key><boolean>0</boolean></map>\
+                   <key>transition</key><string>ENTER</string></map>\
+                 <key>{text_agent}</key><map>\
+                   <key>info</key><map>\
+                     <key>can_voice_chat</key><boolean>0</boolean>\
+                     <key>is_now_speaking</key><boolean>1</boolean></map>\
+                   <key>transition</key><string>ENTER</string></map>\
+               </map></map></llsd>"
+        );
+        session.handle_caps_event(
+            "ChatterBoxSessionAgentListUpdates",
+            &parse_llsd_xml(&updates)?,
+            now,
+        )?;
+        assert_eq!(
+            voice_members(&session, kind),
+            vec![AgentKey::from(voice_agent)]
+        );
+
+        // A LEAVE transition drops the voice member.
+        let leave = format!(
+            "<llsd><map>\
+               <key>session_id</key><uuid>{conf}</uuid>\
+               <key>agent_updates</key><map>\
+                 <key>{voice_agent}</key><map>\
+                   <key>info</key><map><key>can_voice_chat</key><boolean>1</boolean></map>\
+                   <key>transition</key><string>LEAVE</string></map>\
+               </map></map></llsd>"
+        );
+        session.handle_caps_event(
+            "ChatterBoxSessionAgentListUpdates",
+            &parse_llsd_xml(&leave)?,
+            now,
+        )?;
+        assert!(voice_members(&session, kind).is_empty());
+        Ok(())
+    }
+
+    /// A 1:1 P2P voice call's members are implicitly `{ self, peer }` once we have
+    /// joined, and empty before.
+    #[test]
+    fn direct_voice_members_are_self_and_peer() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x6C_01));
+        let own = AgentKey::from(uuid::Uuid::from_u128(1));
+        let kind = ChatSessionKind::Direct { peer };
+        assert!(
+            voice_members(&session, kind).is_empty(),
+            "no members before joining"
+        );
+
+        session.join_session_voice(kind, now);
+        let mut expected = vec![own, peer];
+        expected.sort();
+        assert_eq!(voice_members(&session, kind), expected);
+        Ok(())
+    }
+
+    /// An `OfflineNotification` drops the offlined friend from `voice.members` on
+    /// the same fan-out as `typing` / `participants`, without removing the session.
+    #[test]
+    fn offline_notification_drops_voice_member() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let friend = uuid::Uuid::from_u128(0xF3);
+        let conf = uuid::Uuid::from_u128(0x6D_01);
+        let kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(conf),
+        };
+        // Open the conference, then mark the friend voice-connected.
+        let add = inbound_offer_im(13, friend, conf, Vec::new());
+        session.handle_datagram(sim_addr(), &server_message(&add, 9, false)?, now)?;
+        let updates = format!(
+            "<llsd><map>\
+               <key>session_id</key><uuid>{conf}</uuid>\
+               <key>agent_updates</key><map>\
+                 <key>{friend}</key><map>\
+                   <key>info</key><map><key>can_voice_chat</key><boolean>1</boolean></map>\
+                   <key>transition</key><string>ENTER</string></map>\
+               </map></map></llsd>"
+        );
+        session.handle_caps_event(
+            "ChatterBoxSessionAgentListUpdates",
+            &parse_llsd_xml(&updates)?,
+            now,
+        )?;
+        assert_eq!(voice_members(&session, kind), vec![AgentKey::from(friend)]);
+
+        let offline = AnyMessage::OfflineNotification(OfflineNotification {
+            agent_block: vec![OfflineNotificationAgentBlockBlock { agent_id: friend }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&offline, 10, true)?, now)?;
+        assert!(voice_members(&session, kind).is_empty());
+        assert_eq!(
+            chat_sessions(&session),
+            vec![kind],
+            "the session still exists"
+        );
+        Ok(())
+    }
+
+    /// The voice facet (joined / channel / members) persists across a teleport,
+    /// like the rest of the chat-session state.
+    #[test]
+    fn teleport_preserves_voice_facet() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let conf = uuid::Uuid::from_u128(0x6E_01);
+        let kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(conf),
+        };
+        // Seed a voice channel (accept reply) and a joined state.
+        let xml = format!(
+            "<llsd><map>\
+               <key>session-id</key><uuid>{conf}</uuid>\
+               <key>from_group</key><boolean>0</boolean>\
+               <key>voice_channel_info</key><map>\
+                 <key>channel_uri</key><string>sip:room@example.com</string>\
+               </map></map></llsd>"
+        );
+        session.handle_caps_event("ChatSessionRequest", &parse_llsd_xml(&xml)?, now)?;
+        session.join_session_voice(kind, now);
+        assert!(session.session_voice_joined(kind));
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Teleport to another region.
+        let handle = 0x0003_E900_0003_E800;
+        session.teleport_to(
+            RegionHandle(handle),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let finish = AnyMessage::TeleportFinish(TeleportFinish {
+            info: TeleportFinishInfoBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                location_id: 4,
+                sim_ip: [127, 0, 0, 1],
+                sim_port: 9100u16.swap_bytes(),
+                region_handle: handle,
+                seed_capability: b"http://x/voiceTP\0".to_vec(),
+                sim_access: sl_wire::sim_access::MATURE,
+                teleport_flags: TeleportFlags::VIA_LURE,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&finish, 10, true)?, now)?;
+
+        // The voice facet survives the teleport.
+        assert!(
+            session.session_voice_joined(kind),
+            "voice.joined survives teleport"
+        );
+        assert!(session.session_has_voice(kind));
+        let channel = session
+            .session_voice_channel(kind)
+            .ok_or("expected the voice channel to survive")?;
+        assert_eq!(
+            channel.channel_uri,
+            url::Url::parse("sip:room@example.com").ok()
+        );
+        Ok(())
+    }
+
     /// The logged conversation history of `session`, oldest-first.
     fn history(session: &Session, kind: ChatSessionKind) -> Vec<SessionMessage> {
         session.history(kind).cloned().collect()
