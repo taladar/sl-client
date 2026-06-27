@@ -154,7 +154,7 @@ task list derived from the signed-off references.
   → child folder ids + child item ids) maintained incrementally by every fold
   site so children/tree-walks are O(children), not O(whole tree). Define how the
   existing `cache_inventory*` folds update the index + fetch-state.
-- [ ] **A3. Extract the `sl-llsd` crate & specify the binary codec.** Pull the
+- [x] **A3. Extract the `sl-llsd` crate & specify the binary codec.** Pull the
       LLSD core (`Llsd` + the XML codec + the notation reader now in
       `material/gltf.rs`) out of `sl-wire` into a new foundational `sl-llsd`
       workspace crate (depending only on `sl-types` + `uuid` + `base64` +
@@ -395,11 +395,110 @@ the trailing `]` / `}` — emit them for cross-readability and tolerate them on
 parse. The cache envelope (A4) is `gzip(` 4-byte BE `u32` version `5`
 `++ to_llsd_binary(map) )`.
 
+**Boundary verified against the code (anchors for B1).** `sl-wire/src/llsd.rs`
+(1318 lines) is **not** all LLSD core — it interleaves the generic value model
+with sl-wire-specific CAPS builders that **stay** in sl-wire. Moves to
+`sl-llsd`: the `Llsd` enum (11 variants, `:18`); the pure accessors `get` /
+`index` / `as_array` / `as_map` / `as_str` / `as_i32` / `as_f64` / `as_f32` /
+`as_bool` / `as_uuid` / `as_binary` / `kind` (`:47`-`:165`); the `field_*` /
+`require_*` field accessors (`:178`-`:408`); the XML codec `to_llsd_xml`
+(`:423`, infallible) / `parse_llsd_xml` (`:519`,
+`-> Result<_, roxmltree::Error>`) with `node_to_llsd` / `push_llsd_xml`; and
+`push_escaped` (`:593`, today `pub(crate)` — make it `pub` in `sl-llsd`, the
+GLTF notation emitter needs it). Stays in sl-wire (sl-wire-typed, `WireError` /
+keys): every `build_*` CAPS request (`build_seed_request` `:609` …
+`build_fetch_inventory_request` `:637` … the `build_object_media_*` trio
+`:1079`-`:1113`, `build_event_queue_*` `:1259`), the response types
+`AssetUploadResponse` (`:935`) / `ObjectMediaResponse` (`:1157`) /
+`EventQueueResponse` (`:1230`) with their `from_llsd`, `parse_seed_response`
+(`:1213`), and the private `llsd_bool` / `llsd_int` / `llsd_string` /
+`llsd_perm` / `llsd_uuid` helpers (`:1013`-). The three `sl_types` keys imported
+at `:12` (`InventoryFolderKey` / `InventoryKey` / `ObjectKey`) are used **only**
+by these staying builders, so the moved core's `sl-types` dependency is light
+(retained per the locked decision for the typed accessors a future caller may
+add).
+
+**The re-export is a real module, not a crate alias (B1).** Because the
+sl-wire-specific builders keep living in `sl-wire/src/llsd.rs`, that file stays
+a real `crate::llsd` module that opens with
+`pub use sl_llsd::{Llsd, parse_llsd_xml, push_escaped, …}` (re-exporting the
+moved core) **and** keeps defining the builders — so both `crate::llsd::Llsd`
+and `crate::llsd::build_seed_request` keep resolving at the **20** sl-wire
+modules (verified count) and the downstream `sl-proto` (4 files) /
+`sl-client-tokio` (7) / `sl-client-bevy` (7) call sites, all unchanged. A bare
+`pub use sl_llsd as llsd` would leave the builders homeless.
+
+**`WireError` coupling → `LlsdError` (B1).** The `field_*` / `require_*`
+accessors return `Result<_, WireError>` today via two variants only —
+`WireError::MalformedField { field: &'static str, value: String }`
+(`error.rs:83`) and `WireError::MissingField { field: &'static str }`
+(`error.rs:95`). The orphan rule forbids leaving `impl Llsd` in sl-wire once
+`Llsd` is foreign, so these accessors **move** and re-type to a crate-local
+`LlsdError` mirroring those two variants; `impl From<LlsdError> for WireError`
+maps them back, and the `?` at every staying-builder call site
+(`AssetUploadResponse::from_llsd` etc.) converts transparently. `parse_llsd_xml`
+keeps its `roxmltree::Error`, so it moves clean.
+
+**Notation reader is GLTF-entangled (B1).** `material/gltf.rs` mixes a generic
+notation-LLSD cursor (`:59`-~`:300`: string/int/array token readers, "advance
+past one value") with GLTF-domain decode (`modify_material_update` `:365`,
+`-> Result<_, WireError>`, `GltfMaterialOverride`). B1 moves **only** the
+generic cursor primitives to `sl-llsd`; the GLTF-typed decode stays in sl-wire.
+If the cursor proves too entangled with GLTF byte-span semantics, B1 may keep it
+in sl-wire — the A3 deliverable (the *binary* codec) is independent of it.
+
+**Binary codec confirmed against Firestorm (anchors for B2).** Ground-truthed in
+`indra/llcommon/llsdserialize.cpp` (`LLSDBinaryFormatter::format_impl` `:1541`,
+`LLSDBinaryParser::doParse` `:952` / `parseMap` `:1186` / `parseArray` `:1240`)
+and `newview/llinventorymodel.cpp` (`saveToFile` `:3779`, `loadFromFile`
+`:3661`, `sCurrentInvCacheVersion = 5` `:97`). Tags are exactly as A3 states.
+Newly pinned wrinkles B2 must honour:
+
+- **Closing `]` / `}` are mandatory, not decorative.** `parseArray` / `parseMap`
+  return `PARSE_FAILURE` if the terminator is absent — so emit them **and**
+  require them on parse. The 4-byte BE count prefix is authoritative: parse
+  exactly `count` entries then expect the terminator (a mismatch is an error).
+- **Date endianness is asymmetric in Firestorm.** `format_impl` writes `Real`
+  through `ll_htond` (network/BE) but writes `Date`'s `f64` *raw* with no swap
+  (host-endian), read back raw — so Firestorm dates are host-endian, unlike
+  every other multi-byte field. **But inventory caches never hit this:** item
+  creation dates serialise as LLSD `Integer`
+  (`LLSD::Integer(item->getCreationDate())`), not LLSD `Date`, so the cache map
+  carries no `Date`. B2 still matches Firestorm for general round-trip
+  (host-endian date, or document the divergence); the agent/library cache is
+  unaffected either way.
+- **Our `Llsd::Date` holds an ISO-8601 *string*** (`:33`, verbatim; the XML
+  codec does no `time` parsing) while binary date is `f64` epoch-seconds — so
+  the binary date path is the one place needing `time` (ISO ↔ epoch). `time` is
+  therefore a **B2** dependency, not B1.
+- **Parser tolerates notation-style strings.** `doParse` / `parseMap` also
+  accept `'` / `"`-delimited string values and quoted map keys as a fallback;
+  our parser tolerates them on read but only ever **emits** the length-prefixed
+  `s` / `k` forms.
+- **File framing (A4 cross-ref).** `saveToFile` writes `htonl(5)` (4-byte BE),
+  then one binary-LLSD map `{ "categories": [...], "items": [...] }` via
+  `LLSDOStreamer`, **then a trailing `\n`** (`<< std::endl`), then gzips the
+  whole temp file separately (`gzip_file`). So the gzip envelope wraps
+  header+map+newline; our writer appends the `\n` (harmless) and our reader
+  tolerates trailing bytes after the top-level map. `loadFromFile` reads the
+  4-byte version first and treats any value `!= 5` as obsolete (ignored). The
+  `getVersion() != VERSION_UNKNOWN` save filter is the Firestorm anchor for
+  A10's "`Loaded` folders only" snapshot.
+
 ### Disk-cache layout & directories reference (from A4)
 
 Files `<agent-uuid>.inv.llsd.gz` (agent) and `<agent-uuid>.lib.inv.llsd.gz`
 (library) are written **directly** under the caller's `agent_cache_dir` (no
-derived subdir). Atomic write: write `<file>.tmp`, then rename over the target.
+derived subdir). **Crash-safe atomic write** (a save interrupted mid-write must
+never corrupt or lose the existing cache): write the complete gzip to a
+distinctly-named temp file **in the same directory** (e.g.
+`<agent-uuid>.inv.llsd.gz.<pid>.tmp`, so it shares the target's filesystem and a
+concurrent save cannot clobber it), `flush` + `fsync` it, then atomically
+`rename` it over the target — POSIX `rename(2)` is atomic, so any reader or a
+crash sees either the intact old file or the intact new one, never a truncated
+blend; on Windows the runtime shell uses the replace-style rename. On error the
+temp file is removed and the old cache is left untouched. The library cache
+(`.lib.inv.llsd.gz`) is written the same way.
 Load: gunzip, read the 4-byte BE version, treat the file as cold (ignore) unless
 it equals `5`, else `parse_llsd_binary` the remainder. `ClientDirectories` lives
 in `sl-proto` next to `ChatLogConfig` with three `Option<PathBuf>` fields —
@@ -526,32 +625,60 @@ work" rule).
 Fully standalone (no inventory dependency); first because every later task
 serialises or parses LLSD and B2 adds the binary codec here.
 
-- [ ] Add a new `sl-llsd` workspace member; move the `Llsd` enum, the XML codec
-      (`to_llsd_xml` / `parse_llsd_xml`), the notation reader from
-      `sl-wire/src/material/gltf.rs`, and the typed-key accessors into it.
-      Dependencies: `sl-types`, `uuid`, `base64`, `roxmltree`, `time`.
-- [ ] Introduce a crate-local `LlsdError` (replacing the
-      `crate::error::WireError` uses in the moved code) and
-      `impl From<LlsdError> for WireError` in sl-wire.
-- [ ] Keep sl-wire compiling: `pub use sl_llsd as llsd` (+ re-export the moved
-      free functions) so the 20 sl-wire modules and the downstream `sl-proto` /
-      runtime crates are unchanged. The sl-wire-typed LLSD-to-domain converters
-      stay in sl-wire.
-- [ ] Verify: full workspace builds + `cargo test` green, clippy-clean; the
-      existing LLSD tests move with the code and still pass.
+- [ ] Add a new `sl-llsd` workspace member; move **only the core** (per the A3
+      boundary): the `Llsd` enum (`:18`), the pure accessors (`get`/`index`/
+      `as_*`/`kind`, `:47`-`:165`), the `field_*` / `require_*` accessors
+      (`:178`-`:408`), the XML codec (`to_llsd_xml` `:423` / `parse_llsd_xml`
+      `:519`, with `node_to_llsd` / `push_llsd_xml`), `push_escaped` (`:593`,
+      make it `pub`), and the generic notation cursor from
+      `sl-wire/src/material/gltf.rs` (`:59`-~`:300`). Dependencies: `sl-types`,
+      `uuid`, `base64`, `roxmltree` (`time` lands with B2, the binary date
+      path). The `build_*` CAPS builders, the `AssetUploadResponse` /
+      `ObjectMediaResponse` / `EventQueueResponse` types, the `llsd_*` helpers,
+      and the GLTF-domain decode (`modify_material_update`) **stay** in sl-wire.
+- [ ] Introduce a crate-local `LlsdError` mirroring the two `WireError` variants
+      the moved accessors use —
+      `MalformedField { field: &'static str, value: String }` (`error.rs:83`)
+      and `MissingField { field: &'static str }` (`error.rs:95`) — re-type the
+      moved `field_*` / `require_*` to it, and add
+      `impl From<LlsdError> for WireError` in sl-wire so the `?` at every
+      staying builder (`AssetUploadResponse::from_llsd` etc.) still converts.
+- [ ] Keep sl-wire compiling: `sl-wire/src/llsd.rs`
+      **stays a real `crate::llsd` module** — it opens with
+      `pub use sl_llsd::{Llsd, parse_llsd_xml, push_escaped, …}` (re-export the
+      moved core) **and** keeps the builders, so both `crate::llsd::Llsd` and
+      `crate::llsd::build_seed_request` resolve at the 20 sl-wire modules +
+      downstream `sl-proto` (4) / `sl-client-tokio` (7) / `sl-client-bevy` (7)
+      call sites unchanged. (A bare `pub use sl_llsd as llsd` would leave the
+      builders homeless.)
+- [ ] Verify: full workspace builds + `cargo test` green, clippy-clean. Split
+      the tests by where their subject landed: the pure-LLSD cases in
+      `sl-wire/tests/llsd.rs` + the inline `field_accessors_*` test (`:1285`)
+      move to `sl-llsd`; the builder/CAPS cases (`AssetUploadResponse`,
+      `EventQueue`, `ObjectMedia`) stay in sl-wire.
 
 ### B2. Binary-LLSD codec in `sl-llsd` (from A3)
 
 Standalone; the cache tasks (B5/B10) serialise through it.
 
-- [ ] Add `sl-llsd/src/binary.rs`: `Llsd::to_llsd_binary(&self) -> Vec<u8>`
-      and `parse_llsd_binary(bytes: &[u8]) -> Result<Llsd, LlsdError>`
-      over all 11 `Llsd` variants, per the A3 tag-byte spec; export it.
+- [ ] Add `sl-llsd/src/binary.rs` (+ the `time` dep, for the date path):
+      `Llsd::to_llsd_binary(&self) -> Vec<u8>` and
+      `parse_llsd_binary(bytes: &[u8]) -> Result<Llsd, LlsdError>` over all 11
+      `Llsd` variants, per the A3 tag-byte spec; export it. Honour the A3-pinned
+      Firestorm wrinkles: **emit and require** the closing `]` / `}` (a missing
+      terminator is an `Err`), treat the 4-byte BE count as authoritative,
+      tolerate notation-style `'` / `"` strings + quoted keys on read but only
+      emit length-prefixed `s` / `k`, and convert `Llsd::Date` (ISO-8601 string)
+      ↔ `f64` epoch-seconds — matching Firestorm's host-endian raw `Date` write
+      (`Real` stays BE via `ll_htond`).
 - [ ] Round-trip tests: each variant individually; a nested map/array; the cache
-  map shape `{ categories: [...], items: [...] }`; and `binary → Llsd` equals
-  `xml → Llsd` for a shared fixture (cross-check against the existing XML path).
-- [ ] A decode-robustness test (truncated / bad-tag input ⇒ `Err`, no panic; no
-  indexing-panic — restriction-lint clean).
+  map shape `{ categories: [...], items: [...] }` (note item creation dates are
+  LLSD `Integer`, not `Date`, so the cache map never exercises the date path);
+  and `binary → Llsd` equals `xml → Llsd` for a shared fixture (cross-check
+  against the existing XML path).
+- [ ] A decode-robustness test (truncated / bad-tag / missing-terminator /
+  count-mismatch input ⇒ `Err`, no panic; no indexing-panic — restriction-lint
+  clean).
 
 ### B3. Held `Inventory` model + fetch-state + index (from A1·A2)
 
@@ -669,8 +796,11 @@ folds and the accessors onto it with no behaviour change yet.
 - [ ] Add an `inventory_cache.rs` runtime shell to each of `sl-client-tokio` and
       `sl-client-bevy`: locate `<agent-uuid>.inv.llsd.gz` / `.lib.inv.llsd.gz`
       **directly** under `agent_cache_dir` (`None` ⇒ caching disabled); gzip via
-      new `flate2` dep;
-      async (`tokio::fs`) vs blocking I/O. Atomic write (temp + rename).
+      new `flate2` dep; async (`tokio::fs`) vs blocking I/O.
+      **Crash-safe atomic write per A4:** stream the gzip to a same-directory
+      `…<pid>.tmp`, flush + `fsync`, then atomic `rename` over the target (never
+      overwrite the live file in place); remove the temp + keep the old cache on
+      any error.
 - [ ] `InventoryCacheConfig` (enable flags, library-cache toggle) beside the dir
   from `ClientDirectories`. Load at login (before/with the skeleton) → call the
   B5 merge → seed B6's fetch queue; save on logout + on the dirty/idle interval
