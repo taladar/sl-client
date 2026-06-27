@@ -880,10 +880,11 @@ fn advance_running(
             }
             Command::AcceptFriendship {
                 transaction_id,
+                friend_id,
                 calling_card_folder,
             } => {
                 session
-                    .accept_friendship(*transaction_id, *calling_card_folder, now)
+                    .accept_friendship(*transaction_id, *friend_id, *calling_card_folder, now)
                     .ok();
             }
             Command::DeclineFriendship(transaction_id) => {

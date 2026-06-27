@@ -56,26 +56,26 @@ use crate::types::{
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
     DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisconnectReason, EjectAction,
     EstateAccessDelta, EstateCovenant, Event, EventInfo, FeatureDisabled, FollowCamProperty,
-    FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage, GenericStreamingMessage,
-    GestureActivation, GodRegionUpdate, GroupNoticeAttachment, GroupNoticeKey, GroupRoleEdit,
-    GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryFolder,
-    InventoryItem, InventoryItemMove, InventoryOffer, Kick, LandEdit, LandSearchType, LandStatItem,
-    LandStatReportType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType,
-    Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode,
-    MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez, Object,
-    ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation,
-    ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
-    PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
-    RegionInfoUpdate, RegionStats, Reliability, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo,
-    ScriptGrantInfo, ScriptPermissionState, ScriptPermissionStatus, ScriptPermissions,
-    ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags,
-    SoundPreload, StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
-    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus,
-    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    Wearable, WearableType,
+    FollowCamPropertyValue, FreezeAction, Friend, FriendRights, GenericMessage,
+    GenericStreamingMessage, GestureActivation, GodRegionUpdate, GroupNoticeAttachment,
+    GroupNoticeKey, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec,
+    InterestsUpdate, InventoryFolder, InventoryItem, InventoryItemMove, InventoryOffer, Kick,
+    LandEdit, LandSearchType, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
+    LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MeanCollision,
+    MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NeighborInfo,
+    NewInventoryItem, NewInventoryLink, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams,
+    ObjectFlagSettings, ObjectPlayingAnimation, ObjectPropertiesFamily, ObjectTransform,
+    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
+    ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult, Postcard,
+    PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionInfoUpdate, RegionStats,
+    Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
+    ScriptControl, ScriptControlAction, ScriptControlsInfo, ScriptGrantInfo, ScriptPermissionState,
+    ScriptPermissionStatus, ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId,
+    SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot,
+    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType,
+    TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams,
+    UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -98,7 +98,7 @@ use sl_wire::{
     parse_resource_cost_selected, parse_simulator_features, zero_decode,
 };
 use sl_wire::{Direction, GlobalCoordinates};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Instant;
 use uuid::Uuid;
@@ -169,6 +169,8 @@ impl Session {
                 consumed: BTreeMap::new(),
                 passed_on: BTreeMap::new(),
             },
+            friends: BTreeMap::new(),
+            online: BTreeSet::new(),
             seed_capability: None,
             inventory_root: None,
             login_account: None,
@@ -1075,7 +1077,11 @@ impl Session {
                     self.events.push_back(Event::InventorySkeleton(folders));
                 }
                 if !success.buddy_list.is_empty() {
-                    let friends = success.buddy_list.iter().map(friend).collect();
+                    let friends: Vec<Friend> = success.buddy_list.iter().map(friend).collect();
+                    // Seed the buddy-list cache from the same `friend()`-mapped
+                    // data; `online` stays empty (the buddy list carries rights,
+                    // not presence — that arrives later as notifications).
+                    self.friends = friends.iter().map(|f| (f.id, *f)).collect();
                     self.events.push_back(Event::FriendList(friends));
                 }
             }
@@ -2037,6 +2043,22 @@ impl Session {
                             joined: matches!(dialog, ImDialog::SessionAdd),
                         });
                     }
+                    // They accepted *our* friendship offer: the `from_agent_id`
+                    // is the new friend. Add them to the buddy cache with the
+                    // default `CAN_SEE_ONLINE` both ways (OpenSim/SL write that
+                    // for both directions and push no `ChangeUserRights`), then
+                    // surface the IM unchanged. (We accepting *their* offer takes
+                    // the `accept_friendship` path instead — no IM is sent to the
+                    // accepter.)
+                    ImDialog::FriendshipAccepted => {
+                        let friend_id = FriendKey::from(im.agent_data.agent_id);
+                        self.add_friend(friend_id);
+                        self.events
+                            .push_back(Event::InstantMessageReceived(Box::new(instant_message(
+                                &im.agent_data,
+                                block,
+                            ))));
+                    }
                     _ => self
                         .events
                         .push_back(Event::InstantMessageReceived(Box::new(instant_message(
@@ -2584,9 +2606,11 @@ impl Session {
             // agent's own id in `AgentData` is redundant, only the former
             // friend (`ExBlock.OtherID`) matters.
             AnyMessage::TerminateFriendship(terminate) => {
-                self.events.push_back(Event::FriendshipTerminated {
-                    other: FriendKey::from(terminate.ex_block.other_id),
-                });
+                let other = FriendKey::from(terminate.ex_block.other_id);
+                // A former friend must never linger as online or in the roster.
+                self.friends.remove(&other);
+                self.online.remove(&other);
+                self.events.push_back(Event::FriendshipTerminated { other });
             }
             // Another agent offered this agent their calling card (a reference
             // card to that avatar, not a friendship request). `AgentData.AgentID`
@@ -3507,6 +3531,10 @@ impl Session {
                     .iter()
                     .map(|block| FriendKey::from(block.agent_id))
                     .collect::<Vec<_>>();
+                // Record presence: this is one of the only two handlers that
+                // mutate `online` (the other is the offline removal below, plus
+                // a terminated friendship). No IM / chat path ever touches it.
+                self.online.extend(ids.iter().copied());
                 if !ids.is_empty() {
                     self.events.push_back(Event::FriendsOnline(ids));
                 }
@@ -3517,6 +3545,9 @@ impl Session {
                     .iter()
                     .map(|block| FriendKey::from(block.agent_id))
                     .collect::<Vec<_>>();
+                for id in &ids {
+                    self.online.remove(id);
+                }
                 if !ids.is_empty() {
                     self.events.push_back(Event::FriendsOffline(ids));
                 }
@@ -3538,9 +3569,23 @@ impl Session {
                     } else {
                         block.agent_related
                     });
+                    let rights = FriendRights(block.related_rights);
+                    // Update the cached friend's rights by direction:
+                    // `granted_to_us` ⇒ the rights the friend grants us
+                    // (`rights_received`); otherwise the echo of our own grant
+                    // (`rights_granted`). An unknown friend (a rights change
+                    // racing ahead of the add signal) is ignored rather than
+                    // synthesising a half-known entry.
+                    if let Some(cached) = self.friends.get_mut(&friend_id) {
+                        if granted_to_us {
+                            cached.rights_received = rights;
+                        } else {
+                            cached.rights_granted = rights;
+                        }
+                    }
                     self.events.push_back(Event::FriendRightsChanged {
                         friend_id,
-                        rights: FriendRights(block.related_rights),
+                        rights,
                         granted_to_us,
                     });
                 }
@@ -4363,9 +4408,16 @@ impl Session {
 
     /// Accepts a friendship offer via `AcceptFriendship`. The `transaction_id`
     /// is the [`InstantMessage::id`](crate::InstantMessage::id) of the incoming
-    /// [`ImDialog::FriendshipOffered`] IM; `calling_card_folder` is the
-    /// inventory folder to place the new friend's calling card in (use the
-    /// Calling Cards system folder, or the inventory root).
+    /// [`ImDialog::FriendshipOffered`] IM; `friend_id` is the offering agent (the
+    /// `from_agent_id` of that same offer IM the driver is answering);
+    /// `calling_card_folder` is the inventory folder to place the new friend's
+    /// calling card in (use the Calling Cards system folder, or the inventory
+    /// root).
+    ///
+    /// The accepter receives no `FriendshipAccepted` IM (the simulator sends it
+    /// only to the original offerer), so the new friend is added to the buddy
+    /// cache here, with the default `CAN_SEE_ONLINE` both ways, from the
+    /// caller-supplied `friend_id` rather than a presence signal.
     ///
     /// # Errors
     ///
@@ -4374,12 +4426,64 @@ impl Session {
     pub fn accept_friendship(
         &mut self,
         transaction_id: TransactionId,
+        friend_id: FriendKey,
         calling_card_folder: InventoryFolderKey,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_accept_friendship(transaction_id.get(), calling_card_folder.uuid(), now)?;
+        self.add_friend(friend_id);
         Ok(())
+    }
+
+    /// Inserts a freshly-formed friendship into the buddy cache with the default
+    /// `CAN_SEE_ONLINE` grant in both directions (the rights a new friendship is
+    /// born with on OpenSim and SL; any later `ChangeUserRights` corrects a
+    /// divergence). Used by both live-add paths — we accepting their offer
+    /// ([`Session::accept_friendship`]) and them accepting ours (the inbound
+    /// `FriendshipAccepted` IM). Does not touch `online`: a new friendship is
+    /// not a presence signal.
+    fn add_friend(&mut self, friend_id: FriendKey) {
+        let default_rights = FriendRights(FriendRights::CAN_SEE_ONLINE);
+        self.friends.insert(
+            friend_id,
+            Friend {
+                id: friend_id,
+                rights_granted: default_rights,
+                rights_received: default_rights,
+            },
+        );
+    }
+
+    /// The buddy-list cache: every current friend, with the friendship rights in
+    /// both directions. Live for the whole session (seeded from login, kept up
+    /// to date by the friendship add/remove/rights signals). Iteration is
+    /// deterministic (ordered by friend id).
+    pub fn friends(&self) -> impl Iterator<Item = Friend> + '_ {
+        self.friends.values().copied()
+    }
+
+    /// Looks up a single friend in the buddy cache, or `None` if `id` is not a
+    /// current friend.
+    #[must_use]
+    pub fn friend(&self, id: FriendKey) -> Option<Friend> {
+        self.friends.get(&id).copied()
+    }
+
+    /// Whether `friend` is currently **known-online** via an authoritative
+    /// presence notification. Absence is *not* provable offline — a friend who
+    /// does not grant us `CAN_SEE_ONLINE` never generates a notification, so
+    /// read `false` as "offline or not visible to us", never "definitely
+    /// offline".
+    #[must_use]
+    pub fn is_online(&self, friend: FriendKey) -> bool {
+        self.online.contains(&friend)
+    }
+
+    /// The friends currently known to be online (see [`Session::is_online`] for
+    /// the visibility caveat). Iteration is deterministic (ordered by id).
+    pub fn online_friends(&self) -> impl Iterator<Item = FriendKey> + '_ {
+        self.online.iter().copied()
     }
 
     /// Declines a friendship offer via `DeclineFriendship`. The `transaction_id`

@@ -2534,6 +2534,281 @@ mod test {
         Ok(())
     }
 
+    /// Builds an inbound `ImprovedInstantMessage` from a specific sender with the
+    /// given 1:1 dialog (used by the buddy-cache presence/live-add tests, which
+    /// need to control the sender id `inbound_im` hardcodes).
+    fn inbound_im_from(from: uuid::Uuid, dialog: u8) -> AnyMessage {
+        AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
+            agent_data: ImprovedInstantMessageAgentDataBlock {
+                agent_id: from,
+                session_id: uuid::Uuid::nil(),
+            },
+            message_block: ImprovedInstantMessageMessageBlockBlock {
+                from_group: false,
+                to_agent_id: uuid::Uuid::from_u128(1),
+                parent_estate_id: 1,
+                region_id: uuid::Uuid::from_u128(0x7),
+                position: vec3(0.0, 0.0, 0.0),
+                offline: 0,
+                dialog,
+                id: uuid::Uuid::from_u128(0xABC),
+                timestamp: 0,
+                from_agent_name: b"Friend Tester\0".to_vec(),
+                message: b"\0".to_vec(),
+                binary_bucket: Vec::new(),
+            },
+            estate_block: ImprovedInstantMessageEstateBlockBlock { estate_id: 1 },
+            meta_data: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn login_buddy_list_seeds_friend_cache() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = new_session()?;
+        let friend_a = uuid::Uuid::from_u128(0xF1);
+        let friend_b = uuid::Uuid::from_u128(0xF2);
+        let LoginResponse::Success(mut login_success) = success()? else {
+            return Err("expected a success response".into());
+        };
+        login_success.buddy_list = vec![
+            sl_wire::BuddyListEntry {
+                buddy_id: friend_a,
+                rights_granted: FriendRights::CAN_SEE_ONLINE | FriendRights::CAN_SEE_ON_MAP,
+                rights_has: FriendRights::CAN_SEE_ONLINE,
+            },
+            sl_wire::BuddyListEntry {
+                buddy_id: friend_b,
+                rights_granted: 0,
+                rights_has: FriendRights::CAN_MODIFY_OBJECTS,
+            },
+        ];
+        session.handle_login_response(LoginResponse::Success(login_success), now)?;
+
+        // The cache is seeded from the same data the FriendList event carries…
+        let cached: Vec<FriendKey> = session.friends().map(|f| f.id).collect();
+        assert_eq!(
+            cached,
+            vec![FriendKey::from(friend_a), FriendKey::from(friend_b)]
+        );
+        let a = session
+            .friend(FriendKey::from(friend_a))
+            .ok_or("friend_a cached")?;
+        assert!(a.rights_granted.can_see_on_map());
+        assert!(a.rights_received.can_see_online());
+        // …and `online` starts empty (the buddy list carries rights, not presence).
+        assert!(!session.is_online(FriendKey::from(friend_a)));
+        assert_eq!(session.online_friends().count(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn online_offline_notifications_drive_presence() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let friend_a = uuid::Uuid::from_u128(0xF1);
+        let friend_b = uuid::Uuid::from_u128(0xF2);
+        let online = AnyMessage::OnlineNotification(OnlineNotification {
+            agent_block: vec![
+                OnlineNotificationAgentBlockBlock { agent_id: friend_a },
+                OnlineNotificationAgentBlockBlock { agent_id: friend_b },
+            ],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&online, 9, true)?, now)?;
+        assert!(session.is_online(FriendKey::from(friend_a)));
+        assert!(session.is_online(FriendKey::from(friend_b)));
+        assert_eq!(
+            session.online_friends().collect::<Vec<_>>(),
+            vec![FriendKey::from(friend_a), FriendKey::from(friend_b)]
+        );
+
+        let offline = AnyMessage::OfflineNotification(OfflineNotification {
+            agent_block: vec![OfflineNotificationAgentBlockBlock { agent_id: friend_a }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&offline, 10, true)?, now)?;
+        assert!(!session.is_online(FriendKey::from(friend_a)));
+        assert!(session.is_online(FriendKey::from(friend_b)));
+        Ok(())
+    }
+
+    #[test]
+    fn change_user_rights_updates_cached_friend_by_direction() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Seed a friend via the inbound accept (they accepted our offer).
+        let friend = uuid::Uuid::from_u128(0xF4);
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&inbound_im_from(friend, 39), 9, true)?,
+            now,
+        )?;
+
+        // The friend grants us more rights (AgentData id == friend, not our 1):
+        // updates `rights_received`.
+        let granted = AnyMessage::ChangeUserRights(ChangeUserRights {
+            agent_data: ChangeUserRightsAgentDataBlock { agent_id: friend },
+            rights: vec![ChangeUserRightsRightsBlock {
+                agent_related: uuid::Uuid::from_u128(1),
+                related_rights: FriendRights::CAN_SEE_ONLINE | FriendRights::CAN_SEE_ON_MAP,
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&granted, 10, true)?, now)?;
+        let cached = session.friend(FriendKey::from(friend)).ok_or("cached")?;
+        assert!(cached.rights_received.can_see_on_map());
+        assert!(!cached.rights_granted.can_see_on_map());
+
+        // We change the rights we grant (echo: AgentData id == our 1): updates
+        // `rights_granted`.
+        let echoed = AnyMessage::ChangeUserRights(ChangeUserRights {
+            agent_data: ChangeUserRightsAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+            rights: vec![ChangeUserRightsRightsBlock {
+                agent_related: friend,
+                related_rights: FriendRights::CAN_MODIFY_OBJECTS,
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&echoed, 11, true)?, now)?;
+        let cached = session.friend(FriendKey::from(friend)).ok_or("cached")?;
+        assert!(cached.rights_granted.can_modify_objects());
+        Ok(())
+    }
+
+    #[test]
+    fn change_user_rights_for_unknown_friend_is_ignored() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A rights change for an agent that is not a cached friend must not
+        // synthesise a half-known entry.
+        let stranger = uuid::Uuid::from_u128(0xF6);
+        let change = AnyMessage::ChangeUserRights(ChangeUserRights {
+            agent_data: ChangeUserRightsAgentDataBlock { agent_id: stranger },
+            rights: vec![ChangeUserRightsRightsBlock {
+                agent_related: uuid::Uuid::from_u128(1),
+                related_rights: FriendRights::CAN_SEE_ONLINE,
+            }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&change, 9, true)?, now)?;
+        assert!(session.friend(FriendKey::from(stranger)).is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn terminate_friendship_drops_both_stores() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let friend = uuid::Uuid::from_u128(0xF7);
+        // Add the friend (their accept) and mark them online.
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&inbound_im_from(friend, 39), 9, true)?,
+            now,
+        )?;
+        let online = AnyMessage::OnlineNotification(OnlineNotification {
+            agent_block: vec![OnlineNotificationAgentBlockBlock { agent_id: friend }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&online, 10, true)?, now)?;
+        assert!(session.friend(FriendKey::from(friend)).is_some());
+        assert!(session.is_online(FriendKey::from(friend)));
+
+        let terminate = AnyMessage::TerminateFriendship(TerminateFriendship {
+            agent_data: TerminateFriendshipAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::nil(),
+            },
+            ex_block: TerminateFriendshipExBlockBlock { other_id: friend },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&terminate, 11, true)?, now)?;
+        assert!(session.friend(FriendKey::from(friend)).is_none());
+        assert!(!session.is_online(FriendKey::from(friend)));
+        Ok(())
+    }
+
+    #[test]
+    fn friendship_accepted_im_adds_friend() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // They accepted *our* offer: the IM's from_agent_id is the new friend.
+        let friend = uuid::Uuid::from_u128(0xF8);
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&inbound_im_from(friend, 39), 9, true)?,
+            now,
+        )?;
+
+        // The IM surface is unchanged (still emitted)…
+        assert!(
+            drain_events(&mut session)
+                .into_iter()
+                .any(|event| matches!(event, Event::InstantMessageReceived(_)))
+        );
+        // …and the friend is now cached with the default CAN_SEE_ONLINE both ways.
+        let cached = session.friend(FriendKey::from(friend)).ok_or("cached")?;
+        assert!(cached.rights_granted.can_see_online());
+        assert!(cached.rights_received.can_see_online());
+        // A new friendship is not a presence signal.
+        assert!(!session.is_online(FriendKey::from(friend)));
+        Ok(())
+    }
+
+    #[test]
+    fn accept_friendship_adds_friend() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // We accepted *their* offer: the caller supplies the offerer's id.
+        let friend = uuid::Uuid::from_u128(0xF9);
+        session.accept_friendship(
+            TransactionId::from(uuid::Uuid::from_u128(0xAA)),
+            FriendKey::from(friend),
+            InventoryFolderKey::from(uuid::Uuid::from_u128(0xBB)),
+            now,
+        )?;
+        let cached = session.friend(FriendKey::from(friend)).ok_or("cached")?;
+        assert!(cached.rights_granted.can_see_online());
+        assert!(cached.rights_received.can_see_online());
+        Ok(())
+    }
+
+    #[test]
+    fn im_after_offline_does_not_resurrect_presence() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let friend = uuid::Uuid::from_u128(0xFA);
+        let online = AnyMessage::OnlineNotification(OnlineNotification {
+            agent_block: vec![OnlineNotificationAgentBlockBlock { agent_id: friend }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&online, 9, true)?, now)?;
+        let offline = AnyMessage::OfflineNotification(OfflineNotification {
+            agent_block: vec![OfflineNotificationAgentBlockBlock { agent_id: friend }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&offline, 10, true)?, now)?;
+        assert!(!session.is_online(FriendKey::from(friend)));
+
+        // A 1:1 IM from the now-offline friend must NOT re-mark them online: IM
+        // traffic is never a presence signal.
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&inbound_im_from(friend, 0), 11, false)?,
+            now,
+        )?;
+        assert!(!session.is_online(FriendKey::from(friend)));
+        Ok(())
+    }
+
     #[test]
     fn send_friendship_offer_packs_im() -> Result<(), TestError> {
         let now = Instant::now();
@@ -2612,6 +2887,7 @@ mod test {
         let folder = uuid::Uuid::from_u128(0xBB);
         session.accept_friendship(
             TransactionId::from(transaction),
+            FriendKey::from(uuid::Uuid::from_u128(0xDD)),
             InventoryFolderKey::from(folder),
             now,
         )?;

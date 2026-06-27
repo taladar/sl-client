@@ -354,11 +354,16 @@ pub enum Command {
     /// End the friendship with an agent (`TerminateFriendship`).
     TerminateFriendship(FriendKey),
     /// Accept a friendship offer (`AcceptFriendship`). The `transaction_id` is
-    /// the [`InstantMessage::id`](crate::InstantMessage::id) of the incoming friendship-offer IM; the
-    /// calling card goes into `calling_card_folder`.
+    /// the [`InstantMessage::id`](crate::InstantMessage::id) of the incoming friendship-offer IM; `friend_id`
+    /// is the offering agent (the `from_agent_id` of that same offer IM), so the
+    /// session can add the new friend to its buddy cache on accept; the calling
+    /// card goes into `calling_card_folder`.
     AcceptFriendship {
         /// The offer's transaction id (the friendship-offer IM's `id`).
         transaction_id: TransactionId,
+        /// The offering agent's id (the offer IM's `from_agent_id`), added to the
+        /// buddy cache on accept.
+        friend_id: FriendKey,
         /// The inventory folder to place the new calling card in.
         calling_card_folder: InventoryFolderKey,
     },
