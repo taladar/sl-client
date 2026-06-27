@@ -1526,6 +1526,26 @@ impl Client {
                                 self.session.leave_conference(session_id, Instant::now())?;
                             }
                         }
+                        Some(Command::QueryChatSessions) => {
+                            // Local query: build the light session list and surface
+                            // it on the event stream (no wire send).
+                            events.send(Event::ChatSessions(
+                                self.session.chat_sessions_info().collect(),
+                            )).await.ok();
+                        }
+                        Some(Command::QueryChatHistoryPage { session, before, limit }) => {
+                            // Local query: clone one bounded, newest-first page into
+                            // an `Arc<[_]>` and surface it with its `prev` cursor.
+                            let (page, prev) = self.session.history_page(session, before, limit);
+                            let messages: std::sync::Arc<[_]> = page.cloned().collect();
+                            events.send(Event::ChatHistoryPage { session, messages, prev }).await.ok();
+                        }
+                        Some(Command::QueryFriends) => {
+                            // Local query: build the buddy snapshot with online flags.
+                            events.send(Event::FriendsSnapshot(
+                                self.session.friends_presence().collect(),
+                            )).await.ok();
+                        }
                         Some(Command::RetrieveInstantMessages) => {
                             self.session.retrieve_instant_messages(Instant::now())?;
                         }

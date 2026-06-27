@@ -610,6 +610,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::SimConsoleResponse { .. }
             | Event::RequiredVoiceVersion(_)
             | Event::OpenRegionInfo(_)
+            | Event::ChatSessions(_)
+            | Event::ChatHistoryPage { .. }
+            | Event::FriendsSnapshot(_)
             | Event::LandStatReply { .. } => {}
         }
     }

@@ -34,12 +34,13 @@ use super::{
     CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_MODIFY_MATERIAL_PARAMS,
     CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
     CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, ChatSession,
-    ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE, GrantStatus, HolderKind,
-    IDENTITY_ROTATION, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
-    MAX_INLINE_ASSET, PendingInvite, SIT_TIMEOUT, ScriptGrant, ScriptHolder, Session,
-    SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls,
-    TeleportPhase, TextureDownload, deadline, merge_deadline,
+    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, ChatLifecycleView,
+    ChatSession, ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, Circuit,
+    DEFAULT_DRAW_DISTANCE, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
+    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_INLINE_ASSET,
+    MessageCursor, PendingInvite, SIT_TIMEOUT, ScriptGrant, ScriptHolder, Session, SessionMessage,
+    SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase,
+    TextureDownload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -4918,6 +4919,82 @@ impl Session {
     ) -> Option<&ChatSessionLifecycle> {
         self.chat_session(session)
             .map(|chat_session| &chat_session.lifecycle)
+    }
+
+    /// Builds the light [`ChatSessionInfo`] snapshot of one session, composing the
+    /// lower-level lifecycle / participant / typing / unread accessors. History
+    /// and the activity stamp are deliberately left out (see [`ChatSessionInfo`]).
+    fn chat_session_info(&self, kind: ChatSessionKind) -> ChatSessionInfo {
+        let lifecycle = self
+            .chat_session_lifecycle(kind)
+            .map_or(ChatLifecycleView::Joined, ChatLifecycleView::from_lifecycle);
+        ChatSessionInfo {
+            kind,
+            lifecycle,
+            participants: self.participants(kind).collect(),
+            typing: self.typing(kind).collect(),
+            unread: self.unread(kind),
+        }
+    }
+
+    /// A light snapshot of every open chat session, ordered **newest-first** by
+    /// last activity (the same order as [`Self::chat_sessions`]) and carrying no
+    /// history — the read-out behind
+    /// [`Command::QueryChatSessions`](crate::Command::QueryChatSessions) /
+    /// [`Event::ChatSessions`](crate::Event::ChatSessions). A bevy system reads
+    /// this directly off the borrowed `Session`; the tokio / REPL runtimes pull it
+    /// over the query/reply bridge. The per-session history is fetched separately
+    /// and one bounded page at a time via [`Self::history_page`].
+    pub fn chat_sessions_info(&self) -> impl Iterator<Item = ChatSessionInfo> + '_ {
+        self.chat_sessions()
+            .map(|kind| self.chat_session_info(kind))
+    }
+
+    /// A snapshot of the buddy cache paired with each friend's live online flag —
+    /// the read-out behind [`Command::QueryFriends`](crate::Command::QueryFriends)
+    /// / [`Event::FriendsSnapshot`](crate::Event::FriendsSnapshot). Iteration is
+    /// deterministic (ordered by friend id). `online` carries the
+    /// [`Self::is_online`] visibility caveat.
+    pub fn friends_presence(&self) -> impl Iterator<Item = FriendPresence> + '_ {
+        self.friends().map(|friend| FriendPresence {
+            online: self.is_online(friend.id),
+            friend,
+        })
+    }
+
+    /// One bounded, **newest-first** page of `session`'s in-memory conversation
+    /// history, plus a `prev` cursor for the next (older) page — the read-out
+    /// behind [`Command::QueryChatHistoryPage`](crate::Command::QueryChatHistoryPage)
+    /// / [`Event::ChatHistoryPage`](crate::Event::ChatHistoryPage).
+    ///
+    /// `before` is `None` for the newest page, or a `prev` cursor returned by an
+    /// earlier call to continue older. At most `limit` messages are yielded,
+    /// newest first; the returned cursor is `Some` while older in-memory messages
+    /// remain and `None` once the window reaches the oldest retained message (the
+    /// on-disk chat log added later continues older pages from there). The iterator
+    /// borrows the session, so a bevy reader pages with zero copies; the channel
+    /// runtimes clone the bounded window into an `Arc<[_]>`.
+    pub fn history_page(
+        &self,
+        session: ChatSessionKind,
+        before: Option<MessageCursor>,
+        limit: usize,
+    ) -> (
+        impl Iterator<Item = &SessionMessage> + '_,
+        Option<MessageCursor>,
+    ) {
+        let consumed = before.map_or(0, MessageCursor::consumed);
+        let history = self.chat_session(session).map(|chat| &chat.history);
+        let len = history.map_or(0, VecDeque::len);
+        let take = len.saturating_sub(consumed).min(limit);
+        let next = consumed.saturating_add(take);
+        let prev = (next < len).then(|| MessageCursor::new(next));
+        let page = history
+            .into_iter()
+            .flat_map(|entries| entries.iter().rev())
+            .skip(consumed)
+            .take(take);
+        (page, prev)
     }
 
     /// Accepts a pending chat-session invitation, promoting its registry entry to

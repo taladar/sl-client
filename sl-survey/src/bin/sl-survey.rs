@@ -654,6 +654,9 @@ impl Survey {
             | Event::ScriptTeleport(_)
             | Event::ScriptControlChange(_)
             | Event::ScriptPermissionState(_)
+            | Event::ChatSessions(_)
+            | Event::ChatHistoryPage { .. }
+            | Event::FriendsSnapshot(_)
             | Event::SetFollowCamProperties { .. }
             | Event::ClearFollowCamProperties { .. }
             | Event::MuteList(_)

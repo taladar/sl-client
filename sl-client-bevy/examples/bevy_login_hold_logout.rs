@@ -395,6 +395,9 @@ fn on_events(
             | SlSessionEvent::SimConsoleResponse { .. }
             | SlSessionEvent::RequiredVoiceVersion(_)
             | SlSessionEvent::OpenRegionInfo(_)
+            | SlSessionEvent::ChatSessions(_)
+            | SlSessionEvent::ChatHistoryPage { .. }
+            | SlSessionEvent::FriendsSnapshot(_)
             | SlSessionEvent::LandStatReply { .. } => {}
         }
     }

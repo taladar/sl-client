@@ -10,30 +10,31 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AnimationKey, AssetKey, AssetType, AttachmentMode,
-        AttachmentPoint, Camera, ChatAudible, ChatChannel, ChatSessionKind, ChatSessionLifecycle,
-        ChatSource, ChatType, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction,
-        CloudPosDensity, CoarseLocation, Color, ColorAlpha, ControlFlags, CreateGroupParams,
-        DayCycle, DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirFindFlags,
-        Direction, DirectoryVisibility, DisconnectReason, DisplayName, DisplayNameUpdate, Distance,
-        EjectAction, EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, EventId,
-        FollowCamProperty, FreezeAction, FriendKey, FriendRights, GestureActivation,
-        GlobalCoordinates, Glow, GodRegionUpdate, GridCoordinates, GroupKey, GroupNoticeAttachment,
-        GroupRequestId, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
-        GroupRoleUpdateType, ImDialog, ImSessionId, ImageCodec, InterestsUpdate,
-        InventoryCallbackId, InventoryFolderKey, InventoryItem, InventoryItemMove,
-        InventoryItemOrFolderKey, InventoryKey, InviteChannel, LandArea, LandBrushAction,
-        LandBrushSize, LandEdit, LandingType, LightData, LindenAmount, LindenBalance, LoginAccount,
-        LoginParams, LookAtType, LureId, MapItemType, Material, Maturity, MeanCollisionType,
-        MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NavMeshBuildStatus,
-        NavMeshStatus, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
-        ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
-        ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
-        ParcelKey, ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-        ParcelUpdate, PendingInvite, PermissionField, Permissions, Permissions5, PickUpdate,
-        PointAtType, Postcard, PrimShape, PrimShapeParams, ProductType, ProfileUpdate, QueryId,
-        ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate, RegionName,
-        Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
-        RezScriptParams, SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction,
+        AttachmentPoint, Camera, ChatAudible, ChatChannel, ChatLifecycleView, ChatSessionInfo,
+        ChatSessionKind, ChatSessionLifecycle, ChatSource, ChatType, ClassifiedCategory,
+        ClassifiedKey, ClassifiedUpdate, ClickAction, CloudPosDensity, CoarseLocation, Color,
+        ColorAlpha, ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination,
+        DetachOrder, Diagnostic, DirFindFlags, Direction, DirectoryVisibility, DisconnectReason,
+        DisplayName, DisplayNameUpdate, Distance, EjectAction, EnvironmentSettings,
+        EstateAccessDelta, EstateAccessKind, Event, EventId, FollowCamProperty, FreezeAction,
+        FriendKey, FriendPresence, FriendRights, GestureActivation, GlobalCoordinates, Glow,
+        GodRegionUpdate, GridCoordinates, GroupKey, GroupNoticeAttachment, GroupRequestId,
+        GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType,
+        ImDialog, ImSessionId, ImageCodec, InterestsUpdate, InventoryCallbackId,
+        InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
+        InventoryKey, InviteChannel, LandArea, LandBrushAction, LandBrushSize, LandEdit,
+        LandingType, LightData, LindenAmount, LindenBalance, LoginAccount, LoginParams, LookAtType,
+        LureId, MapItemType, Material, Maturity, MeanCollisionType, MeshKey, MoneyTransactionType,
+        MovementMode, MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem,
+        NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
+        ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
+        ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand,
+        ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PendingInvite,
+        PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
+        PrimShapeParams, ProductType, ProfileUpdate, QueryId, ReflectionProbeFlags,
+        RegionCoordinates, RegionHandle, RegionInfoUpdate, RegionName, Reliability,
+        RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+        SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction,
         ScriptPermissionStatus, ScriptPermissions, SculptOrMeshKey, Session, SessionMessage,
         SetDisplayNameReply, SimStatId, SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags,
         StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea,
@@ -16917,6 +16918,224 @@ mod test {
             peer: AgentKey::from(uuid::Uuid::from_u128(0x55)),
         });
         assert_eq!(session.total_unread(), 1);
+        Ok(())
+    }
+
+    /// Like [`established`] but seeds the login buddy list, so the friend cache is
+    /// populated for the presence read tests.
+    fn established_with_friends(
+        now: Instant,
+        buddies: Vec<sl_wire::BuddyListEntry>,
+    ) -> Result<Session, TestError> {
+        let mut session = new_session()?;
+        let LoginResponse::Success(mut login) = success()? else {
+            return Err("expected a success response".into());
+        };
+        login.buddy_list = buddies;
+        session.handle_login_response(LoginResponse::Success(login), now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let handshake = server_datagram(MessageId::Low(148), &[0u8; 600], 1, true);
+        session.handle_datagram(sim_addr(), &handshake, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        Ok(session)
+    }
+
+    #[test]
+    fn chat_sessions_info_lists_newest_first_and_flattens_invited() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Oldest: a 1:1 direct session (one inbound IM → one unread).
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x55));
+        let direct_kind = ChatSessionKind::Direct { peer };
+        let im = inbound_im(0, b"Friendly Bot\0", b"hi\0");
+        session.handle_datagram(sim_addr(), &server_message(&im, 9, false)?, now)?;
+
+        // Newer: a group session opened by an inbound send.
+        let group = uuid::Uuid::from_u128(0x6708);
+        let group_kind = ChatSessionKind::Group {
+            group_id: GroupKey::from(group),
+        };
+        let send = inbound_group_im(17, uuid::Uuid::from_u128(0x6709), group);
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&send, 10, true)?,
+            after(now, 1_000)?,
+        )?;
+
+        // Newest: a still-pending conference invitation (lifecycle `Invited`).
+        let conf = uuid::Uuid::from_u128(0x6801);
+        let inviter = uuid::Uuid::from_u128(0x6802);
+        let conf_kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(conf),
+        };
+        let conf_xml = format!(
+            "<llsd><map>\
+               <key>session_name</key><string>Chat</string>\
+               <key>instantmessage</key><map><key>message_params</key><map>\
+                 <key>id</key><uuid>{conf}</uuid>\
+                 <key>from_id</key><uuid>{inviter}</uuid>\
+                 <key>from_name</key><string>Inviter</string>\
+                 <key>type</key><integer>16</integer>\
+                 <key>from_group</key><boolean>0</boolean>\
+               </map></map></map></llsd>"
+        );
+        session.handle_caps_event(
+            "ChatterBoxInvitation",
+            &parse_llsd_xml(&conf_xml)?,
+            after(now, 2_000)?,
+        )?;
+
+        let infos: Vec<ChatSessionInfo> = session.chat_sessions_info().collect();
+        // Newest-first: the invited conference, then the group, then the 1:1.
+        let kinds: Vec<ChatSessionKind> = infos.iter().map(|info| info.kind).collect();
+        assert_eq!(kinds, vec![conf_kind, group_kind, direct_kind]);
+
+        // The conference's lifecycle is the flattened `Invited` view.
+        let conf_info = infos.first().ok_or("conference info")?;
+        assert_eq!(
+            conf_info.lifecycle,
+            ChatLifecycleView::Invited {
+                inviter: AgentKey::from(inviter),
+                session_name: "Chat".to_owned(),
+                channel: InviteChannel::Text,
+            }
+        );
+        assert!(conf_info.participants.is_empty());
+
+        // The group is `Joined` and carries the inbound send's unread.
+        let group_info = infos.get(1).ok_or("group info")?;
+        assert_eq!(group_info.lifecycle, ChatLifecycleView::Joined);
+        assert_eq!(group_info.unread, 1);
+
+        // The 1:1 synthesises its roster as `{peer}` and carries the unread inbound.
+        let direct_info = infos.get(2).ok_or("direct info")?;
+        assert_eq!(direct_info.lifecycle, ChatLifecycleView::Joined);
+        assert_eq!(direct_info.participants, vec![peer]);
+        assert_eq!(direct_info.unread, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn history_page_pages_newest_first_through_older_windows() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x55));
+        let kind = ChatSessionKind::Direct { peer };
+        // Five inbound messages m0..m4, oldest-first in storage.
+        for index in 0..5u32 {
+            let text = format!("m{index}\0");
+            let im = inbound_im(0, b"Friendly Bot\0", text.as_bytes());
+            let sequence = index.checked_add(9).ok_or("sequence overflow")?;
+            session.handle_datagram(sim_addr(), &server_message(&im, sequence, false)?, now)?;
+        }
+
+        // The newest page (limit 2) is m4, m3, with a cursor pointing older. Every
+        // page is bounded to the requested window — never the whole history.
+        let (page, prev) = session.history_page(kind, None, 2);
+        let first: Vec<String> = page.map(|m| m.text.clone()).collect();
+        assert_eq!(first, vec!["m4".to_owned(), "m3".to_owned()]);
+        let prev = prev.ok_or("expected an older page after the newest two")?;
+
+        // The next older window is m2, m1; still more remain.
+        let (page, prev2) = session.history_page(kind, Some(prev), 2);
+        let second: Vec<String> = page.map(|m| m.text.clone()).collect();
+        assert_eq!(second, vec!["m2".to_owned(), "m1".to_owned()]);
+        let prev2 = prev2.ok_or("expected one more older page")?;
+
+        // The last window holds only m0 and ends the walk (no cursor).
+        let (page, prev3) = session.history_page(kind, Some(prev2), 2);
+        let third: Vec<String> = page.map(|m| m.text.clone()).collect();
+        assert_eq!(third, vec!["m0".to_owned()]);
+        assert!(
+            prev3.is_none(),
+            "the oldest in-memory message ends the in-memory walk"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn history_page_on_unopened_session_is_empty() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let kind = ChatSessionKind::Direct {
+            peer: AgentKey::from(uuid::Uuid::from_u128(0x99)),
+        };
+        let (page, prev) = session.history_page(kind, None, 10);
+        assert_eq!(page.count(), 0);
+        assert!(prev.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn friends_presence_reports_each_friends_online_flag() -> Result<(), TestError> {
+        let now = Instant::now();
+        let friend_a = uuid::Uuid::from_u128(0xF1);
+        let friend_b = uuid::Uuid::from_u128(0xF2);
+        let mut session = established_with_friends(
+            now,
+            vec![
+                sl_wire::BuddyListEntry {
+                    buddy_id: friend_a,
+                    rights_granted: FriendRights::CAN_SEE_ONLINE,
+                    rights_has: FriendRights::CAN_SEE_ONLINE,
+                },
+                sl_wire::BuddyListEntry {
+                    buddy_id: friend_b,
+                    rights_granted: 0,
+                    rights_has: 0,
+                },
+            ],
+        )?;
+
+        // Only friend_a is reported online.
+        let online = AnyMessage::OnlineNotification(OnlineNotification {
+            agent_block: vec![OnlineNotificationAgentBlockBlock { agent_id: friend_a }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&online, 9, true)?, now)?;
+
+        let snapshot: Vec<FriendPresence> = session.friends_presence().collect();
+        // Ordered by friend id; friend_a online, friend_b not.
+        let ids: Vec<FriendKey> = snapshot.iter().map(|p| p.friend.id).collect();
+        assert_eq!(
+            ids,
+            vec![FriendKey::from(friend_a), FriendKey::from(friend_b)]
+        );
+        let flags: Vec<bool> = snapshot.iter().map(|p| p.online).collect();
+        assert_eq!(flags, vec![true, false]);
+        Ok(())
+    }
+
+    #[test]
+    fn chat_sessions_reply_shares_an_arc_without_deep_copy() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let im = inbound_im(0, b"Friendly Bot\0", b"hi\0");
+        session.handle_datagram(sim_addr(), &server_message(&im, 9, false)?, now)?;
+
+        // The reply payload is an `Arc<[…]>`; both runtimes build it from this one
+        // sans-IO builder, so a bevy-direct read and a tokio reply carry identical
+        // data by construction.
+        let infos: std::sync::Arc<[ChatSessionInfo]> = session.chat_sessions_info().collect();
+        let direct: Vec<ChatSessionInfo> = session.chat_sessions_info().collect();
+        assert_eq!(infos.as_ref(), direct.as_slice());
+
+        // Handing the payload across the channel is an `Arc` clone, never a deep
+        // copy: the shipped event shares the same allocation.
+        let event = Event::ChatSessions(std::sync::Arc::clone(&infos));
+        let Event::ChatSessions(shipped) = &event else {
+            return Err("expected a ChatSessions event".into());
+        };
+        assert!(std::sync::Arc::ptr_eq(&infos, shipped));
         Ok(())
     }
 }

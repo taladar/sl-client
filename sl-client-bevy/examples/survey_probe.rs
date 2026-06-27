@@ -175,6 +175,9 @@ fn on_events(
             | SlSessionEvent::ScriptTeleport(_)
             | SlSessionEvent::ScriptControlChange(_)
             | SlSessionEvent::ScriptPermissionState(_)
+            | SlSessionEvent::ChatSessions(_)
+            | SlSessionEvent::ChatHistoryPage { .. }
+            | SlSessionEvent::FriendsSnapshot(_)
             | SlSessionEvent::SetFollowCamProperties { .. }
             | SlSessionEvent::ClearFollowCamProperties { .. }
             | SlSessionEvent::MuteList(_)

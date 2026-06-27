@@ -10,7 +10,7 @@
 
 use super::conversions::compute_im_session_id;
 use crate::bookkeeping_ids::ImSessionId;
-use crate::types::ImDialog;
+use crate::types::{Friend, ImDialog};
 use sl_types::key::{AgentKey, GroupKey};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::{Duration, Instant};
@@ -228,5 +228,99 @@ impl ChatSession {
     pub(crate) fn log_outbound(&mut self, message: SessionMessage) {
         self.unread = 0;
         self.push_history(message);
+    }
+}
+
+/// A flattened, read-model view of a chat session's lifecycle — the public
+/// counterpart of the internal [`ChatSessionLifecycle`], carried by
+/// [`ChatSessionInfo::lifecycle`]. The `Invited` variant inlines the
+/// [`PendingInvite`] fields rather than nesting them, so a consumer reads
+/// `inviter` / `session_name` / `channel` directly off the view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatLifecycleView {
+    /// A session we are in (the common case for everything we have sent into or
+    /// received traffic from).
+    Joined,
+    /// A still-pending invitation we have not yet accepted or declined.
+    Invited {
+        /// The inviting agent.
+        inviter: AgentKey,
+        /// The session's human-readable name (the group or conference name).
+        session_name: String,
+        /// Which channel(s) the invitation is to.
+        channel: InviteChannel,
+    },
+}
+
+impl ChatLifecycleView {
+    /// Flattens the internal [`ChatSessionLifecycle`] into the public view,
+    /// cloning the invite's `session_name` (the only owned field).
+    pub(crate) fn from_lifecycle(lifecycle: &ChatSessionLifecycle) -> Self {
+        match lifecycle {
+            ChatSessionLifecycle::Joined => Self::Joined,
+            ChatSessionLifecycle::Invited(invite) => Self::Invited {
+                inviter: invite.inviter,
+                session_name: invite.session_name.clone(),
+                channel: invite.channel,
+            },
+        }
+    }
+}
+
+/// A light, owned snapshot of one chat session — the element of the
+/// [`Session::chat_sessions_info`](crate::Session::chat_sessions_info) list and
+/// the [`Event::ChatSessions`](crate::Event::ChatSessions) reply. Deliberately
+/// **omits the history and the activity stamp**: the list stays cheap to ship,
+/// history is fetched separately and one bounded page at a time via
+/// [`Event::ChatHistoryPage`](crate::Event::ChatHistoryPage), and the monotonic
+/// `last_activity` is meaningless across a process boundary (it only orders the
+/// list newest-first before it ships).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatSessionInfo {
+    /// The typed session id (1:1 direct, group, or conference).
+    pub kind: ChatSessionKind,
+    /// Whether the session is joined or a still-pending invitation.
+    pub lifecycle: ChatLifecycleView,
+    /// The session roster: the group / conference participants, or the implicit
+    /// `{ peer }` for a `Direct` session.
+    pub participants: Vec<AgentKey>,
+    /// The avatars currently typing (remote typers only, stale entries pruned).
+    pub typing: Vec<AgentKey>,
+    /// The number of unread inbound messages.
+    pub unread: u32,
+}
+
+/// A friend paired with whether they are currently known-online — the element of
+/// the [`Session::friends_presence`](crate::Session::friends_presence) snapshot
+/// and the [`Event::FriendsSnapshot`](crate::Event::FriendsSnapshot) reply.
+/// `online` follows the same visibility caveat as
+/// [`Session::is_online`](crate::Session::is_online): `false` is "offline or not
+/// visible to us", never provably offline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FriendPresence {
+    /// The friend, with the friendship rights in both directions.
+    pub friend: Friend,
+    /// Whether the friend is currently known-online.
+    pub online: bool,
+}
+
+/// An opaque page token for [`Session::history_page`](crate::Session::history_page)
+/// — a `prev` cursor returned by one page is fed back as the `before` argument of
+/// the next to walk older windows. Consumers never interpret it; the inner
+/// representation is private so the memory→archive boundary (the on-disk chat log
+/// added later) can change it transparently. Today it is a count of how many of
+/// the newest in-memory messages a page already consumed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MessageCursor(usize);
+
+impl MessageCursor {
+    /// Wraps a "messages already consumed from the newest end" count as a cursor.
+    pub(crate) const fn new(consumed: usize) -> Self {
+        Self(consumed)
+    }
+
+    /// The number of newest in-memory messages this cursor skips past.
+    pub(crate) const fn consumed(self) -> usize {
+        self.0
     }
 }
