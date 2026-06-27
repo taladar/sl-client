@@ -145,7 +145,7 @@ task list derived from the signed-off references.
       Confirm the typed keys (`InventoryKey`, `InventoryFolderKey`,
       `InventoryItemOrFolderKey`) and domain types (`InventoryFolder`,
       `InventoryItem`) are reused unchanged underneath.
-- [ ] **A2. Design the fetch-state machine & the parent→children index.**
+- [x] **A2. Design the fetch-state machine & the parent→children index.**
   Specify a per-folder fetch state — `Unknown` (in the tree from skeleton/parent
   but contents not fetched) / `Fetching` (request in flight) / `Loaded { version
   }` (contents present, known version) — and the authoritative-version rule: a
@@ -335,6 +335,34 @@ index is the child-key sets on `FolderEntry`
 entry, and (if new) creates its entry `Unknown`; `cache_inventory_item` inserts
 the item and links it under its `folder_id`; removals unlink. So
 `inventory_children(folder)` is O(children), not O(tree).
+
+**Fold / unlink sites verified against the code (anchors for B3).** Every site
+that mutates `inventory_folders` / `inventory_items` must maintain the index +
+fetch-state. Inserts/updates flow through `cache_inventory_folder`
+(`methods.rs:7897`) and `cache_inventory_item` (`:7920`) — both via
+`cache_inventory` (`:7910`) — the natural index hooks. **But two classes of site
+bypass them and B3 must route through the model too:** (1) the login **skeleton
+seed inserts directly** (`:1223-1224`, a raw `inventory_folders.insert`, *not*
+`cache_inventory_folder`) — this is the one site carrying the authoritative
+per-folder `version`, so it must set `Loaded`/`Unknown` + index *there*, not
+lose it; (2) the **re-parent mutations edit the parent link in place** —
+`move_inventory_folders` mutates `folder.parent_id` (`:8062`) and
+`move_inventory_items` mutates `item.folder_id` (`:8193`) — so the index must
+*unlink from the old parent and link to the new* at these two sites (an
+insert/remove pair does not model a move). Unlink/removal sites:
+`purge_cached_descendents` (`:7926`, recursive), `remove_inventory_folders`
+(`:8085-8086`), `remove_inventory_items` (`:8248`),
+`purge_inventory_descendents` (`:8288`), and `remove_inventory_objects`
+(`:8310-8314`) — each unlinks the
+dropped keys from their parent's child-sets. The optimistic creates
+(`create_inventory_folder` `:7978` version `1`, the AIS folder create `:8011`)
+already route through `cache_inventory_folder`, so they index for free once the
+hook is there.
+
+Authoritative-version anchor: `cache_inventory_folder` **already** preserves an
+existing version when a fold carries `0` (`:7898-7903`) — the seed of the
+`Loaded` rule; B3 promotes that ad-hoc guard into `FolderState` so a `version 0`
+child fold leaves the entry `Unknown` rather than fabricating `Loaded { 0 }`.
 
 ### `sl-llsd` extraction & binary-codec reference (from A3)
 
@@ -537,9 +565,15 @@ folds and the accessors onto it with no behaviour change yet.
       `const fn` empty constructor.
 - [ ] Move `inventory_folders` / `inventory_items` / `inventory_root` /
   `next_inventory_callback` off `Session` into the model field; migrate every
-  internal use (`cache_inventory` / `cache_inventory_folder` /
-  `cache_inventory_item` and the mutation methods at `methods.rs` ~7900–8320) to
-  maintain the index + fetch-state.
+  internal use to maintain the index + fetch-state: the central folds
+  (`cache_inventory`/`_folder`/`_item`, `:7910`/`:7897`/`:7920`), the **direct
+  skeleton seed** (`:1223-1224` — route through the model so it sets the
+  authoritative version + index instead of a raw `insert`), the **re-parent
+  mutations** that edit the parent link in place (`move_inventory_folders`
+  `:8062`, `move_inventory_items` `:8193` — unlink-old + link-new), and the
+  removal sites (`purge_cached_descendents` `:7926`, `remove_inventory_folders`
+  `:8085`, `remove_inventory_items` `:8248`, `purge_inventory_descendents`
+  `:8288`, `remove_inventory_objects` `:8310`).
 - [ ] Set the authoritative folder version from the skeleton (`methods.rs:1223`)
   and from descendents replies; keep sub-folders (`version 0`) `Unknown`.
 - [ ] **Persistence guard (from A10):** add **no** inventory clear at the four
