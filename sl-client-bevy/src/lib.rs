@@ -27,16 +27,17 @@ use sl_proto::{
     CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
     CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-    Event as SessionEvent, GroupKey, Llsd, LoginResponse, RECV_BUFFER_SIZE, SelectedCostKind,
-    Session, ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, build_agent_preferences_request,
-    build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
-    build_ais_update_item_body, build_create_inventory_category_request,
-    build_get_object_cost_request, build_get_object_physics_data_request,
-    build_modify_material_params_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_parcel_voice_info_request,
-    build_provision_voice_account_request, build_region_experiences_request,
-    build_remote_parcel_request, build_resource_cost_selected_request, build_send_user_report,
+    CHAT_SESSION_DECLINE_P2P_VOICE, ChatSessionKind, Event as SessionEvent, GroupKey, Llsd,
+    LoginResponse, RECV_BUFFER_SIZE, SelectedCostKind, Session, ais_category_children_fetch_url,
+    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
+    build_agent_preferences_request, build_ais_create_category_body, build_ais_move_body,
+    build_ais_rename_category_body, build_ais_update_item_body,
+    build_create_inventory_category_request, build_get_object_cost_request,
+    build_get_object_physics_data_request, build_modify_material_params_request,
+    build_object_media_navigate_request, build_object_media_update_request,
+    build_parcel_voice_info_request, build_provision_voice_account_request,
+    build_region_experiences_request, build_remote_parcel_request,
+    build_resource_cost_selected_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_upload_baked_texture_request,
     build_voice_signaling_request, chat_session_request_body, display_names_query,
@@ -2592,6 +2593,69 @@ fn advance_running(
                         .ok();
                 } else {
                     session.leave_conference(*session_id, now).ok();
+                }
+            }
+            Command::JoinSessionVoice {
+                session: chat_session,
+            } => {
+                // Optimistic local join, then drive the signalling: ensure a voice
+                // account, then signal into the channel over `ChatSessionRequest`
+                // (accept invitation). Signalling only — no audio.
+                session.join_session_voice(*chat_session, now);
+                if let (Some(own), Some(caps)) = (session.agent_id(), caps.as_ref()) {
+                    let session_uuid = chat_session.canonical_session_id(own);
+                    let from_group = matches!(chat_session, ChatSessionKind::Group { .. });
+                    if let Some(url) = caps.map.get(CAP_PROVISION_VOICE_ACCOUNT).cloned() {
+                        let body =
+                            build_provision_voice_account_request(&VoiceProvisionRequest::vivox());
+                        let events_tx = caps.events_tx.clone();
+                        std::thread::spawn(move || {
+                            run_voice_cap(&url, body, CAP_PROVISION_VOICE_ACCOUNT, &events_tx);
+                        });
+                    }
+                    if let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned() {
+                        let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_uuid);
+                        let events_tx = caps.events_tx.clone();
+                        std::thread::spawn(move || {
+                            run_chat_session_request(
+                                &url,
+                                body,
+                                session_uuid,
+                                from_group,
+                                &events_tx,
+                            );
+                        });
+                    }
+                }
+            }
+            Command::LeaveSessionVoice {
+                session: chat_session,
+            } => {
+                // Optimistic local leave (keeps the text conversation), then signal
+                // the voice decline on the wire: a 1:1 P2P call uses `decline p2p
+                // voice`, a group / conference the multi-agent `decline invitation`.
+                session.leave_session_voice(*chat_session);
+                if let (Some(own), Some(caps)) = (session.agent_id(), caps.as_ref()) {
+                    let session_uuid = chat_session.canonical_session_id(own);
+                    let from_group = matches!(chat_session, ChatSessionKind::Group { .. });
+                    let method = if matches!(chat_session, ChatSessionKind::Direct { .. }) {
+                        CHAT_SESSION_DECLINE_P2P_VOICE
+                    } else {
+                        CHAT_SESSION_DECLINE
+                    };
+                    if let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned() {
+                        let body = chat_session_request_body(method, session_uuid);
+                        let events_tx = caps.events_tx.clone();
+                        std::thread::spawn(move || {
+                            run_chat_session_request(
+                                &url,
+                                body,
+                                session_uuid,
+                                from_group,
+                                &events_tx,
+                            );
+                        });
+                    }
                 }
             }
             Command::QueryChatSessions => {

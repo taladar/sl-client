@@ -1,7 +1,7 @@
 //! Wire/LLSD <-> value-type converters shared by the session impls, plus the
 //! server-side CAPS serializers and their round-trip tests.
 
-use super::chat_session::InviteChannel;
+use super::chat_session::{InviteChannel, VoiceChannelInfo};
 use crate::GroupRoleKey;
 use crate::appearance;
 use crate::types::{
@@ -2627,6 +2627,74 @@ pub(crate) fn chat_session_roster_from_llsd(body: &Llsd) -> Vec<AgentKey> {
             .collect();
     }
     Vec::new()
+}
+
+/// Reads a non-empty string from an LLSD map member, or `None` when the member is
+/// absent, the wrong kind, or the empty string (the grid's "unset" sentinel).
+fn optional_string_member(map: &Llsd, key: &str) -> Option<String> {
+    map.get(key)
+        .and_then(Llsd::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+/// Decodes a [`VoiceChannelInfo`] from a session-voice LLSD map — either an
+/// invitation's `voice` body or the `ChatSessionRequest "accept invitation"`
+/// reply's `voice_channel_info` block. Reads the room `channel_uri` (a non-empty,
+/// parseable uri; an empty/garbled uri decodes to `None`), the optional
+/// per-channel `channel_credentials`, the `voice_server_type` backend tag, and the
+/// SL `session_handle`. A map with none of these decodes to an empty
+/// [`VoiceChannelInfo`] (the channel exists but its coordinates are not yet
+/// known) — the caller still records `has_voice` from the map's presence.
+pub(crate) fn voice_channel_info_from_llsd(map: &Llsd) -> VoiceChannelInfo {
+    let channel_uri = map
+        .get("channel_uri")
+        .and_then(Llsd::as_str)
+        .filter(|uri| !uri.is_empty())
+        .and_then(|uri| url::Url::parse(uri).ok());
+    VoiceChannelInfo {
+        channel_uri,
+        channel_credentials: optional_string_member(map, "channel_credentials"),
+        voice_server_type: optional_string_member(map, "voice_server_type"),
+        session_handle: optional_string_member(map, "session_handle"),
+    }
+}
+
+/// Decodes a `ChatterBoxSessionAgentListUpdates` CAPS event body into the session
+/// id and the per-agent **voice-connected** flags — the modern equivalent of the
+/// voice participant list (Firestorm `LLIMSpeakerMgr::updateSpeakers`,
+/// `llspeakers.cpp:687`). Each `agent_updates` entry is keyed by the agent uuid
+/// and carries an `info` map (whose `can_voice_chat` flag is the voice-membership
+/// indicator B8 folds) and a `transition` (`"ENTER"` / `"LEAVE"`). The returned
+/// bool is "in voice now": `true` when the agent is entering / present *and*
+/// voice-capable, `false` when leaving or text-only — so the handler can both add
+/// and drop voice members from one update. The `is_now_speaking` / talk-activity
+/// flag is deliberately **not** read (out of scope — that is the external voice
+/// client's concern). Returns `None` if the body carries no `agent_updates` map.
+pub(crate) fn agent_list_voice_updates_from_llsd(
+    body: &Llsd,
+) -> Option<(Uuid, Vec<(AgentKey, bool)>)> {
+    let session_id = uuid_member_lenient(body, "session_id");
+    let Some(Llsd::Map(updates)) = body.get("agent_updates") else {
+        return None;
+    };
+    let members = updates
+        .iter()
+        .filter_map(|(key, value)| {
+            let agent = AgentKey::from(Uuid::parse_str(key).ok()?);
+            let leaving = value
+                .get("transition")
+                .and_then(Llsd::as_str)
+                .is_some_and(|transition| transition == "LEAVE");
+            let can_voice = value
+                .get("info")
+                .and_then(|info| info.get("can_voice_chat"))
+                .and_then(Llsd::as_bool)
+                .unwrap_or(false);
+            Some((agent, !leaving && can_voice))
+        })
+        .collect();
+    Some((session_id, members))
 }
 
 /// Reads a region-local position from an LLSD map's `position` member, encoded

@@ -810,6 +810,8 @@ const fn command_name(command: &Command) -> &'static str {
         Command::MarkSessionRead { .. } => "mark_session_read",
         Command::AcceptChatInvite { .. } => "accept_chat_invite",
         Command::DeclineChatInvite { .. } => "decline_chat_invite",
+        Command::JoinSessionVoice { .. } => "join_session_voice",
+        Command::LeaveSessionVoice { .. } => "leave_session_voice",
         Command::QueryChatSessions => "query_chat_sessions",
         Command::QueryChatHistoryPage { .. } => "query_chat_history_page",
         Command::QueryFriends => "query_friends",
