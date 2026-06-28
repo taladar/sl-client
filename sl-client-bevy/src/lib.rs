@@ -58,9 +58,9 @@ pub use sl_proto::{
     ControlFlags, ConversationKind, CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic,
     Direction, DisconnectReason, Distance, EconomyData, EstateAccessDelta, EstateAccessKind,
     EstateInfo, ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate,
-    ExtendedMesh, FlexibleData, FolderInfo, FolderType, Friend, FriendRights, GlobalCoordinates,
-    GltfMaterialOverride, GridCoordinates, GroupMember, GroupMembership, GroupNotice,
-    GroupNoticeAttachment, GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole,
+    ExtendedMesh, FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendRights,
+    GlobalCoordinates, GltfMaterialOverride, GridCoordinates, GroupMember, GroupMembership,
+    GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole,
     GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange,
     GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog, ImSessionId,
     InstantMessage, InterestsUpdate, InventoryCallbackId, InventoryCursor, InventoryFolder,
@@ -2821,6 +2821,36 @@ fn advance_running(
                     session: *chat_session,
                     messages,
                     prev,
+                }));
+            }
+            Command::QueryInventoryFolder {
+                folder,
+                before,
+                limit,
+            } => {
+                // Local query: page the held model into owning view types (one
+                // bounded borrow→owned transform, `Arc<[…]>` payload). A bevy
+                // system may instead borrow the Session and call
+                // `inventory_folder_page` directly, skipping the round-trip.
+                let (folders, items, prev) =
+                    session.inventory_folder_page(*folder, *before, *limit);
+                // On-demand: a query for an unfetched folder schedules its fetch
+                // (works regardless of the background-crawl flag).
+                if session.folder_fetch_state(*folder) == Some(FolderState::Unknown) {
+                    session.request_folder_contents(*folder, now).ok();
+                }
+                events.write(SlEvent(SessionEvent::InventoryFolderPage {
+                    folder: *folder,
+                    folders: folders.into(),
+                    items: items.into(),
+                    prev,
+                }));
+            }
+            Command::QueryInventoryRoots => {
+                // Local query: surface the agent + library roots (both `Copy`).
+                events.write(SlEvent(SessionEvent::InventoryRoots {
+                    agent_root: session.inventory_root(),
+                    library_root: session.library_root(),
                 }));
             }
             Command::QueryFriends => {

@@ -13,18 +13,19 @@ use crate::{
     EjectAction, EstateAccessDelta, EventId, ExperienceKey, ExperiencePermission, ExperienceUpdate,
     FolderType, FreezeAction, FriendKey, FriendRights, GestureActivation, GodRegionUpdate,
     GroupKey, GroupNoticeAttachment, GroupNoticeKey, GroupRequestId, GroupRoleEdit, GroupRoleKey,
-    GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate, InventoryFolderKey,
-    InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandEdit, LandSearchType,
-    LandStatReportType, LindenAmount, LureId, MapItemType, Material, MaterialOverrideUpdate,
-    MediaEntry, MeshKey, MessageCursor, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
-    NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
-    ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessScope,
-    ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
-    PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId,
-    RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, Rotation, SaleType, ScriptPermissions, SimWideDeleteFlags,
-    StartLocationSlot, TaskInventoryKey, TextureEntry, TextureKey, Throttle, TransactionId,
-    UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
+    GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate, InventoryCursor,
+    InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandEdit,
+    LandSearchType, LandStatReportType, LindenAmount, LureId, MapItemType, Material,
+    MaterialOverrideUpdate, MediaEntry, MeshKey, MessageCursor, MoneyTransactionType, MovementMode,
+    MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
+    ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
+    ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField,
+    PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
+    QueryId, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem,
+    RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType, ScriptPermissions,
+    SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey, TextureEntry, TextureKey, Throttle,
+    TransactionId, UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
+    Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -170,6 +171,33 @@ pub enum Command {
     /// path (`FetchInventoryDescendents2`) — the modern path used on Second Life.
     /// Each folder's contents arrive as an [`Event::InventoryDescendents`](crate::Event::InventoryDescendents).
     FetchInventoryFolders(Vec<InventoryFolderKey>),
+    /// Query one bounded page of an inventory folder's held contents from the
+    /// in-memory model. The runtime replies with
+    /// [`Event::InventoryFolderPage`](crate::Event::InventoryFolderPage) built from
+    /// [`Session::inventory_folder_page`](crate::Session::inventory_folder_page);
+    /// no wire send. If the folder's contents are not yet loaded
+    /// ([`FolderState::Unknown`](crate::FolderState::Unknown)) the runtime also
+    /// schedules its on-demand fetch (the
+    /// [`Command::RequestFolderContents`] path), so a later query sees the loaded
+    /// contents. A bevy reader may instead borrow the `Session` and call the
+    /// builder directly.
+    QueryInventoryFolder {
+        /// Which folder to page.
+        folder: InventoryFolderKey,
+        /// The page boundary: `None` for the first page, or a `prev` cursor from
+        /// an earlier reply to continue.
+        before: Option<InventoryCursor>,
+        /// The maximum number of folders + items in the page.
+        limit: usize,
+    },
+    /// Query the inventory tree roots (the agent root and the read-only Library
+    /// root). The runtime replies with
+    /// [`Event::InventoryRoots`](crate::Event::InventoryRoots) built from
+    /// [`Session::inventory_root`](crate::Session::inventory_root) /
+    /// [`Session::library_root`](crate::Session::library_root); no wire send. A
+    /// bevy reader may instead borrow the `Session` and call the accessors
+    /// directly.
+    QueryInventoryRoots,
     /// Create an inventory folder (`CreateInventoryFolder`, UDP). `folder_id` is a
     /// fresh, caller-chosen id. The simulator sends no reply; the folder is added
     /// to the local cache optimistically. Use [`Command::CreateInventoryCategory`]

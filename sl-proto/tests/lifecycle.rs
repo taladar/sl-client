@@ -18195,6 +18195,118 @@ mod test {
         Ok(())
     }
 
+    /// The B8 inventory pull-bridge: both runtimes synthesize the reply from the
+    /// same sans-IO read methods. A folder query yields the paged view-type
+    /// window + cursor as an `Arc<[…]>` shared across the channel (never a deep
+    /// copy); a roots query echoes the typed accessors; a query for an unfetched
+    /// (`Unknown`) folder schedules its on-demand fetch (the bridge's
+    /// `RequestFolderContents` step, `Unknown → Fetching`); and a `&Session`
+    /// reader walks the cache borrowed, with no clone (the bevy-direct path).
+    #[test]
+    fn b8_inventory_pull_bridge_synthesizes_page_and_roots() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Seed a `Loaded` folder with three sub-folders and two items.
+        let parent = 0xD0;
+        let parent_key = InventoryFolderKey::from(uuid::Uuid::from_u128(parent));
+        feed_descendents(
+            &mut session,
+            now,
+            parent,
+            4,
+            vec![
+                desc_folder(0xD1, parent, -1, "Alpha"),
+                desc_folder(0xD2, parent, -1, "Beta"),
+                desc_folder(0xD3, parent, -1, "Gamma"),
+            ],
+            vec![
+                desc_item(0xE1, parent, 7, 7, 0, 0, "Note"), // notecard, not for sale
+                desc_item(0xE2, parent, 6, 6, 2, 250, "Cube"), // object, copy sale
+            ],
+            7,
+        )?;
+
+        // The page the bridge ships: the bounded window from
+        // `inventory_folder_page`, materialised into `Arc<[…]>` exactly as both
+        // runtime dispatch arms do (one borrow→owned transform at the channel).
+        let (folders, items, prev) = session.inventory_folder_page(parent_key, None, 4);
+        let folders: std::sync::Arc<[FolderInfo]> = folders.into();
+        let items: std::sync::Arc<[ItemInfo]> = items.into();
+        let page_event = Event::InventoryFolderPage {
+            folder: parent_key,
+            folders: std::sync::Arc::clone(&folders),
+            items: std::sync::Arc::clone(&items),
+            prev,
+        };
+        let Event::InventoryFolderPage {
+            folder,
+            folders: shipped_folders,
+            items: shipped_items,
+            prev: shipped_prev,
+        } = &page_event
+        else {
+            return Err("expected an InventoryFolderPage event".into());
+        };
+        assert_eq!(*folder, parent_key);
+        // Handing the window across the channel is an `Arc` clone, never a deep
+        // copy: the shipped event shares the same allocation.
+        assert!(std::sync::Arc::ptr_eq(&folders, shipped_folders));
+        assert!(std::sync::Arc::ptr_eq(&items, shipped_items));
+        // The limit of 4 fills with all 3 sub-folders + the first item; the
+        // second item carries over to the next page.
+        assert_eq!(shipped_folders.len(), 3);
+        assert_eq!(shipped_items.len(), 1);
+        let cursor = shipped_prev.ok_or("expected a continuation cursor")?;
+        assert_eq!(cursor.consumed_count(), 4);
+        // The view types resolve the raw bytes into typed enums.
+        let alpha = shipped_folders.first().ok_or("alpha folder")?;
+        assert_eq!(
+            alpha.folder_id,
+            InventoryFolderKey::from(uuid::Uuid::from_u128(0xD1))
+        );
+        assert_eq!(alpha.state, FolderState::Unknown); // a sub-folder, unfetched
+        let note = shipped_items.first().ok_or("note item")?;
+        assert_eq!(note.asset_type, AssetType::Notecard);
+
+        // The roots reply echoes the typed accessors (both `Copy` keys, no `Arc`).
+        let roots_event = Event::InventoryRoots {
+            agent_root: session.inventory_root(),
+            library_root: session.library_root(),
+        };
+        let Event::InventoryRoots {
+            agent_root,
+            library_root,
+        } = &roots_event
+        else {
+            return Err("expected an InventoryRoots event".into());
+        };
+        assert_eq!(*agent_root, session.inventory_root());
+        assert_eq!(*library_root, session.library_root());
+
+        // On-demand: a query for an `Unknown` sub-folder schedules its fetch (the
+        // bridge's `RequestFolderContents` step), flipping `Unknown → Fetching`.
+        let alpha_key = InventoryFolderKey::from(uuid::Uuid::from_u128(0xD1));
+        assert_eq!(
+            session.folder_fetch_state(alpha_key),
+            Some(FolderState::Unknown)
+        );
+        session.request_folder_contents(alpha_key, now)?;
+        assert_eq!(
+            session.folder_fetch_state(alpha_key),
+            Some(FolderState::Fetching)
+        );
+
+        // The direct-borrow reader (the bevy path) walks the cache borrowed, with
+        // no clone: `inventory_children` yields `Child<'_>` straight out of an
+        // immutable `&Session`, no owned copy of the tree.
+        let reader: &Session = &session;
+        let borrowed: usize = reader.inventory_children(parent_key).count();
+        assert_eq!(borrowed, 5);
+        Ok(())
+    }
+
     // ---- Persistence / region guard (B10) -----------------------------------
     //
     // The grid-level chat/presence stores (`chat_sessions` / `friends` /

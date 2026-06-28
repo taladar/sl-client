@@ -2025,6 +2025,24 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "query_inventory_folder",
+            usage: "<folder_id> [limit]",
+            // The `before` page cursor is opaque (the runtime mints it on a reply),
+            // so the REPL always requests the first page; `limit` defaults to 50.
+            build: |args, ctx| {
+                Ok(Command::QueryInventoryFolder {
+                    folder: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 0)?),
+                    before: None,
+                    limit: args.parse_or(ctx, "limit", 1, "usize", 50)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "query_inventory_roots",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::QueryInventoryRoots),
+        },
+        CommandSpec {
             name: "create_inventory_folder",
             usage: "<folder_id> <parent_id> <folder_type> <name>",
             build: |args, ctx| {

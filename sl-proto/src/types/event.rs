@@ -9,21 +9,22 @@ use super::{
     AvatarProperties, ChatMessage, ClassifiedInfo, CoarseLocation, DirClassifiedResult,
     DirEventResult, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
     DisconnectReason, DisplayNameUpdate, EconomyData, EnvironmentSettings, EstateAccessKind,
-    EstateCovenant, EstateInfo, EventInfo, FeatureDisabled, FollowCamPropertyValue, Friend,
-    FriendRights, GenericMessage, GenericStreamingMessage, GroupAccountDetails,
+    EstateCovenant, EstateInfo, EventInfo, FeatureDisabled, FolderInfo, FollowCamPropertyValue,
+    Friend, FriendRights, GenericMessage, GenericStreamingMessage, GroupAccountDetails,
     GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupMember,
     GroupMembership, GroupName, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle,
-    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    InventoryItemMove, Kick, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
-    MapItem, MapItemType, MapLayer, MapRegionInfo, Maturity, MeanCollision, MoneyBalance,
-    MuteEntry, NavMeshStatus, NeighborInfo, Object, ObjectPlayingAnimation, ObjectProperties,
-    ObjectPropertiesFamily, OpenRegionInfo, ParcelAccessEntry, ParcelAccessScope, ParcelDetails,
-    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
-    PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, RegionStats,
-    RequiredVoiceVersion, ScriptControl, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissionState, ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimulatorTime,
-    SoundFlags, SoundPreload, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainPatch,
-    Texture, TransferStatus, UserInfo, ViewerEffect, Wearable,
+    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryCursor, InventoryFolder,
+    InventoryItem, InventoryItemMove, ItemInfo, Kick, LandStatItem, LandStatReportType,
+    LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapLayer, MapRegionInfo, Maturity,
+    MeanCollision, MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo, Object,
+    ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, OpenRegionInfo,
+    ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, PickInfo, PlacesResult,
+    PlayingAnimation, RegionIdentity, RegionLimits, RegionStats, RequiredVoiceVersion,
+    ScriptControl, ScriptDialog, ScriptPermissionRequest, ScriptPermissionState,
+    ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimulatorTime, SoundFlags,
+    SoundPreload, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainPatch, Texture,
+    TransferStatus, UserInfo, ViewerEffect, Wearable,
 };
 use sl_types::key::{
     AgentKey, ExperienceKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
@@ -942,6 +943,36 @@ pub enum Event {
     /// locally** from [`Session::friends_presence`](crate::Session::friends_presence).
     /// The payload is an `Arc<[…]>` (an `Arc` clone across the channel).
     FriendsSnapshot(Arc<[FriendPresence]>),
+    /// One bounded page of an inventory folder's held contents, surfaced in reply
+    /// to a [`Command::QueryInventoryFolder`](crate::Command::QueryInventoryFolder)
+    /// and **synthesized locally** from
+    /// [`Session::inventory_folder_page`](crate::Session::inventory_folder_page).
+    /// `prev` continues the next page when `Some`. The `folders` / `items`
+    /// payloads are `Arc<[…]>` (an `Arc` clone across the channel, never a deep
+    /// copy of the window).
+    InventoryFolderPage {
+        /// Which folder this page is of (echoes the query).
+        folder: InventoryFolderKey,
+        /// The page's sub-folders (resolved view types), bounded to the limit.
+        folders: Arc<[FolderInfo]>,
+        /// The page's items (resolved view types), bounded to the limit.
+        items: Arc<[ItemInfo]>,
+        /// A cursor for the next page, or `None` at the end of the folder.
+        prev: Option<InventoryCursor>,
+    },
+    /// The inventory tree roots — the agent's own root and the read-only Library
+    /// root — surfaced in reply to a
+    /// [`Command::QueryInventoryRoots`](crate::Command::QueryInventoryRoots) and
+    /// **synthesized locally** from
+    /// [`Session::inventory_root`](crate::Session::inventory_root) /
+    /// [`Session::library_root`](crate::Session::library_root). Both keys are
+    /// `Copy`, so the event is trivially cheap (no `Arc`).
+    InventoryRoots {
+        /// The agent's own inventory root folder, or `None` if not yet known.
+        agent_root: Option<InventoryFolderKey>,
+        /// The read-only shared Library root folder, or `None` if not present.
+        library_root: Option<InventoryFolderKey>,
+    },
     /// A scripted object set follow-camera parameters (`SetFollowCamProperties`,
     /// i.e. `llSetCameraParams`), after the agent granted it
     /// [`ScriptPermissions::CONTROL_CAMERA`](crate::ScriptPermissions::CONTROL_CAMERA).

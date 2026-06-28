@@ -26,7 +26,7 @@ passes. Add sub-tasks as you discover them.
 Phase A is **planning only** — its items produce design decisions, not code;
 those decisions are recorded in the **§ Phase A design references** below (one
 per A-item), which are the actual output of Phase A. Phase B (implementation,
-B1–B11) is the task list **derived from** those references, executed once Phase
+B1–B12) is the task list **derived from** those references, executed once Phase
 A is signed off. Tick a Phase A box to sign off the matching reference.
 
 Scope reminders:
@@ -130,7 +130,7 @@ Scope reminders:
 
 Each item is a design directive; its pinned-down output lives in the matching
 **§ … reference (from A#)** under § Phase A design references below. Ticking an
-item's box signs off that reference. Phase B (B1–B10) is then the implementation
+item's box signs off that reference. Phase B (B1–B12) is then the implementation
 task list derived from the signed-off references.
 
 - [x] **A1. Inventory the surface & define the held model.** Enumerate what
@@ -1159,7 +1159,7 @@ tests" rule, so B11's cross-cutting tests are split across the B-tasks that
 introduce their subjects and the residue (the teleport-survival test, the
 relogin example, the live OpenSim verify) is what B11 itself owns.
 
-## Phase B tasks — consolidated (B1–B11)
+## Phase B tasks — consolidated (B1–B12)
 
 Derived from the signed-off § Phase A design references and dependency-ordered
 so each task leaves the tree buildable, clippy-clean (restriction lints), and
@@ -1513,7 +1513,7 @@ live crawl stalls.
 
 ### B8. `Command`/`Event` pull-bridge (from A8)
 
-- [ ] Add `Command::QueryInventoryFolder { folder, before, limit }` +
+- [x] Add `Command::QueryInventoryFolder { folder, before, limit }` +
       `Command::QueryInventoryRoots` in `sl-proto/src/command.rs`; add
       `Event::InventoryFolderPage` (carrying
       `{ folder, folders: Arc<[FolderInfo]>, items: Arc<[ItemInfo]>, prev }`)
@@ -1522,7 +1522,7 @@ live crawl stalls.
       like `Event::ChatHistoryPage` (`event.rs:919-930`). **No `methods.rs`
       dispatch arm** — the bridge mirrors `QueryChatHistoryPage`, which is
       answered in the runtimes, not in sl-proto.
-- [ ] Synthesize each reply in **both** runtimes' command-dispatch arms beside
+- [x] Synthesize each reply in **both** runtimes' command-dispatch arms beside
       the existing `QueryChatHistoryPage` ones (tokio `lib.rs:1622-1650`, bevy
       `lib.rs:2716-2748`): call the pure `inventory_folder_page` (B4) /
       `inventory_root()` / `library_root()` read methods on `Session` and push
@@ -1531,7 +1531,7 @@ live crawl stalls.
       `sl-repl-tokio/src/bin/sl-repl-tokio.rs:504`/`:597-600`). A bevy reader
       system may additionally borrow `&Session` and call `inventory_folder_page`
       directly (zero-copy); the bridge arm stays for parity.
-- [ ] Tests: a folder query replies with the paged view-type window + cursor; an
+- [x] Tests: a folder query replies with the paged view-type window + cursor; an
   `Unknown`-folder query schedules its fetch (ties to B6); the page payloads are
   `Arc<[…]>`-shaped and the direct-borrow `inventory_children` reader compiles
   against `&Session` with no cache clone (the no-unnecessary-copy budget).
@@ -1596,3 +1596,37 @@ live crawl stalls.
       already-current folders (confirm via the diagnostics / log).
 - [ ] Gate: `cargo fmt --all`, full clippy (restriction lints), `rumdl` on this
   file (80-col), on the current branch.
+
+### B12. Update the mdbook inventory chapter (docs)
+
+The `book/src/content/inventory.md` chapter still describes only the old
+fetch / mutate / rez / server-push flow; the whole held read-model added across
+B3–B8 is undocumented. Bring the chapter in sync with the new public API.
+
+- [ ] Document the held two-level model (B3): the in-memory `Inventory` holding
+      the agent tree **and** the read-only Library tree, the per-folder
+      `FolderState` (`Unknown` / `Fetching` / `Loaded { version }`), the
+      parent→children index, and that it holds structure/metadata only (asset
+      bytes are out of scope).
+- [ ] Document the idiomatic read + write API (B4/B7): the typed borrowed
+      accessors (`inventory_root` / `library_root`, `inventory_folder` /
+      `inventory_item`, the `Child`-yielding `inventory_children`,
+      `folder_fetch_state`, the paged `inventory_folder_page` +
+      `InventoryCursor`), the owning view types `FolderInfo` / `ItemInfo` with
+      resolved enums, and the deprecation of the raw `inventory_folders()` /
+      `inventory_items()` maps.
+- [ ] Document background-fetch orchestration (B6): the opt-in
+      `set_background_inventory_fetch` crawl, `next_inventory_fetch_batch` /
+      `request_folder_contents`, and the `inventory_fully_loaded` completion
+      signal.
+- [ ] Document the `Command`/`Event` pull-bridge (B8):
+      `Command::QueryInventoryFolder` / `Command::QueryInventoryRoots` answered
+      by the **synthesized-locally** `Event::InventoryFolderPage` /
+      `Event::InventoryRoots`, the `Arc<[…]>` copy budget, and the bevy
+      zero-copy `&Session` borrow alternative.
+- [ ] Document the disk cache (B9/B10): the Firestorm-compatible
+      `<agent-uuid>.inv.llsd.gz` / `.lib.inv.llsd.gz`, the version-gated
+      load → merge-with-skeleton flow, `ClientDirectories`, and that the cache
+      is grid-level (survives teleport / region crossings).
+- [ ] Gate: `mdbook build book`, `rumdl` on the chapter (80-col), on the current
+      branch.
