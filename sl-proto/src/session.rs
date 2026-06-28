@@ -495,6 +495,12 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
 /// receive buffer never truncates an inbound datagram.
 pub const RECV_BUFFER_SIZE: usize = 0x1_0000;
 
+/// A sensible default bound on the number of inventory folder-contents fetches a
+/// background crawler keeps in flight at once, passed by the runtime shells to
+/// [`Session::next_inventory_fetch_batch`]. Matches Firestorm's legacy
+/// `max_concurrent_fetches = 12` (`LLInventoryModelBackgroundFetch`).
+pub const INVENTORY_FETCH_MAX_IN_FLIGHT: usize = 12;
+
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
 fn deadline(now: Instant, duration: Duration) -> Instant {
     now.checked_add(duration).unwrap_or(now)
@@ -1078,6 +1084,12 @@ pub struct Session {
     /// [`Event::InventoryBulkUpdate`] pushes, and kept current by the agent's own
     /// mutations. See [`Session::inventory_folder`].
     inventory: Inventory,
+    /// Whether the automatic background inventory crawl is enabled. Off by
+    /// default so a consumer that never reads inventory (e.g. a survey bot) issues
+    /// no folder fetches; the explicit pull paths work regardless. Toggled by
+    /// [`Session::set_background_inventory_fetch`] and consulted by
+    /// [`Session::next_inventory_fetch_batch`].
+    background_inventory_fetch: bool,
     /// Pending high-level events for the driver.
     events: VecDeque<Event>,
     /// Whether protocol diagnostics are collected. Off by default so the

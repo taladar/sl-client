@@ -55,6 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             params,
             diagnostics: false,
             chat_log_config: ChatLogConfig::default(),
+            background_inventory_fetch: false,
         })
         .insert_resource(HoldState {
             hold: Duration::from_secs(hold_secs),

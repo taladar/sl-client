@@ -616,6 +616,10 @@ fn run_session(
             params: params.clone(),
             diagnostics: true,
             chat_log_config: chat_log_config.clone(),
+            // The REPL exercises the full client, so crawl inventory in the
+            // background (the tokio REPL does the same via
+            // `set_background_inventory_fetch`).
+            background_inventory_fetch: true,
         })
         .insert_resource(ReplState {
             ctx: SessionContext::new(),
