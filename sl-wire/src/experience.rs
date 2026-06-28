@@ -71,7 +71,7 @@ fn llsd_uuid(value: &Llsd) -> Option<Uuid> {
 
 /// Collects every UUID from the LLSD `array` at `map[key]` (skipping non-UUID
 /// elements). An absent or `Undef` value yields an empty list; a present value
-/// of the wrong LLSD kind is a [`WireError::MalformedField`] labelled `key`.
+/// of the wrong LLSD kind is a [`WireError::Llsd`] labelled `key`.
 fn uuid_array(map: &Llsd, key: &'static str) -> Result<Vec<Uuid>, WireError> {
     Ok(map
         .field_array(key, key)?

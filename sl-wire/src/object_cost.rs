@@ -24,7 +24,7 @@ use sl_types::key::ObjectKey;
 use uuid::Uuid;
 
 use crate::WireError;
-use crate::llsd::Llsd;
+use crate::llsd::{Llsd, LlsdError};
 
 /// The accounting costs of one object, as carried by a `GetObjectCost` reply.
 /// Each value is reported per-part (`resource_cost` / `physics_cost`) and for the
@@ -135,7 +135,7 @@ fn object_cost_to_llsd(cost: &ObjectCost) -> Llsd {
 /// and a conforming emitter always sends them (OpenSim
 /// `BunchOfCaps.cs:GetObjectCost` writes them unconditionally; Firestorm
 /// `llviewerobjectlist.cpp` reads all four), so their absence is a hard
-/// [`WireError::MissingField`]. `resource_limiting_type` is emitted by OpenSim
+/// [`LlsdError::MissingField`]. `resource_limiting_type` is emitted by OpenSim
 /// but never read by the Firestorm reference reader, so it stays optional
 /// (defaulting to the empty string).
 fn object_cost_from_llsd(value: &Llsd) -> Result<ObjectCost, WireError> {
@@ -168,8 +168,8 @@ pub fn build_get_object_cost_request(object_ids: &[ObjectKey]) -> String {
 /// reply map (the "no such object" signal) are simply not present in the result.
 ///
 /// # Errors
-/// Returns [`WireError::MissingField`] if a present per-object cost map omits a
-/// required cost field, or [`WireError::MalformedField`] if a decoded LLSD field
+/// Returns [`LlsdError::MissingField`] if a present per-object cost map omits a
+/// required cost field, or [`LlsdError::MalformedField`] if a decoded LLSD field
 /// is present but of the wrong kind.
 pub fn parse_get_object_cost(body: &Llsd) -> Result<Vec<(ObjectKey, ObjectCost)>, WireError> {
     let mut costs: Vec<(ObjectKey, ObjectCost)> = body
@@ -225,7 +225,7 @@ pub fn build_resource_cost_selected_request(
 /// Defaults to [`SelectedCostKind::Roots`] with no ids when neither key is set.
 ///
 /// # Errors
-/// Returns [`WireError::MalformedField`] if a decoded LLSD field is present but
+/// Returns [`LlsdError::MalformedField`] if a decoded LLSD field is present but
 /// of the wrong kind.
 pub fn parse_resource_cost_selected_request(
     body: &Llsd,
@@ -251,18 +251,19 @@ pub fn parse_resource_cost_selected_request(
 /// (or `Undef`) `selected` map yields the default (all-zero) costs.
 ///
 /// # Errors
-/// Returns [`WireError::MissingField`] if the `selected` map is present but omits
-/// a summed-cost field, or [`WireError::MalformedField`] if a decoded LLSD field
+/// Returns [`LlsdError::MissingField`] if the `selected` map is present but omits
+/// a summed-cost field, or [`LlsdError::MalformedField`] if a decoded LLSD field
 /// is present but of the wrong kind.
 pub fn parse_resource_cost_selected(body: &Llsd) -> Result<SelectedResourceCost, WireError> {
     let selected = match body.get("selected") {
         None | Some(Llsd::Undef) => return Ok(SelectedResourceCost::default()),
         Some(map @ Llsd::Map(_)) => map,
         Some(other) => {
-            return Err(WireError::MalformedField {
+            return Err(LlsdError::MalformedField {
                 field: "selected",
                 value: other.kind().to_owned(),
-            });
+            }
+            .into());
         }
     };
     // When the `selected` map is present it is the whole point of the reply, so
@@ -386,9 +387,9 @@ mod tests {
         );
         let body = parse_llsd_xml(xml).map_err(|error| format!("{error:?}"))?;
         match parse_get_object_cost(&body) {
-            Err(WireError::MissingField {
+            Err(WireError::Llsd(crate::LlsdError::MissingField {
                 field: "resource_cost",
-            }) => Ok(()),
+            })) => Ok(()),
             other => Err(format!(
                 "expected MissingField resource_cost, got {other:?}"
             )),
@@ -408,7 +409,7 @@ mod tests {
         );
         let body = parse_llsd_xml(xml).map_err(|error| format!("{error:?}"))?;
         match parse_resource_cost_selected(&body) {
-            Err(WireError::MissingField { field: "streaming" }) => Ok(()),
+            Err(WireError::Llsd(crate::LlsdError::MissingField { field: "streaming" })) => Ok(()),
             other => Err(format!("expected MissingField streaming, got {other:?}")),
         }
     }

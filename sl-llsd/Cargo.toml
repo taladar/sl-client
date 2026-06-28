@@ -1,6 +1,6 @@
 [package]
-name = "sl-wire"
-description = "Sans-I/O codec for the Second Life / OpenSim LLUDP wire protocol and XML-RPC login"
+name = "sl-llsd"
+description = "LLSD (Linden Lab Structured Data) value model and codecs for Second Life / OpenSim tooling"
 readme = "README.md"
 license = "LGPL-2.1-only"
 version = "0.1.0"
@@ -10,25 +10,15 @@ rust-version = "1.94.0"
 
 publish = false
 repository = "https://github.com/taladar/sl-client"
-keywords = ["secondlife", "opensim", "lludp", "protocol", "codec"]
-categories = ["encoding", "parser-implementations", "network-programming"]
-
-exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+keywords = ["secondlife", "opensim", "llsd", "encoding", "codec"]
+categories = ["encoding", "parser-implementations"]
 
 [dependencies]
 base64 = { version = "0.22.1" }
-md5 = { version = "0.7.0" }
-miniz_oxide = { version = "0.8.9" }
 roxmltree = { version = "0.20.0" }
-sl-llsd = { version = "0.1.0", path = "../sl-llsd" }
 sl-types = { version = "0.6.1", path = "../../sl-map-tools/sl-types" }
 thiserror = { version = "2.0.18" }
-url = { version = "2.5.8" }
 uuid = { version = "1.18.1" }
-
-[build-dependencies]
-fs-err = { version = "3.1.1" }
-sl-msg-template = { version = "0.1.0", path = "../sl-msg-template" }
 
 [dev-dependencies]
 pretty_assertions = { version = "1.4.1" }

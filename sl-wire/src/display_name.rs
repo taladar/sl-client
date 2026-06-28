@@ -114,8 +114,8 @@ impl DisplayName {
     ///
     /// # Errors
     ///
-    /// Returns [`WireError::MissingField`] if a required identity field is
-    /// absent, or [`WireError::MalformedField`] if a present field has the wrong
+    /// Returns [`WireError::Llsd`] if a required identity field is
+    /// absent, or [`WireError::Llsd`] if a present field has the wrong
     /// LLSD kind.
     pub fn from_llsd(map: &Llsd) -> Result<Self, WireError> {
         let optional_string = |key: &'static str| -> Result<String, WireError> {
@@ -209,7 +209,7 @@ pub fn display_names_query(ids: &[Uuid]) -> String {
 ///
 /// # Errors
 ///
-/// Returns [`WireError::MalformedField`] if `agents`/`bad_ids` is present with
+/// Returns [`WireError::Llsd`] if `agents`/`bad_ids` is present with
 /// the wrong LLSD kind, or an `agents` element has a wrong-kind field.
 pub fn parse_display_names(body: &Llsd) -> Result<Vec<DisplayName>, WireError> {
     let mut names = Vec::new();
@@ -348,7 +348,7 @@ mod tests {
     }
 
     /// An `agents` entry that omits a mandatory identity field (here the
-    /// `username`) is rejected as [`WireError::MissingField`] rather than
+    /// `username`) is rejected as [`WireError::Llsd`] rather than
     /// decoding a half-populated record — a resolved entry's identity fields are
     /// always emitted by a conforming grid.
     #[test]
@@ -362,7 +362,7 @@ mod tests {
         ))
         .map_err(|error| format!("{error:?}"))?;
         match parse_display_names(&reply) {
-            Err(WireError::MissingField { field: "username" }) => Ok(()),
+            Err(WireError::Llsd(crate::LlsdError::MissingField { field: "username" })) => Ok(()),
             other => Err(format!("expected MissingField username, got {other:?}")),
         }
     }

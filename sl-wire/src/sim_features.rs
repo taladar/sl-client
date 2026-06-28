@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::WireError;
-use crate::llsd::Llsd;
+use crate::llsd::{Llsd, LlsdError};
 
 /// Which collision-shape types the simulator accepts for a prim's physics shape
 /// (`PhysicsShapeTypes`). The viewer enables the corresponding entries in the
@@ -237,7 +237,7 @@ impl OpenSimExtras {
 /// decodes to [`None`] when omitted (as it is on Second Life).
 ///
 /// # Errors
-/// Returns [`WireError::MalformedField`] if a decoded LLSD field is present but
+/// Returns [`LlsdError::MalformedField`] if a decoded LLSD field is present but
 /// of the wrong kind.
 pub fn parse_simulator_features(body: &Llsd) -> Result<SimulatorFeatures, WireError> {
     let physics_shape_types = match body.get("PhysicsShapeTypes") {
@@ -248,10 +248,11 @@ pub fn parse_simulator_features(body: &Llsd) -> Result<SimulatorFeatures, WireEr
             prim: map_bool(map, "prim")?,
         }),
         Some(other) => {
-            return Err(WireError::MalformedField {
+            return Err(LlsdError::MalformedField {
                 field: "PhysicsShapeTypes",
                 value: other.kind().to_owned(),
-            });
+            }
+            .into());
         }
     };
     let animated_objects = match body.get("AnimatedObjects") {
@@ -261,10 +262,11 @@ pub fn parse_simulator_features(body: &Llsd) -> Result<SimulatorFeatures, WireEr
             max_agent_attachments: map_int(map, "MaxAgentAnimatedObjectAttachments")?,
         }),
         Some(other) => {
-            return Err(WireError::MalformedField {
+            return Err(LlsdError::MalformedField {
                 field: "AnimatedObjects",
                 value: other.kind().to_owned(),
-            });
+            }
+            .into());
         }
     };
     Ok(SimulatorFeatures {
@@ -288,10 +290,11 @@ pub fn parse_simulator_features(body: &Llsd) -> Result<SimulatorFeatures, WireEr
             None | Some(Llsd::Undef) => None,
             Some(map @ Llsd::Map(_)) => Some(OpenSimExtras::from_llsd(map)?),
             Some(other) => {
-                return Err(WireError::MalformedField {
+                return Err(LlsdError::MalformedField {
                     field: "OpenSimExtras",
                     value: other.kind().to_owned(),
-                });
+                }
+                .into());
             }
         },
     })

@@ -23,7 +23,7 @@
 use std::collections::HashMap;
 
 use crate::WireError;
-use crate::llsd::{Llsd, parse_llsd_xml, push_escaped};
+use crate::llsd::{Llsd, LlsdError, parse_llsd_xml, push_escaped};
 
 /// The voice server type string for the legacy Vivox (SIP/RTP) backend, sent as
 /// the `voice_server_type` field of a [`ProvisionVoiceAccountRequest`](build_provision_voice_account_request).
@@ -225,11 +225,11 @@ pub fn build_voice_signaling_request(
 /// # Errors
 ///
 /// Returns a [`roxmltree::Error`] if the body is not well-formed XML, or
-/// [`WireError::MalformedField`] if a present field has the wrong LLSD kind.
+/// [`LlsdError::MalformedField`] if a present field has the wrong LLSD kind.
 pub fn parse_provision_voice_account_request(
     xml: &str,
 ) -> Result<VoiceProvisionRequest, WireError> {
-    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+    let root = parse_llsd_xml(xml).map_err(|error| LlsdError::MalformedField {
         field: "ProvisionVoiceAccountRequest",
         value: format!("{error:?}"),
     })?;
@@ -237,10 +237,11 @@ pub fn parse_provision_voice_account_request(
         None | Some(Llsd::Undef) => None,
         Some(jsep @ Llsd::Map(_)) => jsep.field_str("sdp", "sdp")?.map(str::to_owned),
         Some(other) => {
-            return Err(WireError::MalformedField {
+            return Err(LlsdError::MalformedField {
                 field: "jsep",
                 value: other.kind().to_owned(),
-            });
+            }
+            .into());
         }
     };
     Ok(VoiceProvisionRequest {
@@ -271,11 +272,11 @@ pub fn parse_provision_voice_account_request(
 /// # Errors
 ///
 /// Returns a [`roxmltree::Error`] if the body is not well-formed XML, or
-/// [`WireError::MalformedField`] if a present field has the wrong LLSD kind.
+/// [`LlsdError::MalformedField`] if a present field has the wrong LLSD kind.
 pub fn parse_voice_signaling_request(
     xml: &str,
 ) -> Result<(String, Vec<IceCandidate>, bool), WireError> {
-    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+    let root = parse_llsd_xml(xml).map_err(|error| LlsdError::MalformedField {
         field: "VoiceSignalingRequest",
         value: format!("{error:?}"),
     })?;
@@ -289,10 +290,11 @@ pub fn parse_voice_signaling_request(
             .field_bool("completed", "completed")?
             .unwrap_or(false),
         Some(other) => {
-            return Err(WireError::MalformedField {
+            return Err(LlsdError::MalformedField {
                 field: "candidate",
                 value: other.kind().to_owned(),
-            });
+            }
+            .into());
         }
     };
     let candidates = match root.field_array("candidates", "candidates")? {
@@ -378,8 +380,8 @@ impl VoiceAccountInfo {
     ///
     /// # Errors
     ///
-    /// Returns [`WireError::MissingField`] when a selected backend's mandatory
-    /// signalling field is absent, or [`WireError::MalformedField`] if a present
+    /// Returns [`LlsdError::MissingField`] when a selected backend's mandatory
+    /// signalling field is absent, or [`LlsdError::MalformedField`] if a present
     /// field has the wrong LLSD kind.
     pub fn from_llsd(body: &Llsd) -> Result<Self, WireError> {
         let (jsep_type, jsep_sdp) = match body.get("jsep") {
@@ -391,10 +393,11 @@ impl VoiceAccountInfo {
                 Some(jsep.require_str("sdp", "jsep.sdp")?.to_owned()),
             ),
             Some(other) => {
-                return Err(WireError::MalformedField {
+                return Err(LlsdError::MalformedField {
                     field: "jsep",
                     value: other.kind().to_owned(),
-                });
+                }
+                .into());
             }
         };
         let username = body.field_str("username", "username")?.map(str::to_owned);
@@ -529,8 +532,8 @@ impl ParcelVoiceInfo {
     ///
     /// # Errors
     ///
-    /// Returns [`WireError::MissingField`] if a present `voice_credentials` map
-    /// lacks `channel_uri`, or [`WireError::MalformedField`] if a present field
+    /// Returns [`LlsdError::MissingField`] if a present `voice_credentials` map
+    /// lacks `channel_uri`, or [`LlsdError::MalformedField`] if a present field
     /// has the wrong LLSD kind.
     pub fn from_llsd(body: &Llsd) -> Result<Option<Self>, WireError> {
         if !matches!(body, Llsd::Map(_)) {
@@ -549,10 +552,11 @@ impl ParcelVoiceInfo {
                     .map(str::to_owned),
             ),
             Some(other) => {
-                return Err(WireError::MalformedField {
+                return Err(LlsdError::MalformedField {
                     field: "voice_credentials",
                     value: other.kind().to_owned(),
-                });
+                }
+                .into());
             }
         };
         // An empty region name is the "unknown region" sentinel (`None`); a
@@ -728,7 +732,7 @@ mod tests {
     }
 
     /// A WebRTC provision reply that carries a `jsep` answer but no
-    /// `viewer_session` is rejected as [`WireError::MissingField`] — the viewer
+    /// `viewer_session` is rejected as [`WireError::Llsd`] — the viewer
     /// reads the session id without a fallback and otherwise aborts the
     /// connection.
     #[test]
@@ -741,9 +745,9 @@ mod tests {
         ))
         .map_err(|error| format!("{error:?}"))?;
         match VoiceAccountInfo::from_llsd(&reply) {
-            Err(WireError::MissingField {
+            Err(WireError::Llsd(crate::LlsdError::MissingField {
                 field: "viewer_session",
-            }) => Ok(()),
+            })) => Ok(()),
             other => Err(format!(
                 "expected MissingField viewer_session, got {other:?}"
             )),
@@ -751,7 +755,7 @@ mod tests {
     }
 
     /// A Vivox provision reply with a `username` but no `password` is malformed
-    /// credentials — rejected as [`WireError::MissingField`].
+    /// credentials — rejected as [`WireError::Llsd`].
     #[test]
     fn vivox_provision_missing_password_is_error() -> Result<(), String> {
         let reply = parse_llsd_xml(concat!(
@@ -761,13 +765,13 @@ mod tests {
         ))
         .map_err(|error| format!("{error:?}"))?;
         match VoiceAccountInfo::from_llsd(&reply) {
-            Err(WireError::MissingField { field: "password" }) => Ok(()),
+            Err(WireError::Llsd(crate::LlsdError::MissingField { field: "password" })) => Ok(()),
             other => Err(format!("expected MissingField password, got {other:?}")),
         }
     }
 
     /// A `voice_credentials` map without a `channel_uri` is malformed — rejected
-    /// as [`WireError::MissingField`]. (An *empty* `channel_uri` is instead the
+    /// as [`WireError::Llsd`]. (An *empty* `channel_uri` is instead the
     /// valid no-voice sentinel, covered by `parcel_voice_info_no_voice`.)
     #[test]
     fn parcel_voice_info_missing_channel_uri_is_error() -> Result<(), String> {
@@ -781,9 +785,9 @@ mod tests {
         ))
         .map_err(|error| format!("{error:?}"))?;
         match ParcelVoiceInfo::from_llsd(&reply) {
-            Err(WireError::MissingField {
+            Err(WireError::Llsd(crate::LlsdError::MissingField {
                 field: "channel_uri",
-            }) => Ok(()),
+            })) => Ok(()),
             other => Err(format!("expected MissingField channel_uri, got {other:?}")),
         }
     }

@@ -2,6 +2,7 @@
 members = [
     "sl-client-bevy",
     "sl-client-tokio",
+    "sl-llsd",
     "sl-msg-template",
     "sl-proto",
     "sl-repl",

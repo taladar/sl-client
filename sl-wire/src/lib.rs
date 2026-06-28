@@ -80,7 +80,7 @@ pub use inventory::{
     parse_create_inventory_category_request,
 };
 pub use llsd::{
-    AssetUploadResponse, EventQueueEvent, EventQueueResponse, Llsd, MEDIA_PERM_ALL,
+    AssetUploadResponse, EventQueueEvent, EventQueueResponse, Llsd, LlsdError, MEDIA_PERM_ALL,
     MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MediaEntry,
     ObjectMediaResponse, build_event_queue_request, build_event_queue_response,
     build_fetch_inventory_request, build_group_member_data_request, build_group_notice_bucket,

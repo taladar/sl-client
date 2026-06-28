@@ -1999,6 +1999,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-llsd"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "pretty_assertions",
+ "roxmltree",
+ "sl-types",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "sl-msg-template"
 version = "0.1.0"
 dependencies = [
@@ -2121,6 +2133,7 @@ dependencies = [
  "miniz_oxide",
  "pretty_assertions",
  "roxmltree",
+ "sl-llsd",
  "sl-msg-template",
  "sl-types",
  "thiserror",

@@ -199,13 +199,12 @@ pub(crate) fn parse_mute_line(line: &str) -> Result<Option<MuteEntry>, sl_wire::
     };
     let mut parts = head.splitn(3, ' ');
     let type_text = parts.next().unwrap_or("").trim();
-    let mute_type =
-        type_text
-            .parse::<i32>()
-            .map_err(|_err| sl_wire::WireError::MalformedField {
-                field: "mute_type",
-                value: type_text.to_owned(),
-            })?;
+    let mute_type = type_text
+        .parse::<i32>()
+        .map_err(|_err| sl_wire::WireError::InvalidScalar {
+            field: "mute_type",
+            value: type_text.to_owned(),
+        })?;
     let id = parse_uuid_field("mute_id", parts.next().unwrap_or("").trim())?;
     let name = parts.next().unwrap_or("").trim().to_owned();
     Ok(Some(MuteEntry {
@@ -1673,7 +1672,7 @@ pub(crate) fn estate_info_from_params(
     // A present-but-malformed parameter is a hard error (rejecting the whole
     // `EstateInfo`) rather than a silently-coerced nil/`0`. The covenant id is
     // an optional notecard (`None` for "no covenant"); every other field is
-    // required, so an unparsable value is `MalformedField`/`InvalidUuid`.
+    // required, so an unparsable value is `InvalidScalar`/`InvalidUuid`.
     Ok(Some(EstateInfo {
         estate_name: text(0),
         estate_owner: parse_uuid_field("estate_owner", &text(1))?,
@@ -2374,12 +2373,12 @@ pub(crate) fn parse_optional_uuid_field(
 }
 
 /// Parses a text-form integer strictly: a value that does not parse is a hard
-/// [`WireError::MalformedField`] rather than a silently-coerced `0`.
+/// [`WireError::InvalidScalar`] rather than a silently-coerced `0`.
 pub(crate) fn parse_u32_field(field: &'static str, value: &str) -> Result<u32, sl_wire::WireError> {
     value
         .trim()
         .parse()
-        .map_err(|_err| sl_wire::WireError::MalformedField {
+        .map_err(|_err| sl_wire::WireError::InvalidScalar {
             field,
             value: value.to_owned(),
         })
@@ -4443,7 +4442,7 @@ mod caps_serializer_tests {
         assert_eq!(super::parse_u32_field("f", "42"), Ok(42));
         assert!(matches!(
             super::parse_u32_field("f", "-1"),
-            Err(sl_wire::WireError::MalformedField { .. })
+            Err(sl_wire::WireError::InvalidScalar { .. })
         ));
     }
 
@@ -4463,7 +4462,7 @@ mod caps_serializer_tests {
         ));
         assert!(matches!(
             super::parse_mute_line("1 11111111-1111-1111-1111-111111111111 Bob|notflags"),
-            Err(sl_wire::WireError::MalformedField { .. })
+            Err(sl_wire::WireError::InvalidScalar { .. })
         ));
     }
 

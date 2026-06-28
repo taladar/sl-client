@@ -26,7 +26,7 @@ use uuid::Uuid;
 
 use crate::WireError;
 use crate::endian::{u64_from_be, u64_to_be};
-use crate::llsd::Llsd;
+use crate::llsd::{Llsd, LlsdError};
 use crate::region_handle::RegionHandle;
 use sl_types::key::ParcelKey;
 use sl_types::map::RegionCoordinates;
@@ -98,7 +98,7 @@ pub fn build_remote_parcel_request(
 /// resolve the location).
 ///
 /// # Errors
-/// Returns [`WireError::MalformedField`] if `parcel_id` is present but of the
+/// Returns [`LlsdError::MalformedField`] if `parcel_id` is present but of the
 /// wrong LLSD kind.
 pub fn parse_remote_parcel_reply(body: &Llsd) -> Result<Option<ParcelKey>, WireError> {
     Ok(body
@@ -116,7 +116,7 @@ pub fn parse_remote_parcel_reply(body: &Llsd) -> Result<Option<ParcelKey>, WireE
 /// `region_handle` is read from the 8-byte big-endian binary the viewer sends.
 ///
 /// # Errors
-/// Returns [`WireError::MalformedField`] if a decoded LLSD field is present but
+/// Returns [`LlsdError::MalformedField`] if a decoded LLSD field is present but
 /// of the wrong kind.
 pub fn parse_remote_parcel_request(body: &Llsd) -> Result<RemoteParcelRequest, WireError> {
     let location = match body.field_array("location", "location")? {
@@ -125,12 +125,14 @@ pub fn parse_remote_parcel_request(body: &Llsd) -> Result<RemoteParcelRequest, W
             let coord = |index: usize| -> Result<f32, WireError> {
                 match array.get(index) {
                     None | Some(Llsd::Undef) => Ok(0.0),
-                    Some(v) => v.as_f64().map(crate::geometry::narrow).ok_or_else(|| {
-                        WireError::MalformedField {
+                    Some(v) => v
+                        .as_f64()
+                        .map(crate::geometry::narrow)
+                        .ok_or_else(|| LlsdError::MalformedField {
                             field: "location",
                             value: v.kind().to_owned(),
-                        }
-                    }),
+                        })
+                        .map_err(WireError::from),
                 }
             };
             RegionCoordinates::new(coord(0)?, coord(1)?, coord(2)?)

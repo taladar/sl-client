@@ -27,7 +27,7 @@ use sl_types::map::RegionCoordinates;
 use uuid::Uuid;
 
 use crate::WireError;
-use crate::llsd::Llsd;
+use crate::llsd::{Llsd, LlsdError};
 
 /// One resource budget line in a [`ResourceSummary`]: how much of a named
 /// resource is available or used. The `resource_type` is `"memory"` (bytes; an
@@ -122,7 +122,7 @@ fn resource_amount_to_llsd(amount: &ResourceAmount) -> Llsd {
 /// for every resource line (`BunchOfCaps.cs` `WriteScriptResourceData`,
 /// `AddElem("amount", …)` / `AddElem("type", …)`), and a line missing either is a
 /// nonsense record (an unnamed budget, or a named budget with no number), so an
-/// absent key is a hard [`WireError::MissingField`] rather than a silent
+/// absent key is a hard [`LlsdError::MissingField`] rather than a silent
 /// `{ type: "", amount: 0 }`.
 fn resource_amount_from_llsd(value: &Llsd) -> Result<ResourceAmount, WireError> {
     Ok(ResourceAmount {
@@ -142,10 +142,11 @@ fn resource_amounts_from_llsd(
             .iter()
             .map(resource_amount_from_llsd)
             .collect::<Result<Vec<_>, _>>(),
-        Some(other) => Err(WireError::MalformedField {
+        Some(other) => Err(LlsdError::MalformedField {
             field: label,
             value: other.kind().to_owned(),
-        }),
+        }
+        .into()),
     }
 }
 
@@ -185,19 +186,23 @@ fn vector3_from_llsd(value: Option<&Llsd>, label: &'static str) -> Result<[f32; 
         None | Some(Llsd::Undef) => return Ok([0.0, 0.0, 0.0]),
         Some(Llsd::Array(array)) => array,
         Some(other) => {
-            return Err(WireError::MalformedField {
+            return Err(LlsdError::MalformedField {
                 field: label,
                 value: other.kind().to_owned(),
-            });
+            }
+            .into());
         }
     };
     let component = |index: usize| -> Result<f32, WireError> {
         match array.get(index) {
             None | Some(Llsd::Undef) => Ok(0.0),
-            Some(element) => element.as_f32().ok_or_else(|| WireError::MalformedField {
-                field: label,
-                value: element.kind().to_owned(),
-            }),
+            Some(element) => element
+                .as_f32()
+                .ok_or_else(|| LlsdError::MalformedField {
+                    field: label,
+                    value: element.kind().to_owned(),
+                })
+                .map_err(WireError::from),
         }
     };
     Ok([component(0)?, component(1)?, component(2)?])
@@ -240,7 +245,7 @@ fn scripted_object_to_llsd(object: &ScriptedObjectInfo) -> Llsd {
 /// every object in both the attachment report and the land detail report
 /// (`BunchOfCaps.cs` — `AddElem("id", …)` / `AddElem("owner_id", …)`), and a
 /// scripted-object record with no identity or no owner is meaningless, so an
-/// absent key is a hard [`WireError::MissingField`]. The remaining fields stay
+/// absent key is a hard [`LlsdError::MissingField`]. The remaining fields stay
 /// optional: `name` may be empty, `location` is `.has()`-guarded by Firestorm
 /// (`llfloaterscriptlimits.cpp`), `is_group_owned` is explicitly tolerated as
 /// absent there ("may not be sent by all server versions" → default `false`), and
@@ -254,10 +259,11 @@ fn scripted_object_from_llsd(value: &Llsd) -> Result<ScriptedObjectInfo, WireErr
             urls: map.field_i32("urls", "urls")?,
         },
         Some(other) => {
-            return Err(WireError::MalformedField {
+            return Err(LlsdError::MalformedField {
                 field: "resources",
                 value: other.kind().to_owned(),
-            });
+            }
+            .into());
         }
     };
     Ok(ScriptedObjectInfo {
@@ -291,10 +297,11 @@ fn scripted_objects_from_llsd(
             .iter()
             .map(scripted_object_from_llsd)
             .collect::<Result<Vec<_>, _>>(),
-        Some(other) => Err(WireError::MalformedField {
+        Some(other) => Err(LlsdError::MalformedField {
             field: label,
             value: other.kind().to_owned(),
-        }),
+        }
+        .into()),
     }
 }
 
@@ -325,9 +332,9 @@ pub struct AttachmentResourcesReport {
 /// Decodes an `AttachmentResources` reply.
 ///
 /// # Errors
-/// Returns [`WireError::MissingField`] if a required field of a scripted-object
+/// Returns [`LlsdError::MissingField`] if a required field of a scripted-object
 /// record (`id`, `owner_id`) or a resource line (`type`, `amount`) is absent, or
-/// [`WireError::MalformedField`] if a decoded LLSD field is present but of the
+/// [`LlsdError::MalformedField`] if a decoded LLSD field is present but of the
 /// wrong kind.
 pub fn parse_attachment_resources(body: &Llsd) -> Result<AttachmentResourcesReport, WireError> {
     let attachments = match body.get("attachments") {
@@ -345,20 +352,22 @@ pub fn parse_attachment_resources(body: &Llsd) -> Result<AttachmentResourcesRepo
             })
             .collect::<Result<Vec<_>, WireError>>()?,
         Some(other) => {
-            return Err(WireError::MalformedField {
+            return Err(LlsdError::MalformedField {
                 field: "attachments",
                 value: other.kind().to_owned(),
-            });
+            }
+            .into());
         }
     };
     let summary = match body.get("summary") {
         None | Some(Llsd::Undef) => ResourceSummary::default(),
         Some(map @ Llsd::Map(_)) => resource_summary_from_llsd(map)?,
         Some(other) => {
-            return Err(WireError::MalformedField {
+            return Err(LlsdError::MalformedField {
                 field: "summary",
                 value: other.kind().to_owned(),
-            });
+            }
+            .into());
         }
     };
     Ok(AttachmentResourcesReport {
@@ -428,7 +437,7 @@ pub fn build_land_resources_request(parcel_id: ParcelKey) -> String {
 /// Decodes a `LandResources` request: the requested parcel id.
 ///
 /// # Errors
-/// Returns [`WireError::MalformedField`] if `parcel_id` is present but of the
+/// Returns [`LlsdError::MalformedField`] if `parcel_id` is present but of the
 /// wrong LLSD kind.
 pub fn parse_land_resources_request(body: &Llsd) -> Result<Option<ParcelKey>, WireError> {
     Ok(body
@@ -439,7 +448,7 @@ pub fn parse_land_resources_request(body: &Llsd) -> Result<Option<ParcelKey>, Wi
 /// Decodes a `LandResources` reply: the follow-up capability URLs.
 ///
 /// # Errors
-/// Returns [`WireError::MalformedField`] if a decoded LLSD field is present but
+/// Returns [`LlsdError::MalformedField`] if a decoded LLSD field is present but
 /// of the wrong kind.
 pub fn parse_land_resources_reply(body: &Llsd) -> Result<LandResourcesUrls, WireError> {
     Ok(LandResourcesUrls {
@@ -484,17 +493,18 @@ pub fn build_land_resources_response(urls: &LandResourcesUrls) -> String {
 /// totals (carried under a `summary` key).
 ///
 /// # Errors
-/// Returns [`WireError::MissingField`] if a resource line is missing its required
-/// `type` or `amount`, or [`WireError::MalformedField`] if a decoded LLSD field
+/// Returns [`LlsdError::MissingField`] if a resource line is missing its required
+/// `type` or `amount`, or [`LlsdError::MalformedField`] if a decoded LLSD field
 /// is present but of the wrong kind.
 pub fn parse_land_resource_summary(body: &Llsd) -> Result<ResourceSummary, WireError> {
     match body.get("summary") {
         None | Some(Llsd::Undef) => Ok(ResourceSummary::default()),
         Some(map @ Llsd::Map(_)) => resource_summary_from_llsd(map),
-        Some(other) => Err(WireError::MalformedField {
+        Some(other) => Err(LlsdError::MalformedField {
             field: "summary",
             value: other.kind().to_owned(),
-        }),
+        }
+        .into()),
     }
 }
 
@@ -529,12 +539,12 @@ pub struct ParcelScriptResources {
 /// writes both unconditionally for every parcel (`BunchOfCaps.cs` —
 /// `AddElem("id", …)` / `AddElem("local_id", …)`), and a parcel record with no
 /// grid id or no region-local id can identify no parcel, so an absent key is a
-/// hard [`WireError::MissingField`]. `name` stays optional (it may be empty and
+/// hard [`LlsdError::MissingField`]. `name` stays optional (it may be empty and
 /// Firestorm reads it blind).
 ///
 /// # Errors
-/// Returns [`WireError::MissingField`] if a required field (`id`, `local_id`) is
-/// absent, or [`WireError::MalformedField`] if a decoded LLSD field is present
+/// Returns [`LlsdError::MissingField`] if a required field (`id`, `local_id`) is
+/// absent, or [`LlsdError::MalformedField`] if a decoded LLSD field is present
 /// but of the wrong kind.
 pub fn parse_land_resource_detail(body: &Llsd) -> Result<Vec<ParcelScriptResources>, WireError> {
     match body.get("parcels") {
@@ -555,10 +565,11 @@ pub fn parse_land_resource_detail(body: &Llsd) -> Result<Vec<ParcelScriptResourc
                 })
             })
             .collect::<Result<Vec<_>, WireError>>(),
-        Some(other) => Err(WireError::MalformedField {
+        Some(other) => Err(LlsdError::MalformedField {
             field: "parcels",
             value: other.kind().to_owned(),
-        }),
+        }
+        .into()),
     }
 }
 

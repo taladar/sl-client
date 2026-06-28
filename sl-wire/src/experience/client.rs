@@ -173,7 +173,7 @@ pub fn build_region_experiences_request(
 ///
 /// # Errors
 ///
-/// Returns a [`WireError::MalformedField`] if a decoded LLSD field has the wrong
+/// Returns a [`WireError::Llsd`] if a decoded LLSD field has the wrong
 /// kind.
 pub fn parse_experience_infos(body: &Llsd) -> Result<Vec<ExperienceInfo>, WireError> {
     let mut infos = Vec::new();
@@ -201,7 +201,7 @@ pub fn parse_experience_infos(body: &Llsd) -> Result<Vec<ExperienceInfo>, WireEr
 ///
 /// # Errors
 ///
-/// Returns a [`WireError::MalformedField`] if `experience_ids` is present but not
+/// Returns a [`WireError::Llsd`] if `experience_ids` is present but not
 /// an LLSD array.
 pub fn parse_experience_ids(body: &Llsd) -> Result<Vec<ExperienceKey>, WireError> {
     Ok(uuid_array(body, "experience_ids")?
@@ -215,7 +215,7 @@ pub fn parse_experience_ids(body: &Llsd) -> Result<Vec<ExperienceKey>, WireError
 ///
 /// # Errors
 ///
-/// Returns a [`WireError::MalformedField`] if `experiences` or `blocked` is
+/// Returns a [`WireError::Llsd`] if `experiences` or `blocked` is
 /// present but not an LLSD array.
 pub fn parse_experience_permissions(
     body: &Llsd,
@@ -236,7 +236,7 @@ pub fn parse_experience_permissions(
 ///
 /// # Errors
 ///
-/// Returns a [`WireError::MalformedField`] if `allowed`, `blocked`, or `trusted`
+/// Returns a [`WireError::Llsd`] if `allowed`, `blocked`, or `trusted`
 /// is present but not an LLSD array.
 #[expect(
     clippy::type_complexity,
@@ -259,7 +259,7 @@ pub fn parse_region_experiences(
 ///
 /// # Errors
 ///
-/// Returns a [`WireError::MalformedField`] if `status` is present but not an LLSD
+/// Returns a [`WireError::Llsd`] if `status` is present but not an LLSD
 /// boolean.
 pub fn parse_experience_status(body: &Llsd) -> Result<bool, WireError> {
     Ok(body.field_bool("status", "status")?.unwrap_or(false))

@@ -74,7 +74,7 @@ fn experience_info_query_and_decode() -> Result<(), String> {
 /// An `experience_keys` element without a `public_id` is rejected: `public_id`
 /// is the experience key every record is filed under (the only field the
 /// Firestorm cache guards), so a record lacking it is meaningless and decoding
-/// is a hard [`WireError::MissingField`].
+/// is a hard [`WireError::Llsd`].
 #[test]
 fn experience_info_missing_public_id_errors() -> Result<(), String> {
     let reply = parse_llsd_xml(concat!(
@@ -85,7 +85,9 @@ fn experience_info_missing_public_id_errors() -> Result<(), String> {
     .map_err(|error| format!("{error:?}"))?;
     assert_eq!(
         parse_experience_infos(&reply),
-        Err(WireError::MissingField { field: "public_id" })
+        Err(WireError::Llsd(crate::LlsdError::MissingField {
+            field: "public_id"
+        }))
     );
     Ok(())
 }

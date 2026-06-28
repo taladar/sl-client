@@ -29,7 +29,7 @@ use sl_types::key::{InventoryFolderKey, InventoryKey};
 use uuid::Uuid;
 
 use crate::WireError;
-use crate::llsd::{Llsd, parse_llsd_xml, push_escaped};
+use crate::llsd::{Llsd, LlsdError, parse_llsd_xml, push_escaped};
 
 /// The viewer's maximum AIS3 folder-fetch depth (`MAX_FOLDER_DEPTH_REQUEST`);
 /// the grid caps deeper requests regardless.
@@ -231,10 +231,10 @@ pub struct AisCategoryCreate {
 ///
 /// # Errors
 ///
-/// Returns [`WireError::MalformedField`] if the body is not well-formed XML or a
+/// Returns [`LlsdError::MalformedField`] if the body is not well-formed XML or a
 /// present field has the wrong LLSD kind.
 pub fn parse_ais_create_category_body(xml: &str) -> Result<AisCategoryCreate, WireError> {
-    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+    let root = parse_llsd_xml(xml).map_err(|error| LlsdError::MalformedField {
         field: "AisCreateCategory",
         value: error.to_string(),
     })?;
@@ -249,10 +249,10 @@ pub fn parse_ais_create_category_body(xml: &str) -> Result<AisCategoryCreate, Wi
 ///
 /// # Errors
 ///
-/// Returns [`WireError::MalformedField`] if the body is not well-formed XML or a
+/// Returns [`LlsdError::MalformedField`] if the body is not well-formed XML or a
 /// present field has the wrong LLSD kind.
 pub fn parse_ais_rename_category_body(xml: &str) -> Result<String, WireError> {
-    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+    let root = parse_llsd_xml(xml).map_err(|error| LlsdError::MalformedField {
         field: "AisRenameCategory",
         value: error.to_string(),
     })?;
@@ -265,10 +265,10 @@ pub fn parse_ais_rename_category_body(xml: &str) -> Result<String, WireError> {
 ///
 /// # Errors
 ///
-/// Returns [`WireError::MalformedField`] if the body is not well-formed XML or a
+/// Returns [`LlsdError::MalformedField`] if the body is not well-formed XML or a
 /// present field has the wrong LLSD kind.
 pub fn parse_ais_move_body(xml: &str) -> Result<InventoryFolderKey, WireError> {
-    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+    let root = parse_llsd_xml(xml).map_err(|error| LlsdError::MalformedField {
         field: "AisMove",
         value: error.to_string(),
     })?;
@@ -293,10 +293,10 @@ pub struct AisItemUpdate {
 ///
 /// # Errors
 ///
-/// Returns [`WireError::MalformedField`] if the body is not well-formed XML or a
+/// Returns [`LlsdError::MalformedField`] if the body is not well-formed XML or a
 /// present field has the wrong LLSD kind.
 pub fn parse_ais_update_item_body(xml: &str) -> Result<AisItemUpdate, WireError> {
-    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+    let root = parse_llsd_xml(xml).map_err(|error| LlsdError::MalformedField {
         field: "AisUpdateItem",
         value: error.to_string(),
     })?;
@@ -335,13 +335,13 @@ pub struct CreateInventoryCategoryRequest {
 ///
 /// # Errors
 ///
-/// Returns [`WireError::MissingField`] if `folder_id`, `parent_id`, or `name`
-/// is absent, and [`WireError::MalformedField`] if the body is not well-formed
+/// Returns [`LlsdError::MissingField`] if `folder_id`, `parent_id`, or `name`
+/// is absent, and [`LlsdError::MalformedField`] if the body is not well-formed
 /// XML or a present field has the wrong LLSD kind.
 pub fn parse_create_inventory_category_request(
     xml: &str,
 ) -> Result<CreateInventoryCategoryRequest, WireError> {
-    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+    let root = parse_llsd_xml(xml).map_err(|error| LlsdError::MalformedField {
         field: "CreateInventoryCategory",
         value: error.to_string(),
     })?;
@@ -357,7 +357,7 @@ pub fn parse_create_inventory_category_request(
 ///
 /// # Errors
 ///
-/// Returns [`WireError::MalformedField`] if `key` is present with a non-string
+/// Returns [`LlsdError::MalformedField`] if `key` is present with a non-string
 /// LLSD value.
 fn llsd_string(root: &Llsd, key: &'static str) -> Result<String, WireError> {
     Ok(root.field_str(key, key)?.unwrap_or("").to_owned())
