@@ -1247,29 +1247,48 @@ Standalone; the cache tasks (B5/B10) serialise through it.
 Folds the existing raw maps into a model module; migrates the `cache_inventory*`
 folds and the accessors onto it with no behaviour change yet.
 
-- [ ] Add `sl-proto/src/session/inventory.rs`: an `Inventory` struct owning the
+- [x] Add `sl-proto/src/session/inventory.rs`: an `Inventory` struct owning the
       folder/item stores, the `owner` discriminator (`Agent` / `Library`), the
       roots, a `FolderState` (`Unknown` / `Fetching` /
       `Loaded { version: i32 }`) per folder, and the parent→children index.
-      `const fn` empty constructor.
-- [ ] Move `inventory_folders` / `inventory_items` / `inventory_root` /
-  `next_inventory_callback` off `Session` into the model field; migrate every
-  internal use to maintain the index + fetch-state: the central folds
-  (`cache_inventory`/`_folder`/`_item`, `:7910`/`:7897`/`:7920`), the **direct
-  skeleton seed** (`:1223-1224` — route through the model so it sets the
-  authoritative version + index instead of a raw `insert`), the **re-parent
-  mutations** that edit the parent link in place (`move_inventory_folders`
-  `:8062`, `move_inventory_items` `:8193` — unlink-old + link-new), and the
-  removal sites (`purge_cached_descendents` `:7926`, `remove_inventory_folders`
-  `:8085`, `remove_inventory_items` `:8248`, `purge_inventory_descendents`
-  `:8288`, `remove_inventory_objects` `:8310`).
-- [ ] Set the authoritative folder version from the skeleton (`methods.rs:1223`)
-  and from descendents replies; keep sub-folders (`version 0`) `Unknown`.
-- [ ] **Persistence guard (from A10):** add **no** inventory clear at the four
-  region-boundary sites; assert that in B11.
-- [ ] Tests: skeleton seeds roots + `Unknown`; a descendents reply flips the
+      `const fn` empty constructor. **Implementation note:** the folder/item
+      stores are keyed by the **typed** `InventoryFolderKey` / `InventoryKey`
+      (not bare `Uuid`); the `inventory_folders()` / `inventory_items()` map
+      accessors are **re-typed** in step with this to return
+      `&BTreeMap<InventoryFolderKey, InventoryFolder>` /
+      `&BTreeMap<InventoryKey, InventoryItem>` (grep-confirmed no external
+      callers, so B4's "deprecate the raw `&BTreeMap<Uuid, …>` accessors" item
+      is superseded — they were never raw `Uuid` once this landed). The
+      per-folder bookkeeping (owner, `FolderState`, child sets) is a side-table
+      `meta: BTreeMap<InventoryFolderKey, FolderMeta>` rather than a unified
+      `FolderEntry` — same capability, no redundant shadow map.
+- [x] Move `inventory_folders` / `inventory_items` / `inventory_root` /
+      `next_inventory_callback` off `Session` into the model field; migrate
+      every internal use to maintain the index + fetch-state: the central folds
+      (`cache_inventory`/`_folder`/`_item`), the **direct skeleton seed** (now
+      routes through `Inventory::cache_folder` so it sets the authoritative
+      version + index instead of a raw `insert`), the **re-parent mutations**
+      that edit the parent link in place (`move_inventory_folders` →
+      `Inventory::reparent_folder`, `move_inventory_items` →
+      `Inventory::move_item` — unlink-old + link-new), and the removal sites
+      (`Inventory::purge_descendents` / `remove_folder` / `remove_item`, the
+      latter two unlinking from the parent's child set).
+- [x] Set the authoritative folder version from the skeleton and from
+  descendents replies (`Inventory::mark_folder_loaded`, at both the UDP and CAPS
+  descendents arms); keep sub-folders (`version 0`) `Unknown`.
+- [x] **Persistence guard (from A10):** add **no** inventory clear at the four
+  region-boundary sites; documented beside the chat persistence guard; assert
+  that in B11.
+- [x] Tests: skeleton seeds roots + `Unknown`; a descendents reply flips the
   folder to `Loaded { version }` and the index lists its children; a mutation
-  keeps the index consistent.
+  keeps the index consistent. (Integration tests in `lifecycle.rs` extended;
+  focused model unit tests added in `inventory.rs`.)
+
+  **B4 down-payment landed here (their readers were needed now):** the public
+  `Session::folder_fetch_state()` and `Session::library_root()` accessors (both
+  also listed under B4) plus a new `Session::inventory_owner()` accessor land in
+  this task as the readers for the new `FolderState` / library-root / `owner`
+  fields; `FolderState` and `InventoryOwner` are re-exported at the crate root.
 
 ### B4. Idiomatic public model API — read + write (from A7)
 
@@ -1289,8 +1308,13 @@ folds and the accessors onto it with no behaviour change yet.
       paged `inventory_folder_page(folder, before, limit)` returning the owning
       view-type window + next `InventoryCursor` (the `history_page` cursor
       precedent — owning `Vec`s, not borrowed iterators).
-- [ ] Deprecate (`#[deprecated]`) the raw `inventory_folders()` (`:7861`) /
-  `inventory_items()` (`:7867`) map accessors; keep them compiling one cycle.
+- [ ] ~~Deprecate (`#[deprecated]`) the raw `inventory_folders()` /
+  `inventory_items()` map accessors.~~ **Superseded by B3:** the stores were
+  re-keyed to typed keys in B3, so these accessors already return
+  `&BTreeMap<InventoryFolderKey, InventoryFolder>` /
+  `&BTreeMap<InventoryKey, InventoryItem>` (no longer raw `Uuid`); nothing to
+  deprecate. B4 may still add the `Child`-iterator / view-type read surface
+  alongside them.
 
 *Write side (symmetric with the read side — coherence mechanics stay in
 B3/A10):*

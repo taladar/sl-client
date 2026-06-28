@@ -1,15 +1,13 @@
 //! The sans-I/O session state machine: login, circuit establishment,
 //! keep-alive, and clean logout, driven entirely by passed-in time.
 
-use crate::bookkeeping_ids::{InventoryCallbackId, TransferId, XferId};
+use crate::bookkeeping_ids::{TransferId, XferId};
 use crate::scoped_id::CircuitId;
 use crate::types::{
-    AssetType, Camera, Diagnostic, Event, Friend, ImageCodec, InventoryFolder, InventoryItem,
-    LoginAccount, LoginParams, Object, TerrainPatch, Throttle,
+    AssetType, Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, Object,
+    TerrainPatch, Throttle,
 };
-use sl_types::key::{
-    AgentKey, ExperienceKey, FriendKey, InventoryFolderKey, InventoryKey, ObjectKey,
-};
+use sl_types::key::{AgentKey, ExperienceKey, FriendKey, InventoryKey, ObjectKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::ScriptPermissions;
 use sl_types::map::Distance;
@@ -997,9 +995,6 @@ pub struct Session {
     /// The current region's capability-seed URL (from login or a teleport), for
     /// the driver to fetch the CAPS map and event queue.
     seed_capability: Option<url::Url>,
-    /// The agent's inventory root ("My Inventory") folder id, from the login
-    /// response.
-    inventory_root: Option<InventoryFolderKey>,
     /// Account-level facts from the login response (home, maturity, group limit,
     /// Library roots), or `None` before login.
     login_account: Option<LoginAccount>,
@@ -1074,21 +1069,15 @@ pub struct Session {
     /// of a circuit's state in [`Session::forget_sim_objects`]. Surfaced via
     /// [`Session::own_avatar_id`].
     own_avatar: BTreeMap<CircuitId, RegionLocalObjectId>,
-    /// The live inventory-folder cache, keyed by folder id. Seeded from the
-    /// login skeleton ([`Event::InventorySkeleton`]), grown by folder-contents
-    /// fetches ([`Event::InventoryDescendents`], both UDP and CAPS) and the
-    /// simulator's [`Event::InventoryBulkUpdate`] pushes, and kept current by the
-    /// agent's own mutations. See [`Session::inventory_folder`].
-    inventory_folders: BTreeMap<Uuid, InventoryFolder>,
-    /// The live inventory-item cache, keyed by item id. Populated by
-    /// folder-contents fetches and the simulator's
-    /// [`Event::InventoryItemCreated`] / [`Event::InventoryBulkUpdate`] pushes,
-    /// and kept current by the agent's own mutations. See
-    /// [`Session::inventory_item`].
-    inventory_items: BTreeMap<Uuid, InventoryItem>,
-    /// A monotonic counter for the async `CallbackID` of inventory create/update
-    /// requests, echoed back in the simulator's reply so a client can correlate.
-    next_inventory_callback: InventoryCallbackId,
+    /// The held inventory model: the agent's own inventory tree and the read-only
+    /// Library tree, each owning its folder/item stores, per-folder fetch state,
+    /// and a parent→children index, plus the inventory roots and the async
+    /// `CallbackID` counter. Seeded from the login skeleton
+    /// ([`Event::InventorySkeleton`]), grown by folder-contents fetches
+    /// ([`Event::InventoryDescendents`], both UDP and CAPS) and the simulator's
+    /// [`Event::InventoryBulkUpdate`] pushes, and kept current by the agent's own
+    /// mutations. See [`Session::inventory_folder`].
+    inventory: Inventory,
     /// Pending high-level events for the driver.
     events: VecDeque<Event>,
     /// Whether protocol diagnostics are collected. Off by default so the
@@ -1103,14 +1092,17 @@ pub struct Session {
 mod chat_session;
 mod circuit;
 mod conversions;
+mod inventory;
 mod methods;
 
 use self::chat_session::{ChatSession, TYPING_TIMEOUT};
+use self::inventory::Inventory;
 pub use chat_session::{
     ChatLifecycleView, ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, FriendPresence,
     InviteChannel, MessageCursor, PendingInvite, SessionMessage, VoiceChannelInfo,
     VoiceChannelState,
 };
+pub use inventory::{FolderState, InventoryOwner};
 
 pub(crate) use conversions::{
     ZERO_VECTOR, instant_message, region_handshake_message, shape_from_object_shape_block,
