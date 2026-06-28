@@ -400,6 +400,8 @@ fn on_events(
             | SlSessionEvent::ChatSessions(_)
             | SlSessionEvent::ChatHistoryPage { .. }
             | SlSessionEvent::FriendsSnapshot(_)
+            | SlSessionEvent::InventoryFolderPage { .. }
+            | SlSessionEvent::InventoryRoots { .. }
             | SlSessionEvent::LandStatReply { .. } => {}
         }
     }

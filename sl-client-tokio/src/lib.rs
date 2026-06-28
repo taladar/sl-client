@@ -54,8 +54,8 @@ pub use sl_proto::{
     ControlFlags, ConversationKind, CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic,
     Direction, DisconnectReason, Distance, EconomyData, EstateAccessDelta, EstateAccessKind,
     EstateInfo, Event, ExperienceInfo, ExperiencePermission, ExperienceProperties,
-    ExperienceUpdate, ExtendedMesh, FlexibleData, FolderInfo, FolderType, Friend, FriendRights,
-    GlobalCoordinates, GltfMaterialOverride, GridCoordinates, GroupKey, GroupMember,
+    ExperienceUpdate, ExtendedMesh, FlexibleData, FolderInfo, FolderState, FolderType, Friend,
+    FriendRights, GlobalCoordinates, GltfMaterialOverride, GridCoordinates, GroupKey, GroupMember,
     GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
     GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
     GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
@@ -1723,6 +1723,39 @@ impl Client {
                                     }
                                 };
                             events.send(Event::ChatHistoryPage { session, messages, prev }).await.ok();
+                        }
+                        Some(Command::QueryInventoryFolder { folder, before, limit }) => {
+                            // Local query: page the held model into owning view
+                            // types (one bounded borrow→owned transform, the
+                            // payload `Arc<[…]>` so re-handoff is a refcount
+                            // bump). A bevy reader may instead borrow the Session
+                            // and call `inventory_folder_page` directly.
+                            let (folders, items, prev) =
+                                self.session.inventory_folder_page(folder, before, limit);
+                            // On-demand: a query for an unfetched folder schedules
+                            // its fetch so a later query sees the contents (works
+                            // regardless of the background-crawl flag).
+                            if self.session.folder_fetch_state(folder)
+                                == Some(FolderState::Unknown)
+                            {
+                                self.session
+                                    .request_folder_contents(folder, Instant::now())
+                                    .ok();
+                            }
+                            events.send(Event::InventoryFolderPage {
+                                folder,
+                                folders: folders.into(),
+                                items: items.into(),
+                                prev,
+                            }).await.ok();
+                        }
+                        Some(Command::QueryInventoryRoots) => {
+                            // Local query: surface the agent + library roots (both
+                            // `Copy` keys, no `Arc` needed).
+                            events.send(Event::InventoryRoots {
+                                agent_root: self.session.inventory_root(),
+                                library_root: self.session.library_root(),
+                            }).await.ok();
                         }
                         Some(Command::QueryFriends) => {
                             // Local query: build the buddy snapshot with online flags.

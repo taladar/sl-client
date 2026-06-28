@@ -657,6 +657,8 @@ impl Survey {
             | Event::ChatSessions(_)
             | Event::ChatHistoryPage { .. }
             | Event::FriendsSnapshot(_)
+            | Event::InventoryFolderPage { .. }
+            | Event::InventoryRoots { .. }
             | Event::SetFollowCamProperties { .. }
             | Event::ClearFollowCamProperties { .. }
             | Event::MuteList(_)
