@@ -15,7 +15,9 @@ use sl_conformance::gitinfo;
 use sl_conformance::grid::Grid;
 use sl_conformance::record::Record;
 use sl_conformance::registry::registry;
-use sl_conformance::report::{Cell, CellStatus, Freshness, Judgement, MetricDelta, classify};
+use sl_conformance::report::{
+    Cell, CellStatus, Freshness, Judgement, MetricDelta, classify, freshness_of,
+};
 
 /// When to colourise output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
@@ -89,8 +91,21 @@ fn run(args: &Options) -> Result<bool, Error> {
         for grid in &grids {
             let applicable = test.grids().contains(grid);
             let record = load_record(&records_dir, *grid, test.name());
-            let cell = classify(applicable, record.as_ref(), current_describe.as_deref());
-            let behind = stale_distance(&cell, repo_root.as_deref());
+            let recorded = record
+                .as_ref()
+                .and_then(Record::newest)
+                .map(|run| run.behavior_describe.clone());
+            // Count behaviour-changing commits since the recorded run, so a record
+            // stays "current" through commits that only touched records/docs.
+            let behind = match (repo_root.as_deref(), recorded.as_deref()) {
+                (Some(root), Some(rec)) => gitinfo::behavioural_commits_behind(root, rec),
+                _ => None,
+            };
+            let freshness = match recorded.as_deref() {
+                Some(rec) => freshness_of(rec, current_describe.as_deref(), behind),
+                None => Freshness::Unknown,
+            };
+            let cell = classify(applicable, record.as_ref(), freshness);
             cells.push(format!(
                 "{}: {}",
                 grid.dir_name(),
@@ -165,17 +180,6 @@ fn color_enabled(choice: ColorChoice) -> bool {
     }
 }
 
-/// How many commits behind HEAD a stale cell's recorded run is, when that can
-/// be determined from git; `None` otherwise (and for non-stale cells).
-fn stale_distance(cell: &Cell, repo_root: Option<&Path>) -> Option<u32> {
-    if !matches!(cell.freshness, Freshness::Stale) {
-        return None;
-    }
-    let recorded = cell.recorded_describe.as_deref()?;
-    let root = repo_root?;
-    gitinfo::commits_behind(root, recorded)
-}
-
 /// Render a status cell, annotating it with commit freshness, dirtiness, and
 /// partial state.
 fn render_status(cell: &Cell, behind: Option<u32>, color: bool) -> String {
@@ -196,8 +200,8 @@ fn render_status(cell: &Cell, behind: Option<u32>, color: bool) -> String {
         Freshness::Stale => {
             let recorded = cell.recorded_describe.as_deref().unwrap_or("?");
             let distance = match behind {
-                Some(1) => "1 commit behind".to_owned(),
-                Some(count) => format!("{count} commits behind"),
+                Some(1) => "1 behavioural commit behind".to_owned(),
+                Some(count) => format!("{count} behavioural commits behind"),
                 None => "older commit".to_owned(),
             };
             text.push_str(&paint(

@@ -130,23 +130,58 @@ pub fn repo_root(start: &Path) -> Result<std::path::PathBuf, GitError> {
     Ok(std::path::PathBuf::from(top.trim()))
 }
 
-/// How many commits the current `HEAD` is ahead of the commit named by a
-/// recorded describe string (its `-dirty` suffix is ignored).
+/// The commit hash a recorded describe refers to (its `-dirty` suffix ignored).
 ///
-/// Returns `None` when the commit is not in the current history (e.g. it was
-/// rebased away) or git cannot answer, so callers can fall back to showing the
-/// raw describe.
-#[must_use]
-pub fn commits_behind(repo_root: &Path, recorded_describe: &str) -> Option<u32> {
+/// `git describe --long` yields `<tag>-<n>-g<hash>`; `--always` with no tag
+/// yields the bare `<hash>`. Take whatever follows the last `-g`, else all.
+fn describe_commit(recorded_describe: &str) -> &str {
     let base = recorded_describe
         .strip_suffix("-dirty")
         .unwrap_or(recorded_describe);
-    // `git describe --long` yields `<tag>-<n>-g<hash>`; `--always` with no tag
-    // yields the bare `<hash>`. Take whatever follows the last `-g`, else all.
-    let hash = base.rsplit_once("-g").map_or(base, |(_prefix, hash)| hash);
+    base.rsplit_once("-g").map_or(base, |(_prefix, hash)| hash)
+}
+
+/// Count, in `git log --format=@@%H --name-only` output, the commits that
+/// touched at least one behaviour-relevant file.
+///
+/// Each commit is introduced by an `@@<hash>` line, followed by its changed
+/// paths; non-behavioural commits (records/docs/book/changelog only) anywhere in
+/// the range are not counted, not merely those adjacent to `HEAD`.
+fn count_behavioural_commits(log_output: &str) -> u32 {
+    let mut count: u32 = 0;
+    let mut in_commit = false;
+    let mut has_behaviour = false;
+    for line in log_output.lines() {
+        if line.starts_with("@@") {
+            if in_commit && has_behaviour {
+                count = count.saturating_add(1);
+            }
+            in_commit = true;
+            has_behaviour = false;
+        } else if !line.is_empty() && path_is_behavioural(line) {
+            has_behaviour = true;
+        }
+    }
+    if in_commit && has_behaviour {
+        count = count.saturating_add(1);
+    }
+    count
+}
+
+/// How many *behaviour-changing* commits lie between the commit named by
+/// `recorded_describe` and the current `HEAD`.
+///
+/// Mirrors the dirty rule: commits that touched only records, documentation, the
+/// book, or changelogs — wherever they sit in the range — are ignored. A result
+/// of `Some(0)` means nothing behaviour-relevant has changed since the record
+/// ran (so it is still current). Returns `None` when the commit is not in
+/// history or git cannot answer.
+#[must_use]
+pub fn behavioural_commits_behind(repo_root: &Path, recorded_describe: &str) -> Option<u32> {
+    let hash = describe_commit(recorded_describe);
     let range = format!("{hash}..HEAD");
-    let output = run_git(repo_root, &["rev-list", "--count", &range]).ok()?;
-    output.trim().parse().ok()
+    let output = run_git(repo_root, &["log", "--format=@@%H", "--name-only", &range]).ok()?;
+    Some(count_behavioural_commits(&output))
 }
 
 /// Compute the behaviour-aware describe for the repository rooted at
@@ -190,8 +225,35 @@ pub enum GitError {
 
 #[cfg(test)]
 mod tests {
-    use super::{BehaviorDescribe, parse_porcelain_z, path_is_behavioural};
+    use super::{
+        BehaviorDescribe, count_behavioural_commits, describe_commit, parse_porcelain_z,
+        path_is_behavioural,
+    };
     use pretty_assertions::assert_eq;
+
+    /// Only commits touching a behavioural file are counted, wherever they sit.
+    #[test]
+    fn behavioural_commit_counting() {
+        // Two commits: the newest touched only records (non-behavioural), an
+        // older one touched source. Only the source one counts.
+        let log = "@@aaaaaaa\nrecords/opensim/inventory-fetch.toml\n\n\
+                   @@bbbbbbb\nsl-conformance/src/grid.rs\nbook/src/x.md\n";
+        assert_eq!(count_behavioural_commits(log), 1);
+        // A run of only doc/record commits counts as zero.
+        let docs_only = "@@aaaaaaa\nROADMAP.md\n\n@@bbbbbbb\nrecords/aditi/x.toml\n";
+        assert_eq!(count_behavioural_commits(docs_only), 0);
+        // Empty range (no commits) is zero.
+        assert_eq!(count_behavioural_commits(""), 0);
+    }
+
+    /// The commit hash is extracted from a describe, ignoring any `-dirty`.
+    #[test]
+    fn commit_extraction() {
+        assert_eq!(describe_commit("f718bbe"), "f718bbe");
+        assert_eq!(describe_commit("f718bbe-dirty"), "f718bbe");
+        assert_eq!(describe_commit("v0.1.0-3-gabcdef"), "abcdef");
+        assert_eq!(describe_commit("v0.1.0-3-gabcdef-dirty"), "abcdef");
+    }
 
     /// Records, docs, the book, and changelogs are not behavioural; source is.
     #[test]

@@ -95,6 +95,34 @@ fn describe_base(describe: &str) -> &str {
     describe.strip_suffix("-dirty").unwrap_or(describe)
 }
 
+/// Decide a run's freshness against the current checkout, given how many
+/// behaviour-changing commits lie between the recorded commit and `HEAD`.
+///
+/// A run is [`Current`](Freshness::Current) when it was recorded at the current
+/// commit, or when no behaviour-changing commit has landed since
+/// (`behavioural_commits_behind == Some(0)`) — mirroring the dirty rule, which
+/// also ignores record/doc changes. It is [`Stale`](Freshness::Stale) when one
+/// or more behavioural commits have landed (or the recorded commit is no longer
+/// in history), and [`Unknown`](Freshness::Unknown) when the current commit
+/// cannot be determined.
+#[must_use]
+pub fn freshness_of(
+    recorded_describe: &str,
+    current_describe: Option<&str>,
+    behavioural_commits_behind: Option<u32>,
+) -> Freshness {
+    let Some(current) = current_describe else {
+        return Freshness::Unknown;
+    };
+    if describe_base(recorded_describe) == describe_base(current) {
+        return Freshness::Current;
+    }
+    match behavioural_commits_behind {
+        Some(0) => Freshness::Current,
+        _ => Freshness::Stale,
+    }
+}
+
 /// Compute the percentage change from `old` to `new`, or `None` when `old` is
 /// zero (an undefined ratio).
 fn percent_change(old: f64, new: f64) -> Option<f64> {
@@ -179,7 +207,7 @@ fn deltas(newest: &Run, previous: Option<&Run>) -> Vec<MetricDelta> {
 /// Classify a `(test, grid)` cell from whether the test applies and its loaded
 /// record.
 #[must_use]
-pub fn classify(applicable: bool, record: Option<&Record>, current_describe: Option<&str>) -> Cell {
+pub fn classify(applicable: bool, record: Option<&Record>, freshness: Freshness) -> Cell {
     if !applicable {
         return Cell {
             status: CellStatus::NotApplicable,
@@ -206,16 +234,6 @@ pub fn classify(applicable: bool, record: Option<&Record>, current_describe: Opt
         Outcome::Pass => CellStatus::Pass,
         Outcome::Fail => CellStatus::Fail,
     };
-    let freshness = match current_describe {
-        None => Freshness::Unknown,
-        Some(current) => {
-            if describe_base(&newest.behavior_describe) == describe_base(current) {
-                Freshness::Current
-            } else {
-                Freshness::Stale
-            }
-        }
-    };
     let previous = record.and_then(Record::previous);
     Cell {
         status,
@@ -230,7 +248,7 @@ pub fn classify(applicable: bool, record: Option<&Record>, current_describe: Opt
 
 #[cfg(test)]
 mod tests {
-    use super::{CellStatus, Freshness, Judgement, classify};
+    use super::{CellStatus, Freshness, Judgement, classify, freshness_of};
     use crate::record::{Completeness, MetricMeta, MetricValue, Outcome, Record, Run};
     use pretty_assertions::assert_eq;
     use std::collections::BTreeMap;
@@ -265,35 +283,46 @@ mod tests {
     #[test]
     fn applicability_and_missing() {
         assert_eq!(
-            classify(false, None, None).status,
+            classify(false, None, Freshness::Unknown).status,
             CellStatus::NotApplicable
         );
-        assert_eq!(classify(true, None, None).status, CellStatus::NeverRan);
+        assert_eq!(
+            classify(true, None, Freshness::Unknown).status,
+            CellStatus::NeverRan
+        );
     }
 
-    /// Freshness compares the newest run's commit to the current one, ignoring
-    /// the `-dirty` suffix.
+    /// Freshness compares the recorded commit to the current one (ignoring
+    /// `-dirty`), counting only behaviour-changing commits since.
     #[test]
-    fn freshness_tracks_current_commit() {
-        let record = Record {
-            test: "t".to_owned(),
-            grid: "opensim".to_owned(),
-            runs: vec![run("v0.1.0-2-gbbbbbb", 4.0, Completeness::Complete)],
-        };
+    fn freshness_rules() {
+        // Same commit (with or without -dirty) is current.
         assert_eq!(
-            classify(true, Some(&record), Some("v0.1.0-2-gbbbbbb")).freshness,
+            freshness_of("v0.1.0-2-gbbbbbb", Some("v0.1.0-2-gbbbbbb"), None),
             Freshness::Current
         );
         assert_eq!(
-            classify(true, Some(&record), Some("v0.1.0-2-gbbbbbb-dirty")).freshness,
+            freshness_of("v0.1.0-2-gbbbbbb", Some("v0.1.0-2-gbbbbbb-dirty"), None),
             Freshness::Current
         );
+        // Different commit, but zero behaviour-changing commits since: current.
         assert_eq!(
-            classify(true, Some(&record), Some("v0.1.0-7-gddddddd")).freshness,
+            freshness_of("v0.1.0-2-gbbbbbb", Some("v0.1.0-3-gccccccc"), Some(0)),
+            Freshness::Current
+        );
+        // Different commit with behaviour-changing commits since: stale.
+        assert_eq!(
+            freshness_of("v0.1.0-2-gbbbbbb", Some("v0.1.0-7-gddddddd"), Some(2)),
             Freshness::Stale
         );
+        // Different commit, commit not in history: stale (conservative).
         assert_eq!(
-            classify(true, Some(&record), None).freshness,
+            freshness_of("v0.1.0-2-gbbbbbb", Some("v0.1.0-7-gddddddd"), None),
+            Freshness::Stale
+        );
+        // Current commit unknown: unknown.
+        assert_eq!(
+            freshness_of("v0.1.0-2-gbbbbbb", None, None),
             Freshness::Unknown
         );
     }
@@ -316,7 +345,7 @@ mod tests {
                 run("b", 4.20, Completeness::Complete),
             ],
         };
-        let cell = classify(true, Some(&record), None);
+        let cell = classify(true, Some(&record), Freshness::Current);
         assert_eq!(cell.status, CellStatus::Pass);
         let delta = only_delta(&cell)?;
         assert_eq!(delta.judgement, Judgement::Better);
@@ -335,7 +364,7 @@ mod tests {
                 run("b", 4.20, Completeness::Partial),
             ],
         };
-        let cell = classify(true, Some(&record), None);
+        let cell = classify(true, Some(&record), Freshness::Current);
         assert!(cell.partial);
         let delta = only_delta(&cell)?;
         assert!(!delta.comparable);
@@ -354,7 +383,7 @@ mod tests {
                 run("b", 4.01, Completeness::Complete),
             ],
         };
-        let cell = classify(true, Some(&record), None);
+        let cell = classify(true, Some(&record), Freshness::Current);
         let delta = only_delta(&cell)?;
         assert_eq!(delta.judgement, Judgement::Unchanged);
         Ok(())
