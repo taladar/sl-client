@@ -13,8 +13,8 @@
 use fs_err::OpenOptions;
 use sl_proto::{
     AgentKey, ChatLogConfig, ChatSessionKind, ConversationKind, GroupKey, ImDialog, ImSessionId,
-    LogLineTime, MessageCursor, Session, SessionMessage, clean_file_name, conference_log_file_name,
-    format_log_line, group_log_file_name, im_log_file_name, nearby_log_file_name, parse_log_lines,
+    LogLineTime, MessageCursor, Session, SessionMessage, conference_log_file_name, format_log_line,
+    group_log_file_name, im_log_file_name, nearby_log_file_name, parse_log_lines,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write as _;
@@ -107,8 +107,11 @@ fn to_unix(time: Option<LogLineTime>, offset: UtcOffset) -> Option<u32> {
 pub(crate) struct ChatLog {
     /// The pure configuration (which types to log, the format knobs, the window).
     config: ChatLogConfig,
-    /// The per-account directory transcripts are written under.
-    base_dir: PathBuf,
+    /// The per-account directory transcripts are written **directly** under
+    /// (supplied verbatim by the runtime, already per-account), or `None` to
+    /// disable all file output. When `None`, [`any_enabled`](Self::any_enabled) is
+    /// false and every write short-circuits.
+    base_dir: Option<PathBuf>,
     /// Our own agent id, once known — the sender of our outbound lines.
     own_id: Option<AgentKey>,
     /// Our own legacy name, used to label our outbound lines and to map a
@@ -150,25 +153,28 @@ struct PendingGroupLine {
 }
 
 impl ChatLog {
-    /// Builds the writer for `own_name`'s account. The base directory is the
-    /// configured `log_dir` (or `chat_logs/`) joined with the sanitised account
-    /// name; the local offset is captured now (falling back to UTC if the platform
-    /// will not report it under the running threads).
-    pub(crate) fn new(config: ChatLogConfig, own_name: String, own_id: Option<AgentKey>) -> Self {
-        let base_dir = config
-            .log_dir
-            .clone()
-            .unwrap_or_else(|| PathBuf::from("chat_logs"))
-            .join(clean_file_name(&own_name));
+    /// Builds the writer for `own_name`'s account. `agent_chat_log_dir` is the
+    /// per-account directory transcripts are written **directly** under, supplied
+    /// verbatim by the runtime (no derived sub-directory); `None` disables all file
+    /// output. The local offset is captured now (falling back to UTC if the
+    /// platform will not report it under the running threads).
+    pub(crate) fn new(
+        config: ChatLogConfig,
+        agent_chat_log_dir: Option<PathBuf>,
+        own_name: String,
+        own_id: Option<AgentKey>,
+    ) -> Self {
+        let base_dir = agent_chat_log_dir;
         let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
         let mut names = BTreeMap::new();
         if let Some(id) = own_id {
             names.insert(id, own_name.clone());
         }
-        let conversations = if config.conversation_log {
-            load_conversation_index(&base_dir, config.conversation_log_retention_days)
-        } else {
-            BTreeMap::new()
+        let conversations = match (&base_dir, config.conversation_log) {
+            (Some(dir), true) => {
+                load_conversation_index(dir, config.conversation_log_retention_days)
+            }
+            _disabled => BTreeMap::new(),
         };
         Self {
             config,
@@ -184,9 +190,10 @@ impl ChatLog {
         }
     }
 
-    /// Whether any logging is enabled — the run loop's cheap gate.
+    /// Whether any logging is enabled — the run loop's cheap gate. Requires both an
+    /// output directory and at least one enabled text-chat type.
     pub(crate) fn any_enabled(&self) -> bool {
-        self.config.any_enabled()
+        self.base_dir.is_some() && self.config.any_enabled()
     }
 
     /// The current local wall-clock as a [`LogLineTime`].
@@ -226,7 +233,10 @@ impl ChatLog {
     /// Rewrites the whole `conversation.log` from the in-memory index (entries
     /// ordered by file name). Best-effort: an I/O error is logged, never propagated.
     fn rewrite_conversation_index(&self) {
-        let path = self.base_dir.join("conversation.log");
+        let Some(base) = &self.base_dir else {
+            return;
+        };
+        let path = base.join("conversation.log");
         let mut body = String::new();
         for line in self.conversations.values() {
             body.push_str(line);
@@ -272,7 +282,10 @@ impl ChatLog {
     /// for `kind` (if any) so a later history read-back can find the file. I/O
     /// errors are logged, never propagated.
     fn append(&mut self, kind: Option<ChatSessionKind>, file_name: &str, line: &str) {
-        let path = self.base_dir.join(file_name);
+        let Some(base) = &self.base_dir else {
+            return;
+        };
+        let path = base.join(file_name);
         if let Some(kind) = kind {
             self.files.insert(kind, path.clone());
         }
@@ -612,11 +625,11 @@ mod tests {
     use std::collections::BTreeSet;
     use uuid::Uuid;
 
-    /// A configuration that logs IMs into a unique temporary directory.
-    fn im_config(dir: &std::path::Path) -> ChatLogConfig {
+    /// A configuration that logs IMs (the output directory is supplied separately
+    /// to [`ChatLog::new`]).
+    fn im_config() -> ChatLogConfig {
         ChatLogConfig {
             enabled: [LoggedChatType::InstantMessage].into_iter().collect(),
-            log_dir: Some(dir.to_path_buf()),
             ..ChatLogConfig::default()
         }
     }
@@ -636,9 +649,14 @@ mod tests {
         let dir = temp_dir("inbound-im");
         let own = AgentKey::from(Uuid::from_u128(1));
         let peer = AgentKey::from(Uuid::from_u128(2));
-        let mut log = ChatLog::new(im_config(&dir), "Me Resident".to_owned(), Some(own));
+        let mut log = ChatLog::new(
+            im_config(),
+            Some(dir.clone()),
+            "Me Resident".to_owned(),
+            Some(own),
+        );
         log.log_inbound_im(peer, "Alice Resident", "hello", None);
-        let file = dir.join("Me Resident").join("Alice Resident.txt");
+        let file = dir.join("Alice Resident.txt");
         let contents = fs_err::read_to_string(&file).unwrap_or_default();
         assert_eq!(contents.contains("Alice Resident: hello"), true);
         assert_eq!(contents.ends_with('\n'), true);
@@ -649,11 +667,13 @@ mod tests {
         let dir = temp_dir("disabled");
         let own = AgentKey::from(Uuid::from_u128(1));
         let peer = AgentKey::from(Uuid::from_u128(2));
-        let config = ChatLogConfig {
-            log_dir: Some(dir.clone()),
-            ..ChatLogConfig::default()
-        };
-        let mut log = ChatLog::new(config, "Me Resident".to_owned(), Some(own));
+        let config = ChatLogConfig::default();
+        let mut log = ChatLog::new(
+            config,
+            Some(dir.clone()),
+            "Me Resident".to_owned(),
+            Some(own),
+        );
         log.log_inbound_im(peer, "Alice", "hello", None);
         assert_eq!(dir.exists(), false);
     }
@@ -663,7 +683,12 @@ mod tests {
         let dir = temp_dir("paging");
         let own = AgentKey::from(Uuid::from_u128(1));
         let peer = AgentKey::from(Uuid::from_u128(2));
-        let mut log = ChatLog::new(im_config(&dir), "Me Resident".to_owned(), Some(own));
+        let mut log = ChatLog::new(
+            im_config(),
+            Some(dir.clone()),
+            "Me Resident".to_owned(),
+            Some(own),
+        );
         // Five inbound lines; pretend two of them are still in the in-memory ring.
         for index in 0..5 {
             log.log_inbound_im(peer, "Alice Resident", &format!("line {index}"), None);
@@ -687,18 +712,22 @@ mod tests {
         let sender = AgentKey::from(Uuid::from_u128(2));
         let config = ChatLogConfig {
             enabled: [LoggedChatType::Group].into_iter().collect(),
-            log_dir: Some(dir.clone()),
             ..ChatLogConfig::default()
         };
-        let mut log = ChatLog::new(config, "Me Resident".to_owned(), Some(own));
+        let mut log = ChatLog::new(
+            config,
+            Some(dir.clone()),
+            "Me Resident".to_owned(),
+            Some(own),
+        );
         // A message arrives before the group's name is known: it must be buffered,
         // and in particular NOT written to any raw-id file.
         log.log_group(group, sender, "Alice", "hello");
-        assert_eq!(dir.join("Me Resident").exists(), false);
+        assert_eq!(dir.exists(), false);
         // The name arrives (e.g. from the login membership push); the buffered
         // message is flushed to the human-readable, named transcript.
         log.note_group_name(group, "My Cool Group");
-        let file = dir.join("Me Resident").join("My Cool Group (group).txt");
+        let file = dir.join("My Cool Group (group).txt");
         let contents = fs_err::read_to_string(&file).unwrap_or_default();
         assert_eq!(contents.contains("Alice: hello"), true);
     }
@@ -708,7 +737,12 @@ mod tests {
         let dir = temp_dir("full-history");
         let own = AgentKey::from(Uuid::from_u128(1));
         let peer = AgentKey::from(Uuid::from_u128(2));
-        let mut log = ChatLog::new(im_config(&dir), "Me Resident".to_owned(), Some(own));
+        let mut log = ChatLog::new(
+            im_config(),
+            Some(dir.clone()),
+            "Me Resident".to_owned(),
+            Some(own),
+        );
         for index in 0..6 {
             log.log_inbound_im(peer, "Alice Resident", &format!("line {index}"), None);
         }
@@ -745,13 +779,17 @@ mod tests {
         let peer = AgentKey::from(Uuid::from_u128(2));
         let config = ChatLogConfig {
             enabled: [LoggedChatType::InstantMessage].into_iter().collect(),
-            log_dir: Some(dir.clone()),
             conversation_log: true,
             ..ChatLogConfig::default()
         };
-        let mut log = ChatLog::new(config, "Me Resident".to_owned(), Some(own));
+        let mut log = ChatLog::new(
+            config,
+            Some(dir.clone()),
+            "Me Resident".to_owned(),
+            Some(own),
+        );
         log.log_inbound_im(peer, "Alice Resident", "hello", None);
-        let conv = dir.join("Me Resident").join("conversation.log");
+        let conv = dir.join("conversation.log");
         let contents = fs_err::read_to_string(&conv).unwrap_or_default();
         assert_eq!(contents.contains("Alice Resident| "), true);
         assert_eq!(contents.contains("Alice Resident.txt|"), true);
@@ -760,23 +798,26 @@ mod tests {
     #[test]
     fn purges_stale_conversation_log_entries_on_load() {
         let dir = temp_dir("conv-purge");
-        let account = dir.join("Me Resident");
-        let _ignored = fs_err::create_dir_all(&account);
+        let _ignored = fs_err::create_dir_all(&dir);
         // A pre-existing entry timestamped at the epoch — far older than retention.
         let stale = "[1] 0 0 0 Old Friend| aa bb Old Friend.txt|\n";
-        let _written = fs_err::write(account.join("conversation.log"), stale);
+        let _written = fs_err::write(dir.join("conversation.log"), stale);
         let own = AgentKey::from(Uuid::from_u128(1));
         let peer = AgentKey::from(Uuid::from_u128(2));
         let config = ChatLogConfig {
             enabled: [LoggedChatType::InstantMessage].into_iter().collect(),
-            log_dir: Some(dir.clone()),
             conversation_log: true,
             ..ChatLogConfig::default()
         };
-        let mut log = ChatLog::new(config, "Me Resident".to_owned(), Some(own));
+        let mut log = ChatLog::new(
+            config,
+            Some(dir.clone()),
+            "Me Resident".to_owned(),
+            Some(own),
+        );
         // New activity rewrites the index; the stale entry was purged on load.
         log.log_inbound_im(peer, "Alice Resident", "hi", None);
-        let contents = fs_err::read_to_string(account.join("conversation.log")).unwrap_or_default();
+        let contents = fs_err::read_to_string(dir.join("conversation.log")).unwrap_or_default();
         assert_eq!(contents.contains("Old Friend"), false);
         assert_eq!(contents.contains("Alice Resident.txt|"), true);
     }
@@ -786,7 +827,12 @@ mod tests {
         let dir = temp_dir("no-file");
         let own = AgentKey::from(Uuid::from_u128(1));
         let peer = AgentKey::from(Uuid::from_u128(2));
-        let log = ChatLog::new(im_config(&dir), "Me Resident".to_owned(), Some(own));
+        let log = ChatLog::new(
+            im_config(),
+            Some(dir.clone()),
+            "Me Resident".to_owned(),
+            Some(own),
+        );
         let _participants: BTreeSet<AgentKey> = BTreeSet::new();
         assert_eq!(
             log.read_older_page(ChatSessionKind::Direct { peer }, 0, 0, 10)

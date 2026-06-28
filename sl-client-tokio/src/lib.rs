@@ -50,44 +50,45 @@ pub use sl_proto::{
     AvatarInterests, AvatarPick, AvatarProperties, Camera, CameraError, ChatAudible, ChatChannel,
     ChatLifecycleView, ChatLogConfig, ChatMessage, ChatSessionInfo, ChatSessionKind, ChatSource,
     ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId,
-    ClassifiedCategory, ClassifiedInfo, ClassifiedUpdate, ClickAction, ClockStyle, Command,
-    ControlFlags, ConversationKind, CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic,
-    Direction, DisconnectReason, Distance, EconomyData, EstateAccessDelta, EstateAccessKind,
-    EstateInfo, Event, ExperienceInfo, ExperiencePermission, ExperienceProperties,
-    ExperienceUpdate, ExtendedMesh, FlexibleData, FolderInfo, FolderState, FolderType, Friend,
-    FriendRights, GlobalCoordinates, GltfMaterialOverride, GridCoordinates, GroupKey, GroupMember,
-    GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
-    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
-    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
-    ImSessionId, ImageCodec, InstantMessage, InterestsUpdate, InventoryCallbackId, InventoryCursor,
-    InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey,
-    InventoryOffer, InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandingType,
-    LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, LoadUrlRequest,
-    LoggedChatType, LoginAccount, LoginParams, LoginRequest, LoginResponse, LureId, MEDIA_PERM_ALL,
-    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
-    MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MessageCursor,
-    MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry,
-    MuteFlags, MuteType, NegativeBalanceError, NeighborInfo, NewInventoryItem, Object,
-    ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks,
-    ObjectProperties, ObjectTransform, OpenSimExtras, OwnerKey, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
-    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
-    PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape,
-    PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId,
-    ReflectionProbe, ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings,
-    RegionCoordinates, RegionFlags, RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits,
-    RegionLocalObjectId, RegionLocalParcelId, RegionName, Reliability, RenderMaterialEntry,
-    RenderMaterialRef, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
-    ScriptControlAction, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, SculptData, SculptOrMeshKey, SequenceNumber, SessionMessage,
-    SimulatorFeatures, SoundFlags, SoundPreload, StartLocation, StartLocationParseError,
-    TerrainLayerType, TerrainPatch, Texture, TextureAnimation, TextureEntry, TextureFace,
-    TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId,
-    TransferId, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest,
-    Wearable, WearableType, XferId, avatar_texture, decode_particle_system, decode_texture_anim,
-    decode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
-    particle_pattern, pcode, sim_access, texture_anim_mode,
+    ClassifiedCategory, ClassifiedInfo, ClassifiedUpdate, ClickAction, ClientDirectories,
+    ClockStyle, Command, ControlFlags, ConversationKind, CreateGroupParams, DeRezDestination,
+    DetachOrder, Diagnostic, Direction, DisconnectReason, Distance, EconomyData, EstateAccessDelta,
+    EstateAccessKind, EstateInfo, Event, ExperienceInfo, ExperiencePermission,
+    ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, FolderInfo, FolderState,
+    FolderType, Friend, FriendRights, GlobalCoordinates, GltfMaterialOverride, GridCoordinates,
+    GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey,
+    GroupProfile, GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey,
+    GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation,
+    IceCandidate, ImDialog, ImSessionId, ImageCodec, InstantMessage, InterestsUpdate,
+    InventoryCallbackId, InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem,
+    InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryOwner, InventoryType,
+    ItemInfo, Key, Kilobits, LandArea, LandingType, LegacyMaterial, LightData, LightImage,
+    LindenAmount, LindenBalance, LoadUrlRequest, LoggedChatType, LoginAccount, LoginParams,
+    LoginRequest, LoginResponse, LureId, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
+    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
+    MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MessageCursor, MfaChallenge,
+    MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags,
+    MuteType, NegativeBalanceError, NeighborInfo, NewInventoryItem, Object, ObjectExtraParams,
+    ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties,
+    ObjectTransform, OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus,
+    ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, PhysicsShapeTypes, PickInfo,
+    PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape, PrimShapeParams, ProductType,
+    ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId, ReflectionProbe,
+    ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionCoordinates, RegionFlags,
+    RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId,
+    RegionLocalParcelId, RegionName, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation,
+    SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData, SculptOrMeshKey,
+    SequenceNumber, SessionMessage, SimulatorFeatures, SoundFlags, SoundPreload, StartLocation,
+    StartLocationParseError, TerrainLayerType, TerrainPatch, Texture, TextureAnimation,
+    TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError,
+    TimestampFormat, TransactionId, TransferId, TransferStatus, Transmit, Uuid, Vector,
+    VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, XferId, avatar_texture,
+    decode_particle_system, decode_texture_anim, decode_texture_entry, grid_to_handle,
+    group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode, sim_access,
+    texture_anim_mode,
 };
 
 mod appearance;
@@ -174,6 +175,11 @@ pub struct Client {
     /// type is enabled, [`Client::run`] writes Firestorm-compatible transcripts and
     /// serves file-backed history pages.
     chat_log_config: ChatLogConfig,
+    /// The per-account filesystem directories the runtime persists its optional
+    /// features under (chat-log transcripts, the inventory disk-cache). Default
+    /// all-`None`, disabling every disk feature; set via
+    /// [`Client::set_directories`] before [`Client::run`].
+    directories: ClientDirectories,
 }
 
 impl Client {
@@ -217,6 +223,7 @@ impl Client {
             recv_buf: vec![0u8; RECV_BUFFER_SIZE],
             caps_reporter: None,
             chat_log_config: ChatLogConfig::default(),
+            directories: ClientDirectories::default(),
         })
     }
 
@@ -281,6 +288,17 @@ impl Client {
         self.chat_log_config = config;
     }
 
+    /// Sets the per-account filesystem directories the runtime persists its
+    /// optional features under. Default all-`None` (every disk feature disabled):
+    /// [`ClientDirectories::agent_chat_log_dir`] is where [`Client::run`] writes
+    /// chat-log transcripts (paired with [`Client::set_chat_log_config`]), and
+    /// [`ClientDirectories::agent_cache_dir`] is where it reads/writes the
+    /// inventory disk-cache. A `None` field disables that feature. Call before
+    /// [`Client::run`].
+    pub fn set_directories(&mut self, directories: ClientDirectories) {
+        self.directories = directories;
+    }
+
     /// Enables or disables the automatic background inventory crawl (off by
     /// default). While enabled, [`Client::run`] breadth-first fetches the agent's
     /// inventory tree in the background (a bounded number of folder-contents
@@ -328,6 +346,7 @@ impl Client {
         // unconditional; it owns the only file I/O in the runtime.
         let mut chat_log = ChatLog::new(
             self.chat_log_config.clone(),
+            self.directories.agent_chat_log_dir.clone(),
             self.session.agent_legacy_name(),
             self.session.agent_id(),
         );

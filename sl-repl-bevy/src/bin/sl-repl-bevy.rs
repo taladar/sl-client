@@ -12,9 +12,9 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, ExternalPrinter};
 use sl_client_bevy::{
-    AgentKey, ChatLogConfig, Command, LoginParams, LoginRequest, MfaChallenge, SlCapabilities,
-    SlClientPlugin, SlCommand, SlDiagnostic, SlEvent, SlIdentity, SlMfaChallenge, SlSessionEvent,
-    StartLocation, Uuid,
+    AgentKey, ChatLogConfig, ClientDirectories, Command, LoginParams, LoginRequest, MfaChallenge,
+    SlCapabilities, SlClientPlugin, SlCommand, SlDiagnostic, SlEvent, SlIdentity, SlMfaChallenge,
+    SlSessionEvent, StartLocation, Uuid,
 };
 use sl_repl::{
     Avatar, Credentials, MetaCommand, ReplAction, ScriptRecorder, SessionContext, format_command,
@@ -606,6 +606,7 @@ fn repl_driver(
 fn run_session(
     params: &LoginParams,
     chat_log_config: &ChatLogConfig,
+    directories: &ClientDirectories,
     smoke: bool,
     line_rx: &Receiver<String>,
     recorder: Option<ScriptRecorder>,
@@ -616,6 +617,7 @@ fn run_session(
             params: params.clone(),
             diagnostics: true,
             chat_log_config: chat_log_config.clone(),
+            directories: directories.clone(),
             // The REPL exercises the full client, so crawl inventory in the
             // background (the tokio REPL does the same via
             // `set_background_inventory_fetch`).
@@ -702,6 +704,10 @@ fn run_repl(args: RunArgs) -> Result<(), Error> {
         args.version.clone(),
     );
     let chat_log_config = args.chat_log.to_config();
+    let directories = ClientDirectories {
+        agent_chat_log_dir: args.chat_log.chat_log_dir(),
+        ..ClientDirectories::default()
+    };
     loop {
         info!(
             "logging in as {} {} to {login_uri}",
@@ -715,6 +721,7 @@ fn run_repl(args: RunArgs) -> Result<(), Error> {
         let outcome = run_session(
             &params,
             &chat_log_config,
+            &directories,
             args.smoke,
             &line_rx,
             recorder.take(),

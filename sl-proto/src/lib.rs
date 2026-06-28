@@ -23,11 +23,11 @@ pub use bookkeeping_ids::{
     TransactionId, TransferId, XferId,
 };
 pub use chat_log::{
-    CONVERSATION_LOG_RETENTION_DAYS, ChatLogConfig, ClockStyle, ConversationKind, LOG_RECALL_SIZE,
-    LogLineTime, LoggedChatType, ParsedLogLine, SYSTEM_SENDER_NAME, TimestampFormat,
-    clean_file_name, conference_log_file_name, conversation_log_file, conversation_log_line,
-    conversation_log_unix, format_log_line, group_log_file_name, im_log_file_name,
-    nearby_log_file_name, parse_log_lines,
+    CONVERSATION_LOG_RETENTION_DAYS, ChatLogConfig, ClientDirectories, ClockStyle,
+    ConversationKind, LOG_RECALL_SIZE, LogLineTime, LoggedChatType, ParsedLogLine,
+    SYSTEM_SENDER_NAME, TimestampFormat, clean_file_name, conference_log_file_name,
+    conversation_log_file, conversation_log_line, conversation_log_unix, format_log_line,
+    group_log_file_name, im_log_file_name, nearby_log_file_name, parse_log_lines,
 };
 pub use command::Command;
 pub use error::Error;
