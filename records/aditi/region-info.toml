@@ -1,0 +1,18 @@
+test = "region-info"
+grid = "aditi"
+
+[[run]]
+behavior_describe = "f718bbe-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-28T20:58:52.461968214Z"
+avatar = "GisetteVector Resident"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+max_agents = 55
+region_info_secs = 0.177050909
+
+[run.metric_meta.region_info_secs]
+lower_is_better = true

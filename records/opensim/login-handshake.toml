@@ -1,0 +1,17 @@
+test = "login-handshake"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "f718bbe-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-28T20:49:17.251100906Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+handshake_secs = 0.189948463
+
+[run.metric_meta.handshake_secs]
+lower_is_better = true

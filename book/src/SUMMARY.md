@@ -42,6 +42,12 @@
 
 - [The REPL test client](tools/sl-repl.md)
 
+## Conformance Testing
+
+- [Overview](conformance/overview.md)
+- [The Runner](conformance/runner.md)
+- [Records & the Dirty Rule](conformance/records.md)
+
 ## Appendix
 
 - [Glossary](appendix/glossary.md)

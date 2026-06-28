@@ -1,0 +1,15 @@
+test = "inventory-fetch"
+grid = "aditi"
+
+[[run]]
+behavior_describe = "f718bbe-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-06-28T21:02:07.067411113Z"
+avatar = "GisetteVector Resident"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]

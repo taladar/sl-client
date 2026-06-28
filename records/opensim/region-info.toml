@@ -1,0 +1,18 @@
+test = "region-info"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "f718bbe-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-28T20:49:52.179172681Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+max_agents = 40
+region_info_secs = 0.048450368
+
+[run.metric_meta.region_info_secs]
+lower_is_better = true

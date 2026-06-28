@@ -1,0 +1,11 @@
+//! The concrete conformance test implementations.
+//!
+//! Each submodule defines one [`GridTest`](crate::registry::GridTest). The
+//! bodies exercise the same features as the `sl-client-tokio` examples but
+//! report through the [`Metrics`](crate::metrics::Metrics) collector instead of
+//! stdout, so the runner can stamp and store the result.
+
+pub mod asset_decode;
+pub mod inventory_fetch;
+pub mod login_handshake;
+pub mod region_info;

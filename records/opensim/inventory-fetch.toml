@@ -1,0 +1,36 @@
+test = "inventory-fetch"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "f718bbe-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-28T20:49:57.56358399Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+inventory_fetch_secs = 0.072687749
+root_folders = 6
+root_items = 1
+
+[run.metric_meta.inventory_fetch_secs]
+lower_is_better = true
+
+[[run]]
+behavior_describe = "f718bbe-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-28T20:50:46.847172594Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+inventory_fetch_secs = 0.012903566
+root_folders = 6
+root_items = 1
+
+[run.metric_meta.inventory_fetch_secs]
+lower_is_better = true
