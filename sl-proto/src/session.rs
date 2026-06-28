@@ -1093,6 +1093,7 @@ mod chat_session;
 mod circuit;
 mod conversions;
 mod inventory;
+mod inventory_cache;
 mod methods;
 
 use self::chat_session::{ChatSession, TYPING_TIMEOUT};
@@ -1103,6 +1104,7 @@ pub use chat_session::{
     VoiceChannelState,
 };
 pub use inventory::{FolderState, InventoryOwner};
+pub use inventory_cache::INVENTORY_CACHE_VERSION;
 
 pub(crate) use conversions::{
     ZERO_VECTOR, instant_message, region_handshake_message, shape_from_object_shape_block,

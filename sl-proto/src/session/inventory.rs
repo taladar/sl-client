@@ -479,6 +479,98 @@ impl Inventory {
             folder.child_items.remove(&item);
         }
     }
+
+    // ---- cache snapshot & skeleton merge (B5) -------------------------------
+
+    /// The cacheable snapshot for one tree: every [`Loaded`](FolderState::Loaded)
+    /// folder of `owner` whose metadata is present, together with the item
+    /// payloads filed directly in those folders. `Unknown` / `Fetching` folders
+    /// (and items under them) are skipped — only fully-fetched contents are worth
+    /// persisting, matching Firestorm's `LLCanCache` (cache a folder iff its
+    /// version is known, an item iff its parent is cacheable).
+    pub(crate) fn cacheable_snapshot(
+        &self,
+        owner: InventoryOwner,
+    ) -> (Vec<&InventoryFolder>, Vec<&InventoryItem>) {
+        let mut folders = Vec::new();
+        let mut items = Vec::new();
+        for entry in self.folders.values() {
+            if entry.owner != owner || !matches!(entry.state, FolderState::Loaded { .. }) {
+                continue;
+            }
+            let Some(payload) = entry.folder.as_ref() else {
+                continue;
+            };
+            folders.push(payload);
+            for item in &entry.child_items {
+                if let Some(item) = self.items.get(item) {
+                    items.push(item);
+                }
+            }
+        }
+        (folders, items)
+    }
+
+    /// Reconciles the held `owner` tree against the authoritative login skeleton,
+    /// returning the folders that still need a contents fetch (the
+    /// [`Unknown`](FolderState::Unknown) set — the initial background-fetch queue).
+    /// Run **once per owner** (the agent skeleton against the agent tree, the
+    /// library skeleton against the library tree); only folders of `owner` are
+    /// touched, so the other tree is left intact. Mirrors Firestorm
+    /// `LLInventoryModel::loadSkeleton`:
+    ///
+    /// 1. A cached folder present in the skeleton with an **equal** version keeps
+    ///    its loaded contents and stays [`Loaded`](FolderState::Loaded).
+    /// 2. A version **mismatch** (or a skeleton folder absent from the cache) marks
+    ///    the folder [`Unknown`](FolderState::Unknown), dropping any stale cached
+    ///    contents beneath it, and queues it for refetch.
+    /// 3. A cached folder of `owner` **absent from the skeleton** was deleted
+    ///    server-side and is removed (with its subtree).
+    ///
+    /// Items survive only under a folder that stayed `Loaded` (a now-`Unknown`
+    /// folder's items are purged in step 2). Merging against an empty cache marks
+    /// every skeleton folder `Unknown` — a full refetch.
+    pub(crate) fn merge_skeleton(
+        &mut self,
+        skeleton: &[InventoryFolder],
+        owner: InventoryOwner,
+    ) -> Vec<InventoryFolderKey> {
+        let skeleton_ids: BTreeSet<InventoryFolderKey> =
+            skeleton.iter().map(|folder| folder.folder_id).collect();
+
+        // (3) Drop cached folders of this owner that the skeleton no longer lists.
+        let deleted: Vec<InventoryFolderKey> = self
+            .folders
+            .iter()
+            .filter(|(key, entry)| entry.owner == owner && !skeleton_ids.contains(key))
+            .map(|(key, _)| *key)
+            .collect();
+        for folder in deleted {
+            self.remove_folder(folder);
+        }
+
+        // (1)/(2) Per skeleton folder, keep its contents iff the cached version
+        // matches; otherwise mark it `Unknown` and queue it.
+        let mut needing_fetch = Vec::new();
+        for folder in skeleton {
+            let key = folder.folder_id;
+            let keep = matches!(
+                self.folders.get(&key).map(|entry| entry.state),
+                Some(FolderState::Loaded { version }) if version == folder.version
+            );
+            self.cache_folder(folder.clone(), owner);
+            if keep {
+                self.mark_folder_loaded(key, folder.version, owner);
+            } else {
+                self.purge_descendents(key);
+                if let Some(entry) = self.folders.get_mut(&key) {
+                    entry.state = FolderState::Unknown;
+                }
+                needing_fetch.push(key);
+            }
+        }
+        needing_fetch
+    }
 }
 
 #[cfg(test)]

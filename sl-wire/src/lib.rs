@@ -88,7 +88,7 @@ pub use llsd::{
     build_object_media_navigate_request, build_object_media_update_request, build_seed_request,
     build_update_avatar_appearance_request, build_update_item_asset_request,
     build_upload_baked_texture_request, parse_asset_upload_response, parse_event_queue_response,
-    parse_llsd_xml, parse_seed_response,
+    parse_llsd_binary, parse_llsd_xml, parse_seed_response,
 };
 pub use login::{
     BuddyListEntry, Credential, HomeLocation, LoginFailure, LoginParseError, LoginRequest,

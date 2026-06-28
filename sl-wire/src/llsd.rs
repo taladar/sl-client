@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use sl_types::key::{InventoryFolderKey, InventoryKey, ObjectKey};
 use uuid::Uuid;
 
-pub use sl_llsd::{Llsd, LlsdError, parse_llsd_xml};
+pub use sl_llsd::{Llsd, LlsdError, parse_llsd_binary, parse_llsd_xml};
 pub(crate) use sl_llsd::{Scan, push_escaped};
 
 use crate::error::WireError;

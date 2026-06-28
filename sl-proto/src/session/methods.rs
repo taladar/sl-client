@@ -7975,6 +7975,71 @@ impl Session {
         self.inventory.folder_owner(folder_id)
     }
 
+    // ---- Inventory disk cache (sans-I/O core) -------------------------------
+
+    /// Serialises the cacheable snapshot of one tree (`owner`) to the un-gzipped
+    /// disk-cache bytes: a 4-byte big-endian version header
+    /// ([`INVENTORY_CACHE_VERSION`](crate::INVENTORY_CACHE_VERSION), matching
+    /// Firestorm) followed by a binary-LLSD `{ categories, items }` map. Only
+    /// fully-fetched ([`Loaded`](FolderState::Loaded)) folders and the items in
+    /// them are written. The runtime shell gzips the result and writes it to
+    /// `<agent-uuid>.inv.llsd.gz` (or `.lib.inv.llsd.gz` for
+    /// [`InventoryOwner::Library`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Wire`] if an item fails to serialise.
+    pub fn inventory_cache_bytes(&self, owner: InventoryOwner) -> Result<Vec<u8>, Error> {
+        Ok(super::inventory_cache::inventory_to_cache_bytes(
+            &self.inventory,
+            owner,
+        )?)
+    }
+
+    /// Loads a disk cache (the un-gzipped bytes the runtime shell read back) into
+    /// the held model under `owner`, **before** the login skeleton arrives: every
+    /// cached folder lands [`Loaded`](FolderState::Loaded) at its stored version,
+    /// to be confirmed or invalidated by the later
+    /// [`Session::merge_inventory_skeleton`]. Returns `true` if a version-valid
+    /// cache was loaded, `false` if the bytes were cold (wrong/short version
+    /// header) and nothing was loaded — in which case the skeleton merge will
+    /// refetch the whole tree.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Wire`] if a version-valid payload is not decodable binary
+    /// LLSD.
+    pub fn load_inventory_cache(
+        &mut self,
+        owner: InventoryOwner,
+        bytes: &[u8],
+    ) -> Result<bool, Error> {
+        match super::inventory_cache::inventory_from_cache_bytes(bytes)
+            .map_err(sl_wire::WireError::from)?
+        {
+            Some(cached) => {
+                super::inventory_cache::load_cached_into(&mut self.inventory, &cached, owner);
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// Reconciles the held `owner` tree against the authoritative login skeleton,
+    /// returning the folders that still need a contents fetch (the initial
+    /// background-fetch queue). Run once per owner after
+    /// [`Session::load_inventory_cache`]: a cached folder whose version matches the
+    /// skeleton keeps its loaded contents; a mismatch, a skeleton-only folder, or
+    /// a server-deleted folder is invalidated (its stale cached contents dropped),
+    /// mirroring Firestorm's `loadSkeleton`.
+    pub fn merge_inventory_skeleton(
+        &mut self,
+        owner: InventoryOwner,
+        skeleton: &[InventoryFolder],
+    ) -> Vec<InventoryFolderKey> {
+        self.inventory.merge_skeleton(skeleton, owner)
+    }
+
     /// Inserts/updates a folder in the held model (agent tree), maintaining the
     /// index and fetch state. A version of `0` (as carried by a descendents
     /// reply's sub-folders, which omit it) does not clobber a known version from
