@@ -8,6 +8,9 @@ credentials.*.toml
 # default log files the REPL binaries write into the working dir
 sl-repl-tokio.log
 sl-repl-bevy.log
+# sl-conformance local run state (per-avatar aditi login cooldown stamps) and log
+/.sl-conformance/
+sl-conformance.log
 tarpaulin-report.html
 tarpaulin-report.json
 /target
