@@ -60,6 +60,15 @@ pub(crate) const IDENTITY_ROTATION: Rotation = Rotation {
 /// message tag a driver feeds back via [`Session::handle_caps_event`].
 pub const CAP_FETCH_INVENTORY: &str = "FetchInventoryDescendents2";
 
+/// The HTTP capability for fetching **shared Library** folder contents — the same
+/// request/response shape as [`CAP_FETCH_INVENTORY`] but POSTed with the Library
+/// owner id so the read-only Library tree (held under
+/// [`InventoryOwner::Library`](crate::InventoryOwner)) is fetched separately from
+/// the agent's own inventory. Stock OpenSim does not serve this cap (the Library
+/// is reachable there only over the UDP `FetchInventoryDescendents` path); it is a
+/// Second-Life capability.
+pub const CAP_FETCH_LIBRARY: &str = "FetchLibDescendents2";
+
 /// The HTTP capability for fetching a group's full member roster (a POST of an
 /// LLSD `{ group_id }` map — the modern Second Life path that replaces the UDP
 /// `GroupMembersRequest`/`Reply`). The LLSD response is decoded by
@@ -438,6 +447,7 @@ pub const CAP_SEND_USER_REPORT_WITH_SCREENSHOT: &str = "SendUserReportWithScreen
 pub const REQUESTED_CAPABILITIES: &[&str] = &[
     "EventQueueGet",
     CAP_FETCH_INVENTORY,
+    CAP_FETCH_LIBRARY,
     CAP_GROUP_MEMBER_DATA,
     CAP_GET_TEXTURE,
     CAP_GET_MESH,

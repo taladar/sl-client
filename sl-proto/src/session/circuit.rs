@@ -2775,10 +2775,13 @@ impl Circuit {
     }
 
     /// Queues a `FetchInventoryDescendents` reliably for the folder `folder_id`
-    /// (sorted by name), requesting its sub-folders and items.
+    /// (sorted by name), requesting its sub-folders and items. `owner_id` is the
+    /// agent's own id for its inventory, or the Library owner id for a shared
+    /// Library folder.
     pub(crate) fn send_fetch_inventory_descendents(
         &mut self,
         folder_id: Uuid,
+        owner_id: Uuid,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::FetchInventoryDescendents(FetchInventoryDescendents {
@@ -2788,8 +2791,7 @@ impl Circuit {
             },
             inventory_data: FetchInventoryDescendentsInventoryDataBlock {
                 folder_id,
-                // Own inventory: the owner is the agent itself.
-                owner_id: self.agent_id.uuid(),
+                owner_id,
                 sort_order: 0, // 0 = by name
                 fetch_folders: true,
                 fetch_items: true,

@@ -8671,6 +8671,158 @@ mod test {
             .ok_or("expected a LibraryInventory event")?;
         assert_eq!(library.len(), 1);
         assert_eq!(library.first().ok_or("library root")?.name, "Library");
+
+        // The Library skeleton is also folded into the held model under its own
+        // root and owner, queryable apart from the agent tree (B7). The agent root
+        // is absent here, so the Library tree stands entirely on its own.
+        assert_eq!(session.library_root(), Some(lib_root));
+        assert_eq!(session.library_owner(), Some(OwnerKey::Agent(lib_owner)));
+        assert_eq!(session.inventory_root(), None);
+        assert_eq!(
+            session.inventory_owner(lib_root),
+            Some(InventoryOwner::Library)
+        );
+        assert_eq!(
+            session.folder_fetch_state(lib_root),
+            Some(FolderState::Unknown)
+        );
+        Ok(())
+    }
+
+    /// B7: the shared Library tree is held apart from the agent tree, fetched
+    /// with the **Library owner** id (not the agent), and a descendents reply for
+    /// a Library folder folds back under [`InventoryOwner::Library`]; the
+    /// fully-fetched Library tree round-trips through its own owner-keyed cache.
+    #[test]
+    fn library_inventory_holds_fetches_and_caches_apart() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = new_session()?;
+        let agent_root = InventoryFolderKey::from(uuid::Uuid::from_u128(0x0A00));
+        let lib_root = InventoryFolderKey::from(uuid::Uuid::from_u128(0x0B00));
+        let lib_owner = AgentKey::from(uuid::Uuid::from_u128(0xAB));
+        let login = LoginResponse::Success(Box::new(LoginSuccess {
+            agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
+            session_id: uuid::Uuid::from_u128(2),
+            secure_session_id: uuid::Uuid::from_u128(3),
+            circuit_code: CircuitCode(0x0011_2233),
+            sim_ip: Ipv4Addr::new(127, 0, 0, 1),
+            sim_port: 9000,
+            seed_capability: "http://127.0.0.1:9000/seed".parse()?,
+            message: None,
+            mfa_hash: None,
+            inventory_root: Some(agent_root),
+            inventory_skeleton: vec![SkeletonFolder {
+                folder_id: agent_root,
+                parent_id: InventoryFolderKey::from(uuid::Uuid::nil()),
+                name: "My Inventory".to_owned(),
+                type_default: 8,
+                version: 1,
+            }],
+            buddy_list: Vec::new(),
+            home: None,
+            look_at: None,
+            region_x: None,
+            region_y: None,
+            agent_access: None,
+            agent_access_max: None,
+            max_agent_groups: None,
+            library_root: Some(lib_root),
+            library_owner: Some(lib_owner),
+            library_skeleton: vec![SkeletonFolder {
+                folder_id: lib_root,
+                parent_id: InventoryFolderKey::from(uuid::Uuid::nil()),
+                name: "Library".to_owned(),
+                type_default: 8,
+                version: 3,
+            }],
+        }));
+        session.handle_login_response(login, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // The two roots are distinct and each lands under its own owner.
+        assert_ne!(session.inventory_root(), session.library_root());
+        assert_eq!(
+            session.inventory_owner(agent_root),
+            Some(InventoryOwner::Agent)
+        );
+        assert_eq!(
+            session.inventory_owner(lib_root),
+            Some(InventoryOwner::Library)
+        );
+        assert_eq!(session.library_owner(), Some(OwnerKey::Agent(lib_owner)));
+
+        // An on-demand fetch of the Library root is addressed to the Library
+        // owner, not the agent id — the one wire difference that routes the
+        // read-only tree — and flips the folder `Fetching`.
+        session.request_folder_contents(lib_root, now)?;
+        let sent = drain(&mut session)?;
+        let fetch = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::FetchInventoryDescendents(fetch) => Some(fetch),
+                _ => None,
+            })
+            .ok_or("expected a FetchInventoryDescendents")?;
+        assert_eq!(fetch.inventory_data.folder_id, lib_root.uuid());
+        assert_eq!(fetch.inventory_data.owner_id, lib_owner.uuid());
+        assert_eq!(
+            session.folder_fetch_state(lib_root),
+            Some(FolderState::Fetching)
+        );
+
+        // The descendents reply folds its contents under the Library owner and
+        // marks the root `Loaded`; the named sub-folder is held in the Library
+        // tree, not the agent tree.
+        let lib_child = uuid::Uuid::from_u128(0x0B01);
+        let reply = AnyMessage::InventoryDescendents(InventoryDescendents {
+            agent_data: InventoryDescendentsAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                folder_id: lib_root.uuid(),
+                owner_id: lib_owner.uuid(),
+                version: 3,
+                descendents: 1,
+            },
+            folder_data: vec![InventoryDescendentsFolderDataBlock {
+                folder_id: lib_child,
+                parent_id: lib_root.uuid(),
+                r#type: 6,
+                name: b"Animations\0".to_vec(),
+            }],
+            item_data: Vec::new(),
+        });
+        let datagram = server_message(&reply, 9, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        drain_events(&mut session);
+
+        assert_eq!(
+            session.folder_fetch_state(lib_root),
+            Some(FolderState::Loaded { version: 3 })
+        );
+        assert_eq!(
+            session.inventory_owner(InventoryFolderKey::from(lib_child)),
+            Some(InventoryOwner::Library)
+        );
+        let (lib_children, _) = split_children(&session, lib_root);
+        assert_eq!(lib_children.len(), 1);
+        assert_eq!(
+            lib_children.first().ok_or("library child")?.folder_id,
+            InventoryFolderKey::from(lib_child)
+        );
+
+        // The fully-fetched Library tree round-trips through its own owner-keyed
+        // cache, separate from the agent tree, restoring the root `Loaded`.
+        let bytes = session.inventory_cache_bytes(InventoryOwner::Library)?;
+        let mut restored = new_session()?;
+        assert!(restored.load_inventory_cache(InventoryOwner::Library, &bytes)?);
+        assert_eq!(
+            restored.inventory_owner(lib_root),
+            Some(InventoryOwner::Library)
+        );
+        assert_eq!(
+            restored.folder_fetch_state(lib_root),
+            Some(FolderState::Loaded { version: 3 })
+        );
         Ok(())
     }
 

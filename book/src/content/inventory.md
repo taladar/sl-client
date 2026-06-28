@@ -105,10 +105,19 @@ mirroring inventory stays in sync. None has a reply; a mirror simply applies it:
 >   (the `RezObjectFromInventory` payload) is in
 >   `sl-proto/src/types/editing.rs`.
 > - The capability names are `CAP_FETCH_INVENTORY`
->   (`FetchInventoryDescendents2`), `CAP_INVENTORY_API_V3` (`InventoryAPIv3`),
->   `CAP_CREATE_INVENTORY_CATEGORY`, in `sl-proto/src/session.rs`. The AIS3
->   URL/body helpers are in `sl-wire/src/inventory.rs` (`ais_category_url`,
+>   (`FetchInventoryDescendents2`), `CAP_FETCH_LIBRARY` (`FetchLibDescendents2`,
+>   the read-only shared Library fetched with the Library owner id),
+>   `CAP_INVENTORY_API_V3` (`InventoryAPIv3`), `CAP_LIBRARY_API_V3`
+>   (`LibraryAPIv3`), `CAP_CREATE_INVENTORY_CATEGORY`, in
+>   `sl-proto/src/session.rs`. The AIS3 URL/body helpers are in
+>   `sl-wire/src/inventory.rs` (`ais_category_url`,
 >   `build_ais_update_item_body`, …).
+> - The agent tree and the shared Library tree are held in one model
+>   (`sl-proto/src/session/inventory.rs`) tagged by `InventoryOwner`
+>   (`Agent` / `Library`), each with its own root and owner
+>   (`Session::inventory_root` / `library_root` / `library_owner`) and its own
+>   version-gated disk cache; a Library descendents reply folds back under
+>   `InventoryOwner::Library`, and no mutation command targets the Library.
 > - The HTTP fetch driver is `sl-client-tokio/src/inventory.rs`; the worked
 >   example is `sl-client-tokio/examples/inventory_edit.rs`.
 > - Events: `InventorySkeleton`, `LibraryInventory`, `InventoryDescendents`,

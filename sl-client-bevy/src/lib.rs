@@ -16,7 +16,7 @@ use std::collections::{BTreeSet, HashMap};
 use sl_proto::{
     CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
     CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
-    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME,
+    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME,
     CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
     CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_OBJECT_COST,
     CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
@@ -65,11 +65,11 @@ pub use sl_proto::{
     GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog, ImSessionId,
     InstantMessage, InterestsUpdate, InventoryCallbackId, InventoryCursor, InventoryFolder,
     InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
-    InventoryType, ItemInfo, Key, Kilobits, LandArea, LandingType, LegacyMaterial, LightData,
-    LightImage, LindenAmount, LindenBalance, LoadUrlRequest, LoggedChatType, LoginAccount,
-    LoginParams, LoginRequest, LureId, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
-    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
-    MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance,
+    InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandingType, LegacyMaterial,
+    LightData, LightImage, LindenAmount, LindenBalance, LoadUrlRequest, LoggedChatType,
+    LoginAccount, LoginParams, LoginRequest, LureId, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE,
+    MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
+    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance,
     MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
     NegativeBalanceError, NeighborInfo, NewInventoryItem, Object, ObjectExtraParams,
     ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties,
@@ -547,11 +547,50 @@ fn advance_running(
             session.agent_id(),
         ) {
             let batch = session.next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT);
-            if !batch.is_empty() {
+            // The batch can span both trees: the agent folders go to
+            // `FetchInventoryDescendents2` with the agent owner, the Library folders
+            // to `FetchLibDescendents2` with the Library owner (or, where the grid
+            // does not serve that cap — e.g. OpenSim — over the UDP path instead, so
+            // they never stay stuck `Fetching`).
+            let (library_folders, agent_folders): (Vec<_>, Vec<_>) =
+                batch.into_iter().partition(|folder| {
+                    session.inventory_owner(*folder) == Some(InventoryOwner::Library)
+                });
+            if !agent_folders.is_empty() {
                 let events_tx = caps.events_tx.clone();
                 std::thread::spawn(move || {
-                    run_inventory_fetch(&url, owner.uuid(), &batch, &events_tx);
+                    run_inventory_fetch(
+                        &url,
+                        owner.uuid(),
+                        &agent_folders,
+                        CAP_FETCH_INVENTORY,
+                        &events_tx,
+                    );
                 });
+            }
+            if !library_folders.is_empty() {
+                match (
+                    caps.map.get(CAP_FETCH_LIBRARY).cloned(),
+                    session.library_owner(),
+                ) {
+                    (Some(lib_url), Some(lib_owner)) => {
+                        let events_tx = caps.events_tx.clone();
+                        std::thread::spawn(move || {
+                            run_inventory_fetch(
+                                &lib_url,
+                                lib_owner.uuid(),
+                                &library_folders,
+                                CAP_FETCH_LIBRARY,
+                                &events_tx,
+                            );
+                        });
+                    }
+                    _ => {
+                        for folder in library_folders {
+                            session.request_folder_contents(folder, now).ok();
+                        }
+                    }
+                }
             }
         }
     }
@@ -684,7 +723,13 @@ fn advance_running(
                     let events_tx = caps.events_tx.clone();
                     let folders = folder_ids.clone();
                     std::thread::spawn(move || {
-                        run_inventory_fetch(&url, owner.uuid(), &folders, &events_tx);
+                        run_inventory_fetch(
+                            &url,
+                            owner.uuid(),
+                            &folders,
+                            CAP_FETCH_INVENTORY,
+                            &events_tx,
+                        );
                     });
                 }
             }

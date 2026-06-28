@@ -5,18 +5,22 @@ use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::{
-    CAP_FETCH_INVENTORY, CAP_GROUP_MEMBER_DATA, CAP_UPDATE_AVATAR_APPEARANCE, GroupKey,
-    InventoryFolderKey, Llsd, Uuid, build_fetch_inventory_request, build_group_member_data_request,
+    CAP_GROUP_MEMBER_DATA, CAP_UPDATE_AVATAR_APPEARANCE, GroupKey, InventoryFolderKey, Llsd, Uuid,
+    build_fetch_inventory_request, build_group_member_data_request,
     build_update_avatar_appearance_request, parse_llsd_xml,
 };
 
-/// POSTs a `FetchInventoryDescendents2` request for `folder_ids` and forwards the
-/// LLSD response to `caps_tx` tagged [`CAP_FETCH_INVENTORY`], for the session to
-/// decode into [`SlSessionEvent::InventoryDescendents`].
+/// POSTs a `FetchInventoryDescendents2` / `FetchLibDescendents2` request for
+/// `folder_ids` (addressed to `owner_id` — the agent for its own inventory, the
+/// Library owner for the shared Library) and forwards the LLSD response to
+/// `caps_tx` tagged `response_cap` (`CAP_FETCH_INVENTORY` for the agent tree,
+/// `CAP_FETCH_LIBRARY` for the Library), for the session to decode into
+/// [`SlSessionEvent::InventoryDescendents`].
 pub(crate) fn run_inventory_fetch(
     cap_url: &str,
     owner_id: Uuid,
     folder_ids: &[InventoryFolderKey],
+    response_cap: &'static str,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
     let Ok(http) = ReqwestBlockingClient::builder()
@@ -38,7 +42,7 @@ pub(crate) fn run_inventory_fetch(
         return;
     };
     if let Ok(llsd) = parse_llsd_xml(&text) {
-        caps_tx.send((CAP_FETCH_INVENTORY.to_owned(), llsd)).ok();
+        caps_tx.send((response_cap.to_owned(), llsd)).ok();
     }
 }
 

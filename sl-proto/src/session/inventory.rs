@@ -25,7 +25,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use sl_types::key::{InventoryFolderKey, InventoryKey};
+use sl_types::key::{InventoryFolderKey, InventoryKey, OwnerKey};
 
 use crate::bookkeeping_ids::InventoryCallbackId;
 use crate::types::{Child, InventoryFolder, InventoryItem, optional_key_from_wire};
@@ -99,6 +99,10 @@ pub(crate) struct Inventory {
     agent_root: Option<InventoryFolderKey>,
     /// The shared Library root folder, from the login response, or `None`.
     library_root: Option<InventoryFolderKey>,
+    /// The owner id of the shared Library tree (the login `inventory-lib-owner`),
+    /// or `None` before login. Library fetches are POSTed/sent with this owner
+    /// rather than the agent id.
+    library_owner: Option<OwnerKey>,
     /// A monotonic counter for the async `CallbackID` of inventory create/update
     /// requests (never zero), echoed back by the simulator so a client can
     /// correlate a reply with its request.
@@ -113,6 +117,7 @@ impl Inventory {
             items: BTreeMap::new(),
             agent_root: None,
             library_root: None,
+            library_owner: None,
             next_callback: InventoryCallbackId(1),
         }
     }
@@ -129,6 +134,11 @@ impl Inventory {
         self.library_root
     }
 
+    /// The owner id of the shared Library tree, if known.
+    pub(crate) const fn library_owner(&self) -> Option<OwnerKey> {
+        self.library_owner
+    }
+
     /// Records the agent inventory root (from the login response).
     pub(crate) const fn set_agent_root(&mut self, root: Option<InventoryFolderKey>) {
         self.agent_root = root;
@@ -137,6 +147,11 @@ impl Inventory {
     /// Records the shared Library root (from the login response).
     pub(crate) const fn set_library_root(&mut self, root: Option<InventoryFolderKey>) {
         self.library_root = root;
+    }
+
+    /// Records the shared Library owner id (from the login response).
+    pub(crate) const fn set_library_owner(&mut self, owner: Option<OwnerKey>) {
+        self.library_owner = owner;
     }
 
     // ---- reads --------------------------------------------------------------
@@ -912,6 +927,43 @@ mod tests {
         let batch = inv.next_fetch_batch(10);
         assert_eq!(batch, vec![fk(0xF0), fk(0xF2)]);
         assert!(!batch.contains(&fk(0xF1)));
+    }
+
+    /// The agent and Library trees share one store but stay queryable apart: each
+    /// root records its own owner, the cacheable snapshot of one owner never
+    /// includes the other's folders, and the Library owner id is held for fetches.
+    #[test]
+    fn agent_and_library_trees_query_apart() {
+        let mut inv = Inventory::new();
+        inv.set_agent_root(Some(fk(0xA0)));
+        inv.set_library_root(Some(fk(0xB0)));
+        inv.set_library_owner(Some(OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0xAB)))));
+        inv.cache_folder(folder(0xA0, None, 1), InventoryOwner::Agent);
+        inv.cache_folder(folder(0xB0, None, 3), InventoryOwner::Library);
+        inv.cache_item(item(0xD1, 0xB0), InventoryOwner::Library);
+        inv.mark_folder_loaded(fk(0xA0), 1, InventoryOwner::Agent);
+        inv.mark_folder_loaded(fk(0xB0), 3, InventoryOwner::Library);
+
+        assert_eq!(inv.folder_owner(fk(0xA0)), Some(InventoryOwner::Agent));
+        assert_eq!(inv.folder_owner(fk(0xB0)), Some(InventoryOwner::Library));
+        assert_eq!(
+            inv.library_owner(),
+            Some(OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0xAB))))
+        );
+
+        // Each owner's cacheable snapshot is its tree alone.
+        let (agent_folders, agent_items) = inv.cacheable_snapshot(InventoryOwner::Agent);
+        assert_eq!(agent_folders.len(), 1);
+        assert_eq!(agent_folders.first().map(|f| f.folder_id), Some(fk(0xA0)));
+        assert!(agent_items.is_empty());
+        let (lib_folders, lib_items) = inv.cacheable_snapshot(InventoryOwner::Library);
+        assert_eq!(lib_folders.len(), 1);
+        assert_eq!(lib_folders.first().map(|f| f.folder_id), Some(fk(0xB0)));
+        assert_eq!(lib_items.len(), 1);
+
+        // Completion is tracked per owner.
+        assert!(inv.fully_loaded(InventoryOwner::Agent));
+        assert!(inv.fully_loaded(InventoryOwner::Library));
     }
 
     /// Allocated callback ids are monotonic and never zero (wrapping past

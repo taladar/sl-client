@@ -29,7 +29,7 @@ use super::{
     AGENT_UPDATE_INTERVAL, AssetTransfer, AssetUpload, CAP_AGENT_EXPERIENCES,
     CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST,
     CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT,
-    CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
+    CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
     CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA,
     CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_MODIFY_MATERIAL_PARAMS,
@@ -398,7 +398,7 @@ impl Session {
                     self.caps_decode_failed(message);
                 }
             }
-            CAP_FETCH_INVENTORY => {
+            CAP_FETCH_INVENTORY | CAP_FETCH_LIBRARY => {
                 for event in inventory_descendents_from_llsd(body) {
                     if let Event::InventoryDescendents {
                         folder_id,
@@ -408,12 +408,13 @@ impl Session {
                         ..
                     } = &event
                     {
-                        self.cache_inventory(folders, items);
-                        self.inventory.mark_folder_loaded(
-                            *folder_id,
-                            *version,
-                            InventoryOwner::Agent,
-                        );
+                        // Route the reply into the tree its target folder belongs
+                        // to — agent or Library — so a `FetchLibDescendents2`
+                        // response folds under the Library owner.
+                        let owner = self.inventory_reply_owner(*folder_id);
+                        self.cache_inventory(folders, items, owner);
+                        self.inventory
+                            .mark_folder_loaded(*folder_id, *version, owner);
                     }
                     self.events.push_back(event);
                 }
@@ -425,7 +426,7 @@ impl Session {
                 if let Some((transaction_id, folders, items)) =
                     bulk_update_inventory_from_llsd(body)
                 {
-                    self.cache_inventory(&folders, &items);
+                    self.cache_inventory(&folders, &items, InventoryOwner::Agent);
                     self.events.push_back(Event::InventoryBulkUpdate {
                         transaction_id,
                         folders,
@@ -440,9 +441,14 @@ impl Session {
             // operation — folders/items it created, updated, or fetched, embedded
             // under `_embedded` (and/or at the top level). Merge into the cache.
             CAP_INVENTORY_API_V3 | CAP_LIBRARY_API_V3 => {
+                let owner = if message == CAP_LIBRARY_API_V3 {
+                    InventoryOwner::Library
+                } else {
+                    InventoryOwner::Agent
+                };
                 let (folders, items) = ais_inventory_update_from_llsd(body);
                 if !folders.is_empty() || !items.is_empty() {
-                    self.cache_inventory(&folders, &items);
+                    self.cache_inventory(&folders, &items, owner);
                     self.events.push_back(Event::InventoryBulkUpdate {
                         transaction_id: Uuid::nil(),
                         folders,
@@ -1197,6 +1203,8 @@ impl Session {
                 self.seed_capability = Some(success.seed_capability.clone());
                 self.inventory.set_agent_root(success.inventory_root);
                 self.inventory.set_library_root(success.library_root);
+                self.inventory
+                    .set_library_owner(success.library_owner.map(OwnerKey::Agent));
                 self.secure_session_id = success.secure_session_id;
                 self.state = SessionState::AwaitingHandshake;
                 self.events.push_back(Event::CircuitEstablished {
@@ -1222,6 +1230,14 @@ impl Session {
                         .iter()
                         .map(skeleton_folder)
                         .collect();
+                    // Seed the held model with the Library skeleton under the
+                    // `Library` owner: each folder lands `Unknown` carrying its
+                    // authoritative skeleton version, queryable and cacheable apart
+                    // from the agent tree.
+                    for folder in &library {
+                        self.inventory
+                            .cache_folder(folder.clone(), InventoryOwner::Library);
+                    }
                     self.events.push_back(Event::LibraryInventory(library));
                 }
                 if !success.inventory_skeleton.is_empty() {
@@ -2426,12 +2442,12 @@ impl Session {
                     .map(inventory_item)
                     .collect::<Result<_, _>>()?;
                 let folder_id = InventoryFolderKey::from(reply.agent_data.folder_id);
-                self.cache_inventory(&folders, &items);
-                self.inventory.mark_folder_loaded(
-                    folder_id,
-                    reply.agent_data.version,
-                    InventoryOwner::Agent,
-                );
+                // Route into the tree the target folder belongs to (agent or
+                // Library), so a UDP Library fetch stays in the Library tree.
+                let owner = self.inventory_reply_owner(folder_id);
+                self.cache_inventory(&folders, &items, owner);
+                self.inventory
+                    .mark_folder_loaded(folder_id, reply.agent_data.version, owner);
                 self.events.push_back(Event::InventoryDescendents {
                     folder_id,
                     version: reply.agent_data.version,
@@ -2484,7 +2500,7 @@ impl Session {
                         )
                     })
                     .collect();
-                self.cache_inventory(&folders, &items);
+                self.cache_inventory(&folders, &items, InventoryOwner::Agent);
                 self.events.push_back(Event::InventoryBulkUpdate {
                     transaction_id: update.agent_data.transaction_id,
                     folders,
@@ -7842,6 +7858,16 @@ impl Session {
         self.inventory.library_root()
     }
 
+    /// The shared Library owner id, from the login response, or `None` if the grid
+    /// did not provide it. Library folder fetches are addressed to this owner (over
+    /// [`CAP_FETCH_LIBRARY`](crate::CAP_FETCH_LIBRARY) on Second Life, or the UDP
+    /// `FetchInventoryDescendents` path on OpenSim) rather than the agent id; the
+    /// same id is also reachable via [`Session::login_account`].
+    #[must_use]
+    pub const fn library_owner(&self) -> Option<OwnerKey> {
+        self.inventory.library_owner()
+    }
+
     /// Account-level facts from the login response (home, start look-at, maturity
     /// ratings, group limit, and the shared Library roots), or `None` before
     /// login. The same data is also emitted once as [`Event::Account`].
@@ -7864,9 +7890,18 @@ impl Session {
         folder_id: InventoryFolderKey,
         now: Instant,
     ) -> Result<(), Error> {
+        // A Library folder is fetched with the Library owner id; the agent's own
+        // folders with the agent id (the circuit default).
+        let owner_id = match self.inventory.folder_owner(folder_id) {
+            Some(InventoryOwner::Library) => {
+                self.inventory.library_owner().map(|owner| owner.uuid())
+            }
+            _ => None,
+        };
         {
             let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-            circuit.send_fetch_inventory_descendents(folder_id.uuid(), now)?;
+            let owner_id = owner_id.unwrap_or_else(|| circuit.agent_id.uuid());
+            circuit.send_fetch_inventory_descendents(folder_id.uuid(), owner_id, now)?;
         }
         // Track the in-flight request in the model so the background scheduler
         // does not re-pick this folder and the completion query reflects it.
@@ -8103,17 +8138,32 @@ impl Session {
         self.inventory.cache_folder(folder, InventoryOwner::Agent);
     }
 
-    /// Merges a batch of folders and items into the held model (from a
-    /// descendents fetch or a simulator push).
-    fn cache_inventory(&mut self, folders: &[InventoryFolder], items: &[InventoryItem]) {
+    /// Merges a batch of folders and items into the held model under `owner` (from
+    /// a descendents fetch or a simulator push). The agent's own mutations and
+    /// bulk updates fold under [`InventoryOwner::Agent`]; a descendents reply folds
+    /// under the tree its target folder belongs to (so a Library fetch stays in the
+    /// Library tree).
+    fn cache_inventory(
+        &mut self,
+        folders: &[InventoryFolder],
+        items: &[InventoryItem],
+        owner: InventoryOwner,
+    ) {
         for folder in folders {
-            self.inventory
-                .cache_folder(folder.clone(), InventoryOwner::Agent);
+            self.inventory.cache_folder(folder.clone(), owner);
         }
         for item in items {
-            self.inventory
-                .cache_item(item.clone(), InventoryOwner::Agent);
+            self.inventory.cache_item(item.clone(), owner);
         }
+    }
+
+    /// The tree a descendents reply for `folder_id` belongs to — the owner already
+    /// recorded for that folder (seeded from the agent or Library skeleton), or
+    /// [`InventoryOwner::Agent`] if the folder is somehow unknown.
+    fn inventory_reply_owner(&self, folder_id: InventoryFolderKey) -> InventoryOwner {
+        self.inventory
+            .folder_owner(folder_id)
+            .unwrap_or(InventoryOwner::Agent)
     }
 
     /// Inserts/updates an item in the held model (agent tree), maintaining the
