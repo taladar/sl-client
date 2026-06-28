@@ -12,9 +12,9 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, ExternalPrinter};
 use sl_client_bevy::{
-    AgentKey, ChatLogConfig, ClientDirectories, Command, LoginParams, LoginRequest, MfaChallenge,
-    SlCapabilities, SlClientPlugin, SlCommand, SlDiagnostic, SlEvent, SlIdentity, SlMfaChallenge,
-    SlSessionEvent, StartLocation, Uuid,
+    AgentKey, ChatLogConfig, ClientDirectories, Command, InventoryCacheConfig, LoginParams,
+    LoginRequest, MfaChallenge, SlCapabilities, SlClientPlugin, SlCommand, SlDiagnostic, SlEvent,
+    SlIdentity, SlMfaChallenge, SlSessionEvent, StartLocation, Uuid,
 };
 use sl_repl::{
     Avatar, Credentials, MetaCommand, ReplAction, ScriptRecorder, SessionContext, format_command,
@@ -618,6 +618,7 @@ fn run_session(
             diagnostics: true,
             chat_log_config: chat_log_config.clone(),
             directories: directories.clone(),
+            inventory_cache_config: InventoryCacheConfig::default(),
             // The REPL exercises the full client, so crawl inventory in the
             // background (the tokio REPL does the same via
             // `set_background_inventory_fetch`).

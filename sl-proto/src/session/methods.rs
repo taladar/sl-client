@@ -8130,6 +8130,24 @@ impl Session {
         self.inventory.merge_skeleton(skeleton, owner)
     }
 
+    /// Whether the held inventory model has cacheable changes since the last
+    /// [`Session::clear_inventory_dirty`] — set by every fold/mutation that can
+    /// alter the cacheable snapshot. The runtime cache shell's optional
+    /// dirty/idle save checks this to skip a no-op rewrite (the cache is
+    /// otherwise written only at logout, mirroring Firestorm's shutdown-only
+    /// save).
+    #[must_use]
+    pub const fn inventory_dirty(&self) -> bool {
+        self.inventory.is_dirty()
+    }
+
+    /// Clears the inventory dirty flag, called by the runtime cache shell once it
+    /// has persisted the cache (or right after the post-login load+merge, to reset
+    /// the baseline so the first idle tick does not re-save an unchanged model).
+    pub const fn clear_inventory_dirty(&mut self) {
+        self.inventory.clear_dirty();
+    }
+
     /// Inserts/updates a folder in the held model (agent tree), maintaining the
     /// index and fetch state. A version of `0` (as carried by a descendents
     /// reply's sub-folders, which omit it) does not clobber a known version from

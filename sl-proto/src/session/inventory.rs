@@ -107,6 +107,11 @@ pub(crate) struct Inventory {
     /// requests (never zero), echoed back by the simulator so a client can
     /// correlate a reply with its request.
     next_callback: InventoryCallbackId,
+    /// Whether the cacheable content has changed since the last disk-cache save.
+    /// Set by every fold/mutation that can alter the cacheable snapshot and
+    /// cleared by the runtime shell after it persists the cache, so the optional
+    /// dirty/idle save can skip a no-op rewrite (see the `B10` cache shells).
+    dirty: bool,
 }
 
 impl Inventory {
@@ -119,7 +124,24 @@ impl Inventory {
             library_root: None,
             library_owner: None,
             next_callback: InventoryCallbackId(1),
+            dirty: false,
         }
+    }
+
+    // ---- disk-cache dirty tracking (B10) ------------------------------------
+
+    /// Whether the cacheable content has changed since the last
+    /// [`clear_dirty`](Self::clear_dirty) — the gate the runtime shell's
+    /// dirty/idle save checks to skip a no-op rewrite.
+    pub(crate) const fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    /// Clears the dirty flag, called by the runtime shell once it has persisted
+    /// the cache (or right after the post-login load+merge, to reset the
+    /// baseline).
+    pub(crate) const fn clear_dirty(&mut self) {
+        self.dirty = false;
     }
 
     // ---- roots --------------------------------------------------------------
@@ -306,6 +328,7 @@ impl Inventory {
     /// child folded before its parent links correctly: the parent's entry is
     /// created payload-less and filled when its own metadata arrives.
     pub(crate) fn cache_folder(&mut self, mut folder: InventoryFolder, owner: InventoryOwner) {
+        self.dirty = true;
         let key = folder.folder_id;
         let old_parent = self
             .folders
@@ -338,6 +361,7 @@ impl Inventory {
     /// index (relinking it if its containing folder changed). A reference to an
     /// as-yet-unknown containing folder creates that folder's entry payload-less.
     pub(crate) fn cache_item(&mut self, item: InventoryItem, owner: InventoryOwner) {
+        self.dirty = true;
         let key = item.item_id;
         let new_folder = item.folder_id;
         let old_folder = self.items.get(&key).map(|existing| existing.folder_id);
@@ -366,6 +390,7 @@ impl Inventory {
         version: i32,
         owner: InventoryOwner,
     ) {
+        self.dirty = true;
         let entry = self.entry(folder, owner);
         entry.state = FolderState::Loaded { version };
         if let Some(payload) = entry.folder.as_mut() {
@@ -382,6 +407,7 @@ impl Inventory {
         folder: InventoryFolderKey,
         new_parent: InventoryFolderKey,
     ) {
+        self.dirty = true;
         let old_parent = match self
             .folders
             .get_mut(&folder)
@@ -416,6 +442,7 @@ impl Inventory {
         new_folder: InventoryFolderKey,
         new_name: &str,
     ) {
+        self.dirty = true;
         let old_folder = match self.items.get_mut(&item) {
             Some(payload) => {
                 let old = payload.folder_id;
@@ -441,6 +468,7 @@ impl Inventory {
     /// Overwrites the flags of a known item (the `ChangeInventoryItemFlags`
     /// mutation), leaving the index untouched (flags do not affect parentage).
     pub(crate) fn set_item_flags(&mut self, item: InventoryKey, flags: u32) {
+        self.dirty = true;
         if let Some(payload) = self.items.get_mut(&item) {
             payload.flags = flags;
         }
@@ -449,6 +477,7 @@ impl Inventory {
     /// Recursively drops a folder's descendents — its items and its sub-folders
     /// (whole subtrees) — leaving the folder's own (now-empty) entry in place.
     pub(crate) fn purge_descendents(&mut self, folder: InventoryFolderKey) {
+        self.dirty = true;
         let Some((child_folders, child_items)) = self
             .folders
             .get(&folder)
@@ -472,6 +501,7 @@ impl Inventory {
     /// Removes a folder and its descendents, unlinking it from its parent's
     /// child set.
     pub(crate) fn remove_folder(&mut self, folder: InventoryFolderKey) {
+        self.dirty = true;
         self.purge_descendents(folder);
         let parent = self
             .folders
@@ -488,6 +518,7 @@ impl Inventory {
 
     /// Removes an item, unlinking it from its containing folder's child set.
     pub(crate) fn remove_item(&mut self, item: InventoryKey) {
+        self.dirty = true;
         if let Some(payload) = self.items.remove(&item)
             && let Some(folder) = self.folders.get_mut(&payload.folder_id)
         {

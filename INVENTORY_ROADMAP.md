@@ -1560,26 +1560,35 @@ live crawl stalls.
   `ChatLog::new` call passes the dir verbatim, and every assertion targets files
   directly under the supplied dir (no `Me Resident` join).
 
-### B10. Runtime cache shells (tokio + bevy) (from A4·A5·A10)
+### B10. Runtime cache shells (tokio + bevy) (from A4·A5·A10) — DONE
 
-- [ ] Add an `inventory_cache.rs` runtime shell to each of `sl-client-tokio` and
-      `sl-client-bevy`: locate `<agent-uuid>.inv.llsd.gz` / `.lib.inv.llsd.gz`
-      **directly** under `agent_cache_dir` (`None` ⇒ caching disabled); gzip via
-      new `flate2` dep (none in the workspace today); async (`tokio::fs`,
-      currently unused) vs blocking I/O — the chat writer's sync
-      `fs_err`+`OpenOptions` append (`sl-client-tokio/src/chat_log.rs:41-49`) is
-      *not* the pattern here; this crash-safe gzip write is all-new code.
-      **Crash-safe atomic write per A4:** stream the gzip to a same-directory
-      `…<pid>.tmp`, flush + `fsync`, then atomic `rename` over the target (never
-      overwrite the live file in place); remove the temp + keep the old cache on
-      any error.
-- [ ] `InventoryCacheConfig` (enable flags, library-cache toggle) beside the dir
-  from `ClientDirectories`. Load at login (before/with the skeleton) → call the
-  B5 merge → seed B6's fetch queue; save on logout + on the dirty/idle interval
-  using the B5 cacheable snapshot (`Loaded` folders only).
-- [ ] Tests: a caller-supplied temp dir round-trips save → gunzip → 4-byte
-      header `5` → load → merge → model equality (and the Firestorm-shaped keys
-      are present).
+- [x] Added an `inventory_cache.rs` runtime shell (byte-identical, mirroring the
+      `chat_log.rs` precedent) to each of `sl-client-tokio` and
+      `sl-client-bevy`: locates `<agent-uuid>.inv.llsd.gz` / `.lib.inv.llsd.gz`
+      **directly** under `agent_cache_dir` (`None` ⇒ caching disabled); gzips
+      via the new `flate2` dep (added to both runtime crates). Blocking I/O (a
+      `fs_err` + `flate2` atomic write), not the chat append pattern — this
+      crash-safe gzip write is all-new code. **Crash-safe atomic write per A4:**
+      streams the gzip to a same-directory `…<pid>.tmp`, flush + `fsync`
+      (`File::sync_all`), then atomic `rename` over the target; removes the temp
+      + keeps the old cache on any error.
+- [x] `InventoryCacheConfig` (master enable flag + library-cache toggle, in
+      `sl-proto` beside `ClientDirectories`, re-exported from both runtimes;
+      default OFF, library toggle ON) consumed beside the dir from
+      `ClientDirectories`. Loads at the `InventorySkeleton` / `LibraryInventory`
+      event (before the merge) → calls the B5 `merge_inventory_skeleton` → the
+      reconciled `Unknown` set **is** B6's fetch queue (no separate injection);
+      saves on the terminal event (logout) and on a dirty/idle tick using the B5
+      cacheable snapshot (`Loaded` folders only). The dirty/idle save is gated
+      on a new sans-IO `Session::inventory_dirty()` / `clear_inventory_dirty()`
+      (an `Inventory.dirty` flag set by every fold/mutation), so an unchanged
+      model is never needlessly rewritten — the optional crash-safety tick
+      beyond Firestorm's shutdown-only save.
+- [x] Tests: a caller-supplied temp dir round-trips save → gunzip → 4-byte
+      header `5` → load → merge → model equality (a `Loaded` folder survives the
+      round-trip at its version), the Firestorm-shaped `category_id` key is
+      present in the bytes, plus disabled-config and library-toggle-off gating
+      tests (in both runtime crates).
 
 ### B11. Cross-cutting tests + example (from A11)
 

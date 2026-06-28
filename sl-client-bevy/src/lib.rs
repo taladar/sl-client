@@ -63,34 +63,35 @@ pub use sl_proto::{
     GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
     GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
     GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
-    ImSessionId, InstantMessage, InterestsUpdate, InventoryCallbackId, InventoryCursor,
-    InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey,
-    InventoryOffer, InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandingType,
-    LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, LoadUrlRequest,
-    LoggedChatType, LoginAccount, LoginParams, LoginRequest, LureId, MEDIA_PERM_ALL,
-    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
-    MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge,
-    MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags,
-    MuteType, NegativeBalanceError, NeighborInfo, NewInventoryItem, Object, ObjectExtraParams,
-    ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties,
-    ObjectTransform, OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-    ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, PhysicsShapeTypes, PickInfo,
-    PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape, PrimShapeParams, ProductType,
-    ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId, ReflectionProbe,
-    ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionCoordinates, RegionFlags,
-    RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId,
-    RegionLocalParcelId, RegionName, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation,
-    SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData, SculptOrMeshKey,
-    SequenceNumber, SimulatorFeatures, SoundFlags, SoundPreload, StartLocation,
-    StartLocationParseError, TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry,
-    TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat,
-    TransactionId, TransferId, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest,
-    Wearable, WearableType, XferId, avatar_texture, decode_particle_system, decode_texture_anim,
-    decode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
-    particle_pattern, pcode, sim_access, texture_anim_mode,
+    ImSessionId, InstantMessage, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId,
+    InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey,
+    InventoryKey, InventoryOffer, InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea,
+    LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance,
+    LoadUrlRequest, LoggedChatType, LoginAccount, LoginParams, LoginRequest, LureId,
+    MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER,
+    MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry,
+    MeshKey, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode,
+    MuteEntry, MuteFlags, MuteType, NegativeBalanceError, NeighborInfo, NewInventoryItem, Object,
+    ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks,
+    ObjectProperties, ObjectTransform, OpenSimExtras, OwnerKey, ParcelAccessEntry,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
+    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
+    PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape,
+    PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId,
+    ReflectionProbe, ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings,
+    RegionCoordinates, RegionFlags, RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits,
+    RegionLocalObjectId, RegionLocalParcelId, RegionName, Reliability, RenderMaterialEntry,
+    RenderMaterialRef, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
+    ScriptControlAction, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest, SculptData, SculptOrMeshKey, SequenceNumber, SimulatorFeatures,
+    SoundFlags, SoundPreload, StartLocation, StartLocationParseError, TerrainLayerType,
+    TerrainPatch, TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle,
+    ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit, Uuid,
+    Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, XferId,
+    avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
+    grid_to_handle, group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode,
+    sim_access, texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -102,6 +103,7 @@ mod experiences;
 mod fetch;
 mod http;
 mod inventory;
+mod inventory_cache;
 mod materials;
 mod media;
 mod upload;
@@ -117,6 +119,7 @@ use crate::http::{
 use crate::inventory::{
     run_group_members_fetch, run_inventory_fetch, run_server_appearance_update,
 };
+use crate::inventory_cache::InventoryCache;
 use crate::materials::{run_modify_material_params, run_render_materials_fetch};
 use crate::media::{run_object_media_fetch, run_object_media_post};
 use crate::upload::{
@@ -146,6 +149,12 @@ pub struct SlClientPlugin {
     /// all-`None`, disabling every disk feature; a `None` field disables that
     /// feature.
     pub directories: ClientDirectories,
+    /// The inventory disk-cache configuration (default off). Once enabled (and
+    /// paired with [`ClientDirectories::agent_cache_dir`]), the driver loads the
+    /// per-account `<agent-uuid>.inv.llsd.gz` cache at login, reconciles it
+    /// against the skeleton so version-matching folders skip the background
+    /// refetch, and writes it back on logout and on a dirty/idle tick.
+    pub inventory_cache_config: InventoryCacheConfig,
     /// Whether to run the automatic background inventory crawl (off by default).
     /// While enabled, the driver breadth-first fetches the agent's inventory tree
     /// in the background (a bounded number of folder-contents requests in flight).
@@ -168,6 +177,7 @@ impl Plugin for SlClientPlugin {
                 diagnostics: self.diagnostics,
                 chat_log_config: self.chat_log_config.clone(),
                 directories: self.directories.clone(),
+                inventory_cache_config: self.inventory_cache_config,
                 background_inventory_fetch: self.background_inventory_fetch,
             })
             .add_systems(Startup, start_login)
@@ -235,6 +245,8 @@ struct SlConfig {
     chat_log_config: ChatLogConfig,
     /// The per-account filesystem directories the optional disk features use.
     directories: ClientDirectories,
+    /// The inventory disk-cache configuration (default off).
+    inventory_cache_config: InventoryCacheConfig,
     /// Whether the automatic background inventory crawl is enabled (default off).
     background_inventory_fetch: bool,
 }
@@ -268,6 +280,8 @@ enum SlInner {
         caps: Option<Caps>,
         /// The local chat-log writer/reader (a no-op when disabled).
         chat_log: Box<ChatLog>,
+        /// The inventory disk-cache reader/writer (a no-op when disabled).
+        inventory_cache: Box<InventoryCache>,
     },
     /// The session is finished.
     Done,
@@ -365,6 +379,7 @@ fn drive(
             rx,
             &config.chat_log_config,
             &config.directories,
+            &config.inventory_cache_config,
             now,
             &mut events,
             &mut identity,
@@ -376,12 +391,14 @@ fn drive(
             recv_buf,
             caps,
             chat_log,
+            inventory_cache,
         } => advance_running(
             session,
             socket,
             recv_buf,
             caps,
             chat_log,
+            inventory_cache,
             now,
             &mut events,
             &mut diagnostics,
@@ -396,14 +413,16 @@ fn drive(
 /// response arrives.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the login step threads the session, its channel, the chat-log config \
-              and directories, and several Bevy writers it emits to on success"
+    reason = "the login step threads the session, its channel, the chat-log and \
+              inventory-cache configs and directories, and several Bevy writers it \
+              emits to on success"
 )]
 fn advance_login(
     mut session: Box<Session>,
     rx: Receiver<Result<String, String>>,
     chat_log_config: &ChatLogConfig,
     directories: &ClientDirectories,
+    inventory_cache_config: &InventoryCacheConfig,
     now: Instant,
     events: &mut EventWriter<SlEvent>,
     identity: &mut EventWriter<SlIdentity>,
@@ -434,12 +453,19 @@ fn advance_login(
                             session.agent_legacy_name(),
                             session.agent_id(),
                         ));
+                        let inventory_cache = Box::new(InventoryCache::new(
+                            *inventory_cache_config,
+                            directories.agent_cache_dir.clone(),
+                            session.agent_id(),
+                            now,
+                        ));
                         SlInner::Running {
                             session,
                             socket,
                             recv_buf: vec![0u8; RECV_BUFFER_SIZE],
                             caps,
                             chat_log,
+                            inventory_cache,
                         }
                     }
                     Err(()) => {
@@ -495,6 +521,7 @@ fn advance_running(
     mut recv_buf: Vec<u8>,
     mut caps: Option<Caps>,
     mut chat_log: Box<ChatLog>,
+    mut inventory_cache: Box<InventoryCache>,
     now: Instant,
     events: &mut EventWriter<SlEvent>,
     diagnostics: &mut EventWriter<SlDiagnostic>,
@@ -3010,6 +3037,15 @@ fn advance_running(
             SessionEvent::NeighborSeed {
                 seed_capability, ..
             } => post_neighbour_seed(seed_capability.clone()),
+            // On the login inventory/library skeleton, load the disk cache (if
+            // any) and reconcile it against the skeleton, so version-matching
+            // folders skip the background refetch. A no-op when disabled.
+            SessionEvent::InventorySkeleton(folders) => {
+                inventory_cache.load_agent(&mut session, folders);
+            }
+            SessionEvent::LibraryInventory(folders) => {
+                inventory_cache.load_library(&mut session, folders);
+            }
             _ => {}
         }
         // Tap the event for the local chat log (no-op when disabled) before
@@ -3024,14 +3060,22 @@ fn advance_running(
     }
 
     if done || session.is_closed() {
+        // Persist the inventory cache before exit (Firestorm's save-at-cleanup);
+        // a no-op when the cache is disabled.
+        inventory_cache.save(&mut session);
         SlInner::Done
     } else {
+        // The optional dirty/idle inventory-cache save (crash-safety beyond
+        // Firestorm's shutdown-only save); self-gating on the dirty flag and the
+        // save interval, so a clean or disabled cache costs nothing.
+        inventory_cache.maybe_save(&mut session, now);
         SlInner::Running {
             session,
             socket,
             recv_buf,
             caps,
             chat_log,
+            inventory_cache,
         }
     }
 }

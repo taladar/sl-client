@@ -186,6 +186,42 @@ pub struct ClientDirectories {
     pub shared_cache_dir: Option<std::path::PathBuf>,
 }
 
+/// The runtime inventory disk-cache configuration — opt-in, **default OFF**
+/// (mirroring the chat-log toggles). Even when enabled, the feature stays
+/// dormant unless [`ClientDirectories::agent_cache_dir`] also supplies a
+/// directory to write the per-account `<agent-uuid>.inv.llsd.gz` /
+/// `.lib.inv.llsd.gz` files under. Supplied once at each runtime's construction
+/// and consumed by the runtime inventory-cache shell (the sans-IO
+/// [`Session`](crate::Session) never touches the filesystem).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InventoryCacheConfig {
+    /// The master switch for the inventory disk cache. While `false` (the
+    /// default) the runtime neither loads a cache at login nor writes one at
+    /// logout/idle, so a consumer that does not want on-disk inventory pays
+    /// nothing. While `true` (and a [`ClientDirectories::agent_cache_dir`] is
+    /// set) the runtime loads the cache before the login skeleton, reconciles it
+    /// against the skeleton, and persists the cacheable snapshot on logout and on
+    /// the dirty/idle tick.
+    pub enabled: bool,
+    /// Whether to also persist the read-only shared **Library** tree to
+    /// `<agent-uuid>.lib.inv.llsd.gz`. The agent's own tree is always cached when
+    /// the feature is enabled; the (large, rarely-changing) Library cache can be
+    /// turned off independently. Defaults to `true` — both caches are written, as
+    /// Firestorm does (its single-instance guard does not apply here).
+    pub cache_library: bool,
+}
+
+impl Default for InventoryCacheConfig {
+    /// The feature off, but the Library toggle on, so merely flipping
+    /// [`enabled`](Self::enabled) caches both trees.
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            cache_library: true,
+        }
+    }
+}
+
 /// The runtime chat-log configuration — opt-in, **default OFF**, mirroring
 /// Firestorm's per-account toggles. The whole feature is disabled until a runtime
 /// enables one or more text-chat types (via [`enabled`](Self::enabled)); the
