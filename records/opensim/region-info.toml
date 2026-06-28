@@ -16,3 +16,19 @@ region_info_secs = 0.048450368
 
 [run.metric_meta.region_info_secs]
 lower_is_better = true
+
+[[run]]
+behavior_describe = "7cc529c"
+dirty = false
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-28T22:06:31.890368506Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+max_agents = 40
+region_info_secs = 0.120153499
+
+[run.metric_meta.region_info_secs]
+lower_is_better = true

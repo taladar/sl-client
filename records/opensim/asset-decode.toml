@@ -17,3 +17,20 @@ texture_fetch_secs = 0.08651588
 
 [run.metric_meta.texture_fetch_secs]
 lower_is_better = true
+
+[[run]]
+behavior_describe = "7cc529c"
+dirty = false
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-28T22:06:42.601680285Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+texture_bytes = 79234
+texture_codec = "J2c"
+texture_fetch_secs = 0.079082356
+
+[run.metric_meta.texture_fetch_secs]
+lower_is_better = true
