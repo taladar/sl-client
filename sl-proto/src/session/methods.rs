@@ -208,6 +208,7 @@ impl Session {
             time_dilation: BTreeMap::new(),
             own_avatar: BTreeMap::new(),
             inventory: Inventory::new(),
+            background_inventory_fetch: false,
             events: VecDeque::new(),
             diagnostics_enabled: false,
             diagnostics: VecDeque::new(),
@@ -7863,9 +7864,63 @@ impl Session {
         folder_id: InventoryFolderKey,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_fetch_inventory_descendents(folder_id.uuid(), now)?;
+        {
+            let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+            circuit.send_fetch_inventory_descendents(folder_id.uuid(), now)?;
+        }
+        // Track the in-flight request in the model so the background scheduler
+        // does not re-pick this folder and the completion query reflects it.
+        self.inventory.mark_folder_fetching(folder_id);
         Ok(())
+    }
+
+    /// The next batch of folders the background crawler should fetch — a
+    /// breadth-first sweep over [`Unknown`](FolderState::Unknown) folders bounded
+    /// by `max_in_flight` (minus those already in flight), flipping each returned
+    /// folder to [`Fetching`](FolderState::Fetching). Returns an **empty** batch
+    /// when the background inventory crawl is disabled (the default — see
+    /// [`Session::set_background_inventory_fetch`]), so a consumer that never reads
+    /// inventory pays nothing.
+    ///
+    /// The runtime shell POSTs a `FetchInventoryDescendents2` for each returned
+    /// folder ([`INVENTORY_FETCH_MAX_IN_FLIGHT`](crate::INVENTORY_FETCH_MAX_IN_FLIGHT)
+    /// is the conventional bound); the reply folds in and flips the folder
+    /// [`Loaded`](FolderState::Loaded), seeding its children `Unknown` for the next
+    /// sweep. The explicit pulls ([`Session::request_folder_contents`],
+    /// [`Command::FetchInventoryFolders`](crate::Command::FetchInventoryFolders))
+    /// work regardless of the flag.
+    pub fn next_inventory_fetch_batch(&mut self, max_in_flight: usize) -> Vec<InventoryFolderKey> {
+        if !self.background_inventory_fetch {
+            return Vec::new();
+        }
+        self.inventory.next_fetch_batch(max_in_flight)
+    }
+
+    /// Enables or disables the automatic background inventory crawl (default
+    /// **disabled**). While disabled, [`Session::next_inventory_fetch_batch`]
+    /// returns empty and nothing auto-enqueues, so a consumer that ignores
+    /// inventory issues no folder fetches. The explicit pull paths
+    /// ([`Session::request_folder_contents`],
+    /// [`Command::FetchInventoryFolders`](crate::Command::FetchInventoryFolders))
+    /// stay available either way.
+    pub const fn set_background_inventory_fetch(&mut self, enabled: bool) {
+        self.background_inventory_fetch = enabled;
+    }
+
+    /// Whether the automatic background inventory crawl is enabled (see
+    /// [`Session::set_background_inventory_fetch`]).
+    #[must_use]
+    pub const fn background_inventory_fetch(&self) -> bool {
+        self.background_inventory_fetch
+    }
+
+    /// Whether the `owner` inventory tree is fully fetched — no folder under it is
+    /// [`Unknown`](FolderState::Unknown) or [`Fetching`](FolderState::Fetching).
+    /// The background-crawl completion signal (vacuously true before any folder of
+    /// that owner is known).
+    #[must_use]
+    pub fn inventory_fully_loaded(&self, owner: InventoryOwner) -> bool {
+        self.inventory.fully_loaded(owner)
     }
 
     // ---- Inventory cache (#30) ---------------------------------------------

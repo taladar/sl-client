@@ -23,7 +23,7 @@
 //! keyed by the typed [`InventoryFolderKey`] / [`InventoryKey`] (never a bare
 //! `Uuid`).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use sl_types::key::{InventoryFolderKey, InventoryKey};
 
@@ -480,6 +480,88 @@ impl Inventory {
         }
     }
 
+    // ---- background-fetch scheduling (B6) -----------------------------------
+
+    /// The number of folders with a descendents request in flight
+    /// ([`Fetching`](FolderState::Fetching)) across both trees — the in-flight
+    /// count the background scheduler measures its budget against.
+    fn fetching_count(&self) -> usize {
+        self.folders
+            .values()
+            .filter(|entry| matches!(entry.state, FolderState::Fetching))
+            .count()
+    }
+
+    /// The next batch of [`Unknown`](FolderState::Unknown) folders to fetch: a
+    /// breadth-first walk from each root over the child-folder index, taking
+    /// unfetched folders up to the in-flight budget (`max_in_flight` minus the
+    /// folders already [`Fetching`](FolderState::Fetching)) and flipping each
+    /// returned folder to `Fetching`. Returns an empty batch when the budget is
+    /// exhausted or nothing is `Unknown`. The walk descends *through*
+    /// already-`Fetching`/`Loaded` folders to reach deeper `Unknown` ones, so a
+    /// later call — after the issued replies fold in and seed their children
+    /// `Unknown` — continues the crawl one level deeper. Mirrors Firestorm's
+    /// bounded-in-flight `LLInventoryModelBackgroundFetch::bulkFetch`.
+    pub(crate) fn next_fetch_batch(&mut self, max_in_flight: usize) -> Vec<InventoryFolderKey> {
+        let slots = max_in_flight.saturating_sub(self.fetching_count());
+        if slots == 0 {
+            return Vec::new();
+        }
+        let mut batch = Vec::new();
+        let mut queue: VecDeque<InventoryFolderKey> = VecDeque::new();
+        let mut seen: BTreeSet<InventoryFolderKey> = BTreeSet::new();
+        for root in [self.agent_root, self.library_root].into_iter().flatten() {
+            if seen.insert(root) {
+                queue.push_back(root);
+            }
+        }
+        while let Some(key) = queue.pop_front() {
+            let Some(entry) = self.folders.get(&key) else {
+                continue;
+            };
+            if matches!(entry.state, FolderState::Unknown) {
+                batch.push(key);
+            }
+            for child in &entry.child_folders {
+                if seen.insert(*child) {
+                    queue.push_back(*child);
+                }
+            }
+            if batch.len() >= slots {
+                break;
+            }
+        }
+        for key in &batch {
+            if let Some(entry) = self.folders.get_mut(key) {
+                entry.state = FolderState::Fetching;
+            }
+        }
+        batch
+    }
+
+    /// Flips a known folder to [`Fetching`](FolderState::Fetching) — an on-demand
+    /// contents request issued for it outside the background crawl (so the
+    /// scheduler will not re-pick it and the completion query reflects it). A
+    /// no-op for a folder not in the model (the request still goes out, but there
+    /// is no entry to track yet).
+    pub(crate) fn mark_folder_fetching(&mut self, folder: InventoryFolderKey) {
+        if let Some(entry) = self.folders.get_mut(&folder) {
+            entry.state = FolderState::Fetching;
+        }
+    }
+
+    /// Whether every folder of `owner` has its contents loaded — none is
+    /// [`Unknown`](FolderState::Unknown) or [`Fetching`](FolderState::Fetching).
+    /// The background-crawl completion signal (mirrors Firestorm
+    /// `isEverythingFetched`). Vacuously true before any folder of that owner is
+    /// known.
+    pub(crate) fn fully_loaded(&self, owner: InventoryOwner) -> bool {
+        !self
+            .folders
+            .values()
+            .any(|entry| entry.owner == owner && !matches!(entry.state, FolderState::Loaded { .. }))
+    }
+
     // ---- cache snapshot & skeleton merge (B5) -------------------------------
 
     /// The cacheable snapshot for one tree: every [`Loaded`](FolderState::Loaded)
@@ -767,6 +849,69 @@ mod tests {
         inv.remove_item(ik(0xD2));
         assert!(child_item_ids(&inv, 0xF0).is_empty());
         assert_eq!(inv.item(ik(0xD2)), None);
+    }
+
+    /// The background scheduler drains an all-`Unknown` tree breadth-first over
+    /// bounded batches: each batch flips at most `max_in_flight` folders to
+    /// `Fetching`, and once the issued folders fold in `Loaded` the next batch
+    /// descends a level deeper, until the tree is fully `Loaded`.
+    #[test]
+    fn background_fetch_drains_over_bounded_batches() {
+        let mut inv = Inventory::new();
+        inv.set_agent_root(Some(fk(0xF0)));
+        inv.cache_folder(folder(0xF0, None, 1), InventoryOwner::Agent);
+        inv.cache_folder(folder(0xF1, Some(0xF0), 1), InventoryOwner::Agent);
+        inv.cache_folder(folder(0xF2, Some(0xF0), 1), InventoryOwner::Agent);
+        inv.cache_folder(folder(0xF3, Some(0xF1), 1), InventoryOwner::Agent);
+        assert!(!inv.fully_loaded(InventoryOwner::Agent));
+
+        // First sweep takes the bounded top of the tree (root + first child).
+        let batch = inv.next_fetch_batch(2);
+        assert_eq!(
+            batch,
+            vec![fk(0xF0), fk(0xF1)],
+            "BFS from the root, bounded at two in flight"
+        );
+        assert_eq!(inv.folder_state(fk(0xF0)), Some(FolderState::Fetching));
+        assert_eq!(inv.folder_state(fk(0xF1)), Some(FolderState::Fetching));
+        // The budget is full, so a second call returns nothing until replies land.
+        assert!(inv.next_fetch_batch(2).is_empty());
+
+        // The two replies fold in: the fetched folders become `Loaded`.
+        inv.mark_folder_loaded(fk(0xF0), 1, InventoryOwner::Agent);
+        inv.mark_folder_loaded(fk(0xF1), 1, InventoryOwner::Agent);
+
+        // The next sweep descends past the now-`Loaded` folders to the deeper
+        // `Unknown` ones.
+        let batch = inv.next_fetch_batch(2);
+        assert_eq!(batch, vec![fk(0xF2), fk(0xF3)]);
+        inv.mark_folder_loaded(fk(0xF2), 1, InventoryOwner::Agent);
+        inv.mark_folder_loaded(fk(0xF3), 1, InventoryOwner::Agent);
+
+        assert!(inv.next_fetch_batch(2).is_empty());
+        assert!(inv.fully_loaded(InventoryOwner::Agent));
+    }
+
+    /// An on-demand fetch flips exactly its one folder to `Fetching`, leaving the
+    /// rest `Unknown`; the background scheduler then skips that in-flight folder
+    /// but still picks up the others.
+    #[test]
+    fn on_demand_fetch_marks_single_folder() {
+        let mut inv = Inventory::new();
+        inv.set_agent_root(Some(fk(0xF0)));
+        inv.cache_folder(folder(0xF0, None, 1), InventoryOwner::Agent);
+        inv.cache_folder(folder(0xF1, Some(0xF0), 1), InventoryOwner::Agent);
+        inv.cache_folder(folder(0xF2, Some(0xF0), 1), InventoryOwner::Agent);
+
+        inv.mark_folder_fetching(fk(0xF1));
+        assert_eq!(inv.folder_state(fk(0xF1)), Some(FolderState::Fetching));
+        assert_eq!(inv.folder_state(fk(0xF0)), Some(FolderState::Unknown));
+        assert_eq!(inv.folder_state(fk(0xF2)), Some(FolderState::Unknown));
+
+        // The scheduler skips the in-flight folder but sweeps up the rest.
+        let batch = inv.next_fetch_batch(10);
+        assert_eq!(batch, vec![fk(0xF0), fk(0xF2)]);
+        assert!(!batch.contains(&fk(0xF1)));
     }
 
     /// Allocated callback ids are monotonic and never zero (wrapping past

@@ -24,9 +24,9 @@ use sl_proto::{
     CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
     CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-    CHAT_SESSION_DECLINE_P2P_VOICE, Llsd, RECV_BUFFER_SIZE, SelectedCostKind, Session,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, build_agent_preferences_request,
+    CHAT_SESSION_DECLINE_P2P_VOICE, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, RECV_BUFFER_SIZE,
+    SelectedCostKind, Session, ais_category_children_fetch_url, ais_category_children_url,
+    ais_category_url, ais_create_category_url, ais_item_url, build_agent_preferences_request,
     build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
     build_ais_update_item_body, build_create_inventory_category_request,
     build_get_object_cost_request, build_get_object_physics_data_request,
@@ -281,6 +281,20 @@ impl Client {
         self.chat_log_config = config;
     }
 
+    /// Enables or disables the automatic background inventory crawl (off by
+    /// default). While enabled, [`Client::run`] breadth-first fetches the agent's
+    /// inventory tree in the background (a bounded number of folder-contents
+    /// requests in flight), so the held model fills in without explicit
+    /// per-folder requests. While disabled, no folder fetches are issued unless
+    /// the driver asks for one
+    /// ([`Command::RequestFolderContents`](sl_proto::Command::RequestFolderContents)
+    /// / [`Command::FetchInventoryFolders`](sl_proto::Command::FetchInventoryFolders)),
+    /// so a consumer that ignores inventory pays nothing. Call before
+    /// [`Client::run`].
+    pub const fn set_background_inventory_fetch(&mut self, enabled: bool) {
+        self.session.set_background_inventory_fetch(enabled);
+    }
+
     /// Runs the session until it is disconnected or logged out, forwarding
     /// events to `events`, diagnostics to `diagnostics` (only when enabled via
     /// [`Client::set_diagnostics`]), and applying commands from `commands`.
@@ -371,6 +385,32 @@ impl Client {
             if self.session.is_closed() {
                 abort_task(&mut caps_task);
                 return Ok(());
+            }
+
+            // Background inventory crawl: when enabled, sweep the next bounded
+            // batch of unfetched folders and POST a `FetchInventoryDescendents2`
+            // for each. Self-gating — `next_inventory_fetch_batch` returns empty
+            // when the crawl is off, so this costs nothing for a consumer that
+            // ignores inventory. The replies fold in over `caps_rx` and the next
+            // loop iteration continues the sweep a level deeper. Only swept while
+            // the fetch capability and agent id are known, so folders are never
+            // flipped to `Fetching` for a request that cannot be issued.
+            if let (Some(url), Some(owner)) = (
+                caps.get(CAP_FETCH_INVENTORY).cloned(),
+                self.session.agent_id(),
+            ) {
+                let batch = self
+                    .session
+                    .next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT);
+                if !batch.is_empty() {
+                    tokio::spawn(fetch_inventory(
+                        url,
+                        owner.uuid(),
+                        batch,
+                        http.clone(),
+                        caps_tx.clone(),
+                    ));
+                }
             }
 
             let sleep = make_sleep(self.session.poll_timeout());

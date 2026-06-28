@@ -27,17 +27,18 @@ use sl_proto::{
     CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
     CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-    CHAT_SESSION_DECLINE_P2P_VOICE, ChatSessionKind, Event as SessionEvent, GroupKey, Llsd,
-    LoginResponse, MessageCursor, RECV_BUFFER_SIZE, SelectedCostKind, Session, SessionMessage,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, build_agent_preferences_request,
-    build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
-    build_ais_update_item_body, build_create_inventory_category_request,
-    build_get_object_cost_request, build_get_object_physics_data_request,
-    build_modify_material_params_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_parcel_voice_info_request,
-    build_provision_voice_account_request, build_region_experiences_request,
-    build_remote_parcel_request, build_resource_cost_selected_request, build_send_user_report,
+    CHAT_SESSION_DECLINE_P2P_VOICE, ChatSessionKind, Event as SessionEvent, GroupKey,
+    INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse, MessageCursor, RECV_BUFFER_SIZE,
+    SelectedCostKind, Session, SessionMessage, ais_category_children_fetch_url,
+    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
+    build_agent_preferences_request, build_ais_create_category_body, build_ais_move_body,
+    build_ais_rename_category_body, build_ais_update_item_body,
+    build_create_inventory_category_request, build_get_object_cost_request,
+    build_get_object_physics_data_request, build_modify_material_params_request,
+    build_object_media_navigate_request, build_object_media_update_request,
+    build_parcel_voice_info_request, build_provision_voice_account_request,
+    build_region_experiences_request, build_remote_parcel_request,
+    build_resource_cost_selected_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_upload_baked_texture_request,
     build_voice_signaling_request, chat_session_request_body, display_names_query,
@@ -140,6 +141,13 @@ pub struct SlClientPlugin {
     /// enabled, the driver writes Firestorm-compatible transcripts and serves the
     /// older, file-backed pages of `QueryChatHistoryPage`.
     pub chat_log_config: ChatLogConfig,
+    /// Whether to run the automatic background inventory crawl (off by default).
+    /// While enabled, the driver breadth-first fetches the agent's inventory tree
+    /// in the background (a bounded number of folder-contents requests in flight).
+    /// While disabled, no folder fetches are issued unless the driver asks for one
+    /// (`RequestFolderContents` / `FetchInventoryFolders`), so a consumer that
+    /// ignores inventory pays nothing.
+    pub background_inventory_fetch: bool,
 }
 
 impl Plugin for SlClientPlugin {
@@ -154,6 +162,7 @@ impl Plugin for SlClientPlugin {
                 params: self.params.clone(),
                 diagnostics: self.diagnostics,
                 chat_log_config: self.chat_log_config.clone(),
+                background_inventory_fetch: self.background_inventory_fetch,
             })
             .add_systems(Startup, start_login)
             .add_systems(Update, drive);
@@ -218,6 +227,8 @@ struct SlConfig {
     diagnostics: bool,
     /// The local chat-log configuration (default off).
     chat_log_config: ChatLogConfig,
+    /// Whether the automatic background inventory crawl is enabled (default off).
+    background_inventory_fetch: bool,
 }
 
 /// The driver's runtime state resource.
@@ -288,6 +299,7 @@ impl Drop for Caps {
 fn start_login(mut commands: Commands, config: Res<SlConfig>) {
     let mut session = Session::new(config.params.clone());
     session.set_diagnostics(config.diagnostics);
+    session.set_background_inventory_fetch(config.background_inventory_fetch);
     let inner = match session.login_http_request() {
         Some(request) => {
             let (tx, rx) = unbounded();
@@ -521,6 +533,26 @@ fn advance_running(
         // Binary asset fetches return fully-formed session events; surface them.
         while let Ok(event) = caps.asset_rx.try_recv() {
             events.write(SlEvent(event));
+        }
+
+        // Background inventory crawl: when enabled, sweep the next bounded batch
+        // of unfetched folders and POST a `FetchInventoryDescendents2` for each.
+        // Self-gating — `next_inventory_fetch_batch` returns empty when the crawl
+        // is off. Only swept while the fetch capability and agent id are known, so
+        // folders are never flipped to `Fetching` for a request that cannot be
+        // issued. The replies fold in over `events_rx` and the next frame
+        // continues the sweep a level deeper.
+        if let (Some(url), Some(owner)) = (
+            caps.map.get(CAP_FETCH_INVENTORY).cloned(),
+            session.agent_id(),
+        ) {
+            let batch = session.next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT);
+            if !batch.is_empty() {
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_inventory_fetch(&url, owner.uuid(), &batch, &events_tx);
+                });
+            }
         }
     }
 

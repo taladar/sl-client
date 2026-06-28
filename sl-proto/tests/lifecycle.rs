@@ -20,28 +20,29 @@ mod test {
         FollowCamProperty, FreezeAction, FriendKey, FriendPresence, FriendRights,
         GestureActivation, GlobalCoordinates, Glow, GodRegionUpdate, GridCoordinates, GroupKey,
         GroupNoticeAttachment, GroupRequestId, GroupRoleChange, GroupRoleEdit, GroupRoleKey,
-        GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImSessionId, ImageCodec,
-        InterestsUpdate, InventoryCallbackId, InventoryFolder, InventoryFolderKey, InventoryItem,
-        InventoryItemMove, InventoryItemOrFolderKey, InventoryKey, InventoryOwner, InventoryType,
-        InviteChannel, ItemInfo, LandArea, LandBrushAction, LandBrushSize, LandEdit, LandingType,
-        LightData, LindenAmount, LindenBalance, LoginAccount, LoginParams, LookAtType, LureId,
-        MapItemType, Material, Maturity, MeanCollisionType, MeshKey, MoneyTransactionType,
-        MovementMode, MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem,
-        NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
-        ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
-        ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand,
-        ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PendingInvite,
-        PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
-        PrimShapeParams, ProductType, ProfileUpdate, QueryId, ReflectionProbeFlags,
-        RegionCoordinates, RegionHandle, RegionInfoUpdate, RegionName, Reliability,
-        RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
-        SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction,
-        ScriptPermissionStatus, ScriptPermissions, SculptOrMeshKey, Session, SessionMessage,
-        SetDisplayNameReply, SimStatId, SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags,
-        StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea,
-        TerrainLayerType, TextureEntry, TextureFace, TextureKey, Throttle, TransactionId,
-        TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, WaterSettings, WearableType, avatar_texture, chat_session_request_body,
+        GroupRoleMemberChange, GroupRoleUpdateType, INVENTORY_FETCH_MAX_IN_FLIGHT, ImDialog,
+        ImSessionId, ImageCodec, InterestsUpdate, InventoryCallbackId, InventoryFolder,
+        InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
+        InventoryKey, InventoryOwner, InventoryType, InviteChannel, ItemInfo, LandArea,
+        LandBrushAction, LandBrushSize, LandEdit, LandingType, LightData, LindenAmount,
+        LindenBalance, LoginAccount, LoginParams, LookAtType, LureId, MapItemType, Material,
+        Maturity, MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags,
+        MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NewInventoryLink,
+        NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
+        ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+        ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
+        ParcelReturnType, ParcelStatus, ParcelUpdate, PendingInvite, PermissionField, Permissions,
+        Permissions5, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams, ProductType,
+        ProfileUpdate, QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle,
+        RegionInfoUpdate, RegionName, Reliability, RequiredVoiceVersion, RestoreItem,
+        RezAttachment, RezObjectParams, RezScriptParams, SaleType, Scale, ScopedObjectId,
+        ScopedParcelId, ScriptControlAction, ScriptPermissionStatus, ScriptPermissions,
+        SculptOrMeshKey, Session, SessionMessage, SetDisplayNameReply, SimStatId,
+        SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags, StartLocationSlot,
+        TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea, TerrainLayerType,
+        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, TransferStatus, Transmit,
+        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        WaterSettings, WearableType, avatar_texture, chat_session_request_body,
         decode_texture_entry, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
@@ -8783,6 +8784,135 @@ mod test {
         assert_eq!(
             cached_items.first().ok_or("cached item")?.item_id,
             InventoryKey::from(uuid::Uuid::from_u128(0xD1))
+        );
+        Ok(())
+    }
+
+    /// B6: the background-fetch scheduler is gated off by default (a consumer
+    /// that ignores inventory issues no fetches), the explicit on-demand pull
+    /// still schedules its one folder while the gate is off, and once enabled the
+    /// scheduler sweeps the rest of the `Unknown` tree breadth-first until the
+    /// descendents replies fold in and the tree is fully `Loaded`.
+    #[test]
+    fn background_inventory_fetch_gate_and_drain() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = new_session()?;
+        let root = InventoryFolderKey::from(uuid::Uuid::from_u128(0xF0));
+        let sub = InventoryFolderKey::from(uuid::Uuid::from_u128(0xF1));
+        let login = LoginResponse::Success(Box::new(LoginSuccess {
+            agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
+            session_id: uuid::Uuid::from_u128(2),
+            secure_session_id: uuid::Uuid::from_u128(3),
+            circuit_code: CircuitCode(0x0011_2233),
+            sim_ip: Ipv4Addr::new(127, 0, 0, 1),
+            sim_port: 9000,
+            seed_capability: "http://127.0.0.1:9000/seed".parse()?,
+            message: None,
+            mfa_hash: None,
+            inventory_root: Some(root),
+            inventory_skeleton: vec![
+                SkeletonFolder {
+                    folder_id: root,
+                    parent_id: InventoryFolderKey::from(uuid::Uuid::nil()),
+                    name: "My Inventory".to_owned(),
+                    type_default: 8,
+                    version: 5,
+                },
+                SkeletonFolder {
+                    folder_id: sub,
+                    parent_id: root,
+                    name: "Objects".to_owned(),
+                    type_default: 6,
+                    version: 2,
+                },
+            ],
+            buddy_list: Vec::new(),
+            home: None,
+            look_at: None,
+            region_x: None,
+            region_y: None,
+            agent_access: None,
+            agent_access_max: None,
+            max_agent_groups: None,
+            library_root: None,
+            library_owner: None,
+            library_skeleton: Vec::new(),
+        }));
+        session.handle_login_response(login, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Both skeleton folders are `Unknown`; the tree is not fully loaded.
+        assert_eq!(session.folder_fetch_state(root), Some(FolderState::Unknown));
+        assert_eq!(session.folder_fetch_state(sub), Some(FolderState::Unknown));
+        assert!(!session.inventory_fully_loaded(InventoryOwner::Agent));
+
+        // Gate off (the default): the scheduler returns nothing and touches no
+        // state even though `Unknown` folders are present.
+        assert!(!session.background_inventory_fetch());
+        assert!(
+            session
+                .next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT)
+                .is_empty()
+        );
+        assert_eq!(session.folder_fetch_state(root), Some(FolderState::Unknown));
+
+        // The explicit on-demand pull still schedules exactly its one folder
+        // (gate still off), flipping it `Fetching` and issuing the UDP fetch.
+        session.request_folder_contents(sub, now)?;
+        let sent = drain(&mut session)?;
+        assert!(sent.iter().any(|message| matches!(
+            message,
+            AnyMessage::FetchInventoryDescendents(fetch)
+                if fetch.inventory_data.folder_id == sub.uuid()
+        )));
+        assert_eq!(session.folder_fetch_state(sub), Some(FolderState::Fetching));
+        assert_eq!(session.folder_fetch_state(root), Some(FolderState::Unknown));
+
+        // Enable the crawl: the scheduler sweeps the remaining `Unknown` folder
+        // (the in-flight `sub` is skipped) and flips it `Fetching`.
+        session.set_background_inventory_fetch(true);
+        assert!(session.background_inventory_fetch());
+        let batch = session.next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT);
+        assert_eq!(batch, vec![root]);
+        assert_eq!(
+            session.folder_fetch_state(root),
+            Some(FolderState::Fetching)
+        );
+
+        // The descendents replies fold in: each fetched folder becomes `Loaded`
+        // at its authoritative version, and the tree is then fully loaded.
+        for (sequence, folder, version) in [(40, root, 5), (41, sub, 2)] {
+            let reply = AnyMessage::InventoryDescendents(InventoryDescendents {
+                agent_data: InventoryDescendentsAgentDataBlock {
+                    agent_id: uuid::Uuid::from_u128(1),
+                    folder_id: folder.uuid(),
+                    owner_id: uuid::Uuid::from_u128(1),
+                    version,
+                    descendents: 0,
+                },
+                folder_data: Vec::new(),
+                item_data: Vec::new(),
+            });
+            let datagram = server_message(&reply, sequence, false)?;
+            session.handle_datagram(sim_addr(), &datagram, now)?;
+            drain_events(&mut session);
+        }
+
+        assert_eq!(
+            session.folder_fetch_state(root),
+            Some(FolderState::Loaded { version: 5 })
+        );
+        assert_eq!(
+            session.folder_fetch_state(sub),
+            Some(FolderState::Loaded { version: 2 })
+        );
+        assert!(session.inventory_fully_loaded(InventoryOwner::Agent));
+        // Nothing left to sweep.
+        assert!(
+            session
+                .next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT)
+                .is_empty()
         );
         Ok(())
     }

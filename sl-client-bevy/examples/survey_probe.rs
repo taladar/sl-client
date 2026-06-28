@@ -66,6 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             params,
             diagnostics: false,
             chat_log_config: ChatLogConfig::default(),
+            background_inventory_fetch: false,
         })
         .insert_resource(ProbeState {
             collect: Duration::from_secs(collect_secs),

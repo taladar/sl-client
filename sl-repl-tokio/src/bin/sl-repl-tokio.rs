@@ -557,6 +557,8 @@ async fn run_repl(args: RunArgs) -> Result<(), Error> {
     tracing::info!("login succeeded");
     client.set_diagnostics(true);
     client.set_chat_log_config(args.chat_log.to_config());
+    // The REPL exercises the full client, so crawl inventory in the background.
+    client.set_background_inventory_fetch(true);
     let (caps_tx, mut caps_rx) = mpsc::channel::<HashMap<String, String>>(8);
     client.set_caps_reporter(caps_tx);
 
