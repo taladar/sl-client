@@ -23,8 +23,9 @@
 use std::time::Duration;
 
 use sl_client_tokio::{
-    Client, Command, DisconnectReason, Error, Event, InventoryFolderKey, InventoryKey, LoginParams,
-    LoginRequest, NewInventoryItem, Throttle, TransactionId, Uuid,
+    AssetType, Client, Command, DisconnectReason, Error, Event, FolderType, InventoryFolderKey,
+    InventoryKey, InventoryType, LoginParams, LoginRequest, NewInventoryItem, Throttle,
+    TransactionId, Uuid, WearableType,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -106,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .send(Command::CreateInventoryFolder {
                             folder_id: test_folder,
                             parent_id: root,
-                            folder_type: -1,
+                            folder_type: FolderType::None,
                             name: "sl-client #30 test".to_owned(),
                         })
                         .await
@@ -128,9 +129,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             folder_id: test_folder,
                             transaction_id: Uuid::nil(),
                             next_owner_mask: 0x0008_e000,
-                            asset_type: 7, // notecard
-                            inv_type: 7,
-                            wearable_type: 0,
+                            asset_type: AssetType::Notecard,
+                            inv_type: InventoryType::Notecard,
+                            wearable_type: WearableType::Shape,
                             name: "sl-client #30 note".to_owned(),
                             description: "created then deleted".to_owned(),
                         }))

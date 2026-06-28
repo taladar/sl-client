@@ -11,37 +11,37 @@ mod test {
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AnimationKey, AssetKey, AssetType, AttachmentMode,
         AttachmentPoint, Camera, ChatAudible, ChatChannel, ChatLifecycleView, ChatSessionInfo,
-        ChatSessionKind, ChatSessionLifecycle, ChatSource, ChatType, ClassifiedCategory,
+        ChatSessionKind, ChatSessionLifecycle, ChatSource, ChatType, Child, ClassifiedCategory,
         ClassifiedKey, ClassifiedUpdate, ClickAction, CloudPosDensity, CoarseLocation, Color,
         ColorAlpha, ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination,
         DetachOrder, Diagnostic, DirFindFlags, Direction, DirectoryVisibility, DisconnectReason,
         DisplayName, DisplayNameUpdate, Distance, EjectAction, EnvironmentSettings,
-        EstateAccessDelta, EstateAccessKind, Event, EventId, FolderState, FollowCamProperty,
-        FreezeAction, FriendKey, FriendPresence, FriendRights, GestureActivation,
-        GlobalCoordinates, Glow, GodRegionUpdate, GridCoordinates, GroupKey, GroupNoticeAttachment,
-        GroupRequestId, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
-        GroupRoleUpdateType, ImDialog, ImSessionId, ImageCodec, InterestsUpdate,
-        InventoryCallbackId, InventoryFolderKey, InventoryItem, InventoryItemMove,
-        InventoryItemOrFolderKey, InventoryKey, InventoryOwner, InviteChannel, LandArea,
-        LandBrushAction, LandBrushSize, LandEdit, LandingType, LightData, LindenAmount,
-        LindenBalance, LoginAccount, LoginParams, LookAtType, LureId, MapItemType, Material,
-        Maturity, MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags,
-        MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NewInventoryLink,
-        NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
-        ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-        ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
-        ParcelReturnType, ParcelStatus, ParcelUpdate, PendingInvite, PermissionField, Permissions,
-        Permissions5, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams, ProductType,
-        ProfileUpdate, QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle,
-        RegionInfoUpdate, RegionName, Reliability, RequiredVoiceVersion, RestoreItem,
-        RezAttachment, RezObjectParams, RezScriptParams, SaleType, Scale, ScopedObjectId,
-        ScopedParcelId, ScriptControlAction, ScriptPermissionStatus, ScriptPermissions,
-        SculptOrMeshKey, Session, SessionMessage, SetDisplayNameReply, SimStatId,
-        SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags, StartLocationSlot,
-        TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea, TerrainLayerType,
-        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, TransferStatus, Transmit,
-        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        WaterSettings, WearableType, avatar_texture, chat_session_request_body,
+        EstateAccessDelta, EstateAccessKind, Event, EventId, FolderInfo, FolderState, FolderType,
+        FollowCamProperty, FreezeAction, FriendKey, FriendPresence, FriendRights,
+        GestureActivation, GlobalCoordinates, Glow, GodRegionUpdate, GridCoordinates, GroupKey,
+        GroupNoticeAttachment, GroupRequestId, GroupRoleChange, GroupRoleEdit, GroupRoleKey,
+        GroupRoleMemberChange, GroupRoleUpdateType, ImDialog, ImSessionId, ImageCodec,
+        InterestsUpdate, InventoryCallbackId, InventoryFolder, InventoryFolderKey, InventoryItem,
+        InventoryItemMove, InventoryItemOrFolderKey, InventoryKey, InventoryOwner, InventoryType,
+        InviteChannel, ItemInfo, LandArea, LandBrushAction, LandBrushSize, LandEdit, LandingType,
+        LightData, LindenAmount, LindenBalance, LoginAccount, LoginParams, LookAtType, LureId,
+        MapItemType, Material, Maturity, MeanCollisionType, MeshKey, MoneyTransactionType,
+        MovementMode, MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem,
+        NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
+        ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
+        ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand,
+        ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PendingInvite,
+        PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
+        PrimShapeParams, ProductType, ProfileUpdate, QueryId, ReflectionProbeFlags,
+        RegionCoordinates, RegionHandle, RegionInfoUpdate, RegionName, Reliability,
+        RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+        SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction,
+        ScriptPermissionStatus, ScriptPermissions, SculptOrMeshKey, Session, SessionMessage,
+        SetDisplayNameReply, SimStatId, SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags,
+        StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea,
+        TerrainLayerType, TextureEntry, TextureFace, TextureKey, Throttle, TransactionId,
+        TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, WaterSettings, WearableType, avatar_texture, chat_session_request_body,
         decode_texture_entry, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
@@ -245,6 +245,23 @@ mod test {
         let mut reader = Reader::new(parsed.body);
         let id = MessageId::decode(&mut reader)?;
         Ok(AnyMessage::decode(id, &mut reader)?)
+    }
+
+    /// Split a folder's borrowed [`Child`] iterator into `(folders, items)`, the
+    /// shape the pre-B4 tuple accessor returned, for the assertions below.
+    fn split_children(
+        session: &Session,
+        folder: InventoryFolderKey,
+    ) -> (Vec<&InventoryFolder>, Vec<&InventoryItem>) {
+        let mut folders = Vec::new();
+        let mut items = Vec::new();
+        for child in session.inventory_children(folder) {
+            match child {
+                Child::Folder(folder) => folders.push(folder),
+                Child::Item(item) => items.push(item),
+            }
+        }
+        (folders, items)
     }
 
     /// Drains and decodes all currently queued transmissions.
@@ -3575,8 +3592,8 @@ mod test {
             &NewInventoryLink {
                 folder_id: InventoryFolderKey::from(folder),
                 linked_id: InventoryItemOrFolderKey::Item(InventoryKey::from(linked)),
-                link_type: 24, // AT_LINK
-                inv_type: 10,
+                link_type: AssetType::Other(24), // AT_LINK
+                inv_type: InventoryType::Script,
                 name: "My Link".to_owned(),
                 description: "a link".to_owned(),
             },
@@ -8557,7 +8574,7 @@ mod test {
             Some(FolderState::Unknown)
         );
         assert_eq!(session.inventory_owner(root), Some(InventoryOwner::Agent));
-        let (child_folders, child_items) = session.inventory_children(root);
+        let (child_folders, child_items) = split_children(&session, root);
         assert_eq!(child_folders.len(), 1);
         assert_eq!(
             child_folders.first().ok_or("child folder")?.folder_id,
@@ -8756,7 +8773,7 @@ mod test {
             Some(FolderState::Loaded { version: 7 })
         );
         assert_eq!(session.folder_fetch_state(sub), Some(FolderState::Unknown));
-        let (cached_folders, cached_items) = session.inventory_children(folder_key);
+        let (cached_folders, cached_items) = split_children(&session, folder_key);
         assert_eq!(cached_folders.len(), 1);
         assert_eq!(
             cached_folders.first().ok_or("cached folder")?.folder_id,
@@ -8767,6 +8784,349 @@ mod test {
             cached_items.first().ok_or("cached item")?.item_id,
             InventoryKey::from(uuid::Uuid::from_u128(0xD1))
         );
+        Ok(())
+    }
+
+    // ---- B4: idiomatic read + write API -----------------------------------
+
+    /// A descendents sub-folder wire block for the B4 read tests.
+    fn desc_folder(
+        id: u128,
+        parent: u128,
+        folder_type: i8,
+        name: &str,
+    ) -> InventoryDescendentsFolderDataBlock {
+        InventoryDescendentsFolderDataBlock {
+            folder_id: uuid::Uuid::from_u128(id),
+            parent_id: uuid::Uuid::from_u128(parent),
+            r#type: folder_type,
+            name: with_nul_bytes(name),
+        }
+    }
+
+    /// A descendents item wire block for the B4 read tests; the asset id is
+    /// derived from `id` so it can be asserted against.
+    fn desc_item(
+        id: u128,
+        folder: u128,
+        asset_type: i8,
+        inv_type: i8,
+        sale_type: u8,
+        sale_price: i32,
+        name: &str,
+    ) -> InventoryDescendentsItemDataBlock {
+        InventoryDescendentsItemDataBlock {
+            item_id: uuid::Uuid::from_u128(id),
+            folder_id: uuid::Uuid::from_u128(folder),
+            creator_id: uuid::Uuid::from_u128(0xC1),
+            owner_id: uuid::Uuid::from_u128(1),
+            group_id: uuid::Uuid::nil(),
+            base_mask: 0x7FFF_FFFF,
+            owner_mask: 0x7FFF_FFFF,
+            group_mask: 0,
+            everyone_mask: 0,
+            next_owner_mask: 0x0008_2000,
+            group_owned: false,
+            asset_id: uuid::Uuid::from_u128(0xA000_u128.wrapping_add(id)),
+            r#type: asset_type,
+            inv_type,
+            flags: 0,
+            sale_type,
+            sale_price,
+            name: with_nul_bytes(name),
+            description: with_nul_bytes(""),
+            creation_date: 1_200_000_000,
+            crc: 0,
+        }
+    }
+
+    /// Feeds one `InventoryDescendents` reply for `folder` at `version`, seeding
+    /// the held model (the folder becomes `Loaded`, its children indexed), and
+    /// drains the resulting events.
+    fn feed_descendents(
+        session: &mut Session,
+        now: Instant,
+        folder: u128,
+        version: i32,
+        folders: Vec<InventoryDescendentsFolderDataBlock>,
+        items: Vec<InventoryDescendentsItemDataBlock>,
+        seq: u32,
+    ) -> Result<(), TestError> {
+        let descendents = i32::try_from(folders.len().saturating_add(items.len())).unwrap_or(0);
+        let reply = AnyMessage::InventoryDescendents(InventoryDescendents {
+            agent_data: InventoryDescendentsAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                folder_id: uuid::Uuid::from_u128(folder),
+                owner_id: uuid::Uuid::from_u128(1),
+                version,
+                descendents,
+            },
+            folder_data: folders,
+            item_data: items,
+        });
+        let datagram = server_message(&reply, seq, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        drain_events(session);
+        Ok(())
+    }
+
+    /// The borrowed `Child` tree-walk yields a folder's sub-folders first (in key
+    /// order), then its items; the owning `inventory_folder_page` window paginates
+    /// the same combined sequence and a single page can span the folder/item
+    /// boundary. The owning view types resolve the raw type bytes into typed enums.
+    #[test]
+    fn b4_tree_walk_pagination_and_view_types() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let parent = 0xB0;
+        let parent_key = InventoryFolderKey::from(uuid::Uuid::from_u128(parent));
+        feed_descendents(
+            &mut session,
+            now,
+            parent,
+            5,
+            vec![
+                desc_folder(0xB1, parent, 14, "Trash"),  // FT_TRASH
+                desc_folder(0xB2, parent, -1, "Stuff"),  // FT_NONE
+                desc_folder(0xB3, parent, 5, "Clothes"), // FT_CLOTHING
+            ],
+            vec![
+                desc_item(0xC1, parent, 7, 7, 0, 0, "Note"), // notecard, not for sale
+                desc_item(0xC2, parent, 6, 6, 2, 250, "Cube"), // object, copy sale L$250
+            ],
+            9,
+        )?;
+
+        // Borrowed tree-walk: 3 folders (key order) then 2 items.
+        let walk: Vec<_> = session.inventory_children(parent_key).collect();
+        assert_eq!(walk.len(), 5);
+        let folder_names: Vec<&str> = walk
+            .iter()
+            .filter_map(|child| match child {
+                Child::Folder(folder) => Some(folder.name.as_str()),
+                Child::Item(_) => None,
+            })
+            .collect();
+        assert_eq!(folder_names, vec!["Trash", "Stuff", "Clothes"]);
+        let item_names: Vec<&str> = walk
+            .iter()
+            .filter_map(|child| match child {
+                Child::Item(item) => Some(item.name.as_str()),
+                Child::Folder(_) => None,
+            })
+            .collect();
+        assert_eq!(item_names, vec!["Note", "Cube"]);
+
+        // Paginate the combined sequence two at a time: page 2 spans the boundary.
+        let (folders1, items1, cursor1) = session.inventory_folder_page(parent_key, None, 2);
+        assert_eq!(folders1.len(), 2);
+        assert!(items1.is_empty());
+        let cursor1 = cursor1.ok_or("expected a second page")?;
+        assert_eq!(cursor1.consumed_count(), 2);
+
+        let (folders2, items2, cursor2) =
+            session.inventory_folder_page(parent_key, Some(cursor1), 2);
+        assert_eq!(folders2.len(), 1); // the last folder…
+        assert_eq!(items2.len(), 1); // …and the first item, in one page
+        let cursor2 = cursor2.ok_or("expected a third page")?;
+
+        let (folders3, items3, cursor3) =
+            session.inventory_folder_page(parent_key, Some(cursor2), 2);
+        assert!(folders3.is_empty());
+        assert_eq!(items3.len(), 1);
+        assert!(cursor3.is_none()); // exhausted
+
+        // View types resolve the raw bytes into typed enums.
+        let trash: &FolderInfo = folders1.first().ok_or("trash folder")?;
+        assert_eq!(trash.folder_type, FolderType::Trash);
+        assert_eq!(trash.state, FolderState::Unknown); // a sub-folder, contents unfetched
+        assert_eq!(
+            trash.folder_id,
+            InventoryFolderKey::from(uuid::Uuid::from_u128(0xB1))
+        );
+
+        let cube: &ItemInfo = items3.first().ok_or("cube item")?;
+        assert_eq!(cube.asset_type, AssetType::Object);
+        assert_eq!(cube.inv_type, InventoryType::Object);
+        assert_eq!(cube.sale, Some((SaleType::Copy, LindenAmount(250))));
+        assert_eq!(
+            cube.asset_id,
+            uuid::Uuid::from_u128(0xA000_u128.wrapping_add(0xC2))
+        );
+
+        // A not-for-sale item resolves to `sale: None`.
+        let note: &ItemInfo = items2.first().ok_or("note item")?;
+        assert_eq!(note.asset_type, AssetType::Notecard);
+        assert_eq!(note.sale, None);
+        Ok(())
+    }
+
+    /// `create_inventory_folder` rejects a nil or duplicate id (leaving the model
+    /// untouched) and returns the new key for a valid create.
+    #[test]
+    fn b4_create_inventory_folder_validates_id() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let parent = InventoryFolderKey::from(uuid::Uuid::from_u128(0x10));
+        let nil = InventoryFolderKey::from(uuid::Uuid::nil());
+        assert!(matches!(
+            session.create_inventory_folder(nil, parent, FolderType::None, "x", now),
+            Err(sl_proto::Error::InvalidInventoryOperation(_))
+        ));
+        // The rejected nil create sent nothing.
+        assert!(drain(&mut session)?.is_empty());
+
+        let folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0xF0));
+        let key =
+            session.create_inventory_folder(folder, parent, FolderType::Trash, "Trash", now)?;
+        assert_eq!(key, folder);
+        assert!(session.inventory_folder(folder).is_some());
+        drain(&mut session)?;
+
+        // A second create of the same id is rejected and changes nothing.
+        assert!(matches!(
+            session.create_inventory_folder(folder, parent, FolderType::None, "again", now),
+            Err(sl_proto::Error::InvalidInventoryOperation(_))
+        ));
+        assert!(drain(&mut session)?.is_empty());
+        assert_eq!(
+            session.inventory_folder(folder).ok_or("folder")?.name,
+            "Trash"
+        );
+        Ok(())
+    }
+
+    /// `move_inventory_folders` rejects a cycle (into self or a descendant) and a
+    /// move to a parent not in the model, sending nothing and leaving the tree
+    /// unchanged.
+    #[test]
+    fn b4_move_inventory_folders_rejects_cycle_and_unknown_parent() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let a0 = InventoryFolderKey::from(uuid::Uuid::from_u128(0xA0));
+        let a1 = InventoryFolderKey::from(uuid::Uuid::from_u128(0xA1));
+        let a2 = InventoryFolderKey::from(uuid::Uuid::from_u128(0xA2));
+        session.create_inventory_folder(a1, a0, FolderType::None, "A1", now)?;
+        session.create_inventory_folder(a2, a1, FolderType::None, "A2", now)?;
+        drain(&mut session)?;
+
+        // Into a descendant, into itself, and to an unknown parent: all rejected.
+        for target in [a2, a1] {
+            assert!(matches!(
+                session.move_inventory_folders(&[(a1, target)], false, now),
+                Err(sl_proto::Error::InvalidInventoryOperation(_))
+            ));
+        }
+        let unknown = InventoryFolderKey::from(uuid::Uuid::from_u128(0xDEAD));
+        assert!(matches!(
+            session.move_inventory_folders(&[(a1, unknown)], false, now),
+            Err(sl_proto::Error::InvalidInventoryOperation(_))
+        ));
+
+        // Nothing was sent and A1 is still under A0.
+        assert!(drain(&mut session)?.is_empty());
+        assert_eq!(
+            session.inventory_folder(a1).and_then(|f| f.parent_id),
+            Some(a0)
+        );
+        Ok(())
+    }
+
+    /// The clobber-free helpers change exactly one attribute, reading the rest
+    /// from the cache: `rename_inventory_folder` keeps the type/parent,
+    /// `rename_inventory_item` keeps the asset/folder/permissions, and
+    /// `set_inventory_item_permissions` keeps the name.
+    #[test]
+    fn b4_clobber_free_helpers_preserve_other_fields() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let a0 = InventoryFolderKey::from(uuid::Uuid::from_u128(0xA0));
+        let a1 = InventoryFolderKey::from(uuid::Uuid::from_u128(0xA1));
+        session.create_inventory_folder(a1, a0, FolderType::Trash, "Old", now)?;
+        feed_descendents(
+            &mut session,
+            now,
+            0xA0,
+            3,
+            Vec::new(),
+            vec![desc_item(0xD1, 0xA0, 7, 7, 0, 0, "OldItem")],
+            10,
+        )?;
+        drain(&mut session)?;
+
+        // Folder rename keeps the (Trash) type and the parent.
+        session.rename_inventory_folder(a1, "New", now)?;
+        let folder = session.inventory_folder(a1).ok_or("folder")?;
+        assert_eq!(folder.name, "New");
+        assert_eq!(folder.folder_type, FolderType::Trash.to_code());
+        assert_eq!(folder.parent_id, Some(a0));
+        drain(&mut session)?;
+
+        let d1 = InventoryKey::from(uuid::Uuid::from_u128(0xD1));
+        let original_asset = session.inventory_item(d1).ok_or("item")?.asset_id;
+
+        // Item rename keeps the asset, folder, and permissions.
+        session.rename_inventory_item(d1, "NewItem", now)?;
+        let item = session.inventory_item(d1).ok_or("item")?;
+        assert_eq!(item.name, "NewItem");
+        assert_eq!(item.asset_id, original_asset);
+        assert_eq!(item.folder_id, a0);
+        drain(&mut session)?;
+
+        // Setting permissions keeps the (renamed) name.
+        session.set_inventory_item_permissions(d1, Permissions5::empty(), now)?;
+        let item = session.inventory_item(d1).ok_or("item")?;
+        assert_eq!(item.permissions, Permissions5::empty());
+        assert_eq!(item.name, "NewItem");
+        Ok(())
+    }
+
+    /// An optimistic local create is overwritten last-write-wins when the
+    /// authoritative `BulkUpdateInventory` reply folds in.
+    #[test]
+    fn b4_optimistic_create_reconciled_by_authoritative_reply() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let parent = InventoryFolderKey::from(uuid::Uuid::from_u128(0x40));
+        let folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0x41));
+        session.create_inventory_folder(folder, parent, FolderType::Trash, "Optimistic", now)?;
+        drain(&mut session)?;
+        assert_eq!(
+            session.inventory_folder(folder).ok_or("folder")?.name,
+            "Optimistic"
+        );
+
+        // The grid's authoritative reply renames and re-types the same folder.
+        let message = AnyMessage::BulkUpdateInventory(BulkUpdateInventory {
+            agent_data: BulkUpdateInventoryAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                transaction_id: uuid::Uuid::from_u128(0xAB),
+            },
+            folder_data: vec![BulkUpdateInventoryFolderDataBlock {
+                folder_id: folder.uuid(),
+                parent_id: parent.uuid(),
+                r#type: 8,
+                name: with_nul_bytes("Authoritative"),
+            }],
+            item_data: Vec::new(),
+        });
+        let datagram = server_message(&message, 42, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        drain_events(&mut session);
+
+        let folder = session.inventory_folder(folder).ok_or("folder")?;
+        assert_eq!(folder.name, "Authoritative");
+        assert_eq!(folder.folder_type, FolderType::RootInventory.to_code());
         Ok(())
     }
 
@@ -15788,7 +16148,7 @@ mod test {
         session.create_inventory_folder(
             InventoryFolderKey::from(folder_id),
             InventoryFolderKey::from(parent_id),
-            8,
+            FolderType::RootInventory,
             "Toys & Co",
             now,
         )?;
@@ -15840,9 +16200,9 @@ mod test {
             folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0x11)),
             transaction_id: uuid::Uuid::nil(),
             next_owner_mask: 0x0008_e000,
-            asset_type: 7, // notecard
-            inv_type: 7,
-            wearable_type: 0,
+            asset_type: AssetType::Notecard,
+            inv_type: InventoryType::Notecard,
+            wearable_type: WearableType::Shape,
             name: "Notes".to_owned(),
             description: "a note".to_owned(),
         };

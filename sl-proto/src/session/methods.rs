@@ -55,22 +55,22 @@ use crate::terrain;
 use crate::types::EventId;
 use crate::types::{
     AlertInfo, Asset, AssetType, AttachmentMode, AttachmentPoint, AvatarClassified, AvatarPick,
-    AvatarPickerResult, Camera, ChatType, ClassifiedCategory, ClassifiedUpdate, ClickAction,
+    AvatarPickerResult, Camera, ChatType, Child, ClassifiedCategory, ClassifiedUpdate, ClickAction,
     CoarseLocation, CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
     DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisconnectReason, EjectAction,
-    EstateAccessDelta, EstateCovenant, Event, EventInfo, FeatureDisabled, FollowCamProperty,
-    FollowCamPropertyValue, FreezeAction, Friend, FriendRights, GenericMessage,
+    EstateAccessDelta, EstateCovenant, Event, EventInfo, FeatureDisabled, FolderInfo, FolderType,
+    FollowCamProperty, FollowCamPropertyValue, FreezeAction, Friend, FriendRights, GenericMessage,
     GenericStreamingMessage, GestureActivation, GodRegionUpdate, GroupNoticeAttachment,
     GroupNoticeKey, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec,
-    InterestsUpdate, InventoryFolder, InventoryItem, InventoryItemMove, InventoryOffer, Kick,
-    LandEdit, LandSearchType, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
-    LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MeanCollision,
-    MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NeighborInfo,
-    NewInventoryItem, NewInventoryLink, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams,
-    ObjectFlagSettings, ObjectPlayingAnimation, ObjectPropertiesFamily, ObjectTransform,
-    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
+    InterestsUpdate, InventoryCursor, InventoryFolder, InventoryItem, InventoryItemMove,
+    InventoryOffer, ItemInfo, Kick, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
+    LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType, Material, Maturity,
+    MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
+    NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez, Object, ObjectBuyItem,
+    ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation, ObjectPropertiesFamily,
+    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+    ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
     ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult, Postcard,
     PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionInfoUpdate, RegionStats,
     Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
@@ -7896,17 +7896,66 @@ impl Session {
         self.inventory.items_iter()
     }
 
-    /// The cached immediate children of `folder_id`: its sub-folders and the
-    /// items directly inside it, resolved through the parent→children index.
-    /// Only as complete as the cache (fetch the folder with
-    /// [`Session::request_folder_contents`], or the modern AIS3 CAPS path, to
-    /// populate it).
-    #[must_use]
+    /// The cached immediate children of `folder_id` as a borrowed [`Child`]
+    /// iterator — its sub-folders first (in key order), then the items directly
+    /// inside it — resolved O(children) through the parent→children index. This is
+    /// the zero-copy tree-walk surface (bevy reads it directly via `&Session`);
+    /// the owning, `Arc`-friendly, paginated counterpart is
+    /// [`Session::inventory_folder_page`]. Only as complete as the cache (fetch
+    /// the folder with [`Session::request_folder_contents`], or the modern AIS3
+    /// CAPS path, to populate it).
     pub fn inventory_children(
         &self,
         folder_id: InventoryFolderKey,
-    ) -> (Vec<&InventoryFolder>, Vec<&InventoryItem>) {
-        self.inventory.children(folder_id)
+    ) -> impl Iterator<Item = Child<'_>> {
+        self.inventory.children_iter(folder_id)
+    }
+
+    /// One page of `folder_id`'s children as owning snapshots: a window over the
+    /// **combined** child sequence — its sub-folders first, then its items, in
+    /// parent→children-index order — so a single page can span the folder/item
+    /// boundary of one mixed folder. Returns the [`FolderInfo`] and [`ItemInfo`]
+    /// snapshots in that window plus the cursor for the next page (`None` when the
+    /// folder is exhausted). Pass `None` for `before` to start at the beginning,
+    /// then feed each returned cursor back as the next call's `before`.
+    ///
+    /// The owning, `Arc`-friendly counterpart of the borrowed
+    /// [`Session::inventory_children`] walk — the snapshot read surface behind the
+    /// [`Command`](crate::Command)/[`Event`](crate::Event) pull-bridge for the
+    /// channel-based runtimes (mirrors [`Session::history_page`]).
+    #[must_use]
+    pub fn inventory_folder_page(
+        &self,
+        folder_id: InventoryFolderKey,
+        before: Option<InventoryCursor>,
+        limit: usize,
+    ) -> (Vec<FolderInfo>, Vec<ItemInfo>, Option<InventoryCursor>) {
+        let (folders, items) = self.inventory.children(folder_id);
+        let total = folders.len().saturating_add(items.len());
+        let start = before.map_or(0, InventoryCursor::consumed);
+        let mut folder_infos = Vec::new();
+        let mut item_infos = Vec::new();
+        let combined = folders
+            .iter()
+            .copied()
+            .map(Child::Folder)
+            .chain(items.iter().copied().map(Child::Item));
+        for child in combined.skip(start).take(limit) {
+            match child {
+                Child::Folder(folder) => {
+                    let state = self
+                        .inventory
+                        .folder_state(folder.folder_id)
+                        .unwrap_or(FolderState::Unknown);
+                    folder_infos.push(FolderInfo::from_folder(folder, state));
+                }
+                Child::Item(item) => item_infos.push(ItemInfo::from_item(item)),
+            }
+        }
+        let consumed = folder_infos.len().saturating_add(item_infos.len());
+        let next_pos = start.saturating_add(consumed);
+        let next = (next_pos < total).then(|| InventoryCursor::new(next_pos));
+        (folder_infos, item_infos, next)
     }
 
     /// The contents [`FolderState`] of `folder_id` (`Unknown` / `Fetching` /
@@ -7961,29 +8010,46 @@ impl Session {
     // ---- Inventory mutation over UDP (#30) ---------------------------------
 
     /// Creates a new inventory folder `folder_id` (a fresh, caller-chosen id)
-    /// named `name` of `folder_type` (a `FolderType`, or `-1` for none) under
-    /// `parent_id`, via `CreateInventoryFolder`. The simulator sends no reply, so
-    /// the folder is added to the local cache optimistically. On Second Life the
-    /// modern AIS3 CAPS path (or the `CreateInventoryCategory` cap) returns a
-    /// confirmed result instead.
+    /// named `name` of [`FolderType`] under `parent_id`, via
+    /// `CreateInventoryFolder`, returning the new folder's key for symmetry with
+    /// the read accessors. The simulator sends no reply, so the folder is added to
+    /// the local cache optimistically. On Second Life the modern AIS3 CAPS path
+    /// (or the `CreateInventoryCategory` cap) returns a confirmed result instead.
+    ///
+    /// `sl-proto` is sans-IO and mints no UUIDs: the caller allocates the fresh v4
+    /// `folder_id` (the protocol lets the client choose *folder* ids; the
+    /// simulator allocates *item* ids and echoes a callback id). The id is
+    /// validated rather than generated.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::NoCircuit`] if no circuit is established, or
-    /// [`Error::Wire`] on an encode failure.
+    /// Returns [`Error::InvalidInventoryOperation`] if `folder_id` is nil or
+    /// already present in the held model (which would clobber an existing folder),
+    /// [`Error::NoCircuit`] if no circuit is established, or [`Error::Wire`] on an
+    /// encode failure.
     pub fn create_inventory_folder(
         &mut self,
         folder_id: InventoryFolderKey,
         parent_id: InventoryFolderKey,
-        folder_type: i8,
+        folder_type: FolderType,
         name: &str,
         now: Instant,
-    ) -> Result<(), Error> {
+    ) -> Result<InventoryFolderKey, Error> {
+        if folder_id.uuid().is_nil() {
+            return Err(Error::InvalidInventoryOperation(
+                "a new inventory folder id must not be nil",
+            ));
+        }
+        if self.inventory.folder_state(folder_id).is_some() {
+            return Err(Error::InvalidInventoryOperation(
+                "an inventory folder with this id already exists",
+            ));
+        }
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_create_inventory_folder(
             folder_id.uuid(),
             parent_id.uuid(),
-            folder_type,
+            folder_type.to_code(),
             name,
             now,
         )?;
@@ -7991,14 +8057,17 @@ impl Session {
             folder_id,
             parent_id: crate::types::optional_key_from_wire(parent_id.uuid()),
             name: name.to_owned(),
-            folder_type,
+            folder_type: folder_type.to_code(),
             version: 1,
         });
-        Ok(())
+        Ok(folder_id)
     }
 
     /// Renames / re-types / re-parents the existing folder `folder_id` via
-    /// `UpdateInventoryFolder`. The cache is updated optimistically.
+    /// `UpdateInventoryFolder` (an all-fields overwrite). The cache is updated
+    /// optimistically. To change a single attribute without risking a clobber of
+    /// the others, prefer the focused [`Session::rename_inventory_folder`] /
+    /// [`Session::retype_inventory_folder`] helpers.
     ///
     /// # Errors
     ///
@@ -8008,7 +8077,7 @@ impl Session {
         &mut self,
         folder_id: InventoryFolderKey,
         parent_id: InventoryFolderKey,
-        folder_type: i8,
+        folder_type: FolderType,
         name: &str,
         now: Instant,
     ) -> Result<(), Error> {
@@ -8016,7 +8085,7 @@ impl Session {
         circuit.send_update_inventory_folder(
             folder_id.uuid(),
             parent_id.uuid(),
-            folder_type,
+            folder_type.to_code(),
             name,
             now,
         )?;
@@ -8024,13 +8093,90 @@ impl Session {
             folder_id,
             parent_id: crate::types::optional_key_from_wire(parent_id.uuid()),
             name: name.to_owned(),
-            folder_type,
+            folder_type: folder_type.to_code(),
             version: self
                 .inventory
                 .folder(folder_id)
                 .map_or(1, |folder| folder.version),
         });
         Ok(())
+    }
+
+    /// Renames the folder `folder_id` to `name` without touching its parent or
+    /// type — a clobber-free wrapper over the all-fields
+    /// [`Session::update_inventory_folder`] that reads the untouched fields from
+    /// the cached folder, so a rename cannot accidentally re-parent or re-type it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidInventoryOperation`] if the folder's metadata is
+    /// not in the held model (nothing to read the other fields from),
+    /// [`Error::NoCircuit`] if no circuit is established, or [`Error::Wire`] on an
+    /// encode failure.
+    pub fn rename_inventory_folder(
+        &mut self,
+        folder_id: InventoryFolderKey,
+        name: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let parent = self.cached_folder_parent(folder_id)?;
+        let folder_type = self.cached_folder_type(folder_id)?;
+        self.update_inventory_folder(folder_id, parent, folder_type, name, now)
+    }
+
+    /// Re-types the folder `folder_id` to `folder_type` without touching its name
+    /// or parent — the clobber-free type-only companion of
+    /// [`Session::rename_inventory_folder`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidInventoryOperation`] if the folder's metadata is
+    /// not in the held model, [`Error::NoCircuit`] if no circuit is established,
+    /// or [`Error::Wire`] on an encode failure.
+    pub fn retype_inventory_folder(
+        &mut self,
+        folder_id: InventoryFolderKey,
+        folder_type: FolderType,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let parent = self.cached_folder_parent(folder_id)?;
+        let name = self
+            .inventory
+            .folder(folder_id)
+            .map(|folder| folder.name.clone())
+            .ok_or(Error::InvalidInventoryOperation(
+                "the folder to re-type is not in the inventory model",
+            ))?;
+        self.update_inventory_folder(folder_id, parent, folder_type, &name, now)
+    }
+
+    /// The cached parent key of `folder_id` (the inventory root's nil key for a
+    /// top-level folder), or an error if the folder is not in the model.
+    fn cached_folder_parent(
+        &self,
+        folder_id: InventoryFolderKey,
+    ) -> Result<InventoryFolderKey, Error> {
+        let folder = self
+            .inventory
+            .folder(folder_id)
+            .ok_or(Error::InvalidInventoryOperation(
+                "the folder is not in the inventory model",
+            ))?;
+        Ok(folder
+            .parent_id
+            .unwrap_or_else(|| InventoryFolderKey::from(Uuid::nil())))
+    }
+
+    /// The cached [`FolderType`] of `folder_id`, or an error if the folder is not
+    /// in the model.
+    fn cached_folder_type(&self, folder_id: InventoryFolderKey) -> Result<FolderType, Error> {
+        let folder = self
+            .inventory
+            .folder(folder_id)
+            .ok_or(Error::InvalidInventoryOperation(
+                "the folder is not in the inventory model",
+            ))?;
+        Ok(FolderType::from_code(folder.folder_type))
     }
 
     /// Re-parents the folder `folder_id` under `parent_id` via
@@ -8054,9 +8200,16 @@ impl Session {
     /// `(folder, new_parent)` pair). `stamp` asks the simulator to re-timestamp
     /// the moved children. The cache is updated optimistically.
     ///
+    /// Each move is checked O(1) against the held parent→children index *before*
+    /// anything is sent: the target parent must be in the model, and the move
+    /// must not make a folder its own ancestor. If **any** move fails the check,
+    /// none is sent and the model is left unchanged.
+    ///
     /// # Errors
     ///
-    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// Returns [`Error::InvalidInventoryOperation`] if a target parent is not in
+    /// the held model, or a move would form a cycle (a folder into itself or one
+    /// of its descendants); [`Error::NoCircuit`] if no circuit is established; or
     /// [`Error::Wire`] on an encode failure.
     pub fn move_inventory_folders(
         &mut self,
@@ -8064,6 +8217,18 @@ impl Session {
         stamp: bool,
         now: Instant,
     ) -> Result<(), Error> {
+        for &(folder_id, parent_id) in moves {
+            if !self.inventory.contains_folder(parent_id) {
+                return Err(Error::InvalidInventoryOperation(
+                    "the move target parent is not in the inventory model",
+                ));
+            }
+            if self.inventory.is_self_or_descendant(folder_id, parent_id) {
+                return Err(Error::InvalidInventoryOperation(
+                    "moving a folder into itself or a descendant would form a cycle",
+                ));
+            }
+        }
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         let wire: Vec<(Uuid, Uuid)> = moves
             .iter()
@@ -8157,6 +8322,60 @@ impl Session {
         circuit.send_update_inventory_item(item, transaction_id.get(), callback_id, now)?;
         self.cache_inventory_item(item.clone());
         Ok(())
+    }
+
+    /// Renames the item `item_id` to `name` without touching any other field — a
+    /// clobber-free wrapper over the all-fields [`Session::update_inventory_item`]
+    /// that reads the rest of the item from the cache, so a rename cannot
+    /// accidentally re-parent, re-asset, or reset its permissions. No asset
+    /// transaction is bound (the transaction id is nil).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidInventoryOperation`] if the item is not in the held
+    /// model, [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn rename_inventory_item(
+        &mut self,
+        item_id: InventoryKey,
+        name: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let mut item = self.cached_item(item_id)?;
+        name.clone_into(&mut item.name);
+        self.update_inventory_item(&item, TransactionId::from(Uuid::nil()), now)
+    }
+
+    /// Replaces the permission masks of item `item_id` without touching any other
+    /// field — the clobber-free permissions-only companion of
+    /// [`Session::rename_inventory_item`] (reads the rest from the cache). No
+    /// asset transaction is bound.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidInventoryOperation`] if the item is not in the held
+    /// model, [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn set_inventory_item_permissions(
+        &mut self,
+        item_id: InventoryKey,
+        permissions: Permissions5,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let mut item = self.cached_item(item_id)?;
+        item.permissions = permissions;
+        self.update_inventory_item(&item, TransactionId::from(Uuid::nil()), now)
+    }
+
+    /// A clone of the cached [`InventoryItem`] `item_id`, or an error if it is not
+    /// in the held model — the read step shared by the clobber-free item helpers.
+    fn cached_item(&self, item_id: InventoryKey) -> Result<InventoryItem, Error> {
+        self.inventory
+            .item(item_id)
+            .cloned()
+            .ok_or(Error::InvalidInventoryOperation(
+                "the item is not in the inventory model",
+            ))
     }
 
     /// Moves the item `item_id` into folder `folder_id`, optionally renaming it

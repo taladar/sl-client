@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use sl_types::key::{InventoryFolderKey, InventoryKey};
 
 use crate::bookkeeping_ids::InventoryCallbackId;
-use crate::types::{InventoryFolder, InventoryItem, optional_key_from_wire};
+use crate::types::{Child, InventoryFolder, InventoryItem, optional_key_from_wire};
 
 /// Which of the two inventory trees an entry belongs to: the agent's own
 /// mutable inventory, or the read-only shared Library. The two trees share one
@@ -203,6 +203,61 @@ impl Inventory {
             .filter_map(|child| self.items.get(child))
             .collect();
         (folders, items)
+    }
+
+    /// The immediate children of `folder` as a borrowed [`Child`] iterator — its
+    /// sub-folder payloads first (in key order), then the item payloads filed
+    /// directly in it — resolved O(children) through the index. Children whose
+    /// metadata has not yet arrived are skipped. The zero-copy counterpart of
+    /// [`children`](Self::children) for tree-walking without allocating.
+    pub(crate) fn children_iter(
+        &self,
+        folder: InventoryFolderKey,
+    ) -> impl Iterator<Item = Child<'_>> {
+        let entry = self.folders.get(&folder);
+        let folders = entry
+            .into_iter()
+            .flat_map(|entry| entry.child_folders.iter())
+            .filter_map(move |child| self.folder(*child))
+            .map(Child::Folder);
+        let items = entry
+            .into_iter()
+            .flat_map(|entry| entry.child_items.iter())
+            .filter_map(move |child| self.item(*child))
+            .map(Child::Item);
+        folders.chain(items)
+    }
+
+    /// Whether `folder` is in the model at all — either with its metadata present
+    /// or as a known-but-unfetched placeholder. The O(1) "is this a real parent"
+    /// guard for a re-parent.
+    pub(crate) fn contains_folder(&self, folder: InventoryFolderKey) -> bool {
+        self.folders.contains_key(&folder)
+    }
+
+    /// Whether `candidate` is `folder` itself or any folder beneath it (walking
+    /// the child-folder index downward). The guard a re-parent uses to reject a
+    /// move that would make a folder its own ancestor (a cycle).
+    pub(crate) fn is_self_or_descendant(
+        &self,
+        folder: InventoryFolderKey,
+        candidate: InventoryFolderKey,
+    ) -> bool {
+        if folder == candidate {
+            return true;
+        }
+        let mut stack = vec![folder];
+        while let Some(current) = stack.pop() {
+            if let Some(entry) = self.folders.get(&current) {
+                for child in &entry.child_folders {
+                    if *child == candidate {
+                        return true;
+                    }
+                    stack.push(*child);
+                }
+            }
+        }
+        false
     }
 
     /// Allocates the next async inventory `CallbackID` (never zero).

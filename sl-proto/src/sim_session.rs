@@ -148,15 +148,15 @@ use crate::session::{
 use crate::types::EventId;
 use crate::types::directory::category_from_wire;
 use crate::types::{
-    AlertInfo, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera, ChatSource,
-    ChatType, ClassifiedCategory, CoarseLocation, DetachOrder, DirClassifiedResult, DirEventResult,
-    DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
+    AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera,
+    ChatSource, ChatType, ClassifiedCategory, CoarseLocation, DetachOrder, DirClassifiedResult,
+    DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
     DirectoryVisibility, DisplayNameUpdate, EjectAction, EstateCovenant, EventInfo,
     FeatureDisabled, FollowCamPropertyValue, FreezeAction, GenericMessage, GenericStreamingMessage,
     GestureActivation, GodRegionUpdate, GroupAccountDetails, GroupAccountSummary,
     GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem,
-    InstantMessage, InventoryItemMove, Kick, LandBrushAction, LandBrushSize, LandEdit,
-    LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer,
+    InstantMessage, InventoryItemMove, InventoryType, Kick, LandBrushAction, LandBrushSize,
+    LandEdit, LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer,
     MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NavMeshStatus, NewInventoryLink,
     NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectPlayingAnimation, ObjectPropertiesFamily,
     OpenRegionInfo, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult, Postcard,
@@ -4856,8 +4856,8 @@ impl SimSession {
                     link: NewInventoryLink {
                         folder_id: InventoryFolderKey::from(block.folder_id),
                         linked_id,
-                        link_type: block.r#type,
-                        inv_type: block.inv_type,
+                        link_type: AssetType::from_code(i32::from(block.r#type)),
+                        inv_type: InventoryType::from_code(i32::from(block.inv_type)),
                         name: trimmed_string(&block.name),
                         description: trimmed_string(&block.description),
                     },

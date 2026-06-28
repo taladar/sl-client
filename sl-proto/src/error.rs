@@ -39,4 +39,11 @@ pub enum Error {
     /// [`Session`](crate::Session).
     #[error("the session is already logged in and cannot accept a fresh login")]
     AlreadyLoggedIn,
+    /// An inventory mutation was rejected locally — before anything was sent to
+    /// the simulator — because it would corrupt the held model: a nil or
+    /// already-present id on a folder create, a move targeting a parent not in
+    /// the model, or a move that would make a folder its own ancestor (a cycle).
+    /// The held model is left unchanged.
+    #[error("invalid inventory operation: {0}")]
+    InvalidInventoryOperation(&'static str),
 }

@@ -11,8 +11,8 @@ use crate::{
     ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction, ControlFlags,
     CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility, Distance,
     EjectAction, EstateAccessDelta, EventId, ExperienceKey, ExperiencePermission, ExperienceUpdate,
-    FreezeAction, FriendKey, FriendRights, GestureActivation, GodRegionUpdate, GroupKey,
-    GroupNoticeAttachment, GroupNoticeKey, GroupRequestId, GroupRoleEdit, GroupRoleKey,
+    FolderType, FreezeAction, FriendKey, FriendRights, GestureActivation, GodRegionUpdate,
+    GroupKey, GroupNoticeAttachment, GroupNoticeKey, GroupRequestId, GroupRoleEdit, GroupRoleKey,
     GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate, InventoryFolderKey,
     InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandEdit, LandSearchType,
     LandStatReportType, LindenAmount, LureId, MapItemType, Material, MaterialOverrideUpdate,
@@ -179,8 +179,8 @@ pub enum Command {
         folder_id: InventoryFolderKey,
         /// The parent folder.
         parent_id: InventoryFolderKey,
-        /// The folder's preferred type (`FolderType`, or `-1` for none).
-        folder_type: i8,
+        /// The folder's preferred type ([`FolderType`]).
+        folder_type: FolderType,
         /// The folder name.
         name: String,
     },
@@ -190,8 +190,8 @@ pub enum Command {
         folder_id: InventoryFolderKey,
         /// The (possibly new) parent folder.
         parent_id: InventoryFolderKey,
-        /// The folder's preferred type (`FolderType`, or `-1`).
-        folder_type: i8,
+        /// The folder's preferred type ([`FolderType`]).
+        folder_type: FolderType,
         /// The folder name.
         name: String,
     },
