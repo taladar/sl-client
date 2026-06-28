@@ -1223,7 +1223,7 @@ serialises or parses LLSD and B2 adds the binary codec here.
 
 Standalone; the cache tasks (B5/B10) serialise through it.
 
-- [ ] Add `sl-llsd/src/binary.rs` (+ the `time` dep, for the date path):
+- [x] Add `sl-llsd/src/binary.rs` (+ the `time` dep, for the date path):
       `Llsd::to_llsd_binary(&self) -> Vec<u8>` and
       `parse_llsd_binary(bytes: &[u8]) -> Result<Llsd, LlsdError>` over all 11
       `Llsd` variants, per the A3 tag-byte spec; export it. Honour the A3-pinned
@@ -1233,12 +1233,12 @@ Standalone; the cache tasks (B5/B10) serialise through it.
       emit length-prefixed `s` / `k`, and convert `Llsd::Date` (ISO-8601 string)
       ↔ `f64` epoch-seconds — matching Firestorm's host-endian raw `Date` write
       (`Real` stays BE via `ll_htond`).
-- [ ] Round-trip tests: each variant individually; a nested map/array; the cache
+- [x] Round-trip tests: each variant individually; a nested map/array; the cache
   map shape `{ categories: [...], items: [...] }` (note item creation dates are
   LLSD `Integer`, not `Date`, so the cache map never exercises the date path);
   and `binary → Llsd` equals `xml → Llsd` for a shared fixture (cross-check
   against the existing XML path).
-- [ ] A decode-robustness test (truncated / bad-tag / missing-terminator /
+- [x] A decode-robustness test (truncated / bad-tag / missing-terminator /
   count-mismatch input ⇒ `Err`, no panic; no indexing-panic — restriction-lint
   clean).
 
