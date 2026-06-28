@@ -30,7 +30,8 @@ pub struct ChatLogArgs {
     /// Log ad-hoc conference messages to `Ad-hoc Conference hash<md5>.txt`.
     #[clap(long)]
     chat_log_conference: bool,
-    /// Directory to write transcripts under (default: a per-account `chat_logs/`).
+    /// Directory to write transcripts directly under. Unset disables chat-log file
+    /// output (there is no built-in default directory).
     #[clap(long)]
     chat_log_dir: Option<PathBuf>,
     /// Use the legacy `firstname.lastname` IM filename scheme.
@@ -48,6 +49,15 @@ pub struct ChatLogArgs {
 }
 
 impl ChatLogArgs {
+    /// The directory transcripts should be written under (`--chat-log-dir`), or
+    /// `None` to disable chat-log file output. Threaded into the runtime via
+    /// [`ClientDirectories::agent_chat_log_dir`](sl_proto::ClientDirectories), no
+    /// longer through [`ChatLogConfig`].
+    #[must_use]
+    pub fn chat_log_dir(&self) -> Option<PathBuf> {
+        self.chat_log_dir.clone()
+    }
+
     /// Builds the [`ChatLogConfig`] these flags describe, layered over the config's
     /// own defaults (so the unset format knobs keep their Firestorm defaults).
     #[must_use]
@@ -72,7 +82,6 @@ impl ChatLogArgs {
         });
         ChatLogConfig {
             enabled,
-            log_dir: self.chat_log_dir.clone(),
             legacy_im_names: self.chat_log_legacy_names,
             date_suffix: self.chat_log_date_suffix,
             timestamp,

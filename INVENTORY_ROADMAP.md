@@ -1538,27 +1538,27 @@ live crawl stalls.
 
 ### B9. `ClientDirectories` struct + chat-log retrofit (from A4)
 
-- [ ] Add `ClientDirectories` (three `Option<PathBuf>` fields —
+- [x] Add `ClientDirectories` (three `Option<PathBuf>` fields —
       `agent_cache_dir`, `agent_chat_log_dir`, `shared_cache_dir`)
       in `sl-proto` (next to `ChatLogConfig`, `chat_log.rs`); thread it through
-      the constructor sites at parity — tokio's `chat_log_config` field +
-      `set_chat_log_config` (`sl-client-tokio/src/lib.rs:175`, `:279`), bevy's
-      plugin `chat_log_config` field (`sl-client-bevy/src/lib.rs:142`), and the
-      REPL wiring (`sl-repl-tokio/src/bin/sl-repl-tokio.rs:559`).
-- [ ] Retrofit **both** `ChatLog::new` shells —
-      `sl-client-tokio/src/chat_log.rs:157` **and** the byte-identical
-      `sl-client-bevy/src/chat_log.rs:157` — to take `agent_chat_log_dir`
-      **verbatim**, dropping **both** the `chat_logs/` default and the
-      `.join(clean_file_name(own_name))` (`:158-162` in each); pass the dir from
-      the new `ClientDirectories` at the call sites (tokio `run()` `:314-318`,
-      bevy `advance_login()` `:404-408`). Remove the now-redundant
-      `ChatLogConfig.log_dir` field (`chat_log.rs:175`, defaulted `:208`) and
-      drop the line that sets it in `ChatLogArgs::to_config`
-      (`sl-repl/src/chat_log_args.rs:75`).
-- [ ] Update the `Me Resident` subdir tests in **both** runtimes (the two
-  chat_log.rs are identical): tokio `:634-645` / `:682-704` / `:741-758` and the
-  mirrored bevy copy, plus the `log_dir: Some(dir)` test helper (`:619` in each)
-  — assert files directly under the supplied dir (no `Me Resident` join).
+      the constructor sites at parity — tokio gains a `directories` field +
+      `set_directories` beside `chat_log_config` / `set_chat_log_config`, bevy's
+      plugin + `SlConfig` gain a `directories` field beside `chat_log_config`,
+      and both REPL binaries build the struct from `--chat-log-dir` (a new
+      `ChatLogArgs::chat_log_dir()` accessor) and wire it through.
+- [x] Retrofit **both** `ChatLog::new` shells (the byte-identical tokio +
+      bevy `chat_log.rs`) to take `agent_chat_log_dir` **verbatim** as a param,
+      dropping **both** the `chat_logs/` default and the
+      `.join(clean_file_name(own_name))`; `base_dir` is now `Option<PathBuf>`
+      (`None` makes `any_enabled()` false + short-circuits every write). The dir
+      flows from `ClientDirectories.agent_chat_log_dir` at the call sites (tokio
+      `run()`, bevy `advance_login()`). Removed the now-redundant
+      `ChatLogConfig.log_dir` field and the line setting it in
+      `ChatLogArgs::to_config`.
+- [x] Updated the `Me Resident` subdir tests in **both** runtimes (the two
+  chat_log.rs are identical): the `im_config` helper drops its dir arg, every
+  `ChatLog::new` call passes the dir verbatim, and every assertion targets files
+  directly under the supplied dir (no `Me Resident` join).
 
 ### B10. Runtime cache shells (tokio + bevy) (from A4·A5·A10)
 

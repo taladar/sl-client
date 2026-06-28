@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::prelude::*;
 use sl_client_bevy::{
-    ChatLogConfig, Command, Distance, LoginParams, LoginRequest, SessionDisconnectReason,
-    SlClientPlugin, SlCommand, SlEvent, SlSessionEvent,
+    ChatLogConfig, ClientDirectories, Command, Distance, LoginParams, LoginRequest,
+    SessionDisconnectReason, SlClientPlugin, SlCommand, SlEvent, SlSessionEvent,
 };
 use tracing::{info, warn};
 
@@ -66,6 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             params,
             diagnostics: false,
             chat_log_config: ChatLogConfig::default(),
+            directories: ClientDirectories::default(),
             background_inventory_fetch: false,
         })
         .insert_resource(ProbeState {

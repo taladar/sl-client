@@ -9,7 +9,9 @@ use std::time::Instant;
 
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, ExternalPrinter};
-use sl_client_tokio::{Client, Command, Event, LoginParams, LoginRequest, StartLocation};
+use sl_client_tokio::{
+    Client, ClientDirectories, Command, Event, LoginParams, LoginRequest, StartLocation,
+};
 use sl_proto::Diagnostic;
 use sl_repl::{
     Avatar, Credentials, MetaCommand, ReplAction, ScriptRecorder, SessionContext, format_command,
@@ -557,6 +559,10 @@ async fn run_repl(args: RunArgs) -> Result<(), Error> {
     tracing::info!("login succeeded");
     client.set_diagnostics(true);
     client.set_chat_log_config(args.chat_log.to_config());
+    client.set_directories(ClientDirectories {
+        agent_chat_log_dir: args.chat_log.chat_log_dir(),
+        ..ClientDirectories::default()
+    });
     // The REPL exercises the full client, so crawl inventory in the background.
     client.set_background_inventory_fetch(true);
     let (caps_tx, mut caps_rx) = mpsc::channel::<HashMap<String, String>>(8);

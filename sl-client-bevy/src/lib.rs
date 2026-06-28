@@ -54,24 +54,24 @@ pub use sl_proto::{
     AnyMessage, AssetKey, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick,
     AvatarProperties, Camera, CameraError, ChatAudible, ChatChannel, ChatLogConfig, ChatMessage,
     ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId,
-    ClassifiedCategory, ClassifiedInfo, ClassifiedUpdate, ClickAction, ClockStyle, Command,
-    ControlFlags, ConversationKind, CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic,
-    Direction, DisconnectReason, Distance, EconomyData, EstateAccessDelta, EstateAccessKind,
-    EstateInfo, ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate,
-    ExtendedMesh, FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendRights,
-    GlobalCoordinates, GltfMaterialOverride, GridCoordinates, GroupMember, GroupMembership,
-    GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole,
-    GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange,
-    GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog, ImSessionId,
-    InstantMessage, InterestsUpdate, InventoryCallbackId, InventoryCursor, InventoryFolder,
-    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
-    InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandingType, LegacyMaterial,
-    LightData, LightImage, LindenAmount, LindenBalance, LoadUrlRequest, LoggedChatType,
-    LoginAccount, LoginParams, LoginRequest, LureId, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE,
-    MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
-    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance,
-    MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
-    NegativeBalanceError, NeighborInfo, NewInventoryItem, Object, ObjectExtraParams,
+    ClassifiedCategory, ClassifiedInfo, ClassifiedUpdate, ClickAction, ClientDirectories,
+    ClockStyle, Command, ControlFlags, ConversationKind, CreateGroupParams, DeRezDestination,
+    DetachOrder, Diagnostic, Direction, DisconnectReason, Distance, EconomyData, EstateAccessDelta,
+    EstateAccessKind, EstateInfo, ExperienceInfo, ExperiencePermission, ExperienceProperties,
+    ExperienceUpdate, ExtendedMesh, FlexibleData, FolderInfo, FolderState, FolderType, Friend,
+    FriendRights, GlobalCoordinates, GltfMaterialOverride, GridCoordinates, GroupMember,
+    GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
+    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
+    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
+    ImSessionId, InstantMessage, InterestsUpdate, InventoryCallbackId, InventoryCursor,
+    InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey,
+    InventoryOffer, InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandingType,
+    LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, LoadUrlRequest,
+    LoggedChatType, LoginAccount, LoginParams, LoginRequest, LureId, MEDIA_PERM_ALL,
+    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
+    MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge,
+    MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags,
+    MuteType, NegativeBalanceError, NeighborInfo, NewInventoryItem, Object, ObjectExtraParams,
     ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties,
     ObjectTransform, OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
     ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand,
@@ -141,6 +141,11 @@ pub struct SlClientPlugin {
     /// enabled, the driver writes Firestorm-compatible transcripts and serves the
     /// older, file-backed pages of `QueryChatHistoryPage`.
     pub chat_log_config: ChatLogConfig,
+    /// The per-account filesystem directories the driver persists its optional
+    /// features under (chat-log transcripts, the inventory disk-cache). Default
+    /// all-`None`, disabling every disk feature; a `None` field disables that
+    /// feature.
+    pub directories: ClientDirectories,
     /// Whether to run the automatic background inventory crawl (off by default).
     /// While enabled, the driver breadth-first fetches the agent's inventory tree
     /// in the background (a bounded number of folder-contents requests in flight).
@@ -162,6 +167,7 @@ impl Plugin for SlClientPlugin {
                 params: self.params.clone(),
                 diagnostics: self.diagnostics,
                 chat_log_config: self.chat_log_config.clone(),
+                directories: self.directories.clone(),
                 background_inventory_fetch: self.background_inventory_fetch,
             })
             .add_systems(Startup, start_login)
@@ -227,6 +233,8 @@ struct SlConfig {
     diagnostics: bool,
     /// The local chat-log configuration (default off).
     chat_log_config: ChatLogConfig,
+    /// The per-account filesystem directories the optional disk features use.
+    directories: ClientDirectories,
     /// Whether the automatic background inventory crawl is enabled (default off).
     background_inventory_fetch: bool,
 }
@@ -356,6 +364,7 @@ fn drive(
             session,
             rx,
             &config.chat_log_config,
+            &config.directories,
             now,
             &mut events,
             &mut identity,
@@ -385,10 +394,16 @@ fn drive(
 
 /// Handles the logging-in phase, transitioning to `Running` once the login
 /// response arrives.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the login step threads the session, its channel, the chat-log config \
+              and directories, and several Bevy writers it emits to on success"
+)]
 fn advance_login(
     mut session: Box<Session>,
     rx: Receiver<Result<String, String>>,
     chat_log_config: &ChatLogConfig,
+    directories: &ClientDirectories,
     now: Instant,
     events: &mut EventWriter<SlEvent>,
     identity: &mut EventWriter<SlIdentity>,
@@ -415,6 +430,7 @@ fn advance_login(
                         let caps = start_caps(&session);
                         let chat_log = Box::new(ChatLog::new(
                             chat_log_config.clone(),
+                            directories.agent_chat_log_dir.clone(),
                             session.agent_legacy_name(),
                             session.agent_id(),
                         ));

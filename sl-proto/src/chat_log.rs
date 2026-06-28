@@ -157,6 +157,35 @@ impl Default for TimestampFormat {
     }
 }
 
+/// The set of per-account filesystem directories a runtime persists its optional,
+/// default-off features under. Each field is `Option<PathBuf>`: `None` disables that
+/// feature entirely (there is no built-in default location — the host application
+/// supplies the path, e.g. an XDG cache dir, or opts out by leaving it `None`). It
+/// is supplied **once** at each runtime's construction, alongside the
+/// [`ChatLogConfig`], and threaded to the file-I/O shells that own the actual writes
+/// (the sans-IO [`Session`](crate::Session) never touches the filesystem).
+///
+/// The directories are deliberately separate so the three features can live in
+/// different roots: a per-account cache dir (machine-regenerable), a per-account
+/// chat-log dir (user-facing transcripts), and a cross-account shared cache.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClientDirectories {
+    /// The directory the per-account inventory disk-cache files
+    /// (`<agent-uuid>.inv.llsd.gz` and `<agent-uuid>.lib.inv.llsd.gz`) are written
+    /// **directly** under, or `None` to disable inventory caching. Consumed by the
+    /// runtime inventory-cache shell (see the `B10` cache shells).
+    pub agent_cache_dir: Option<std::path::PathBuf>,
+    /// The directory chat-log transcripts (and the optional `conversation.log`
+    /// index) are written **directly** under, or `None` to disable chat logging.
+    /// Passed verbatim to the runtime `ChatLog` shell — there is no derived
+    /// per-account sub-directory; the host supplies an already-per-account path.
+    pub agent_chat_log_dir: Option<std::path::PathBuf>,
+    /// Reserved for a cache directory shared across accounts (e.g. a grid-wide
+    /// texture or name cache). Not yet consumed; `None` until a shared-cache
+    /// feature lands.
+    pub shared_cache_dir: Option<std::path::PathBuf>,
+}
+
 /// The runtime chat-log configuration — opt-in, **default OFF**, mirroring
 /// Firestorm's per-account toggles. The whole feature is disabled until a runtime
 /// enables one or more text-chat types (via [`enabled`](Self::enabled)); the
@@ -169,10 +198,6 @@ pub struct ChatLogConfig {
     /// The text-chat types whose messages are written to a transcript. Empty means
     /// the feature is fully off.
     pub enabled: BTreeSet<LoggedChatType>,
-    /// The base directory transcripts are written under, or `None` for the
-    /// runtime default (a per-account `chat_logs/` directory). Each account's
-    /// transcripts live in a sanitised sub-directory of this base.
-    pub log_dir: Option<std::path::PathBuf>,
     /// Use the legacy `firstname.lastname` IM filename scheme rather than the
     /// modern display/account name (Firestorm `UseLegacyIMLogNames`). The runtime
     /// selects which name string to pass; this records the user's preference so it
@@ -205,7 +230,6 @@ impl Default for ChatLogConfig {
     fn default() -> Self {
         Self {
             enabled: BTreeSet::new(),
-            log_dir: None,
             legacy_im_names: false,
             date_suffix: false,
             timestamp: Some(TimestampFormat::default()),
