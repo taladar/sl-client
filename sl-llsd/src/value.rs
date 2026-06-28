@@ -420,6 +420,20 @@ impl Llsd {
         out
     }
 
+    /// Serializes this value as binary LLSD — the byte-compatible encoding
+    /// Second Life viewers use for the on-disk inventory cache, and the inverse
+    /// of [`parse_llsd_binary`](crate::parse_llsd_binary).
+    ///
+    /// Map keys are emitted in sorted order so two equal [`Llsd`] trees always
+    /// serialize byte-for-byte identically (LLSD maps are unordered, so the
+    /// order is a free choice; sorting makes it deterministic — matching
+    /// [`to_llsd_xml`](Self::to_llsd_xml)). The output is the body the inventory
+    /// cache envelope gzips after its 4-byte version header.
+    #[must_use]
+    pub fn to_llsd_binary(&self) -> Vec<u8> {
+        crate::binary::to_binary(self)
+    }
+
     /// Appends this value's LLSD-XML element(s) to `out` without the `<llsd>`
     /// document wrapper, recursing into arrays and maps. The element-by-element
     /// inverse of [`node_to_llsd`].
