@@ -75,26 +75,21 @@ pub enum WireError {
         /// The offending value, rendered for diagnostics.
         value: String,
     },
-    /// A field that should carry a parseable scalar (e.g. an integer rendered as
-    /// text in an `EstateOwnerMessage` parameter or a downloaded list file) held
-    /// a value that could not be decoded. The message is rejected rather than
-    /// silently coerced to a default (e.g. `0`).
-    #[error("field {field} carried malformed value {value:?}")]
-    MalformedField {
+    /// A field that should carry a text-encoded scalar (an integer rendered as
+    /// text in an `EstateOwnerMessage` parameter or a downloaded list-file line,
+    /// e.g. a mute-list entry's type or flags) held a value that could not be
+    /// decoded. The message is rejected rather than silently coerced to a default
+    /// (e.g. `0`), matching the non-masking stance of
+    /// [`InvalidUuid`](WireError::InvalidUuid). LLSD map-field faults are *not*
+    /// reported here — those flow through [`Llsd`](WireError::Llsd) as an
+    /// [`LlsdError`](sl_llsd::LlsdError) — so a text-scalar fault stays
+    /// distinguishable from a structured-data one.
+    #[error("field {field} carried invalid scalar {value:?}")]
+    InvalidScalar {
         /// A short static label identifying the offending field.
         field: &'static str,
         /// The offending value, rendered for diagnostics.
         value: String,
-    },
-    /// A field that a conforming peer is required to send was absent from a
-    /// decoded body (an LLSD map key that should always be present, e.g. the
-    /// identity id a capability reply is *about*). The message is rejected rather
-    /// than silently substituting a default, since its absence means the body is
-    /// malformed or from an incompatible peer.
-    #[error("required field {field} was absent")]
-    MissingField {
-        /// A short static label identifying the absent field.
-        field: &'static str,
     },
     /// A field that should carry a URL held a non-empty value that does not parse
     /// as one. An empty value, where the field treats it as an "absent" sentinel,
@@ -109,4 +104,14 @@ pub enum WireError {
         /// The offending value, rendered for diagnostics.
         value: String,
     },
+    /// A fault decoding a [`Llsd`](sl_llsd::Llsd) body: a map field read by the
+    /// typed `field_*` / `require_*` accessors was absent or of the wrong LLSD
+    /// kind, or an LLSD-XML document failed to parse. This wraps the LLSD core's
+    /// own [`LlsdError`](sl_llsd::LlsdError) so that a structured-data fault stays
+    /// **distinguishable** from the text-scalar
+    /// [`InvalidScalar`](WireError::InvalidScalar) / [`InvalidUuid`](WireError::InvalidUuid)
+    /// faults a non-LLSD parser (XML-RPC login, scalar list-file fields, …) raises
+    /// directly.
+    #[error(transparent)]
+    Llsd(#[from] sl_llsd::LlsdError),
 }

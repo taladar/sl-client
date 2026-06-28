@@ -77,16 +77,23 @@ decode the bytes big-endian.
 
 > **In this codebase**
 >
-> - The value tree is the `Llsd` enum in `sl-wire/src/llsd.rs`, with variants
->   `Undef`, `Boolean`, `Integer`, `Real`, `String`, `Uuid`, `Date`, `Uri`,
->   `Binary`, `Array`, `Map` (re-exported from `sl-proto` as `Llsd`).
+> - The value tree is the `Llsd` enum in the `sl-llsd` crate
+>   (`sl-llsd/src/value.rs`), with variants `Undef`, `Boolean`, `Integer`,
+>   `Real`, `String`, `Uuid`, `Date`, `Uri`, `Binary`, `Array`, `Map`
+>   (re-exported through `sl-wire`'s `llsd` module, and onward as
+>   `sl-proto`'s `Llsd`).
 > - Accessors make trees ergonomic to walk: `Llsd::get(key)`, `index(i)`,
 >   `as_array`, `as_map`, plus scalar coercions. Use these rather than matching
->   variants by hand.
-> - The XML parser and the request-body builders (`build_seed_request`,
->   `build_event_queue_request`, `build_object_media_update_request`, …) and
->   response parsers (`parse_seed_response`, `parse_event_queue_response`, …)
->   are all in `sl-wire/src/llsd.rs`.
+>   variants by hand. The typed `field_*` / `require_*` map accessors return
+>   `LlsdError` (missing / wrong-kind field), which `sl-wire` transports as
+>   `WireError::Llsd` — keeping structured-data faults distinguishable from
+>   text-scalar ones (`WireError::InvalidScalar` / `InvalidUuid`).
+> - The XML parser lives in `sl-llsd`; the CAPS request-body builders
+>   (`build_seed_request`, `build_event_queue_request`,
+>   `build_object_media_update_request`, …) and response parsers
+>   (`parse_seed_response`, `parse_event_queue_response`, …) stay in
+>   `sl-wire/src/llsd.rs`, since they depend on `WireError` and the typed
+>   `sl-types` keys.
 > - For the binary-integer gotcha, the tolerant `llsd_u32` / `llsd_u64` helpers
 >   in `sl-proto/src/session/conversions.rs` decode a number whether it arrived
 >   as `<integer>` or as big-endian `<binary>`.

@@ -4,7 +4,7 @@ use super::{
     ExperienceInfo, ExperiencePermission, ExperienceUpdate, llsd_uuid, parse_region_experiences,
 };
 use crate::WireError;
-use crate::llsd::{Llsd, parse_llsd_xml};
+use crate::llsd::{Llsd, LlsdError, parse_llsd_xml};
 use sl_types::key::ExperienceKey;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -168,10 +168,10 @@ pub fn parse_set_experience_permission_request(
 ///
 /// # Errors
 ///
-/// Returns a [`WireError::MalformedField`] if the body is not well-formed XML or
+/// Returns a [`LlsdError::MalformedField`] if the body is not well-formed XML or
 /// a present field has the wrong LLSD kind.
 pub fn parse_update_experience_request(xml: &str) -> Result<ExperienceUpdate, WireError> {
-    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+    let root = parse_llsd_xml(xml).map_err(|error| LlsdError::MalformedField {
         field: "UpdateExperience",
         value: error.to_string(),
     })?;
@@ -200,7 +200,7 @@ pub fn parse_update_experience_request(xml: &str) -> Result<ExperienceUpdate, Wi
 ///
 /// # Errors
 ///
-/// Returns a [`WireError::MalformedField`] if the body is not well-formed XML or
+/// Returns a [`LlsdError::MalformedField`] if the body is not well-formed XML or
 /// a present `allowed`/`blocked`/`trusted` field has the wrong LLSD kind.
 #[expect(
     clippy::type_complexity,
@@ -209,7 +209,7 @@ pub fn parse_update_experience_request(xml: &str) -> Result<ExperienceUpdate, Wi
 pub fn parse_region_experiences_request(
     xml: &str,
 ) -> Result<(Vec<ExperienceKey>, Vec<ExperienceKey>, Vec<ExperienceKey>), WireError> {
-    let root = parse_llsd_xml(xml).map_err(|error| WireError::MalformedField {
+    let root = parse_llsd_xml(xml).map_err(|error| LlsdError::MalformedField {
         field: "RegionExperiences",
         value: error.to_string(),
     })?;

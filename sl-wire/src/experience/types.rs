@@ -2,25 +2,26 @@
 
 use super::llsd_uuid;
 use crate::WireError;
-use crate::llsd::Llsd;
+use crate::llsd::{Llsd, LlsdError};
 use sl_types::key::{AgentKey, ExperienceKey, GroupKey, OwnerKey};
 use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Reads a required UUID field that, like [`super::llsd_uuid`], accepts either a
 /// `uuid` or a UUID-valued `string`. An absent (or `Undef`) field is a
-/// [`WireError::MissingField`]; a present value that is neither a `uuid` nor a
-/// parseable UUID string is a [`WireError::MalformedField`]. (We cannot use
+/// [`LlsdError::MissingField`]; a present value that is neither a `uuid` nor a
+/// parseable UUID string is a [`LlsdError::MalformedField`]. (We cannot use
 /// [`Llsd::require_uuid`](crate::llsd::Llsd::require_uuid), which rejects the
 /// string form the lenient path historically accepted here.)
 fn require_uuid_lenient(map: &Llsd, field: &'static str) -> Result<Uuid, WireError> {
     match map.get(field) {
-        None | Some(Llsd::Undef) => Err(WireError::MissingField { field }),
-        Some(value) => llsd_uuid(value).ok_or_else(|| WireError::MalformedField {
+        None | Some(Llsd::Undef) => Err(LlsdError::MissingField { field }),
+        Some(value) => llsd_uuid(value).ok_or_else(|| LlsdError::MalformedField {
             field,
             value: value.kind().to_owned(),
         }),
     }
+    .map_err(WireError::from)
 }
 
 // The experience property bitfield and its `PROPERTY_*` flag constants now live
@@ -161,8 +162,8 @@ impl ExperienceInfo {
     ///
     /// # Errors
     ///
-    /// Returns a [`WireError::MissingField`] if `public_id` is absent, or a
-    /// [`WireError::MalformedField`] if a present field has the wrong LLSD kind.
+    /// Returns a [`LlsdError::MissingField`] if `public_id` is absent, or a
+    /// [`LlsdError::MalformedField`] if a present field has the wrong LLSD kind.
     pub fn from_llsd(map: &Llsd) -> Result<Self, WireError> {
         let string = |key: &'static str| -> Result<String, WireError> {
             Ok(map.field_str(key, key)?.unwrap_or_default().to_owned())

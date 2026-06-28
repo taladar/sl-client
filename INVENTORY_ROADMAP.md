@@ -449,10 +449,14 @@ accessors return `Result<_, WireError>` today via two variants only —
 (`error.rs:83`) and `WireError::MissingField { field: &'static str }`
 (`error.rs:95`). The orphan rule forbids leaving `impl Llsd` in sl-wire once
 `Llsd` is foreign, so these accessors **move** and re-type to a crate-local
-`LlsdError` mirroring those two variants; `impl From<LlsdError> for WireError`
-maps them back, and the `?` at every staying-builder call site
-(`AssetUploadResponse::from_llsd` etc.) converts transparently. `parse_llsd_xml`
-keeps its `roxmltree::Error`, so it moves clean.
+`LlsdError` mirroring those two variants. **Implemented differently (see B1):**
+rather than mapping `LlsdError` back onto generic `WireError::MalformedField` /
+`MissingField`, those two `WireError` variants were **removed** — LLSD faults
+now flow through a transparent `WireError::Llsd(#[from] LlsdError)`, the
+non-LLSD text-scalar case moved to a new `WireError::InvalidScalar`, and every
+sl-wire LLSD parse site produces/propagates `LlsdError` rather than
+constructing `WireError`. `parse_llsd_xml` keeps its `roxmltree::Error`, so it
+moves clean.
 
 **Notation reader is GLTF-entangled (B1).** `material/gltf.rs` mixes a generic
 notation-LLSD cursor (`:59`-~`:300`: string/int/array token readers, "advance
@@ -1172,37 +1176,48 @@ work" rule).
 Fully standalone (no inventory dependency); first because every later task
 serialises or parses LLSD and B2 adds the binary codec here.
 
-- [ ] Add a new `sl-llsd` workspace member; move **only the core** (per the A3
-      boundary): the `Llsd` enum (`:18`), the pure accessors (`get`/`index`/
-      `as_*`/`kind`, `:47`-`:165`), the `field_*` / `require_*` accessors
-      (`:178`-`:408`), the XML codec (`to_llsd_xml` `:423` / `parse_llsd_xml`
-      `:519`, with `node_to_llsd` / `push_llsd_xml`), `push_escaped` (`:593`,
-      make it `pub`), and the generic notation cursor from
-      `sl-wire/src/material/gltf.rs` (`:59`-~`:300`). Dependencies: `sl-types`,
-      `uuid`, `base64`, `roxmltree` (`time` lands with B2, the binary date
-      path). The `build_*` CAPS builders, the `AssetUploadResponse` /
-      `ObjectMediaResponse` / `EventQueueResponse` types, the `llsd_*` helpers,
-      and the GLTF-domain decode (`modify_material_update`) **stay** in sl-wire.
-- [ ] Introduce a crate-local `LlsdError` mirroring the two `WireError` variants
-      the moved accessors use —
-      `MalformedField { field: &'static str, value: String }` (`error.rs:83`)
-      and `MissingField { field: &'static str }` (`error.rs:95`) — re-type the
-      moved `field_*` / `require_*` to it, and add
-      `impl From<LlsdError> for WireError` in sl-wire so the `?` at every
-      staying builder (`AssetUploadResponse::from_llsd` etc.) still converts.
-- [ ] Keep sl-wire compiling: `sl-wire/src/llsd.rs`
+- [x] Add a new `sl-llsd` workspace member; move **only the core** (per the
+      A3 boundary): the `Llsd` enum, the pure accessors (`get`/`index`/`as_*`/
+      `kind`), the `field_*` / `require_*` accessors, the XML codec
+      (`to_llsd_xml` / `parse_llsd_xml`, with `node_to_llsd` / `push_llsd_xml`),
+      `push_escaped` (made `pub`), and the generic notation cursor (`Scan`) from
+      `sl-wire/src/material/gltf.rs`. Dependencies: `sl-types`, `uuid`,
+      `base64`, `roxmltree`, plus `thiserror` for `LlsdError` (`time` lands with
+      B2, the binary date path). The `build_*` CAPS builders, the
+      `AssetUploadResponse` / `ObjectMediaResponse` / `EventQueueResponse`
+      types, the `llsd_*` helpers, and the GLTF-domain decode
+      (`modify_material_update`) **stay** in sl-wire.
+      Files: `sl-llsd/src/{lib,value,notation,error}.rs` + the per-crate aux
+      (`README.md`, `CHANGELOG.md`, `cliff.toml`).
+- [x] Introduce a crate-local `LlsdError` (`MalformedField { field, value }`,
+      `MissingField { field }`) and re-type the moved `field_*` / `require_*` to
+      it. **Error-architecture decision (user-directed, divergence from the
+      drafted "mirror + identity-`From`" plan):** instead of mapping `LlsdError`
+      back onto generic `WireError::MalformedField` / `MissingField`, those two
+      `WireError` variants are **removed** and replaced by one transported type
+      per format — LLSD faults flow through a transparent
+      `WireError::Llsd(#[from] LlsdError)`, and the only genuinely non-LLSD use
+      (text-scalar parsing in `sl-proto`'s `parse_u32_field` /
+      `parse_mute_line`) moves to a new inline
+      `WireError::InvalidScalar { field, value }` (sibling of `InvalidUuid` /
+      `InvalidUrl`). This keeps structured-data faults distinguishable from
+      text-scalar ones, and every LLSD parse site in sl-wire now
+      produces/propagates `LlsdError` (via `?` / `.into()`) rather than
+      inspecting `WireError` variants — making the retarget part of the
+      extraction itself.
+- [x] Keep sl-wire compiling: `sl-wire/src/llsd.rs`
       **stays a real `crate::llsd` module** — it opens with
-      `pub use sl_llsd::{Llsd, parse_llsd_xml, push_escaped, …}` (re-export the
-      moved core) **and** keeps the builders, so both `crate::llsd::Llsd` and
-      `crate::llsd::build_seed_request` resolve at the 20 sl-wire modules +
-      downstream `sl-proto` (4) / `sl-client-tokio` (7) / `sl-client-bevy` (7)
-      call sites unchanged. (A bare `pub use sl_llsd as llsd` would leave the
-      builders homeless.)
-- [ ] Verify: full workspace builds + `cargo test` green, clippy-clean. Split
-      the tests by where their subject landed: the pure-LLSD cases in
-      `sl-wire/tests/llsd.rs` + the inline `field_accessors_*` test (`:1285`)
-      move to `sl-llsd`; the builder/CAPS cases (`AssetUploadResponse`,
-      `EventQueue`, `ObjectMedia`) stay in sl-wire.
+      `pub use sl_llsd::{Llsd, LlsdError, parse_llsd_xml};` +
+      `pub(crate) use sl_llsd::{Scan, push_escaped};` (re-export the moved core)
+      **and** keeps the builders, so both `crate::llsd::Llsd` and
+      `crate::llsd::build_seed_request` resolve at the sl-wire modules +
+      downstream `sl-proto` / `sl-client-tokio` / `sl-client-bevy` call sites
+      unchanged. `LlsdError` is re-exported at the sl-wire crate root.
+- [x] Verify: full workspace builds + `cargo test` green, clippy-clean,
+      rustdoc-clean (`-D warnings`). Split the tests by where their subject
+      landed: the pure-LLSD cases + the inline `field_accessors_*` test move to
+      `sl-llsd`; the builder/CAPS cases (`AssetUploadResponse`, `EventQueue`,
+      `ObjectMedia`) stay in `sl-wire/tests/llsd.rs`.
 
 ### B2. Binary-LLSD codec in `sl-llsd` (from A3)
 

@@ -111,7 +111,7 @@ fn object_physics_data_to_llsd(data: &ObjectPhysicsData) -> HashMap<String, Llsd
 /// conforming emitter always sends it (OpenSim `BunchOfCaps.cs` /
 /// `EventQueueGetHandlers.cs` / `LLClientView.cs`) and both Firestorm readers
 /// (`llviewerobjectlist.cpp`, `llviewerobject.cpp`) read it unconditionally, so
-/// its absence is a hard [`WireError::MissingField`].
+/// its absence is a hard [`WireError::Llsd`].
 ///
 /// The four material fields (`Density`, `Friction`, `Restitution`,
 /// `GravityMultiplier`) are written as an all-or-nothing group. For
@@ -121,7 +121,7 @@ fn object_physics_data_to_llsd(data: &ObjectPhysicsData) -> HashMap<String, Llsd
 /// honour both: if `Density` is present the other three are required, and if it
 /// is absent the whole group defaults to `0.0`. A partial material set (e.g.
 /// `Density` present but `Friction` absent) is therefore a hard
-/// [`WireError::MissingField`] rather than being silently masked.
+/// [`WireError::Llsd`] rather than being silently masked.
 fn object_physics_data_from_llsd(value: &Llsd) -> Result<ObjectPhysicsData, WireError> {
     let shape = value.require_i32("PhysicsShapeType", "PhysicsShapeType")?;
     let physics_shape_type =
@@ -160,7 +160,7 @@ pub fn build_get_object_physics_data_request(object_ids: &[ObjectKey]) -> String
 /// Decodes a `GetObjectPhysicsData` request: the requested object ids.
 ///
 /// # Errors
-/// Returns [`WireError::MalformedField`] if a decoded LLSD field is present but
+/// Returns [`WireError::Llsd`] if a decoded LLSD field is present but
 /// of the wrong kind.
 pub fn parse_get_object_physics_data_request(body: &Llsd) -> Result<Vec<ObjectKey>, WireError> {
     parse_object_ids(body)
@@ -171,9 +171,9 @@ pub fn parse_get_object_physics_data_request(body: &Llsd) -> Result<Vec<ObjectKe
 /// reply map (the "no such object" signal) are simply not present in the result.
 ///
 /// # Errors
-/// Returns [`WireError::MissingField`] if a present per-object map omits the
+/// Returns [`WireError::Llsd`] if a present per-object map omits the
 /// required `PhysicsShapeType` (or a partial material set), or
-/// [`WireError::MalformedField`] if a decoded LLSD field is present but of the
+/// [`WireError::Llsd`] if a decoded LLSD field is present but of the
 /// wrong kind.
 pub fn parse_get_object_physics_data(
     body: &Llsd,
@@ -221,10 +221,10 @@ pub fn build_get_object_physics_data_response(data: &[(ObjectKey, ObjectPhysicsD
 /// data keyed by region-local id (`ObjectData[].LocalID`).
 ///
 /// # Errors
-/// Returns [`WireError::MissingField`] if the `ObjectData` array, an entry's
+/// Returns [`WireError::Llsd`] if the `ObjectData` array, an entry's
 /// `LocalID`, its `PhysicsShapeType`, or a material field is absent (every field
 /// of this event is always sent by a conforming emitter), or
-/// [`WireError::MalformedField`] if a decoded LLSD field is present but of the
+/// [`WireError::Llsd`] if a decoded LLSD field is present but of the
 /// wrong kind.
 pub fn parse_object_physics_properties(
     body: &Llsd,
@@ -327,9 +327,9 @@ mod tests {
         );
         let body = parse_llsd_xml(xml).map_err(|error| format!("{error:?}"))?;
         match parse_get_object_physics_data(&body) {
-            Err(WireError::MissingField {
+            Err(WireError::Llsd(crate::LlsdError::MissingField {
                 field: "PhysicsShapeType",
-            }) => Ok(()),
+            })) => Ok(()),
             other => Err(format!(
                 "expected MissingField PhysicsShapeType, got {other:?}"
             )),
@@ -354,7 +354,7 @@ mod tests {
         );
         let body = parse_llsd_xml(partial).map_err(|error| format!("{error:?}"))?;
         match parse_get_object_physics_data(&body) {
-            Err(WireError::MissingField { field: "Friction" }) => {}
+            Err(WireError::Llsd(crate::LlsdError::MissingField { field: "Friction" })) => {}
             other => return Err(format!("expected MissingField Friction, got {other:?}")),
         }
 
@@ -388,7 +388,7 @@ mod tests {
         );
         let body = parse_llsd_xml(xml).map_err(|error| format!("{error:?}"))?;
         match parse_object_physics_properties(&body) {
-            Err(WireError::MissingField { field: "LocalID" }) => Ok(()),
+            Err(WireError::Llsd(crate::LlsdError::MissingField { field: "LocalID" })) => Ok(()),
             other => Err(format!("expected MissingField LocalID, got {other:?}")),
         }
     }

@@ -29,7 +29,7 @@
 use std::collections::HashMap;
 
 use crate::WireError;
-use crate::llsd::Llsd;
+use crate::llsd::{Llsd, LlsdError};
 
 /// The default permission masks new objects are created with
 /// (`default_object_perm_masks`), as raw `PERM_*` bit masks. The viewer sends
@@ -113,7 +113,7 @@ fn agent_preferences_to_llsd(prefs: &AgentPreferences) -> Llsd {
 /// two share the same key shape.
 ///
 /// # Errors
-/// Returns [`WireError::MalformedField`] if a decoded LLSD field is present but
+/// Returns [`LlsdError::MalformedField`] if a decoded LLSD field is present but
 /// of the wrong kind.
 pub fn parse_agent_preferences(body: &Llsd) -> Result<AgentPreferences, WireError> {
     let default_object_perm_masks = match body.get("default_object_perm_masks") {
@@ -124,20 +124,22 @@ pub fn parse_agent_preferences(body: &Llsd) -> Result<AgentPreferences, WireErro
             next_owner: masks.field_i32("NextOwner", "NextOwner")?.unwrap_or(0),
         }),
         Some(other) => {
-            return Err(WireError::MalformedField {
+            return Err(LlsdError::MalformedField {
                 field: "default_object_perm_masks",
                 value: other.kind().to_owned(),
-            });
+            }
+            .into());
         }
     };
     let max_access_pref = match body.get("access_prefs") {
         None | Some(Llsd::Undef) => None,
         Some(prefs @ Llsd::Map(_)) => prefs.field_str("max", "max")?.map(str::to_owned),
         Some(other) => {
-            return Err(WireError::MalformedField {
+            return Err(LlsdError::MalformedField {
                 field: "access_prefs",
                 value: other.kind().to_owned(),
-            });
+            }
+            .into());
         }
     };
     Ok(AgentPreferences {
