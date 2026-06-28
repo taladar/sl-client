@@ -1251,17 +1251,22 @@ folds and the accessors onto it with no behaviour change yet.
       folder/item stores, the `owner` discriminator (`Agent` / `Library`), the
       roots, a `FolderState` (`Unknown` / `Fetching` /
       `Loaded { version: i32 }`) per folder, and the parent→children index.
-      `const fn` empty constructor. **Implementation note:** the folder/item
-      stores are keyed by the **typed** `InventoryFolderKey` / `InventoryKey`
-      (not bare `Uuid`); the `inventory_folders()` / `inventory_items()` map
-      accessors are **re-typed** in step with this to return
-      `&BTreeMap<InventoryFolderKey, InventoryFolder>` /
-      `&BTreeMap<InventoryKey, InventoryItem>` (grep-confirmed no external
-      callers, so B4's "deprecate the raw `&BTreeMap<Uuid, …>` accessors" item
-      is superseded — they were never raw `Uuid` once this landed). The
-      per-folder bookkeeping (owner, `FolderState`, child sets) is a side-table
-      `meta: BTreeMap<InventoryFolderKey, FolderMeta>` rather than a unified
-      `FolderEntry` — same capability, no redundant shadow map.
+      `const fn` empty constructor. **Implementation note:** the stores are
+      keyed by the **typed** `InventoryFolderKey` / `InventoryKey` (not bare
+      `Uuid`). Each folder is **one `FolderEntry { folder:
+      Option<InventoryFolder>, owner, state, child_folders, child_items }`** in
+      a single `BTreeMap<InventoryFolderKey, FolderEntry>` — payload and
+      bookkeeping live together so they cannot desync (the invariant is
+      type-enforced), and the `Option` payload models a folder
+      *known to exist but not yet fetched* (its bookkeeping/state/index is
+      tracked while the payload is `None`, e.g. a child folded before its
+      parent, or a descendents reply preceding the skeleton entry). Items carry
+      no bookkeeping, so they stay a plain
+      `BTreeMap<InventoryKey, InventoryItem>`. The `inventory_folders()` /
+      `inventory_items()` accessors become
+      `impl Iterator<Item = &InventoryFolder>` / `&InventoryItem` (folders skip
+      payload-less entries); grep-confirmed no external callers, so B4's
+      "deprecate the raw `&BTreeMap<Uuid, …>` accessors" item is superseded.
 - [x] Move `inventory_folders` / `inventory_items` / `inventory_root` /
       `next_inventory_callback` off `Session` into the model field; migrate
       every internal use to maintain the index + fetch-state: the central folds

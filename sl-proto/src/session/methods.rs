@@ -7884,16 +7884,16 @@ impl Session {
         self.inventory.item(item_id)
     }
 
-    /// All cached inventory folders, keyed by typed folder key.
-    #[must_use]
-    pub const fn inventory_folders(&self) -> &BTreeMap<InventoryFolderKey, InventoryFolder> {
-        self.inventory.folders()
+    /// All cached inventory folders whose metadata is present, in key order. A
+    /// folder that is known to exist but whose metadata has not yet arrived is
+    /// not yielded; query its [`Session::folder_fetch_state`] to observe it.
+    pub fn inventory_folders(&self) -> impl Iterator<Item = &InventoryFolder> {
+        self.inventory.folders_iter()
     }
 
-    /// All cached inventory items, keyed by typed item key.
-    #[must_use]
-    pub const fn inventory_items(&self) -> &BTreeMap<InventoryKey, InventoryItem> {
-        self.inventory.items()
+    /// All cached inventory items, in key order.
+    pub fn inventory_items(&self) -> impl Iterator<Item = &InventoryItem> {
+        self.inventory.items_iter()
     }
 
     /// The cached immediate children of `folder_id`: its sub-folders and the
