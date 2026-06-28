@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use sl_proto::{
     CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
     CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
-    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FIND_EXPERIENCE_BY_NAME,
+    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME,
     CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
     CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_OBJECT_COST,
     CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
@@ -61,9 +61,9 @@ pub use sl_proto::{
     GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
     ImSessionId, ImageCodec, InstantMessage, InterestsUpdate, InventoryCallbackId, InventoryCursor,
     InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey,
-    InventoryOffer, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandingType, LegacyMaterial,
-    LightData, LightImage, LindenAmount, LindenBalance, LoadUrlRequest, LoggedChatType,
-    LoginAccount, LoginParams, LoginRequest, LoginResponse, LureId, MEDIA_PERM_ALL,
+    InventoryOffer, InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandingType,
+    LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, LoadUrlRequest,
+    LoggedChatType, LoginAccount, LoginParams, LoginRequest, LoginResponse, LureId, MEDIA_PERM_ALL,
     MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
     MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MessageCursor,
     MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry,
@@ -402,14 +402,48 @@ impl Client {
                 let batch = self
                     .session
                     .next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT);
-                if !batch.is_empty() {
+                // The batch can span both trees (the scheduler walks from both
+                // roots): the agent folders go to `FetchInventoryDescendents2` with
+                // the agent owner, the Library folders to `FetchLibDescendents2`
+                // with the Library owner (or, where the grid does not serve that cap
+                // — e.g. OpenSim — over the UDP path instead, so they never stay
+                // stuck `Fetching`).
+                let (library_folders, agent_folders): (Vec<_>, Vec<_>) =
+                    batch.into_iter().partition(|folder| {
+                        self.session.inventory_owner(*folder) == Some(InventoryOwner::Library)
+                    });
+                if !agent_folders.is_empty() {
                     tokio::spawn(fetch_inventory(
                         url,
                         owner.uuid(),
-                        batch,
+                        agent_folders,
+                        CAP_FETCH_INVENTORY,
                         http.clone(),
                         caps_tx.clone(),
                     ));
+                }
+                if !library_folders.is_empty() {
+                    match (
+                        caps.get(CAP_FETCH_LIBRARY).cloned(),
+                        self.session.library_owner(),
+                    ) {
+                        (Some(lib_url), Some(lib_owner)) => {
+                            tokio::spawn(fetch_inventory(
+                                lib_url,
+                                lib_owner.uuid(),
+                                library_folders,
+                                CAP_FETCH_LIBRARY,
+                                http.clone(),
+                                caps_tx.clone(),
+                            ));
+                        }
+                        _ => {
+                            for folder in library_folders {
+                                self.session
+                                    .request_folder_contents(folder, Instant::now())?;
+                            }
+                        }
+                    }
                 }
             }
 
@@ -561,6 +595,7 @@ impl Client {
                                     url,
                                     owner.uuid(),
                                     folder_ids,
+                                    CAP_FETCH_INVENTORY,
                                     http.clone(),
                                     caps_tx.clone(),
                                 ));
