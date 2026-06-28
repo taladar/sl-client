@@ -12,9 +12,16 @@
 //! cacheable) apart. Only structure/metadata lives here — asset bytes (textures,
 //! meshes, notecard/script contents) are out of scope.
 //!
-//! The stores are keyed by the typed [`InventoryFolderKey`] / [`InventoryKey`]
-//! (never a bare `Uuid`), so a folder key and an item key built from the same
-//! raw id are distinct keys.
+//! Each folder is one [`FolderEntry`] that owns its payload **and** its
+//! bookkeeping (owner, fetch state, child index) in a single value keyed by
+//! folder key, so the two can never desync. The payload is an
+//! `Option<`[`InventoryFolder`]`>`: a folder may be *known to exist* — named as a
+//! child in another folder's listing, or fetched in its own right — before its
+//! own metadata has arrived, in which case the entry holds the bookkeeping with a
+//! `None` payload until the metadata lands. Items carry no such bookkeeping (no
+//! fetch state, no children), so they stay a plain payload map. The stores are
+//! keyed by the typed [`InventoryFolderKey`] / [`InventoryKey`] (never a bare
+//! `Uuid`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -53,11 +60,22 @@ pub enum FolderState {
     },
 }
 
-/// Per-folder bookkeeping kept beside the [`InventoryFolder`] payload: which tree
-/// the folder belongs to, its contents' [`FolderState`], and the parent→children
-/// index (the keys of its immediate sub-folders and items).
+/// A folder and everything the model tracks about it: the [`InventoryFolder`]
+/// payload, the tree it belongs to, its contents' [`FolderState`], and the
+/// parent→children index. The payload and bookkeeping live in one value so they
+/// cannot desync.
+///
+/// The payload is optional: a folder can be *known to exist* (linked as some
+/// item's or folder's parent, or fetched in its own right) before its own
+/// metadata arrives, and the entry then holds the bookkeeping with a `None`
+/// payload until the metadata lands. Such a payload-less folder is reported as
+/// absent by [`Inventory::folder`] / [`Inventory::folders_iter`] but its state
+/// and child index are still tracked.
 #[derive(Debug)]
-struct FolderMeta {
+struct FolderEntry {
+    /// The folder payload, or `None` while the folder is known to exist but its
+    /// metadata has not yet been received.
+    folder: Option<InventoryFolder>,
     /// The tree (agent or library) this folder belongs to.
     owner: InventoryOwner,
     /// The fetch state of this folder's contents.
@@ -71,13 +89,11 @@ struct FolderMeta {
 /// The held inventory model — both the agent tree and the Library tree.
 #[derive(Debug)]
 pub(crate) struct Inventory {
-    /// The folder payloads, keyed by folder key.
-    folders: BTreeMap<InventoryFolderKey, InventoryFolder>,
-    /// The item payloads, keyed by item key.
+    /// The folder entries (payload + bookkeeping), keyed by folder key.
+    folders: BTreeMap<InventoryFolderKey, FolderEntry>,
+    /// The item payloads, keyed by item key. Items carry no per-item bookkeeping,
+    /// so they need no entry wrapper.
     items: BTreeMap<InventoryKey, InventoryItem>,
-    /// Per-folder bookkeeping (owner, fetch state, child index), keyed by folder
-    /// key.
-    meta: BTreeMap<InventoryFolderKey, FolderMeta>,
     /// The agent inventory root ("My Inventory") folder, from the login response,
     /// or `None` before login.
     agent_root: Option<InventoryFolderKey>,
@@ -95,7 +111,6 @@ impl Inventory {
         Self {
             folders: BTreeMap::new(),
             items: BTreeMap::new(),
-            meta: BTreeMap::new(),
             agent_root: None,
             library_root: None,
             next_callback: InventoryCallbackId(1),
@@ -126,19 +141,24 @@ impl Inventory {
 
     // ---- reads --------------------------------------------------------------
 
-    /// All cached folder payloads, keyed by folder key.
-    pub(crate) const fn folders(&self) -> &BTreeMap<InventoryFolderKey, InventoryFolder> {
-        &self.folders
+    /// All folders whose metadata is present, in key order (payload-less
+    /// known-but-unfetched folders are skipped).
+    pub(crate) fn folders_iter(&self) -> impl Iterator<Item = &InventoryFolder> {
+        self.folders
+            .values()
+            .filter_map(|entry| entry.folder.as_ref())
     }
 
-    /// All cached item payloads, keyed by item key.
-    pub(crate) const fn items(&self) -> &BTreeMap<InventoryKey, InventoryItem> {
-        &self.items
+    /// All cached item payloads, in key order.
+    pub(crate) fn items_iter(&self) -> impl Iterator<Item = &InventoryItem> {
+        self.items.values()
     }
 
-    /// A folder payload by key, if cached.
+    /// A folder payload by key, if its metadata is present.
     pub(crate) fn folder(&self, folder: InventoryFolderKey) -> Option<&InventoryFolder> {
-        self.folders.get(&folder)
+        self.folders
+            .get(&folder)
+            .and_then(|entry| entry.folder.as_ref())
     }
 
     /// An item payload by key, if cached.
@@ -147,31 +167,37 @@ impl Inventory {
     }
 
     /// A known folder's contents [`FolderState`], or `None` if the folder is not
-    /// in the model at all.
+    /// in the model at all. A known-but-unfetched folder (no payload yet) still
+    /// has a state.
     pub(crate) fn folder_state(&self, folder: InventoryFolderKey) -> Option<FolderState> {
-        self.meta.get(&folder).map(|meta| meta.state)
+        self.folders.get(&folder).map(|entry| entry.state)
     }
 
     /// The tree (agent or library) a known folder belongs to, or `None`.
     pub(crate) fn folder_owner(&self, folder: InventoryFolderKey) -> Option<InventoryOwner> {
-        self.meta.get(&folder).map(|meta| meta.owner)
+        self.folders.get(&folder).map(|entry| entry.owner)
     }
 
     /// The immediate children of `folder` — its sub-folder payloads and the item
     /// payloads filed directly in it — resolved O(children) through the index.
+    /// Children whose metadata has not yet arrived are skipped.
     pub(crate) fn children(
         &self,
         folder: InventoryFolderKey,
     ) -> (Vec<&InventoryFolder>, Vec<&InventoryItem>) {
-        let Some(meta) = self.meta.get(&folder) else {
+        let Some(entry) = self.folders.get(&folder) else {
             return (Vec::new(), Vec::new());
         };
-        let folders = meta
+        let folders = entry
             .child_folders
             .iter()
-            .filter_map(|child| self.folders.get(child))
+            .filter_map(|child| {
+                self.folders
+                    .get(child)
+                    .and_then(|child| child.folder.as_ref())
+            })
             .collect();
-        let items = meta
+        let items = entry
             .child_items
             .iter()
             .filter_map(|child| self.items.get(child))
@@ -188,10 +214,14 @@ impl Inventory {
 
     // ---- folds (index- and state-maintaining) -------------------------------
 
-    /// Ensures a [`FolderMeta`] exists for `folder`, creating it `Unknown` under
-    /// `owner` if absent; returns a mutable reference to it.
-    fn meta_entry(&mut self, folder: InventoryFolderKey, owner: InventoryOwner) -> &mut FolderMeta {
-        self.meta.entry(folder).or_insert_with(|| FolderMeta {
+    /// Ensures an entry exists for `folder`, creating a payload-less `Unknown`
+    /// one under `owner` if absent; returns a mutable reference. This is how a
+    /// folder becomes *known to exist* before its own metadata arrives — e.g.
+    /// when one of its children is folded first, or a descendents reply for it
+    /// lands before its skeleton entry.
+    fn entry(&mut self, folder: InventoryFolderKey, owner: InventoryOwner) -> &mut FolderEntry {
+        self.folders.entry(folder).or_insert_with(|| FolderEntry {
+            folder: None,
             owner,
             state: FolderState::Unknown,
             child_folders: BTreeSet::new(),
@@ -199,99 +229,112 @@ impl Inventory {
         })
     }
 
-    /// Inserts or updates a folder payload under `owner`, maintaining the child
-    /// index (relinking it if its parent changed) and seeding an `Unknown` fetch
-    /// state for a newly-seen folder. A `version` of `0` (as carried by a
-    /// descendents reply's sub-folders, which omit it) does not clobber a known
-    /// version from the login skeleton.
+    /// Inserts or updates a folder's metadata under `owner`, maintaining the
+    /// child index (relinking it if its parent changed) and preserving an
+    /// existing fetch state. A `version` of `0` (as carried by a descendents
+    /// reply's sub-folders, which omit it) does not clobber a known version. A
+    /// child folded before its parent links correctly: the parent's entry is
+    /// created payload-less and filled when its own metadata arrives.
     pub(crate) fn cache_folder(&mut self, mut folder: InventoryFolder, owner: InventoryOwner) {
         let key = folder.folder_id;
         let old_parent = self
             .folders
             .get(&key)
+            .and_then(|entry| entry.folder.as_ref())
             .and_then(|existing| existing.parent_id);
         let new_parent = folder.parent_id;
         if folder.version == 0
-            && let Some(existing) = self.folders.get(&key)
+            && let Some(existing) = self
+                .folders
+                .get(&key)
+                .and_then(|entry| entry.folder.as_ref())
         {
             folder.version = existing.version;
         }
         if old_parent != new_parent {
-            if let Some(parent) = old_parent
-                && let Some(meta) = self.meta.get_mut(&parent)
+            if let Some(old) = old_parent
+                && let Some(parent) = self.folders.get_mut(&old)
             {
-                meta.child_folders.remove(&key);
+                parent.child_folders.remove(&key);
             }
-            if let Some(parent) = new_parent {
-                self.meta_entry(parent, owner).child_folders.insert(key);
+            if let Some(new) = new_parent {
+                self.entry(new, owner).child_folders.insert(key);
             }
         }
-        self.folders.insert(key, folder);
-        self.meta_entry(key, owner);
+        self.entry(key, owner).folder = Some(folder);
     }
 
     /// Inserts or updates an item payload under `owner`, maintaining the child
-    /// index (relinking it if its containing folder changed).
+    /// index (relinking it if its containing folder changed). A reference to an
+    /// as-yet-unknown containing folder creates that folder's entry payload-less.
     pub(crate) fn cache_item(&mut self, item: InventoryItem, owner: InventoryOwner) {
         let key = item.item_id;
         let new_folder = item.folder_id;
         let old_folder = self.items.get(&key).map(|existing| existing.folder_id);
         if old_folder != Some(new_folder) {
-            if let Some(folder) = old_folder
-                && let Some(meta) = self.meta.get_mut(&folder)
+            if let Some(old) = old_folder
+                && let Some(folder) = self.folders.get_mut(&old)
             {
-                meta.child_items.remove(&key);
+                folder.child_items.remove(&key);
             }
-            self.meta_entry(new_folder, owner).child_items.insert(key);
+            self.entry(new_folder, owner).child_items.insert(key);
         }
         self.items.insert(key, item);
     }
 
     /// Marks a folder's contents as fetched at `version` — the authoritative
     /// version from its own descendents reply — and writes that version into the
-    /// folder payload. The sub-folders carried in that reply stay `Unknown`
-    /// (their own `version 0` is not authoritative); only the fetched folder
-    /// itself becomes [`Loaded`](FolderState::Loaded).
+    /// folder payload if present. The folder need not have its own metadata yet
+    /// (a descendents reply can precede the skeleton entry): the state is recorded
+    /// on a payload-less entry, created under `owner` if absent. The sub-folders
+    /// carried in that reply stay `Unknown` (their own `version 0` is not
+    /// authoritative); only the fetched folder becomes
+    /// [`Loaded`](FolderState::Loaded).
     pub(crate) fn mark_folder_loaded(
         &mut self,
         folder: InventoryFolderKey,
         version: i32,
         owner: InventoryOwner,
     ) {
-        self.meta_entry(folder, owner).state = FolderState::Loaded { version };
-        if let Some(payload) = self.folders.get_mut(&folder) {
+        let entry = self.entry(folder, owner);
+        entry.state = FolderState::Loaded { version };
+        if let Some(payload) = entry.folder.as_mut() {
             payload.version = version;
         }
     }
 
     /// Re-parents a known folder under `new_parent`, moving it in the child index
-    /// (unlink from the old parent, link under the new). Used by the in-place
-    /// `MoveInventoryFolder` mutation.
+    /// (unlink from the old parent, link under the new if present). Used by the
+    /// in-place `MoveInventoryFolder` mutation. A no-op for a folder whose
+    /// metadata is not present (nothing to re-parent).
     pub(crate) fn reparent_folder(
         &mut self,
         folder: InventoryFolderKey,
         new_parent: InventoryFolderKey,
     ) {
-        let Some(payload) = self.folders.get_mut(&folder) else {
-            return;
+        let old_parent = match self
+            .folders
+            .get_mut(&folder)
+            .and_then(|entry| entry.folder.as_mut())
+        {
+            Some(payload) => {
+                let old = payload.parent_id;
+                payload.parent_id = optional_key_from_wire(new_parent.uuid());
+                old
+            }
+            None => return,
         };
-        let old_parent = payload.parent_id;
-        payload.parent_id = optional_key_from_wire(new_parent.uuid());
         if old_parent == Some(new_parent) {
             return;
         }
         if let Some(old) = old_parent
-            && let Some(meta) = self.meta.get_mut(&old)
+            && let Some(parent) = self.folders.get_mut(&old)
         {
-            meta.child_folders.remove(&folder);
+            parent.child_folders.remove(&folder);
         }
-        let owner = self
-            .meta
-            .get(&folder)
-            .map_or(InventoryOwner::Agent, |meta| meta.owner);
-        self.meta_entry(new_parent, owner)
-            .child_folders
-            .insert(folder);
+        if let Some(parent) = self.folders.get_mut(&new_parent) {
+            parent.child_folders.insert(folder);
+        }
     }
 
     /// Moves a known item into `new_folder` (optionally renaming it — an empty
@@ -303,21 +346,24 @@ impl Inventory {
         new_folder: InventoryFolderKey,
         new_name: &str,
     ) {
-        let Some(payload) = self.items.get_mut(&item) else {
-            return;
+        let old_folder = match self.items.get_mut(&item) {
+            Some(payload) => {
+                let old = payload.folder_id;
+                payload.folder_id = new_folder;
+                if !new_name.is_empty() {
+                    new_name.clone_into(&mut payload.name);
+                }
+                old
+            }
+            None => return,
         };
-        let old_folder = payload.folder_id;
-        payload.folder_id = new_folder;
-        if !new_name.is_empty() {
-            new_name.clone_into(&mut payload.name);
-        }
         if old_folder == new_folder {
             return;
         }
-        if let Some(meta) = self.meta.get_mut(&old_folder) {
-            meta.child_items.remove(&item);
+        if let Some(folder) = self.folders.get_mut(&old_folder) {
+            folder.child_items.remove(&item);
         }
-        self.meta_entry(new_folder, InventoryOwner::Agent)
+        self.entry(new_folder, InventoryOwner::Agent)
             .child_items
             .insert(item);
     }
@@ -330,13 +376,13 @@ impl Inventory {
         }
     }
 
-    /// Recursively drops a folder's descendents — its items, its sub-folders, and
-    /// their bookkeeping — leaving the folder's own (now-empty) entry in place.
+    /// Recursively drops a folder's descendents — its items and its sub-folders
+    /// (whole subtrees) — leaving the folder's own (now-empty) entry in place.
     pub(crate) fn purge_descendents(&mut self, folder: InventoryFolderKey) {
         let Some((child_folders, child_items)) = self
-            .meta
+            .folders
             .get(&folder)
-            .map(|meta| (meta.child_folders.clone(), meta.child_items.clone()))
+            .map(|entry| (entry.child_folders.clone(), entry.child_items.clone()))
         else {
             return;
         };
@@ -346,11 +392,10 @@ impl Inventory {
         for sub in &child_folders {
             self.purge_descendents(*sub);
             self.folders.remove(sub);
-            self.meta.remove(sub);
         }
-        if let Some(meta) = self.meta.get_mut(&folder) {
-            meta.child_items.clear();
-            meta.child_folders.clear();
+        if let Some(entry) = self.folders.get_mut(&folder) {
+            entry.child_items.clear();
+            entry.child_folders.clear();
         }
     }
 
@@ -361,22 +406,22 @@ impl Inventory {
         let parent = self
             .folders
             .get(&folder)
-            .and_then(|existing| existing.parent_id);
+            .and_then(|entry| entry.folder.as_ref())
+            .and_then(|payload| payload.parent_id);
         self.folders.remove(&folder);
-        self.meta.remove(&folder);
         if let Some(parent) = parent
-            && let Some(meta) = self.meta.get_mut(&parent)
+            && let Some(parent) = self.folders.get_mut(&parent)
         {
-            meta.child_folders.remove(&folder);
+            parent.child_folders.remove(&folder);
         }
     }
 
     /// Removes an item, unlinking it from its containing folder's child set.
     pub(crate) fn remove_item(&mut self, item: InventoryKey) {
         if let Some(payload) = self.items.remove(&item)
-            && let Some(meta) = self.meta.get_mut(&payload.folder_id)
+            && let Some(folder) = self.folders.get_mut(&payload.folder_id)
         {
-            meta.child_items.remove(&item);
+            folder.child_items.remove(&item);
         }
     }
 }
@@ -474,8 +519,28 @@ mod tests {
         assert_eq!(inv.folder_state(fk(0xF1)), Some(FolderState::Unknown));
     }
 
+    /// A child folded **before** its parent still links correctly: the parent's
+    /// entry is created payload-less (reported absent until its metadata lands)
+    /// but its child index is already populated.
+    #[test]
+    fn child_before_parent_links_via_placeholder() {
+        let mut inv = Inventory::new();
+        // Fold the child first; its parent 0xF0 is unknown so far.
+        inv.cache_folder(folder(0xF1, Some(0xF0), 1), InventoryOwner::Agent);
+        assert_eq!(inv.folder(fk(0xF0)), None); // parent metadata not here yet…
+        assert_eq!(inv.folder_state(fk(0xF0)), Some(FolderState::Unknown)); // …but it's known
+        assert_eq!(child_folder_ids(&inv, 0xF0), vec![0xF1]); // …and indexed
+
+        // The parent's own metadata lands; the index is unchanged, payload appears.
+        inv.cache_folder(folder(0xF0, None, 1), InventoryOwner::Agent);
+        assert!(inv.folder(fk(0xF0)).is_some());
+        assert_eq!(child_folder_ids(&inv, 0xF0), vec![0xF1]);
+    }
+
     /// `mark_folder_loaded` flips a folder to `Loaded` at the reply version and
     /// writes that version into the payload, while its children stay `Unknown`.
+    /// It works even for a folder whose own metadata has not arrived (a
+    /// descendents reply preceding the skeleton entry).
     #[test]
     fn mark_loaded_sets_state_and_version() {
         let mut inv = Inventory::new();
@@ -492,6 +557,15 @@ mod tests {
         assert_eq!(inv.folder_state(fk(0xF1)), Some(FolderState::Unknown));
         assert_eq!(child_folder_ids(&inv, 0xF0), vec![0xF1]);
         assert_eq!(child_item_ids(&inv, 0xF0), vec![0xD1]);
+
+        // Loading a folder we have no metadata for yet records the state on a
+        // payload-less entry (the descendents-before-skeleton case).
+        inv.mark_folder_loaded(fk(0xBEEF), 3, InventoryOwner::Agent);
+        assert_eq!(
+            inv.folder_state(fk(0xBEEF)),
+            Some(FolderState::Loaded { version: 3 })
+        );
+        assert_eq!(inv.folder(fk(0xBEEF)), None);
     }
 
     /// Re-parenting a folder and moving an item both relink the child index:
