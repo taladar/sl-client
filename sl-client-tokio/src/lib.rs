@@ -60,35 +60,35 @@ pub use sl_proto::{
     GroupProfile, GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey,
     GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation,
     IceCandidate, ImDialog, ImSessionId, ImageCodec, InstantMessage, InterestsUpdate,
-    InventoryCallbackId, InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem,
-    InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryOwner, InventoryType,
-    ItemInfo, Key, Kilobits, LandArea, LandingType, LegacyMaterial, LightData, LightImage,
-    LindenAmount, LindenBalance, LoadUrlRequest, LoggedChatType, LoginAccount, LoginParams,
-    LoginRequest, LoginResponse, LureId, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
-    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
-    MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MessageCursor, MfaChallenge,
-    MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags,
-    MuteType, NegativeBalanceError, NeighborInfo, NewInventoryItem, Object, ObjectExtraParams,
-    ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties,
-    ObjectTransform, OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-    ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, PhysicsShapeTypes, PickInfo,
-    PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape, PrimShapeParams, ProductType,
-    ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId, ReflectionProbe,
-    ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionCoordinates, RegionFlags,
-    RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId,
-    RegionLocalParcelId, RegionName, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation,
-    SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData, SculptOrMeshKey,
-    SequenceNumber, SessionMessage, SimulatorFeatures, SoundFlags, SoundPreload, StartLocation,
-    StartLocationParseError, TerrainLayerType, TerrainPatch, Texture, TextureAnimation,
-    TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError,
-    TimestampFormat, TransactionId, TransferId, TransferStatus, Transmit, Uuid, Vector,
-    VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, XferId, avatar_texture,
-    decode_particle_system, decode_texture_anim, decode_texture_entry, grid_to_handle,
-    group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode, sim_access,
-    texture_anim_mode,
+    InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
+    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
+    InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandingType, LegacyMaterial,
+    LightData, LightImage, LindenAmount, LindenBalance, LoadUrlRequest, LoggedChatType,
+    LoginAccount, LoginParams, LoginRequest, LoginResponse, LureId, MEDIA_PERM_ALL,
+    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
+    MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MessageCursor,
+    MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry,
+    MuteFlags, MuteType, NegativeBalanceError, NeighborInfo, NewInventoryItem, Object,
+    ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks,
+    ObjectProperties, ObjectTransform, OpenSimExtras, OwnerKey, ParcelAccessEntry,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
+    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
+    PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape,
+    PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId,
+    ReflectionProbe, ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings,
+    RegionCoordinates, RegionFlags, RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits,
+    RegionLocalObjectId, RegionLocalParcelId, RegionName, Reliability, RenderMaterialEntry,
+    RenderMaterialRef, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
+    ScriptControlAction, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTeleportRequest, SculptData, SculptOrMeshKey, SequenceNumber, SessionMessage,
+    SimulatorFeatures, SoundFlags, SoundPreload, StartLocation, StartLocationParseError,
+    TerrainLayerType, TerrainPatch, Texture, TextureAnimation, TextureEntry, TextureFace,
+    TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId,
+    TransferId, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest,
+    Wearable, WearableType, XferId, avatar_texture, decode_particle_system, decode_texture_anim,
+    decode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
+    particle_pattern, pcode, sim_access, texture_anim_mode,
 };
 
 mod appearance;
@@ -98,6 +98,7 @@ mod experiences;
 mod fetch;
 mod http;
 mod inventory;
+mod inventory_cache;
 mod materials;
 mod media;
 mod upload;
@@ -117,6 +118,7 @@ use crate::http::{
     post_chat_session_request, put_caps_llsd,
 };
 use crate::inventory::{fetch_group_members, fetch_inventory};
+use crate::inventory_cache::InventoryCache;
 use crate::materials::{fetch_render_materials, post_modify_material_params};
 use crate::media::{fetch_object_media, post_object_media};
 use crate::upload::{run_caps_upload, run_report_screenshot_upload};
@@ -180,6 +182,12 @@ pub struct Client {
     /// all-`None`, disabling every disk feature; set via
     /// [`Client::set_directories`] before [`Client::run`].
     directories: ClientDirectories,
+    /// The inventory disk-cache configuration. Off by default; once enabled (and
+    /// paired with [`ClientDirectories::agent_cache_dir`]), [`Client::run`] loads
+    /// the cache at login, reconciles it against the skeleton, and persists it on
+    /// logout and the dirty/idle tick. Set via
+    /// [`Client::set_inventory_cache_config`] before [`Client::run`].
+    inventory_cache_config: InventoryCacheConfig,
 }
 
 impl Client {
@@ -224,6 +232,7 @@ impl Client {
             caps_reporter: None,
             chat_log_config: ChatLogConfig::default(),
             directories: ClientDirectories::default(),
+            inventory_cache_config: InventoryCacheConfig::default(),
         })
     }
 
@@ -299,6 +308,17 @@ impl Client {
         self.directories = directories;
     }
 
+    /// Sets the inventory disk-cache configuration. Off by default; once enabled
+    /// (and paired with a [`ClientDirectories::agent_cache_dir`] via
+    /// [`Client::set_directories`]), [`Client::run`] reads the per-account
+    /// `<agent-uuid>.inv.llsd.gz` cache before the login skeleton, reconciles it
+    /// against the skeleton so version-matching folders skip the background
+    /// refetch, and writes the cache back on logout and on a dirty/idle tick.
+    /// Call before [`Client::run`].
+    pub const fn set_inventory_cache_config(&mut self, config: InventoryCacheConfig) {
+        self.inventory_cache_config = config;
+    }
+
     /// Enables or disables the automatic background inventory crawl (off by
     /// default). While enabled, [`Client::run`] breadth-first fetches the agent's
     /// inventory tree in the background (a bounded number of folder-contents
@@ -351,6 +371,16 @@ impl Client {
             self.session.agent_id(),
         );
 
+        // The optional inventory disk cache. Like the chat log it is constructed
+        // even when disabled (its methods short-circuit), so the load / save taps
+        // stay unconditional. It owns the gzip envelope and the crash-safe write.
+        let mut inventory_cache = InventoryCache::new(
+            self.inventory_cache_config,
+            self.directories.agent_cache_dir.clone(),
+            self.session.agent_id(),
+            Instant::now(),
+        );
+
         loop {
             while let Some(transmit) = self.session.poll_transmit() {
                 self.socket
@@ -386,6 +416,19 @@ impl Client {
                 if chat_log.any_enabled() {
                     chat_log.observe_event(&self.session, &event);
                 }
+                // On the login inventory/library skeleton, load the disk cache (if
+                // any) and reconcile it against the skeleton, so version-matching
+                // folders skip the background refetch. A no-op when the cache is
+                // disabled.
+                match &event {
+                    Event::InventorySkeleton(folders) => {
+                        inventory_cache.load_agent(&mut self.session, folders);
+                    }
+                    Event::LibraryInventory(folders) => {
+                        inventory_cache.load_library(&mut self.session, folders);
+                    }
+                    _other => {}
+                }
                 events.send(event).await.ok();
                 if region_changed {
                     abort_task(&mut caps_task);
@@ -397,14 +440,22 @@ impl Client {
                     caps_task = spawn_event_queue(&caps, &http, &caps_tx);
                 }
                 if terminal {
+                    // Persist the inventory cache before exit (Firestorm's
+                    // save-at-cleanup); a no-op when the cache is disabled.
+                    inventory_cache.save(&mut self.session);
                     abort_task(&mut caps_task);
                     return Ok(());
                 }
             }
             if self.session.is_closed() {
+                inventory_cache.save(&mut self.session);
                 abort_task(&mut caps_task);
                 return Ok(());
             }
+            // The optional dirty/idle inventory-cache save (crash-safety beyond
+            // Firestorm's shutdown-only save); self-gating on the dirty flag and
+            // the save interval, so a clean or disabled cache costs nothing.
+            inventory_cache.maybe_save(&mut self.session, Instant::now());
 
             // Background inventory crawl: when enabled, sweep the next bounded
             // batch of unfetched folders and POST a `FetchInventoryDescendents2`
