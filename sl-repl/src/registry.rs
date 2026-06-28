@@ -51,23 +51,23 @@ use sl_proto::{
     Camera, ChatType, ClassifiedCategory, ClassifiedUpdate, Command, ControlFlags,
     CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility,
     EjectAction, EstateAccessDelta, ExperiencePermission, ExperienceUpdate, ExtendedMesh,
-    FlexibleData, FreezeAction, FriendRights, GestureActivation, GodRegionUpdate, GridCoordinates,
-    GroupNoticeAttachment, GroupNoticeKey, GroupRoleChange, GroupRoleEdit, GroupRoleMemberChange,
-    InterestsUpdate, InventoryItem, InventoryOffer, InventoryType, LandBrushAction, LandBrushSize,
-    LandEdit, LandSearchType, LandStatReportType, LightData, LightImage, LindenAmount, LookAtType,
-    MapItemType, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType,
-    MovementMode, MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez,
-    ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPermMasks, ObjectTransform,
-    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
-    ParcelReturnType, ParcelUpdate, PermissionField, Permissions, Permissions5, PickKey,
-    PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
-    ReflectionProbe, ReflectionProbeFlags, RegionHandle, RegionInfoUpdate, RegionLocalObjectId,
-    RegionLocalParcelId, RegionName, RenderMaterialRef, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
-    ScriptPermissions, SculptData, SculptOrMeshKey, SimWideDeleteFlags, StartLocationSlot,
-    TaskInventoryKey, TerraformArea, TextureEntry, TextureFace, Throttle, UpdateGroupInfoParams,
-    Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceProvisionRequest,
-    Wearable, WearableType,
+    FlexibleData, FolderType, FreezeAction, FriendRights, GestureActivation, GodRegionUpdate,
+    GridCoordinates, GroupNoticeAttachment, GroupNoticeKey, GroupRoleChange, GroupRoleEdit,
+    GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType,
+    LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatReportType, LightData,
+    LightImage, LindenAmount, LookAtType, MapItemType, Material, MaterialOverrideUpdate, Maturity,
+    MediaEntry, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem,
+    NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
+    ObjectPermMasks, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+    ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, Permissions,
+    Permissions5, PickKey, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams,
+    ProfileUpdate, ProposalVoteId, ReflectionProbe, ReflectionProbeFlags, RegionHandle,
+    RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId, RegionName, RenderMaterialRef,
+    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
+    ScopedObjectId, ScopedParcelId, ScriptPermissions, SculptData, SculptOrMeshKey,
+    SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey, TerraformArea, TextureEntry,
+    TextureFace, Throttle, UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -660,6 +660,48 @@ fn parse_inventory_type(field: &str, value: &str) -> Result<InventoryType, ReplE
     })
 }
 
+/// Parse a [`FolderType`] from its name or wire code (`-1` / `none` ⇒
+/// [`FolderType::None`]).
+fn parse_folder_type(field: &str, value: &str) -> Result<FolderType, ReplError> {
+    Ok(match norm(value).as_str() {
+        "none" => FolderType::None,
+        "texture" => FolderType::Texture,
+        "sound" => FolderType::Sound,
+        "callingcard" => FolderType::CallingCard,
+        "landmark" => FolderType::Landmark,
+        "clothing" => FolderType::Clothing,
+        "object" => FolderType::Object,
+        "notecard" => FolderType::Notecard,
+        "rootinventory" | "root" => FolderType::RootInventory,
+        "lsltext" | "script" => FolderType::LslText,
+        "bodypart" => FolderType::Bodypart,
+        "trash" => FolderType::Trash,
+        "snapshot" => FolderType::SnapshotCategory,
+        "lostandfound" => FolderType::LostAndFound,
+        "animation" => FolderType::Animation,
+        "gesture" => FolderType::Gesture,
+        "favorite" => FolderType::Favorite,
+        "currentoutfit" => FolderType::CurrentOutfit,
+        "outfit" => FolderType::Outfit,
+        "myoutfits" => FolderType::MyOutfits,
+        "mesh" => FolderType::Mesh,
+        "inbox" => FolderType::Inbox,
+        "outbox" => FolderType::Outbox,
+        "basicroot" => FolderType::BasicRoot,
+        "marketplacelistings" => FolderType::MarketplaceListings,
+        "marketplacestock" => FolderType::MarketplaceStock,
+        "marketplaceversion" => FolderType::MarketplaceVersion,
+        "settings" => FolderType::Settings,
+        "material" => FolderType::Material,
+        _ => FolderType::from_code(
+            value
+                .parse::<i8>()
+                .ok()
+                .ok_or_else(|| invalid(field, value, "folder type"))?,
+        ),
+    })
+}
+
 /// Parse a [`WearableType`] from its name or wire code.
 fn parse_wearable_type(field: &str, value: &str) -> Result<WearableType, ReplError> {
     Ok(match norm(value).as_str() {
@@ -1192,9 +1234,30 @@ fn build_new_inventory_item(
         folder_id: InventoryFolderKey::from(args.uuid_or_nil(ctx, "folder_id", 0)?),
         transaction_id: args.uuid_or_nil(ctx, "transaction_id", 1)?,
         next_owner_mask: args.parse_or(ctx, "next_owner_mask", 2, "u32", 0)?,
-        asset_type: args.parse_or(ctx, "asset_type", 3, "i8", 0)?,
-        inv_type: args.parse_or(ctx, "inv_type", 4, "i8", 0)?,
-        wearable_type: args.parse_or(ctx, "wearable_type", 5, "u8", 0)?,
+        asset_type: enum_arg_or(
+            args,
+            ctx,
+            "asset_type",
+            3,
+            parse_asset_type,
+            AssetType::Texture,
+        )?,
+        inv_type: enum_arg_or(
+            args,
+            ctx,
+            "inv_type",
+            4,
+            parse_inventory_type,
+            InventoryType::Texture,
+        )?,
+        wearable_type: enum_arg_or(
+            args,
+            ctx,
+            "wearable_type",
+            5,
+            parse_wearable_type,
+            WearableType::Shape,
+        )?,
         name: args.str_or(ctx, "name", 6, "")?,
         description: args.str_or(ctx, "description", 7, "")?,
     })
@@ -1217,8 +1280,22 @@ fn build_new_inventory_link(
     Ok(NewInventoryLink {
         folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 0)?),
         linked_id,
-        link_type: args.parse_or(ctx, "link_type", 2, "i8", 0)?,
-        inv_type: args.parse_or(ctx, "inv_type", 3, "i8", 0)?,
+        link_type: enum_arg_or(
+            args,
+            ctx,
+            "link_type",
+            2,
+            parse_asset_type,
+            AssetType::Other(24),
+        )?,
+        inv_type: enum_arg_or(
+            args,
+            ctx,
+            "inv_type",
+            3,
+            parse_inventory_type,
+            InventoryType::Texture,
+        )?,
         name: args.str_or(ctx, "name", 4, "")?,
         description: args.str_or(ctx, "description", 6, "")?,
     })
@@ -1954,7 +2031,14 @@ fn all_specs() -> Vec<CommandSpec> {
                 Ok(Command::CreateInventoryFolder {
                     folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 0)?),
                     parent_id: InventoryFolderKey::from(args.req_uuid(ctx, "parent_id", 1)?),
-                    folder_type: args.parse_or(ctx, "folder_type", 2, "i8", -1)?,
+                    folder_type: enum_arg_or(
+                        args,
+                        ctx,
+                        "folder_type",
+                        2,
+                        parse_folder_type,
+                        FolderType::None,
+                    )?,
                     name: args.req_str(ctx, "name", 3)?,
                 })
             },
@@ -1966,7 +2050,14 @@ fn all_specs() -> Vec<CommandSpec> {
                 Ok(Command::UpdateInventoryFolder {
                     folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 0)?),
                     parent_id: InventoryFolderKey::from(args.req_uuid(ctx, "parent_id", 1)?),
-                    folder_type: args.parse_or(ctx, "folder_type", 2, "i8", -1)?,
+                    folder_type: enum_arg_or(
+                        args,
+                        ctx,
+                        "folder_type",
+                        2,
+                        parse_folder_type,
+                        FolderType::None,
+                    )?,
                     name: args.req_str(ctx, "name", 3)?,
                 })
             },
@@ -5329,13 +5420,13 @@ mod tests {
     use sl_proto::{
         AbuseReportType, AgentKey, AgentPreferences, AssetKey, AssetType, ChatChannel, ChatType,
         CircuitId, Command, ControlFlags, DirFindFlags, DirectoryVisibility, EjectAction, EventId,
-        FreezeAction, FriendRights, GridCoordinates, GroupKey, InventoryFolderKey,
-        InventoryItemOrFolderKey, InventoryKey, LandBrushAction, LandBrushSize, LandEdit,
-        LandStatReportType, LindenAmount, MapItemType, MovementMode, ObjectBuyItem, ObjectKey,
-        OwnerKey, ReflectionProbeFlags, RegionHandle, RegionLocalObjectId, RegionLocalParcelId,
-        RenderMaterialRef, SaleType, ScopedObjectId, ScopedParcelId, ScriptPermissions,
-        SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey, TerraformArea, TextureKey,
-        TransactionId, Uuid,
+        FolderType, FreezeAction, FriendRights, GridCoordinates, GroupKey, InventoryFolderKey,
+        InventoryItemOrFolderKey, InventoryKey, InventoryType, LandBrushAction, LandBrushSize,
+        LandEdit, LandStatReportType, LindenAmount, MapItemType, MovementMode, ObjectBuyItem,
+        ObjectKey, OwnerKey, ReflectionProbeFlags, RegionHandle, RegionLocalObjectId,
+        RegionLocalParcelId, RenderMaterialRef, SaleType, ScopedObjectId, ScopedParcelId,
+        ScriptPermissions, SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey, TerraformArea,
+        TextureKey, TransactionId, Uuid,
     };
 
     use super::Registry;
@@ -5476,7 +5567,7 @@ mod tests {
         assert!(matches!(
             build(&format!("create_inventory_folder {ONE} {TWO} -1 Stuff")),
             Ok(Command::CreateInventoryFolder {
-                folder_type: -1,
+                folder_type: FolderType::None,
                 ..
             })
         ));
@@ -5757,8 +5848,8 @@ mod tests {
             Ok(Command::LinkInventoryItem(link))
                 if link.folder_id.uuid() == uuid(ONE)
                     && matches!(link.linked_id, InventoryItemOrFolderKey::Item(item) if item.uuid() == uuid(TWO))
-                    && link.link_type == 24
-                    && link.inv_type == 10
+                    && link.link_type == AssetType::Other(24)
+                    && link.inv_type == InventoryType::Script
                     && link.name == "Link"
         ));
     }
