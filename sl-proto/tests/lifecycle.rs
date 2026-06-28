@@ -8940,6 +8940,140 @@ mod test {
         Ok(())
     }
 
+    /// B11: the cache-merge relogin path. A fully-`Loaded` agent tree round-trips
+    /// through the on-disk cache bytes; reconciling the restored tree against the
+    /// login skeleton on relogin refetches *only* the folders whose version moved
+    /// (or that the skeleton dropped). A version-matching folder keeps its cached
+    /// contents and is absent from the refetch queue, so its descendents are never
+    /// re-requested — the whole point of the disk cache.
+    #[test]
+    fn relogin_merge_skips_version_matching_folders() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = new_session()?;
+        let unchanged = 0xE0;
+        let bumped = 0xE1;
+        let unchanged_key = InventoryFolderKey::from(uuid::Uuid::from_u128(unchanged));
+        let bumped_key = InventoryFolderKey::from(uuid::Uuid::from_u128(bumped));
+
+        // Log in with a skeleton listing the two folders as top-level roots
+        // (parent nil) at versions 5 and 7, so the cached tree carries no phantom
+        // parent to confuse the merge. They seed `Unknown` (metadata only).
+        let nil = InventoryFolderKey::from(uuid::Uuid::nil());
+        let login = LoginResponse::Success(Box::new(LoginSuccess {
+            agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
+            session_id: uuid::Uuid::from_u128(2),
+            secure_session_id: uuid::Uuid::from_u128(3),
+            circuit_code: CircuitCode(0x0011_2233),
+            sim_ip: Ipv4Addr::new(127, 0, 0, 1),
+            sim_port: 9000,
+            seed_capability: "http://127.0.0.1:9000/seed".parse()?,
+            message: None,
+            mfa_hash: None,
+            inventory_root: Some(unchanged_key),
+            inventory_skeleton: vec![
+                SkeletonFolder {
+                    folder_id: unchanged_key,
+                    parent_id: nil,
+                    name: "Kept".to_owned(),
+                    type_default: 8,
+                    version: 5,
+                },
+                SkeletonFolder {
+                    folder_id: bumped_key,
+                    parent_id: nil,
+                    name: "Bumped".to_owned(),
+                    type_default: 8,
+                    version: 7,
+                },
+            ],
+            buddy_list: Vec::new(),
+            home: None,
+            look_at: None,
+            region_x: None,
+            region_y: None,
+            agent_access: None,
+            agent_access_max: None,
+            max_agent_groups: None,
+            library_root: None,
+            library_owner: None,
+            library_skeleton: Vec::new(),
+        }));
+        session.handle_login_response(login, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Fold a descendents reply for each, marking it `Loaded` at its skeleton
+        // version with one filed item — a fully-fetched cacheable tree.
+        feed_descendents(
+            &mut session,
+            now,
+            unchanged,
+            5,
+            Vec::new(),
+            vec![desc_item(0xEE0, unchanged, 7, 7, 0, 0, "kept note")],
+            10,
+        )?;
+        feed_descendents(
+            &mut session,
+            now,
+            bumped,
+            7,
+            Vec::new(),
+            vec![desc_item(0xEE1, bumped, 7, 7, 0, 0, "stale note")],
+            11,
+        )?;
+
+        // Round-trip the agent tree through the cache bytes into a fresh session,
+        // loaded *before* the skeleton (the relogin order). Each `Loaded` folder
+        // comes back `Loaded` at its stored version, awaiting the skeleton.
+        let bytes = session.inventory_cache_bytes(InventoryOwner::Agent)?;
+        let mut relogin = new_session()?;
+        assert!(relogin.load_inventory_cache(InventoryOwner::Agent, &bytes)?);
+        assert_eq!(
+            relogin.folder_fetch_state(unchanged_key),
+            Some(FolderState::Loaded { version: 5 })
+        );
+
+        // The login skeleton: `unchanged` is still version 5; `bumped` moved to 8.
+        let skeleton = vec![
+            InventoryFolder {
+                folder_id: unchanged_key,
+                parent_id: None,
+                name: "Kept".to_owned(),
+                folder_type: -1,
+                version: 5,
+            },
+            InventoryFolder {
+                folder_id: bumped_key,
+                parent_id: None,
+                name: "Bumped".to_owned(),
+                folder_type: -1,
+                version: 8,
+            },
+        ];
+        let needing = relogin.merge_inventory_skeleton(InventoryOwner::Agent, &skeleton);
+
+        // Only the version-bumped folder is queued for a refetch; the unchanged
+        // one is skipped and keeps its cached `Loaded` contents.
+        assert_eq!(needing, vec![bumped_key]);
+        assert_eq!(
+            relogin.folder_fetch_state(unchanged_key),
+            Some(FolderState::Loaded { version: 5 })
+        );
+        let (_, kept_items) = split_children(&relogin, unchanged_key);
+        assert_eq!(kept_items.len(), 1, "the cached item survives the merge");
+        assert_eq!(kept_items.first().ok_or("kept item")?.name, "kept note");
+        // The version-bumped folder is invalidated: its stale cached contents are
+        // dropped and it is back to `Unknown`, to be refetched from the queue.
+        assert_eq!(
+            relogin.folder_fetch_state(bumped_key),
+            Some(FolderState::Unknown)
+        );
+        let (_, stale_items) = split_children(&relogin, bumped_key);
+        assert!(stale_items.is_empty(), "stale cached contents are dropped");
+        Ok(())
+    }
+
     /// B6: the background-fetch scheduler is gated off by default (a consumer
     /// that ignores inventory issues no fetches), the explicit on-demand pull
     /// still schedules its one folder while the gate is off, and once enabled the
@@ -18506,6 +18640,141 @@ mod test {
         drain_events(&mut session);
 
         assert_chat_and_presence_intact(&session)
+    }
+
+    /// The folder the inventory-survival fixture loads with children.
+    const GUARD_INV_FOLDER: u128 = 0x0001_0000;
+    /// A sub-folder indexed under the loaded folder.
+    const GUARD_INV_SUBFOLDER: u128 = 0x0001_0001;
+    /// An item indexed under the loaded folder.
+    const GUARD_INV_ITEM: u128 = 0x0001_00D1;
+    /// The authoritative version the fixture's descendents reply carries.
+    const GUARD_INV_VERSION: i32 = 9;
+
+    /// Seeds a `Loaded` inventory folder (one sub-folder and one item indexed
+    /// under it) on a fresh active session — the inventory mirror of
+    /// `seed_chat_and_presence` for the grid-level held model.
+    fn seed_loaded_inventory(now: Instant) -> Result<Session, TestError> {
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        feed_descendents(
+            &mut session,
+            now,
+            GUARD_INV_FOLDER,
+            GUARD_INV_VERSION,
+            vec![desc_folder(
+                GUARD_INV_SUBFOLDER,
+                GUARD_INV_FOLDER,
+                6,
+                "Objects",
+            )],
+            vec![desc_item(
+                GUARD_INV_ITEM,
+                GUARD_INV_FOLDER,
+                7,
+                7,
+                0,
+                0,
+                "a notecard",
+            )],
+            9,
+        )?;
+        Ok(session)
+    }
+
+    /// Asserts the full `seed_loaded_inventory` seed is present and unchanged —
+    /// after a region transition (which must leave the grid-level inventory model
+    /// intact, like the chat/presence stores).
+    fn assert_inventory_intact(session: &Session) -> Result<(), TestError> {
+        let folder = InventoryFolderKey::from(uuid::Uuid::from_u128(GUARD_INV_FOLDER));
+        let sub = InventoryFolderKey::from(uuid::Uuid::from_u128(GUARD_INV_SUBFOLDER));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(GUARD_INV_ITEM));
+        // The loaded folder keeps its authoritative version (it is not refetched).
+        assert_eq!(
+            session.folder_fetch_state(folder),
+            Some(FolderState::Loaded {
+                version: GUARD_INV_VERSION
+            }),
+            "the loaded folder survives"
+        );
+        // Its parent→children index survives: the sub-folder and the item.
+        let (child_folders, child_items) = split_children(session, folder);
+        assert_eq!(child_folders.len(), 1, "the sub-folder survives");
+        assert_eq!(child_folders.first().ok_or("sub-folder")?.folder_id, sub);
+        assert_eq!(child_items.len(), 1, "the item survives");
+        assert_eq!(child_items.first().ok_or("item")?.item_id, item);
+        // The child metadata (carried by the descendents reply) remains directly
+        // addressable — the sub-folder by name and the item by id.
+        assert_eq!(
+            session
+                .inventory_folder(sub)
+                .ok_or("sub-folder metadata")?
+                .name,
+            "Objects"
+        );
+        assert!(
+            session.inventory_item(item).is_some(),
+            "the item metadata survives"
+        );
+        Ok(())
+    }
+
+    /// A real (cross-region) teleport via `TeleportFinish` (`begin_handover`)
+    /// leaves the grid-level inventory model untouched — the loaded tree, its
+    /// `Loaded` version, and the parent→children index all survive (INVENTORY
+    /// A10/B3, the inventory mirror of `teleport_preserves_chat_and_presence`).
+    #[test]
+    fn teleport_preserves_inventory() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = seed_loaded_inventory(now)?;
+
+        let handle = 0x0003_E900_0003_E800;
+        session.teleport_to(
+            RegionHandle(handle),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let finish = AnyMessage::TeleportFinish(TeleportFinish {
+            info: TeleportFinishInfoBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                location_id: 4,
+                sim_ip: [127, 0, 0, 1],
+                sim_port: 9100u16.swap_bytes(),
+                region_handle: handle,
+                seed_capability: b"http://x/invTP\0".to_vec(),
+                sim_access: sl_wire::sim_access::MATURE,
+                teleport_flags: TeleportFlags::VIA_LURE,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&finish, 20, true)?, now)?;
+
+        assert_inventory_intact(&session)
+    }
+
+    /// An intra-region teleport (`TeleportLocal`) likewise leaves the grid-level
+    /// inventory model untouched.
+    #[test]
+    fn local_teleport_preserves_inventory() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = seed_loaded_inventory(now)?;
+
+        session.teleport_to(
+            RegionHandle(0x0003_E800_0003_E800),
+            region_coords(64.0, 64.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let local = server_datagram(MessageId::Low(64), &[0u8; 48], 20, true);
+        session.handle_datagram(sim_addr(), &local, now)?;
+        drain_events(&mut session);
+
+        assert_inventory_intact(&session)
     }
 
     /// Retiring a child circuit (`DisableSimulator`) touches only that neighbour's
