@@ -37,11 +37,11 @@ use super::{
     CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED,
     CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, ChatLifecycleView,
     ChatSession, ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, Circuit,
-    DEFAULT_DRAW_DISTANCE, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
-    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_INLINE_ASSET,
-    MessageCursor, PendingInvite, SIT_TIMEOUT, ScriptGrant, ScriptHolder, Session, SessionMessage,
-    SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase,
-    TextureDownload, VoiceChannelInfo, deadline, merge_deadline,
+    DEFAULT_DRAW_DISTANCE, FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
+    Inventory, InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
+    MAX_INLINE_ASSET, MessageCursor, PendingInvite, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
+    Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT,
+    TakenControls, TeleportPhase, TextureDownload, VoiceChannelInfo, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -192,7 +192,6 @@ impl Session {
             online: BTreeSet::new(),
             chat_sessions: BTreeMap::new(),
             seed_capability: None,
-            inventory_root: None,
             login_account: None,
             mute_xfers: BTreeMap::new(),
             next_xfer_id: XferId(1),
@@ -208,9 +207,7 @@ impl Session {
             regions: BTreeMap::new(),
             time_dilation: BTreeMap::new(),
             own_avatar: BTreeMap::new(),
-            inventory_folders: BTreeMap::new(),
-            inventory_items: BTreeMap::new(),
-            next_inventory_callback: InventoryCallbackId(1),
+            inventory: Inventory::new(),
             events: VecDeque::new(),
             diagnostics_enabled: false,
             diagnostics: VecDeque::new(),
@@ -402,8 +399,20 @@ impl Session {
             }
             CAP_FETCH_INVENTORY => {
                 for event in inventory_descendents_from_llsd(body) {
-                    if let Event::InventoryDescendents { folders, items, .. } = &event {
+                    if let Event::InventoryDescendents {
+                        folder_id,
+                        version,
+                        folders,
+                        items,
+                        ..
+                    } = &event
+                    {
                         self.cache_inventory(folders, items);
+                        self.inventory.mark_folder_loaded(
+                            *folder_id,
+                            *version,
+                            InventoryOwner::Agent,
+                        );
                     }
                     self.events.push_back(event);
                 }
@@ -947,11 +956,12 @@ impl Session {
         // drop their permission grants (attachments cross with the avatar).
         self.drop_inworld_grants();
         // Deliberately NOT reset here (nor at any region boundary): `chat_sessions`
-        // / `friends` / `online` are grid-level state routed by the grid's IM /
-        // group / presence services, not the region simulator, so they survive
-        // every teleport and crossing (the inverse of the region-local `sit` /
-        // script grants above). They are seeded empty only in `Session::new` and
-        // die solely when the `Session` is dropped — see CHAT_ROADMAP B10/A9.
+        // / `friends` / `online` / `inventory` are grid-level state routed by the
+        // grid's IM / group / presence / inventory services, not the region
+        // simulator, so they survive every teleport and crossing (the inverse of
+        // the region-local `sit` / script grants above). They are seeded empty
+        // only in `Session::new` and die solely when the `Session` is dropped —
+        // see CHAT_ROADMAP B10/A9 and INVENTORY_ROADMAP A10/B3.
         self.teleport = TeleportPhase::Handover { region_handle };
         self.state = SessionState::AwaitingHandshake;
         Ok(())
@@ -1184,7 +1194,8 @@ impl Session {
                         .insert(circuit_id, RegionHandle::from_global(region_x, region_y));
                 }
                 self.seed_capability = Some(success.seed_capability.clone());
-                self.inventory_root = success.inventory_root;
+                self.inventory.set_agent_root(success.inventory_root);
+                self.inventory.set_library_root(success.library_root);
                 self.secure_session_id = success.secure_session_id;
                 self.state = SessionState::AwaitingHandshake;
                 self.events.push_back(Event::CircuitEstablished {
@@ -1218,10 +1229,12 @@ impl Session {
                         .iter()
                         .map(skeleton_folder)
                         .collect();
-                    // Seed the live inventory cache with the skeleton.
+                    // Seed the held inventory model with the skeleton: each
+                    // folder lands `Unknown` (contents unfetched) carrying its
+                    // authoritative skeleton version, linked into the index.
                     for folder in &folders {
-                        self.inventory_folders
-                            .insert(folder.folder_id.uuid(), folder.clone());
+                        self.inventory
+                            .cache_folder(folder.clone(), InventoryOwner::Agent);
                     }
                     self.events.push_back(Event::InventorySkeleton(folders));
                 }
@@ -2411,9 +2424,15 @@ impl Session {
                     .iter()
                     .map(inventory_item)
                     .collect::<Result<_, _>>()?;
+                let folder_id = InventoryFolderKey::from(reply.agent_data.folder_id);
                 self.cache_inventory(&folders, &items);
+                self.inventory.mark_folder_loaded(
+                    folder_id,
+                    reply.agent_data.version,
+                    InventoryOwner::Agent,
+                );
                 self.events.push_back(Event::InventoryDescendents {
-                    folder_id: InventoryFolderKey::from(reply.agent_data.folder_id),
+                    folder_id,
                     version: reply.agent_data.version,
                     descendents: reply.agent_data.descendents,
                     folders,
@@ -7810,7 +7829,16 @@ impl Session {
     /// point for [`Session::request_folder_contents`].
     #[must_use]
     pub const fn inventory_root(&self) -> Option<InventoryFolderKey> {
-        self.inventory_root
+        self.inventory.agent_root()
+    }
+
+    /// The shared Library root folder id, from the login response, or `None` if
+    /// the grid did not provide it. The read-only Library tree hangs off this
+    /// root (held under [`InventoryOwner::Library`]); see also
+    /// [`Session::login_account`].
+    #[must_use]
+    pub const fn library_root(&self) -> Option<InventoryFolderKey> {
+        self.inventory.library_root()
     }
 
     /// Account-level facts from the login response (home, start look-at, maturity
@@ -7846,104 +7874,88 @@ impl Session {
     /// folder-contents fetch, a simulator push, or the agent's own mutations).
     #[must_use]
     pub fn inventory_folder(&self, folder_id: InventoryFolderKey) -> Option<&InventoryFolder> {
-        self.inventory_folders.get(&folder_id.uuid())
+        self.inventory.folder(folder_id)
     }
 
     /// A cached inventory item by id, if known (from a folder-contents fetch, a
     /// simulator push, or the agent's own mutations).
     #[must_use]
     pub fn inventory_item(&self, item_id: InventoryKey) -> Option<&InventoryItem> {
-        self.inventory_items.get(&item_id.uuid())
+        self.inventory.item(item_id)
     }
 
-    /// All cached inventory folders, keyed by folder id.
+    /// All cached inventory folders, keyed by typed folder key.
     #[must_use]
-    pub const fn inventory_folders(&self) -> &BTreeMap<Uuid, InventoryFolder> {
-        &self.inventory_folders
+    pub const fn inventory_folders(&self) -> &BTreeMap<InventoryFolderKey, InventoryFolder> {
+        self.inventory.folders()
     }
 
-    /// All cached inventory items, keyed by item id.
+    /// All cached inventory items, keyed by typed item key.
     #[must_use]
-    pub const fn inventory_items(&self) -> &BTreeMap<Uuid, InventoryItem> {
-        &self.inventory_items
+    pub const fn inventory_items(&self) -> &BTreeMap<InventoryKey, InventoryItem> {
+        self.inventory.items()
     }
 
     /// The cached immediate children of `folder_id`: its sub-folders and the
-    /// items directly inside it. Only as complete as the cache (fetch the folder
-    /// with [`Session::request_folder_contents`], or the modern AIS3 CAPS path,
-    /// to populate it).
+    /// items directly inside it, resolved through the parent→children index.
+    /// Only as complete as the cache (fetch the folder with
+    /// [`Session::request_folder_contents`], or the modern AIS3 CAPS path, to
+    /// populate it).
     #[must_use]
     pub fn inventory_children(
         &self,
         folder_id: InventoryFolderKey,
     ) -> (Vec<&InventoryFolder>, Vec<&InventoryItem>) {
-        let folder_id = folder_id.uuid();
-        let folders = self
-            .inventory_folders
-            .values()
-            .filter(|folder| folder.parent_id.is_some_and(|p| p.uuid() == folder_id))
-            .collect();
-        let items = self
-            .inventory_items
-            .values()
-            .filter(|item| item.folder_id.uuid() == folder_id)
-            .collect();
-        (folders, items)
+        self.inventory.children(folder_id)
     }
 
-    /// Inserts/updates a folder in the cache. A version of `0` (as carried by a
-    /// descendents reply's sub-folders, which omit it) does not clobber a known
-    /// version from the login skeleton.
-    fn cache_inventory_folder(&mut self, mut folder: InventoryFolder) {
-        if let (0, Some(existing)) = (
-            folder.version,
-            self.inventory_folders.get(&folder.folder_id.uuid()),
-        ) {
-            folder.version = existing.version;
-        }
-        self.inventory_folders
-            .insert(folder.folder_id.uuid(), folder);
+    /// The contents [`FolderState`] of `folder_id` (`Unknown` / `Fetching` /
+    /// `Loaded { version }`), or `None` if the folder is not in the model. A
+    /// skeleton folder is `Unknown` until its contents are fetched in their own
+    /// right; a descendents reply for the folder flips it to `Loaded`.
+    #[must_use]
+    pub fn folder_fetch_state(&self, folder_id: InventoryFolderKey) -> Option<FolderState> {
+        self.inventory.folder_state(folder_id)
     }
 
-    /// Merges a batch of folders and items into the live cache (from a
+    /// Which tree — the agent's own inventory ([`InventoryOwner::Agent`]) or the
+    /// read-only shared Library ([`InventoryOwner::Library`]) — the known folder
+    /// `folder_id` belongs to, or `None` if it is not in the model.
+    #[must_use]
+    pub fn inventory_owner(&self, folder_id: InventoryFolderKey) -> Option<InventoryOwner> {
+        self.inventory.folder_owner(folder_id)
+    }
+
+    /// Inserts/updates a folder in the held model (agent tree), maintaining the
+    /// index and fetch state. A version of `0` (as carried by a descendents
+    /// reply's sub-folders, which omit it) does not clobber a known version from
+    /// the login skeleton.
+    fn cache_inventory_folder(&mut self, folder: InventoryFolder) {
+        self.inventory.cache_folder(folder, InventoryOwner::Agent);
+    }
+
+    /// Merges a batch of folders and items into the held model (from a
     /// descendents fetch or a simulator push).
     fn cache_inventory(&mut self, folders: &[InventoryFolder], items: &[InventoryItem]) {
         for folder in folders {
-            self.cache_inventory_folder(folder.clone());
+            self.inventory
+                .cache_folder(folder.clone(), InventoryOwner::Agent);
         }
         for item in items {
-            self.cache_inventory_item(item.clone());
+            self.inventory
+                .cache_item(item.clone(), InventoryOwner::Agent);
         }
     }
 
-    /// Inserts/updates an item in the cache.
+    /// Inserts/updates an item in the held model (agent tree), maintaining the
+    /// index.
     fn cache_inventory_item(&mut self, item: InventoryItem) {
-        self.inventory_items.insert(item.item_id.uuid(), item);
-    }
-
-    /// Recursively drops a folder's cached descendents (sub-folders and items),
-    /// used by [`Session::purge_inventory_descendents`].
-    fn purge_cached_descendents(&mut self, folder_id: Uuid) {
-        let subfolders: Vec<Uuid> = self
-            .inventory_folders
-            .values()
-            .filter(|folder| folder.parent_id.is_some_and(|p| p.uuid() == folder_id))
-            .map(|folder| folder.folder_id.uuid())
-            .collect();
-        self.inventory_items
-            .retain(|_, item| item.folder_id.uuid() != folder_id);
-        for sub in subfolders {
-            self.purge_cached_descendents(sub);
-            self.inventory_folders.remove(&sub);
-        }
+        self.inventory.cache_item(item, InventoryOwner::Agent);
     }
 
     /// Allocates the next async inventory `CallbackID` (never zero).
     fn next_inventory_callback(&mut self) -> InventoryCallbackId {
-        let id = self.next_inventory_callback;
-        self.next_inventory_callback =
-            InventoryCallbackId(self.next_inventory_callback.get().wrapping_add(1).max(1));
-        id
+        self.inventory.next_callback()
     }
 
     // ---- Inventory mutation over UDP (#30) ---------------------------------
@@ -8014,8 +8026,8 @@ impl Session {
             name: name.to_owned(),
             folder_type,
             version: self
-                .inventory_folders
-                .get(&folder_id.uuid())
+                .inventory
+                .folder(folder_id)
                 .map_or(1, |folder| folder.version),
         });
         Ok(())
@@ -8059,9 +8071,7 @@ impl Session {
             .collect();
         circuit.send_move_inventory_folders(&wire, stamp, now)?;
         for &(folder_id, parent_id) in moves {
-            if let Some(folder) = self.inventory_folders.get_mut(&folder_id.uuid()) {
-                folder.parent_id = crate::types::optional_key_from_wire(parent_id.uuid());
-            }
+            self.inventory.reparent_folder(folder_id, parent_id);
         }
         Ok(())
     }
@@ -8082,8 +8092,7 @@ impl Session {
         let wire: Vec<Uuid> = folder_ids.iter().map(InventoryFolderKey::uuid).collect();
         circuit.send_remove_inventory_folders(&wire, now)?;
         for folder_id in folder_ids {
-            self.purge_cached_descendents(folder_id.uuid());
-            self.inventory_folders.remove(&folder_id.uuid());
+            self.inventory.remove_folder(*folder_id);
         }
         Ok(())
     }
@@ -8190,12 +8199,7 @@ impl Session {
             .collect();
         circuit.send_move_inventory_items(&wire, stamp, now)?;
         for (item_id, folder_id, new_name) in moves {
-            if let Some(item) = self.inventory_items.get_mut(&item_id.uuid()) {
-                item.folder_id = *folder_id;
-                if !new_name.is_empty() {
-                    item.name.clone_from(new_name);
-                }
-            }
+            self.inventory.move_item(*item_id, *folder_id, new_name);
         }
         Ok(())
     }
@@ -8245,7 +8249,7 @@ impl Session {
         let wire: Vec<Uuid> = item_ids.iter().map(InventoryKey::uuid).collect();
         circuit.send_remove_inventory_items(&wire, now)?;
         for item_id in item_ids {
-            self.inventory_items.remove(&item_id.uuid());
+            self.inventory.remove_item(*item_id);
         }
         Ok(())
     }
@@ -8265,9 +8269,7 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_change_inventory_item_flags(item_id.uuid(), flags, now)?;
-        if let Some(item) = self.inventory_items.get_mut(&item_id.uuid()) {
-            item.flags = flags;
-        }
+        self.inventory.set_item_flags(item_id, flags);
         Ok(())
     }
 
@@ -8285,7 +8287,7 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_purge_inventory_descendents(folder_id.uuid(), now)?;
-        self.purge_cached_descendents(folder_id.uuid());
+        self.inventory.purge_descendents(folder_id);
         Ok(())
     }
 
@@ -8307,11 +8309,10 @@ impl Session {
         let item_wire: Vec<Uuid> = item_ids.iter().map(InventoryKey::uuid).collect();
         circuit.send_remove_inventory_objects(&folder_wire, &item_wire, now)?;
         for folder_id in folder_ids {
-            self.purge_cached_descendents(folder_id.uuid());
-            self.inventory_folders.remove(&folder_id.uuid());
+            self.inventory.remove_folder(*folder_id);
         }
         for item_id in item_ids {
-            self.inventory_items.remove(&item_id.uuid());
+            self.inventory.remove_item(*item_id);
         }
         Ok(())
     }

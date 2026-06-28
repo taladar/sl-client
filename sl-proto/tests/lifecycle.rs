@@ -16,31 +16,32 @@ mod test {
         ColorAlpha, ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination,
         DetachOrder, Diagnostic, DirFindFlags, Direction, DirectoryVisibility, DisconnectReason,
         DisplayName, DisplayNameUpdate, Distance, EjectAction, EnvironmentSettings,
-        EstateAccessDelta, EstateAccessKind, Event, EventId, FollowCamProperty, FreezeAction,
-        FriendKey, FriendPresence, FriendRights, GestureActivation, GlobalCoordinates, Glow,
-        GodRegionUpdate, GridCoordinates, GroupKey, GroupNoticeAttachment, GroupRequestId,
-        GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType,
-        ImDialog, ImSessionId, ImageCodec, InterestsUpdate, InventoryCallbackId,
-        InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
-        InventoryKey, InviteChannel, LandArea, LandBrushAction, LandBrushSize, LandEdit,
-        LandingType, LightData, LindenAmount, LindenBalance, LoginAccount, LoginParams, LookAtType,
-        LureId, MapItemType, Material, Maturity, MeanCollisionType, MeshKey, MoneyTransactionType,
-        MovementMode, MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem,
-        NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
-        ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
-        ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand,
-        ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, PendingInvite,
-        PermissionField, Permissions, Permissions5, PickUpdate, PointAtType, Postcard, PrimShape,
-        PrimShapeParams, ProductType, ProfileUpdate, QueryId, ReflectionProbeFlags,
-        RegionCoordinates, RegionHandle, RegionInfoUpdate, RegionName, Reliability,
-        RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
-        SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptControlAction,
-        ScriptPermissionStatus, ScriptPermissions, SculptOrMeshKey, Session, SessionMessage,
-        SetDisplayNameReply, SimStatId, SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags,
-        StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea,
-        TerrainLayerType, TextureEntry, TextureFace, TextureKey, Throttle, TransactionId,
-        TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, WaterSettings, WearableType, avatar_texture, chat_session_request_body,
+        EstateAccessDelta, EstateAccessKind, Event, EventId, FolderState, FollowCamProperty,
+        FreezeAction, FriendKey, FriendPresence, FriendRights, GestureActivation,
+        GlobalCoordinates, Glow, GodRegionUpdate, GridCoordinates, GroupKey, GroupNoticeAttachment,
+        GroupRequestId, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
+        GroupRoleUpdateType, ImDialog, ImSessionId, ImageCodec, InterestsUpdate,
+        InventoryCallbackId, InventoryFolderKey, InventoryItem, InventoryItemMove,
+        InventoryItemOrFolderKey, InventoryKey, InventoryOwner, InviteChannel, LandArea,
+        LandBrushAction, LandBrushSize, LandEdit, LandingType, LightData, LindenAmount,
+        LindenBalance, LoginAccount, LoginParams, LookAtType, LureId, MapItemType, Material,
+        Maturity, MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags,
+        MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NewInventoryLink,
+        NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
+        ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+        ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
+        ParcelReturnType, ParcelStatus, ParcelUpdate, PendingInvite, PermissionField, Permissions,
+        Permissions5, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams, ProductType,
+        ProfileUpdate, QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle,
+        RegionInfoUpdate, RegionName, Reliability, RequiredVoiceVersion, RestoreItem,
+        RezAttachment, RezObjectParams, RezScriptParams, SaleType, Scale, ScopedObjectId,
+        ScopedParcelId, ScriptControlAction, ScriptPermissionStatus, ScriptPermissions,
+        SculptOrMeshKey, Session, SessionMessage, SetDisplayNameReply, SimStatId,
+        SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags, StartLocationSlot,
+        TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea, TerrainLayerType,
+        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, TransferStatus, Transmit,
+        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        WaterSettings, WearableType, avatar_texture, chat_session_request_body,
         decode_texture_entry, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
@@ -8546,6 +8547,24 @@ mod test {
         session.handle_login_response(login, now)?;
 
         assert_eq!(session.inventory_root(), Some(root));
+        // The skeleton seeds the held model: both folders land in the agent tree
+        // `Unknown` (contents unfetched) and the parent→children index links the
+        // sub-folder under the root.
+        let objects = InventoryFolderKey::from(uuid::Uuid::from_u128(0xF1));
+        assert_eq!(session.folder_fetch_state(root), Some(FolderState::Unknown));
+        assert_eq!(
+            session.folder_fetch_state(objects),
+            Some(FolderState::Unknown)
+        );
+        assert_eq!(session.inventory_owner(root), Some(InventoryOwner::Agent));
+        let (child_folders, child_items) = session.inventory_children(root);
+        assert_eq!(child_folders.len(), 1);
+        assert_eq!(
+            child_folders.first().ok_or("child folder")?.folder_id,
+            objects
+        );
+        assert!(child_items.is_empty());
+
         let folders = drain_events(&mut session)
             .into_iter()
             .find_map(|event| match event {
@@ -8726,6 +8745,28 @@ mod test {
         assert_eq!(item.name, "a notecard");
         assert_eq!(item.asset_id, uuid::Uuid::from_u128(0xA1));
         assert_eq!(item.inv_type, 7);
+
+        // The descendents reply flips the fetched folder to `Loaded` at the
+        // reply's authoritative version and fills the index with its children;
+        // the sub-folder it names stays `Unknown` (its own contents unfetched).
+        let folder_key = InventoryFolderKey::from(folder);
+        let sub = InventoryFolderKey::from(uuid::Uuid::from_u128(0xF2));
+        assert_eq!(
+            session.folder_fetch_state(folder_key),
+            Some(FolderState::Loaded { version: 7 })
+        );
+        assert_eq!(session.folder_fetch_state(sub), Some(FolderState::Unknown));
+        let (cached_folders, cached_items) = session.inventory_children(folder_key);
+        assert_eq!(cached_folders.len(), 1);
+        assert_eq!(
+            cached_folders.first().ok_or("cached folder")?.folder_id,
+            sub
+        );
+        assert_eq!(cached_items.len(), 1);
+        assert_eq!(
+            cached_items.first().ok_or("cached item")?.item_id,
+            InventoryKey::from(uuid::Uuid::from_u128(0xD1))
+        );
         Ok(())
     }
 
