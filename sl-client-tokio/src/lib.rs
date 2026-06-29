@@ -250,7 +250,7 @@ impl Client {
 
     /// The region handle of the region the agent logged in to, available once
     /// logged in. Seeded from the login response, so a driver can issue an
-    /// intra-region [`Command::Teleport`](sl_proto::Command::Teleport) before
+    /// intra-region [`Command::Teleport`] before
     /// [`Client::run`] consumes the client.
     #[must_use]
     pub fn region_handle(&self) -> Option<RegionHandle> {
@@ -304,7 +304,7 @@ impl Client {
     /// type is enabled, [`Client::run`] writes Firestorm-compatible transcripts for
     /// nearby chat / IMs / group / conference sessions (per the enabled set) and
     /// serves the older, file-backed pages of
-    /// [`Command::QueryChatHistoryPage`](sl_proto::Command::QueryChatHistoryPage).
+    /// [`Command::QueryChatHistoryPage`].
     /// Call before [`Client::run`].
     pub fn set_chat_log_config(&mut self, config: ChatLogConfig) {
         self.chat_log_config = config;
@@ -338,8 +338,8 @@ impl Client {
     /// requests in flight), so the held model fills in without explicit
     /// per-folder requests. While disabled, no folder fetches are issued unless
     /// the driver asks for one
-    /// ([`Command::RequestFolderContents`](sl_proto::Command::RequestFolderContents)
-    /// / [`Command::FetchInventoryFolders`](sl_proto::Command::FetchInventoryFolders)),
+    /// ([`Command::RequestFolderContents`]
+    /// / [`Command::FetchInventoryFolders`]),
     /// so a consumer that ignores inventory pays nothing. Call before
     /// [`Client::run`].
     pub const fn set_background_inventory_fetch(&mut self, enabled: bool) {
