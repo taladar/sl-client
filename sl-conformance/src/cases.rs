@@ -10,6 +10,7 @@ pub mod chat_hear_other;
 pub mod chat_self_echo;
 pub mod chat_whisper_shout_range;
 pub mod draw_distance;
+pub mod im_1to1;
 pub mod inventory_fetch;
 pub mod keepalive_ping;
 pub mod login_handshake;

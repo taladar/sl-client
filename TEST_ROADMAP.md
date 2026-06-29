@@ -212,7 +212,20 @@ short and consistent.
 
 ## Phase 3 — Instant messaging & chat sessions `[both]`
 
-- [ ] `im-1to1` — send IM, peer receives; reply back. `2av`.
+- [x] `im-1to1` — send IM, peer receives; reply back. `2av`
+  (OpenSim now; Aditi deferred → Phase Z). A direct IM is an
+  `ImprovedInstantMessage` with the `IM_NOTHING_SPECIAL` dialog
+  (`ImDialog::Message`), routed by the grid's IM service rather than broadcast
+  to the region like local chat. The primary `Command::InstantMessage`s the
+  secondary (`Friend Tester`), which — a separate session — observes the
+  matching `Event::InstantMessageReceived` attributed to the primary, then
+  replies with its own IM, and the primary observes the matching reply. Each
+  direction tags its text with the sender's agent id so the predicate ignores
+  unrelated background IM; the case asserts `ImDialog::Message` plus
+  `from_agent_id`/`to_agent_id` in both directions, proving the service
+  delivers a *targeted* message (vs `chat-hear-other`'s proximity broadcast)
+  and that the reply travels back the same way. Green on OpenSim; deliver RTT
+  ≈ 14 ms, reply RTT ≈ 0.4 ms on loopback.
 - [ ] `im-typing` — IM typing start/stop. `2av`.
 - [ ] `group-session-message` — start a group session, send, leave. `2av`
   (needs Groups; OpenSim requires Groups V2).
