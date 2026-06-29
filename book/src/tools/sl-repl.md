@@ -202,8 +202,10 @@ token folded in; the persistent line editor and the log survive the restart.
 >   `$self`/`$session`/`$circuit`/`$cap:*` from identity facts the `Event`
 >   stream does not carry: the tokio `Client` exposes `session_id` /
 >   `circuit_code` / `seed_capability` accessors and a `set_caps_reporter`
->   cap-map stream; the Bevy plugin emits an additive `SlIdentity` event and an
->   `SlCapabilities` event for parity.
+>   cap-map stream; the Bevy plugin exposes them as the `SlIdentity` *resource*
+>   (read at any tick with `Res<SlIdentity>`) and still emits an
+>   `SlCapabilities` event for parity. See [Sessions](../comms/sessions.md) for
+>   the Bevy world model (`SlIdentity` plus the per-region entities).
 > - The diagnostics surface (`set_diagnostics`, `poll_diagnostic`, the
 >   `Diagnostic` enum) lives in `sl-proto`; the runtimes stream it as a
 >   `Diagnostic` mpsc channel (tokio) and an `SlDiagnostic` event (Bevy). See

@@ -108,6 +108,7 @@ mod materials;
 mod media;
 mod upload;
 mod voice;
+mod world;
 use crate::caps::{CAPS_FAILURE_PREFIX, post_neighbour_seed, start_caps};
 use crate::chat_log::ChatLog;
 use crate::experiences::{run_experience_status, run_group_experiences};
@@ -128,6 +129,11 @@ use crate::upload::{
     spawn_new_file_upload,
 };
 use crate::voice::{run_voice_cap, run_voice_signaling};
+use crate::world::{SlRegionIndex, maintain_world};
+
+pub use crate::world::{
+    SlCurrentRegion, SlIdentity, SlNeighbor, SlParcel, SlRegion, SlRegionIdentity, SlRegionLimits,
+};
 
 /// How long to wait for a single CAPS event-queue long-poll before retrying.
 const EVENT_QUEUE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -170,7 +176,6 @@ impl Plugin for SlClientPlugin {
         app.add_event::<SlEvent>()
             .add_event::<SlDiagnostic>()
             .add_event::<SlCapabilities>()
-            .add_event::<SlIdentity>()
             .add_event::<SlMfaChallenge>()
             .add_event::<SlLoginRejected>()
             .add_event::<SlCommand>()
@@ -182,8 +187,11 @@ impl Plugin for SlClientPlugin {
                 inventory_cache_config: self.inventory_cache_config,
                 background_inventory_fetch: self.background_inventory_fetch,
             })
+            .init_resource::<SlIdentity>()
+            .init_resource::<SlRegionIndex>()
             .add_systems(Startup, start_login)
-            .add_systems(Update, drive);
+            // `maintain_world` reads the events `drive` writes, so chain it after.
+            .add_systems(Update, (drive, maintain_world).chain());
     }
 }
 
@@ -205,24 +213,6 @@ pub struct SlDiagnostic(pub Diagnostic);
 /// symbolizing `$cap:Name` placeholders in a REPL or diagnostic consumer.
 #[derive(Event, Debug, Clone)]
 pub struct SlCapabilities(pub HashMap<String, String>);
-
-/// The session's login-derived identity facts, emitted as a Bevy event once the
-/// circuit comes up. These (agent id, session id, circuit code, and the seed
-/// capability URL) are not carried in the [`SlEvent`] stream, so a REPL or
-/// diagnostic consumer reads them here to seed `$self`/`$session`/`$circuit`/
-/// `$cap:Seed` placeholders. Mirrors the tokio client's `agent_id`/`session_id`/
-/// `circuit_code`/`seed_capability` accessors for runtime parity.
-#[derive(Event, Debug, Clone)]
-pub struct SlIdentity {
-    /// The logged-in avatar's agent id.
-    pub agent_id: Option<AgentKey>,
-    /// The session id assigned by the grid.
-    pub session_id: Option<Uuid>,
-    /// The circuit code assigned by the grid.
-    pub circuit_code: Option<CircuitCode>,
-    /// The seed capability URL, if the login response carried one.
-    pub seed_capability: Option<url::Url>,
-}
 
 /// Emitted when the grid requires a multi-factor one-time code. To answer it,
 /// re-add the plugin with login parameters prepared via
@@ -380,7 +370,7 @@ fn drive(
     mut events: EventWriter<SlEvent>,
     mut diagnostics: EventWriter<SlDiagnostic>,
     mut capabilities: EventWriter<SlCapabilities>,
-    mut identity: EventWriter<SlIdentity>,
+    mut identity: ResMut<SlIdentity>,
     mut mfa: EventWriter<SlMfaChallenge>,
     mut rejected: EventWriter<SlLoginRejected>,
     mut commands: EventReader<SlCommand>,
@@ -440,7 +430,7 @@ fn advance_login(
     inventory_cache_config: &InventoryCacheConfig,
     now: Instant,
     events: &mut EventWriter<SlEvent>,
-    identity: &mut EventWriter<SlIdentity>,
+    identity: &mut SlIdentity,
     mfa: &mut EventWriter<SlMfaChallenge>,
     rejected: &mut EventWriter<SlLoginRejected>,
 ) -> SlInner {
@@ -456,12 +446,13 @@ fn advance_login(
                 }
                 match bind_socket() {
                     Ok(socket) => {
-                        identity.write(SlIdentity {
+                        *identity = SlIdentity {
                             agent_id: session.agent_id(),
                             session_id: session.session_id(),
                             circuit_code: session.circuit_code(),
                             seed_capability: session.seed_capability().cloned(),
-                        });
+                            region_handle: session.region_handle(),
+                        };
                         let caps = start_caps(&session);
                         let chat_log = Box::new(ChatLog::new(
                             chat_log_config.clone(),
