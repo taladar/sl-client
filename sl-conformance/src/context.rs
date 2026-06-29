@@ -53,8 +53,15 @@ pub struct Session {
     /// Seeded from the login response; a case pairs it with a region-local
     /// position to issue an intra-region [`Command::Teleport`].
     region_handle: Option<RegionHandle>,
-    /// Inbound events from the run loop.
-    events: mpsc::Receiver<Event>,
+    /// Inbound events from the run loop, after a forwarder has drained them off
+    /// the run loop's bounded channel into this unbounded one. A case typically
+    /// waits on one session at a time, leaving the others' event channels unread;
+    /// because each runtime's run loop blocks while pushing an event onto a full
+    /// channel, an unread bounded channel would stall that session's run loop
+    /// (its queued commands never transmit, its incoming packets never decode).
+    /// The forwarder keeps every session draining regardless of which one the
+    /// case is currently reading, so no avatar can stall another.
+    events: mpsc::UnboundedReceiver<Event>,
     /// Outbound commands to the run loop.
     commands: mpsc::Sender<Command>,
     /// Protocol diagnostics collected from the run loop's diagnostic channel,
@@ -270,7 +277,7 @@ pub async fn login(
 
     let agent_id = client.agent_id();
     let region_handle = client.region_handle();
-    let (event_tx, event_rx) = mpsc::channel::<Event>(256);
+    let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
     let (command_tx, command_rx) = mpsc::channel::<Command>(16);
     let (diag_tx, mut diag_rx) = mpsc::channel::<Diagnostic>(64);
     let diagnostics = Arc::new(Mutex::new(Vec::new()));
@@ -286,11 +293,26 @@ pub async fn login(
             }
         }
     });
+    // Forward the run loop's bounded event channel into an unbounded one,
+    // continuously, so the run loop never blocks pushing an event even while the
+    // case is reading a *different* session. Without this, any session whose
+    // events go unread (the non-awaited avatar in a multi-avatar case) stalls its
+    // run loop once its 256-slot channel fills, freezing its command transmission
+    // and packet decoding until the case happens to read it. Mirrors the
+    // diagnostic-channel drain above.
+    let (events_tx, events_rx) = mpsc::unbounded_channel::<Event>();
+    let _forward = tokio::spawn(async move {
+        while let Some(event) = event_rx.recv().await {
+            if events_tx.send(event).is_err() {
+                break;
+            }
+        }
+    });
     let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
     Ok(Session {
         agent_id,
         region_handle,
-        events: event_rx,
+        events: events_rx,
         commands: command_tx,
         diagnostics,
         run,
