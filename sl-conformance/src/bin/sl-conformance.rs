@@ -127,6 +127,34 @@ fn resolve_secondary<'creds>(
     None
 }
 
+/// Resolve the tertiary avatar for a three-account test: an explicit
+/// `--tertiary`, else the conventional `tertiary` entry, else the first avatar
+/// in the file distinct from *both* the primary and the secondary.
+fn resolve_tertiary<'creds>(
+    credentials: &'creds Credentials,
+    primary: &Avatar,
+    secondary: &Avatar,
+    explicit: Option<&str>,
+) -> Option<&'creds Avatar> {
+    let other = |candidate: &Avatar| distinct(candidate, primary) && distinct(candidate, secondary);
+    if let Some(name) = explicit {
+        return credentials.select(Some(name)).ok();
+    }
+    if let Ok(candidate) = credentials.select(Some("tertiary"))
+        && other(candidate)
+    {
+        return Some(candidate);
+    }
+    for name in credentials.avatar_names() {
+        if let Ok(candidate) = credentials.select(Some(name))
+            && other(candidate)
+        {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 /// The default credentials path for a grid when `--credentials` is omitted.
 fn default_credentials(grid: Grid) -> PathBuf {
     match grid {
@@ -176,6 +204,21 @@ async fn run(args: RunArgs) -> Result<(), Error> {
     } else {
         None
     };
+    let tertiary = if test.accounts() >= 3 {
+        let secondary = secondary.ok_or_else(|| Error::NotEnoughAvatars {
+            test: test.name().to_owned(),
+            needed: test.accounts(),
+            found: 1,
+        })?;
+        let resolved = resolve_tertiary(&credentials, primary, secondary, args.tertiary.as_deref());
+        Some(resolved.ok_or_else(|| Error::NotEnoughAvatars {
+            test: test.name().to_owned(),
+            needed: test.accounts(),
+            found: 2,
+        })?)
+    } else {
+        None
+    };
 
     let state_dir = repo_root.join(".sl-conformance");
     let records_dir = repo_root.join("records");
@@ -187,6 +230,10 @@ async fn run(args: RunArgs) -> Result<(), Error> {
             .map_err(|error| Error::Test(error.to_string()))?;
         if let Some(secondary) = secondary {
             context::enforce_cooldown(&state_dir, &avatar_label(secondary), args.force)
+                .map_err(|error| Error::Test(error.to_string()))?;
+        }
+        if let Some(tertiary) = tertiary {
+            context::enforce_cooldown(&state_dir, &avatar_label(tertiary), args.force)
                 .map_err(|error| Error::Test(error.to_string()))?;
         }
     }
@@ -208,10 +255,24 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         ),
         None => None,
     };
+    let tertiary_session = match tertiary {
+        Some(tertiary) => Some(
+            context::login(args.grid, tertiary, CHANNEL, version)
+                .await
+                .map_err(|error| Error::Test(error.to_string()))?,
+        ),
+        None => None,
+    };
 
-    let mut ctx = TestContext::new(args.grid, primary_session, secondary_session);
+    let mut ctx = TestContext::new(
+        args.grid,
+        primary_session,
+        secondary_session,
+        tertiary_session,
+    );
     let outcome = test.run(&mut ctx).await;
-    let (metrics, completeness, completeness_note, primary_sess, secondary_sess) = ctx.into_parts();
+    let (metrics, completeness, completeness_note, primary_sess, secondary_sess, tertiary_sess) =
+        ctx.into_parts();
 
     // Log out cleanly regardless of the test outcome.
     if let Err(error) = primary_sess.logout().await {
@@ -221,6 +282,11 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         && let Err(error) = session.logout().await
     {
         tracing::warn!("secondary logout error: {error}");
+    }
+    if let Some(session) = tertiary_sess
+        && let Err(error) = session.logout().await
+    {
+        tracing::warn!("tertiary logout error: {error}");
     }
 
     write_record(
@@ -397,6 +463,9 @@ struct RunArgs {
     /// The secondary avatar name for two-account tests.
     #[clap(long)]
     secondary: Option<String>,
+    /// The tertiary avatar name for three-account tests.
+    #[clap(long)]
+    tertiary: Option<String>,
     /// The credentials TOML file (defaults per grid: credentials.toml /
     /// credentials.aditi.toml).
     #[clap(long)]

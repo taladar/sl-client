@@ -230,6 +230,8 @@ pub struct TestContext {
     primary: Session,
     /// The secondary session, for two-account tests.
     secondary: Option<Session>,
+    /// The tertiary session, for three-account tests.
+    tertiary: Option<Session>,
     /// The metrics the test writes.
     metrics: Metrics,
     /// Whether the test declared its run complete or partial.
@@ -241,11 +243,17 @@ pub struct TestContext {
 impl TestContext {
     /// Build a context around the given live session(s).
     #[must_use]
-    pub fn new(grid: Grid, primary: Session, secondary: Option<Session>) -> Self {
+    pub fn new(
+        grid: Grid,
+        primary: Session,
+        secondary: Option<Session>,
+        tertiary: Option<Session>,
+    ) -> Self {
         Self {
             grid,
             primary,
             secondary,
+            tertiary,
             metrics: Metrics::new(),
             completeness: Completeness::Complete,
             completeness_note: None,
@@ -266,6 +274,11 @@ impl TestContext {
     /// The secondary session, if this is a two-account test.
     pub const fn secondary(&mut self) -> Option<&mut Session> {
         self.secondary.as_mut()
+    }
+
+    /// The tertiary session, if this is a three-account test.
+    pub const fn tertiary(&mut self) -> Option<&mut Session> {
+        self.tertiary.as_mut()
     }
 
     /// The metrics collector to record measurements into.
@@ -291,6 +304,7 @@ impl TestContext {
         Option<String>,
         Session,
         Option<Session>,
+        Option<Session>,
     ) {
         (
             self.metrics,
@@ -298,6 +312,7 @@ impl TestContext {
             self.completeness_note,
             self.primary,
             self.secondary,
+            self.tertiary,
         )
     }
 }
