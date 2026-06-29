@@ -193,19 +193,20 @@ use sl_wire::messages::{
     SendXferPacketXferIDBlock, SetGroupAcceptNotices, SetGroupAcceptNoticesAgentDataBlock,
     SetGroupAcceptNoticesDataBlock, SetGroupAcceptNoticesNewDataBlock, SetGroupContribution,
     SetGroupContributionAgentDataBlock, SetGroupContributionDataBlock, StartLure,
-    StartLureAgentDataBlock, StartLureInfoBlock, StartLureTargetDataBlock, TeleportLocationRequest,
-    TeleportLocationRequestAgentDataBlock, TeleportLocationRequestInfoBlock, TeleportLureRequest,
-    TeleportLureRequestInfoBlock, TerminateFriendship, TerminateFriendshipAgentDataBlock,
-    TerminateFriendshipExBlockBlock, TrackAgent, TrackAgentAgentDataBlock,
-    TrackAgentTargetDataBlock, TransferRequest, TransferRequestTransferInfoBlock,
-    UUIDGroupNameRequest, UUIDGroupNameRequestUUIDNameBlockBlock, UUIDNameRequest,
-    UUIDNameRequestUUIDNameBlockBlock, UpdateGroupInfo, UpdateGroupInfoAgentDataBlock,
-    UpdateGroupInfoGroupDataBlock, UpdateInventoryFolder, UpdateInventoryFolderAgentDataBlock,
-    UpdateInventoryFolderFolderDataBlock, UpdateInventoryItem, UpdateInventoryItemAgentDataBlock,
-    UpdateInventoryItemInventoryDataBlock, UpdateMuteListEntry, UpdateMuteListEntryAgentDataBlock,
-    UpdateMuteListEntryMuteDataBlock, UseCircuitCode, UseCircuitCodeCircuitCodeBlock, UserReport,
-    UserReportAgentDataBlock, UserReportReportDataBlock, ViewerEffect as ViewerEffectMessage,
-    ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
+    StartLureAgentDataBlock, StartLureInfoBlock, StartLureTargetDataBlock, StartPingCheck,
+    StartPingCheckPingIDBlock, TeleportLocationRequest, TeleportLocationRequestAgentDataBlock,
+    TeleportLocationRequestInfoBlock, TeleportLureRequest, TeleportLureRequestInfoBlock,
+    TerminateFriendship, TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock,
+    TrackAgent, TrackAgentAgentDataBlock, TrackAgentTargetDataBlock, TransferRequest,
+    TransferRequestTransferInfoBlock, UUIDGroupNameRequest, UUIDGroupNameRequestUUIDNameBlockBlock,
+    UUIDNameRequest, UUIDNameRequestUUIDNameBlockBlock, UpdateGroupInfo,
+    UpdateGroupInfoAgentDataBlock, UpdateGroupInfoGroupDataBlock, UpdateInventoryFolder,
+    UpdateInventoryFolderAgentDataBlock, UpdateInventoryFolderFolderDataBlock, UpdateInventoryItem,
+    UpdateInventoryItemAgentDataBlock, UpdateInventoryItemInventoryDataBlock, UpdateMuteListEntry,
+    UpdateMuteListEntryAgentDataBlock, UpdateMuteListEntryMuteDataBlock, UseCircuitCode,
+    UseCircuitCodeCircuitCodeBlock, UserReport, UserReportAgentDataBlock,
+    UserReportReportDataBlock, ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock,
+    ViewerEffectEffectBlock,
 };
 use sl_wire::messages::{
     AgentDataUpdateRequest, AgentDataUpdateRequestAgentDataBlock, AgentQuitCopy,
@@ -297,7 +298,7 @@ use sl_wire::{
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 /// Converts a draw-distance [`Distance`] to the `f32` the `AgentUpdate` `Far`
@@ -333,6 +334,8 @@ impl Circuit {
             code: circuit_code,
             next_sequence: SequenceNumber::FIRST,
             pause_serial_num: 0,
+            next_ping_id: PingId::default(),
+            outstanding_ping: None,
             pending_acks: Vec::new(),
             unacked: BTreeMap::new(),
             seen: SeenWindow::default(),
@@ -342,6 +345,7 @@ impl Circuit {
                 inactivity: deadline(now, INACTIVITY_TIMEOUT),
                 ack_flush: None,
                 agent_update: None,
+                ping: None,
                 logout: None,
                 teleport: None,
                 sit: None,
@@ -355,6 +359,8 @@ impl Circuit {
     pub(crate) fn retarget(&mut self, sim_addr: SocketAddr, now: Instant) {
         self.sim_addr = sim_addr;
         self.next_sequence = SequenceNumber::FIRST;
+        self.next_ping_id = PingId::default();
+        self.outstanding_ping = None;
         self.pending_acks.clear();
         self.unacked.clear();
         self.seen = SeenWindow::default();
@@ -363,6 +369,7 @@ impl Circuit {
             inactivity: deadline(now, INACTIVITY_TIMEOUT),
             ack_flush: None,
             agent_update: None,
+            ping: None,
             logout: None,
             teleport: None,
             sit: None,
@@ -486,6 +493,48 @@ impl Circuit {
             },
         });
         self.send(&message, Reliability::Unreliable, now)
+    }
+
+    /// Queues a keep-alive `StartPingCheck` unreliably, recording it as the
+    /// outstanding ping so the matching `CompletePingCheck` can be timed.
+    ///
+    /// Like the reference viewer, the ping carries the lowest unacked outgoing
+    /// sequence number in `OldestUnacked`, letting the simulator drop its own
+    /// record of anything older. Returns the ping id sent.
+    pub(crate) fn send_start_ping_check(&mut self, now: Instant) -> Result<PingId, WireError> {
+        let ping_id = self.next_ping_id;
+        self.next_ping_id = self.next_ping_id.wrapping_next();
+        let oldest_unacked = self
+            .unacked
+            .keys()
+            .next()
+            .copied()
+            .map_or(0, SequenceNumber::get);
+        let message = AnyMessage::StartPingCheck(StartPingCheck {
+            ping_id: StartPingCheckPingIDBlock {
+                ping_id: ping_id.get(),
+                oldest_unacked,
+            },
+        });
+        self.send(&message, Reliability::Unreliable, now)?;
+        self.outstanding_ping = Some((ping_id, now));
+        Ok(ping_id)
+    }
+
+    /// Records an inbound `CompletePingCheck`, returning the round-trip time when
+    /// it answers the outstanding keep-alive ping.
+    ///
+    /// Returns `None` for an unsolicited reply or one whose id does not match the
+    /// ping in flight (a stale or duplicate echo), leaving any genuine
+    /// outstanding ping untouched.
+    pub(crate) fn record_ping_reply(&mut self, ping_id: PingId, now: Instant) -> Option<Duration> {
+        match self.outstanding_ping {
+            Some((outstanding, sent_at)) if outstanding == ping_id => {
+                self.outstanding_ping = None;
+                Some(now.saturating_duration_since(sent_at))
+            }
+            _ => None,
+        }
     }
 
     /// Queues a `ChatFromViewer` reliably, sending local chat. The wire string

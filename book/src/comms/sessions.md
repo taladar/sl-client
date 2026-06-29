@@ -42,7 +42,7 @@ through these states:
   (`UseCircuitCode`, `CompleteAgentMovement`) have been sent to the region; the
   client is waiting for the region to introduce itself with a `RegionHandshake`.
 - **Active** — the handshake is done and keep-alive traffic (`AgentUpdate`,
-  acks) is flowing. This is the normal steady state.
+  pings, acks) is flowing. This is the normal steady state.
 - **Teleporting** — a [teleport](../content/teleport.md) is in progress; the
   client is waiting for the destination to confirm.
 - **LoggingOut** — a `LogoutRequest` was sent; the client is waiting for the
@@ -60,6 +60,13 @@ periodically sends `AgentUpdate` (which also reports camera and control state)
 and flushes acknowledgements for reliable packets it has received. Conversely,
 if *no* traffic arrives from the region within an inactivity budget, the client
 treats the session as timed out.
+
+On the root circuit the client also sends a periodic `StartPingCheck` — the
+reference viewer's ~5-second circuit ping — and times the simulator's
+`CompletePingCheck` answer to measure the round-trip time. That round trip is
+surfaced as `Event::Ping { rtt }`, the "ping to sim" a viewer displays. (The
+client likewise answers the simulator's own `StartPingCheck` with a
+`CompletePingCheck`, so the ping is symmetric.)
 
 ## Session errors & forced disconnect
 

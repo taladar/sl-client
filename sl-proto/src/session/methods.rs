@@ -39,9 +39,10 @@ use super::{
     ChatSession, ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, Circuit,
     DEFAULT_DRAW_DISTANCE, FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
     Inventory, InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
-    MAX_INLINE_ASSET, MessageCursor, PendingInvite, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
-    Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT,
-    TakenControls, TeleportPhase, TextureDownload, VoiceChannelInfo, deadline, merge_deadline,
+    MAX_INLINE_ASSET, MessageCursor, PING_INTERVAL, PendingInvite, SIT_TIMEOUT, ScriptGrant,
+    ScriptHolder, Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT,
+    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, VoiceChannelInfo, deadline,
+    merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -985,6 +986,10 @@ impl Session {
         }
         if let Some(circuit) = self.circuit.as_mut() {
             circuit.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
+            // Arm the keep-alive ping on the root circuit, matching the reference
+            // viewer's periodic circuit ping; the first one goes out one interval
+            // from arrival.
+            circuit.timers.ping = Some(deadline(now, PING_INTERVAL));
             // Re-advertise the bandwidth throttle on the new root circuit: each
             // region starts with the simulator's conservative defaults until the
             // client tells it otherwise. Best-effort — a wire-encode failure here
@@ -2627,6 +2632,15 @@ impl Session {
                     circuit.send_complete_ping_check(PingId(ping.ping_id.ping_id), now)?;
                 }
             }
+            AnyMessage::CompletePingCheck(reply) => {
+                // The simulator's answer to our keep-alive `StartPingCheck`:
+                // surface the round-trip time when it matches the ping in flight.
+                if let Some(rtt) = self.circuit.as_mut().and_then(|circuit| {
+                    circuit.record_ping_reply(PingId(reply.ping_id.ping_id), now)
+                }) {
+                    self.events.push_back(Event::Ping { rtt });
+                }
+            }
             AnyMessage::PacketAck(ack) => {
                 if let Some(circuit) = self.circuit.as_mut() {
                     for packet in &ack.packets {
@@ -4045,6 +4059,20 @@ impl Session {
                 circuit.send_agent_update(controls, body, head, &camera, now)?;
                 circuit.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
             }
+        }
+
+        // Send the periodic keep-alive ping on the root circuit; the matching
+        // `CompletePingCheck` surfaces as an `Event::Ping` with the round-trip
+        // time. Best-effort — a wire-encode failure must not abort the timer loop.
+        if self
+            .circuit
+            .as_ref()
+            .and_then(|c| c.timers.ping)
+            .is_some_and(|d| now >= d)
+            && let Some(circuit) = self.circuit.as_mut()
+        {
+            let _ignored = circuit.send_start_ping_check(now);
+            circuit.timers.ping = Some(deadline(now, PING_INTERVAL));
         }
 
         // Keep child circuits healthy: flush owed acks, retransmit, advertise the

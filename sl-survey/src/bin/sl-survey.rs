@@ -800,6 +800,7 @@ impl Survey {
             | Event::SimConsoleResponse { .. }
             | Event::RequiredVoiceVersion(_)
             | Event::OpenRegionInfo(_)
+            | Event::Ping { .. }
             | Event::Environment(_) => {}
         }
         Ok(false)

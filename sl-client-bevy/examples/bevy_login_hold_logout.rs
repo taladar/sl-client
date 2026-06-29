@@ -404,6 +404,7 @@ fn on_events(
             | SlSessionEvent::FriendsSnapshot(_)
             | SlSessionEvent::InventoryFolderPage { .. }
             | SlSessionEvent::InventoryRoots { .. }
+            | SlSessionEvent::Ping { .. }
             | SlSessionEvent::LandStatReply { .. } => {}
         }
     }

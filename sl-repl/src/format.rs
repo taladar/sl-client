@@ -318,6 +318,7 @@ const fn event_name(event: &Event) -> &'static str {
     match event {
         Event::CircuitEstablished { .. } => "circuit_established",
         Event::RegionHandshakeComplete => "region_handshake_complete",
+        Event::Ping { .. } => "ping",
         Event::RegionInfoHandshake(..) => "region_info_handshake",
         Event::RegionLimits(..) => "region_limits",
         Event::SimStats(..) => "sim_stats",
