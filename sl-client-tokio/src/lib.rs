@@ -117,7 +117,7 @@ use crate::http::{
     delete_caps_llsd, fetch_land_resources, get_caps_llsd, patch_caps_llsd, post_caps_oneway,
     post_chat_session_request, put_caps_llsd,
 };
-use crate::inventory::{fetch_group_members, fetch_inventory};
+use crate::inventory::{fetch_folder_contents, fetch_group_members, fetch_inventory};
 use crate::inventory_cache::InventoryCache;
 use crate::materials::{fetch_render_materials, post_modify_material_params};
 use crate::media::{fetch_object_media, post_object_media};
@@ -655,7 +655,14 @@ impl Client {
                             )?;
                         }
                         Some(Command::RequestFolderContents(folder_id)) => {
-                            self.session.request_folder_contents(folder_id, Instant::now())?;
+                            fetch_folder_contents(
+                                &mut self.session,
+                                folder_id,
+                                &caps,
+                                &http,
+                                &caps_tx,
+                                Instant::now(),
+                            )?;
                         }
                         Some(Command::FetchInventoryFolders(folder_ids)) => {
                             if let (Some(url), Some(owner)) =
@@ -1808,9 +1815,15 @@ impl Client {
                             if self.session.folder_fetch_state(folder)
                                 == Some(FolderState::Unknown)
                             {
-                                self.session
-                                    .request_folder_contents(folder, Instant::now())
-                                    .ok();
+                                fetch_folder_contents(
+                                    &mut self.session,
+                                    folder,
+                                    &caps,
+                                    &http,
+                                    &caps_tx,
+                                    Instant::now(),
+                                )
+                                .ok();
                             }
                             events.send(Event::InventoryFolderPage {
                                 folder,

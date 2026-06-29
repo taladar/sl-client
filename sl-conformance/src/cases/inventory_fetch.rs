@@ -1,4 +1,7 @@
-//! Fetch the agent's inventory root folder over UDP, timing the round-trip.
+//! Fetch the agent's inventory root folder, timing the round-trip. The library
+//! auto-selects the modern CAPS `FetchInventoryDescendents2` where the region
+//! advertises it (Second Life) and the legacy UDP `FetchInventoryDescendents`
+//! where it does not (OpenSim), so the same case runs against both grids.
 
 use std::time::{Duration, Instant};
 
@@ -28,7 +31,7 @@ impl GridTest for InventoryFetch {
     }
 
     fn description(&self) -> &'static str {
-        "Fetch the agent inventory root folder contents over UDP"
+        "Fetch the agent inventory root folder contents (CAPS or UDP)"
     }
 
     fn grids(&self) -> &'static [Grid] {

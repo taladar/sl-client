@@ -8057,6 +8057,17 @@ impl Session {
         self.inventory.folder_state(folder_id)
     }
 
+    /// Marks `folder_id` as having a contents fetch in flight, flipping it to
+    /// [`Fetching`](FolderState::Fetching) so the background crawl scheduler does
+    /// not also pick it and [`Session::folder_fetch_state`] reflects the pending
+    /// request. The UDP [`Session::request_folder_contents`] does this
+    /// internally; a runtime that instead issues the fetch over the modern CAPS
+    /// path (`FetchInventoryDescendents2` / `FetchLibDescendents2`, which Second
+    /// Life requires) calls this so the in-flight bookkeeping matches either way.
+    pub fn mark_folder_fetching(&mut self, folder_id: InventoryFolderKey) {
+        self.inventory.mark_folder_fetching(folder_id);
+    }
+
     /// Which tree — the agent's own inventory ([`InventoryOwner::Agent`]) or the
     /// read-only shared Library ([`InventoryOwner::Library`]) — the known folder
     /// `folder_id` belongs to, or `None` if it is not in the model.
