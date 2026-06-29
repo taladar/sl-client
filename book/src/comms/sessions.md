@@ -180,3 +180,16 @@ real grid.
 >   `Client::run` takes a `diagnostics: mpsc::Sender<Diagnostic>` and is enabled
 >   with `Client::set_diagnostics`; `sl-client-bevy` registers an `SlDiagnostic`
 >   event and enables it via `SlClientPlugin::diagnostics`.
+> - The two drivers model session/region state differently by design.
+>   `sl-client-tokio` exposes the globally-unique login facts as flat `Client`
+>   accessors (`agent_id` / `session_id` / `circuit_code` / `seed_capability` /
+>   `region_handle`). `sl-client-bevy` instead surfaces them the idiomatic ECS
+>   way (`sl-client-bevy/src/world.rs`): the login facts live in the
+>   **`SlIdentity` resource** (read at any tick with `Res<SlIdentity>`,
+>   `region_handle` tracking the current region), and per-region state lives on
+>   **components of region entities** — `SlRegion` (handle + sim address) for
+>   the login region and every neighbour, marked `SlCurrentRegion` /
+>   `SlNeighbor`, with `SlRegionIdentity` / `SlRegionLimits` and child
+>   `SlParcel` entities attached as the data arrives. The plugin's
+>   `maintain_world` system folds the `SlEvent` stream into this model each
+>   frame.

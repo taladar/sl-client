@@ -539,22 +539,27 @@ fn repl_driver(
     mut events: EventReader<SlEvent>,
     mut diagnostics: EventReader<SlDiagnostic>,
     mut capabilities: EventReader<SlCapabilities>,
-    mut identity: EventReader<SlIdentity>,
+    identity: Res<SlIdentity>,
     mut mfa: EventReader<SlMfaChallenge>,
     mut rejected: EventReader<SlLoginRejected>,
     mut commands: EventWriter<SlCommand>,
     mut exit: EventWriter<AppExit>,
 ) {
-    for id in identity.read() {
-        if let (Some(agent), Some(session), Some(circuit)) =
-            (id.agent_id, id.session_id, id.circuit_code)
-        {
+    // The identity facts now live in a resource the plugin updates in place, so
+    // fold them into the REPL context only when they change (login, region
+    // change) rather than draining a one-shot event.
+    if identity.is_changed() {
+        if let (Some(agent), Some(session), Some(circuit)) = (
+            identity.agent_id,
+            identity.session_id,
+            identity.circuit_code,
+        ) {
             state.ctx.set_identity(agent.uuid(), session, circuit);
         }
-        if let Some(seed) = &id.seed_capability {
+        if let Some(seed) = &identity.seed_capability {
             state.ctx.set_cap("Seed", seed.as_str());
         }
-        state.self_agent = id.agent_id.map(|agent| agent.uuid());
+        state.self_agent = identity.agent_id.map(|agent| agent.uuid());
     }
     for caps in capabilities.read() {
         state.ctx.set_caps(caps.0.clone().into_iter().collect());
