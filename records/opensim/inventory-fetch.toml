@@ -51,3 +51,20 @@ root_items = 1
 
 [run.metric_meta.inventory_fetch_secs]
 lower_is_better = true
+
+[[run]]
+behavior_describe = "1321352"
+dirty = false
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-29T06:18:31.57114308Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+inventory_fetch_secs = 0.115062218
+root_folders = 23
+root_items = 2
+
+[run.metric_meta.inventory_fetch_secs]
+lower_is_better = true
