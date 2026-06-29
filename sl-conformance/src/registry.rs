@@ -43,6 +43,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::region_info::RegionInfo),
         Box::new(crate::cases::logout_clean::LogoutClean),
         Box::new(crate::cases::keepalive_ping::KeepalivePing),
+        Box::new(crate::cases::throttle_set::ThrottleSet),
     ]
 }
 
