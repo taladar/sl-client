@@ -138,8 +138,13 @@ short and consistent.
 
 ## Phase 2 — Local chat `[both]`
 
-- [ ] `chat-self-echo` — `say` on a channel and observe own
-  `ChatFromSimulator`. `1av`, runs on Aditi today.
+- [x] `chat-self-echo` — `say` on a channel and observe own
+  `ChatFromSimulator`. `1av`, runs on Aditi today. A normal `say` on the
+  public channel (`0`) is broadcast back to the speaker, so the case sends a
+  marker message tagged with the avatar's own agent id, then awaits the
+  matching `Event::ChatReceived` attributed to its own agent — asserting the
+  echoed text, source, and `Normal` chat type. Green on both grids; echo RTT
+  ≈ 18 ms on loopback OpenSim, ≈ 177 ms on Aditi.
 - [ ] `chat-hear-other` — second avatar says, primary hears. `2av`
   (OpenSim now; Aditi deferred → Phase Z).
 - [ ] `chat-whisper-shout-range` — verify whisper/shout reach vs normal. `2av`.

@@ -1,0 +1,17 @@
+test = "chat-self-echo"
+grid = "aditi"
+
+[[run]]
+behavior_describe = "0e92ab8-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-29T11:22:16.582833745Z"
+avatar = "GisetteVector Resident"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+echo_rtt_secs = 0.176592735
+
+[run.metric_meta.echo_rtt_secs]
+lower_is_better = true

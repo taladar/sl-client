@@ -45,6 +45,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::keepalive_ping::KeepalivePing),
         Box::new(crate::cases::throttle_set::ThrottleSet),
         Box::new(crate::cases::draw_distance::DrawDistance),
+        Box::new(crate::cases::chat_self_echo::ChatSelfEcho),
     ]
 }
 
