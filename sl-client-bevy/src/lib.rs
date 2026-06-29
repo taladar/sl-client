@@ -117,7 +117,8 @@ use crate::http::{
     run_land_resources, run_patch_caps_llsd, run_put_caps_llsd,
 };
 use crate::inventory::{
-    run_group_members_fetch, run_inventory_fetch, run_server_appearance_update,
+    fetch_folder_contents, run_group_members_fetch, run_inventory_fetch,
+    run_server_appearance_update,
 };
 use crate::inventory_cache::InventoryCache;
 use crate::materials::{run_modify_material_params, run_render_materials_fetch};
@@ -754,7 +755,7 @@ fn advance_running(
                     .ok();
             }
             Command::RequestFolderContents(folder_id) => {
-                session.request_folder_contents(*folder_id, now).ok();
+                fetch_folder_contents(&mut session, *folder_id, caps.as_ref(), now);
             }
             Command::FetchInventoryFolders(folder_ids) => {
                 if let Some(caps) = caps.as_ref()
@@ -2880,7 +2881,7 @@ fn advance_running(
                 // On-demand: a query for an unfetched folder schedules its fetch
                 // (works regardless of the background-crawl flag).
                 if session.folder_fetch_state(*folder) == Some(FolderState::Unknown) {
-                    session.request_folder_contents(*folder, now).ok();
+                    fetch_folder_contents(&mut session, *folder, caps.as_ref(), now);
                 }
                 events.write(SlEvent(SessionEvent::InventoryFolderPage {
                     folder: *folder,
