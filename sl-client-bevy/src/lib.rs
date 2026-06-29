@@ -67,31 +67,31 @@ pub use sl_proto::{
     InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey,
     InventoryKey, InventoryOffer, InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea,
     LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance,
-    LoadUrlRequest, LoggedChatType, LoginAccount, LoginParams, LoginRequest, LureId,
-    MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER,
-    MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry,
-    MeshKey, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode,
-    MuteEntry, MuteFlags, MuteType, NegativeBalanceError, NeighborInfo, NewInventoryItem, Object,
-    ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks,
-    ObjectProperties, ObjectTransform, OpenSimExtras, OwnerKey, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
-    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
-    PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape,
-    PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId,
-    ReflectionProbe, ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings,
-    RegionCoordinates, RegionFlags, RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits,
-    RegionLocalObjectId, RegionLocalParcelId, RegionName, Reliability, RenderMaterialEntry,
-    RenderMaterialRef, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
-    ScriptControlAction, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTeleportRequest, SculptData, SculptOrMeshKey, SequenceNumber, SimulatorFeatures,
-    SoundFlags, SoundPreload, StartLocation, StartLocationParseError, TerrainLayerType,
-    TerrainPatch, TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle,
-    ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit, Uuid,
-    Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, XferId,
-    avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
-    grid_to_handle, group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode,
-    sim_access, texture_anim_mode,
+    LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind,
+    LoginRequest, LureId, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
+    MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate,
+    Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance, MoneyTransaction,
+    MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType, NegativeBalanceError,
+    NeighborInfo, NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings,
+    ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties, ObjectTransform,
+    OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+    ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
+    ParcelVoiceInfo, ParticleSystem, PermissionField, PhysicsShapeTypes, PickInfo, PickKey,
+    PickUpdate, PingId, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
+    ProposalCandidateId, ProposalVoteId, QueryId, ReflectionProbe, ReflectionProbeFlags,
+    RegionChatSettings, RegionCombatSettings, RegionCoordinates, RegionFlags, RegionHandle,
+    RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
+    RegionName, Reliability, RenderMaterialEntry, RenderMaterialRef, Rotation, SaleType,
+    ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData, SculptOrMeshKey,
+    SequenceNumber, SimulatorFeatures, SoundFlags, SoundPreload, StartLocation,
+    StartLocationParseError, TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry,
+    TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat,
+    TransactionId, TransferId, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest,
+    Wearable, WearableType, XferId, avatar_texture, decode_particle_system, decode_texture_anim,
+    decode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
+    particle_pattern, pcode, sim_access, texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -172,6 +172,7 @@ impl Plugin for SlClientPlugin {
             .add_event::<SlCapabilities>()
             .add_event::<SlIdentity>()
             .add_event::<SlMfaChallenge>()
+            .add_event::<SlLoginRejected>()
             .add_event::<SlCommand>()
             .insert_resource(SlConfig {
                 params: self.params.clone(),
@@ -228,6 +229,17 @@ pub struct SlIdentity {
 /// `LoginRequest::with_mfa`.
 #[derive(Event, Debug, Clone)]
 pub struct SlMfaChallenge(pub MfaChallenge);
+
+/// Emitted when the grid rejected the login with a *retryable* "already logged
+/// in" presence ([`LoginRejectKind::AlreadyLoggedIn`]) — typically a prior
+/// session that did not log out cleanly, which the grid evicts on the next
+/// attempt. Unlike a fatal rejection (which arrives as a
+/// [`DisconnectReason::LoginFailed`]), this is surfaced as its own event,
+/// mirroring [`SlMfaChallenge`], so a driver can consult the user and re-add the
+/// plugin to retry the same login. The carried [`LoginFailure`] keeps the raw
+/// reason/message for display.
+#[derive(Event, Debug, Clone)]
+pub struct SlLoginRejected(pub LoginFailure);
 
 /// A command to a running session, sent as a Bevy event. Wraps the shared
 /// [`Command`] vocabulary (defined in `sl-proto`) so it can be read as a Bevy
@@ -370,6 +382,7 @@ fn drive(
     mut capabilities: EventWriter<SlCapabilities>,
     mut identity: EventWriter<SlIdentity>,
     mut mfa: EventWriter<SlMfaChallenge>,
+    mut rejected: EventWriter<SlLoginRejected>,
     mut commands: EventReader<SlCommand>,
 ) {
     let now = Instant::now();
@@ -385,6 +398,7 @@ fn drive(
             &mut events,
             &mut identity,
             &mut mfa,
+            &mut rejected,
         ),
         SlInner::Running {
             session,
@@ -428,6 +442,7 @@ fn advance_login(
     events: &mut EventWriter<SlEvent>,
     identity: &mut EventWriter<SlIdentity>,
     mfa: &mut EventWriter<SlMfaChallenge>,
+    rejected: &mut EventWriter<SlLoginRejected>,
 ) -> SlInner {
     match rx.try_recv() {
         Ok(Ok(body)) => match parse_login_response(&body) {
@@ -480,13 +495,20 @@ fn advance_login(
                 SlInner::Done
             }
             Ok(LoginResponse::Failure(failure)) => {
-                emit_disconnect(
-                    events,
-                    DisconnectReason::LoginFailed {
-                        reason: failure.reason,
-                        message: failure.message,
-                    },
-                );
+                // A retryable "already logged in" rejection is surfaced like an
+                // MFA challenge — its own event the driver can act on (consult
+                // the user, re-add the plugin) — rather than a fatal disconnect.
+                if failure.kind() == LoginRejectKind::AlreadyLoggedIn {
+                    rejected.write(SlLoginRejected(failure));
+                } else {
+                    emit_disconnect(
+                        events,
+                        DisconnectReason::LoginFailed {
+                            reason: failure.reason,
+                            message: failure.message,
+                        },
+                    );
+                }
                 SlInner::Done
             }
             Err(_parse) => {

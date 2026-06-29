@@ -10,7 +10,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sl_client_tokio::{
-    AgentKey, Client, Command, Diagnostic, Event, LoginParams, LoginRequest, StartLocation,
+    AgentKey, Client, Command, Diagnostic, Event, LoginParams, LoginRejectKind, LoginRequest,
+    StartLocation,
 };
 use sl_repl::Avatar;
 use time::format_description::well_known::Rfc3339;
@@ -24,6 +25,19 @@ use crate::record::Completeness;
 
 /// How long an aditi avatar must wait between logins, to avoid rate-limiting.
 const ADITI_LOGIN_COOLDOWN: TimeDuration = TimeDuration::seconds(120);
+
+/// How many times to retry an OpenSim login that was rejected as
+/// "already logged in" before giving up. A prior session that did not log out
+/// cleanly leaves a stale presence; the *rejected* attempt itself evicts that
+/// ghost (OpenSim's login service marks the grid-user logged-out before
+/// returning the rejection), so the next attempt normally succeeds. One retry
+/// is plenty; the cap stops a genuinely-online duplicate from looping forever.
+const ALREADY_LOGGED_IN_MAX_RETRIES: u8 = 2;
+
+/// A short settle delay before retrying an "already logged in" OpenSim login, to
+/// let the grid finish evicting the stale presence (god-kick to the last region
+/// plus the grid-user logged-out write) before the next attempt.
+const ALREADY_LOGGED_IN_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// How long [`Session::logout`] waits for a clean `LoggedOut` before forcing the
 /// run loop down.
@@ -195,6 +209,7 @@ pub async fn login(
         channel.to_owned(),
         version.to_owned(),
     );
+    let mut already_logged_in_retries: u8 = 0;
     let mut client = loop {
         let params = LoginParams {
             login_uri: login_uri.clone(),
@@ -212,6 +227,27 @@ pub async fn login(
                     .map_err(|error| TestFailure::Auth(error.to_string()))?
                     .ok_or(TestFailure::MfaRequired)?;
                 request = request.with_mfa(token.expose(), challenge.mfa_hash);
+            }
+            // A stale presence from a prior session that did not log out cleanly
+            // (the OpenSim no-`LogoutReply` quirk) rejects the next login as
+            // "already logged in" — but that rejected attempt evicts the ghost,
+            // so a retry succeeds. Only OpenSim: Second Life may flag rapid
+            // repeated login attempts as suspicious, so there we surface the
+            // rejection unchanged rather than retrying.
+            Err(sl_client_tokio::Error::LoginRejected {
+                kind: LoginRejectKind::AlreadyLoggedIn,
+                reason,
+                message,
+            }) if grid == Grid::Opensim
+                && already_logged_in_retries < ALREADY_LOGGED_IN_MAX_RETRIES =>
+            {
+                already_logged_in_retries = already_logged_in_retries.saturating_add(1);
+                tracing::warn!(
+                    "login rejected as already-logged-in ({reason}: {message}); the rejected \
+                     attempt evicts the stale presence — retrying (attempt {})",
+                    already_logged_in_retries.saturating_add(1)
+                );
+                tokio::time::sleep(ALREADY_LOGGED_IN_RETRY_DELAY).await;
             }
             Err(other) => return Err(TestFailure::Client(other)),
         }

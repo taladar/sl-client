@@ -12,9 +12,10 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, ExternalPrinter};
 use sl_client_bevy::{
-    AgentKey, ChatLogConfig, ClientDirectories, Command, InventoryCacheConfig, LoginParams,
-    LoginRequest, MfaChallenge, SlCapabilities, SlClientPlugin, SlCommand, SlDiagnostic, SlEvent,
-    SlIdentity, SlMfaChallenge, SlSessionEvent, StartLocation, Uuid,
+    AgentKey, ChatLogConfig, ClientDirectories, Command, InventoryCacheConfig, LoginFailure,
+    LoginParams, LoginRequest, MfaChallenge, SlCapabilities, SlClientPlugin, SlCommand,
+    SlDiagnostic, SlEvent, SlIdentity, SlLoginRejected, SlMfaChallenge, SlSessionEvent,
+    StartLocation, Uuid,
 };
 use sl_repl::{
     Avatar, Credentials, MetaCommand, ReplAction, ScriptRecorder, SessionContext, format_command,
@@ -285,20 +286,25 @@ struct Recorder {
     inner: Option<ScriptRecorder>,
 }
 
-/// The MFA outcome of a single Bevy run, kept as a Bevy resource so the binary
+/// The login outcome of a single Bevy run, kept as a Bevy resource so the binary
 /// can read it back after the app exits.
 #[derive(Resource, Debug)]
 struct MfaOutcome {
     /// The challenge the grid issued, if login stopped on one.
     challenge: Option<MfaChallenge>,
+    /// The retryable "already logged in" rejection, if login stopped on one.
+    rejected: Option<LoginFailure>,
 }
 
-/// The result of running one Bevy session: the MFA challenge (if any) plus the
-/// recorder handed back so it survives an MFA-driven restart.
+/// The result of running one Bevy session: the recoverable login outcome (an MFA
+/// challenge or a retryable rejection, if any) plus the recorder handed back so
+/// it survives a restart.
 #[derive(Debug)]
 struct SessionOutcome {
     /// The MFA challenge the grid issued, if login stopped on one.
     challenge: Option<MfaChallenge>,
+    /// The retryable "already logged in" rejection, if login stopped on one.
+    rejected: Option<LoginFailure>,
     /// The recorder, returned for reuse on the next run.
     recorder: Option<ScriptRecorder>,
 }
@@ -535,6 +541,7 @@ fn repl_driver(
     mut capabilities: EventReader<SlCapabilities>,
     mut identity: EventReader<SlIdentity>,
     mut mfa: EventReader<SlMfaChallenge>,
+    mut rejected: EventReader<SlLoginRejected>,
     mut commands: EventWriter<SlCommand>,
     mut exit: EventWriter<AppExit>,
 ) {
@@ -579,6 +586,10 @@ fn repl_driver(
         outcome.challenge = Some(challenge.0.clone());
         exit.write(AppExit::Success);
     }
+    for rejection in rejected.read() {
+        outcome.rejected = Some(rejection.0.clone());
+        exit.write(AppExit::Success);
+    }
     loop {
         match line_input.rx.try_recv() {
             Ok(raw) => {
@@ -601,8 +612,23 @@ fn repl_driver(
     }
 }
 
-/// Run one Bevy session to completion, returning any MFA challenge it stopped on
-/// and the recorder for reuse on a subsequent (MFA-driven) restart.
+/// Prompt the user with `question` and read a yes/no answer from the line
+/// editor. Returns `true` only on an affirmative answer (`y`/`yes`/`retry`); a
+/// closed input channel or any other line is treated as "no".
+fn prompt_yes_no(line_rx: &Receiver<String>, question: &str) -> bool {
+    warn!("{question}");
+    match line_rx.recv() {
+        Ok(answer) => matches!(
+            answer.trim().to_ascii_lowercase().as_str(),
+            "y" | "yes" | "retry"
+        ),
+        Err(_closed) => false,
+    }
+}
+
+/// Run one Bevy session to completion, returning any recoverable login outcome
+/// it stopped on (an MFA challenge or a retryable "already logged in" rejection)
+/// and the recorder for reuse on a subsequent restart.
 fn run_session(
     params: &LoginParams,
     chat_log_config: &ChatLogConfig,
@@ -634,20 +660,26 @@ fn run_session(
         .insert_resource(LineInput {
             rx: line_rx.clone(),
         })
-        .insert_resource(MfaOutcome { challenge: None })
+        .insert_resource(MfaOutcome {
+            challenge: None,
+            rejected: None,
+        })
         .insert_non_send_resource(Recorder { inner: recorder })
         .add_systems(Update, repl_driver);
     let _exit = app.run();
-    let challenge = app
+    let (challenge, rejected) = app
         .world()
         .get_resource::<MfaOutcome>()
-        .and_then(|outcome| outcome.challenge.clone());
+        .map_or((None, None), |outcome| {
+            (outcome.challenge.clone(), outcome.rejected.clone())
+        });
     let recorder = app
         .world_mut()
         .remove_non_send_resource::<Recorder>()
         .and_then(|recorder| recorder.inner);
     SessionOutcome {
         challenge,
+        rejected,
         recorder,
     }
 }
@@ -728,17 +760,36 @@ fn run_repl(args: RunArgs) -> Result<(), Error> {
             recorder.take(),
         );
         recorder = outcome.recorder;
-        match outcome.challenge {
-            Some(challenge) => {
-                info!(
-                    "multi-factor authentication required: {}",
-                    challenge.message
-                );
-                let token = avatar.acquire_mfa()?.ok_or(Error::MfaRequired)?;
-                request = request.with_mfa(token.expose(), challenge.mfa_hash);
-            }
-            None => break,
+        if let Some(challenge) = outcome.challenge {
+            info!(
+                "multi-factor authentication required: {}",
+                challenge.message
+            );
+            let token = avatar.acquire_mfa()?.ok_or(Error::MfaRequired)?;
+            request = request.with_mfa(token.expose(), challenge.mfa_hash);
+            continue;
         }
+        // A retryable "already logged in" rejection: consult the user (in
+        // interactive mode only) and retry the same login if they confirm. Not
+        // automatic — the duplicate may be a real other session, and a grid may
+        // flag rapid repeated attempts.
+        if let Some(rejection) = outcome.rejected {
+            warn!(
+                "login rejected: {} ({})",
+                rejection.reason, rejection.message
+            );
+            if interactive
+                && prompt_yes_no(
+                    &line_rx,
+                    "You appear to be already logged in (a prior session may not have closed \
+                     cleanly). Retry the login? [y/N]",
+                )
+            {
+                info!("retrying login");
+                continue;
+            }
+        }
+        break;
     }
     info!("session ended");
     Ok(())

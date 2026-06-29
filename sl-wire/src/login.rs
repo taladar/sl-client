@@ -449,6 +449,66 @@ pub struct LoginFailure {
     pub message: String,
 }
 
+/// A coarse classification of a [`LoginFailure`], so callers can react to the
+/// well-known cases without matching on the raw [`reason`](LoginFailure::reason)
+/// string — in particular to recognise the *retryable* "already logged in"
+/// rejection and offer the user a retry, while leaving truly fatal rejections
+/// alone.
+///
+/// The grid's `reason` code alone is not enough to tell these apart: Second Life
+/// and OpenSim both reuse the `"presence"` code for *several* distinct
+/// conditions — a stale/duplicate presence ("you appear to be already logged
+/// in", which a retry usually clears once the grid evicts the ghost), but also
+/// administratively restricted logins and unverified accounts, which a retry
+/// must **not** hammer. Disambiguating the retryable case therefore also inspects
+/// the human-readable [`message`](LoginFailure::message); see
+/// [`LoginFailure::kind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LoginRejectKind {
+    /// The avatar already has a presence registered on the grid ("you appear to
+    /// be already logged in"). This is usually transient — a prior session that
+    /// did not log out cleanly leaves a ghost the grid evicts on the next login
+    /// attempt — so logging in again typically succeeds. A driver may retry,
+    /// ideally after consulting the user and mindful that a grid may flag rapid
+    /// repeated attempts.
+    AlreadyLoggedIn,
+    /// Authentication failed: an unknown account or a wrong password (`"key"`).
+    /// Retrying with the same credentials cannot succeed.
+    BadCredentials,
+    /// Any other rejection — including the non-retryable `"presence"` variants
+    /// (logins administratively restricted, unverified account) and reasons this
+    /// classifier does not model. Inspect the raw
+    /// [`reason`](LoginFailure::reason) / [`message`](LoginFailure::message).
+    Other,
+}
+
+impl LoginFailure {
+    /// Classify this rejection into a [`LoginRejectKind`].
+    ///
+    /// `"key"` maps to [`LoginRejectKind::BadCredentials`]. The `"presence"`
+    /// reason maps to [`LoginRejectKind::AlreadyLoggedIn`] *only* when the
+    /// message identifies the already-logged-in case (it contains "already
+    /// logged in"); the other `"presence"` uses (restricted logins, unverified
+    /// account) are deliberately left as [`LoginRejectKind::Other`] so a caller
+    /// does not retry them. Everything else is [`LoginRejectKind::Other`].
+    #[must_use]
+    pub fn kind(&self) -> LoginRejectKind {
+        match self.reason.as_str() {
+            "key" => LoginRejectKind::BadCredentials,
+            "presence"
+                if self
+                    .message
+                    .to_ascii_lowercase()
+                    .contains("already logged in") =>
+            {
+                LoginRejectKind::AlreadyLoggedIn
+            }
+            _other => LoginRejectKind::Other,
+        }
+    }
+}
+
 /// An error encountered while parsing a login response.
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -1198,5 +1258,73 @@ impl LoginServer {
             });
         }
         LoginResponse::Success(success)
+    }
+}
+
+#[cfg(test)]
+mod kind_tests {
+    use super::{LoginFailure, LoginRejectKind};
+    use pretty_assertions::assert_eq;
+
+    /// Builds a failure with the given reason and message.
+    fn failure(reason: &str, message: &str) -> LoginFailure {
+        LoginFailure {
+            reason: reason.to_owned(),
+            message: message.to_owned(),
+        }
+    }
+
+    /// `"key"` is bad credentials.
+    #[test]
+    fn key_is_bad_credentials() {
+        assert_eq!(
+            failure("key", "Could not authenticate your avatar.").kind(),
+            LoginRejectKind::BadCredentials
+        );
+    }
+
+    /// A `"presence"` rejection whose message says "already logged in" is the
+    /// retryable case (matched case-insensitively).
+    #[test]
+    fn presence_already_logged_in() {
+        assert_eq!(
+            failure(
+                "presence",
+                "You appear to be already logged in.\n\nPlease wait a minute or two and retry.",
+            )
+            .kind(),
+            LoginRejectKind::AlreadyLoggedIn
+        );
+        assert_eq!(
+            failure("presence", "You appear to be ALREADY LOGGED IN.").kind(),
+            LoginRejectKind::AlreadyLoggedIn
+        );
+    }
+
+    /// The other `"presence"` uses (restricted logins, unverified account) are
+    /// deliberately *not* classified as retryable.
+    #[test]
+    fn presence_non_retryable_is_other() {
+        assert_eq!(
+            failure(
+                "presence",
+                "Logins are currently restricted. Please try again later."
+            )
+            .kind(),
+            LoginRejectKind::Other
+        );
+        assert_eq!(
+            failure("presence", "Your account has not yet been verified.").kind(),
+            LoginRejectKind::Other
+        );
+    }
+
+    /// An unmodelled reason code falls through to `Other`.
+    #[test]
+    fn unknown_reason_is_other() {
+        assert_eq!(
+            failure("tos", "You must accept the ToS.").kind(),
+            LoginRejectKind::Other
+        );
     }
 }
