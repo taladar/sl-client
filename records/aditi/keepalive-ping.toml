@@ -15,3 +15,18 @@ ping_rtt_secs = 0.170100457
 
 [run.metric_meta.ping_rtt_secs]
 lower_is_better = true
+
+[[run]]
+behavior_describe = "a374083-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-29T10:16:09.562060375Z"
+avatar = "GisetteVector Resident"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+ping_rtt_secs = 0.172177808
+
+[run.metric_meta.ping_rtt_secs]
+lower_is_better = true

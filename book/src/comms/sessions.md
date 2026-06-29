@@ -61,12 +61,15 @@ and flushes acknowledgements for reliable packets it has received. Conversely,
 if *no* traffic arrives from the region within an inactivity budget, the client
 treats the session as timed out.
 
-On the root circuit the client also sends a periodic `StartPingCheck` — the
-reference viewer's ~5-second circuit ping — and times the simulator's
-`CompletePingCheck` answer to measure the round-trip time. That round trip is
-surfaced as `Event::Ping { rtt }`, the "ping to sim" a viewer displays. (The
-client likewise answers the simulator's own `StartPingCheck` with a
-`CompletePingCheck`, so the ping is symmetric.)
+The client also sends a periodic `StartPingCheck` — the reference viewer's
+~5-second circuit ping — on every circuit (the root and each open child-agent
+circuit to a neighbouring region) and times the simulator's `CompletePingCheck`
+answer to measure the round-trip time. Each round trip is surfaced as
+`Event::Ping { sim, child, rtt }`; the root circuit's (`child: false`) is the
+"ping to sim" a viewer displays, while child pings measure the link to a
+neighbouring region. (The client likewise answers each simulator's own
+`StartPingCheck` with a `CompletePingCheck`, so the ping is symmetric on every
+circuit.)
 
 ## Session errors & forced disconnect
 

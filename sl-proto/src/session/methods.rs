@@ -1056,6 +1056,10 @@ impl Session {
         let head = self.head_rotation.clone();
         let _ignored = child.send_agent_update(controls, body, head, &self.camera, now);
         child.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
+        // Arm the keep-alive ping on the child circuit too, so the link to the
+        // neighbour is measured the same way as the root (the first ping goes out
+        // one interval from now).
+        child.timers.ping = Some(deadline(now, PING_INTERVAL));
         self.children.insert(sim, child);
         Ok(())
     }
@@ -1379,6 +1383,20 @@ impl Session {
             AnyMessage::StartPingCheck(ping) => {
                 if let Some(circuit) = self.children.get_mut(&from) {
                     circuit.send_complete_ping_check(PingId(ping.ping_id.ping_id), now)?;
+                }
+            }
+            AnyMessage::CompletePingCheck(reply) => {
+                // The neighbour's answer to our keep-alive `StartPingCheck` on
+                // this child circuit: surface the round-trip time as a
+                // child-circuit `Event::Ping`.
+                if let Some(rtt) = self.children.get_mut(&from).and_then(|circuit| {
+                    circuit.record_ping_reply(PingId(reply.ping_id.ping_id), now)
+                }) {
+                    self.events.push_back(Event::Ping {
+                        sim: from,
+                        child: true,
+                        rtt,
+                    });
                 }
             }
             AnyMessage::RegionHandshake(_) => {
@@ -2633,12 +2651,19 @@ impl Session {
                 }
             }
             AnyMessage::CompletePingCheck(reply) => {
-                // The simulator's answer to our keep-alive `StartPingCheck`:
-                // surface the round-trip time when it matches the ping in flight.
-                if let Some(rtt) = self.circuit.as_mut().and_then(|circuit| {
-                    circuit.record_ping_reply(PingId(reply.ping_id.ping_id), now)
+                // The simulator's answer to our keep-alive `StartPingCheck` on the
+                // root circuit: surface the round-trip time when it matches the
+                // ping in flight.
+                if let Some((sim, rtt)) = self.circuit.as_mut().and_then(|circuit| {
+                    circuit
+                        .record_ping_reply(PingId(reply.ping_id.ping_id), now)
+                        .map(|rtt| (circuit.sim_addr, rtt))
                 }) {
-                    self.events.push_back(Event::Ping { rtt });
+                    self.events.push_back(Event::Ping {
+                        sim,
+                        child: false,
+                        rtt,
+                    });
                 }
             }
             AnyMessage::PacketAck(ack) => {
@@ -4098,6 +4123,14 @@ impl Session {
             if child.timers.agent_update.is_some_and(|d| now >= d) {
                 child.send_agent_update(controls, body.clone(), head.clone(), &camera, now)?;
                 child.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
+            }
+            // Ping the neighbour too, the same cadence as the root; its
+            // `CompletePingCheck` surfaces a child-circuit `Event::Ping`. The
+            // reply is recorded when it arrives (in `dispatch_child`), so nothing
+            // is emitted here. Best-effort — a wire-encode failure is ignored.
+            if child.timers.ping.is_some_and(|d| now >= d) {
+                let _ignored = child.send_start_ping_check(now);
+                child.timers.ping = Some(deadline(now, PING_INTERVAL));
             }
         }
         for (sequence, name) in child_exhausted {

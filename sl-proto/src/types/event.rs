@@ -71,11 +71,17 @@ pub enum Event {
     },
     /// The region handshake completed; the session is now fully active.
     RegionHandshakeComplete,
-    /// A keep-alive ping round-trip to the simulator completed: the session sent
-    /// a periodic `StartPingCheck` on the root circuit and the simulator answered
-    /// with the matching `CompletePingCheck`. Carries the measured round-trip
-    /// time — the "ping to sim" a viewer displays.
+    /// A keep-alive ping round-trip to a simulator completed: the session sent a
+    /// periodic `StartPingCheck` and the simulator answered with the matching
+    /// `CompletePingCheck`. The root circuit's round-trip is the "ping to sim" a
+    /// viewer displays; child-circuit pings measure the link to a neighbouring
+    /// region.
     Ping {
+        /// The simulator the ping round-tripped to.
+        sim: SocketAddr,
+        /// Whether the ping was on a child-agent circuit (a neighbouring region)
+        /// rather than the root circuit.
+        child: bool,
         /// The round-trip time from sending the `StartPingCheck` to receiving its
         /// `CompletePingCheck`.
         rtt: Duration,

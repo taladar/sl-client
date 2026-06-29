@@ -311,13 +311,15 @@ mod test {
 
         let client_events = drain_client(&mut client);
         let rtt = client_events.iter().find_map(|event| match event {
-            Event::Ping { rtt } => Some(*rtt),
+            Event::Ping {
+                child: false, rtt, ..
+            } => Some(*rtt),
             _other => None,
         });
         assert_eq!(
             rtt,
             Some(Duration::from_millis(200)),
-            "expected Event::Ping carrying the measured RTT, got {client_events:?}"
+            "expected a root Event::Ping carrying the measured RTT, got {client_events:?}"
         );
         Ok(())
     }
