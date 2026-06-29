@@ -1,0 +1,18 @@
+test = "throttle-set"
+grid = "aditi"
+
+[[run]]
+behavior_describe = "48c948e"
+dirty = false
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-29T10:53:14.550695822Z"
+avatar = "GisetteVector Resident"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+ping_rtt_secs = 0.181245238
+throttle_total_kbps = 500.0
+
+[run.metric_meta.ping_rtt_secs]
+lower_is_better = true
