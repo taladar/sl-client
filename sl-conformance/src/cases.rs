@@ -6,6 +6,7 @@
 //! stdout, so the runner can stamp and store the result.
 
 pub mod asset_decode;
+pub mod chat_hear_other;
 pub mod chat_self_echo;
 pub mod draw_distance;
 pub mod inventory_fetch;
