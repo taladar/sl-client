@@ -817,11 +817,20 @@ impl Session {
             // is resolved from the wire id against the existing registry (the
             // event carries no group/conference discriminator); an update for an
             // unknown session is ignored.
+            //
+            // This is an informational roster push, **not** a join: it folds via
+            // the non-promoting [`Self::chat_session_get_mut`] so a still-pending
+            // `Invited` session keeps its lifecycle (OpenSim sends such an update
+            // alongside the `ChatterBoxInvitation` itself, before we have accepted
+            // it). Joining happens on an explicit accept, our own send, or an
+            // inbound session message — never on a bare roster update. Activity is
+            // still stamped so the update orders the session list.
             "ChatterBoxSessionAgentListUpdates" => {
                 if let Some((session_uuid, updates)) = agent_list_voice_updates_from_llsd(body)
                     && let Some(kind) = self.chat_session_kind_for_session_id(session_uuid)
+                    && let Some(session) = self.chat_session_get_mut(kind)
                 {
-                    let session = self.chat_session_mut(kind, now);
+                    session.last_activity = now;
                     for (agent, in_voice) in updates {
                         if in_voice {
                             session.voice.has_voice = true;

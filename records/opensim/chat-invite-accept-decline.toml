@@ -1,0 +1,37 @@
+test = "chat-invite-accept-decline"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "c01450f-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-06-29T21:32:53.811464046Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "c01450f-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-29T21:35:57.927778148Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+accept_invite_rtt_secs = 0.096930859
+accept_promoted_to_joined = true
+chat_session_request_cap = "absent"
+decline_invite_rtt_secs = 0.068330977
+decline_removed_entry = true
+
+[run.metric_meta.accept_invite_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.decline_invite_rtt_secs]
+lower_is_better = true

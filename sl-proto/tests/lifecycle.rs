@@ -16362,6 +16362,68 @@ mod test {
         Ok(())
     }
 
+    /// A `ChatterBoxSessionAgentListUpdates` push that arrives for a still-pending
+    /// `Invited` session (as OpenSim sends alongside the invitation itself) folds
+    /// the voice roster **without** promoting the session to `Joined` — the
+    /// lifecycle stays `Invited` until an explicit accept or real session traffic.
+    #[test]
+    fn agent_list_update_does_not_join_invited_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Record a pending group invitation (type 15, from_group).
+        let group = uuid::Uuid::from_u128(0x62_01);
+        let inviter = uuid::Uuid::from_u128(0x62_02);
+        let group_xml = format!(
+            "<llsd><map>\
+               <key>session_name</key><string>My Group</string>\
+               <key>instantmessage</key><map><key>message_params</key><map>\
+                 <key>id</key><uuid>{group}</uuid>\
+                 <key>from_id</key><uuid>{inviter}</uuid>\
+                 <key>from_name</key><string>Inviter</string>\
+                 <key>type</key><integer>15</integer>\
+                 <key>from_group</key><boolean>1</boolean>\
+               </map></map></map></llsd>"
+        );
+        session.handle_caps_event("ChatterBoxInvitation", &parse_llsd_xml(&group_xml)?, now)?;
+        let kind = ChatSessionKind::Group {
+            group_id: GroupKey::from(group),
+        };
+
+        // The agent-list update that follows the invitation must not join us.
+        let voice_agent = uuid::Uuid::from_u128(0x62_0A);
+        let updates = format!(
+            "<llsd><map>\
+               <key>session_id</key><uuid>{group}</uuid>\
+               <key>agent_updates</key><map>\
+                 <key>{voice_agent}</key><map>\
+                   <key>info</key><map><key>can_voice_chat</key><boolean>1</boolean></map>\
+                   <key>transition</key><string>ENTER</string></map>\
+               </map></map></llsd>"
+        );
+        session.handle_caps_event(
+            "ChatterBoxSessionAgentListUpdates",
+            &parse_llsd_xml(&updates)?,
+            now,
+        )?;
+
+        // Still a pending invitation — the roster push is informational only.
+        assert!(
+            matches!(
+                session.chat_session_lifecycle(kind),
+                Some(ChatSessionLifecycle::Invited(_))
+            ),
+            "an agent-list update must not promote an Invited session to Joined"
+        );
+        // …but the voice roster was folded.
+        assert_eq!(
+            voice_members(&session, kind),
+            vec![AgentKey::from(voice_agent)]
+        );
+        Ok(())
+    }
+
     /// The invite channel is classified from the body's `instantmessage` /
     /// `voice` sub-maps: both present is [`InviteChannel::Both`]; a `voice`-only
     /// body (no `instantmessage`, fields at the top level) is

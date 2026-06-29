@@ -52,6 +52,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::im_1to1::Im1to1),
         Box::new(crate::cases::im_typing::ImTyping),
         Box::new(crate::cases::group_session_message::GroupSessionMessage),
+        Box::new(crate::cases::chat_invite_accept_decline::ChatInviteAcceptDecline),
     ]
 }
 
