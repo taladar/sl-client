@@ -1,0 +1,17 @@
+test = "keepalive-ping"
+grid = "aditi"
+
+[[run]]
+behavior_describe = "414cf6b-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-29T09:49:55.212577856Z"
+avatar = "GisetteVector Resident"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+ping_rtt_secs = 0.170100457
+
+[run.metric_meta.ping_rtt_secs]
+lower_is_better = true

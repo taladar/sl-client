@@ -323,6 +323,7 @@ fn on_events(
             | SlSessionEvent::SimConsoleResponse { .. }
             | SlSessionEvent::RequiredVoiceVersion(_)
             | SlSessionEvent::OpenRegionInfo(_)
+            | SlSessionEvent::Ping { .. }
             | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged {

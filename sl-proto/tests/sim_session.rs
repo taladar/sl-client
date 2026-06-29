@@ -266,6 +266,62 @@ mod test {
         Ok(())
     }
 
+    /// Once active, the client sends a periodic keep-alive `StartPingCheck` on
+    /// the root circuit and surfaces the simulator's `CompletePingCheck` as
+    /// [`Event::Ping`] carrying the measured round-trip time.
+    #[test]
+    fn keepalive_ping_round_trip_measures_rtt() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        // Flush arrival traffic so only the ping exchange is left in flight.
+        pump(&mut client, &mut sim, now)?;
+        let _arrival_events = drain_client(&mut client);
+        let _arrival_server_events = drain_server(&mut sim);
+
+        // One ping interval after arrival the keep-alive timer fires and the
+        // client transmits its `StartPingCheck`; hand it to the simulator.
+        let sent_at = after(now, 5_000)?;
+        client.handle_timeout(sent_at);
+        let mut start_ping_seen = false;
+        while let Some(transmit) = client.poll_transmit() {
+            if matches!(decode(&transmit)?, AnyMessage::StartPingCheck(_)) {
+                start_ping_seen = true;
+            }
+            sim.handle_datagram(client_addr(), &transmit.payload, sent_at)?;
+        }
+        assert!(
+            start_ping_seen,
+            "the client should send a keep-alive StartPingCheck once active"
+        );
+
+        // The simulator answers; deliver its `CompletePingCheck` 200ms later so
+        // the round-trip time is observable rather than zero.
+        let replied_at = after(now, 5_200)?;
+        let mut complete_ping_seen = false;
+        while let Some(transmit) = sim.poll_transmit() {
+            if matches!(decode(&transmit)?, AnyMessage::CompletePingCheck(_)) {
+                complete_ping_seen = true;
+            }
+            client.handle_datagram(sim_addr(), &transmit.payload, replied_at)?;
+        }
+        assert!(
+            complete_ping_seen,
+            "the simulator should answer StartPingCheck with CompletePingCheck"
+        );
+
+        let client_events = drain_client(&mut client);
+        let rtt = client_events.iter().find_map(|event| match event {
+            Event::Ping { rtt } => Some(*rtt),
+            _other => None,
+        });
+        assert_eq!(
+            rtt,
+            Some(Duration::from_millis(200)),
+            "expected Event::Ping carrying the measured RTT, got {client_events:?}"
+        );
+        Ok(())
+    }
+
     #[test]
     fn client_chat_reaches_simulator() -> Result<(), TestError> {
         let now = Instant::now();

@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use super::{
     ActiveGroup, AlertInfo, Asset, AssetType, AvatarAppearance, AvatarClassified,
@@ -70,6 +71,15 @@ pub enum Event {
     },
     /// The region handshake completed; the session is now fully active.
     RegionHandshakeComplete,
+    /// A keep-alive ping round-trip to the simulator completed: the session sent
+    /// a periodic `StartPingCheck` on the root circuit and the simulator answered
+    /// with the matching `CompletePingCheck`. Carries the measured round-trip
+    /// time — the "ping to sim" a viewer displays.
+    Ping {
+        /// The round-trip time from sending the `StartPingCheck` to receiving its
+        /// `CompletePingCheck`.
+        rtt: Duration,
+    },
     /// The current region's identity, maturity, and product type, parsed from
     /// the `RegionHandshake` (emitted alongside [`Event::RegionHandshakeComplete`]
     /// on entry, and [`Event::RegionChanged`] after a teleport).

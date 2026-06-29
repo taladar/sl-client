@@ -1,7 +1,7 @@
 //! The sans-I/O session state machine: login, circuit establishment,
 //! keep-alive, and clean logout, driven entirely by passed-in time.
 
-use crate::bookkeeping_ids::{TransferId, XferId};
+use crate::bookkeeping_ids::{PingId, TransferId, XferId};
 use crate::scoped_id::CircuitId;
 use crate::types::{
     AssetType, Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, Object,
@@ -23,6 +23,12 @@ use uuid::Uuid;
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
 const AGENT_UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
+/// How often a keep-alive `StartPingCheck` is sent on the root circuit to
+/// measure the round-trip time to the simulator, matching the reference
+/// viewer's circuit ping cadence (`LLCircuit`'s ~5-second periodic ping). The
+/// simulator answers each with a `CompletePingCheck` echoing the ping id, which
+/// the session times to surface an [`Event::Ping`](crate::Event::Ping).
+const PING_INTERVAL: Duration = Duration::from_secs(5);
 /// How long owed acknowledgements may wait before being flushed as a `PacketAck`.
 const ACK_FLUSH_DELAY: Duration = Duration::from_millis(150);
 /// How long without inbound traffic before the link is considered dead. Kept
@@ -578,6 +584,9 @@ struct Timers {
     ack_flush: Option<Instant>,
     /// When to send the next `AgentUpdate`, once the session is active.
     agent_update: Option<Instant>,
+    /// When to send the next keep-alive `StartPingCheck`, once the session is
+    /// active. Armed on the root circuit at region arrival.
+    ping: Option<Instant>,
     /// When to give up waiting for a `LogoutReply`, once logging out.
     logout: Option<Instant>,
     /// When to give up waiting for a `TeleportFinish`, once teleporting.
@@ -727,6 +736,14 @@ struct Circuit {
     /// The monotonically increasing serial number shared by `AgentPause` and
     /// `AgentResume`; the simulator ignores non-increasing values.
     pause_serial_num: u32,
+    /// The next outgoing keep-alive ping id (mirrors the reference viewer's
+    /// `LLCircuitData::mLastPingID`); a wrapping `u8` the matching
+    /// `CompletePingCheck` echoes back.
+    next_ping_id: PingId,
+    /// The in-flight keep-alive ping awaiting its `CompletePingCheck`, paired
+    /// with the instant it was sent so the round-trip time can be measured.
+    /// `None` when no ping is outstanding.
+    outstanding_ping: Option<(PingId, Instant)>,
     /// Inbound reliable sequence numbers we still owe acknowledgements for.
     pending_acks: Vec<SequenceNumber>,
     /// Outgoing reliable packets awaiting acknowledgement, keyed by sequence.
