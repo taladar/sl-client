@@ -48,6 +48,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::chat_self_echo::ChatSelfEcho),
         Box::new(crate::cases::chat_hear_other::ChatHearOther),
         Box::new(crate::cases::chat_whisper_shout_range::ChatWhisperShoutRange),
+        Box::new(crate::cases::typing_indicator::TypingIndicator),
     ]
 }
 

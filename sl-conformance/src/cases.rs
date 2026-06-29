@@ -16,3 +16,4 @@ pub mod login_handshake;
 pub mod logout_clean;
 pub mod region_info;
 pub mod throttle_set;
+pub mod typing_indicator;
