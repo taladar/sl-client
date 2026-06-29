@@ -6,6 +6,7 @@
 //! stdout, so the runner can stamp and store the result.
 
 pub mod asset_decode;
+pub mod draw_distance;
 pub mod inventory_fetch;
 pub mod keepalive_ping;
 pub mod login_handshake;

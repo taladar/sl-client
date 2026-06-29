@@ -1,0 +1,20 @@
+test = "draw-distance"
+grid = "aditi"
+
+[[run]]
+behavior_describe = "7fd5c39-dirty"
+dirty = true
+outcome = "pass"
+completeness = "partial"
+completeness_note = "landing region has no neighbouring regions within draw distance"
+recorded_at = "2026-06-29T11:08:46.295381502Z"
+avatar = "GisetteVector Resident"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+draw_distance_m = 512.0
+neighbors_count = 0
+ping_rtt_secs = 0.163466397
+
+[run.metric_meta.ping_rtt_secs]
+lower_is_better = true

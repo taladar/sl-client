@@ -1,0 +1,19 @@
+test = "draw-distance"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "7fd5c39-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-29T11:06:20.218736697Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+draw_distance_m = 512.0
+neighbors_count = 3
+ping_rtt_secs = 0.000472597
+
+[run.metric_meta.ping_rtt_secs]
+lower_is_better = true
