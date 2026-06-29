@@ -64,15 +64,15 @@ pub use sl_proto::{
     InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
     InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandingType, LegacyMaterial,
     LightData, LightImage, LindenAmount, LindenBalance, LoadUrlRequest, LoggedChatType,
-    LoginAccount, LoginParams, LoginRequest, LoginResponse, LureId, MEDIA_PERM_ALL,
-    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
-    MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MessageCursor,
-    MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry,
-    MuteFlags, MuteType, NegativeBalanceError, NeighborInfo, NewInventoryItem, Object,
-    ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks,
-    ObjectProperties, ObjectTransform, OpenSimExtras, OwnerKey, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
+    LoginAccount, LoginParams, LoginRejectKind, LoginRequest, LoginResponse, LureId,
+    MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER,
+    MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry,
+    MeshKey, MessageCursor, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
+    MovementMode, MuteEntry, MuteFlags, MuteType, NegativeBalanceError, NeighborInfo,
+    NewInventoryItem, Object, ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse,
+    ObjectMotion, ObjectPermMasks, ObjectProperties, ObjectTransform, OpenSimExtras, OwnerKey,
+    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
+    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
     ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
     PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape,
     PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId,
@@ -145,6 +145,9 @@ pub enum Error {
     /// The grid rejected the login.
     #[error("login rejected: {reason} ({message})")]
     LoginRejected {
+        /// A coarse classification of the rejection, so a caller can recognise
+        /// the retryable "already logged in" case without matching on `reason`.
+        kind: LoginRejectKind,
         /// The machine-readable reason code.
         reason: String,
         /// The human-readable message.
@@ -216,6 +219,7 @@ impl Client {
             LoginResponse::MfaChallenge(challenge) => return Err(Error::MfaChallenge(challenge)),
             LoginResponse::Failure(failure) => {
                 return Err(Error::LoginRejected {
+                    kind: failure.kind(),
                     reason: failure.reason,
                     message: failure.message,
                 });

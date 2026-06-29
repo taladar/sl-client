@@ -10,7 +10,8 @@ use std::time::Instant;
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, ExternalPrinter};
 use sl_client_tokio::{
-    Client, ClientDirectories, Command, Event, LoginParams, LoginRequest, StartLocation,
+    Client, ClientDirectories, Command, Event, LoginParams, LoginRejectKind, LoginRequest,
+    StartLocation,
 };
 use sl_proto::Diagnostic;
 use sl_repl::{
@@ -446,6 +447,12 @@ fn init_logging(log_file: &Path, terminal: TerminalSink) -> Result<(), Error> {
 /// Connect to the grid, answering an MFA challenge via the avatar's
 /// `mfa_command` and retrying the login with the acquired token.
 ///
+/// On an "already logged in" rejection (a stale presence from a prior session)
+/// the user is consulted — in interactive mode only — and the login is retried
+/// with the same request if they confirm. This deliberately does *not* retry
+/// automatically: the user decides, both because the duplicate may be a real
+/// other session and because a grid may flag rapid repeated attempts.
+///
 /// # Errors
 ///
 /// Returns [`Error::Client`] on a login failure, [`Error::Auth`] if acquiring an
@@ -455,6 +462,8 @@ async fn connect_with_mfa(
     login_uri: &str,
     mut request: LoginRequest,
     avatar: &Avatar,
+    interactive: bool,
+    line_rx: &mut mpsc::Receiver<String>,
 ) -> Result<Client, Error> {
     let login_uri: url::Url = login_uri.parse()?;
     loop {
@@ -472,8 +481,42 @@ async fn connect_with_mfa(
                 let token = avatar.acquire_mfa()?.ok_or(Error::MfaRequired)?;
                 request = request.with_mfa(token.expose(), challenge.mfa_hash);
             }
+            Err(
+                error @ sl_client_tokio::Error::LoginRejected {
+                    kind: LoginRejectKind::AlreadyLoggedIn,
+                    ..
+                },
+            ) => {
+                tracing::warn!("{error}");
+                if interactive
+                    && prompt_yes_no(
+                        line_rx,
+                        "You appear to be already logged in (a prior session may not have closed \
+                         cleanly). Retry the login? [y/N]",
+                    )
+                    .await
+                {
+                    tracing::info!("retrying login");
+                } else {
+                    return Err(Error::Client(error));
+                }
+            }
             Err(other) => return Err(Error::Client(other)),
         }
+    }
+}
+
+/// Prompt the user with `question` and read a yes/no answer from the line
+/// editor. Returns `true` only on an affirmative answer (`y`/`yes`/`retry`); a
+/// closed input channel or any other line is treated as "no".
+async fn prompt_yes_no(line_rx: &mut mpsc::Receiver<String>, question: &str) -> bool {
+    tracing::warn!("{question}");
+    match line_rx.recv().await {
+        Some(answer) => {
+            let answer = answer.trim().to_ascii_lowercase();
+            matches!(answer.as_str(), "y" | "yes" | "retry")
+        }
+        None => false,
     }
 }
 
@@ -555,7 +598,8 @@ async fn run_repl(args: RunArgs) -> Result<(), Error> {
         args.channel.clone(),
         args.version.clone(),
     );
-    let mut client = connect_with_mfa(&login_uri, request, avatar).await?;
+    let mut client =
+        connect_with_mfa(&login_uri, request, avatar, interactive, &mut line_rx).await?;
     tracing::info!("login succeeded");
     client.set_diagnostics(true);
     client.set_chat_log_config(args.chat_log.to_config());
