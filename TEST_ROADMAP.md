@@ -117,7 +117,13 @@ short and consistent.
   and surfaces each `CompletePingCheck` as `Event::Ping { sim, child, rtt }`.
   The case asserts the root ping (`child: false`, the "ping to sim"); recorded
   RTT ≈ 1.2 ms on loopback OpenSim, ≈ 170 ms on Aditi.
-- [ ] `throttle-set` — apply a `Throttle` preset and confirm it is accepted.
+- [x] `throttle-set` — apply a `Throttle` preset and confirm it is accepted.
+  `AgentThrottle` is fire-and-forget (no protocol reply), so acceptance is the
+  *absence* of failure: the reliable packet is acked by the sim rather than
+  retransmitted to exhaustion (which would close the circuit). The case applies
+  the 500 kbps preset and watches the circuit past the retransmit budget (~9 s)
+  via keep-alive pings; a healthy ping past that point plus no `AgentThrottle`
+  reply-missing diagnostic confirms acceptance. Green on both grids.
 - [ ] `draw-distance` — set draw distance; confirm no error and any echoed
   state.
 
