@@ -1,0 +1,21 @@
+test = "im-1to1"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "86fa8a5-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-29T20:17:04.820245803Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+deliver_rtt_secs = 0.014497912
+reply_rtt_secs = 0.000381724
+
+[run.metric_meta.deliver_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.reply_rtt_secs]
+lower_is_better = true
