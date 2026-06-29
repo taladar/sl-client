@@ -248,6 +248,15 @@ impl Client {
         self.session.agent_id()
     }
 
+    /// The region handle of the region the agent logged in to, available once
+    /// logged in. Seeded from the login response, so a driver can issue an
+    /// intra-region [`Command::Teleport`](sl_proto::Command::Teleport) before
+    /// [`Client::run`] consumes the client.
+    #[must_use]
+    pub fn region_handle(&self) -> Option<RegionHandle> {
+        self.session.region_handle()
+    }
+
     /// The session id, available once logged in. Useful for symbolizing the
     /// session in a REPL/diagnostic log before [`Client::run`] consumes the
     /// client.
