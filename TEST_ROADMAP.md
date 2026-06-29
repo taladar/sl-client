@@ -112,10 +112,11 @@ short and consistent.
   `Shutdown`), so it logs out via the 5 s timeout fallback and is recorded
   `partial`. Our client is conformant on both.
 - [x] `keepalive-ping` — observe start/complete ping round-trip over the
-  circuit; record RTT. The session now sends a periodic `StartPingCheck` on the
-  root circuit (the reference viewer's ~5 s circuit ping) and surfaces the
-  simulator's `CompletePingCheck` as `Event::Ping { rtt }`. Recorded RTT
-  ≈ 1.2 ms on loopback OpenSim, ≈ 170 ms on Aditi.
+  circuit; record RTT. The session now sends a periodic `StartPingCheck` on
+  every circuit — root and child (the reference viewer's ~5 s circuit ping) —
+  and surfaces each `CompletePingCheck` as `Event::Ping { sim, child, rtt }`.
+  The case asserts the root ping (`child: false`, the "ping to sim"); recorded
+  RTT ≈ 1.2 ms on loopback OpenSim, ≈ 170 ms on Aditi.
 - [ ] `throttle-set` — apply a `Throttle` preset and confirm it is accepted.
 - [ ] `draw-distance` — set draw distance; confirm no error and any echoed
   state.

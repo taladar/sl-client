@@ -10737,6 +10737,57 @@ mod test {
     }
 
     #[test]
+    fn child_circuit_sends_keepalive_ping_and_times_the_reply() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        enable_neighbour_b(&mut session, 9, now)?;
+        // Drain the child open burst (UseCircuitCode, AgentUpdate) and root traffic.
+        while session.poll_transmit().is_some() {}
+
+        // One ping interval later (the session's 5 s `PING_INTERVAL`) the child
+        // circuit's keep-alive timer fires and it transmits its own
+        // `StartPingCheck` to the neighbour, numbered from the child's own ping id
+        // sequence (first id 0).
+        let sent_at = after(now, 5_000)?;
+        session.handle_timeout(sent_at);
+        // The same tick also re-sends the child `AgentUpdate`, so scan all
+        // transmits to the neighbour for the `StartPingCheck`.
+        let mut child_ping_id = None;
+        while let Some(transmit) = session.poll_transmit() {
+            if transmit.destination == sim_b()
+                && let AnyMessage::StartPingCheck(ping) = decode(&transmit)?
+            {
+                child_ping_id = Some(ping.ping_id.ping_id);
+            }
+        }
+        assert_eq!(
+            child_ping_id,
+            Some(0),
+            "expected a child keep-alive StartPingCheck (ping id 0) to sim_b"
+        );
+
+        // The neighbour answers 200ms later; the child times the round trip and
+        // surfaces it as a child-circuit `Event::Ping`.
+        let replied_at = after(now, 5_200)?;
+        let complete = server_datagram(MessageId::High(2), &[0], 3, false);
+        session.handle_datagram(sim_b(), &complete, replied_at)?;
+        let ping_event = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::Ping { sim, child, rtt } => Some((sim, child, rtt)),
+                _other => None,
+            });
+        assert_eq!(
+            ping_event,
+            Some((sim_b(), true, Duration::from_millis(200))),
+            "expected a child Event::Ping for sim_b with the measured RTT"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn crossed_region_promotes_child_to_root() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;

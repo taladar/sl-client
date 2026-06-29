@@ -43,11 +43,15 @@ impl GridTest for KeepalivePing {
 
             // The keep-alive ping is driven by the session's own timer, so the
             // case just waits for the first round trip rather than sending a
-            // command. The timeout is generous enough to cover the ping interval
-            // plus a slow Aditi round trip.
+            // command. Filter to the root circuit's ping — the "ping to sim" a
+            // viewer displays — rather than a neighbouring region's child ping.
+            // The timeout is generous enough to cover the ping interval plus a
+            // slow Aditi round trip.
             let rtt = session
                 .wait_for(REPLY_TIMEOUT, |event| match event {
-                    Event::Ping { rtt } => Some(*rtt),
+                    Event::Ping {
+                        child: false, rtt, ..
+                    } => Some(*rtt),
                     _ => None,
                 })
                 .await?;
