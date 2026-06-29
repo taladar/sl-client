@@ -1891,6 +1891,18 @@ impl Session {
         self.circuit.as_ref().map(|circuit| circuit.id)
     }
 
+    /// The [`RegionHandle`] of the current root region, if login has established
+    /// a root circuit. Seeded from the login response's global `region_x` /
+    /// `region_y` at login (so it is known before any object update arrives) and
+    /// kept current as the root circuit changes region; a driver pairs it with a
+    /// region-local position to issue an intra-region
+    /// [`Command::Teleport`](crate::Command::Teleport). `None` before login.
+    #[must_use]
+    pub fn region_handle(&self) -> Option<RegionHandle> {
+        self.root_circuit_id()
+            .and_then(|circuit| self.regions.get(&circuit).copied())
+    }
+
     /// The agent's **own** avatar object on the current root circuit, as a
     /// [`ScopedObjectId`], once that avatar's object has been observed (its
     /// `ObjectUpdate` cached, or read back at `AgentMovementComplete`); `None`

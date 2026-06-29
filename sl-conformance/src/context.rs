@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use sl_client_tokio::{
     AgentKey, Client, Command, Diagnostic, Event, LoginParams, LoginRejectKind, LoginRequest,
-    StartLocation,
+    RegionHandle, StartLocation,
 };
 use sl_repl::Avatar;
 use time::format_description::well_known::Rfc3339;
@@ -49,6 +49,10 @@ const LOGOUT_GRACE: Duration = Duration::from_secs(15);
 pub struct Session {
     /// The agent's own id, available after login.
     agent_id: Option<AgentKey>,
+    /// The handle of the region the agent logged in to, available after login.
+    /// Seeded from the login response; a case pairs it with a region-local
+    /// position to issue an intra-region [`Command::Teleport`].
+    region_handle: Option<RegionHandle>,
     /// Inbound events from the run loop.
     events: mpsc::Receiver<Event>,
     /// Outbound commands to the run loop.
@@ -66,6 +70,13 @@ impl Session {
     #[must_use]
     pub const fn agent_id(&self) -> Option<AgentKey> {
         self.agent_id
+    }
+
+    /// The handle of the region the agent logged in to, if login reported one.
+    /// A case needs it to target an intra-region [`Command::Teleport`].
+    #[must_use]
+    pub const fn region_handle(&self) -> Option<RegionHandle> {
+        self.region_handle
     }
 
     /// A snapshot of the protocol diagnostics seen so far on this session.
@@ -258,6 +269,7 @@ pub async fn login(
     client.set_diagnostics(true);
 
     let agent_id = client.agent_id();
+    let region_handle = client.region_handle();
     let (event_tx, event_rx) = mpsc::channel::<Event>(256);
     let (command_tx, command_rx) = mpsc::channel::<Command>(16);
     let (diag_tx, mut diag_rx) = mpsc::channel::<Diagnostic>(64);
@@ -277,6 +289,7 @@ pub async fn login(
     let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
     Ok(Session {
         agent_id,
+        region_handle,
         events: event_rx,
         commands: command_tx,
         diagnostics,

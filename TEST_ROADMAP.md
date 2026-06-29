@@ -153,7 +153,37 @@ short and consistent.
   the secondary's agent, `ChatAudible::Fully`, `Normal` volume. Proves the
   simulator *relays* local chat between distinct agents (vs `chat-self-echo`'s
   self-echo). Green on OpenSim; relay RTT ≈ 1 ms on loopback.
-- [ ] `chat-whisper-shout-range` — verify whisper/shout reach vs normal. `2av`.
+- [x] `chat-whisper-shout-range` — verify whisper/shout reach vs normal. `2av`
+  (OpenSim now; Aditi deferred → Phase Z). OpenSim drops an out-of-range message
+  outright (it never marks it less audible), so reach is simply whether the
+  relayed `ChatFromSimulator` arrives. The case anchors the primary and
+  teleports the secondary (an intra-region `Command::Teleport`, so the gap is
+  exact regardless of where each logged in) to two separations: at **15 m**
+  (between whisper's 10 m and say's 20 m) a normal say is heard but a whisper is
+  not, and at **60 m** (between say's 20 m and shout's 100 m) a shout is heard
+  but a say is not — establishing whisper < say < shout. At each gap the
+  secondary says the out-of-range message immediately followed by a louder
+  in-range sentinel; hearing the sentinel but never the out-of-range marker
+  (with a short grace against reordering) confirms the drop. Both avatars are
+  placed at a high Z so the teleport is not clamped to terrain and the
+  separation is purely horizontal. Green on OpenSim; say RTT ≈ 1–3 ms, shout
+  RTT ≈ 1 ms on loopback.
+- [ ] **Runtime refactor (do before the remaining cases, not a test case):**
+  surface session/region state in the **bevy** runtime the idiomatic ECS way so
+  later cases (and features) can query it at any tick instead of catching a
+  one-shot event or threading flat accessors. Move the globally-unique login
+  facts now carried by the fire-once `SlIdentity` event (agent id, session id,
+  circuit code, seed capability — plus the region handle the
+  `chat-whisper-shout-range` work added to the tokio `Client`) into a Bevy
+  **`Resource`**, and put per-region state (region handle, sim address, region
+  info, neighbours, parcels, …) on **`Component`s of region entities**. The
+  motivation: `chat-whisper-shout-range` had to bolt one more flat accessor
+  (`region_handle`) onto `Session`/`Client`; doing the structured split early
+  means future tests extend a model that already knows where new global vs
+  per-region facts belong, rather than accreting ad-hoc `SlIdentity` fields and
+  `Client` accessors. Keep tokio-side parity in mind (the
+  `agent_id`/`session_id`/`circuit_code`/`seed_capability`/`region_handle`
+  accessors are the flat precursor this supersedes on the bevy side).
 - [ ] `typing-indicator` — `set_typing` start/stop observed by the other. `2av`.
 
 ## Phase 3 — Instant messaging & chat sessions `[both]`
