@@ -145,8 +145,14 @@ short and consistent.
   matching `Event::ChatReceived` attributed to its own agent — asserting the
   echoed text, source, and `Normal` chat type. Green on both grids; echo RTT
   ≈ 18 ms on loopback OpenSim, ≈ 177 ms on Aditi.
-- [ ] `chat-hear-other` — second avatar says, primary hears. `2av`
-  (OpenSim now; Aditi deferred → Phase Z).
+- [x] `chat-hear-other` — second avatar says, primary hears. `2av`
+  (OpenSim now; Aditi deferred → Phase Z). The first multi-avatar case: the
+  secondary (`Friend Tester`) `say`s a marker tagged with its own agent id on
+  the public channel, and the primary (`Avatar Tester`) — a separate session
+  sharing the region — receives the matching `Event::ChatReceived` attributed to
+  the secondary's agent, `ChatAudible::Fully`, `Normal` volume. Proves the
+  simulator *relays* local chat between distinct agents (vs `chat-self-echo`'s
+  self-echo). Green on OpenSim; relay RTT ≈ 1 ms on loopback.
 - [ ] `chat-whisper-shout-range` — verify whisper/shout reach vs normal. `2av`.
 - [ ] `typing-indicator` — `set_typing` start/stop observed by the other. `2av`.
 
