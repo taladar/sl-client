@@ -17,6 +17,8 @@
 //!   registry ([`registry()`]).
 //! - [`context`] — the login + session-drive [`TestContext`](context::TestContext)
 //!   handed to each test, and the per-avatar aditi cooldown guard.
+//! - [`support`] — shared scaffolding (timeouts, combinators, assertion and
+//!   metric-name helpers, well-known id fixtures) the cases build on.
 //! - [`cases`] — the concrete test implementations.
 
 pub mod cases;
@@ -27,6 +29,7 @@ pub mod metrics;
 pub mod record;
 pub mod registry;
 pub mod report;
+pub mod support;
 
 pub use grid::Grid;
 pub use metrics::Metrics;

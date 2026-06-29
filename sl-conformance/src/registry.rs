@@ -24,7 +24,7 @@ pub trait GridTest: Send + Sync {
     /// The grids on which this test is meaningful.
     fn grids(&self) -> &'static [Grid];
 
-    /// How many distinct logged-in avatars the test needs (1 or 2).
+    /// How many distinct logged-in avatars the test needs (1, 2, or 3).
     fn accounts(&self) -> u8 {
         1
     }

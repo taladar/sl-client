@@ -80,21 +80,27 @@ sl-conformance-report                              # green = Current
 Pure code, no new avatars. Build the shared scaffolding so later cases stay
 short and consistent.
 
-- [ ] `cases/common.rs` (or a `support` module) with: standard timeout
+- [x] `cases/common.rs` (or a `support` module) with: standard timeout
   constants, a `send-then-await-matching-event` combinator, a grid-gating
-  helper, and metric-name helpers.
-- [ ] An assertion helper wrapping `TestFailure::Assertion` with a clear,
+  helper, and metric-name helpers. (`sl-conformance/src/support.rs`:
+  `REGION_TIMEOUT`/`REPLY_TIMEOUT`/`LONG_TIMEOUT`, `send_then_wait`,
+  `is_opensim`/`is_aditi`, `secs_metric`/`count_metric`.)
+- [x] An assertion helper wrapping `TestFailure::Assertion` with a clear,
   formatted message so cases can assert field values, not just measure.
-- [ ] A fixtures helper for well-known ids (the default plywood texture UUID
+  (`support::check` / `support::check_eq`.)
+- [x] A fixtures helper for well-known ids (the default plywood texture UUID
   already used by `asset-decode`; the default region UUID; the estate-owner
-  avatar label).
-- [ ] **Tertiary-avatar harness support** (prerequisite for any `3av` case):
+  avatar label). (`support::fixtures`: `PLYWOOD_TEXTURE` /
+  `plywood_texture()`, `OPENSIM_DEFAULT_REGION`, `ESTATE_OWNER_LABEL`;
+  `asset-decode` now uses the fixture.)
+- [x] **Tertiary-avatar harness support** (prerequisite for any `3av` case):
   a `--tertiary` resolver mirroring `resolve_secondary`, a `ctx.tertiary()`
   accessor, a third Aditi cooldown guard, and bumping `accounts()` handling to
   accept `3`. Two-avatar plumbing already exists in
   `sl-conformance/src/context.rs` (`accounts()` + `--secondary`); this extends
   it. OpenSim `3av` cases can run as soon as this lands; Aditi `3av` waits on a
-  3rd Aditi avatar (Phase Z).
+  3rd Aditi avatar (Phase Z). (Resolver picks an avatar distinct from both
+  primary and secondary; conventional credentials label `tertiary`.)
 
 ---
 

@@ -1,22 +1,14 @@
 //! Fetch a known texture over the HTTP capability and decode it, timing the
 //! round-trip and recording the codec and byte length.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use sl_client_tokio::{Command, Event, TextureKey, Throttle, Uuid};
+use sl_client_tokio::{Command, Event, Throttle};
 
-use crate::context::{TestContext, TestFailure};
+use crate::context::TestContext;
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-
-/// How long to wait for the region to become active.
-const REGION_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// How long to wait for the texture to arrive and decode.
-const TEXTURE_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// The standard SL/OpenSim "plywood" default texture, present on a stock grid.
-const PLYWOOD_TEXTURE: &str = "89556747-24cb-43ed-920b-47caed15465f";
+use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, fixtures};
 
 /// Fetches the default plywood texture and records its decode timing and size.
 #[derive(Debug)]
@@ -37,10 +29,7 @@ impl GridTest for AssetDecode {
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
-            let texture_uuid: Uuid = PLYWOOD_TEXTURE
-                .parse()
-                .map_err(|_invalid| TestFailure::Assertion("bad texture uuid".to_owned()))?;
-            let texture_id = TextureKey::from(texture_uuid);
+            let texture_id = fixtures::plywood_texture()?;
 
             let session = ctx.primary();
             session.wait_for_region(REGION_TIMEOUT).await?;
@@ -56,7 +45,7 @@ impl GridTest for AssetDecode {
                 })
                 .await?;
             let (codec, bytes) = session
-                .wait_for(TEXTURE_TIMEOUT, |event| match event {
+                .wait_for(LONG_TIMEOUT, |event| match event {
                     Event::TextureReceived(texture) if texture.id == texture_id => {
                         Some((format!("{:?}", texture.codec), texture.data.len()))
                     }
