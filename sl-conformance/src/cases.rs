@@ -8,4 +8,5 @@
 pub mod asset_decode;
 pub mod inventory_fetch;
 pub mod login_handshake;
+pub mod logout_clean;
 pub mod region_info;

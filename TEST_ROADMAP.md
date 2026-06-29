@@ -106,7 +106,11 @@ short and consistent.
 
 ## Phase 1 — Session lifecycle & circuit `[both] 1av`
 
-- [ ] `logout-clean` — request logout, assert clean `LogoutReply` / shutdown.
+- [x] `logout-clean` — request logout, assert clean `LogoutReply` / shutdown.
+  SL replies cleanly (`complete`); OpenSim never transmits the reply (queued
+  then dropped by an unimplemented `LLUDPServer.Flush` + outbox-clearing
+  `Shutdown`), so it logs out via the 5 s timeout fallback and is recorded
+  `partial`. Our client is conformant on both.
 - [ ] `keepalive-ping` — observe start/complete ping round-trip over the
   circuit; record RTT.
 - [ ] `throttle-set` — apply a `Throttle` preset and confirm it is accepted.

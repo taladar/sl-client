@@ -1,0 +1,19 @@
+test = "logout-clean"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "46d8669-dirty"
+dirty = true
+outcome = "pass"
+completeness = "partial"
+completeness_note = "grid did not send a LogoutReply; logged out via timeout fallback"
+recorded_at = "2026-06-29T09:11:23.274486598Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+logout_reply_received = false
+logout_secs = 5.001953418
+
+[run.metric_meta.logout_secs]
+lower_is_better = true

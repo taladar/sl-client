@@ -6,6 +6,7 @@
 //! the live session(s) and a [`Metrics`] collector to the test body.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sl_client_tokio::{
@@ -38,6 +39,10 @@ pub struct Session {
     events: mpsc::Receiver<Event>,
     /// Outbound commands to the run loop.
     commands: mpsc::Sender<Command>,
+    /// Protocol diagnostics collected from the run loop's diagnostic channel,
+    /// so a case can inspect anomalies (e.g. a missing `LogoutReply`) that are
+    /// kept separate from [`Event`] and would otherwise only be logged.
+    diagnostics: Arc<Mutex<Vec<Diagnostic>>>,
     /// The spawned `Client::run` task.
     run: JoinHandle<Result<(), sl_client_tokio::Error>>,
 }
@@ -47,6 +52,20 @@ impl Session {
     #[must_use]
     pub const fn agent_id(&self) -> Option<AgentKey> {
         self.agent_id
+    }
+
+    /// A snapshot of the protocol diagnostics seen so far on this session.
+    ///
+    /// Diagnostics are collected on a background task, so a case that has just
+    /// observed the event a diagnostic accompanies (e.g. [`Event::LoggedOut`]
+    /// after a logout that timed out) should allow a brief grace for the
+    /// diagnostic to be recorded before reading them.
+    #[must_use]
+    pub fn diagnostics(&self) -> Vec<Diagnostic> {
+        self.diagnostics.lock().map_or_else(
+            |poisoned| poisoned.into_inner().clone(),
+            |guard| guard.clone(),
+        )
     }
 
     /// Send a command to the run loop.
@@ -176,7 +195,7 @@ pub async fn login(
         channel.to_owned(),
         version.to_owned(),
     );
-    let client = loop {
+    let mut client = loop {
         let params = LoginParams {
             login_uri: login_uri.clone(),
             request: request.clone(),
@@ -198,14 +217,25 @@ pub async fn login(
         }
     };
 
+    // Enable diagnostics so a case can observe protocol anomalies (e.g. a
+    // logout that never received its `LogoutReply`); they are off by default.
+    client.set_diagnostics(true);
+
     let agent_id = client.agent_id();
     let (event_tx, event_rx) = mpsc::channel::<Event>(256);
     let (command_tx, command_rx) = mpsc::channel::<Command>(16);
     let (diag_tx, mut diag_rx) = mpsc::channel::<Diagnostic>(64);
-    // Drain diagnostics to the log so a full channel never stalls the run loop.
+    let diagnostics = Arc::new(Mutex::new(Vec::new()));
+    let diag_sink = Arc::clone(&diagnostics);
+    // Drain diagnostics to the log (so a full channel never stalls the run
+    // loop) and into the shared buffer a case can inspect.
     let _drain = tokio::spawn(async move {
         while let Some(diagnostic) = diag_rx.recv().await {
             tracing::debug!("diagnostic: {diagnostic:?}");
+            match diag_sink.lock() {
+                Ok(mut buffer) => buffer.push(diagnostic),
+                Err(poisoned) => poisoned.into_inner().push(diagnostic),
+            }
         }
     });
     let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
@@ -213,6 +243,7 @@ pub async fn login(
         agent_id,
         events: event_rx,
         commands: command_tx,
+        diagnostics,
         run,
     })
 }
