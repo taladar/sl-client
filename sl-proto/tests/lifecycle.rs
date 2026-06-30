@@ -3461,7 +3461,7 @@ mod test {
         drain(&mut session)?;
 
         let group = uuid::Uuid::from_u128(0x670A);
-        session.activate_group(GroupKey::from(group), now)?;
+        session.activate_group(Some(GroupKey::from(group)), now)?;
         session.request_group_members(GroupKey::from(group), now)?;
         let sent = drain(&mut session)?;
 
@@ -3482,6 +3482,26 @@ mod test {
             })
             .ok_or("expected a GroupMembersRequest")?;
         assert_eq!(members.group_data.group_id, group);
+        Ok(())
+    }
+
+    #[test]
+    fn activate_group_none_clears_with_nil_id() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // `None` clears the active group, sent on the wire as the nil group id.
+        session.activate_group(None, now)?;
+        let sent = drain(&mut session)?;
+        let activate = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ActivateGroup(a) => Some(a),
+                _ => None,
+            })
+            .ok_or("expected an ActivateGroup")?;
+        assert_eq!(activate.agent_data.group_id, uuid::Uuid::nil());
         Ok(())
     }
 

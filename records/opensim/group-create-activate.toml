@@ -1,0 +1,27 @@
+test = "group-create-activate"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "78c4c50-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T17:51:42.351300583Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+activate_secs = 0.059750571
+clear_active_secs = 0.04591656
+group_create_secs = 0.393489896
+group_powers_hex = "0x000ffffffffffffe"
+group_powers_nonzero = true
+
+[run.metric_meta.activate_secs]
+lower_is_better = true
+
+[run.metric_meta.clear_active_secs]
+lower_is_better = true
+
+[run.metric_meta.group_create_secs]
+lower_is_better = true

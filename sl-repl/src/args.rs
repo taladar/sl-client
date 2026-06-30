@@ -535,6 +535,29 @@ impl Args {
             .collect())
     }
 
+    /// An optional [`Uuid`] argument: `Some(uuid)` when present, `None` when
+    /// absent (vs [`Args::uuid_or_nil`], which collapses "absent" to the nil
+    /// UUID). Use this where the command distinguishes "no value" from the nil
+    /// id, e.g. clearing the active group.
+    pub(crate) fn opt_uuid(
+        &self,
+        ctx: &dyn ReplContext,
+        field: &str,
+        pos: usize,
+    ) -> Result<Option<Uuid>, ReplError> {
+        match self.opt_str(ctx, field, pos)? {
+            Some(value) => Uuid::parse_str(&value)
+                .ok()
+                .ok_or_else(|| ReplError::InvalidArg {
+                    field: field.to_owned(),
+                    value,
+                    expected: "UUID".to_owned(),
+                })
+                .map(Some),
+            None => Ok(None),
+        }
+    }
+
     /// An optional [`Uuid`] argument, defaulting to [`Uuid::nil`] if absent.
     pub(crate) fn uuid_or_nil(
         &self,
