@@ -39,6 +39,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
     vec![
         Box::new(crate::cases::login_handshake::LoginHandshake),
         Box::new(crate::cases::inventory_fetch::InventoryFetch),
+        Box::new(crate::cases::inventory_tree_crawl::InventoryTreeCrawl),
         Box::new(crate::cases::asset_decode::AssetDecode),
         Box::new(crate::cases::region_info::RegionInfo),
         Box::new(crate::cases::logout_clean::LogoutClean),

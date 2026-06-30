@@ -19,6 +19,7 @@ pub mod group_session_message;
 pub mod im_1to1;
 pub mod im_typing;
 pub mod inventory_fetch;
+pub mod inventory_tree_crawl;
 pub mod keepalive_ping;
 pub mod login_handshake;
 pub mod logout_clean;
