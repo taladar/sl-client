@@ -1,0 +1,33 @@
+test = "group-notice"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "d8114cb-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T19:38:28.02364747Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+group_create_secs = 0.318747713
+group_join_secs = 0.060701797
+group_source = "created"
+listed_notices_count = 1
+notice_deliver_secs = 0.044084784
+notice_in_history = true
+notice_list_secs = 0.016059575
+notice_received = true
+
+[run.metric_meta.group_create_secs]
+lower_is_better = true
+
+[run.metric_meta.group_join_secs]
+lower_is_better = true
+
+[run.metric_meta.notice_deliver_secs]
+lower_is_better = true
+
+[run.metric_meta.notice_list_secs]
+lower_is_better = true
