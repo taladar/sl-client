@@ -66,6 +66,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::im_1to1::Im1to1),
         Box::new(crate::cases::im_typing::ImTyping),
         Box::new(crate::cases::group_session_message::GroupSessionMessage),
+        Box::new(crate::cases::group_accounting::GroupAccounting),
         Box::new(crate::cases::group_create_activate::GroupCreateActivate),
         Box::new(crate::cases::group_join_leave::GroupJoinLeave),
         Box::new(crate::cases::group_notice::GroupNotice),
