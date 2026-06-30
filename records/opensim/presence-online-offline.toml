@@ -1,0 +1,40 @@
+test = "presence-online-offline"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "ad15887-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T13:08:45.110908968Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+offline_notify_rtt_secs = 5.000961593
+online_notify_rtt_secs = 0.083692041
+
+[run.metric_meta.offline_notify_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.online_notify_rtt_secs]
+lower_is_better = true
+
+[[run]]
+behavior_describe = "ad15887-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T13:10:36.451754845Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+offline_notify_rtt_secs = 0.000038994
+online_notify_rtt_secs = 0.080596537
+
+[run.metric_meta.offline_notify_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.online_notify_rtt_secs]
+lower_is_better = true
