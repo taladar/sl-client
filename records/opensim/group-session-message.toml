@@ -97,3 +97,93 @@ lower_is_better = true
 
 [run.metric_meta.post_leave_ping_secs]
 lower_is_better = true
+
+[[run]]
+behavior_describe = "ecb1a17-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T18:28:57.139333487Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+deliver_rtt_secs = 0.062678445
+delivery_path = "chatterbox-invitation"
+group_create_secs = 0.129834251
+group_join_secs = 0.120966826
+group_source = "created"
+leave_circuit_healthy = true
+post_leave_ping_secs = 0.000414196
+
+[run.metric_meta.deliver_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.group_create_secs]
+lower_is_better = true
+
+[run.metric_meta.group_join_secs]
+lower_is_better = true
+
+[run.metric_meta.post_leave_ping_secs]
+lower_is_better = true
+
+[[run]]
+behavior_describe = "ecb1a17-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T18:43:02.14999415Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+deliver_rtt_secs = 0.104629363
+delivery_path = "chatterbox-invitation"
+group_create_secs = 0.141803116
+group_join_secs = 0.09105923
+group_source = "created"
+leave_circuit_healthy = true
+post_leave_ping_secs = 0.001209246
+
+[run.metric_meta.deliver_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.group_create_secs]
+lower_is_better = true
+
+[run.metric_meta.group_join_secs]
+lower_is_better = true
+
+[run.metric_meta.post_leave_ping_secs]
+lower_is_better = true
+
+[[run]]
+behavior_describe = "ecb1a17-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T18:50:38.350756807Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+deliver_rtt_secs = 0.097052471
+delivery_path = "chatterbox-invitation"
+group_create_secs = 0.149058166
+group_join_secs = 0.045666131
+group_source = "created"
+leave_circuit_healthy = true
+post_leave_ping_secs = 0.000571465
+
+[run.metric_meta.deliver_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.group_create_secs]
+lower_is_better = true
+
+[run.metric_meta.group_join_secs]
+lower_is_better = true
+
+[run.metric_meta.post_leave_ping_secs]
+lower_is_better = true

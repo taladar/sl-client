@@ -1,0 +1,132 @@
+test = "group-join-leave"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "ecb1a17-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T18:12:43.444526385Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+dropped_from_group = true
+group_create_secs = 0.204167238
+group_join_secs = 0.120994819
+group_leave_secs = 0.106076565
+join_success = true
+leave_success = true
+
+[run.metric_meta.group_create_secs]
+lower_is_better = true
+
+[run.metric_meta.group_join_secs]
+lower_is_better = true
+
+[run.metric_meta.group_leave_secs]
+lower_is_better = true
+
+[[run]]
+behavior_describe = "ecb1a17-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T18:28:41.04074147Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+dropped_from_group = true
+group_create_secs = 0.220703226
+group_join_secs = 0.045631482
+group_leave_secs = 0.045623887
+group_source = "created"
+join_success = true
+leave_success = true
+
+[run.metric_meta.group_create_secs]
+lower_is_better = true
+
+[run.metric_meta.group_join_secs]
+lower_is_better = true
+
+[run.metric_meta.group_leave_secs]
+lower_is_better = true
+
+[[run]]
+behavior_describe = "ecb1a17-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T18:42:51.781577664Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+dropped_from_group = true
+group_create_secs = 0.189272323
+group_join_secs = 0.045438042
+group_leave_secs = 0.078152498
+group_source = "created"
+join_success = true
+leave_success = true
+
+[run.metric_meta.group_create_secs]
+lower_is_better = true
+
+[run.metric_meta.group_join_secs]
+lower_is_better = true
+
+[run.metric_meta.group_leave_secs]
+lower_is_better = true
+
+[[run]]
+behavior_describe = "ecb1a17-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T18:48:41.448708027Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+dropped_from_group = true
+group_join_secs = 0.192882903
+group_leave_secs = 0.332235304
+group_source = "premade"
+join_success = true
+leave_success = true
+
+[run.metric_meta.group_join_secs]
+lower_is_better = true
+
+[run.metric_meta.group_leave_secs]
+lower_is_better = true
+
+[[run]]
+behavior_describe = "ecb1a17-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T18:50:28.029270412Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+dropped_from_group = true
+group_create_secs = 0.208367868
+group_join_secs = 0.045432447
+group_leave_secs = 0.060421382
+group_source = "created"
+join_success = true
+leave_success = true
+
+[run.metric_meta.group_create_secs]
+lower_is_better = true
+
+[run.metric_meta.group_join_secs]
+lower_is_better = true
+
+[run.metric_meta.group_leave_secs]
+lower_is_better = true

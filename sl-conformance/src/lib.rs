@@ -23,6 +23,7 @@
 
 pub mod cases;
 pub mod context;
+pub mod fixtures;
 pub mod gitinfo;
 pub mod grid;
 pub mod metrics;

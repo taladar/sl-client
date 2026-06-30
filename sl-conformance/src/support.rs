@@ -11,11 +11,11 @@
 //!   suffixes,
 //! - a [`fixtures`] module of well-known ids.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use sl_client_tokio::{Command, Event};
+use sl_client_tokio::{Command, CreateGroupParams, Event, GroupKey, LindenAmount};
 
-use crate::context::{Session, TestFailure};
+use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 
 /// Generous timeout for the initial region handshake; covers an aditi login,
@@ -115,6 +115,113 @@ pub fn secs_metric(base: &str) -> String {
 #[must_use]
 pub fn count_metric(base: &str) -> String {
     format!("{base}_count")
+}
+
+/// Where the group a membership/messaging case operates on came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroupSource {
+    /// A throwaway group created fresh for this run (the OpenSim default: free
+    /// and disposable).
+    Created,
+    /// A pre-made group configured via [`crate::fixtures`] and reused across runs
+    /// (the Second Life path: avoids the per-run L$100 group-creation fee and the
+    /// founder group-slot churn).
+    Premade,
+}
+
+impl GroupSource {
+    /// The metric label recorded for this source.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Premade => "premade",
+        }
+    }
+}
+
+/// The group a membership/messaging case will operate on, plus where it came
+/// from and (for a freshly created group) how long creation took.
+#[derive(Clone, Copy, Debug)]
+pub struct MembershipGroup {
+    /// The group to drive the case against.
+    pub group_id: GroupKey,
+    /// Whether it was created for this run or reused from fixtures.
+    pub source: GroupSource,
+    /// The create round-trip time, present only when [`source`](Self::source) is
+    /// [`GroupSource::Created`].
+    pub create_rtt: Option<Duration>,
+}
+
+/// Resolve the `index`-th group a group case should operate on.
+///
+/// Prefers the [pre-made group](crate::fixtures) configured at `index` for the
+/// grid — reusing stable groups avoids Second Life's per-run L$100
+/// group-creation fee and the founder group-slot churn (an emptied SL group
+/// purges only ~48 h after dropping below two members). When none is configured
+/// at that position (the norm on the throwaway OpenSim grid), it creates a fresh
+/// open-enrollment group with the given `name` and `charter`, leaving the primary
+/// as founder/owner.
+///
+/// `index` lets a case that needs more than one distinct group take them by
+/// position: the membership/messaging cases use `0`, while
+/// [`super::cases::chat_invite_accept_decline`] uses `0` and `1`.
+///
+/// The returned group is one the **primary** owns or belongs to, so the primary
+/// can drive group traffic on it; a secondary then joins it.
+///
+/// # Errors
+///
+/// Returns [`TestFailure`] if creating the group fails (channel closed, timeout,
+/// disconnect, or the grid reporting failure).
+pub async fn membership_group(
+    ctx: &mut TestContext,
+    index: usize,
+    name: &str,
+    charter: &str,
+) -> Result<MembershipGroup, TestFailure> {
+    if let Some(group_id) = ctx.premade_group(index) {
+        return Ok(MembershipGroup {
+            group_id,
+            source: GroupSource::Premade,
+            create_rtt: None,
+        });
+    }
+
+    let session = ctx.primary();
+    let created_at = Instant::now();
+    session
+        .send(Command::CreateGroup(CreateGroupParams {
+            name: name.to_owned(),
+            charter: charter.to_owned(),
+            show_in_list: false,
+            insignia_id: None,
+            membership_fee: LindenAmount(0),
+            open_enrollment: true,
+            allow_publish: false,
+            mature_publish: false,
+        }))
+        .await?;
+    let (group_id, create_ok, create_message) = session
+        .wait_for(REPLY_TIMEOUT, |event| match event {
+            Event::CreateGroupResult {
+                group_id,
+                success,
+                message,
+            } => Some((*group_id, *success, message.clone())),
+            _ => None,
+        })
+        .await?;
+    let create_rtt = created_at.elapsed();
+    check(
+        create_ok,
+        &format!("group creation failed: {create_message}"),
+    )?;
+    Ok(MembershipGroup {
+        group_id,
+        source: GroupSource::Created,
+        create_rtt: Some(create_rtt),
+    })
 }
 
 /// Well-known ids and labels reused across cases.

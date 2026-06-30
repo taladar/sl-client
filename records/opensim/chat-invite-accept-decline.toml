@@ -35,3 +35,75 @@ lower_is_better = true
 
 [run.metric_meta.decline_invite_rtt_secs]
 lower_is_better = true
+
+[[run]]
+behavior_describe = "ecb1a17-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T18:42:01.981623679Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+accept_group_source = "created"
+accept_invite_rtt_secs = 0.051890772
+accept_promoted_to_joined = true
+chat_session_request_cap = "absent"
+decline_group_source = "created"
+decline_invite_rtt_secs = 0.019386184
+decline_removed_entry = true
+
+[run.metric_meta.accept_invite_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.decline_invite_rtt_secs]
+lower_is_better = true
+
+[[run]]
+behavior_describe = "ecb1a17-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T18:48:56.431802181Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+accept_group_source = "premade"
+accept_invite_rtt_secs = 0.04057682
+accept_promoted_to_joined = true
+chat_session_request_cap = "absent"
+decline_group_source = "premade"
+decline_invite_rtt_secs = 0.092071194
+decline_removed_entry = true
+
+[run.metric_meta.accept_invite_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.decline_invite_rtt_secs]
+lower_is_better = true
+
+[[run]]
+behavior_describe = "ecb1a17-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T18:50:54.040611299Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+accept_group_source = "created"
+accept_invite_rtt_secs = 0.098622641
+accept_promoted_to_joined = true
+chat_session_request_cap = "absent"
+decline_group_source = "created"
+decline_invite_rtt_secs = 0.063522979
+decline_removed_entry = true
+
+[run.metric_meta.accept_invite_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.decline_invite_rtt_secs]
+lower_is_better = true

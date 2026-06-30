@@ -5,14 +5,16 @@
 use std::time::{Duration, Instant, SystemTime};
 
 use sl_client_tokio::{
-    AgentKey, ChatLifecycleView, ChatSessionInfo, ChatSessionKind, Command, CreateGroupParams,
-    Event, GroupKey, ImSessionId, InviteChannel, LindenAmount,
+    AgentKey, ChatLifecycleView, ChatSessionInfo, ChatSessionKind, Command, Event, GroupKey,
+    ImSessionId, InviteChannel,
 };
 
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, secs_metric};
+use crate::support::{
+    self, GroupSource, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, secs_metric,
+};
 
 /// The secondary is invited to two distinct group IM sessions and answers each
 /// differently: it [`Command::AcceptChatInvite`]s one and
@@ -23,9 +25,11 @@ use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, secs_metric
 /// [`ChatLifecycleView::Invited`]; accepting it promotes the entry to
 /// [`ChatLifecycleView::Joined`] and declining it removes the entry entirely
 /// (the registry tracks only live sessions). To provoke a *real* invitation —
-/// not a synthetic registry insert — the primary creates a throwaway
-/// open-enrollment group, the secondary joins it as a member, and the primary
-/// opens the group's IM session and sends one message: because the secondary has
+/// not a synthetic registry insert — the primary takes an open-enrollment group
+/// (created fresh, or a pre-made fixture group reused; see
+/// [`support::membership_group`]), the secondary joins it as a member, and the
+/// primary opens the group's IM session and sends one message: because the
+/// secondary has
 /// not itself joined the session, OpenSim's `GroupsMessagingModule` delivers
 /// that first message as a CAPS `ChatterBoxInvitation`
 /// ([`Event::ConferenceInvited`] with `from_group`), the same path
@@ -96,8 +100,8 @@ impl GridTest for ChatInviteAcceptDecline {
             })?;
 
             // --- Accept path: invite the secondary to a group, then accept. ---
-            let (accept_group, accept_rtt) =
-                provoke_group_invitation(ctx, primary_id, "accept").await?;
+            let (accept_group, accept_source, accept_rtt) =
+                provoke_group_invitation(ctx, primary_id, 0, "accept").await?;
             let accept_session = ChatSessionKind::Group {
                 group_id: accept_group,
             };
@@ -125,8 +129,8 @@ impl GridTest for ChatInviteAcceptDecline {
             )?;
 
             // --- Decline path: invite the secondary to a second group, decline. ---
-            let (decline_group, decline_rtt) =
-                provoke_group_invitation(ctx, primary_id, "decline").await?;
+            let (decline_group, decline_source, decline_rtt) =
+                provoke_group_invitation(ctx, primary_id, 1, "decline").await?;
             let decline_session = ChatSessionKind::Group {
                 group_id: decline_group,
             };
@@ -152,12 +156,35 @@ impl GridTest for ChatInviteAcceptDecline {
                 "declined group session should be removed from the registry",
             )?;
 
+            // On the reused pre-made path, the secondary leaves the groups it
+            // joined so the fixtures are restored to founder-only for the next
+            // run — a *fresh* join is what makes the first message arrive as an
+            // invitation rather than a plain session message. On the throwaway
+            // path the groups are discarded with the run, so this is skipped.
+            for (group_id, source) in [
+                (accept_group, accept_source),
+                (decline_group, decline_source),
+            ] {
+                if source == GroupSource::Premade {
+                    ctx.secondary()
+                        .ok_or_else(|| {
+                            TestFailure::Assertion(
+                                "two-account test ran without a secondary".to_owned(),
+                            )
+                        })?
+                        .send(Command::LeaveGroup(group_id))
+                        .await?;
+                }
+            }
+
             let metrics = ctx.metrics();
             metrics.set_timing(&secs_metric("accept_invite_rtt"), accept_rtt.as_secs_f64());
             metrics.set_timing(
                 &secs_metric("decline_invite_rtt"),
                 decline_rtt.as_secs_f64(),
             );
+            metrics.set("accept_group_source", accept_source.label());
+            metrics.set("decline_group_source", decline_source.label());
             // On OpenSim there is no `ChatSessionRequest` capability, so accept /
             // decline are observable only as the client-side registry transition;
             // the cap POST is the Aditi (Phase Z) variant.
@@ -169,53 +196,37 @@ impl GridTest for ChatInviteAcceptDecline {
     }
 }
 
-/// Creates a throwaway open-enrollment group, has the secondary join it as a
+/// Takes a group (a pre-made one from [`crate::fixtures`] by `index`, or a fresh
+/// throwaway — see [`support::membership_group`]), has the secondary join it as a
 /// member, then has the primary open the group's IM session and send one marker
 /// message — which the secondary, not yet a session participant, receives as a
 /// `ChatterBoxInvitation` ([`Event::ConferenceInvited`] with `from_group`).
-/// Returns the new group's id and the send→invitation round-trip time.
+/// Returns the group's id, where it came from (so the caller can leave a reused
+/// group afterward), and the send→invitation round-trip time.
 ///
-/// `purpose` distinguishes the two groups this case creates (one to accept, one
-/// to decline) in the group name and the marker text.
+/// `index` and `purpose` distinguish the two groups this case needs (one to
+/// accept, one to decline): `index` selects distinct pre-made groups by position,
+/// and `purpose` distinguishes the group name and marker text.
 async fn provoke_group_invitation(
     ctx: &mut TestContext,
     primary_id: AgentKey,
+    index: usize,
     purpose: &str,
-) -> Result<(GroupKey, Duration), TestFailure> {
-    // The group name carries a wall-clock suffix so repeated runs do not collide
-    // on the grid's unique-name constraint. The primary becomes the founder.
+) -> Result<(GroupKey, GroupSource, Duration), TestFailure> {
+    // The throwaway group's name carries a wall-clock suffix so repeated
+    // create-per-run does not collide on the grid's unique-name constraint; it is
+    // ignored on the pre-made path. The primary owns the group either way.
     let unique = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |since| since.as_millis());
-    let group_name = format!("sl-client chat-invite {purpose} {unique}");
-    ctx.primary()
-        .send(Command::CreateGroup(CreateGroupParams {
-            name: group_name,
-            charter: "throwaway group for the chat-invite-accept-decline conformance case"
-                .to_owned(),
-            show_in_list: false,
-            insignia_id: None,
-            membership_fee: LindenAmount(0),
-            open_enrollment: true,
-            allow_publish: false,
-            mature_publish: false,
-        }))
-        .await?;
-    let (group_id, create_ok, create_message) = ctx
-        .primary()
-        .wait_for(REPLY_TIMEOUT, |event| match event {
-            Event::CreateGroupResult {
-                group_id,
-                success,
-                message,
-            } => Some((*group_id, *success, message.clone())),
-            _ => None,
-        })
-        .await?;
-    check(
-        create_ok,
-        &format!("group creation failed: {create_message}"),
-    )?;
+    let group = support::membership_group(
+        ctx,
+        index,
+        &format!("sl-client chat-invite {purpose} {unique}"),
+        "throwaway group for the chat-invite-accept-decline conformance case",
+    )
+    .await?;
+    let group_id = group.group_id;
 
     // The secondary joins the open-enrollment group, becoming a member eligible
     // to receive the group's session traffic — but it does NOT open the session,
@@ -287,7 +298,7 @@ async fn provoke_group_invitation(
         &GroupKey::from(invited_session),
         &group_id,
     )?;
-    Ok((group_id, invite_rtt))
+    Ok((group_id, group.source, invite_rtt))
 }
 
 /// Queries the secondary's chat-session registry and returns the entry for

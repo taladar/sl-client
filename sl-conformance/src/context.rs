@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sl_client_tokio::{
-    AgentKey, Client, ClientDirectories, Command, Diagnostic, Event, InventoryCacheConfig,
-    LoginParams, LoginRejectKind, LoginRequest, RegionHandle, StartLocation,
+    AgentKey, Client, ClientDirectories, Command, Diagnostic, Event, GroupKey,
+    InventoryCacheConfig, LoginParams, LoginRejectKind, LoginRequest, RegionHandle, StartLocation,
 };
 use sl_repl::Avatar;
 use time::format_description::well_known::Rfc3339;
@@ -19,6 +19,7 @@ use time::{Duration as TimeDuration, OffsetDateTime};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::fixtures::Fixtures;
 use crate::grid::Grid;
 use crate::metrics::Metrics;
 use crate::record::Completeness;
@@ -520,6 +521,8 @@ pub struct TestContext {
     tertiary: Option<Session>,
     /// The metrics the test writes.
     metrics: Metrics,
+    /// Environment-specific fixtures (e.g. a pre-made group) for this grid.
+    fixtures: Fixtures,
     /// Whether the test declared its run complete or partial.
     completeness: Completeness,
     /// The note explaining a partial run.
@@ -527,13 +530,14 @@ pub struct TestContext {
 }
 
 impl TestContext {
-    /// Build a context around the given live session(s).
+    /// Build a context around the given live session(s) and grid fixtures.
     #[must_use]
     pub fn new(
         grid: Grid,
         primary: Session,
         secondary: Option<Session>,
         tertiary: Option<Session>,
+        fixtures: Fixtures,
     ) -> Self {
         Self {
             grid,
@@ -541,6 +545,7 @@ impl TestContext {
             secondary,
             tertiary,
             metrics: Metrics::new(),
+            fixtures,
             completeness: Completeness::Complete,
             completeness_note: None,
         }
@@ -550,6 +555,15 @@ impl TestContext {
     #[must_use]
     pub const fn grid(&self) -> Grid {
         self.grid
+    }
+
+    /// The `index`-th pre-made group configured for this grid, if any. When
+    /// present, the group cases reuse it (by position) instead of creating a
+    /// throwaway group per run (see [`crate::fixtures`] for why this matters on
+    /// Second Life).
+    #[must_use]
+    pub fn premade_group(&self, index: usize) -> Option<GroupKey> {
+        self.fixtures.premade_group(index)
     }
 
     /// The primary session.
