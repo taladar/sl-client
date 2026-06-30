@@ -1,0 +1,51 @@
+test = "ais3-folder-lifecycle"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "68af060-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-06-30T15:13:35.766702533Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "68af060-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T15:18:44.105401259Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+create_secs = 0.099534362
+lifecycle_secs = 2.900564533
+move_secs = 0.802315298
+path = "udp"
+purge_secs = 0.797394119
+remove_secs = 0.70158634
+rename_secs = 0.100668635
+
+[run.metric_meta.create_secs]
+lower_is_better = true
+
+[run.metric_meta.lifecycle_secs]
+lower_is_better = true
+
+[run.metric_meta.move_secs]
+lower_is_better = true
+
+[run.metric_meta.purge_secs]
+lower_is_better = true
+
+[run.metric_meta.remove_secs]
+lower_is_better = true
+
+[run.metric_meta.rename_secs]
+lower_is_better = true
