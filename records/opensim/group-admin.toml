@@ -1,0 +1,34 @@
+test = "group-admin"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "cc1c851-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T21:13:35.738731615Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+dropped_from_group = true
+eject_secs = 0.081670512
+eject_success = true
+group_create_secs = 0.426229059
+group_source = "created"
+role_add_secs = 0.048170325
+role_assigned = true
+role_remove_secs = 0.068449833
+role_unassigned = true
+
+[run.metric_meta.eject_secs]
+lower_is_better = true
+
+[run.metric_meta.group_create_secs]
+lower_is_better = true
+
+[run.metric_meta.role_add_secs]
+lower_is_better = true
+
+[run.metric_meta.role_remove_secs]
+lower_is_better = true
