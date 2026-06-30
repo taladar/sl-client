@@ -2409,9 +2409,9 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "activate_group",
             usage: "[group_id]",
             build: |args, ctx| {
-                Ok(Command::ActivateGroup(GroupKey::from(
-                    args.uuid_or_nil(ctx, "group_id", 0)?,
-                )))
+                Ok(Command::ActivateGroup(
+                    args.opt_uuid(ctx, "group_id", 0)?.map(GroupKey::from),
+                ))
             },
         },
         CommandSpec {

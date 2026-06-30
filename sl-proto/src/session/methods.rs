@@ -5405,17 +5405,25 @@ impl Session {
         Ok(())
     }
 
-    /// Makes `group_id` the agent's active group (`ActivateGroup`); pass
-    /// [`Uuid::nil`] to clear it. The simulator confirms with an
-    /// [`Event::ActiveGroupChanged`]. The agent's memberships arrive at login as
+    /// Sets the agent's active group (`ActivateGroup`): `Some(group)` makes that
+    /// group active, `None` clears the active group (sent as the nil group id on
+    /// the wire). The simulator confirms with an [`Event::ActiveGroupChanged`]
+    /// whose [`active_group_id`](crate::ActiveGroup::active_group_id) mirrors the
+    /// `Option`. The agent's memberships arrive at login as
     /// [`Event::GroupMemberships`].
     ///
     /// # Errors
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn activate_group(&mut self, group_id: GroupKey, now: Instant) -> Result<(), Error> {
+    pub fn activate_group(
+        &mut self,
+        group_id: Option<GroupKey>,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        // The nil group id is the wire convention for "no active group".
+        let group_id = group_id.unwrap_or_else(|| GroupKey::from(Uuid::nil()));
         circuit.send_activate_group(group_id, now)?;
         Ok(())
     }

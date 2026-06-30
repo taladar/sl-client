@@ -44,7 +44,10 @@ the active group yields `Event::ActiveGroupChanged`. On Second Life some of this
 The write side covers the full lifecycle, gated by the caller's powers:
 
 - **Lifecycle** — `CreateGroup`, `JoinGroup`, `LeaveGroup`, `ActivateGroup`,
-  `InviteToGroup`, `EjectGroupMembers`.
+  `InviteToGroup`, `EjectGroupMembers`. `ActivateGroup` takes an
+  `Option<GroupKey>`: `Some(group)` makes that group active, `None` clears the
+  active group (sent as the nil group id on the wire), mirroring the
+  `Option` `active_group_id` reported back by `ActiveGroupChanged`.
 - **Profile** — `UpdateGroupInfo` edits an existing group's profile (charter,
   insignia, search visibility, join fee, open-enrollment, and publish flags),
   carried by an `UpdateGroupInfoParams` targeting the group by id (a group

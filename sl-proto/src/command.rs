@@ -421,9 +421,13 @@ pub enum Command {
     /// is the one echoed by the incoming
     /// [`Event::CallingCardOffered`](crate::Event::CallingCardOffered).
     DeclineCallingCard(TransactionId),
-    /// Make a group the active group (`ActivateGroup`); nil clears it. Confirmed
-    /// by [`Event::ActiveGroupChanged`](crate::Event::ActiveGroupChanged).
-    ActivateGroup(GroupKey),
+    /// Set (or clear) the agent's active group (`ActivateGroup`): `Some(group)`
+    /// makes that group active, `None` clears the active group (sent on the wire
+    /// as the nil group id). Confirmed by
+    /// [`Event::ActiveGroupChanged`](crate::Event::ActiveGroupChanged), whose
+    /// [`active_group_id`](crate::ActiveGroup::active_group_id) mirrors this
+    /// `Option`.
+    ActivateGroup(Option<GroupKey>),
     /// Request a group's member roster over **UDP** (`GroupMembersRequest`).
     /// Replies arrive as [`Event::GroupMembers`](crate::Event::GroupMembers).
     RequestGroupMembers(GroupKey),
