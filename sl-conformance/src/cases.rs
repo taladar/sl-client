@@ -18,6 +18,7 @@ pub mod friendship_terminate;
 pub mod give_inventory;
 pub mod grant_user_rights;
 pub mod group_create_activate;
+pub mod group_join_leave;
 pub mod group_session_message;
 pub mod im_1to1;
 pub mod im_typing;

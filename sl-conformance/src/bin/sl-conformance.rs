@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Parser as _;
 use sl_conformance::context::{self, TestContext, TestFailure};
+use sl_conformance::fixtures::Fixtures;
 use sl_conformance::grid::Grid;
 use sl_conformance::record::{Outcome, Record, Run};
 use sl_conformance::registry::{GridTest, find, registry};
@@ -192,6 +193,11 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         .select(args.avatar.as_deref())
         .map_err(|error| Error::Auth(error.to_string()))?;
 
+    // Optional environment-specific fixtures (e.g. a pre-made group the
+    // membership cases reuse instead of creating one per run). Absent by default,
+    // especially on OpenSim where creating per run is free.
+    let fixtures = Fixtures::load(args.grid, args.fixtures.as_deref())?;
+
     // Avatar-availability precondition: refuse only when more avatars are needed
     // than the file provides, before any login happens.
     let secondary = if test.accounts() >= 2 {
@@ -298,6 +304,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         primary_session,
         secondary_session,
         tertiary_session,
+        fixtures,
     );
     let outcome = test.run(&mut ctx).await;
     let (metrics, completeness, completeness_note, primary_sess, secondary_sess, tertiary_sess) =
@@ -499,6 +506,10 @@ struct RunArgs {
     /// credentials.aditi.toml).
     #[clap(long)]
     credentials: Option<PathBuf>,
+    /// The fixtures TOML file (defaults per grid: fixtures.toml /
+    /// fixtures.aditi.toml; absent default file means "no fixtures").
+    #[clap(long)]
+    fixtures: Option<PathBuf>,
     /// Bypass the per-avatar aditi login cooldown.
     #[clap(long)]
     force: bool,
@@ -523,6 +534,9 @@ enum Error {
     /// Credentials could not be loaded or an avatar could not be selected.
     #[error("credentials error: {0}")]
     Auth(String),
+    /// The fixtures file could not be loaded or parsed.
+    #[error("fixtures error: {0}")]
+    Fixtures(#[from] sl_conformance::fixtures::FixturesError),
     /// The named test is not registered.
     #[error("unknown test `{0}`")]
     UnknownTest(String),

@@ -5,6 +5,10 @@
 # checked-in template is sl-repl/testdata/credentials.example.toml.
 credentials.toml
 credentials.*.toml
+# sl-conformance fixtures hold operator-specific grid ids (e.g. a pre-made
+# group), so they are local-only like the credentials files.
+fixtures.toml
+fixtures.*.toml
 # default log files the REPL binaries write into the working dir
 sl-repl-tokio.log
 sl-repl-bevy.log

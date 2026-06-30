@@ -3,12 +3,14 @@
 
 use std::time::{Duration, Instant, SystemTime};
 
-use sl_client_tokio::{Command, CreateGroupParams, Event, GroupKey, LindenAmount};
+use sl_client_tokio::{Command, Event, GroupKey};
 
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, secs_metric};
+use crate::support::{
+    self, GroupSource, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, secs_metric,
+};
 
 /// How a group-session message was delivered to the recipient.
 #[derive(Clone, Copy, Debug)]
@@ -42,11 +44,13 @@ impl Delivery {
 /// broadcast to the region like local chat or addressed to one recipient like a
 /// 1:1 IM ([`super::im_1to1`]). The session id is the group id itself.
 ///
-/// The case is self-contained: it creates a throwaway open-enrollment group
-/// (the primary becomes the founder/owner) and has the secondary
-/// [`Command::JoinGroup`] it, so it depends only on Groups V2 being enabled, not
-/// on any pre-existing group. Both avatars then [`Command::StartGroupSession`]
-/// to register as session participants before the primary
+/// The case takes an open-enrollment group the primary owns — created fresh per
+/// run, or a pre-made fixture group reused (see [`support::membership_group`];
+/// the latter avoids Second Life's per-run group-creation fee) — and has the
+/// secondary [`Command::JoinGroup`] it, so on OpenSim it depends only on Groups
+/// V2 being enabled, not on any pre-existing group. Both avatars then
+/// [`Command::StartGroupSession`] to register as session participants before the
+/// primary
 /// [`Command::SendGroupMessage`]s a marker tagged with its own agent id.
 ///
 /// OpenSim's `GroupsMessagingModule` delivers a group message to a member who is
@@ -114,43 +118,23 @@ impl GridTest for GroupSessionMessage {
                 TestFailure::Assertion("primary login did not report an agent id".to_owned())
             })?;
 
-            // Create a throwaway open-enrollment group. The name carries a
-            // wall-clock suffix so repeated runs do not collide on the grid's
-            // unique-name constraint. The primary becomes the founder/owner.
+            // The group to message over: a pre-made group on grids that
+            // configure one (Second Life), or a throwaway created here (the
+            // OpenSim default). The name carries a wall-clock suffix so repeated
+            // create-per-run does not collide on the grid's unique-name
+            // constraint; it is ignored on the pre-made path. The primary owns
+            // the group either way, so it can drive the session.
             let unique = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map_or(0, |since| since.as_millis());
-            let group_name = format!("sl-client group-session {unique}");
-            let created_at = Instant::now();
-            ctx.primary()
-                .send(Command::CreateGroup(CreateGroupParams {
-                    name: group_name,
-                    charter: "throwaway group for the group-session-message conformance case"
-                        .to_owned(),
-                    show_in_list: false,
-                    insignia_id: None,
-                    membership_fee: LindenAmount(0),
-                    open_enrollment: true,
-                    allow_publish: false,
-                    mature_publish: false,
-                }))
-                .await?;
-            let (group_id, create_ok, create_message) = ctx
-                .primary()
-                .wait_for(REPLY_TIMEOUT, |event| match event {
-                    Event::CreateGroupResult {
-                        group_id,
-                        success,
-                        message,
-                    } => Some((*group_id, *success, message.clone())),
-                    _ => None,
-                })
-                .await?;
-            let create_rtt = created_at.elapsed();
-            check(
-                create_ok,
-                &format!("group creation failed: {create_message}"),
-            )?;
+            let group = support::membership_group(
+                ctx,
+                0,
+                &format!("sl-client group-session {unique}"),
+                "throwaway group for the group-session-message conformance case",
+            )
+            .await?;
+            let group_id = group.group_id;
 
             // The secondary joins the open-enrollment group; once a member, it is
             // eligible to receive the group's session traffic.
@@ -256,8 +240,26 @@ impl GridTest for GroupSessionMessage {
                 })
                 .await?;
 
+            // On the reused pre-made path, the secondary leaves the group so the
+            // fixture is reset to its founding-member-only state for the next
+            // run. On the throwaway path the group is discarded with the run, so
+            // this is unnecessary and skipped.
+            if group.source == GroupSource::Premade {
+                ctx.secondary()
+                    .ok_or_else(|| {
+                        TestFailure::Assertion(
+                            "two-account test ran without a secondary".to_owned(),
+                        )
+                    })?
+                    .send(Command::LeaveGroup(group_id))
+                    .await?;
+            }
+
             let metrics = ctx.metrics();
-            metrics.set_timing(&secs_metric("group_create"), create_rtt.as_secs_f64());
+            if let Some(create_rtt) = group.create_rtt {
+                metrics.set_timing(&secs_metric("group_create"), create_rtt.as_secs_f64());
+            }
+            metrics.set("group_source", group.source.label());
             metrics.set_timing(&secs_metric("group_join"), join_rtt.as_secs_f64());
             metrics.set_timing(&secs_metric("deliver_rtt"), deliver_rtt.as_secs_f64());
             metrics.set("delivery_path", delivery.label());

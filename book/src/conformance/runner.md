@@ -6,7 +6,8 @@
 
 ```text
 sl-conformance run    --grid <opensim|aditi> [--avatar <name>]
-                      [--secondary <name>] [--credentials <path>] [--force] <TEST>
+                      [--secondary <name>] [--credentials <path>]
+                      [--fixtures <path>] [--force] <TEST>
 sl-conformance list   [--grid <opensim|aditi>]
 sl-conformance generate-manpage --output-dir <dir>
 sl-conformance generate-shell-completion --output-file <f> --shell <shell>
@@ -37,6 +38,37 @@ distinct secondary, resolved as:
 
 If none can be resolved, the run is refused before any network activity, naming
 the required versus found count.
+
+## Fixtures (pre-made grid resources)
+
+Some cases need a *stable, pre-existing* grid resource rather than one created
+fresh each run. The membership/messaging group cases are the motivating example:
+on the throwaway OpenSim grid, creating a group per run is free and disposable,
+but on Second Life creating a group costs **L$100**, an emptied group purges
+only after ~48&nbsp;h, and the founder holds a group slot for every group they
+create — so a case that creates per run both spends L$ and marches the founder
+toward Second Life's ~42-group cap.
+
+To avoid that, such a case reads an optional, gitignored fixtures file
+(`fixtures.toml` for OpenSim, `fixtures.aditi.toml` for aditi; override with
+`--fixtures`). It lists pre-made groups the primary owns; a case takes the
+group(s) it needs **by position** — the membership/messaging cases use the
+first, while `chat-invite-accept-decline` uses the first two (it needs two
+distinct pending sessions). When a group is configured at the position a case
+asks for, the case reuses it; otherwise it creates a throwaway. A case that
+joins a reused group also leaves it again, so the fixture is left as it was
+found (a fresh join is also what makes the invitation case fire).
+
+```toml
+# fixtures.aditi.toml — pre-made open-enrollment groups the primary owns.
+premade_groups = [
+  "00000000-0000-0000-0000-000000000000",
+  "11111111-1111-1111-1111-111111111111",
+]
+```
+
+Every field is optional and an absent file is equivalent to an empty one, so no
+fixtures file is needed to run on OpenSim.
 
 ## The aditi cooldown
 
