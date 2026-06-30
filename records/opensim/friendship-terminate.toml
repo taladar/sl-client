@@ -1,0 +1,21 @@
+test = "friendship-terminate"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "0dbf534-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T12:39:57.701387459Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+terminate_echo_rtt_secs = 0.01318182
+terminate_notify_rtt_secs = 0.01337667
+
+[run.metric_meta.terminate_echo_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.terminate_notify_rtt_secs]
+lower_is_better = true

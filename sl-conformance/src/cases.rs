@@ -12,6 +12,7 @@ pub mod chat_self_echo;
 pub mod chat_whisper_shout_range;
 pub mod draw_distance;
 pub mod friendship_offer_accept;
+pub mod friendship_terminate;
 pub mod group_session_message;
 pub mod im_1to1;
 pub mod im_typing;
