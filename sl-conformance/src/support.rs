@@ -226,7 +226,7 @@ pub async fn membership_group(
 
 /// Well-known ids and labels reused across cases.
 pub mod fixtures {
-    use sl_client_tokio::{TextureKey, Uuid};
+    use sl_client_tokio::{AgentKey, TextureKey, Uuid};
 
     use crate::context::TestFailure;
 
@@ -244,6 +244,23 @@ pub mod fixtures {
     /// The conventional credentials-file label for the estate-owner avatar that
     /// estate/land-edit cases log in as (`--avatar estate-owner`).
     pub const ESTATE_OWNER_LABEL: &str = "estate-owner";
+
+    /// The local OpenSim secondary test avatar (`Friend Tester`), created with a
+    /// fixed UUID on this workspace's grid. The `avatar-properties` case reads
+    /// *this* avatar's profile as a known "other avatar" on OpenSim — the account
+    /// exists (so the profile service answers) and need not be logged in. Second
+    /// Life has no such built-in second avatar, so the aditi run reads the
+    /// `other_avatar` configured in `fixtures.aditi.toml` instead.
+    pub const OPENSIM_SECONDARY_AVATAR: &str = "bbbbbbbb-aaaa-cccc-dddd-000000000001";
+
+    /// The OpenSim secondary test avatar as a typed [`AgentKey`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TestFailure::Assertion`] if the constant is malformed.
+    pub fn opensim_secondary_avatar() -> Result<AgentKey, TestFailure> {
+        Ok(AgentKey::from(uuid(OPENSIM_SECONDARY_AVATAR)?))
+    }
 
     /// Parse a well-known UUID literal, failing the test on a malformed value.
     ///
