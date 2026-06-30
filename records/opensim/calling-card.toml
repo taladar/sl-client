@@ -1,0 +1,18 @@
+test = "calling-card"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "d4e80e9-dirty"
+dirty = true
+outcome = "pass"
+completeness = "partial"
+completeness_note = "OpenSim's accept handler is a no-op and sends no confirmation to the offerer; the offer→accept→offerer-confirm round-trip is SL-only (Phase Z)"
+recorded_at = "2026-06-30T14:23:59.436312406Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+offer_rtt_secs = 0.061710789
+
+[run.metric_meta.offer_rtt_secs]
+lower_is_better = true
