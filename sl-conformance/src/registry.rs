@@ -59,6 +59,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::friendship_terminate::FriendshipTerminate),
         Box::new(crate::cases::presence_online_offline::PresenceOnlineOffline),
         Box::new(crate::cases::grant_user_rights::GrantUserRights),
+        Box::new(crate::cases::calling_card::CallingCard),
     ]
 }
 

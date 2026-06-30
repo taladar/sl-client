@@ -6,6 +6,7 @@
 //! stdout, so the runner can stamp and store the result.
 
 pub mod asset_decode;
+pub mod calling_card;
 pub mod chat_hear_other;
 pub mod chat_invite_accept_decline;
 pub mod chat_self_echo;
