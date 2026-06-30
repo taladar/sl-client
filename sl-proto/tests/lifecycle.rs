@@ -8940,6 +8940,62 @@ mod test {
         Ok(())
     }
 
+    /// OpenSim emits a single nil-id placeholder `FolderData` block for an empty
+    /// folder (an LLUDP "stuffing" quirk a real viewer ignores). That phantom
+    /// sub-folder must be filtered out of the descendents reply — otherwise a
+    /// crawl would try to fetch the nil folder (which never answers) and the
+    /// background scheduler would mark it `Fetching` forever. Surfaced live by the
+    /// `library-tree-fetch` conformance case crawling the OpenSim Library tree.
+    #[test]
+    fn inventory_descendents_drops_nil_placeholder_subfolder() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let folder = uuid::Uuid::from_u128(0xF0);
+        let reply = AnyMessage::InventoryDescendents(InventoryDescendents {
+            agent_data: InventoryDescendentsAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                folder_id: folder,
+                owner_id: uuid::Uuid::from_u128(1),
+                version: 7,
+                descendents: 0,
+            },
+            // The sole block is the nil-id stuffing block an empty folder carries.
+            folder_data: vec![InventoryDescendentsFolderDataBlock {
+                folder_id: uuid::Uuid::nil(),
+                parent_id: folder,
+                r#type: -1,
+                name: b"\0".to_vec(),
+            }],
+            item_data: vec![],
+        });
+        let datagram = server_message(&reply, 9, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let folders = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InventoryDescendents {
+                    folder_id, folders, ..
+                } if folder_id == InventoryFolderKey::from(folder) => Some(folders),
+                _ => None,
+            })
+            .ok_or("expected an InventoryDescendents event")?;
+        // The phantom nil folder is gone: the empty folder reports no sub-folders.
+        assert!(
+            folders.is_empty(),
+            "nil placeholder sub-folder should be filtered out, got {folders:?}"
+        );
+        // And the nil folder was never seeded into the model (so the background
+        // crawl can never pick it up and stall).
+        assert_eq!(
+            session.folder_fetch_state(InventoryFolderKey::from(uuid::Uuid::nil())),
+            None
+        );
+        Ok(())
+    }
+
     /// B11: the cache-merge relogin path. A fully-`Loaded` agent tree round-trips
     /// through the on-disk cache bytes; reconciling the restored tree against the
     /// login skeleton on relogin refetches *only* the folders whose version moved
