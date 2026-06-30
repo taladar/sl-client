@@ -70,6 +70,27 @@ pub struct Session {
     diagnostics: Arc<Mutex<Vec<Diagnostic>>>,
     /// The spawned `Client::run` task.
     run: JoinHandle<Result<(), sl_client_tokio::Error>>,
+    /// The grid this session belongs to, retained so the session can reconnect
+    /// the same avatar mid-case (see [`Session::relogin`]).
+    grid: Grid,
+    /// The avatar credentials, retained so [`Session::relogin`] can log the same
+    /// account back in after a [`Session::disconnect`].
+    avatar: Avatar,
+    /// The viewer channel reported at login, retained for [`Session::relogin`].
+    channel: String,
+    /// The viewer version reported at login, retained for [`Session::relogin`].
+    version: String,
+    /// The harness state directory holding the per-avatar login-cooldown stamps,
+    /// so [`Session::relogin`] can honour the aditi cooldown rather than bypass
+    /// it (the initial logins are gated by the runner).
+    state_dir: PathBuf,
+    /// Whether to bypass the login cooldown (the runner's `--force`), threaded so
+    /// [`Session::relogin`] makes the same choice as the initial login.
+    force: bool,
+    /// Whether the run loop is currently live. A [`Session::disconnect`] tears it
+    /// down (the avatar goes offline on the grid) without discarding the identity
+    /// needed to [`Session::relogin`].
+    connected: bool,
 }
 
 impl Session {
@@ -192,6 +213,102 @@ impl Session {
             Err(join) => Err(TestFailure::Join(join.to_string())),
         }
     }
+
+    /// Whether the run loop is currently live (i.e. the avatar is logged in).
+    #[must_use]
+    pub const fn is_connected(&self) -> bool {
+        self.connected
+    }
+
+    /// Log this avatar out and tear the run loop down *without* discarding the
+    /// session — the identity needed to [`Session::relogin`] is kept, so a case
+    /// can take an avatar offline (e.g. to make a peer's instant message go to
+    /// offline storage) and bring the same account back later.
+    ///
+    /// Unlike [`Session::logout`], which consumes the session at the end of a
+    /// run, this leaves a reusable but disconnected handle: sends fail and the
+    /// event stream is empty until [`Session::relogin`].
+    ///
+    /// # Errors
+    ///
+    /// Never returns an error today (a failed logout is logged and the run loop
+    /// is forced down regardless), but the signature is fallible for symmetry
+    /// with [`Session::relogin`] and to allow stricter teardown later.
+    pub async fn disconnect(&mut self) -> Result<(), TestFailure> {
+        if !self.connected {
+            return Ok(());
+        }
+        // Request a clean logout, then force the run loop down by closing the
+        // command channel (mirrors `logout`), and join the task.
+        self.commands.send(Command::Logout).await.ok();
+        let _logged_out = self
+            .wait_for(LOGOUT_GRACE, |event| {
+                matches!(event, Event::LoggedOut).then_some(())
+            })
+            .await;
+        // Replace the live command sender with a dead one (its receiver is
+        // dropped immediately): this drops the only live sender, so the run
+        // loop sees its command channel close and shuts down, and any later
+        // `send` on this disconnected session fails cleanly.
+        let (dead_tx, dead_rx) = mpsc::channel::<Command>(1);
+        drop(dead_rx);
+        self.commands = dead_tx;
+        // Swap the real run task out for an already-finished placeholder so the
+        // struct stays valid, then await the real one.
+        let placeholder = tokio::spawn(async { Ok(()) });
+        let run = std::mem::replace(&mut self.run, placeholder);
+        match run.await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => tracing::warn!("run loop error on disconnect: {error}"),
+            Err(join) => tracing::warn!("run task join error on disconnect: {join}"),
+        }
+        // Replace the event receiver with a closed one (its sender is dropped),
+        // so `wait_for` on a disconnected session returns immediately rather
+        // than blocking until a timeout.
+        let (_event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
+        self.events = event_rx;
+        self.connected = false;
+        Ok(())
+    }
+
+    /// Log the same avatar back in after a [`Session::disconnect`], replacing the
+    /// run loop, channels, and login-derived identity in place.
+    ///
+    /// This performs a fresh XML-RPC login (answering MFA as
+    /// [`login`] does) and, on OpenSim, inherits the "already logged in" retry
+    /// that evicts any stale presence left by the preceding disconnect.
+    ///
+    /// On a grid that rate-limits logins (aditi) it first *waits out* the
+    /// per-avatar login cooldown via [`wait_out_cooldown`] — the same guard the
+    /// runner applies to the initial logins, but waited rather than failed, so an
+    /// in-test relogin honours the rate limit instead of bypassing it. The
+    /// runner's `--force`, threaded onto the session, skips the wait, mirroring
+    /// the initial login; per the project rule, do not force aditi.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`TestFailure`] if the login fails (see [`login`]) or the
+    /// cooldown stamp cannot be written.
+    pub async fn relogin(&mut self) -> Result<(), TestFailure> {
+        let grid = self.grid;
+        let avatar = self.avatar.clone();
+        let channel = self.channel.clone();
+        let version = self.version.clone();
+        let state_dir = self.state_dir.clone();
+        let force = self.force;
+        if grid.needs_cooldown() {
+            let label = avatar_label(&avatar);
+            wait_out_cooldown(&state_dir, &label, force).await?;
+        }
+        *self = connect_and_spawn(grid, &avatar, &channel, &version, &state_dir, force).await?;
+        Ok(())
+    }
+}
+
+/// The stable per-avatar label used for cooldown stamps: the avatar's
+/// `First Last` identity (matches the runner's labelling).
+fn avatar_label(avatar: &Avatar) -> String {
+    format!("{} {}", avatar.first(), avatar.last())
 }
 
 /// Log in to `grid` as `avatar`, answering any MFA challenge, and spawn the run
@@ -206,6 +323,32 @@ pub async fn login(
     avatar: &Avatar,
     channel: &str,
     version: &str,
+    state_dir: &Path,
+    force: bool,
+) -> Result<Session, TestFailure> {
+    connect_and_spawn(grid, avatar, channel, version, state_dir, force).await
+}
+
+/// Perform the XML-RPC login, spawn the run loop and its drains, and assemble a
+/// live [`Session`]. This is the shared core of [`login`] and
+/// [`Session::relogin`].
+///
+/// `state_dir` and `force` are retained on the returned session so a later
+/// [`Session::relogin`] can honour the aditi login cooldown. This function does
+/// not itself enforce the cooldown — the runner gates the initial logins and
+/// [`Session::relogin`] waits it out for reconnections.
+///
+/// # Errors
+///
+/// Returns a [`TestFailure`] if the login URI is invalid, the start location
+/// cannot be parsed, MFA is required but unavailable, or the login fails.
+async fn connect_and_spawn(
+    grid: Grid,
+    avatar: &Avatar,
+    channel: &str,
+    version: &str,
+    state_dir: &Path,
+    force: bool,
 ) -> Result<Session, TestFailure> {
     let login_uri_text = avatar
         .login_uri()
@@ -316,6 +459,13 @@ pub async fn login(
         commands: command_tx,
         diagnostics,
         run,
+        grid,
+        avatar: avatar.clone(),
+        channel: channel.to_owned(),
+        version: version.to_owned(),
+        state_dir: state_dir.to_path_buf(),
+        force,
+        connected: true,
     })
 }
 
@@ -474,11 +624,59 @@ pub fn enforce_cooldown(
             });
         }
     }
+    stamp_login(&path)
+}
+
+/// Wait out, then refresh, the aditi login cooldown for `avatar_label`.
+///
+/// Unlike [`enforce_cooldown`], which *fails* when the cooldown is still active,
+/// this *sleeps* the remaining window and then proceeds — so an in-test
+/// reconnection ([`Session::relogin`]) honours the rate limit instead of either
+/// bypassing it or aborting the run. When `force` is true the wait is skipped
+/// (mirroring the initial login); per the project rule, do not force aditi.
+///
+/// # Errors
+///
+/// Returns [`TestFailure::State`] if the timestamp cannot be written.
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "wall-clock instant/duration subtraction here cannot overflow in practice"
+)]
+pub async fn wait_out_cooldown(
+    state_dir: &Path,
+    avatar_label: &str,
+    force: bool,
+) -> Result<(), TestFailure> {
+    let path = cooldown_path(state_dir, avatar_label);
+    if !force
+        && let Ok(text) = fs_err::read_to_string(&path)
+        && let Ok(previous) = OffsetDateTime::parse(text.trim(), &Rfc3339)
+    {
+        let elapsed = OffsetDateTime::now_utc() - previous;
+        if elapsed < ADITI_LOGIN_COOLDOWN {
+            // Add a one-second margin so the next stamp is unambiguously past the
+            // window, then sleep.
+            let remaining = (ADITI_LOGIN_COOLDOWN - elapsed).whole_seconds().max(0);
+            let secs = u64::try_from(remaining).unwrap_or(0).saturating_add(1);
+            tracing::info!("waiting out aditi login cooldown for {avatar_label}: {secs}s");
+            tokio::time::sleep(Duration::from_secs(secs)).await;
+        }
+    }
+    stamp_login(&path)
+}
+
+/// Write the current time as the last-login stamp at `path`, creating the parent
+/// directory if needed. Shared by [`enforce_cooldown`] and [`wait_out_cooldown`].
+///
+/// # Errors
+///
+/// Returns [`TestFailure::State`] if the directory or file cannot be written.
+fn stamp_login(path: &Path) -> Result<(), TestFailure> {
     if let Some(parent) = path.parent() {
         fs_err::create_dir_all(parent).map_err(|error| TestFailure::State(error.to_string()))?;
     }
     let stamp = now_rfc3339()?;
-    fs_err::write(&path, stamp).map_err(|error| TestFailure::State(error.to_string()))?;
+    fs_err::write(path, stamp).map_err(|error| TestFailure::State(error.to_string()))?;
     Ok(())
 }
 
@@ -537,9 +735,29 @@ pub enum TestFailure {
 
 #[cfg(test)]
 mod tests {
-    use super::{cooldown_path, sanitize_label};
+    use super::{cooldown_path, enforce_cooldown, sanitize_label, wait_out_cooldown};
     use pretty_assertions::assert_eq;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    /// A process-unique scratch directory for a cooldown test, removed on drop.
+    struct ScratchDir(PathBuf);
+
+    impl ScratchDir {
+        /// Create a fresh, empty scratch directory keyed by test name and pid.
+        fn new(name: &str) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("sl-conformance-{name}-{}", std::process::id()));
+            let _removed = fs_err::remove_dir_all(&dir);
+            Self(dir)
+        }
+    }
+
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _removed = fs_err::remove_dir_all(&self.0);
+        }
+    }
 
     /// Labels are sanitised into filesystem-safe stems.
     #[test]
@@ -554,5 +772,42 @@ mod tests {
     fn cooldown_path_layout() {
         let path = cooldown_path(Path::new("/state"), "primary");
         assert!(path.ends_with("aditi-last-login/primary.timestamp"));
+    }
+
+    /// With no prior stamp there is nothing to wait for: `wait_out_cooldown`
+    /// returns promptly and records a fresh stamp.
+    #[tokio::test]
+    async fn wait_out_cooldown_is_immediate_without_a_prior_stamp() {
+        let scratch = ScratchDir::new("wait-noprior");
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            wait_out_cooldown(&scratch.0, "primary", false),
+        )
+        .await;
+        assert!(matches!(result, Ok(Ok(()))), "should not wait or error");
+        assert!(
+            cooldown_path(&scratch.0, "primary").exists(),
+            "a fresh login stamp should be written"
+        );
+    }
+
+    /// `force` skips the wait even when a stamp was just written (an un-forced
+    /// call would otherwise block for the full cooldown window).
+    #[tokio::test]
+    async fn wait_out_cooldown_force_skips_the_wait() {
+        let scratch = ScratchDir::new("wait-force");
+        assert!(
+            enforce_cooldown(&scratch.0, "primary", false).is_ok(),
+            "initial stamp should be written"
+        );
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            wait_out_cooldown(&scratch.0, "primary", true),
+        )
+        .await;
+        assert!(
+            matches!(result, Ok(Ok(()))),
+            "force should return without waiting out the cooldown"
+        );
     }
 }
