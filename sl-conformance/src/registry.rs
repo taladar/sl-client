@@ -56,6 +56,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::session_mark_read::SessionMarkRead),
         Box::new(crate::cases::offline_msg_fetch::OfflineMsgFetch),
         Box::new(crate::cases::friendship_offer_accept::FriendshipOfferAccept),
+        Box::new(crate::cases::friendship_terminate::FriendshipTerminate),
     ]
 }
 
