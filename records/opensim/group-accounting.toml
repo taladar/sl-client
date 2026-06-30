@@ -1,0 +1,25 @@
+test = "group-accounting"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "969c324-dirty"
+dirty = true
+outcome = "pass"
+completeness = "partial"
+completeness_note = "OpenSim has no group-accounting backend: the summary/details/transactions requests are accepted (acked, the circuit stays healthy past the reliable-retransmit budget) but never answered; the reply assertions are the Second Life variant"
+recorded_at = "2026-06-30T20:16:19.997685555Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+group_create_secs = 0.426909914
+group_source = "created"
+ping_rtt_secs = 0.000506431
+replies_received_count = 0
+requests_sent_count = 3
+
+[run.metric_meta.group_create_secs]
+lower_is_better = true
+
+[run.metric_meta.ping_rtt_secs]
+lower_is_better = true
