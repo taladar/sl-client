@@ -2478,13 +2478,26 @@ impl Session {
                     .push_back(Event::ClassifiedInfo(Box::new(classified_info(&reply.data)?)));
             }
             AnyMessage::InventoryDescendents(reply) => {
-                let folders: Vec<InventoryFolder> =
-                    reply.folder_data.iter().map(inventory_folder).collect();
+                // OpenSim emits a single nil-id placeholder `FolderData` block for
+                // an empty folder (an LLUDP "stuffing" quirk a real viewer
+                // ignores); a nil folder/item id is never a real descendent, so
+                // drop it here — otherwise the background crawl would mark the
+                // phantom folder `Fetching` forever and an explicit crawl would
+                // hang fetching it. Mirrors `bulk_update_inventory_from_llsd`.
+                let folders: Vec<InventoryFolder> = reply
+                    .folder_data
+                    .iter()
+                    .map(inventory_folder)
+                    .filter(|folder| !folder.folder_id.uuid().is_nil())
+                    .collect();
                 let items: Vec<InventoryItem> = reply
                     .item_data
                     .iter()
                     .map(inventory_item)
-                    .collect::<Result<_, _>>()?;
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .filter(|item| !item.item_id.uuid().is_nil())
+                    .collect();
                 let folder_id = InventoryFolderKey::from(reply.agent_data.folder_id);
                 // Route into the tree the target folder belongs to (agent or
                 // Library), so a UDP Library fetch stays in the Library tree.

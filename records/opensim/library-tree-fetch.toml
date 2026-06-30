@@ -1,0 +1,98 @@
+test = "library-tree-fetch"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "452d136-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-06-30T16:29:43.339758482Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "452d136-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-06-30T16:32:03.380324236Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "452d136-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-06-30T16:33:28.951117396Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "452d136-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-06-30T16:35:27.950874034Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "452d136-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-06-30T16:38:06.985404615Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "452d136-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-06-30T16:40:18.614658673Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "452d136-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T16:43:28.844427486Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+library_crawl_secs = 0.479907803
+library_folders_total = 7
+library_items_total = 17
+library_max_depth = 1
+
+[run.metric_meta.library_crawl_secs]
+lower_is_better = true

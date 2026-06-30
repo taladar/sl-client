@@ -2839,6 +2839,8 @@ pub(crate) fn group_members_from_caps_llsd(body: &Llsd) -> Option<Event> {
 /// Parses a `FetchInventoryDescendents2` CAPS response body into one
 /// [`Event::InventoryDescendents`] per returned folder. The HTTP response shape
 /// differs from the UDP `InventoryDescendents`, but yields the same value types.
+/// Nil-id placeholder folders/items (which OpenSim emits) are skipped, matching
+/// the UDP fold and `bulk_update_inventory_from_llsd`.
 pub(crate) fn inventory_descendents_from_llsd(body: &Llsd) -> Vec<Event> {
     let Some(folders) = body.get("folders").and_then(Llsd::as_array) else {
         return Vec::new();
@@ -2855,8 +2857,16 @@ pub(crate) fn inventory_descendents_from_llsd(body: &Llsd) -> Vec<Event> {
                 folder_id: InventoryFolderKey::from(uuid_member(folder, "folder_id")),
                 version: i32_member(folder, "version"),
                 descendents: i32_member(folder, "descendents"),
-                folders: categories.iter().map(inventory_folder_from_llsd).collect(),
-                items: items.iter().filter_map(inventory_item_from_llsd).collect(),
+                folders: categories
+                    .iter()
+                    .map(inventory_folder_from_llsd)
+                    .filter(|folder| !folder.folder_id.uuid().is_nil())
+                    .collect(),
+                items: items
+                    .iter()
+                    .filter_map(inventory_item_from_llsd)
+                    .filter(|item| !item.item_id.uuid().is_nil())
+                    .collect(),
             }
         })
         .collect()
