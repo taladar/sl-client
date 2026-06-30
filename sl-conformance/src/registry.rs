@@ -29,6 +29,14 @@ pub trait GridTest: Send + Sync {
         1
     }
 
+    /// Whether the primary session should run with the inventory disk cache
+    /// enabled (default `false`). The runner then supplies a cleared per-case
+    /// cache directory so the case starts cold and can observe the cache being
+    /// reused across a relogin (the `inventory-cache-skip` case).
+    fn inventory_cache(&self) -> bool {
+        false
+    }
+
     /// Run the exercise against the (already logged-in) context.
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a>;
 }
@@ -42,6 +50,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::inventory_tree_crawl::InventoryTreeCrawl),
         Box::new(crate::cases::library_tree_fetch::LibraryTreeFetch),
         Box::new(crate::cases::inventory_item_ops::InventoryItemOps),
+        Box::new(crate::cases::inventory_cache_skip::InventoryCacheSkip),
         Box::new(crate::cases::ais3_folder_lifecycle::Ais3FolderLifecycle),
         Box::new(crate::cases::asset_decode::AssetDecode),
         Box::new(crate::cases::region_info::RegionInfo),

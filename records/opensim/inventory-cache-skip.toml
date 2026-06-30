@@ -1,0 +1,26 @@
+test = "inventory-cache-skip"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "3487b44-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T17:07:31.696042899Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+child_folders_count = 24
+cold_loaded_children_count = 0
+folders_cached_count = 29
+inventory_crawl_secs = 2.882579063
+relogin_secs = 5.102221491
+version_matched_children_count = 24
+warm_loaded_children_count = 24
+
+[run.metric_meta.inventory_crawl_secs]
+lower_is_better = true
+
+[run.metric_meta.relogin_secs]
+lower_is_better = true
