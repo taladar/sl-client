@@ -244,14 +244,38 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         args.grid,
         avatar_label(primary)
     );
-    let primary_session =
-        context::login(args.grid, primary, CHANNEL, version, &state_dir, args.force)
-            .await
-            .map_err(|error| Error::Test(error.to_string()))?;
+
+    // A case that asks for the inventory disk cache gets a cleared per-case,
+    // per-grid directory under the (gitignored) state dir, so it starts cold and
+    // the cache it writes on disconnect is the one its relogin reads back. Cleared
+    // each run so a prior invocation's cache cannot warm this one's cold phase.
+    let primary_cache_dir = if test.inventory_cache() {
+        let dir = state_dir
+            .join("inventory-cache")
+            .join(test.name())
+            .join(args.grid.dir_name());
+        let _removed = fs_err::remove_dir_all(&dir);
+        fs_err::create_dir_all(&dir).map_err(|error| Error::Test(error.to_string()))?;
+        Some(dir)
+    } else {
+        None
+    };
+
+    let primary_session = context::login(
+        args.grid,
+        primary,
+        CHANNEL,
+        version,
+        &state_dir,
+        args.force,
+        primary_cache_dir,
+    )
+    .await
+    .map_err(|error| Error::Test(error.to_string()))?;
     let secondary_session = match secondary {
         Some(secondary) => Some(
             context::login(
-                args.grid, secondary, CHANNEL, version, &state_dir, args.force,
+                args.grid, secondary, CHANNEL, version, &state_dir, args.force, None,
             )
             .await
             .map_err(|error| Error::Test(error.to_string()))?,
@@ -261,7 +285,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
     let tertiary_session = match tertiary {
         Some(tertiary) => Some(
             context::login(
-                args.grid, tertiary, CHANNEL, version, &state_dir, args.force,
+                args.grid, tertiary, CHANNEL, version, &state_dir, args.force, None,
             )
             .await
             .map_err(|error| Error::Test(error.to_string()))?,

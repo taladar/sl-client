@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sl_client_tokio::{
-    AgentKey, Client, Command, Diagnostic, Event, LoginParams, LoginRejectKind, LoginRequest,
-    RegionHandle, StartLocation,
+    AgentKey, Client, ClientDirectories, Command, Diagnostic, Event, InventoryCacheConfig,
+    LoginParams, LoginRejectKind, LoginRequest, RegionHandle, StartLocation,
 };
 use sl_repl::Avatar;
 use time::format_description::well_known::Rfc3339;
@@ -87,6 +87,13 @@ pub struct Session {
     /// Whether to bypass the login cooldown (the runner's `--force`), threaded so
     /// [`Session::relogin`] makes the same choice as the initial login.
     force: bool,
+    /// The per-account inventory disk-cache directory, or `None` to leave the
+    /// inventory disk cache off (the default for every case). When `Some`, the
+    /// runtime loads `<agent-uuid>.inv.llsd.gz` before the login skeleton and
+    /// writes it back on logout, so a [`Session::relogin`] sees the cache the
+    /// preceding [`Session::disconnect`] saved. Retained so the reconnection uses
+    /// the same directory as the initial login (the `inventory-cache-skip` case).
+    cache_dir: Option<PathBuf>,
     /// Whether the run loop is currently live. A [`Session::disconnect`] tears it
     /// down (the avatar goes offline on the grid) without discarding the identity
     /// needed to [`Session::relogin`].
@@ -296,11 +303,15 @@ impl Session {
         let version = self.version.clone();
         let state_dir = self.state_dir.clone();
         let force = self.force;
+        let cache_dir = self.cache_dir.clone();
         if grid.needs_cooldown() {
             let label = avatar_label(&avatar);
             wait_out_cooldown(&state_dir, &label, force).await?;
         }
-        *self = connect_and_spawn(grid, &avatar, &channel, &version, &state_dir, force).await?;
+        *self = connect_and_spawn(
+            grid, &avatar, &channel, &version, &state_dir, force, cache_dir,
+        )
+        .await?;
         Ok(())
     }
 }
@@ -314,6 +325,11 @@ fn avatar_label(avatar: &Avatar) -> String {
 /// Log in to `grid` as `avatar`, answering any MFA challenge, and spawn the run
 /// loop, returning the live [`Session`].
 ///
+/// `cache_dir` is the per-account inventory disk-cache directory, or `None` to
+/// leave the inventory disk cache off (what every case but `inventory-cache-skip`
+/// passes). When `Some`, the runtime caches the agent's inventory tree there
+/// across the session's [`Session::disconnect`]/[`Session::relogin`] cycle.
+///
 /// # Errors
 ///
 /// Returns a [`TestFailure`] if the login URI is invalid, the start location
@@ -325,8 +341,9 @@ pub async fn login(
     version: &str,
     state_dir: &Path,
     force: bool,
+    cache_dir: Option<PathBuf>,
 ) -> Result<Session, TestFailure> {
-    connect_and_spawn(grid, avatar, channel, version, state_dir, force).await
+    connect_and_spawn(grid, avatar, channel, version, state_dir, force, cache_dir).await
 }
 
 /// Perform the XML-RPC login, spawn the run loop and its drains, and assemble a
@@ -349,6 +366,7 @@ async fn connect_and_spawn(
     version: &str,
     state_dir: &Path,
     force: bool,
+    cache_dir: Option<PathBuf>,
 ) -> Result<Session, TestFailure> {
     let login_uri_text = avatar
         .login_uri()
@@ -418,6 +436,21 @@ async fn connect_and_spawn(
     // logout that never received its `LogoutReply`); they are off by default.
     client.set_diagnostics(true);
 
+    // Enable the inventory disk cache when the case asked for one (only
+    // `inventory-cache-skip` does). The runtime then loads the cache before the
+    // login skeleton and reconciles it, so version-matching folders stay loaded
+    // across a relogin instead of being refetched.
+    if let Some(dir) = cache_dir.as_ref() {
+        client.set_inventory_cache_config(InventoryCacheConfig {
+            enabled: true,
+            ..InventoryCacheConfig::default()
+        });
+        client.set_directories(ClientDirectories {
+            agent_cache_dir: Some(dir.clone()),
+            ..ClientDirectories::default()
+        });
+    }
+
     let agent_id = client.agent_id();
     let region_handle = client.region_handle();
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
@@ -465,6 +498,7 @@ async fn connect_and_spawn(
         version: version.to_owned(),
         state_dir: state_dir.to_path_buf(),
         force,
+        cache_dir,
         connected: true,
     })
 }
