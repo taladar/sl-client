@@ -244,22 +244,27 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         args.grid,
         avatar_label(primary)
     );
-    let primary_session = context::login(args.grid, primary, CHANNEL, version)
-        .await
-        .map_err(|error| Error::Test(error.to_string()))?;
+    let primary_session =
+        context::login(args.grid, primary, CHANNEL, version, &state_dir, args.force)
+            .await
+            .map_err(|error| Error::Test(error.to_string()))?;
     let secondary_session = match secondary {
         Some(secondary) => Some(
-            context::login(args.grid, secondary, CHANNEL, version)
-                .await
-                .map_err(|error| Error::Test(error.to_string()))?,
+            context::login(
+                args.grid, secondary, CHANNEL, version, &state_dir, args.force,
+            )
+            .await
+            .map_err(|error| Error::Test(error.to_string()))?,
         ),
         None => None,
     };
     let tertiary_session = match tertiary {
         Some(tertiary) => Some(
-            context::login(args.grid, tertiary, CHANNEL, version)
-                .await
-                .map_err(|error| Error::Test(error.to_string()))?,
+            context::login(
+                args.grid, tertiary, CHANNEL, version, &state_dir, args.force,
+            )
+            .await
+            .map_err(|error| Error::Test(error.to_string()))?,
         ),
         None => None,
     };

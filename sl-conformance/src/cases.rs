@@ -18,6 +18,7 @@ pub mod inventory_fetch;
 pub mod keepalive_ping;
 pub mod login_handshake;
 pub mod logout_clean;
+pub mod offline_msg_fetch;
 pub mod region_info;
 pub mod session_mark_read;
 pub mod throttle_set;
