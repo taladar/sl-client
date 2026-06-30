@@ -1,0 +1,34 @@
+test = "inventory-item-ops"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "3a320e1-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T16:15:03.689327851Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+copy_secs = 0.100542778
+create_secs = 0.097397598
+lifecycle_secs = 1.198513691
+link_secs = 0.200458827
+move_secs = 0.800112856
+path = "udp"
+
+[run.metric_meta.copy_secs]
+lower_is_better = true
+
+[run.metric_meta.create_secs]
+lower_is_better = true
+
+[run.metric_meta.lifecycle_secs]
+lower_is_better = true
+
+[run.metric_meta.link_secs]
+lower_is_better = true
+
+[run.metric_meta.move_secs]
+lower_is_better = true
