@@ -1,0 +1,47 @@
+test = "group-roster"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "6c5d2e4-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T19:15:51.184443523Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+group_create_secs = 0.223001667
+group_source = "created"
+member_reply_count = 1
+members_request_secs = 0.01498409
+members_returned_count = 1
+profile_request_secs = 0.022858847
+reported_member_count = 1
+reported_role_count = 3
+role_member_pairs_count = 2
+role_members_request_secs = 0.00991571
+role_reply_count = 3
+roles_request_secs = 0.050508988
+roles_returned_count = 3
+selected_titles_count = 1
+titles_request_secs = 0.015164393
+titles_returned_count = 2
+
+[run.metric_meta.group_create_secs]
+lower_is_better = true
+
+[run.metric_meta.members_request_secs]
+lower_is_better = true
+
+[run.metric_meta.profile_request_secs]
+lower_is_better = true
+
+[run.metric_meta.role_members_request_secs]
+lower_is_better = true
+
+[run.metric_meta.roles_request_secs]
+lower_is_better = true
+
+[run.metric_meta.titles_request_secs]
+lower_is_better = true
