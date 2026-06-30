@@ -1,0 +1,94 @@
+test = "grant-user-rights"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "0d9d096-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-06-30T13:40:50.930186484Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "0d9d096-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-06-30T13:44:42.313738694Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "0d9d096-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-06-30T13:48:37.386886354Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "0d9d096-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-06-30T13:50:11.25540887Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "0d9d096-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T13:55:39.448330679Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+grant_echo_rtt_secs = 0.280911489
+grant_notify_rtt_secs = 0.28120148
+granted_rights_count = 7
+
+[run.metric_meta.grant_echo_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.grant_notify_rtt_secs]
+lower_is_better = true
+
+[[run]]
+behavior_describe = "0d9d096-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-06-30T13:58:19.783440417Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+grant_echo_rtt_secs = 0.004413597
+grant_notify_rtt_secs = 0.004677758
+granted_rights_count = 7
+
+[run.metric_meta.grant_echo_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.grant_notify_rtt_secs]
+lower_is_better = true
