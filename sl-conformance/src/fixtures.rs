@@ -27,11 +27,16 @@
 //!     "00000000-0000-0000-0000-000000000000",
 //!     "11111111-1111-1111-1111-111111111111",
 //! ]
+//!
+//! # A second, stable avatar whose profile the `avatar-properties` case reads.
+//! # On OpenSim the case falls back to the local secondary test avatar, so this
+//! # is only needed on Second Life (where there is no built-in second avatar).
+//! other_avatar = "22222222-2222-2222-2222-222222222222"
 //! ```
 
 use std::path::{Path, PathBuf};
 
-use sl_client_tokio::{GroupKey, Uuid};
+use sl_client_tokio::{AgentKey, GroupKey, Uuid};
 
 use crate::grid::Grid;
 
@@ -42,6 +47,10 @@ pub struct Fixtures {
     /// group cases (by position) instead of creating throwaway groups per run. An
     /// empty list (the default, and the norm on OpenSim) means "create per run".
     premade_groups: Vec<GroupKey>,
+    /// A second, stable avatar whose profile the `avatar-properties` case reads.
+    /// Needed only on Second Life, which has no built-in second avatar; on
+    /// OpenSim the case falls back to the local secondary test avatar.
+    other_avatar: Option<AgentKey>,
 }
 
 /// The raw TOML shape, before ids are parsed into typed keys.
@@ -52,6 +61,10 @@ struct RawFixtures {
     /// [`Fixtures::premade_groups`].
     #[serde(default)]
     premade_groups: Vec<String>,
+    /// The second-avatar id as a UUID string, parsed into
+    /// [`Fixtures::other_avatar`].
+    #[serde(default)]
+    other_avatar: Option<String>,
 }
 
 /// Why a fixtures file could not be turned into [`Fixtures`].
@@ -151,7 +164,21 @@ impl Fixtures {
                     })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { premade_groups })
+        let other_avatar = raw
+            .other_avatar
+            .map(|value| {
+                Uuid::parse_str(&value)
+                    .map(AgentKey::from)
+                    .map_err(|_invalid| FixturesError::BadUuid {
+                        field: "other_avatar",
+                        value,
+                    })
+            })
+            .transpose()?;
+        Ok(Self {
+            premade_groups,
+            other_avatar,
+        })
     }
 
     /// The `index`-th pre-made group, if one is configured at that position for
@@ -161,6 +188,14 @@ impl Fixtures {
     #[must_use]
     pub fn premade_group(&self, index: usize) -> Option<GroupKey> {
         self.premade_groups.get(index).copied()
+    }
+
+    /// The configured second avatar whose profile the `avatar-properties` case
+    /// reads, if any. Needed only on Second Life; OpenSim falls back to the local
+    /// secondary test avatar.
+    #[must_use]
+    pub const fn other_avatar(&self) -> Option<AgentKey> {
+        self.other_avatar
     }
 }
 
@@ -208,6 +243,7 @@ mod tests {
                 "11111111-2222-3333-4444-555555555555".to_owned(),
                 "22222222-3333-4444-5555-666666666666".to_owned(),
             ],
+            other_avatar: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.premade_group(0).is_some());
@@ -216,7 +252,38 @@ mod tests {
         assert_ne!(fixtures.premade_group(0), fixtures.premade_group(1));
         // No third group configured.
         assert_eq!(fixtures.premade_group(2), None);
+        // No other-avatar configured here.
+        assert_eq!(fixtures.other_avatar(), None);
         Ok(())
+    }
+
+    /// A well-formed `other_avatar` parses into a typed key; an absent one is
+    /// `None`.
+    #[test]
+    fn parses_other_avatar() -> Result<(), super::FixturesError> {
+        let raw = RawFixtures {
+            premade_groups: Vec::new(),
+            other_avatar: Some("33333333-4444-5555-6666-777777777777".to_owned()),
+        };
+        let fixtures = Fixtures::from_raw(raw)?;
+        assert!(fixtures.other_avatar().is_some());
+        Ok(())
+    }
+
+    /// A malformed `other_avatar` is a `BadUuid` error, not a silent drop.
+    #[test]
+    fn rejects_bad_other_avatar() {
+        let raw = RawFixtures {
+            premade_groups: Vec::new(),
+            other_avatar: Some("not-a-uuid".to_owned()),
+        };
+        assert!(matches!(
+            Fixtures::from_raw(raw),
+            Err(super::FixturesError::BadUuid {
+                field: "other_avatar",
+                ..
+            })
+        ));
     }
 
     /// A malformed entry in `premade_groups` is a `BadUuid` error, not a silent
@@ -225,6 +292,7 @@ mod tests {
     fn rejects_bad_premade_group() {
         let raw = RawFixtures {
             premade_groups: vec!["not-a-uuid".to_owned()],
+            other_avatar: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),

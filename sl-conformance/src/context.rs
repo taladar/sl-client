@@ -566,6 +566,14 @@ impl TestContext {
         self.fixtures.premade_group(index)
     }
 
+    /// The configured second avatar whose profile the `avatar-properties` case
+    /// reads, if any. Needed only on Second Life (which has no built-in second
+    /// avatar); OpenSim falls back to the local secondary test avatar.
+    #[must_use]
+    pub const fn other_avatar(&self) -> Option<AgentKey> {
+        self.fixtures.other_avatar()
+    }
+
     /// The primary session.
     pub const fn primary(&mut self) -> &mut Session {
         &mut self.primary
