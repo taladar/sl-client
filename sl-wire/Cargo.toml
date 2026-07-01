@@ -15,13 +15,19 @@ categories = ["encoding", "parser-implementations", "network-programming"]
 
 exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
+[features]
+# Derive `serde::Serialize` on the generated message/block structs and
+# `AnyMessage`, so decoded messages can be serialized (e.g. to JSON) by tools.
+serde = ["dep:serde", "uuid/serde"]
+
 [dependencies]
 base64 = { version = "0.22.1" }
 md5 = { version = "0.7.0" }
 miniz_oxide = { version = "0.8.9" }
 roxmltree = { version = "0.20.0" }
+serde = { version = "1.0.228", features = ["derive"], optional = true }
 sl-llsd = { version = "0.1.0", path = "../sl-llsd" }
-sl-types = { version = "0.6.1", path = "../../sl-map-tools/sl-types" }
+sl-types = { version = "0.6.2", path = "../../sl-map-tools/sl-types" }
 thiserror = { version = "2.0.18" }
 url = { version = "2.5.8" }
 uuid = { version = "1.18.1" }

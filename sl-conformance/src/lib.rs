@@ -31,6 +31,7 @@ pub mod record;
 pub mod registry;
 pub mod report;
 pub mod support;
+pub mod trace;
 
 pub use grid::Grid;
 pub use metrics::Metrics;
