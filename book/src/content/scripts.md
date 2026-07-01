@@ -82,6 +82,61 @@ ready to answer:
   script wants (take controls, animate the agent, attach, debit, …). The viewer
   grants a subset with `ScriptAnswer` (`Command::AnswerScriptPermissions`).
 
+## Uploading & compiling a script
+
+Editing a script's source is **not** a plain asset upload: the viewer never
+compiles LSL (or Lua) locally — it POSTs the raw source to a capability and the
+**simulator compiles it synchronously** and returns the result. Two capabilities
+carry the source, chosen by where the script lives:
+
+- **Agent inventory** — `UpdateScriptAgent`, carrying the `item_id`.
+- **Object task inventory** — `UpdateScriptTask`, carrying `task_id`, `item_id`,
+  `is_script_running`, and an optional `experience`.
+
+Both also carry a **compile target** — the `target` field, one of `mono`,
+`lsl2`, or `luau`. This is a *request* for a backend, not a local action: Second
+Life honours it (LSL Mono, legacy LSL, or Lua/SLua via Luau), while OpenSim
+ignores it and picks the language from a source-header comment. Lua and LSL
+share the same script asset type; the language is also recorded as an inventory
+*subtype* in the low byte of the item flags (`Lsl` = 0, `Luau` = 1).
+
+The completion reply carries the simulator's compile outcome: a `compiled`
+boolean and an `errors` array of diagnostic strings. A script can upload
+successfully as an asset yet fail to compile — that is not a transport
+failure.
+
+Creating a brand-new script goes through `CreateInventoryItem` (carrying the
+language subtype): the **simulator fills a compilable default body** (the LSL
+default, or the Lua default on a SLua-capable grid) — never an empty,
+non-compiling script. Replace that body with custom source (and compile it) with
+a follow-up upload.
+
+> **In this codebase**
+>
+> - Upload: `Command::UploadScript { location, target, source }`, where
+>   `location` is `ScriptUploadLocation::AgentInventory { item_id }` or
+>   `::TaskInventory { task_id, item_id, running, experience }`, and `target`
+>   is the `#[non_exhaustive]` `ScriptTarget` (`Lsl2` / `Mono` / `Luau`). The
+>   result is `Event::ScriptUploaded { new_asset, new_inventory_item, compiled,
+>   errors, running }`; a transport failure is `Event::AssetUploadFailed`
+>   instead.
+> - Compile diagnostics are parsed into `ScriptCompileError { raw, line, column,
+>   message }` (the `raw` string is always preserved; the position is a
+>   best-effort parse of the grid's format).
+> - Create: `Command::CreateScript { folder_id, name, description,
+>   next_owner_mask, language }` (`ScriptLanguage::Lsl` / `Luau`), backed by
+>   `Session::create_script`; the reply is `Event::InventoryItemCreated`.
+> - The generic asset-upload commands (`UploadAsset` / `UpdateInventoryAsset`)
+>   **cannot** carry a script — `UpdateInventoryAsset` takes an
+>   `UpdatableAssetType` with no script variant, so a script update through the
+>   compile-blind path is a compile error, not a silent discard.
+> - The two capabilities are `CAP_UPDATE_SCRIPT_AGENT` /
+>   `CAP_UPDATE_SCRIPT_TASK`; the request builders are
+>   `build_update_script_agent_request` /
+>   `build_update_script_task_request` in `sl-wire/src/llsd.rs`; the two-step
+>   upload runner is `run_script_upload` in each runtime crate's `upload.rs`.
+> - REPL commands `create_script`, `upload_script_agent`, `upload_script_task`.
+
 ## Server side
 
 A simulator built on `SimSession` decodes each inbound task-script message into

@@ -541,9 +541,241 @@ pub struct MuteEntry {
     pub flags: MuteFlags,
 }
 
+// ---------------------------------------------------------------------------
+// Script upload & compilation control (`UpdateScriptAgent` / `UpdateScriptTask`).
+// ---------------------------------------------------------------------------
+
+/// The compiler / runtime backend a script upload asks the simulator to compile
+/// for — the `target` field of an `UpdateScriptAgent` / `UpdateScriptTask`
+/// capability POST.
+///
+/// The **simulator** compiles; this only *requests* a backend (the viewer never
+/// compiles locally). Second Life honours the token; OpenSim ignores it and picks
+/// the language from a source-header comment, so an unknown backend does no harm
+/// there.
+///
+/// `#[non_exhaustive]`: Linden Lab's own viewer moved this from a fixed
+/// `{ LSL2, MONO }` enum to a free-form combo whose values now include `luau`
+/// (Lua/SLua), with more runtimes (e.g. a new LSL VM) in progress. New backends
+/// arrive rarely (every few years), so each is added as a variant when it ships.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ScriptTarget {
+    /// Legacy LSL bytecode (`"lsl2"`).
+    Lsl2,
+    /// Mono / CIL (`"mono"`) — the Second Life default for LSL.
+    Mono,
+    /// Lua / SLua, compiled with Luau (`"luau"`).
+    Luau,
+}
+
+impl ScriptTarget {
+    /// The wire token for this backend (the `target` field value).
+    #[must_use]
+    pub const fn to_wire(self) -> &'static str {
+        match self {
+            Self::Lsl2 => "lsl2",
+            Self::Mono => "mono",
+            Self::Luau => "luau",
+        }
+    }
+
+    /// Classifies a `target` wire token, or `None` for one this build does not
+    /// know (a backend Linden Lab has added but this crate has not yet modelled).
+    #[must_use]
+    pub fn from_wire(token: &str) -> Option<Self> {
+        match token {
+            "lsl2" => Some(Self::Lsl2),
+            "mono" => Some(Self::Mono),
+            "luau" => Some(Self::Luau),
+            _ => None,
+        }
+    }
+}
+
+/// The scripting language a script inventory item is written in, carried in the
+/// low byte of the item's `flags` (`II_FLAGS_SUBTYPE_MASK`), as Linden Lab's
+/// viewer records it (`ScriptSubtype_t`). Distinct from [`ScriptTarget`], which
+/// is a per-upload *compile* request; this is a persisted property of the item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ScriptLanguage {
+    /// LSL (`SST_LSL = 0`).
+    Lsl,
+    /// Lua / SLua (`SST_LUA = 1`).
+    Luau,
+}
+
+impl ScriptLanguage {
+    /// The item-`flags` low-byte mask carrying the script subtype
+    /// (`II_FLAGS_SUBTYPE_MASK`).
+    pub const SUBTYPE_MASK: u32 = 0x0000_00ff;
+
+    /// The `ScriptSubtype_t` byte for this language (`SST_LSL`/`SST_LUA`).
+    #[must_use]
+    pub const fn subtype(self) -> u8 {
+        match self {
+            Self::Lsl => 0,
+            Self::Luau => 1,
+        }
+    }
+
+    /// Classifies a `ScriptSubtype_t` byte, or `None` for an unknown subtype.
+    #[must_use]
+    pub const fn from_subtype(byte: u8) -> Option<Self> {
+        match byte {
+            0 => Some(Self::Lsl),
+            1 => Some(Self::Luau),
+            _ => None,
+        }
+    }
+
+    /// The language recorded in an inventory item's `flags`, reading the subtype
+    /// low byte ([`SUBTYPE_MASK`](Self::SUBTYPE_MASK)); `None` for an unknown
+    /// subtype.
+    #[must_use]
+    pub fn from_item_flags(flags: u32) -> Option<Self> {
+        let byte = u8::try_from(flags & Self::SUBTYPE_MASK).ok()?;
+        Self::from_subtype(byte)
+    }
+}
+
+/// Where a script's source is being uploaded to — selecting the capability and
+/// the request body for [`Command::UploadScript`](crate::Command::UploadScript).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScriptUploadLocation {
+    /// A script item in the agent's own inventory (`UpdateScriptAgent`).
+    AgentInventory {
+        /// The script inventory item whose source is being replaced.
+        item_id: InventoryKey,
+    },
+    /// A script item inside an in-world object's task inventory
+    /// (`UpdateScriptTask`).
+    TaskInventory {
+        /// The object (task) holding the script.
+        task_id: ObjectKey,
+        /// The script item within that object's inventory.
+        item_id: InventoryKey,
+        /// Whether the script should be running after the update
+        /// (`is_script_running`).
+        running: bool,
+        /// The experience the script runs under, or `None` outside an experience.
+        experience: Option<ExperienceKey>,
+    },
+}
+
+/// One compiler diagnostic from a script upload, parsed (best-effort) out of one
+/// entry of the capability response's `errors` array.
+///
+/// The [`raw`](Self::raw) string is always preserved verbatim; [`line`](Self::line)
+/// / [`column`](Self::column) / [`message`](Self::message) are a best-effort split
+/// of the grid's format (Second Life Mono and OpenSim XEngine format these
+/// differently), falling back to `line`/`column` `None` and `message == raw` when
+/// no position prefix is recognised.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptCompileError {
+    /// The diagnostic string exactly as the simulator sent it.
+    pub raw: String,
+    /// The 1-based source line, if a position prefix was recognised.
+    pub line: Option<u32>,
+    /// The source column, if a position prefix was recognised.
+    pub column: Option<u32>,
+    /// The human-readable message (the diagnostic with any position prefix
+    /// stripped, or the whole string when none was found).
+    pub message: String,
+}
+
+impl ScriptCompileError {
+    /// Parses one compiler-error string into a structured diagnostic, keeping the
+    /// original in [`raw`](Self::raw). Recognises a leading `(line, col)` prefix
+    /// (OpenSim / Mono) or a `line:col:` prefix, else leaves the position empty
+    /// and the whole string as the message.
+    #[must_use]
+    pub fn parse(raw: &str) -> Self {
+        let trimmed = raw.trim();
+        if let Some((line, column, message)) = parse_paren_position(trimmed) {
+            return Self {
+                raw: raw.to_owned(),
+                line: Some(line),
+                column: Some(column),
+                message,
+            };
+        }
+        if let Some((line, column, message)) = parse_colon_position(trimmed) {
+            return Self {
+                raw: raw.to_owned(),
+                line: Some(line),
+                column: Some(column),
+                message,
+            };
+        }
+        Self {
+            raw: raw.to_owned(),
+            line: None,
+            column: None,
+            message: trimmed.to_owned(),
+        }
+    }
+}
+
+/// Parses a leading `(line, col)` position (e.g. `"(4, 20): message"`, as OpenSim
+/// XEngine and SL Mono emit), returning `(line, col, message)` with the prefix
+/// stripped. The message keeps whatever follows the closing paren (minus a
+/// leading `:`/whitespace).
+fn parse_paren_position(s: &str) -> Option<(u32, u32, String)> {
+    let rest = s.strip_prefix('(')?;
+    let (inside, after) = rest.split_once(')')?;
+    let mut nums = inside.split(',');
+    let line = nums.next()?.trim().parse::<u32>().ok()?;
+    let column = nums.next()?.trim().parse::<u32>().ok()?;
+    let message = after
+        .trim_start_matches(|c: char| c == ':' || c.is_whitespace())
+        .to_owned();
+    Some((line, column, message))
+}
+
+/// Parses a leading `line:col:` position (e.g. `"12:3: message"`), returning
+/// `(line, col, message)` with the prefix stripped.
+fn parse_colon_position(s: &str) -> Option<(u32, u32, String)> {
+    let mut parts = s.splitn(3, ':');
+    let line = parts.next()?.trim().parse::<u32>().ok()?;
+    let column = parts.next()?.trim().parse::<u32>().ok()?;
+    let message = parts.next()?.trim_start().to_owned();
+    Some((line, column, message))
+}
+
+/// A compilable default LSL script body, matching what a viewer's "New Script"
+/// leaves in a fresh item (the classic Second Life starter). Handy for seeding a
+/// body through [`Command::UploadScript`](crate::Command::UploadScript) so an
+/// empty (non-compiling) source is never uploaded. Creating an item with
+/// [`Session::create_inventory_item`](crate::Session::create_inventory_item)
+/// already gets the simulator's own default body; this is for the explicit-seed
+/// path.
+pub const DEFAULT_LSL_SCRIPT: &str = "default\n\
+    {\n\
+    \x20   state_entry()\n\
+    \x20   {\n\
+    \x20       llSay(0, \"Hello, Avatar!\");\n\
+    \x20   }\n\
+    \n\
+    \x20   touch_start(integer total_number)\n\
+    \x20   {\n\
+    \x20       llSay(0, \"Touched.\");\n\
+    \x20   }\n\
+    }\n";
+
+/// A compilable default Lua/SLua script body — a comment-only program, which is
+/// valid Luau (unlike an empty LSL script, an empty Luau program compiles). Used
+/// like [`DEFAULT_LSL_SCRIPT`] to seed a non-empty body for a `luau`
+/// [`ScriptTarget`] upload.
+pub const DEFAULT_LUAU_SCRIPT: &str = "-- SLua script\n";
+
 #[cfg(test)]
 mod tests {
-    use super::{ChatChannel, PermissionRole, ScriptControlAction, ScriptPermissions};
+    use super::{
+        ChatChannel, PermissionRole, ScriptCompileError, ScriptControlAction, ScriptLanguage,
+        ScriptPermissions, ScriptTarget,
+    };
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -613,5 +845,59 @@ mod tests {
         for raw in [0_i32, 5, -1234, i32::MIN, i32::MAX] {
             assert_eq!(ChatChannel(raw).0, raw);
         }
+    }
+
+    #[test]
+    fn script_target_wire_round_trips() {
+        for target in [ScriptTarget::Lsl2, ScriptTarget::Mono, ScriptTarget::Luau] {
+            assert_eq!(ScriptTarget::from_wire(target.to_wire()), Some(target));
+        }
+        assert_eq!(ScriptTarget::Luau.to_wire(), "luau");
+        // An unknown backend (e.g. one LL adds later) is not silently coerced.
+        assert_eq!(ScriptTarget::from_wire("lso2"), None);
+        assert_eq!(ScriptTarget::from_wire(""), None);
+    }
+
+    #[test]
+    fn script_language_subtype_and_item_flags() {
+        assert_eq!(ScriptLanguage::Lsl.subtype(), 0);
+        assert_eq!(ScriptLanguage::Luau.subtype(), 1);
+        assert_eq!(ScriptLanguage::from_subtype(0), Some(ScriptLanguage::Lsl));
+        assert_eq!(ScriptLanguage::from_subtype(1), Some(ScriptLanguage::Luau));
+        assert_eq!(ScriptLanguage::from_subtype(2), None);
+        // The subtype lives in the low byte of the item flags; higher bits are
+        // other flag bits and must be ignored.
+        assert_eq!(
+            ScriptLanguage::from_item_flags(0xff00 | 0x01),
+            Some(ScriptLanguage::Luau)
+        );
+        assert_eq!(
+            ScriptLanguage::from_item_flags(0xdead_0000),
+            Some(ScriptLanguage::Lsl)
+        );
+    }
+
+    #[test]
+    fn script_compile_error_parses_opensim_and_mono_formats() {
+        // OpenSim / Mono parenthesised position.
+        let paren = ScriptCompileError::parse("(4, 20): ERROR: Syntax error");
+        assert_eq!(paren.line, Some(4));
+        assert_eq!(paren.column, Some(20));
+        assert_eq!(paren.message, "ERROR: Syntax error");
+        assert_eq!(paren.raw, "(4, 20): ERROR: Syntax error");
+
+        // `line:col:` position.
+        let colon = ScriptCompileError::parse("12:3: unexpected token");
+        assert_eq!(colon.line, Some(12));
+        assert_eq!(colon.column, Some(3));
+        assert_eq!(colon.message, "unexpected token");
+
+        // No recognised position — whole (trimmed) string is the message, raw
+        // preserved verbatim.
+        let plain = ScriptCompileError::parse("  could not compile  ");
+        assert_eq!(plain.line, None);
+        assert_eq!(plain.column, None);
+        assert_eq!(plain.message, "could not compile");
+        assert_eq!(plain.raw, "  could not compile  ");
     }
 }

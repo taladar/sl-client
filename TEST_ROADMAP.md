@@ -1258,6 +1258,34 @@ OpenSim may not.
   reply ping ≈ 3.6 ms. `[both]`; the aditi run is deferred with the batch (no
   aditi record this session).
 - [ ] `script-running` — query and toggle script running, reset. `1av`.
+- [x] `script-upload` — create a script, upload source, read the compile. `1av`.
+      **OpenSim green; SL run deferred to Phase Z** (see the SL-task-write note
+      there). Editing a script's source is not a plain asset upload: the viewer
+      never compiles LSL/Lua locally — it POSTs the raw source to the
+      `UpdateScriptAgent` (agent inventory) or `UpdateScriptTask` (task
+      inventory) capability with a requested compile `target`
+      (`mono`/`lsl2`/`luau`), and the **simulator compiles synchronously**,
+      returning a `compiled` flag and an `errors` array; a script can upload as
+      an asset yet fail to compile. The case uses the **task-inventory** path
+      (only a task upload compiles on OpenSim — its agent path just stores the
+      asset): rez a throwaway cube, create a script **directly in it** with
+      [`RezScript`](Command::RezScript) + [`RestoreItem::new_script`] (the
+      viewer's object-Contents "New Script" — a null-id/null-asset item the sim
+      fills with a default body), fetch the listing for the task item id, then
+      [`UploadScript`](Command::UploadScript) **valid** source (asserts
+      `compiled == true`, no errors) and **invalid** source (asserts
+      `compiled == false`, a non-empty error list, and that the first
+      [`ScriptCompileError`] parsed a `line`/`column` — the payoff of the
+      structured parse). Green on OpenSim: valid compiles, invalid → 3 errors,
+      real XEngine format `(4,20) Error: …` parsed to line 4 col 20. New surface
+      (all wired through both runtimes + REPL): `ScriptTarget`
+      (`#[non_exhaustive]`, `luau` confirmed from LL viewer source),
+      `ScriptLanguage` (the item-flags subtype), `ScriptUploadLocation`,
+      `ScriptCompileError`, `Command::UploadScript`/`CreateScript`,
+      `Event::ScriptUploaded`, the `UpdateScriptTask` cap, and the parent-aware
+      CRC helpers `RestoreItem::for_task_drop`/`new_script`; scripts are removed
+      from the generic upload commands at the type level (`UpdatableAssetType`)
+      so the compile-blind path can't touch them.
 
 ## Phase 10 — Parcel & land `[both]`
 
@@ -1384,6 +1412,33 @@ tertiary-avatar harness support is the only prerequisite for OpenSim `3av`.
 - [ ] Provision a 2nd Aditi avatar; add it to `credentials.aditi.toml`.
 - [ ] Provision a 3rd Aditi avatar (for conference / group-roster only).
 - [ ] Add `[aditi]` variants of the deferred cases as the avatars land.
+
+Single-avatar SL-behaviour blocker (not multi-avatar, parked here):
+
+- [ ] **`script-upload` on aditi — SL drops the task-inventory write.** The
+      `script-upload` case is green on OpenSim but gated to OpenSim only: on SL
+      the task-inventory *write* never lands (the object's contents serial stays
+      `0` after both [`RezScript`](Command::RezScript) and an
+      [`UpdateTaskInventory`](Command::UpdateTaskInventory) drop), while **rez,
+      agent-inventory create, and reads (`RequestTaskInventory`) all succeed on
+      the same authenticated session**, the avatar owns the object, and the wire
+      encoding matches the viewer byte-for-byte. Ruled out live on aditi:
+      login/MFA (auth confirmed — objects persisted and were auto-returned 15
+      min later), land permission (you may edit your own objects wherever you
+      can rez them — and the Firestorm viewer
+      **successfully creates a script in an object at the same spot**), the item
+      checksum (ported faithfully from `LLInventoryItem::getCRC32`, with the
+      object as parent — `RestoreItem::for_task_drop`/`new_script`), and object
+      selection (a fired `ObjectSelect` did not help; it also never returned
+      `ObjectProperties` on SL). Since the viewer works on the same parcel, it
+      is a client-message difference. **Next step: packet/message capture** of
+      the Firestorm viewer doing object-Contents "New Script" (rez → New Script)
+      — grab the outgoing `RezScript` (and any preceding `ObjectSelect`) and
+      diff the field values against ours. Leading suspects: a required preceding
+      selection message, or an item-block field value. When found, flip
+      `script-upload` back to `[both]` and run the aditi SL-Mono error-format
+      validation (the parser + all the upload code already exist and are
+      unit-tested).
 
 ---
 

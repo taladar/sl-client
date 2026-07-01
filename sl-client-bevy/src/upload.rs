@@ -6,7 +6,8 @@ use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::Event as SessionEvent;
 use sl_proto::{
     AssetType, AssetUploadResponse, CAP_NEW_FILE_AGENT_INVENTORY, InventoryFolderKey,
-    InventoryType, build_new_file_agent_inventory_request, parse_asset_upload_response,
+    InventoryType, ScriptCompileError, build_new_file_agent_inventory_request,
+    parse_asset_upload_response,
 };
 
 /// Spawns the modern `NewFileAgentInventory` two-step CAPS upload on a background
@@ -116,6 +117,58 @@ pub(crate) fn run_caps_upload(cap_url: &str, metadata: String, data: Vec<u8>) ->
                 }),
             },
         },
+        Err(reason) => SessionEvent::AssetUploadFailed { reason },
+    }
+}
+
+/// Runs a two-step **script** upload (`UpdateScriptAgent`/`UpdateScriptTask`)
+/// synchronously and returns the simulator's compile result as
+/// [`SessionEvent::ScriptUploaded`]. A transport-level failure (missing uploader,
+/// HTTP/parse error, or a bare error completion) returns
+/// [`SessionEvent::AssetUploadFailed`]. `running` is the requested run state
+/// echoed for a task-inventory upload (`None` for agent inventory).
+pub(crate) fn run_script_upload(
+    cap_url: &str,
+    metadata: String,
+    source: Vec<u8>,
+    running: Option<bool>,
+) -> SessionEvent {
+    // Step 1: POST the metadata (ids + compile target), get an uploader.
+    let uploader = match caps_upload_step(cap_url, "application/llsd+xml", metadata.into_bytes()) {
+        Ok(response) => match response.uploader {
+            Some(url) => url,
+            None => {
+                return SessionEvent::AssetUploadFailed {
+                    reason: response.error.unwrap_or_else(|| {
+                        format!("script upload metadata rejected (state {})", response.state)
+                    }),
+                };
+            }
+        },
+        Err(reason) => return SessionEvent::AssetUploadFailed { reason },
+    };
+    // Step 2: POST the raw source; the completion carries the compile result.
+    match caps_upload_step(&uploader, "application/octet-stream", source) {
+        Ok(response) => {
+            if response.compiled.is_none() && response.new_asset.is_none() {
+                return SessionEvent::AssetUploadFailed {
+                    reason: response.error.unwrap_or_else(|| {
+                        format!("script upload did not complete (state {})", response.state)
+                    }),
+                };
+            }
+            SessionEvent::ScriptUploaded {
+                new_asset: response.new_asset,
+                new_inventory_item: response.new_inventory_item,
+                compiled: response.compiled.unwrap_or(true),
+                errors: response
+                    .errors
+                    .iter()
+                    .map(|error| ScriptCompileError::parse(error))
+                    .collect(),
+                running,
+            }
+        }
         Err(reason) => SessionEvent::AssetUploadFailed { reason },
     }
 }

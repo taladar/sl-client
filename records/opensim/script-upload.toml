@@ -1,0 +1,99 @@
+test = "script-upload"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "a7b1b7e-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T16:46:34.172227242Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "a7b1b7e-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T16:54:45.897405603Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+bad_error_parsed = true
+bad_error_sample = "(4,20) Error: invalid operand token"
+bad_errors_count = "3"
+bad_upload_rtt_secs = 1.027705627
+compiled_bad = false
+compiled_good = true
+container_object = "8f3ac9dc-9818-46cc-bf69-9ffad5dfcde7"
+good_errors_count = "0"
+good_upload_rtt_secs = 1.081797282
+target = "mono"
+task_script_item = "f170afb4-5e61-4c49-9718-87700fa81f8f"
+
+[run.metric_meta.bad_upload_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.good_upload_rtt_secs]
+lower_is_better = true
+
+[[run]]
+behavior_describe = "a7b1b7e-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T17:40:46.219526608Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+bad_error_parsed = true
+bad_error_sample = "(4,20) Error: invalid operand token"
+bad_errors_count = "3"
+bad_upload_rtt_secs = 1.007962161
+compiled_bad = false
+compiled_good = true
+container_object = "3c2c4d6f-7f82-4398-8e01-071dba8cb6c8"
+good_errors_count = "0"
+good_upload_rtt_secs = 1.009966195
+target = "mono"
+task_script_item = "91b6f676-8a9c-4cab-8982-8f07879e3956"
+
+[run.metric_meta.bad_upload_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.good_upload_rtt_secs]
+lower_is_better = true
+
+[[run]]
+behavior_describe = "a7b1b7e-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T18:04:50.970608527Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+bad_error_parsed = true
+bad_error_sample = "(4,20) Error: invalid operand token"
+bad_errors_count = "3"
+bad_upload_rtt_secs = 1.008462408
+compiled_bad = false
+compiled_good = true
+container_object = "eef6b1dc-45c4-4dd1-980b-e0923c7e2063"
+good_errors_count = "0"
+good_upload_rtt_secs = 1.010894595
+target = "mono"
+task_script_item = "e389cb1f-c1a3-48ed-8da1-f91702494804"
+
+[run.metric_meta.bad_upload_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.good_upload_rtt_secs]
+lower_is_better = true

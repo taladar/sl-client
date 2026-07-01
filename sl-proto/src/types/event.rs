@@ -22,10 +22,10 @@ use super::{
     ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo, ParcelMediaCommand,
     ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, PickInfo, PlacesResult,
     PlayingAnimation, RegionIdentity, RegionLimits, RegionStats, RequiredVoiceVersion,
-    ScriptControl, ScriptDialog, ScriptPermissionRequest, ScriptPermissionState,
-    ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimulatorTime, SoundFlags,
-    SoundPreload, TaskInventoryItem, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainPatch,
-    Texture, TransferStatus, UserInfo, ViewerEffect, Wearable,
+    ScriptCompileError, ScriptControl, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissionState, ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimulatorTime,
+    SoundFlags, SoundPreload, TaskInventoryItem, TaskInventoryReply, TelehubInfo, TeleportFlags,
+    TerrainPatch, Texture, TransferStatus, UserInfo, ViewerEffect, Wearable,
 };
 use sl_types::key::{
     AgentKey, ExperienceKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
@@ -1355,6 +1355,32 @@ pub enum Event {
     AssetUploadFailed {
         /// A description of the failure.
         reason: String,
+    },
+    /// A script upload ([`Command::UploadScript`](crate::Command::UploadScript))
+    /// completed and the **simulator compiled** the source. Distinct from
+    /// [`AssetUploaded`](Self::AssetUploaded)/[`AssetUploadFailed`](Self::AssetUploadFailed):
+    /// the transport succeeded, so this reports the *compile* outcome.
+    /// `compiled == false` with a non-empty [`errors`](Self::ScriptUploaded::errors)
+    /// is a successful upload whose source failed to compile (the simulator still
+    /// stored the source). A transport-level failure arrives as
+    /// [`AssetUploadFailed`](Self::AssetUploadFailed) instead.
+    ScriptUploaded {
+        /// The stored source asset's UUID (`new_asset`), if the completion
+        /// reported one.
+        new_asset: Option<Uuid>,
+        /// The updated inventory item's UUID (`new_inventory_item`), if reported.
+        new_inventory_item: Option<Uuid>,
+        /// Whether the simulator compiled the source successfully. When the grid
+        /// does not report a `compiled` field but the upload completed, this is
+        /// `true`.
+        compiled: bool,
+        /// The compiler diagnostics, parsed from the response's `errors` array
+        /// (empty on a clean compile). Present even when `compiled` is `true`
+        /// (some grids report warnings here).
+        errors: Vec<ScriptCompileError>,
+        /// The script's running state echoed back for a task-inventory upload
+        /// (`is_script_running`), or `None` for an agent-inventory upload.
+        running: Option<bool>,
     },
     /// Another avatar's appearance arrived (`AvatarAppearance`): its decoded
     /// baked textures and visual parameters, pushed when the avatar comes into

@@ -28,10 +28,11 @@ pub enum AssetType {
     Object,
     /// A notecard (`AT_NOTECARD`).
     Notecard,
-    /// LSL script source text (`AT_LSL_TEXT`).
-    LslText,
-    /// Compiled LSL bytecode (`AT_LSL_BYTECODE`).
-    LslBytecode,
+    /// Script source text — LSL or Lua/SLua (`AT_LSL_TEXT`; both languages share
+    /// this asset type, distinguished by the inventory item's language subtype).
+    ScriptText,
+    /// Compiled script bytecode (`AT_LSL_BYTECODE`).
+    ScriptBytecode,
     /// A TGA texture (`AT_TEXTURE_TGA`).
     TextureTga,
     /// A wearable body part (`AT_BODYPART`).
@@ -77,8 +78,8 @@ impl AssetType {
             Self::Clothing => 5,
             Self::Object => 6,
             Self::Notecard => 7,
-            Self::LslText => 10,
-            Self::LslBytecode => 11,
+            Self::ScriptText => 10,
+            Self::ScriptBytecode => 11,
             Self::TextureTga => 12,
             Self::Bodypart => 13,
             Self::SoundWav => 17,
@@ -108,8 +109,8 @@ impl AssetType {
             5 => Self::Clothing,
             6 => Self::Object,
             7 => Self::Notecard,
-            10 => Self::LslText,
-            11 => Self::LslBytecode,
+            10 => Self::ScriptText,
+            11 => Self::ScriptBytecode,
             12 => Self::TextureTga,
             13 => Self::Bodypart,
             17 => Self::SoundWav,
@@ -140,8 +141,8 @@ impl AssetType {
             Self::Clothing => Some("clothing_id"),
             Self::Object => Some("object_id"),
             Self::Notecard => Some("notecard_id"),
-            Self::LslText => Some("lsltext_id"),
-            Self::LslBytecode => Some("lslbyte_id"),
+            Self::ScriptText => Some("lsltext_id"),
+            Self::ScriptBytecode => Some("lslbyte_id"),
             Self::TextureTga => Some("txtr_tga_id"),
             Self::Bodypart => Some("bodypart_id"),
             Self::SoundWav => Some("snd_wav_id"),
@@ -172,8 +173,8 @@ impl AssetType {
             Self::Clothing => Some("clothing"),
             Self::Object => Some("object"),
             Self::Notecard => Some("notecard"),
-            Self::LslText => Some("lsltext"),
-            Self::LslBytecode => Some("lslbyte"),
+            Self::ScriptText => Some("lsltext"),
+            Self::ScriptBytecode => Some("lslbyte"),
             Self::TextureTga => Some("txtr_tga"),
             Self::Bodypart => Some("bodypart"),
             Self::SoundWav => Some("snd_wav"),
@@ -206,8 +207,8 @@ impl AssetType {
             "clothing" => Self::Clothing,
             "object" => Self::Object,
             "notecard" => Self::Notecard,
-            "lsltext" => Self::LslText,
-            "lslbyte" => Self::LslBytecode,
+            "lsltext" => Self::ScriptText,
+            "lslbyte" => Self::ScriptBytecode,
             "txtr_tga" => Self::TextureTga,
             "bodypart" => Self::Bodypart,
             "snd_wav" => Self::SoundWav,
@@ -237,10 +238,95 @@ impl AssetType {
         match self {
             Self::Gesture => Some("UpdateGestureAgentInventory"),
             Self::Notecard => Some("UpdateNotecardAgentInventory"),
-            Self::LslText => Some("UpdateScriptAgent"),
+            Self::ScriptText => Some("UpdateScriptAgent"),
             Self::Settings => Some("UpdateSettingsAgentInventory"),
             Self::Material => Some("UpdateMaterialAgentInventory"),
             _ => None,
+        }
+    }
+
+    /// Whether this is a script asset class ([`ScriptText`](Self::ScriptText) or
+    /// [`ScriptBytecode`](Self::ScriptBytecode)). Scripts do not travel the
+    /// generic asset-upload commands — they go through
+    /// [`Command::UploadScript`](crate::Command::UploadScript) so compile results
+    /// are surfaced — so the generic upload dispatch rejects a script class.
+    #[must_use]
+    pub const fn is_script(self) -> bool {
+        matches!(self, Self::ScriptText | Self::ScriptBytecode)
+    }
+}
+
+/// The asset classes whose *existing* inventory item can have its asset replaced
+/// through the generic `Update*AgentInventory` capability path
+/// ([`Command::UpdateInventoryAsset`](crate::Command::UpdateInventoryAsset)) — a
+/// **script-excluding** narrowing of [`AssetType`].
+///
+/// Scripts are deliberately absent: an LSL/Lua script must be uploaded via
+/// [`Command::UploadScript`](crate::Command::UploadScript) so the simulator's
+/// compile result (success and any compiler errors) is surfaced rather than
+/// silently discarded as a plain asset write. Because there is no script variant
+/// here, updating a script through the generic path is unrepresentable — a
+/// compile error, not a runtime check. Widen to an [`AssetType`] with
+/// [`From`]/[`Into`]; narrow a raw [`AssetType`] with [`TryFrom`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UpdatableAssetType {
+    /// A gesture (`UpdateGestureAgentInventory`).
+    Gesture,
+    /// A notecard (`UpdateNotecardAgentInventory`).
+    Notecard,
+    /// A settings asset (`UpdateSettingsAgentInventory`).
+    Settings,
+    /// A render material (`UpdateMaterialAgentInventory`).
+    Material,
+}
+
+impl UpdatableAssetType {
+    /// The capability that updates an existing inventory item's asset for this
+    /// class. Unlike [`AssetType::update_item_cap`] this is **total** — every
+    /// [`UpdatableAssetType`] has an update capability.
+    #[must_use]
+    pub const fn cap(self) -> &'static str {
+        match self {
+            Self::Gesture => "UpdateGestureAgentInventory",
+            Self::Notecard => "UpdateNotecardAgentInventory",
+            Self::Settings => "UpdateSettingsAgentInventory",
+            Self::Material => "UpdateMaterialAgentInventory",
+        }
+    }
+}
+
+impl From<UpdatableAssetType> for AssetType {
+    /// Infallible widening — every [`UpdatableAssetType`] is an [`AssetType`].
+    fn from(value: UpdatableAssetType) -> Self {
+        match value {
+            UpdatableAssetType::Gesture => Self::Gesture,
+            UpdatableAssetType::Notecard => Self::Notecard,
+            UpdatableAssetType::Settings => Self::Settings,
+            UpdatableAssetType::Material => Self::Material,
+        }
+    }
+}
+
+/// The error from narrowing an [`AssetType`] that has no generic in-place update
+/// capability (a script — use
+/// [`Command::UploadScript`](crate::Command::UploadScript) — or any class the
+/// `Update*AgentInventory` path does not serve) into an [`UpdatableAssetType`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("asset type {0:?} has no generic inventory-update capability")]
+pub struct NotUpdatableAssetType(pub AssetType);
+
+impl TryFrom<AssetType> for UpdatableAssetType {
+    type Error = NotUpdatableAssetType;
+
+    /// Fallible narrowing — a script (or any non-updatable class) is rejected.
+    fn try_from(value: AssetType) -> Result<Self, Self::Error> {
+        match value {
+            AssetType::Gesture => Ok(Self::Gesture),
+            AssetType::Notecard => Ok(Self::Notecard),
+            AssetType::Settings => Ok(Self::Settings),
+            AssetType::Material => Ok(Self::Material),
+            other => Err(NotUpdatableAssetType(other)),
         }
     }
 }

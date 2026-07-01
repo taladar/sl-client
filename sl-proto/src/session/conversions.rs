@@ -19,8 +19,8 @@ use crate::types::{
     OpenRegionInfo, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo,
     PickKey, PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
     RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits, RequiredVoiceVersion,
-    SaleType, Scale, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply,
-    SkySettings, TaskInventoryItem, WaterSettings, avatar_texture,
+    RestoreItem, SaleType, Scale, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    SetDisplayNameReply, SkySettings, TaskInventoryItem, WaterSettings, avatar_texture,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
@@ -1523,11 +1523,19 @@ pub(crate) fn uuid_crc(id: Uuid) -> u32 {
 }
 
 /// The LL inventory-item "CRC" (a checksum, not a true CRC) carried in
-/// `UpdateInventoryItem`/`BulkUpdateInventory`, a faithful port of
-/// `LLInventoryItem::getCRC32` (with `LLPermissions::getCRC32` and
+/// `UpdateInventoryItem`/`BulkUpdateInventory`/`UpdateTaskInventory`, a faithful
+/// port of `LLInventoryItem::getCRC32` (with `LLPermissions::getCRC32` and
 /// `LLSaleInfo::getCRC32`). The simulator uses it to detect a no-op update; an
 /// `i8` asset/inventory type is sign-extended to `u32` as in the C++ promotion.
-pub(crate) fn inventory_item_crc(item: &InventoryItem) -> Result<u32, sl_wire::WireError> {
+///
+/// `parent_id` is the item's parent as it appears on the wire — the agent folder
+/// for an agent-inventory update, but the **object's id** when the item is being
+/// dropped into that object's task inventory (the viewer sets the sliced item's
+/// parent to the object id, and the checksum folds `mParentUUID` in).
+pub(crate) fn inventory_item_crc(
+    item: &InventoryItem,
+    parent_id: Uuid,
+) -> Result<u32, sl_wire::WireError> {
     let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
     let permissions_crc = uuid_crc(item.creator_id.uuid())
         .wrapping_add(uuid_crc(owner_id))
@@ -1545,7 +1553,7 @@ pub(crate) fn inventory_item_crc(item: &InventoryItem) -> Result<u32, sl_wire::W
         .cast_unsigned()
         .wrapping_add(u32::from(item.sale_type).wrapping_mul(0x0707_3096));
     Ok(uuid_crc(item.item_id.uuid())
-        .wrapping_add(uuid_crc(item.folder_id.uuid()))
+        .wrapping_add(uuid_crc(parent_id))
         .wrapping_add(permissions_crc)
         .wrapping_add(uuid_crc(item.asset_id))
         .wrapping_add(i32::from(item.item_type).cast_unsigned())
@@ -1554,6 +1562,120 @@ pub(crate) fn inventory_item_crc(item: &InventoryItem) -> Result<u32, sl_wire::W
         .wrapping_add(sale_info_crc)
         .wrapping_add(item.creation_date.cast_unsigned()))
     // The thumbnail UUID (nil here) contributes 0 and is omitted.
+}
+
+impl RestoreItem {
+    /// Builds a [`RestoreItem`] that drops the agent-inventory `item` into the
+    /// task inventory of the object `object_id`
+    /// ([`Command::UpdateTaskInventory`](crate::Command::UpdateTaskInventory)).
+    ///
+    /// Mirrors the viewer: the item is sliced with its **parent set to the object
+    /// id** (`mID`), so the wire `folder_id` is the object id and the item's
+    /// checksum ([`crc`](Self::crc)) is **computed internally** over that parent
+    /// (plus the asset id and last-owner id a hand-built [`RestoreItem`] omits).
+    /// Second Life validates the checksum and silently ignores a drop whose value
+    /// is wrong, so this is the correct way to construct the drop — a caller need
+    /// never compute or even see the checksum. (OpenSim validates neither, and
+    /// resolves the item by id from the agent's inventory regardless.)
+    ///
+    /// `transaction_id` correlates the operation (pass a fresh id).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`sl_wire::WireError`] if the item's L$ sale price does not encode.
+    pub fn for_task_drop(
+        item: &InventoryItem,
+        object_id: ObjectKey,
+        transaction_id: Uuid,
+    ) -> Result<Self, sl_wire::WireError> {
+        Ok(Self {
+            item_id: item.item_id,
+            // The dropped item's parent on the wire is the target object, not the
+            // agent folder it came from — both the `folder_id` field and the CRC.
+            folder_id: InventoryFolderKey::from(object_id.uuid()),
+            creator_id: item.creator_id,
+            owner: item.owner,
+            group: item.group,
+            permissions: item.permissions,
+            transaction_id,
+            asset_type: item.item_type,
+            inv_type: item.inv_type,
+            flags: item.flags,
+            sale_type: SaleType::from_code(item.sale_type),
+            sale_price: item.sale_price.clone(),
+            name: item.name.clone(),
+            description: item.description.clone(),
+            creation_date: item.creation_date,
+            crc: inventory_item_crc(item, object_id.uuid())?,
+        })
+    }
+
+    /// Builds a [`RestoreItem`] for a **brand-new default script** to rez directly
+    /// into the object `object_id` ([`Command::RezScript`](crate::Command::RezScript)) —
+    /// the viewer's object-Contents "New Script".
+    ///
+    /// Mirrors `LLPanelContents::onClickNewScript`: a script item with a **null id
+    /// and null asset** (the simulator allocates both and fills a compilable
+    /// default body), parented to the object, created and owned by `creator`, with
+    /// full owner permissions. The item's checksum ([`crc`](Self::crc)) is
+    /// computed internally over these known fields, exactly as the viewer's
+    /// `packMessage` does (Second Life validates it). Unlike
+    /// [`for_task_drop`](Self::for_task_drop) this needs no source
+    /// [`InventoryItem`] — the script does not exist in agent inventory.
+    #[must_use]
+    pub fn new_script(
+        creator: AgentKey,
+        object_id: ObjectKey,
+        name: &str,
+        transaction_id: Uuid,
+    ) -> Self {
+        let permissions = Permissions5 {
+            base: Permissions::ALL,
+            owner: Permissions::ALL,
+            group: Permissions::empty(),
+            everyone: Permissions::empty(),
+            next_owner: Permissions::ALL,
+        };
+        let asset_type = i8::try_from(AssetType::ScriptText.to_code()).unwrap_or(10);
+        let inv_type = i8::try_from(InventoryType::Script.to_code()).unwrap_or(10);
+        // `LLInventoryItem::getCRC32` over the (mostly null) fields: item id and
+        // asset id are nil (→ 0), the parent is the object, last-owner and group
+        // are nil, sale/flags/creation are 0. Permission masks fold base+owner+
+        // everyone+group (not next-owner).
+        let permissions_crc = uuid_crc(creator.uuid())
+            .wrapping_add(uuid_crc(creator.uuid()))
+            .wrapping_add(
+                permissions
+                    .base
+                    .bits()
+                    .wrapping_add(permissions.owner.bits())
+                    .wrapping_add(permissions.everyone.bits())
+                    .wrapping_add(permissions.group.bits()),
+            );
+        let crc = uuid_crc(object_id.uuid())
+            .wrapping_add(permissions_crc)
+            .wrapping_add(i32::from(asset_type).cast_unsigned())
+            .wrapping_add(i32::from(inv_type).cast_unsigned());
+        Self {
+            item_id: InventoryKey::from(Uuid::nil()),
+            // Parent is the target object, as the viewer sets it.
+            folder_id: InventoryFolderKey::from(object_id.uuid()),
+            creator_id: creator,
+            owner: sl_types::key::OwnerKey::Agent(creator),
+            group: None,
+            permissions,
+            transaction_id,
+            asset_type,
+            inv_type,
+            flags: 0,
+            sale_type: SaleType::NotForSale,
+            sale_price: None,
+            name: name.to_owned(),
+            description: String::new(),
+            creation_date: 0,
+            crc,
+        }
+    }
 }
 
 /// Builds an [`InventoryItem`] from an `InventoryDescendents` item entry.
@@ -4823,7 +4945,7 @@ mod caps_serializer_tests {
         );
         assert_eq!(script.creator_id, AgentKey::from(creator));
         assert_eq!(script.asset_id.map(|id| id.uuid()), Some(asset));
-        assert_eq!(script.asset_type, crate::types::AssetType::LslText);
+        assert_eq!(script.asset_type, crate::types::AssetType::ScriptText);
         assert_eq!(script.inv_type, crate::types::InventoryType::Script);
         assert_eq!(script.name, "Hello World Script");
         assert_eq!(script.description, "");

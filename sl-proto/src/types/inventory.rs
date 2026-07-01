@@ -200,7 +200,7 @@ pub enum FolderType {
     /// **not** [`AssetType::Folder`], which shares that code).
     RootInventory,
     /// Scripts folder (`FT_LSL_TEXT`).
-    LslText,
+    ScriptText,
     /// Body parts folder (`FT_BODYPART`).
     Bodypart,
     /// The Trash (`FT_TRASH`).
@@ -257,7 +257,7 @@ impl FolderType {
             Self::Object => 6,
             Self::Notecard => 7,
             Self::RootInventory => 8,
-            Self::LslText => 10,
+            Self::ScriptText => 10,
             Self::Bodypart => 13,
             Self::Trash => 14,
             Self::SnapshotCategory => 15,
@@ -295,7 +295,7 @@ impl FolderType {
             6 => Self::Object,
             7 => Self::Notecard,
             8 => Self::RootInventory,
-            10 => Self::LslText,
+            10 => Self::ScriptText,
             13 => Self::Bodypart,
             14 => Self::Trash,
             15 => Self::SnapshotCategory,

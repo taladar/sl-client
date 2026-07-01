@@ -77,12 +77,12 @@ use crate::types::{
     PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
     RegionInfoUpdate, RegionStats, Reliability, RestoreItem, RezAttachment, RezObjectParams,
     RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo,
-    ScriptGrantInfo, ScriptPermissionState, ScriptPermissionStatus, ScriptPermissions,
-    ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags,
-    SoundPreload, StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
-    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus,
-    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    Wearable, WearableType,
+    ScriptGrantInfo, ScriptLanguage, ScriptPermissionState, ScriptPermissionStatus,
+    ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags,
+    SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, TaskInventoryKey,
+    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
+    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -8822,6 +8822,47 @@ impl Session {
         let callback_id = self.next_inventory_callback();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_create_inventory_item(new, callback_id, now)?;
+        Ok(callback_id)
+    }
+
+    /// Creates a new **script** inventory item via `CreateInventoryItem`,
+    /// returning the async callback id echoed in the simulator's
+    /// `UpdateCreateInventoryItem` reply ([`Event::InventoryItemCreated`]).
+    ///
+    /// The item is created empty of a client-supplied asset (nil transaction id),
+    /// so **the simulator fills it with its default script body** — a compilable
+    /// starter, never an empty (non-compiling) script — selecting the LSL or Lua
+    /// default from `language` (carried as the item's subtype, exactly as the
+    /// viewer's "New Script" does). To then replace the body with custom source
+    /// and compile it, follow up with
+    /// [`Command::UploadScript`](crate::Command::UploadScript) once the item id
+    /// arrives. A Lua item only takes on a Lua default on a SLua-capable grid;
+    /// elsewhere the simulator falls back to the LSL default.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn create_script(
+        &mut self,
+        folder_id: InventoryFolderKey,
+        name: &str,
+        description: &str,
+        next_owner_mask: u32,
+        language: ScriptLanguage,
+        now: Instant,
+    ) -> Result<InventoryCallbackId, Error> {
+        let callback_id = self.next_inventory_callback();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_create_script_item(
+            folder_id,
+            name,
+            description,
+            next_owner_mask,
+            language.subtype(),
+            callback_id,
+            now,
+        )?;
         Ok(callback_id)
     }
 

@@ -19,3 +19,6 @@ siz = "siz"
 # `flate2` is the gzip crate (used for the inventory disk cache); not a typo
 # of "flat".
 flate2 = "flate2"
+# `lso2` is the legacy-LSL-bytecode compile-target token (LSO2), an emerging
+# `ScriptTarget` value seen in the LL viewer; not a typo of "also".
+lso2 = "lso2"

@@ -109,6 +109,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::task_inventory::TaskInventory),
         Box::new(crate::cases::script_dialog::ScriptDialog),
         Box::new(crate::cases::script_permissions::ScriptPermissionsCase),
+        Box::new(crate::cases::script_upload::ScriptUpload),
     ]
 }
 
