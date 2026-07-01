@@ -1,0 +1,57 @@
+test = "object-edit"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "32e09d0-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T11:09:29.008710709Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "32e09d0-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T11:18:22.792289834Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "32e09d0-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T11:20:38.427334876Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+edited_name = "SLClientEditTest"
+flags_rtt_secs = 0.03011984
+material_rtt_secs = 0.030391295
+next_owner_after_hex = "0x0008a000"
+next_owner_before_hex = "0x00082000"
+object_id = "4911dd74-0496-4382-bb0d-8e4b0258e8ff"
+sale_price = 25
+sale_type = 2
+shape_rtt_secs = 0.090684725
+
+[run.metric_meta.flags_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.material_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.shape_rtt_secs]
+lower_is_better = true
