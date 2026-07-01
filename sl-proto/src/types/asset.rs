@@ -190,6 +190,42 @@ impl AssetType {
         }
     }
 
+    /// Classifies a short asset-type name (LL's `LLAssetType` `mTypeName`, the
+    /// inverse of [`caps_asset_name`](Self::caps_asset_name)) as written into a
+    /// task-inventory `Xfer` listing by `Utils.AssetTypeToString`. The legacy
+    /// `"script"` (the deprecated `AT_SCRIPT` bytecode, code 4) has no enum
+    /// variant, so it maps to [`Other(4)`](Self::Other); any unrecognised name
+    /// maps to the [`Other(-1)`](Self::Other) sentinel.
+    #[must_use]
+    pub fn from_type_name(name: &str) -> Self {
+        match name {
+            "texture" => Self::Texture,
+            "sound" => Self::Sound,
+            "callcard" => Self::CallingCard,
+            "landmark" => Self::Landmark,
+            "clothing" => Self::Clothing,
+            "object" => Self::Object,
+            "notecard" => Self::Notecard,
+            "lsltext" => Self::LslText,
+            "lslbyte" => Self::LslBytecode,
+            "txtr_tga" => Self::TextureTga,
+            "bodypart" => Self::Bodypart,
+            "snd_wav" => Self::SoundWav,
+            "img_tga" => Self::ImageTga,
+            "jpeg" => Self::ImageJpeg,
+            "animatn" => Self::Animation,
+            "gesture" => Self::Gesture,
+            "mesh" => Self::Mesh,
+            "settings" => Self::Settings,
+            "material" => Self::Material,
+            "gltf" => Self::Gltf,
+            "glbin" => Self::GltfBin,
+            "category" | "root" => Self::Folder,
+            "script" => Self::Other(4),
+            _ => Self::Other(-1),
+        }
+    }
+
     /// The name of the capability that updates an *existing* inventory item's
     /// asset for this asset class (the modern in-place edit path:
     /// `UpdateGestureAgentInventory`, `UpdateNotecardAgentInventory`,
@@ -328,6 +364,34 @@ impl InventoryType {
             Self::Settings => Some("settings"),
             Self::Material => Some("material"),
             Self::Other(_) => None,
+        }
+    }
+
+    /// Classifies a short inventory-type name (LL's `LLInventoryType` `mName`,
+    /// the inverse of [`caps_name`](Self::caps_name)) as written into a
+    /// task-inventory `Xfer` listing by `Utils.InventoryTypeToString`. Accepts
+    /// `"lsl"` as an alias for the LSL [`Script`](Self::Script) name; any
+    /// unrecognised name maps to the [`Other(-1)`](Self::Other) sentinel.
+    #[must_use]
+    pub fn from_type_name(name: &str) -> Self {
+        match name {
+            "texture" => Self::Texture,
+            "sound" => Self::Sound,
+            "callcard" => Self::CallingCard,
+            "landmark" => Self::Landmark,
+            "object" => Self::Object,
+            "notecard" => Self::Notecard,
+            "category" => Self::Category,
+            "script" | "lsl" => Self::Script,
+            "snapshot" => Self::Snapshot,
+            "attach" => Self::Attachment,
+            "wearable" => Self::Wearable,
+            "animation" => Self::Animation,
+            "gesture" => Self::Gesture,
+            "mesh" => Self::Mesh,
+            "settings" => Self::Settings,
+            "material" => Self::Material,
+            _ => Self::Other(-1),
         }
     }
 }

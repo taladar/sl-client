@@ -34,14 +34,20 @@
 //! 5. **Request (populated)**: a second [`Command::RequestTaskInventory`] now
 //!    returns a serial strictly greater than the baseline and a non-empty
 //!    filename — the write is observable.
-//! 6. **Clean up**: [`Command::DerezObjects`] the container to the Trash
+//! 6. **Read (parsed)**: [`Command::FetchTaskInventory`] follows the reply to
+//!    its Xfer file, downloads and parses the listing, and surfaces the items as
+//!    [`Event::TaskInventoryContents`] — the dropped item is now enumerable
+//!    (matched by name, since OpenSim mints a fresh item id when copying into
+//!    task inventory).
+//! 7. **Clean up**: [`Command::DerezObjects`] the container to the Trash
 //!    ([`DeRezDestination::Trash`]), confirmed by its [`Event::ObjectRemoved`]
 //!    (`KillObject`), leaving the world scene as found.
 //!
-//! `1av`, `[both]`. No new client code — the
-//! `RequestTaskInventory`/`UpdateTaskInventory` surface already existed; this
-//! case only re-exports [`TaskInventoryKey`] / [`TaskInventoryReply`] from the
-//! two runtime crates (as commit `d41e378` did for `ObjectPropertiesFamily`).
+//! `1av`, `[both]`. Exercises the Xfer task-inventory read path added in this
+//! effort ([`Command::FetchTaskInventory`] → [`Event::TaskInventoryContents`]),
+//! alongside the [`RequestTaskInventory`](Command::RequestTaskInventory) /
+//! [`UpdateTaskInventory`](Command::UpdateTaskInventory) surface it shares with
+//! the [`TaskInventoryKey`] / [`TaskInventoryReply`] re-exports.
 //! On OpenSim the avatar is forced into the "Default Region", which holds this
 //! workspace's rezzed test object as the placement reference, so a primitive is
 //! guaranteed and its absence fails the case. On Second Life the landing
@@ -284,6 +290,32 @@ impl GridTest for TaskInventory {
                 "the task inventory filename stayed empty after UpdateTaskInventory",
             )?;
 
+            // 5b. Read the populated inventory: FetchTaskInventory downloads the
+            //     Xfer listing named by the reply and parses it, so the dropped
+            //     item is enumerable (OpenSim assigns a fresh item id when copying
+            //     into task inventory, so match on the item name).
+            let fetch_started = std::time::Instant::now();
+            session
+                .send(Command::FetchTaskInventory {
+                    target: container_id,
+                })
+                .await?;
+            let contents = session
+                .wait_for(STEP_TIMEOUT, |event| match event {
+                    Event::TaskInventoryContents { task, items, .. }
+                        if *task == container.full_id =>
+                    {
+                        Some(items.clone())
+                    }
+                    _ => None,
+                })
+                .await?;
+            let fetch_rtt = fetch_started.elapsed();
+            check(
+                contents.iter().any(|entry| entry.name == item.name),
+                "the parsed task inventory listing did not contain the dropped item",
+            )?;
+
             // 6. Clean up: delete the container to Trash, confirmed by its
             //    KillObject, leaving the world scene as found.
             session
@@ -309,8 +341,10 @@ impl GridTest for TaskInventory {
             metrics.set("donor_item_name", item.name.clone());
             metrics.set(&count_metric("serial_before"), before.serial.to_string());
             metrics.set(&count_metric("serial_after"), after.serial.to_string());
+            metrics.set(&count_metric("fetched_items"), contents.len().to_string());
             metrics.set_timing(&secs_metric("request_rtt"), request_rtt.as_secs_f64());
             metrics.set_timing(&secs_metric("update_rtt"), update_rtt.as_secs_f64());
+            metrics.set_timing(&secs_metric("fetch_rtt"), fetch_rtt.as_secs_f64());
             Ok(())
         })
     }

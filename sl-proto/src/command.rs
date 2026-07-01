@@ -1462,10 +1462,32 @@ pub enum Command {
     },
     /// Request an in-world object's task (object) inventory listing
     /// (`RequestTaskInventory`); the reply arrives as
-    /// [`Event::TaskInventoryReply`](crate::Event::TaskInventoryReply).
+    /// [`Event::TaskInventoryReply`](crate::Event::TaskInventoryReply), giving
+    /// the contents serial and the `Xfer` filename. To also download and parse
+    /// the listing, use [`Command::FetchTaskInventory`].
     RequestTaskInventory {
         /// The object whose task inventory is requested.
         target: ScopedObjectId,
+    },
+    /// Request *and read* an in-world object's task inventory: sends
+    /// `RequestTaskInventory`, then downloads and parses the `Xfer` listing its
+    /// reply names, surfacing the parsed items as
+    /// [`Event::TaskInventoryContents`](crate::Event::TaskInventoryContents)
+    /// (the [`Event::TaskInventoryReply`](crate::Event::TaskInventoryReply) is
+    /// still emitted first).
+    FetchTaskInventory {
+        /// The object whose task inventory is requested.
+        target: ScopedObjectId,
+    },
+    /// Download an arbitrary named file over the legacy `Xfer` path
+    /// (`RequestXfer`); the assembled bytes arrive as
+    /// [`Event::XferDownloaded`](crate::Event::XferDownloaded). Use this for a
+    /// raw `Xfer` `filename` handed to you by another message (for example a
+    /// [`Event::TaskInventoryReply`](crate::Event::TaskInventoryReply) filename
+    /// whose bytes you want unparsed).
+    RequestXfer {
+        /// The `Xfer` filename to download.
+        filename: String,
     },
     /// Write (add or replace) an item in an in-world object's task inventory
     /// (`UpdateTaskInventory`).

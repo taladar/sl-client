@@ -488,6 +488,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::InventoryObjectsRemoved { .. }
             | Event::InventoryItemsMoved { .. }
             | Event::TaskInventoryReply(..)
+            | Event::TaskInventoryContents { .. }
+            | Event::XferDownloaded { .. }
             | Event::UserInfo(..)
             | Event::DeRezAck { .. }
             | Event::ForceObjectSelect { .. }

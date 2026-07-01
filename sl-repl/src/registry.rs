@@ -4279,6 +4279,24 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "fetch_task_inventory",
+            usage: "<target-local_id>",
+            build: |args, ctx| {
+                Ok(Command::FetchTaskInventory {
+                    target: scoped_object(ctx, args.req_parse(ctx, "target", 0, "u32")?)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_xfer",
+            usage: "<filename>",
+            build: |args, ctx| {
+                Ok(Command::RequestXfer {
+                    filename: args.req_str(ctx, "filename", 0)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "update_task_inventory",
             usage: "<target-local_id> <item_id> [key=] [folder_id=] [creator_id=] [owner_id=] \
                     [group_id=] [base_mask=] [owner_mask=] [group_mask=] [everyone_mask=] \

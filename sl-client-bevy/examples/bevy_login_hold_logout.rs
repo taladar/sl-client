@@ -325,6 +325,8 @@ fn on_events(
             | SlSessionEvent::InventoryObjectsRemoved { .. }
             | SlSessionEvent::InventoryItemsMoved { .. }
             | SlSessionEvent::TaskInventoryReply(..)
+            | SlSessionEvent::TaskInventoryContents { .. }
+            | SlSessionEvent::XferDownloaded { .. }
             | SlSessionEvent::UserInfo(..)
             | SlSessionEvent::DeRezAck { .. }
             | SlSessionEvent::ForceObjectSelect { .. }
