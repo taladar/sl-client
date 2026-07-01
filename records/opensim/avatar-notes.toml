@@ -1,0 +1,97 @@
+test = "avatar-notes"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "38c23ce-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T06:34:11.562727602Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "38c23ce-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T06:38:16.208049289Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "38c23ce-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T06:39:53.449623801Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "38c23ce-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T06:40:47.563520943Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "38c23ce-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T06:41:51.473485777Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "38c23ce-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T06:43:17.147997457Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "38c23ce-dirty"
+dirty = true
+outcome = "pass"
+completeness = "partial"
+completeness_note = "grid left the avatarnotesrequest query unanswered (stock OpenSim); the note write was exercised but the read-back round-trip is unverifiable on this grid"
+recorded_at = "2026-07-01T06:46:37.377617237Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+note_written = "sl-conformance avatar-notes (write-only, unverifiable read)"
+notes_read_answered = false
+target_avatar = "bbbbbbbb-aaaa-cccc-dddd-000000000001"
+
+[run.metric_meta]

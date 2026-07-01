@@ -55,6 +55,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::ais3_folder_lifecycle::Ais3FolderLifecycle),
         Box::new(crate::cases::asset_decode::AssetDecode),
         Box::new(crate::cases::avatar_properties::AvatarProperties),
+        Box::new(crate::cases::avatar_notes::AvatarNotes),
         Box::new(crate::cases::profile_edit_roundtrip::ProfileEditRoundtrip),
         Box::new(crate::cases::picks_classifieds::PicksClassifieds),
         Box::new(crate::cases::region_info::RegionInfo),
