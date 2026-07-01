@@ -64,10 +64,11 @@ use sl_proto::{
     ProfileUpdate, ProposalVoteId, ReflectionProbe, ReflectionProbeFlags, RegionHandle,
     RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId, RegionName, RenderMaterialRef,
     RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
-    ScopedObjectId, ScopedParcelId, ScriptPermissions, SculptData, SculptOrMeshKey,
-    SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey, TerraformArea, TextureEntry,
-    TextureFace, Throttle, UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
+    ScopedObjectId, ScopedParcelId, ScriptLanguage, ScriptPermissions, ScriptTarget,
+    ScriptUploadLocation, SculptData, SculptOrMeshKey, SimWideDeleteFlags, StartLocationSlot,
+    TaskInventoryKey, TerraformArea, TextureEntry, TextureFace, Throttle, UpdatableAssetType,
+    UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -608,8 +609,8 @@ fn parse_asset_type(field: &str, value: &str) -> Result<AssetType, ReplError> {
         "clothing" => AssetType::Clothing,
         "object" => AssetType::Object,
         "notecard" => AssetType::Notecard,
-        "lsltext" | "lsl" | "script" => AssetType::LslText,
-        "lslbytecode" | "bytecode" => AssetType::LslBytecode,
+        "lsltext" | "lsl" | "script" => AssetType::ScriptText,
+        "lslbytecode" | "bytecode" => AssetType::ScriptBytecode,
         "texturetga" => AssetType::TextureTga,
         "bodypart" => AssetType::Bodypart,
         "soundwav" => AssetType::SoundWav,
@@ -630,6 +631,35 @@ fn parse_asset_type(field: &str, value: &str) -> Result<AssetType, ReplError> {
                 .ok_or_else(|| invalid(field, value, "asset type"))?,
         ),
     })
+}
+
+/// Parse an [`UpdatableAssetType`] (the script-excluding narrowing used by
+/// `update_inventory_asset`) from an [`AssetType`] name/code. A script class is
+/// rejected — scripts are uploaded with `upload_script` so compile results are
+/// surfaced.
+fn parse_updatable_asset_type(field: &str, value: &str) -> Result<UpdatableAssetType, ReplError> {
+    UpdatableAssetType::try_from(parse_asset_type(field, value)?).map_err(|_error| {
+        invalid(
+            field,
+            value,
+            "updatable asset type (gesture/notecard/settings/material; scripts use upload_script)",
+        )
+    })
+}
+
+/// Parse a [`ScriptTarget`] (script compile backend) from its wire token.
+fn parse_script_target(field: &str, value: &str) -> Result<ScriptTarget, ReplError> {
+    ScriptTarget::from_wire(&norm(value))
+        .ok_or_else(|| invalid(field, value, "script target (mono/lsl2/luau)"))
+}
+
+/// Parse a [`ScriptLanguage`] from its name.
+fn parse_script_language(field: &str, value: &str) -> Result<ScriptLanguage, ReplError> {
+    match norm(value).as_str() {
+        "lsl" => Ok(ScriptLanguage::Lsl),
+        "luau" | "lua" | "slua" => Ok(ScriptLanguage::Luau),
+        _ => Err(invalid(field, value, "script language (lsl/luau)")),
+    }
 }
 
 /// Parse an [`InventoryType`] from its name or wire code.
@@ -673,7 +703,7 @@ fn parse_folder_type(field: &str, value: &str) -> Result<FolderType, ReplError> 
         "object" => FolderType::Object,
         "notecard" => FolderType::Notecard,
         "rootinventory" | "root" => FolderType::RootInventory,
-        "lsltext" | "script" => FolderType::LslText,
+        "lsltext" | "script" => FolderType::ScriptText,
         "bodypart" => FolderType::Bodypart,
         "trash" => FolderType::Trash,
         "snapshot" => FolderType::SnapshotCategory,
@@ -4949,8 +4979,74 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::UpdateInventoryAsset {
                     item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
-                    asset_type: enum_arg(args, ctx, "asset_type", 1, parse_asset_type)?,
+                    asset_type: enum_arg(args, ctx, "asset_type", 1, parse_updatable_asset_type)?,
                     data: args.bytes_or_empty(ctx, "data", 100)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "create_script",
+            usage: "<folder_id> name=<n> description=<d> next_owner_mask=<u32> language=<lsl|luau>",
+            build: |args, ctx| {
+                Ok(Command::CreateScript {
+                    folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 0)?),
+                    name: args.req_str(ctx, "name", 1)?,
+                    description: args.opt_str(ctx, "description", 2)?.unwrap_or_default(),
+                    next_owner_mask: args.parse_or(ctx, "next_owner_mask", 3, "u32", 0)?,
+                    language: enum_arg_or(
+                        args,
+                        ctx,
+                        "language",
+                        4,
+                        parse_script_language,
+                        ScriptLanguage::Lsl,
+                    )?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "upload_script_agent",
+            usage: "<item_id> target=<mono|lsl2|luau> source=<hex>",
+            build: |args, ctx| {
+                Ok(Command::UploadScript {
+                    location: ScriptUploadLocation::AgentInventory {
+                        item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
+                    },
+                    target: enum_arg_or(
+                        args,
+                        ctx,
+                        "target",
+                        1,
+                        parse_script_target,
+                        ScriptTarget::Mono,
+                    )?,
+                    source: args.bytes_or_empty(ctx, "source", 100)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "upload_script_task",
+            usage: "<task_id> <item_id> running=<bool> experience=<uuid> \
+                    target=<mono|lsl2|luau> source=<hex>",
+            build: |args, ctx| {
+                Ok(Command::UploadScript {
+                    location: ScriptUploadLocation::TaskInventory {
+                        task_id: ObjectKey::from(args.req_uuid(ctx, "task_id", 0)?),
+                        item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?),
+                        running: args.req_bool(ctx, "running", 2)?,
+                        experience: args
+                            .opt_uuid(ctx, "experience", 3)?
+                            .map(ExperienceKey::from),
+                    },
+                    target: enum_arg_or(
+                        args,
+                        ctx,
+                        "target",
+                        4,
+                        parse_script_target,
+                        ScriptTarget::Mono,
+                    )?,
+                    source: args.bytes_or_empty(ctx, "source", 100)?,
                 })
             },
         },
@@ -5736,7 +5832,7 @@ mod tests {
         assert!(matches!(
             build(&format!("request_asset {ONE} lsl_text")),
             Ok(Command::RequestAsset {
-                asset_type: AssetType::LslText,
+                asset_type: AssetType::ScriptText,
                 ..
             })
         ));

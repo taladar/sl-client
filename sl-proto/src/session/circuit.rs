@@ -19,8 +19,8 @@ use crate::types::{
     AssetType, AttachmentMode, AttachmentPoint, Camera, ChatType, ClassifiedCategory,
     ClassifiedUpdate, ClickAction, CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags,
     GestureActivation, GodRegionUpdate, GroupRoleEdit, GroupRoleMemberChange, ImDialog,
-    InterestsUpdate, InventoryItem, LandEdit, LandSearchType, MapRequestFlags, Material,
-    MovementMode, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
+    InterestsUpdate, InventoryItem, InventoryType, LandEdit, LandSearchType, MapRequestFlags,
+    Material, MovementMode, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
     ObjectExtraParams, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelCategory,
     ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams,
     ProfileUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
@@ -2976,6 +2976,46 @@ impl Circuit {
         self.send(&message, Reliability::Reliable, now)
     }
 
+    /// Queues a `CreateInventoryItem` reliably for a **new script** item, with the
+    /// language `subtype` byte packed into the `WearableType` field (as the viewer
+    /// does — `SST_LSL = 0` / `SST_LUA = 1`). The transaction id is nil, so the
+    /// simulator fills the item with its default script body (selecting the LSL or
+    /// Lua default from the subtype). The reply is an `UpdateCreateInventoryItem`
+    /// echoing `callback_id` ([`Event::InventoryItemCreated`]).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors the flat CreateInventoryItem wire block fields"
+    )]
+    pub(crate) fn send_create_script_item(
+        &mut self,
+        folder_id: InventoryFolderKey,
+        name: &str,
+        description: &str,
+        next_owner_mask: u32,
+        subtype: u8,
+        callback_id: InventoryCallbackId,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::CreateInventoryItem(CreateInventoryItem {
+            agent_data: CreateInventoryItemAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            inventory_block: CreateInventoryItemInventoryBlockBlock {
+                callback_id: callback_id.get(),
+                folder_id: folder_id.uuid(),
+                transaction_id: Uuid::nil(),
+                next_owner_mask,
+                r#type: i8::try_from(AssetType::ScriptText.to_code()).unwrap_or(-1),
+                inv_type: i8::try_from(InventoryType::Script.to_code()).unwrap_or(-1),
+                wearable_type: subtype,
+                name: with_nul(name),
+                description: with_nul(description),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
     /// Queues a `LinkInventoryItem` reliably (create a link to an existing item
     /// or folder). The simulator answers with an `UpdateCreateInventoryItem`
     /// echoing `callback_id` ([`Event::InventoryItemCreated`]). The `TransactionID`
@@ -3047,7 +3087,7 @@ impl Circuit {
                 name: with_nul(&item.name),
                 description: with_nul(&item.description),
                 creation_date: item.creation_date,
-                crc: inventory_item_crc(item)?,
+                crc: inventory_item_crc(item, item.folder_id.uuid())?,
             }],
         });
         self.send(&message, Reliability::Reliable, now)

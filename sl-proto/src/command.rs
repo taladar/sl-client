@@ -23,9 +23,10 @@ use crate::{
     Permissions, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate,
     ProposalVoteId, QueryId, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability,
     RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
-    ScriptPermissions, SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey, TextureEntry,
-    TextureKey, Throttle, TransactionId, UpdateGroupInfoParams, Uuid, Vector, ViewerEffect,
-    VoiceProvisionRequest, Wearable,
+    ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation, SimWideDeleteFlags,
+    StartLocationSlot, TaskInventoryKey, TextureEntry, TextureKey, Throttle, TransactionId,
+    UpdatableAssetType, UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
+    Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -235,6 +236,28 @@ pub enum Command {
     /// Create an inventory item (`CreateInventoryItem`). The simulator allocates
     /// the id and replies with an [`Event::InventoryItemCreated`](crate::Event::InventoryItemCreated).
     CreateInventoryItem(NewInventoryItem),
+    /// Create a new **script** inventory item (`CreateInventoryItem` carrying the
+    /// language subtype). The simulator allocates the id and fills the item with a
+    /// **compilable default body** — the LSL default, or the Lua default on a
+    /// SLua-capable grid when `language` is [`ScriptLanguage::Luau`] — never an
+    /// empty (non-compiling) script. The reply is an
+    /// [`Event::InventoryItemCreated`](crate::Event::InventoryItemCreated); follow
+    /// up with [`Command::UploadScript`] to replace the body with compiled custom
+    /// source. This is the script-aware counterpart to
+    /// [`CreateInventoryItem`](Self::CreateInventoryItem).
+    CreateScript {
+        /// The folder the new script item is created in.
+        folder_id: InventoryFolderKey,
+        /// The new item's name.
+        name: String,
+        /// The new item's description.
+        description: String,
+        /// The next-owner permission mask for the new item.
+        next_owner_mask: u32,
+        /// The script language (sets the item's subtype; selects the sim's default
+        /// body).
+        language: ScriptLanguage,
+    },
     /// Create an inventory link to an existing item or folder
     /// (`LinkInventoryItem`). The simulator allocates the link item's id and
     /// replies with an [`Event::InventoryItemCreated`](crate::Event::InventoryItemCreated).
@@ -1966,11 +1989,38 @@ pub enum Command {
     UpdateInventoryAsset {
         /// The inventory item whose asset is being replaced.
         item_id: InventoryKey,
-        /// The item's asset class (selects the capability; see
-        /// [`AssetType::update_item_cap`]).
-        asset_type: AssetType,
+        /// The item's asset class, narrowed to the classes the generic
+        /// `Update*AgentInventory` path serves (selects the capability via
+        /// [`UpdatableAssetType::cap`]). Scripts are excluded by construction —
+        /// use [`Command::UploadScript`] so compile results are surfaced.
+        asset_type: UpdatableAssetType,
         /// The new raw asset bytes.
         data: Vec<u8>,
+    },
+    /// Upload new source into an existing script inventory item and have the
+    /// **simulator compile it** (the `UpdateScriptAgent` / `UpdateScriptTask`
+    /// capability, chosen by `location`). The viewer never compiles locally — it
+    /// POSTs the raw source and a requested [`ScriptTarget`], and the simulator
+    /// returns the compile result. That result arrives as
+    /// [`Event::ScriptUploaded`](crate::Event::ScriptUploaded) (which carries the
+    /// `compiled` flag and any [`ScriptCompileError`](crate::ScriptCompileError)s);
+    /// a transport-level failure (missing capability, HTTP/parse error) arrives as
+    /// [`Event::AssetUploadFailed`](crate::Event::AssetUploadFailed) instead.
+    ///
+    /// This is the *only* way to put script source on the wire (the generic
+    /// [`UploadAsset`](Self::UploadAsset) / [`UpdateInventoryAsset`](Self::UpdateInventoryAsset)
+    /// paths reject scripts) so compile results are never silently discarded. To
+    /// create a *new* script item first, use
+    /// [`Session::create_inventory_item`](crate::Session::create_inventory_item)
+    /// (the simulator supplies a compilable default body).
+    UploadScript {
+        /// Which script item is being updated (agent inventory or an object's
+        /// task inventory) — selects the capability and request body.
+        location: ScriptUploadLocation,
+        /// The compiler/runtime backend to compile for (`mono`/`lsl2`/`luau`).
+        target: ScriptTarget,
+        /// The raw script source bytes (UTF-8 text).
+        source: Vec<u8>,
     },
     /// Fetch an object's per-face **media-on-a-prim** settings over the
     /// `ObjectMedia` capability (a GET). The result arrives as

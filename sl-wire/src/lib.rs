@@ -87,6 +87,7 @@ pub use llsd::{
     build_new_file_agent_inventory_request, build_object_media_get_request,
     build_object_media_navigate_request, build_object_media_update_request, build_seed_request,
     build_update_avatar_appearance_request, build_update_item_asset_request,
+    build_update_script_agent_request, build_update_script_task_request,
     build_upload_baked_texture_request, parse_asset_upload_response, parse_event_queue_response,
     parse_llsd_binary, parse_llsd_xml, parse_seed_response,
 };
@@ -172,7 +173,8 @@ mod test {
         MediaEntry, MessageId, ObjectMediaResponse, PacketFlags, Reader, SequenceNumber, WireError,
         Writer, build_group_notice_bucket, build_new_file_agent_inventory_request,
         build_object_media_get_request, build_object_media_navigate_request,
-        build_object_media_update_request, build_update_item_asset_request, combine_uuids,
+        build_object_media_update_request, build_update_item_asset_request,
+        build_update_script_agent_request, build_update_script_task_request, combine_uuids,
         encode_datagram, message_name, parse_asset_upload_response, parse_datagram, parse_llsd_xml,
         zero_decode, zero_encode,
     };
@@ -456,6 +458,69 @@ mod test {
         let item = sl_types::key::InventoryKey::from(uuid::Uuid::from_u128(0x17e3));
         let body = build_update_item_asset_request(item);
         assert!(body.contains(&format!("<key>item_id</key><uuid>{item}</uuid>")));
+    }
+
+    #[test]
+    fn upload_response_parses_script_compile_result() -> Result<(), roxmltree::Error> {
+        let asset = uuid::Uuid::from_u128(0x5c_1b7);
+        // A clean compile: compiled = true, no errors.
+        let ok = parse_asset_upload_response(&format!(
+            "<llsd><map><key>state</key><string>complete</string>\
+             <key>new_asset</key><uuid>{asset}</uuid>\
+             <key>compiled</key><boolean>true</boolean>\
+             <key>errors</key><array /></map></llsd>"
+        ))?;
+        assert_eq!(ok.compiled, Some(true));
+        assert!(ok.errors.is_empty());
+
+        // A failed compile: compiled = false with diagnostic strings.
+        let bad = parse_asset_upload_response(
+            "<llsd><map><key>state</key><string>complete</string>\
+             <key>compiled</key><boolean>false</boolean>\
+             <key>errors</key><array>\
+             <string>(3, 5): ERROR: Syntax error</string>\
+             <string>(4, 1): ERROR: missing }</string>\
+             </array></map></llsd>",
+        )?;
+        assert_eq!(bad.compiled, Some(false));
+        assert_eq!(
+            bad.errors,
+            vec![
+                "(3, 5): ERROR: Syntax error".to_owned(),
+                "(4, 1): ERROR: missing }".to_owned(),
+            ]
+        );
+
+        // A non-script upload carries neither field.
+        let plain = parse_asset_upload_response(
+            "<llsd><map><key>state</key><string>complete</string></map></llsd>",
+        )?;
+        assert_eq!(plain.compiled, None);
+        assert!(plain.errors.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn update_script_requests_carry_target_and_fields() {
+        let item = sl_types::key::InventoryKey::from(uuid::Uuid::from_u128(0x17e3));
+        let task = sl_types::key::ObjectKey::from(uuid::Uuid::from_u128(0x7a5c));
+        let exp = sl_types::key::ExperienceKey::from(uuid::Uuid::from_u128(0xe0e0));
+
+        let agent = build_update_script_agent_request(item, "luau");
+        assert!(agent.contains(&format!("<key>item_id</key><uuid>{item}</uuid>")));
+        assert!(agent.contains("<key>target</key><string>luau</string>"));
+
+        // Task upload with a running script under an experience.
+        let with_exp = build_update_script_task_request(task, item, true, "mono", Some(exp));
+        assert!(with_exp.contains(&format!("<key>task_id</key><uuid>{task}</uuid>")));
+        assert!(with_exp.contains("<key>is_script_running</key><integer>1</integer>"));
+        assert!(with_exp.contains("<key>target</key><string>mono</string>"));
+        assert!(with_exp.contains(&format!("<key>experience</key><uuid>{exp}</uuid>")));
+
+        // Not running, no experience → the experience key is omitted, flag is 0.
+        let no_exp = build_update_script_task_request(task, item, false, "lsl2", None);
+        assert!(no_exp.contains("<key>is_script_running</key><integer>0</integer>"));
+        assert!(!no_exp.contains("<key>experience</key>"));
     }
 
     #[test]

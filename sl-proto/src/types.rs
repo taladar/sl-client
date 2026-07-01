@@ -367,7 +367,10 @@ pub use appearance::{
     PlayingAnimation, RezAttachment, SoundFlags, SoundPreload, TextureEntry, TextureFace, Wearable,
     WearableType, avatar_texture,
 };
-pub use asset::{Asset, AssetType, ImageCodec, InventoryType, Texture, TransferStatus};
+pub use asset::{
+    Asset, AssetType, ImageCodec, InventoryType, NotUpdatableAssetType, Texture, TransferStatus,
+    UpdatableAssetType,
+};
 pub use avatar_profile::{
     AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,
     ClassifiedInfo, ClassifiedUpdate, DirectoryVisibility, Friend, FriendRights, InterestsUpdate,
@@ -438,10 +441,11 @@ pub use region::{
 };
 pub use report::Postcard;
 pub use script::{
-    AlertInfo, FollowCamProperty, FollowCamPropertyValue, LoadUrlRequest, MuteEntry, MuteFlags,
-    MuteType, PermissionRole, ScriptControl, ScriptControlAction, ScriptControlsInfo, ScriptDialog,
-    ScriptGrantInfo, ScriptPermissionRequest, ScriptPermissionState, ScriptPermissionStatus,
-    ScriptPermissions, ScriptTeleportRequest,
+    AlertInfo, DEFAULT_LSL_SCRIPT, DEFAULT_LUAU_SCRIPT, FollowCamProperty, FollowCamPropertyValue,
+    LoadUrlRequest, MuteEntry, MuteFlags, MuteType, PermissionRole, ScriptCompileError,
+    ScriptControl, ScriptControlAction, ScriptControlsInfo, ScriptDialog, ScriptGrantInfo,
+    ScriptLanguage, ScriptPermissionRequest, ScriptPermissionState, ScriptPermissionStatus,
+    ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation,
 };
 pub use server_error::{FeatureDisabled, Kick, ServerError};
 pub use session::{

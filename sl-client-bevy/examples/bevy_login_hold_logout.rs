@@ -311,6 +311,7 @@ fn on_events(
             | SlSessionEvent::AssetUploadComplete { .. }
             | SlSessionEvent::AssetUploaded { .. }
             | SlSessionEvent::AssetUploadFailed { .. }
+            | SlSessionEvent::ScriptUploaded { .. }
             | SlSessionEvent::AvatarAppearance(_)
             | SlSessionEvent::AgentWearables { .. }
             | SlSessionEvent::AvatarAnimation { .. }

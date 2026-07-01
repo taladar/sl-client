@@ -686,6 +686,7 @@ impl Survey {
             | Event::AssetUploadComplete { .. }
             | Event::AssetUploaded { .. }
             | Event::AssetUploadFailed { .. }
+            | Event::ScriptUploaded { .. }
             | Event::AvatarAppearance(_)
             | Event::AgentWearables { .. }
             | Event::AvatarAnimation { .. }

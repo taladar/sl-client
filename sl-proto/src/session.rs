@@ -143,10 +143,17 @@ pub const CAP_UPDATE_GESTURE_AGENT_INVENTORY: &str = "UpdateGestureAgentInventor
 /// the `item_id`.
 pub const CAP_UPDATE_NOTECARD_AGENT_INVENTORY: &str = "UpdateNotecardAgentInventory";
 
-/// The HTTP capability for replacing the asset of an existing **LSL script**
-/// inventory item (`UpdateScriptAgent`). Two-step uploader carrying the
-/// `item_id`.
+/// The HTTP capability for replacing the source of an existing **script**
+/// inventory item in the agent's own inventory (`UpdateScriptAgent`). Two-step
+/// uploader carrying the `item_id` and a compile `target`; the completion reply
+/// carries the simulator's compile result (`compiled` + `errors`).
 pub const CAP_UPDATE_SCRIPT_AGENT: &str = "UpdateScriptAgent";
+
+/// The HTTP capability for replacing the source of a **script** inside an
+/// in-world object's task inventory (`UpdateScriptTask`). Two-step uploader
+/// carrying `task_id`/`item_id`, `is_script_running`, a compile `target`, and an
+/// optional `experience`; the completion reply carries the compile result.
+pub const CAP_UPDATE_SCRIPT_TASK: &str = "UpdateScriptTask";
 
 /// The HTTP capability for replacing the asset of an existing **settings**
 /// inventory item (`UpdateSettingsAgentInventory`). Two-step uploader carrying
@@ -465,6 +472,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_UPDATE_GESTURE_AGENT_INVENTORY,
     CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
     CAP_UPDATE_SCRIPT_AGENT,
+    CAP_UPDATE_SCRIPT_TASK,
     CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
     CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE,

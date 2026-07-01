@@ -51,6 +51,7 @@ pub mod profile_edit_roundtrip;
 pub mod region_info;
 pub mod script_dialog;
 pub mod script_permissions;
+pub mod script_upload;
 pub mod session_mark_read;
 pub mod task_inventory;
 pub mod throttle_set;

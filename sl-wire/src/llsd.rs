@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use sl_types::key::{InventoryFolderKey, InventoryKey, ObjectKey};
+use sl_types::key::{ExperienceKey, InventoryFolderKey, InventoryKey, ObjectKey};
 use uuid::Uuid;
 
 pub use sl_llsd::{Llsd, LlsdError, parse_llsd_binary, parse_llsd_xml};
@@ -166,6 +166,54 @@ pub fn build_update_item_asset_request(item_id: InventoryKey) -> String {
     format!("<llsd><map><key>item_id</key><uuid>{item_id}</uuid></map></llsd>")
 }
 
+/// Builds the LLSD-XML metadata body for the first step of an `UpdateScriptAgent`
+/// capability upload (replacing an **agent-inventory** script item's source and
+/// compiling it): a map carrying the `item_id` and the compile `target`
+/// (`"mono"`/`"lsl2"`/`"luau"`). The simulator replies with an `uploader` URL; the
+/// completion reply carries the compile result (see
+/// [`parse_asset_upload_response`]).
+#[must_use]
+pub fn build_update_script_agent_request(item_id: InventoryKey, target: &str) -> String {
+    let mut out = String::from("<llsd><map><key>item_id</key><uuid>");
+    out.push_str(&item_id.to_string());
+    out.push_str("</uuid><key>target</key><string>");
+    push_escaped(&mut out, target);
+    out.push_str("</string></map></llsd>");
+    out
+}
+
+/// Builds the LLSD-XML metadata body for the first step of an `UpdateScriptTask`
+/// capability upload (replacing a **task-inventory** script's source inside an
+/// in-world object and compiling it): a map carrying `task_id`, `item_id`,
+/// `is_script_running`, the compile `target`, and — when the script runs under an
+/// experience — the `experience` id. The completion reply carries the compile
+/// result.
+#[must_use]
+pub fn build_update_script_task_request(
+    task_id: ObjectKey,
+    item_id: InventoryKey,
+    is_script_running: bool,
+    target: &str,
+    experience: Option<ExperienceKey>,
+) -> String {
+    let mut out = String::from("<llsd><map><key>task_id</key><uuid>");
+    out.push_str(&task_id.to_string());
+    out.push_str("</uuid><key>item_id</key><uuid>");
+    out.push_str(&item_id.to_string());
+    out.push_str("</uuid><key>is_script_running</key><integer>");
+    out.push_str(if is_script_running { "1" } else { "0" });
+    out.push_str("</integer><key>target</key><string>");
+    push_escaped(&mut out, target);
+    out.push_str("</string>");
+    if let Some(experience) = experience {
+        out.push_str("<key>experience</key><uuid>");
+        out.push_str(&experience.to_string());
+        out.push_str("</uuid>");
+    }
+    out.push_str("</map></llsd>");
+    out
+}
+
 /// Builds the LLSD-XML metadata body for the first step of an
 /// `UploadBakedTexture` capability upload (a temporary avatar bake, which
 /// creates no inventory item): an empty map, as the viewer sends.
@@ -195,6 +243,14 @@ pub struct AssetUploadResponse {
     pub new_inventory_item: Option<Uuid>,
     /// The grid's error message, if the response reported a failure.
     pub error: Option<String>,
+    /// The simulator's script-compile result (`compiled`), for a script upload
+    /// (`UpdateScriptAgent`/`UpdateScriptTask`). `None` for a non-script upload,
+    /// which carries no `compiled` field.
+    pub compiled: Option<bool>,
+    /// The compiler diagnostics (`errors`) from a script upload, verbatim strings
+    /// as the grid formatted them. Empty for a non-script upload or a clean
+    /// compile.
+    pub errors: Vec<String>,
 }
 
 /// Parses a CAPS asset-upload response (either step of the two-step uploader)
@@ -225,12 +281,29 @@ pub fn parse_asset_upload_response(xml: &str) -> Result<AssetUploadResponse, rox
         .get("error")
         .and_then(upload_error_message)
         .filter(|message| !message.is_empty());
+    // Script uploads (`UpdateScriptAgent`/`UpdateScriptTask`) additionally report
+    // the simulator's compile result: a `compiled` boolean and an `errors` array
+    // of diagnostic strings. Absent for a non-script upload.
+    let compiled = root.get("compiled").and_then(Llsd::as_bool);
+    let errors = root
+        .get("errors")
+        .and_then(Llsd::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(Llsd::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(AssetUploadResponse {
         state,
         uploader,
         new_asset,
         new_inventory_item,
         error,
+        compiled,
+        errors,
     })
 }
 

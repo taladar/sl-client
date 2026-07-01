@@ -23,10 +23,11 @@ use sl_proto::{
     CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
-    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-    CHAT_SESSION_DECLINE_P2P_VOICE, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, RECV_BUFFER_SIZE,
-    SelectedCostKind, Session, ais_category_children_fetch_url, ais_category_children_url,
-    ais_category_url, ais_create_category_url, ais_item_url, build_agent_preferences_request,
+    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING,
+    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, RECV_BUFFER_SIZE, SelectedCostKind, Session,
+    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    ais_create_category_url, ais_item_url, build_agent_preferences_request,
     build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
     build_ais_update_item_body, build_create_inventory_category_request,
     build_get_object_cost_request, build_get_object_physics_data_request,
@@ -36,7 +37,8 @@ use sl_proto::{
     build_region_experiences_request, build_remote_parcel_request,
     build_resource_cost_selected_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
-    build_update_item_asset_request, build_upload_baked_texture_request,
+    build_update_item_asset_request, build_update_script_agent_request,
+    build_update_script_task_request, build_upload_baked_texture_request,
     build_voice_signaling_request, chat_session_request_body, display_names_query,
     experience_id_query, experience_info_query, find_experience_query, forget_experience_query,
     group_experiences_query, parse_login_response,
@@ -80,17 +82,19 @@ pub use sl_proto::{
     ProposalVoteId, QueryId, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
     RegionCombatSettings, RegionCoordinates, RegionFlags, RegionHandle, RegionIdentity,
     RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionName,
-    Reliability, RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezObjectParams, Rotation,
-    SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData, SculptOrMeshKey,
-    SequenceNumber, SessionMessage, SetDisplayNameReply, SimulatorFeatures, SoundFlags,
-    SoundPreload, StartLocation, StartLocationParseError, TaskInventoryItem, TaskInventoryKey,
-    TaskInventoryReply, TerrainLayerType, TerrainPatch, Texture, TextureAnimation, TextureEntry,
-    TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat,
-    TransactionId, TransferId, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo,
-    VoiceProvisionRequest, Wearable, WearableType, XferId, avatar_texture, decode_particle_system,
-    decode_texture_anim, decode_texture_entry, grid_to_handle, group_powers, handle_to_global,
-    handle_to_grid, particle_pattern, pcode, sim_access, texture_anim_mode,
+    Reliability, RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezObjectParams,
+    RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError,
+    ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData,
+    SculptOrMeshKey, SequenceNumber, SessionMessage, SetDisplayNameReply, SimulatorFeatures,
+    SoundFlags, SoundPreload, StartLocation, StartLocationParseError, TaskInventoryItem,
+    TaskInventoryKey, TaskInventoryReply, TerrainLayerType, TerrainPatch, Texture,
+    TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder,
+    ThrottleError, TimestampFormat, TransactionId, TransferId, TransferStatus, Transmit, Uuid,
+    Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, XferId,
+    avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
+    grid_to_handle, group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode,
+    sim_access, texture_anim_mode,
 };
 
 mod appearance;
@@ -123,7 +127,7 @@ use crate::inventory::{fetch_folder_contents, fetch_group_members, fetch_invento
 use crate::inventory_cache::InventoryCache;
 use crate::materials::{fetch_render_materials, post_modify_material_params};
 use crate::media::{fetch_object_media, post_object_media};
-use crate::upload::{run_caps_upload, run_report_screenshot_upload};
+use crate::upload::{run_caps_upload, run_report_screenshot_upload, run_script_upload};
 use crate::voice::{post_voice_cap, post_voice_signaling};
 
 /// How long to sleep when the session has no scheduled timeout.
@@ -707,6 +711,9 @@ impl Client {
                         }
                         Some(Command::CreateInventoryItem(new)) => {
                             self.session.create_inventory_item(&new, Instant::now())?;
+                        }
+                        Some(Command::CreateScript { folder_id, name, description, next_owner_mask, language }) => {
+                            self.session.create_script(folder_id, &name, &description, next_owner_mask, language, Instant::now())?;
                         }
                         Some(Command::LinkInventoryItem(new)) => {
                             self.session.link_inventory_item(&new, Instant::now())?;
@@ -1436,6 +1443,15 @@ impl Client {
                         Some(Command::UploadAssetUdp { asset_type, data, temp_file, store_local }) => {
                             self.session.upload_asset_udp(asset_type, data, temp_file, store_local, Instant::now())?;
                         }
+                        Some(Command::UploadAsset { asset_type, .. }) if asset_type.is_script() => {
+                            // Scripts must go through `UploadScript` so the
+                            // simulator's compile result is surfaced; the generic
+                            // create-with-body path would discard it.
+                            events.send(Event::AssetUploadFailed {
+                                reason: "scripts must be uploaded with UploadScript (create the item \
+                                    with create_inventory_item first)".to_owned(),
+                            }).await.ok();
+                        }
                         Some(Command::UploadAsset {
                             folder_id, asset_type, inventory_type, name, description,
                             next_owner_mask, group_mask, everyone_mask, expected_upload_cost, data,
@@ -1474,22 +1490,47 @@ impl Client {
                             }
                         }
                         Some(Command::UpdateInventoryAsset { item_id, asset_type, data }) => {
-                            match asset_type.update_item_cap() {
-                                Some(cap) => {
-                                    if let Some(url) = caps.get(cap).cloned() {
-                                        let body = build_update_item_asset_request(item_id);
-                                        tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
-                                    } else {
-                                        events.send(Event::AssetUploadFailed {
-                                            reason: format!("{cap} capability not available"),
-                                        }).await.ok();
-                                    }
-                                }
-                                None => {
-                                    events.send(Event::AssetUploadFailed {
-                                        reason: "asset type has no inventory-update capability".to_owned(),
-                                    }).await.ok();
-                                }
+                            // `UpdatableAssetType::cap` is total — scripts (which
+                            // need the compile-aware `UploadScript`) are excluded
+                            // from this type by construction.
+                            let cap = asset_type.cap();
+                            if let Some(url) = caps.get(cap).cloned() {
+                                let body = build_update_item_asset_request(item_id);
+                                tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
+                            } else {
+                                events.send(Event::AssetUploadFailed {
+                                    reason: format!("{cap} capability not available"),
+                                }).await.ok();
+                            }
+                        }
+                        Some(Command::UploadScript { location, target, source }) => {
+                            // Choose the capability + request body by location; the
+                            // completion carries the simulator's compile result.
+                            let target_wire = target.to_wire();
+                            let (cap, body, running) = match location {
+                                ScriptUploadLocation::AgentInventory { item_id } => (
+                                    CAP_UPDATE_SCRIPT_AGENT,
+                                    build_update_script_agent_request(item_id, target_wire),
+                                    None,
+                                ),
+                                ScriptUploadLocation::TaskInventory {
+                                    task_id, item_id, running, experience,
+                                } => (
+                                    CAP_UPDATE_SCRIPT_TASK,
+                                    build_update_script_task_request(
+                                        task_id, item_id, running, target_wire, experience,
+                                    ),
+                                    Some(running),
+                                ),
+                            };
+                            if let Some(url) = caps.get(cap).cloned() {
+                                tokio::spawn(run_script_upload(
+                                    url, body, source, running, http.clone(), events.clone(),
+                                ));
+                            } else {
+                                events.send(Event::AssetUploadFailed {
+                                    reason: format!("{cap} capability not available"),
+                                }).await.ok();
                             }
                         }
                         Some(Command::RequestObjectMedia { object_id }) => {

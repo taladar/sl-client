@@ -1,7 +1,7 @@
 //! Two-step NewFileAgentInventory / UploadBakedTexture asset upload.
 
 use reqwest::Client as ReqwestClient;
-use sl_proto::{Event, parse_asset_upload_response};
+use sl_proto::{Event, ScriptCompileError, parse_asset_upload_response};
 use tokio::sync::mpsc;
 
 /// Runs the modern two-step CAPS asset upload: POST the LLSD `metadata` to the
@@ -63,6 +63,83 @@ pub(crate) async fn caps_upload_event(
                 }),
             },
         },
+        Err(reason) => Event::AssetUploadFailed { reason },
+    }
+}
+
+/// Runs a two-step **script** upload (`UpdateScriptAgent` / `UpdateScriptTask`)
+/// and surfaces the simulator's compile result as [`Event::ScriptUploaded`]. A
+/// transport-level failure (missing uploader, HTTP/parse error, or a bare error
+/// completion) surfaces as [`Event::AssetUploadFailed`] instead. `running` is the
+/// requested run state echoed back for a task-inventory upload (`None` for agent
+/// inventory).
+pub(crate) async fn run_script_upload(
+    cap_url: String,
+    metadata: String,
+    source: Vec<u8>,
+    running: Option<bool>,
+    http: ReqwestClient,
+    events: mpsc::Sender<Event>,
+) {
+    let event = script_upload_event(&cap_url, metadata, source, running, &http).await;
+    events.send(event).await.ok();
+}
+
+/// Performs both steps of a script upload and maps the completion to an event.
+async fn script_upload_event(
+    cap_url: &str,
+    metadata: String,
+    source: Vec<u8>,
+    running: Option<bool>,
+    http: &ReqwestClient,
+) -> Event {
+    // Step 1: POST the metadata (item/task ids + compile target), get an uploader.
+    let uploader = match caps_upload_step(
+        http,
+        cap_url,
+        "application/llsd+xml",
+        metadata.into_bytes(),
+    )
+    .await
+    {
+        Ok(response) => match response.uploader {
+            Some(url) => url,
+            None => {
+                return Event::AssetUploadFailed {
+                    reason: response.error.unwrap_or_else(|| {
+                        format!("script upload metadata rejected (state {})", response.state)
+                    }),
+                };
+            }
+        },
+        Err(reason) => return Event::AssetUploadFailed { reason },
+    };
+    // Step 2: POST the raw source; the completion carries the compile result.
+    match caps_upload_step(http, &uploader, "application/octet-stream", source).await {
+        Ok(response) => {
+            // A completion with neither a compile result nor a stored asset is a
+            // transport/permission error, not a (failed) compile.
+            if response.compiled.is_none() && response.new_asset.is_none() {
+                return Event::AssetUploadFailed {
+                    reason: response.error.unwrap_or_else(|| {
+                        format!("script upload did not complete (state {})", response.state)
+                    }),
+                };
+            }
+            Event::ScriptUploaded {
+                new_asset: response.new_asset,
+                new_inventory_item: response.new_inventory_item,
+                // A grid that completed but omitted `compiled` is treated as a
+                // clean compile.
+                compiled: response.compiled.unwrap_or(true),
+                errors: response
+                    .errors
+                    .iter()
+                    .map(|error| ScriptCompileError::parse(error))
+                    .collect(),
+                running,
+            }
+        }
         Err(reason) => Event::AssetUploadFailed { reason },
     }
 }
