@@ -1,0 +1,29 @@
+test = "script-permissions"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "c0a6035-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T14:19:17.052738527Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+debit_retained_after_revoke = true
+granted_permissions = 2
+is_experience = false
+item_id = "94559bb3-f4b8-4e70-9d0f-9ce282df5987"
+object_name = "SLClientScriptTester"
+object_owner = "Avatar Tester"
+ping_rtt_secs = 0.003570227
+request_rtt_secs = 4.854546634
+requested_permissions = 2
+task_id = "ee013122-0b68-4fc0-8f06-c66708eb48a0"
+
+[run.metric_meta.ping_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.request_rtt_secs]
+lower_is_better = true
