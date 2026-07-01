@@ -1,0 +1,29 @@
+test = "object-properties"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "d26456c-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T09:02:28.478407224Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+creator = "9ba32878-e86d-4e19-9c71-51ff2214d3ee"
+family_rtt_secs = 0.029778136
+group_set = false
+object_id = "e0df3b92-545b-4d14-874e-4cdfc6d236b5"
+object_name = "SLClientSoundTester"
+owner = "9ba32878-e86d-4e19-9c71-51ff2214d3ee"
+perms_base_hex = "0x0009e000"
+properties_rtt_secs = 0.030502701
+sale_type = 0
+texture_ids = 0
+
+[run.metric_meta.family_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.properties_rtt_secs]
+lower_is_better = true
