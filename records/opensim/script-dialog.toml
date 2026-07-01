@@ -1,0 +1,40 @@
+test = "script-dialog"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "0adacdd-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T13:54:49.197576766Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "0adacdd-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T13:57:17.822952111Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+buttons_count = "2"
+chat_channel = -4242
+chosen_button = "Yes"
+dialog_rtt_secs = 10.674140028
+is_text_box = false
+object_id = "ee013122-0b68-4fc0-8f06-c66708eb48a0"
+object_name = "SLClientScriptTester"
+ping_rtt_secs = 0.000531289
+
+[run.metric_meta.dialog_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.ping_rtt_secs]
+lower_is_better = true
