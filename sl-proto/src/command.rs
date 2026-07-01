@@ -20,12 +20,12 @@ use crate::{
     MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
     ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
     ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField,
-    PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
-    QueryId, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability, RestoreItem,
-    RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType, ScriptPermissions,
-    SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey, TextureEntry, TextureKey, Throttle,
-    TransactionId, UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
-    Wearable,
+    Permissions, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate,
+    ProposalVoteId, QueryId, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability,
+    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
+    ScriptPermissions, SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey, TextureEntry,
+    TextureKey, Throttle, TransactionId, UpdateGroupInfoParams, Uuid, Vector, ViewerEffect,
+    VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1299,8 +1299,8 @@ pub enum Command {
         field: PermissionField,
         /// Whether to set (true) or clear (false) the bits.
         set: bool,
-        /// The `PERM_*` bits to set or clear.
-        mask: u32,
+        /// The permission bits to set or clear (e.g. [`Permissions::COPY`]).
+        mask: Permissions,
     },
     /// Set an object's sale type and price (`ObjectSaleInfo`).
     SetObjectForSale {

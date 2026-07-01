@@ -3950,7 +3950,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     )?,
                     field: enum_arg(args, ctx, "field", 1, parse_permission_field)?,
                     set: args.req_bool(ctx, "set", 2)?,
-                    mask: args.req_parse(ctx, "mask", 3, "u32")?,
+                    mask: Permissions::from_bits(args.req_parse(ctx, "mask", 3, "u32")?),
                 })
             },
         },

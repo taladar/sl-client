@@ -37,6 +37,7 @@ use sl_types::lsl::{Rotation, Vector};
 use sl_types::map::Distance;
 use sl_types::money::LindenAmount;
 use sl_wire::AbuseReport;
+use sl_wire::Permissions;
 use sl_wire::messages::{
     AcceptCallingCard, AcceptCallingCardAgentDataBlock, AcceptCallingCardFolderDataBlock,
     AcceptCallingCardTransactionBlockBlock, AcceptFriendship, AcceptFriendshipAgentDataBlock,
@@ -4689,7 +4690,7 @@ impl Circuit {
             },
             object_data: vec![ObjectNameObjectDataBlock {
                 local_id: local_id.0,
-                name: name.as_bytes().to_vec(),
+                name: with_nul(name),
             }],
         });
         self.send(&message, Reliability::Reliable, now)
@@ -4709,7 +4710,7 @@ impl Circuit {
             },
             object_data: vec![ObjectDescriptionObjectDataBlock {
                 local_id: local_id.0,
-                description: description.as_bytes().to_vec(),
+                description: with_nul(description),
             }],
         });
         self.send(&message, Reliability::Reliable, now)
@@ -4834,7 +4835,7 @@ impl Circuit {
             },
             object_data: vec![ObjectImageObjectDataBlock {
                 object_local_id: local_id.0,
-                media_url: media_url.as_bytes().to_vec(),
+                media_url: with_nul(media_url),
                 texture_entry: encode_texture_entry(texture_entry),
             }],
         });
@@ -4893,13 +4894,14 @@ impl Circuit {
         self.send(&message, Reliability::Reliable, now)
     }
 
-    /// Queues an `ObjectPermissions` reliably (set/clear `mask` bits of `field`).
+    /// Queues an `ObjectPermissions` reliably (set/clear the `mask` bits of
+    /// `field`).
     pub(crate) fn send_object_permissions(
         &mut self,
         local_ids: &[RegionLocalObjectId],
         field: PermissionField,
         set: bool,
-        mask: u32,
+        mask: Permissions,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectPermissions(ObjectPermissions {
@@ -4914,7 +4916,7 @@ impl Circuit {
                     object_local_id: id.0,
                     field: field.to_code(),
                     set: u8::from(set),
-                    mask,
+                    mask: mask.bits(),
                 })
                 .collect(),
         });

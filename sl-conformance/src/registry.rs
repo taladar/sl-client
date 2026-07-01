@@ -105,6 +105,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::object_rez_derez::ObjectRezDerez),
         Box::new(crate::cases::object_touch_grab::ObjectTouchGrab),
         Box::new(crate::cases::object_link_delink::ObjectLinkDelink),
+        Box::new(crate::cases::object_edit::ObjectEdit),
     ]
 }
 

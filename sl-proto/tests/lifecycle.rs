@@ -3054,7 +3054,8 @@ mod test {
             .ok_or("expected an ObjectImage")?;
         let block = object_image.object_data.first().ok_or("first object")?;
         assert_eq!(block.object_local_id, 7);
-        assert_eq!(block.media_url, b"http://example.com/media");
+        // The variable string field is NUL-terminated on the wire.
+        assert_eq!(block.media_url, b"http://example.com/media\0");
         // The packed TextureEntry round-trips back to the requested texture id
         // (a single face's value is the default applied to every face).
         let decoded = decode_texture_entry(&block.texture_entry, 1);
@@ -15027,7 +15028,8 @@ mod test {
             .ok_or("expected an ObjectName")?;
         let block = name.object_data.first().ok_or("expected one block")?;
         assert_eq!(block.local_id, 9);
-        assert_eq!(block.name, b"Vendor");
+        // The variable string field is NUL-terminated on the wire.
+        assert_eq!(block.name, b"Vendor\0");
         Ok(())
     }
 
@@ -15103,7 +15105,6 @@ mod test {
         let circuit = session.root_circuit_id().ok_or("no circuit")?;
         drain(&mut session)?;
 
-        // PERM_COPY = 0x8000 in the LSL permission flags.
         session.set_object_permissions(
             &[ScopedObjectId::new(
                 circuit,
@@ -15111,7 +15112,7 @@ mod test {
             )],
             PermissionField::NextOwner,
             false,
-            0x8000,
+            sl_proto::Permissions::COPY,
             now,
         )?;
         let sent = drain(&mut session)?;
@@ -15127,7 +15128,7 @@ mod test {
         assert_eq!(block.object_local_id, 31);
         assert_eq!(block.field, 0x10); // PERM_NEXT_OWNER
         assert_eq!(block.set, 0); // clearing
-        assert_eq!(block.mask, 0x8000);
+        assert_eq!(block.mask, sl_proto::Permissions::COPY.bits()); // PERM_COPY = 0x8000
         Ok(())
     }
 

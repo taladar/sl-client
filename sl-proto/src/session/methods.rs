@@ -10355,10 +10355,10 @@ impl Session {
         Ok(())
     }
 
-    /// Sets or clears `mask` permission bits of the `field` mask on the objects
-    /// `local_ids` (an `ObjectPermissions`). The `mask` bits are the LSL
-    /// `PERM_*` permission flags (`PERM_COPY`, `PERM_MODIFY`, `PERM_TRANSFER`,
-    /// …); `set` adds them when true and removes them when false.
+    /// Sets or clears the `mask` permission bits of the `field` mask on the
+    /// objects `local_ids` (an `ObjectPermissions`). The `mask` is a typed
+    /// [`Permissions`] set (e.g. [`Permissions::COPY`]` | `[`Permissions::MODIFY`]);
+    /// `set` adds those bits when true and removes them when false.
     ///
     /// # Errors
     ///
@@ -10369,7 +10369,7 @@ impl Session {
         local_ids: &[ScopedObjectId],
         field: PermissionField,
         set: bool,
-        mask: u32,
+        mask: Permissions,
         now: Instant,
     ) -> Result<(), Error> {
         let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
