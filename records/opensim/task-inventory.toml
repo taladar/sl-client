@@ -1,0 +1,26 @@
+test = "task-inventory"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "c57fb10-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T11:51:20.855922347Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+container_object = "5d35dad0-893a-461c-b195-ba408dcb5637"
+donor_item = "2b998ebf-f524-4249-b899-90475beb810f"
+donor_item_name = "Object"
+request_rtt_secs = 0.015078532
+serial_after_count = "1"
+serial_before_count = "0"
+update_rtt_secs = 0.01509856
+
+[run.metric_meta.request_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.update_rtt_secs]
+lower_is_better = true

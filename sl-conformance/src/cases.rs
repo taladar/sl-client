@@ -50,5 +50,6 @@ pub mod presence_online_offline;
 pub mod profile_edit_roundtrip;
 pub mod region_info;
 pub mod session_mark_read;
+pub mod task_inventory;
 pub mod throttle_set;
 pub mod typing_indicator;
