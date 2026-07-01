@@ -1,0 +1,28 @@
+test = "object-link-delink"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "9eca098-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T10:35:26.339276112Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+child_objects = "f8378069-5979-499b-bd9c-1ee00ca0b157,0b8ac702-b2a0-48ef-908d-48b027fe45f8"
+create_rtt_secs = 0.248839783
+delink_rtt_secs = 0.090755435
+link_rtt_secs = 0.090682758
+root_object = "02ccbc38-cc1e-4a41-a8da-08805b2ceec3"
+set_size = "3"
+
+[run.metric_meta.create_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.delink_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.link_rtt_secs]
+lower_is_better = true
