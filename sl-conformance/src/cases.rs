@@ -37,6 +37,7 @@ pub mod keepalive_ping;
 pub mod library_tree_fetch;
 pub mod login_handshake;
 pub mod logout_clean;
+pub mod mute_list;
 pub mod offline_msg_fetch;
 pub mod picks_classifieds;
 pub mod presence_online_offline;
