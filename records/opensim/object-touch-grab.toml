@@ -1,0 +1,22 @@
+test = "object-touch-grab"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "d41e378-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T09:38:18.44598822Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+drag_m = 0.25
+grab_updates_count = 1
+object_id = "e0df3b92-545b-4d14-874e-4cdfc6d236b5"
+pcode = 9
+ping_rtt_secs = 0.000602233
+touches_count = 1
+
+[run.metric_meta.ping_rtt_secs]
+lower_is_better = true
