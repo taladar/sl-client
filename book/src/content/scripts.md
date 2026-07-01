@@ -17,6 +17,11 @@ it, each targeting the object by [`ScopedObjectId`](world.md#objects):
   `serial` (it increments on every change, so a client can tell whether a cached
   listing is stale) and the temporary Xfer `filename` to download the full
   listing from (empty when the task inventory is empty).
+- `Command::FetchTaskInventory { target }` goes one step further: it sends the
+  same request, then downloads and parses the Xfer listing the reply names,
+  surfacing the parsed items as `Event::TaskInventoryContents` (the
+  `TaskInventoryReply` is still emitted first). See [Xfer File
+  Transfer](../comms/xfer.md) for the download mechanism and the listing format.
 - `Command::UpdateTaskInventory { target, key, item }` writes (adds or replaces)
   an item. `key` is a `TaskInventoryKey` choosing whether the simulator matches
   the existing entry by item id or by asset id; `item` is the full inventory

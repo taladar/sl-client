@@ -13,14 +13,14 @@ use crate::types::{
     GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
     GroupActiveProposalItem, GroupMember, GroupMembership, GroupName, GroupNotice, GroupNoticeKey,
     GroupProfile, GroupRole, GroupTitle, GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage,
-    InventoryFolder, InventoryItem, LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo,
-    MapRequestFlags, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType,
-    NavMeshBuildStatus, NavMeshStatus, NeighborInfo, Object, ObjectProperties, OpenRegionInfo,
-    ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey,
-    PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
+    InventoryFolder, InventoryItem, InventoryType, LandingType, MapItem, MapItemType, MapLayer,
+    MapRegionInfo, MapRequestFlags, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags,
+    MuteType, NavMeshBuildStatus, NavMeshStatus, NeighborInfo, Object, ObjectProperties,
+    OpenRegionInfo, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo,
+    PickKey, PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
     RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits, RequiredVoiceVersion,
-    Scale, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply,
-    SkySettings, WaterSettings, avatar_texture,
+    SaleType, Scale, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply,
+    SkySettings, TaskInventoryItem, WaterSettings, avatar_texture,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
@@ -62,6 +62,9 @@ use sl_wire::messages::{
 use sl_wire::{Direction, GlobalCoordinates};
 use sl_wire::{Llsd, SkeletonFolder};
 use sl_wire::{Permissions, Permissions5};
+
+use crate::asset_keys::AssetKey;
+use sl_types::money::LindenAmount;
 use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
 use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -213,6 +216,263 @@ pub(crate) fn parse_mute_line(line: &str) -> Result<Option<MuteEntry>, sl_wire::
         mute_type: MuteType::from_i32(mute_type),
         flags: MuteFlags(flags),
     }))
+}
+
+/// Parses a downloaded task-inventory `Xfer` listing — LL's plain-text
+/// `inv_item { … }` format, as written by OpenSim's
+/// `SceneObjectPartInventory.RequestInventoryFile` — into [`TaskInventoryItem`]
+/// values. The leading `inv_object` folder section (the virtual "Contents"
+/// folder) and any other non-item block are skipped; only leaf `inv_item`
+/// blocks are returned. A present-but-malformed field (an unparsable id, mask,
+/// or integer) or a missing required field is a hard [`WireError`], rather than
+/// silently coercing it.
+pub(crate) fn parse_task_inventory(
+    bytes: &[u8],
+) -> Result<Vec<TaskInventoryItem>, sl_wire::WireError> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut items = Vec::new();
+    let mut current: Option<TaskItemFields> = None;
+    // Brace depth, so an item's own closing `}` (and not those of its nested
+    // `permissions`/`sale_info` blocks) ends the item.
+    let mut depth: i32 = 0;
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line == "{" {
+            depth = depth.saturating_add(1);
+            continue;
+        }
+        if line == "}" {
+            depth = depth.saturating_sub(1);
+            if current
+                .as_ref()
+                .is_some_and(|fields| depth <= fields.open_depth)
+                && let Some(fields) = current.take()
+            {
+                items.push(fields.build()?);
+            }
+            continue;
+        }
+        // A "key<TAB>value" line, or a section header like "permissions 0".
+        let key = line.split_whitespace().next().unwrap_or("");
+        if key == "inv_item" {
+            current = Some(TaskItemFields::new(depth));
+            continue;
+        }
+        // Fields only matter inside an item: the leading `inv_object` folder
+        // block has `current == None`, so its overlapping keys are ignored.
+        if let Some(fields) = current.as_mut() {
+            let value = line.get(key.len()..).unwrap_or("").trim();
+            fields.set(key, value);
+        }
+    }
+    Ok(items)
+}
+
+/// The raw text fields collected while scanning one `inv_item` block, resolved
+/// into a [`TaskInventoryItem`] by [`build`](TaskItemFields::build).
+#[derive(Default)]
+struct TaskItemFields {
+    /// The brace depth the `inv_item` opened at, so its matching close is found.
+    open_depth: i32,
+    /// The `item_id` line (a UUID).
+    item_id: Option<String>,
+    /// The `parent_id` line (the prim's UUID).
+    parent_id: Option<String>,
+    /// The `base_mask` permission line (hex).
+    base_mask: Option<String>,
+    /// The `owner_mask` permission line (hex).
+    owner_mask: Option<String>,
+    /// The `group_mask` permission line (hex).
+    group_mask: Option<String>,
+    /// The `everyone_mask` permission line (hex).
+    everyone_mask: Option<String>,
+    /// The `next_owner_mask` permission line (hex).
+    next_owner_mask: Option<String>,
+    /// The `creator_id` line (a UUID).
+    creator_id: Option<String>,
+    /// The `last_owner_id` line (a UUID).
+    last_owner_id: Option<String>,
+    /// The `group_id` line (a UUID).
+    group_id: Option<String>,
+    /// The `owner_id` line (a UUID).
+    owner_id: Option<String>,
+    /// The `group_owned` line (`0`/`1`).
+    group_owned: Option<String>,
+    /// The `asset_id` line (a UUID; nil when redacted).
+    asset_id: Option<String>,
+    /// The `type` line (an asset-type name).
+    asset_type: Option<String>,
+    /// The `inv_type` line (an inventory-type name).
+    inv_type: Option<String>,
+    /// The `flags` line (hex).
+    flags: Option<String>,
+    /// The `sale_type` line (a sale-type name).
+    sale_type: Option<String>,
+    /// The `sale_price` line (an integer).
+    sale_price: Option<String>,
+    /// The `name` line (terminator stripped).
+    name: Option<String>,
+    /// The `desc` line (terminator stripped).
+    desc: Option<String>,
+    /// The `creation_date` line (an integer).
+    creation_date: Option<String>,
+}
+
+impl TaskItemFields {
+    /// Starts a fresh item collected at brace depth `open_depth`.
+    fn new(open_depth: i32) -> Self {
+        Self {
+            open_depth,
+            ..Self::default()
+        }
+    }
+
+    /// Records one `key value` line; unknown keys (and section headers) are
+    /// ignored. The `name`/`desc` values have their trailing `|` terminator
+    /// stripped.
+    fn set(&mut self, key: &str, value: &str) {
+        let owned = || value.to_owned();
+        match key {
+            "item_id" => self.item_id = Some(owned()),
+            "parent_id" => self.parent_id = Some(owned()),
+            "base_mask" => self.base_mask = Some(owned()),
+            "owner_mask" => self.owner_mask = Some(owned()),
+            "group_mask" => self.group_mask = Some(owned()),
+            "everyone_mask" => self.everyone_mask = Some(owned()),
+            "next_owner_mask" => self.next_owner_mask = Some(owned()),
+            "creator_id" => self.creator_id = Some(owned()),
+            "last_owner_id" => self.last_owner_id = Some(owned()),
+            "group_id" => self.group_id = Some(owned()),
+            "owner_id" => self.owner_id = Some(owned()),
+            "group_owned" => self.group_owned = Some(owned()),
+            "asset_id" => self.asset_id = Some(owned()),
+            "type" => self.asset_type = Some(owned()),
+            "inv_type" => self.inv_type = Some(owned()),
+            "flags" => self.flags = Some(owned()),
+            "sale_type" => self.sale_type = Some(owned()),
+            "sale_price" => self.sale_price = Some(owned()),
+            "name" => self.name = Some(strip_terminator(value)),
+            "desc" => self.desc = Some(strip_terminator(value)),
+            "creation_date" => self.creation_date = Some(owned()),
+            _ => {}
+        }
+    }
+
+    /// Resolves the collected fields into a [`TaskInventoryItem`], failing on a
+    /// missing or malformed required field.
+    fn build(self) -> Result<TaskInventoryItem, sl_wire::WireError> {
+        let owner_id = parse_uuid_field("owner_id", &require("owner_id", self.owner_id)?)?;
+        let group_id = parse_uuid_field("group_id", &require("group_id", self.group_id)?)?;
+        let group_owned = require("group_owned", self.group_owned)?.trim() == "1";
+        let asset_uuid = parse_uuid_field("asset_id", &require("asset_id", self.asset_id)?)?;
+        Ok(TaskInventoryItem {
+            item_id: InventoryKey::from(parse_uuid_field(
+                "item_id",
+                &require("item_id", self.item_id)?,
+            )?),
+            parent_task: ObjectKey::from(parse_uuid_field(
+                "parent_id",
+                &require("parent_id", self.parent_id)?,
+            )?),
+            permissions: Permissions5 {
+                base: Permissions::from_bits(parse_hex_field(
+                    "base_mask",
+                    &require("base_mask", self.base_mask)?,
+                )?),
+                owner: Permissions::from_bits(parse_hex_field(
+                    "owner_mask",
+                    &require("owner_mask", self.owner_mask)?,
+                )?),
+                group: Permissions::from_bits(parse_hex_field(
+                    "group_mask",
+                    &require("group_mask", self.group_mask)?,
+                )?),
+                everyone: Permissions::from_bits(parse_hex_field(
+                    "everyone_mask",
+                    &require("everyone_mask", self.everyone_mask)?,
+                )?),
+                next_owner: Permissions::from_bits(parse_hex_field(
+                    "next_owner_mask",
+                    &require("next_owner_mask", self.next_owner_mask)?,
+                )?),
+            },
+            creator_id: AgentKey::from(parse_uuid_field(
+                "creator_id",
+                &require("creator_id", self.creator_id)?,
+            )?),
+            last_owner_id: AgentKey::from(parse_uuid_field(
+                "last_owner_id",
+                &require("last_owner_id", self.last_owner_id)?,
+            )?),
+            owner: crate::types::inventory_owner_from_wire(owner_id, group_id, group_owned),
+            group: crate::types::group_from_wire(group_id),
+            group_owned,
+            asset_id: (!asset_uuid.is_nil()).then(|| AssetKey::from(asset_uuid)),
+            asset_type: AssetType::from_type_name(&require("type", self.asset_type)?),
+            inv_type: InventoryType::from_type_name(&require("inv_type", self.inv_type)?),
+            flags: parse_hex_field("flags", &require("flags", self.flags)?)?,
+            sale_type: SaleType::from_sale_name(&require("sale_type", self.sale_type)?),
+            sale_price: LindenAmount(parse_u64_field(
+                "sale_price",
+                &require("sale_price", self.sale_price)?,
+            )?),
+            name: self.name.unwrap_or_default(),
+            description: self.desc.unwrap_or_default(),
+            creation_date: parse_i32_field(
+                "creation_date",
+                &require("creation_date", self.creation_date)?,
+            )?,
+        })
+    }
+}
+
+/// Returns a required inventory-listing field, or a [`WireError`] naming the
+/// missing field.
+fn require(field: &'static str, value: Option<String>) -> Result<String, sl_wire::WireError> {
+    value.ok_or_else(|| sl_wire::WireError::InvalidScalar {
+        field,
+        value: String::from("(missing)"),
+    })
+}
+
+/// Strips the trailing `|` terminator LL appends to a text-listing `name`/`desc`
+/// value.
+fn strip_terminator(value: &str) -> String {
+    value.strip_suffix('|').unwrap_or(value).to_owned()
+}
+
+/// Parses a text-form hexadecimal `u32` (LL's `UIntToHexString`, no `0x`
+/// prefix) strictly.
+fn parse_hex_field(field: &'static str, value: &str) -> Result<u32, sl_wire::WireError> {
+    u32::from_str_radix(value.trim(), 16).map_err(|_err| sl_wire::WireError::InvalidScalar {
+        field,
+        value: value.to_owned(),
+    })
+}
+
+/// Parses a text-form `u64` strictly.
+fn parse_u64_field(field: &'static str, value: &str) -> Result<u64, sl_wire::WireError> {
+    value
+        .trim()
+        .parse()
+        .map_err(|_err| sl_wire::WireError::InvalidScalar {
+            field,
+            value: value.to_owned(),
+        })
+}
+
+/// Parses a text-form `i32` strictly.
+fn parse_i32_field(field: &'static str, value: &str) -> Result<i32, sl_wire::WireError> {
+    value
+        .trim()
+        .parse()
+        .map_err(|_err| sl_wire::WireError::InvalidScalar {
+            field,
+            value: value.to_owned(),
+        })
 }
 
 /// Builds a [`RegionIdentity`] from a `RegionHandshake`'s region-info blocks. The
@@ -4396,6 +4656,7 @@ mod caps_serializer_tests {
     use sl_types::key::GroupKey;
     use sl_types::key::InventoryFolderKey;
     use sl_types::key::InventoryKey;
+    use sl_types::key::ObjectKey;
     use sl_types::key::TextureKey;
     use sl_types::map::RegionCoordinates;
     use sl_types::money::LindenAmount;
@@ -4472,6 +4733,119 @@ mod caps_serializer_tests {
         ));
         assert!(matches!(
             super::parse_mute_line("1 11111111-1111-1111-1111-111111111111 Bob|notflags"),
+            Err(sl_wire::WireError::InvalidScalar { .. })
+        ));
+    }
+
+    /// A task-inventory `Xfer` listing in OpenSim's exact tab-delimited text
+    /// format parses into its items: the leading `inv_object` folder header is
+    /// skipped, permission masks and ids resolve, `name`/`desc` terminators are
+    /// stripped, and a nil `asset_id` (the redacted case) becomes `None`.
+    #[test]
+    fn parse_task_inventory_reads_items() -> Result<(), sl_wire::WireError> {
+        let prim = Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222);
+        let item = Uuid::from_u128(0x3333_3333_3333_3333_3333_3333_3333_3333);
+        let creator = Uuid::from_u128(0x4444_4444_4444_4444_4444_4444_4444_4444);
+        let asset = Uuid::from_u128(0x5555_5555_5555_5555_5555_5555_5555_5555);
+        // Assembled exactly as `SceneObjectPartInventory.RequestInventoryFile`
+        // writes it: a `Contents` folder header, then a script item, then a
+        // second item whose asset id is redacted to nil.
+        let listing = format!(
+            "\tinv_object\t0\n\t{{\n\
+             \t\tobj_id\t00000000-0000-0000-0000-000000000000\n\
+             \t\tparent_id\t{prim}\n\
+             \t\ttype\tcategory\n\
+             \t\tname\tContents|\n\t}}\n\
+             \tinv_item\t0\n\t{{\n\
+             \t\titem_id\t{item}\n\
+             \t\tparent_id\t{prim}\n\
+             \t\tpermissions 0\n\t\t{{\n\
+             \t\t\tbase_mask\t7fffffff\n\
+             \t\t\towner_mask\t7fffffff\n\
+             \t\t\tgroup_mask\t00000000\n\
+             \t\t\teveryone_mask\t00000000\n\
+             \t\t\tnext_owner_mask\t0008e000\n\
+             \t\t\tcreator_id\t{creator}\n\
+             \t\t\tlast_owner_id\t{creator}\n\
+             \t\t\tgroup_id\t00000000-0000-0000-0000-000000000000\n\
+             \t\t\towner_id\t{creator}\n\
+             \t\t\tgroup_owned\t0\n\t\t}}\n\
+             \t\tasset_id\t{asset}\n\
+             \t\ttype\tlsltext\n\
+             \t\tinv_type\tscript\n\
+             \t\tflags\t00000000\n\
+             \t\tsale_info\t0\n\t\t{{\n\
+             \t\t\tsale_type\tnot\n\
+             \t\t\tsale_price\t0\n\t\t}}\n\
+             \t\tname\tHello World Script|\n\
+             \t\tdesc\t|\n\
+             \t\tcreation_date\t1700000000\n\t}}\n\
+             \tinv_item\t0\n\t{{\n\
+             \t\titem_id\t{item}\n\
+             \t\tparent_id\t{prim}\n\
+             \t\tpermissions 0\n\t\t{{\n\
+             \t\t\tbase_mask\t0007ffff\n\
+             \t\t\towner_mask\t0007ffff\n\
+             \t\t\tgroup_mask\t00000000\n\
+             \t\t\teveryone_mask\t00000000\n\
+             \t\t\tnext_owner_mask\t0007ffff\n\
+             \t\t\tcreator_id\t{creator}\n\
+             \t\t\tlast_owner_id\t{creator}\n\
+             \t\t\tgroup_id\t00000000-0000-0000-0000-000000000000\n\
+             \t\t\towner_id\t{creator}\n\
+             \t\t\tgroup_owned\t0\n\t\t}}\n\
+             \t\tasset_id\t00000000-0000-0000-0000-000000000000\n\
+             \t\ttype\tnotecard\n\
+             \t\tinv_type\tnotecard\n\
+             \t\tflags\t00000000\n\
+             \t\tsale_info\t0\n\t\t{{\n\
+             \t\t\tsale_type\tnot\n\
+             \t\t\tsale_price\t0\n\t\t}}\n\
+             \t\tname\tReadme|\n\
+             \t\tdesc\ta note|\n\
+             \t\tcreation_date\t1700000001\n\t}}\n",
+        );
+        let items = super::parse_task_inventory(listing.as_bytes())?;
+        // Slice-match instead of indexing (denied by the restriction lints).
+        let [script, note] = items.as_slice() else {
+            return Err(sl_wire::WireError::InvalidScalar {
+                field: "item_count",
+                value: items.len().to_string(),
+            });
+        };
+
+        assert_eq!(script.item_id, InventoryKey::from(item));
+        assert_eq!(script.parent_task, ObjectKey::from(prim));
+        assert_eq!(script.permissions.base, Permissions::from_bits(0x7fff_ffff));
+        assert_eq!(
+            script.permissions.next_owner,
+            Permissions::from_bits(0x0008_e000)
+        );
+        assert_eq!(script.creator_id, AgentKey::from(creator));
+        assert_eq!(script.asset_id.map(|id| id.uuid()), Some(asset));
+        assert_eq!(script.asset_type, crate::types::AssetType::LslText);
+        assert_eq!(script.inv_type, crate::types::InventoryType::Script);
+        assert_eq!(script.name, "Hello World Script");
+        assert_eq!(script.description, "");
+        assert_eq!(script.sale_price, LindenAmount(0));
+        assert!(!script.group_owned);
+        assert_eq!(script.creation_date, 1_700_000_000);
+
+        // The second item's asset id is redacted to nil → `None`.
+        assert_eq!(note.asset_id, None);
+        assert_eq!(note.inv_type, crate::types::InventoryType::Notecard);
+        assert_eq!(note.name, "Readme");
+        assert_eq!(note.description, "a note");
+        Ok(())
+    }
+
+    /// A listing missing a required field is a hard error, not a coerced item.
+    #[test]
+    fn parse_task_inventory_rejects_missing_field() {
+        // An item block with no `item_id` line.
+        let listing = "\tinv_item\t0\n\t{\n\t\tflags\t00000000\n\t}\n";
+        assert!(matches!(
+            super::parse_task_inventory(listing.as_bytes()),
             Err(sl_wire::WireError::InvalidScalar { .. })
         ));
     }

@@ -24,8 +24,8 @@ use super::{
     PlayingAnimation, RegionIdentity, RegionLimits, RegionStats, RequiredVoiceVersion,
     ScriptControl, ScriptDialog, ScriptPermissionRequest, ScriptPermissionState,
     ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimulatorTime, SoundFlags,
-    SoundPreload, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainPatch, Texture,
-    TransferStatus, UserInfo, ViewerEffect, Wearable,
+    SoundPreload, TaskInventoryItem, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainPatch,
+    Texture, TransferStatus, UserInfo, ViewerEffect, Wearable,
 };
 use sl_types::key::{
     AgentKey, ExperienceKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
@@ -52,7 +52,7 @@ use sl_wire::SimulatorFeatures;
 use sl_wire::VoiceAccountInfo;
 use uuid::Uuid;
 
-use crate::bookkeeping_ids::{InventoryCallbackId, TransactionId};
+use crate::bookkeeping_ids::{InventoryCallbackId, TransactionId, XferId};
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::{ChatSessionInfo, ChatSessionKind, FriendPresence, MessageCursor, SessionMessage};
 
@@ -631,9 +631,37 @@ pub enum Event {
     },
     /// The current contents serial and Xfer filename of an in-world object's
     /// task inventory (`ReplyTaskInventory`), in reply to a
-    /// `RequestTaskInventory`. Download the full listing from the filename via
-    /// the asset Xfer system.
+    /// [`Command::RequestTaskInventory`](crate::Command::RequestTaskInventory).
+    /// Download the full listing from the filename via the `Xfer` system — or
+    /// use [`Command::FetchTaskInventory`](crate::Command::FetchTaskInventory),
+    /// which does that download and parse for you and surfaces
+    /// [`Event::TaskInventoryContents`].
     TaskInventoryReply(TaskInventoryReply),
+    /// The parsed contents of an in-world object's task inventory, in reply to a
+    /// [`Command::FetchTaskInventory`](crate::Command::FetchTaskInventory): the
+    /// simulator's `ReplyTaskInventory` was followed to its `Xfer` file, which
+    /// was downloaded and parsed into the item listing. The `serial` matches the
+    /// [`TaskInventoryReply`] that named the file; `items` is empty when the task
+    /// inventory is empty.
+    TaskInventoryContents {
+        /// The in-world object (task) whose inventory this lists.
+        task: ObjectKey,
+        /// The contents serial the listing was fetched at.
+        serial: i16,
+        /// The parsed task inventory items.
+        items: Vec<TaskInventoryItem>,
+    },
+    /// A caller-initiated raw `Xfer` file download finished
+    /// ([`Session::request_xfer`](crate::Session::request_xfer)): the assembled
+    /// file bytes, tagged with the [`XferId`] the request returned so concurrent
+    /// downloads can be told apart.
+    XferDownloaded {
+        /// The transfer id [`Session::request_xfer`](crate::Session::request_xfer)
+        /// returned for this download.
+        xfer_id: XferId,
+        /// The complete downloaded file bytes.
+        data: Vec<u8>,
+    },
     /// The agent's own account contact preferences (`UserInfoReply`), in reply
     /// to a `UserInfoRequest`.
     UserInfo(UserInfo),

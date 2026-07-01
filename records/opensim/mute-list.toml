@@ -23,3 +23,26 @@ lower_is_better = true
 
 [run.metric_meta.unmute_rtt_secs]
 lower_is_better = true
+
+[[run]]
+behavior_describe = "d149af1-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T13:27:07.483830744Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+baseline_mutes_count = 0
+mute_readback = true
+mute_rtt_secs = 1.041593032
+mute_target = "c04f0117-0000-4000-8000-000000000001"
+mute_type = "agent"
+unmute_rtt_secs = 0.024740092
+
+[run.metric_meta.mute_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.unmute_rtt_secs]
+lower_is_better = true

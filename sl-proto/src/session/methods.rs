@@ -19,11 +19,12 @@ use super::conversions::{
     map_layer, map_region_info, money_balance, nav_mesh_status_from_llsd, neighbor_info,
     object_from_full_update, object_properties, offline_messages_from_llsd,
     open_region_info_from_llsd, pack_uuids, parcel_info, parcel_info_from_llsd,
-    parse_lure_region_handle, parse_mute_list, parse_uuid_string, pick_info, region_identity,
-    region_limits, required_voice_version_from_llsd, script_dialog, script_permission_request,
-    server_appearance_update_from_llsd, set_display_name_reply_from_llsd,
-    sim_console_response_from_llsd, skeleton_folder, teleport_finish_from_llsd, trimmed_string,
-    voice_channel_info_from_llsd, windlight_refresh_from_llsd,
+    parse_lure_region_handle, parse_mute_list, parse_task_inventory, parse_uuid_string, pick_info,
+    region_identity, region_limits, required_voice_version_from_llsd, script_dialog,
+    script_permission_request, server_appearance_update_from_llsd,
+    set_display_name_reply_from_llsd, sim_console_response_from_llsd, skeleton_folder,
+    teleport_finish_from_llsd, trimmed_string, voice_channel_info_from_llsd,
+    windlight_refresh_from_llsd,
 };
 use super::{
     AGENT_UPDATE_INTERVAL, AssetTransfer, AssetUpload, CAP_AGENT_EXPERIENCES,
@@ -41,8 +42,8 @@ use super::{
     Inventory, InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
     MAX_INLINE_ASSET, MessageCursor, PING_INTERVAL, PendingInvite, SIT_TIMEOUT, ScriptGrant,
     ScriptHolder, Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT,
-    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, VoiceChannelInfo, deadline,
-    merge_deadline,
+    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, VoiceChannelInfo, XferDownload,
+    XferPurpose, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -65,22 +66,23 @@ use crate::types::{
     GenericStreamingMessage, GestureActivation, GodRegionUpdate, GroupNoticeAttachment,
     GroupNoticeKey, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec,
     InterestsUpdate, InventoryCursor, InventoryFolder, InventoryItem, InventoryItemMove,
-    InventoryOffer, ItemInfo, Kick, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
-    LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType, Material, Maturity,
-    MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
-    NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez, Object, ObjectBuyItem,
-    ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation, ObjectPropertiesFamily,
-    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult, Postcard,
-    PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionInfoUpdate, RegionStats,
-    Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
-    ScriptControl, ScriptControlAction, ScriptControlsInfo, ScriptGrantInfo, ScriptPermissionState,
-    ScriptPermissionStatus, ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId,
-    SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot,
-    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType,
-    TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams,
-    UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
+    InventoryOffer, InventoryType, ItemInfo, Kick, LandEdit, LandSearchType, LandStatItem,
+    LandStatReportType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType,
+    Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode,
+    MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez, Object,
+    ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation,
+    ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
+    PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
+    RegionInfoUpdate, RegionStats, Reliability, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo,
+    ScriptGrantInfo, ScriptPermissionState, ScriptPermissionStatus, ScriptPermissions,
+    ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags,
+    SoundPreload, StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
+    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus,
+    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -194,8 +196,10 @@ impl Session {
             chat_sessions: BTreeMap::new(),
             seed_capability: None,
             login_account: None,
-            mute_xfers: BTreeMap::new(),
+            xfer_downloads: BTreeMap::new(),
             next_xfer_id: XferId(1),
+            pending_task_inventory: BTreeSet::new(),
+            pending_task_inventory_unresolved: VecDeque::new(),
             texture_downloads: BTreeMap::new(),
             asset_transfers: BTreeMap::new(),
             next_transfer_id: 1,
@@ -203,6 +207,8 @@ impl Session {
             asset_uploads: BTreeMap::new(),
             upload_xfers: BTreeMap::new(),
             next_upload_id: 1,
+            pending_inventory_uploads: BTreeMap::new(),
+            pending_upload_callbacks: BTreeMap::new(),
             objects: BTreeMap::new(),
             terrain: BTreeMap::new(),
             regions: BTreeMap::new(),
@@ -2523,11 +2529,25 @@ impl Session {
                 for data in &reply.inventory_data {
                     let item = inventory_item_from_create(data)?;
                     self.cache_inventory_item(item.clone());
+                    let callback_id = crate::types::optional_u32_from_wire(data.callback_id)
+                        .map(InventoryCallbackId);
+                    // A fallback UDP inventory-upload's created item
+                    // (`upload_asset_to_inventory_udp`): surface the unified
+                    // `AssetUploaded` (matching the CAPS outcome) and keep it
+                    // cached, but suppress the raw `InventoryItemCreated`.
+                    if let Some(callback) = callback_id
+                        && let Some(asset_id) = self.pending_upload_callbacks.remove(&callback)
+                    {
+                        self.events.push_back(Event::AssetUploaded {
+                            new_asset: asset_id,
+                            new_inventory_item: Some(item.item_id.uuid()),
+                        });
+                        continue;
+                    }
                     self.events.push_back(Event::InventoryItemCreated {
                         sim_approved: reply.agent_data.sim_approved,
                         transaction_id: reply.agent_data.transaction_id,
-                        callback_id: crate::types::optional_u32_from_wire(data.callback_id)
-                            .map(InventoryCallbackId),
+                        callback_id,
                         item,
                     });
                 }
@@ -2713,12 +2733,7 @@ impl Session {
                 if filename.is_empty() {
                     self.events.push_back(Event::MuteList(Vec::new()));
                 } else {
-                    let xfer_id = self.next_xfer_id;
-                    self.next_xfer_id = XferId(self.next_xfer_id.get().checked_add(1).unwrap_or(1));
-                    self.mute_xfers.insert(xfer_id, Vec::new());
-                    if let Some(circuit) = self.circuit.as_mut() {
-                        circuit.send_request_xfer(xfer_id, &filename, now)?;
-                    }
+                    self.start_xfer_download(XferPurpose::MuteList, &filename, now)?;
                 }
             }
             AnyMessage::UseCachedMuteList(_) => {
@@ -2759,11 +2774,26 @@ impl Session {
                 let success = complete.asset_block.success;
                 self.asset_uploads.remove(&asset_id);
                 self.upload_xfers.retain(|_, id| *id != asset_id);
-                self.events.push_back(Event::AssetUploadComplete {
-                    asset_id,
-                    asset_type,
-                    success,
-                });
+                if let Some(new) = self.pending_inventory_uploads.remove(&asset_id) {
+                    // The fallback path of `upload_asset_to_inventory_udp`: the
+                    // asset is stored, so now create the inventory item bound to
+                    // it (or report the store failure) rather than surfacing the
+                    // intermediate `AssetUploadComplete`.
+                    if success {
+                        let callback_id = self.create_inventory_item(&new, now)?;
+                        self.pending_upload_callbacks.insert(callback_id, asset_id);
+                    } else {
+                        self.events.push_back(Event::AssetUploadFailed {
+                            reason: "the simulator rejected the UDP asset upload".to_owned(),
+                        });
+                    }
+                } else {
+                    self.events.push_back(Event::AssetUploadComplete {
+                        asset_id,
+                        asset_type,
+                        success,
+                    });
+                }
             }
             AnyMessage::SendXferPacket(packet) => {
                 let xfer_id = XferId(packet.xfer_id.id);
@@ -2772,7 +2802,7 @@ impl Session {
                 // sequence number (the first packet is sequence 0).
                 let is_last = packet_num & 0x8000_0000 != 0;
                 let sequence = packet_num & 0x7fff_ffff;
-                if self.mute_xfers.contains_key(&xfer_id) {
+                if self.xfer_downloads.contains_key(&xfer_id) {
                     // The first packet carries a 4-byte little-endian length
                     // prefix before the file data; later packets are raw.
                     let chunk: &[u8] = if sequence == 0 {
@@ -2780,15 +2810,14 @@ impl Session {
                     } else {
                         &packet.data_packet.data
                     };
-                    if let Some(buffer) = self.mute_xfers.get_mut(&xfer_id) {
-                        buffer.extend_from_slice(chunk);
+                    if let Some(download) = self.xfer_downloads.get_mut(&xfer_id) {
+                        download.buffer.extend_from_slice(chunk);
                     }
                     if let Some(circuit) = self.circuit.as_mut() {
                         circuit.send_confirm_xfer_packet(xfer_id, packet_num, now)?;
                     }
-                    if is_last && let Some(buffer) = self.mute_xfers.remove(&xfer_id) {
-                        self.events
-                            .push_back(Event::MuteList(parse_mute_list(&buffer)?));
+                    if is_last && let Some(download) = self.xfer_downloads.remove(&xfer_id) {
+                        self.finish_xfer_download(xfer_id, download)?;
                     }
                 }
             }
@@ -3064,12 +3093,35 @@ impl Session {
             // The contents serial and Xfer filename of an in-world object's task
             // inventory, in reply to a `RequestTaskInventory`.
             AnyMessage::ReplyTaskInventory(reply) => {
+                let task = ObjectKey::from(reply.inventory_data.task_id);
+                let serial = reply.inventory_data.serial;
+                let filename = trimmed_string(&reply.inventory_data.filename);
                 self.events
                     .push_back(Event::TaskInventoryReply(TaskInventoryReply {
-                        task: ObjectKey::from(reply.inventory_data.task_id),
-                        serial: reply.inventory_data.serial,
-                        filename: trimmed_string(&reply.inventory_data.filename),
+                        task,
+                        serial,
+                        filename: filename.clone(),
                     }));
+                // If `fetch_task_inventory` asked for this object's parsed
+                // contents, follow the reply to its `Xfer` file (or emit an empty
+                // listing directly when the task inventory is empty).
+                let claimed = self.pending_task_inventory.remove(&task)
+                    || self.pending_task_inventory_unresolved.pop_front().is_some();
+                if claimed {
+                    if filename.is_empty() {
+                        self.events.push_back(Event::TaskInventoryContents {
+                            task,
+                            serial,
+                            items: Vec::new(),
+                        });
+                    } else {
+                        self.start_xfer_download(
+                            XferPurpose::TaskInventory { task, serial },
+                            &filename,
+                            now,
+                        )?;
+                    }
+                }
             }
             // The agent's own account contact preferences, in reply to a
             // `UserInfoRequest`. The echoed `AgentData.AgentID` is dropped.
@@ -6733,6 +6785,86 @@ impl Session {
         }
     }
 
+    /// Allocates the next monotonic [`XferId`] (never zero), for a new inbound
+    /// `Xfer` download or the caller-initiated [`request_xfer`](Self::request_xfer)
+    /// path.
+    fn alloc_xfer_id(&mut self) -> XferId {
+        let id = self.next_xfer_id;
+        self.next_xfer_id = XferId(self.next_xfer_id.get().checked_add(1).unwrap_or(1));
+        id
+    }
+
+    /// Registers a new inbound `Xfer` download for `filename` with the given
+    /// routing `purpose` and queues the `RequestXfer` that starts it. Returns the
+    /// allocated [`XferId`] correlating the transfer.
+    fn start_xfer_download(
+        &mut self,
+        purpose: XferPurpose,
+        filename: &str,
+        now: Instant,
+    ) -> Result<XferId, Error> {
+        let xfer_id = self.alloc_xfer_id();
+        self.xfer_downloads.insert(
+            xfer_id,
+            XferDownload {
+                purpose,
+                buffer: Vec::new(),
+            },
+        );
+        if let Some(circuit) = self.circuit.as_mut() {
+            circuit.send_request_xfer(xfer_id, filename, now)?;
+        }
+        Ok(xfer_id)
+    }
+
+    /// Routes a completed inbound `Xfer` download's assembled bytes to the typed
+    /// event named by its [`XferPurpose`].
+    fn finish_xfer_download(
+        &mut self,
+        xfer_id: XferId,
+        download: XferDownload,
+    ) -> Result<(), Error> {
+        match download.purpose {
+            XferPurpose::MuteList => {
+                self.events
+                    .push_back(Event::MuteList(parse_mute_list(&download.buffer)?));
+            }
+            XferPurpose::TaskInventory { task, serial } => {
+                self.events.push_back(Event::TaskInventoryContents {
+                    task,
+                    serial,
+                    items: parse_task_inventory(&download.buffer)?,
+                });
+            }
+            XferPurpose::Generic => {
+                self.events.push_back(Event::XferDownloaded {
+                    xfer_id,
+                    data: download.buffer,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Downloads an arbitrary named file over the legacy `Xfer` path
+    /// (`RequestXfer`), surfacing the assembled bytes as
+    /// [`Event::XferDownloaded`] tagged with the returned [`XferId`]. This is the
+    /// generic building block the mute-list and task-inventory consumers
+    /// specialize; use it directly when a message hands you a raw `Xfer`
+    /// `filename` (for example a [`TaskInventoryReply`](crate::TaskInventoryReply)
+    /// `filename` you want the bytes of without the parsed listing).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_xfer(&mut self, filename: &str, now: Instant) -> Result<XferId, Error> {
+        if self.circuit.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        self.start_xfer_download(XferPurpose::Generic, filename, now)
+    }
+
     /// Requests the agent's mute (block) list (`MuteListRequest` with a zero
     /// CRC, forcing a fresh download). The simulator replies with the list (the
     /// file is downloaded over the `Xfer` path and surfaced as
@@ -6884,6 +7016,23 @@ impl Session {
         store_local: bool,
         now: Instant,
     ) -> Result<Uuid, Error> {
+        let (asset_id, _transaction_id) =
+            self.start_asset_upload_udp(asset_type, data, temp_file, store_local, now)?;
+        Ok(asset_id)
+    }
+
+    /// Uploads `data` as a new asset over the legacy UDP path (see
+    /// [`upload_asset_udp`](Self::upload_asset_udp)), returning both the predicted
+    /// asset id and the transaction id linking it (the transaction id a follow-up
+    /// `CreateInventoryItem` needs to bind the item to the uploaded asset).
+    fn start_asset_upload_udp(
+        &mut self,
+        asset_type: AssetType,
+        data: Vec<u8>,
+        temp_file: bool,
+        store_local: bool,
+        now: Instant,
+    ) -> Result<(Uuid, Uuid), Error> {
         let transaction_id = Uuid::from_u128(self.next_upload_id);
         self.next_upload_id = self.next_upload_id.checked_add(1).unwrap_or(1);
         let asset_id = sl_wire::combine_uuids(transaction_id, self.secure_session_id);
@@ -6912,7 +7061,56 @@ impl Session {
             request_data,
             now,
         )?;
-        Ok(asset_id)
+        Ok((asset_id, transaction_id))
+    }
+
+    /// Uploads `data` as a new asset **and creates an inventory item** for it over
+    /// the legacy UDP path — the fallback for the modern CAPS
+    /// `NewFileAgentInventory` upload when that capability is absent. The asset is
+    /// streamed the same way [`upload_asset_udp`](Self::upload_asset_udp) streams
+    /// it; once the simulator reports it stored (`AssetUploadComplete`) a
+    /// `CreateInventoryItem` bound to the same transaction id is sent, and the
+    /// resulting item surfaces as the unified
+    /// [`Event::AssetUploaded`](crate::Event::AssetUploaded) — matching the CAPS
+    /// outcome. A store failure surfaces as
+    /// [`Event::AssetUploadFailed`](crate::Event::AssetUploadFailed).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors the CAPS NewFileAgentInventory upload's item parameters"
+    )]
+    pub fn upload_asset_to_inventory_udp(
+        &mut self,
+        folder_id: InventoryFolderKey,
+        asset_type: AssetType,
+        inv_type: InventoryType,
+        name: String,
+        description: String,
+        next_owner_mask: u32,
+        wearable_type: WearableType,
+        data: Vec<u8>,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let (asset_id, transaction_id) =
+            self.start_asset_upload_udp(asset_type, data, false, false, now)?;
+        self.pending_inventory_uploads.insert(
+            asset_id,
+            NewInventoryItem {
+                folder_id,
+                transaction_id,
+                next_owner_mask,
+                asset_type,
+                inv_type,
+                wearable_type,
+                name,
+                description,
+            },
+        );
+        Ok(())
     }
 
     /// Sends the next `SendXferPacket` of the upload keyed by `asset_id` over the
@@ -7675,6 +7873,49 @@ impl Session {
         let circuit = self.circuit_for_scope(target.circuit)?;
         circuit.send_request_task_inventory(target.id, now)?;
         Ok(())
+    }
+
+    /// Requests and *reads* the task (object) inventory of `target`: sends the
+    /// same `RequestTaskInventory` as
+    /// [`request_task_inventory`](Self::request_task_inventory), but then follows
+    /// the `ReplyTaskInventory` to its `Xfer` file, downloads it, and parses the
+    /// listing — surfacing the parsed items as
+    /// [`Event::TaskInventoryContents`] (an empty list when the inventory is
+    /// empty). The lower-level [`Event::TaskInventoryReply`] is still emitted
+    /// first, so a caller that only wants the serial can ignore the contents.
+    ///
+    /// The reply is correlated to `target` by the object's full id, resolved
+    /// from the object cache at request time; if the object is not yet cached
+    /// the fetch falls back to matching the next otherwise-unclaimed reply, which
+    /// cannot disambiguate concurrent uncached fetches.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownCircuit`] if `target`'s circuit has gone away, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn fetch_task_inventory(
+        &mut self,
+        target: ScopedObjectId,
+        now: Instant,
+    ) -> Result<(), Error> {
+        match self.resolve_object_key(target) {
+            Some(task) => {
+                self.pending_task_inventory.insert(task);
+            }
+            None => self.pending_task_inventory_unresolved.push_back(()),
+        }
+        let circuit = self.circuit_for_scope(target.circuit)?;
+        circuit.send_request_task_inventory(target.id, now)?;
+        Ok(())
+    }
+
+    /// Resolves a [`ScopedObjectId`] to the cached object's full [`ObjectKey`],
+    /// or `None` when that object is not (yet) in the scene-graph cache.
+    fn resolve_object_key(&self, target: ScopedObjectId) -> Option<ObjectKey> {
+        self.objects
+            .get(&target.circuit)?
+            .get(&target.id)
+            .map(|object| object.full_id)
     }
 
     /// Writes the inventory item `item` into the task inventory of the in-world

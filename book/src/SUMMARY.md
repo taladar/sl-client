@@ -13,6 +13,7 @@
 - [LLSD](comms/llsd.md)
 - [Messages & the Template](comms/messages.md)
 - [Generic Messages](comms/generic-messages.md)
+- [Xfer File Transfer](comms/xfer.md)
 
 ## Content Layer
 

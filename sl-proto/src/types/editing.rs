@@ -174,6 +174,19 @@ impl SaleType {
             _ => Self::NotForSale,
         }
     }
+
+    /// Classifies the short sale-type name LL writes into a text inventory
+    /// listing (`LLSaleInfo`: `"not"`, `"orig"`, `"copy"`, `"cntn"`); unknown
+    /// names map to [`NotForSale`](Self::NotForSale).
+    #[must_use]
+    pub fn from_sale_name(name: &str) -> Self {
+        match name {
+            "orig" => Self::Original,
+            "copy" => Self::Copy,
+            "cntn" => Self::Contents,
+            _ => Self::NotForSale,
+        }
+    }
 }
 
 /// Which id the simulator matches an `UpdateTaskInventory` against (the

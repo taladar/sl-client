@@ -21,9 +21,9 @@ use sl_proto::{
     CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_OBJECT_COST,
     CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
     CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
-    CAP_LAND_RESOURCES, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
-    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_LAND_RESOURCES, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
+    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
     CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
@@ -88,12 +88,13 @@ pub use sl_proto::{
     ScriptControl, ScriptControlAction, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
     ScriptTeleportRequest, SculptData, SculptOrMeshKey, SequenceNumber, SetDisplayNameReply,
     SimulatorFeatures, SoundFlags, SoundPreload, StartLocation, StartLocationParseError,
-    TaskInventoryKey, TaskInventoryReply, TerrainLayerType, TerrainPatch, TextureAnimation,
-    TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError,
-    TimestampFormat, TransactionId, TransferId, Transmit, Uuid, Vector, VoiceAccountInfo,
-    VoiceProvisionRequest, Wearable, WearableType, XferId, avatar_texture, decode_particle_system,
-    decode_texture_anim, decode_texture_entry, grid_to_handle, group_powers, handle_to_global,
-    handle_to_grid, particle_pattern, pcode, sim_access, texture_anim_mode,
+    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TerrainLayerType, TerrainPatch,
+    TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder,
+    ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit, Uuid, Vector,
+    VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, XferId, avatar_texture,
+    decode_particle_system, decode_texture_anim, decode_texture_entry, grid_to_handle,
+    group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode, sim_access,
+    texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -2152,6 +2153,12 @@ fn advance_running(
             Command::RequestTaskInventory { target } => {
                 session.request_task_inventory(*target, now).ok();
             }
+            Command::FetchTaskInventory { target } => {
+                session.fetch_task_inventory(*target, now).ok();
+            }
+            Command::RequestXfer { filename } => {
+                session.request_xfer(filename, now).ok();
+            }
             Command::UpdateTaskInventory { target, key, item } => {
                 session.update_task_inventory(*target, *key, item, now).ok();
             }
@@ -2206,19 +2213,44 @@ fn advance_running(
                 expected_upload_cost,
                 data,
             } => {
-                spawn_new_file_upload(
-                    caps.as_ref(),
-                    *folder_id,
-                    *asset_type,
-                    *inventory_type,
-                    name,
-                    description,
-                    *next_owner_mask,
-                    *group_mask,
-                    *everyone_mask,
-                    *expected_upload_cost,
-                    data.clone(),
-                );
+                // Prefer the modern CAPS uploader when the region advertises it
+                // and can name both types; otherwise fall back to the legacy UDP
+                // asset-upload + create-item path.
+                let caps_available = matches!(
+                    (asset_type.caps_asset_name(), inventory_type.caps_name()),
+                    (Some(_), Some(_))
+                ) && caps
+                    .as_ref()
+                    .is_some_and(|caps| caps.map.contains_key(CAP_NEW_FILE_AGENT_INVENTORY));
+                if caps_available {
+                    spawn_new_file_upload(
+                        caps.as_ref(),
+                        *folder_id,
+                        *asset_type,
+                        *inventory_type,
+                        name,
+                        description,
+                        *next_owner_mask,
+                        *group_mask,
+                        *everyone_mask,
+                        *expected_upload_cost,
+                        data.clone(),
+                    );
+                } else {
+                    session
+                        .upload_asset_to_inventory_udp(
+                            *folder_id,
+                            *asset_type,
+                            *inventory_type,
+                            name.clone(),
+                            description.clone(),
+                            *next_owner_mask,
+                            WearableType::Shape,
+                            data.clone(),
+                            now,
+                        )
+                        .ok();
+                }
             }
             Command::UploadBakedTexture { data } => {
                 if let Some(caps) = caps.as_ref()

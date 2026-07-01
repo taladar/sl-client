@@ -700,6 +700,8 @@ impl Survey {
             | Event::InventoryObjectsRemoved { .. }
             | Event::InventoryItemsMoved { .. }
             | Event::TaskInventoryReply(..)
+            | Event::TaskInventoryContents { .. }
+            | Event::XferDownloaded { .. }
             | Event::UserInfo(..)
             | Event::DeRezAck { .. }
             | Event::ForceObjectSelect { .. }

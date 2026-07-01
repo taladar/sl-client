@@ -84,13 +84,13 @@ pub use sl_proto::{
     SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction, ScriptDialog,
     ScriptPermissionRequest, ScriptPermissions, ScriptTeleportRequest, SculptData, SculptOrMeshKey,
     SequenceNumber, SessionMessage, SetDisplayNameReply, SimulatorFeatures, SoundFlags,
-    SoundPreload, StartLocation, StartLocationParseError, TaskInventoryKey, TaskInventoryReply,
-    TerrainLayerType, TerrainPatch, Texture, TextureAnimation, TextureEntry, TextureFace,
-    TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId,
-    TransferId, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest,
-    Wearable, WearableType, XferId, avatar_texture, decode_particle_system, decode_texture_anim,
-    decode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
-    particle_pattern, pcode, sim_access, texture_anim_mode,
+    SoundPreload, StartLocation, StartLocationParseError, TaskInventoryItem, TaskInventoryKey,
+    TaskInventoryReply, TerrainLayerType, TerrainPatch, Texture, TextureAnimation, TextureEntry,
+    TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat,
+    TransactionId, TransferId, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo,
+    VoiceProvisionRequest, Wearable, WearableType, XferId, avatar_texture, decode_particle_system,
+    decode_texture_anim, decode_texture_entry, grid_to_handle, group_powers, handle_to_global,
+    handle_to_grid, particle_pattern, pcode, sim_access, texture_anim_mode,
 };
 
 mod appearance;
@@ -1409,6 +1409,12 @@ impl Client {
                         Some(Command::RequestTaskInventory { target }) => {
                             self.session.request_task_inventory(target, Instant::now())?;
                         }
+                        Some(Command::FetchTaskInventory { target }) => {
+                            self.session.fetch_task_inventory(target, Instant::now())?;
+                        }
+                        Some(Command::RequestXfer { filename }) => {
+                            self.session.request_xfer(&filename, Instant::now())?;
+                        }
                         Some(Command::UpdateTaskInventory { target, key, item }) => {
                             self.session.update_task_inventory(target, key, &item, Instant::now())?;
                         }
@@ -1434,25 +1440,27 @@ impl Client {
                             folder_id, asset_type, inventory_type, name, description,
                             next_owner_mask, group_mask, everyone_mask, expected_upload_cost, data,
                         }) => {
-                            match (asset_type.caps_asset_name(), inventory_type.caps_name()) {
-                                (Some(asset_name), Some(inv_name)) => {
-                                    if let Some(url) = caps.get(CAP_NEW_FILE_AGENT_INVENTORY).cloned() {
-                                        let body = build_new_file_agent_inventory_request(
-                                            folder_id, asset_name, inv_name, &name, &description,
-                                            next_owner_mask, group_mask, everyone_mask, expected_upload_cost,
-                                        );
-                                        tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
-                                    } else {
-                                        events.send(Event::AssetUploadFailed {
-                                            reason: "NewFileAgentInventory capability not available".to_owned(),
-                                        }).await.ok();
-                                    }
-                                }
-                                _ => {
-                                    events.send(Event::AssetUploadFailed {
-                                        reason: "asset/inventory type is not uploadable".to_owned(),
-                                    }).await.ok();
-                                }
+                            // Prefer the modern CAPS uploader when the region
+                            // advertises it and can name both types; otherwise fall
+                            // back to the legacy UDP asset-upload + create-item path.
+                            let caps_upload = match (asset_type.caps_asset_name(), inventory_type.caps_name()) {
+                                (Some(asset_name), Some(inv_name)) => caps
+                                    .get(CAP_NEW_FILE_AGENT_INVENTORY)
+                                    .cloned()
+                                    .map(|url| (url, asset_name, inv_name)),
+                                _ => None,
+                            };
+                            if let Some((url, asset_name, inv_name)) = caps_upload {
+                                let body = build_new_file_agent_inventory_request(
+                                    folder_id, asset_name, inv_name, &name, &description,
+                                    next_owner_mask, group_mask, everyone_mask, expected_upload_cost,
+                                );
+                                tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
+                            } else {
+                                self.session.upload_asset_to_inventory_udp(
+                                    folder_id, asset_type, inventory_type, name, description,
+                                    next_owner_mask, WearableType::Shape, data, Instant::now(),
+                                )?;
                             }
                         }
                         Some(Command::UploadBakedTexture { data }) => {

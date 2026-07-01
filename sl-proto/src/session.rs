@@ -1,11 +1,11 @@
 //! The sans-I/O session state machine: login, circuit establishment,
 //! keep-alive, and clean logout, driven entirely by passed-in time.
 
-use crate::bookkeeping_ids::{PingId, TransferId, XferId};
+use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
 use crate::scoped_id::CircuitId;
 use crate::types::{
-    AssetType, Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, Object,
-    TerrainPatch, Throttle,
+    AssetType, Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams,
+    NewInventoryItem, Object, TerrainPatch, Throttle,
 };
 use sl_types::key::{AgentKey, ExperienceKey, FriendKey, InventoryKey, ObjectKey};
 use sl_types::lsl::Rotation;
@@ -716,6 +716,45 @@ impl AssetUpload {
     }
 }
 
+/// What a completed inbound `Xfer` file download should become — the routing
+/// tag stored alongside each in-flight download in
+/// [`Session::xfer_downloads`](Session::xfer_downloads). Every consumer of the
+/// shared download machinery (mute list, task inventory, and the generic
+/// [`Session::request_xfer`](Session::request_xfer) path) registers its purpose
+/// so the single `SendXferPacket` handler can route the assembled bytes to the
+/// right typed event.
+#[derive(Debug, Clone)]
+enum XferPurpose {
+    /// A mute-list file: parse it into [`Event::MuteList`](crate::Event::MuteList).
+    MuteList,
+    /// A task-inventory listing for the given object (`task`) at contents
+    /// `serial`: parse it into
+    /// [`Event::TaskInventoryContents`](crate::Event::TaskInventoryContents).
+    TaskInventory {
+        /// The in-world object whose task inventory this listing describes.
+        task: ObjectKey,
+        /// The contents serial reported by the `ReplyTaskInventory` that named
+        /// the file, echoed back on the parsed event.
+        serial: i16,
+    },
+    /// A caller-initiated raw download: surface the bytes verbatim as
+    /// [`Event::XferDownloaded`](crate::Event::XferDownloaded).
+    Generic,
+}
+
+/// An in-flight inbound `Xfer` file download: the accumulated bytes and what to
+/// do with them once the final packet arrives. Started by a `MuteListUpdate`, an
+/// auto-fetched `ReplyTaskInventory`, or [`Session::request_xfer`], and keyed by
+/// [`XferId`] in [`Session::xfer_downloads`](Session::xfer_downloads).
+#[derive(Debug)]
+struct XferDownload {
+    /// What the assembled file should be routed to on completion.
+    purpose: XferPurpose,
+    /// The file bytes accumulated so far (the seq-0 length prefix already
+    /// stripped).
+    buffer: Vec<u8>,
+}
+
 /// The UDP circuit to a single simulator.
 #[derive(Debug)]
 struct Circuit {
@@ -1031,11 +1070,27 @@ pub struct Session {
     /// Account-level facts from the login response (home, maturity, group limit,
     /// Library roots), or `None` before login.
     login_account: Option<LoginAccount>,
-    /// In-flight mute-list file downloads (`Xfer` id → accumulated file bytes),
-    /// started when a `MuteListUpdate` arrives.
-    mute_xfers: BTreeMap<XferId, Vec<u8>>,
+    /// In-flight inbound `Xfer` file downloads, keyed by the client-chosen
+    /// [`XferId`], each carrying the accumulated bytes and a routing
+    /// [`XferPurpose`]. Started by a `MuteListUpdate`, an auto-fetched
+    /// `ReplyTaskInventory`, or [`Session::request_xfer`]; the single
+    /// `SendXferPacket` handler drains and routes them.
+    xfer_downloads: BTreeMap<XferId, XferDownload>,
     /// A monotonic counter for generating `Xfer` ids (never zero).
     next_xfer_id: XferId,
+    /// Objects whose task inventory a [`Session::fetch_task_inventory`] asked
+    /// for, keyed by their full [`ObjectKey`] (resolved from the object cache at
+    /// request time). When the matching `ReplyTaskInventory` arrives its `Xfer`
+    /// listing is auto-downloaded and parsed into
+    /// [`Event::TaskInventoryContents`](crate::Event::TaskInventoryContents)
+    /// rather than surfaced only as a serial/filename.
+    pending_task_inventory: BTreeSet<ObjectKey>,
+    /// A FIFO fallback for `fetch_task_inventory` calls whose target object was
+    /// not yet in the cache (so its full id could not be resolved to key
+    /// [`pending_task_inventory`](Self::pending_task_inventory)). Each entry
+    /// auto-fetches the next otherwise-unmatched `ReplyTaskInventory`; it cannot
+    /// disambiguate concurrent uncached fetches.
+    pending_task_inventory_unresolved: VecDeque<()>,
     /// In-flight legacy UDP texture downloads, keyed by the texture's asset id
     /// (echoed in every `ImageData`/`ImagePacket`). Started by
     /// [`Session::request_texture`].
@@ -1064,6 +1119,19 @@ pub struct Session {
     /// A monotonic counter for generating upload transaction ids (each packed
     /// into a fresh transaction UUID; never zero).
     next_upload_id: u128,
+    /// Legacy UDP asset uploads that should also create an inventory item once
+    /// the asset is stored — the fallback path of
+    /// [`Session::upload_asset_to_inventory_udp`], keyed by the predicted asset
+    /// id. On the `AssetUploadComplete` for that asset a `CreateInventoryItem` is
+    /// sent to make the item the modern CAPS `NewFileAgentInventory` upload would
+    /// have created in one step.
+    pending_inventory_uploads: BTreeMap<Uuid, NewInventoryItem>,
+    /// Maps the `CreateInventoryItem` callback id of a
+    /// [`pending_inventory_uploads`](Self::pending_inventory_uploads) item back to
+    /// its asset id, so the resulting `UpdateCreateInventoryItem` can be turned
+    /// into the unified [`Event::AssetUploaded`](crate::Event::AssetUploaded)
+    /// (rather than a bare `InventoryItemCreated`).
+    pending_upload_callbacks: BTreeMap<InventoryCallbackId, Uuid>,
     /// The scene-graph object cache, keyed by the circuit instance the objects
     /// belong to (the root region *and* every child/neighbour circuit), then by
     /// region-local id. Region-local ids are only unique within a circuit, so

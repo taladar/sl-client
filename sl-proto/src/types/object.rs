@@ -13,9 +13,11 @@ use sl_wire::RegionHandle;
 use sl_wire::RegionLocalObjectId;
 use uuid::Uuid;
 
-use crate::asset_keys::AnimationKey;
+use crate::asset_keys::{AnimationKey, AssetKey};
 use crate::scoped_id::{CircuitId, ScopedObjectId};
 use crate::types::SculptOrMeshKey;
+use crate::types::asset::{AssetType, InventoryType};
+use crate::types::editing::SaleType;
 
 /// Linden `PCode` constants: the object-class byte (`p_code`) in an object
 /// update, identifying what kind of entity an object is.
@@ -611,6 +613,55 @@ pub struct TaskInventoryReply {
     /// The temporary asset Xfer filename to download the full contents listing
     /// from, or empty when the task inventory is empty.
     pub filename: String,
+}
+
+/// One item inside an in-world object's (task's) inventory, parsed from the
+/// legacy `Xfer` contents listing a `RequestTaskInventory` names. Surfaced in
+/// [`Event::TaskInventoryContents`](crate::Event::TaskInventoryContents), the
+/// parsed reply to a
+/// [`Command::FetchTaskInventory`](crate::Command::FetchTaskInventory).
+///
+/// The listing is LL's plain-text `inv_item { … }` format; folder (`inv_object`)
+/// sections are skipped, so this describes only leaf items.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskInventoryItem {
+    /// The task inventory item id.
+    pub item_id: InventoryKey,
+    /// The object (prim) whose inventory holds this item (the listing's
+    /// `parent_id`).
+    pub parent_task: ObjectKey,
+    /// The base / owner / group / everyone / next-owner permission masks.
+    pub permissions: Permissions5,
+    /// The item's creator.
+    pub creator_id: AgentKey,
+    /// The item's previous owner.
+    pub last_owner_id: AgentKey,
+    /// The item's owner — an agent, or a group when the item is group-owned.
+    pub owner: OwnerKey,
+    /// The group the item is set to, or `None` when no group is set (a
+    /// group-*owned* item reports its group via [`owner`](Self::owner)).
+    pub group: Option<GroupKey>,
+    /// Whether the item is group-owned (the listing's `group_owned` flag).
+    pub group_owned: bool,
+    /// The item's asset id, or `None` when the simulator redacted it — it writes
+    /// a nil `asset_id` unless the requester may edit the prim's inventory.
+    pub asset_id: Option<AssetKey>,
+    /// The asset type (`AssetType`).
+    pub asset_type: AssetType,
+    /// The inventory type (`InventoryType`).
+    pub inv_type: InventoryType,
+    /// The item flags.
+    pub flags: u32,
+    /// How the item is offered for sale.
+    pub sale_type: SaleType,
+    /// The asking price in L$ (zero when not for sale).
+    pub sale_price: LindenAmount,
+    /// The item name.
+    pub name: String,
+    /// The item description.
+    pub description: String,
+    /// The creation timestamp (seconds since the Unix epoch).
+    pub creation_date: i32,
 }
 
 /// Particle-flow pattern (`mPattern`) values for a [`ParticleSystem`], matching
