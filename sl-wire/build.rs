@@ -95,7 +95,7 @@ fn push_message_types(out: &mut String, message: &MessageDef) {
     emit(
         out,
         format_args!(
-            "#[derive(Debug, Clone, PartialEq{})]\npub struct {} {{\n",
+            "#[derive(Debug, Clone, PartialEq{})]\n#[cfg_attr(feature = \"serde\", derive(serde::Serialize))]\npub struct {} {{\n",
             eq_suffix(message.blocks.iter().all(block_is_eq)),
             message.name
         ),
@@ -120,7 +120,7 @@ fn push_block_struct(out: &mut String, message_name: &str, block: &BlockDef) {
     emit(
         out,
         format_args!(
-            "#[derive(Debug, Clone, PartialEq{})]\npub struct {name} {{\n",
+            "#[derive(Debug, Clone, PartialEq{})]\n#[cfg_attr(feature = \"serde\", derive(serde::Serialize))]\npub struct {name} {{\n",
             eq_suffix(block.fields.iter().all(|f| field_is_eq(&f.ty)))
         ),
     );
@@ -263,7 +263,7 @@ fn block_construct_expr(struct_name: &str, block: &BlockDef) -> String {
 
 /// Emits the `AnyMessage` enum and its dispatch impl.
 fn push_any_message(out: &mut String, template: &Template) {
-    out.push_str("/// Any decoded incoming message.\n#[derive(Debug, Clone, PartialEq)]\npub enum AnyMessage {\n");
+    out.push_str("/// Any decoded incoming message.\n#[derive(Debug, Clone, PartialEq)]\n#[cfg_attr(feature = \"serde\", derive(serde::Serialize))]\npub enum AnyMessage {\n");
     for message in &template.messages {
         emit(out, format_args!("    {0}({0}),\n", message.name));
     }

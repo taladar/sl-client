@@ -21,16 +21,24 @@ path = "src/bin/sl-conformance.rs"
 name = "sl-conformance-report"
 path = "src/bin/sl-conformance-report.rs"
 
+[[bin]]
+name = "sl-conformance-trace"
+path = "src/bin/sl-conformance-trace.rs"
+
 [dependencies]
 clap = { version = "4.6.1", features = ["cargo", "derive", "env"] }
 clap_complete = "4.6.2"
 clap_mangen = "0.3.0"
+etherparse = { version = "0.20.2" }
 fs-err = { version = "3.3.0" }
 log-panics = { version = "2.1.0", features = ["with-backtrace"] }
 owo-colors = "4.3.0"
+pcap-file = { version = "2.0.0" }
 serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.145" }
 sl-client-tokio = { path = "../sl-client-tokio", version = "0.1.0" }
 sl-repl = { path = "../sl-repl", version = "0.1.0" }
+sl-wire = { path = "../sl-wire", version = "0.1.0", features = ["serde"] }
 thiserror = "2.0.18"
 time = { version = "0.3.49", features = ["formatting", "parsing"] }
 tokio = { version = "1.52.1", features = ["full"] }
