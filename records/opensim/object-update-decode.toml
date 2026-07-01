@@ -1,0 +1,21 @@
+test = "object-update-decode"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "229c3dd-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T08:47:20.034275379Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+avatars_count = 1
+first_object_secs = 0.001067747
+objects_count = 2
+other_count = 0
+primitives_count = 1
+
+[run.metric_meta.first_object_secs]
+lower_is_better = true

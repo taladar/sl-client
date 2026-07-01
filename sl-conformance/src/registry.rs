@@ -37,6 +37,20 @@ pub trait GridTest: Send + Sync {
         false
     }
 
+    /// The `start` location every avatar of this test logs in at, as the wire
+    /// string a grid expects (`"last"`, `"home"`, or `"uri:Region&x&y&z"`).
+    ///
+    /// Defaults to `"last"` (resume where the avatar logged out), which is right
+    /// for almost every case. A case overrides it when it must be co-located
+    /// with a fixed in-world resource — e.g. the Phase 8/9 object and scripting
+    /// cases, whose rezzed OAR object lives in the OpenSim "Default Region", so
+    /// they force a login there rather than trusting the avatar's last position.
+    /// The `grid` is passed so an override can be OpenSim-specific (a named
+    /// OpenSim region is meaningless on Second Life, where `"last"` is kept).
+    fn start_location(&self, _grid: Grid) -> &'static str {
+        "last"
+    }
+
     /// Run the exercise against the (already logged-in) context.
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a>;
 }
@@ -86,6 +100,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::grant_user_rights::GrantUserRights),
         Box::new(crate::cases::calling_card::CallingCard),
         Box::new(crate::cases::mute_list::MuteList),
+        Box::new(crate::cases::object_update_decode::ObjectUpdateDecode),
     ]
 }
 

@@ -267,11 +267,19 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         None
     };
 
+    // The `start` location every avatar logs in at. Almost every case keeps the
+    // default `"last"`; a case that must be co-located with a fixed in-world
+    // resource (the Phase 8/9 object/scripting cases and their OAR object in the
+    // OpenSim "Default Region") overrides it. The same location is used for every
+    // avatar so a multi-avatar case that overrides lands them together.
+    let start_location = test.start_location(args.grid);
+
     let primary_session = context::login(
         args.grid,
         primary,
         CHANNEL,
         version,
+        start_location,
         &state_dir,
         args.force,
         primary_cache_dir,
@@ -281,7 +289,14 @@ async fn run(args: RunArgs) -> Result<(), Error> {
     let secondary_session = match secondary {
         Some(secondary) => Some(
             context::login(
-                args.grid, secondary, CHANNEL, version, &state_dir, args.force, None,
+                args.grid,
+                secondary,
+                CHANNEL,
+                version,
+                start_location,
+                &state_dir,
+                args.force,
+                None,
             )
             .await
             .map_err(|error| Error::Test(error.to_string()))?,
@@ -291,7 +306,14 @@ async fn run(args: RunArgs) -> Result<(), Error> {
     let tertiary_session = match tertiary {
         Some(tertiary) => Some(
             context::login(
-                args.grid, tertiary, CHANNEL, version, &state_dir, args.force, None,
+                args.grid,
+                tertiary,
+                CHANNEL,
+                version,
+                start_location,
+                &state_dir,
+                args.force,
+                None,
             )
             .await
             .map_err(|error| Error::Test(error.to_string()))?,

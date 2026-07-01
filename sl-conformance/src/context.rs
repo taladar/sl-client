@@ -81,6 +81,11 @@ pub struct Session {
     channel: String,
     /// The viewer version reported at login, retained for [`Session::relogin`].
     version: String,
+    /// The `start` wire string this avatar logs in at (`"last"` for almost every
+    /// case; a fixed `"uri:Region&x&y&z"` for cases that must be co-located with
+    /// an in-world resource). Retained so [`Session::relogin`] lands the same
+    /// place the initial login did.
+    start_location: String,
     /// The harness state directory holding the per-avatar login-cooldown stamps,
     /// so [`Session::relogin`] can honour the aditi cooldown rather than bypass
     /// it (the initial logins are gated by the runner).
@@ -302,6 +307,7 @@ impl Session {
         let avatar = self.avatar.clone();
         let channel = self.channel.clone();
         let version = self.version.clone();
+        let start_location = self.start_location.clone();
         let state_dir = self.state_dir.clone();
         let force = self.force;
         let cache_dir = self.cache_dir.clone();
@@ -310,7 +316,14 @@ impl Session {
             wait_out_cooldown(&state_dir, &label, force).await?;
         }
         *self = connect_and_spawn(
-            grid, &avatar, &channel, &version, &state_dir, force, cache_dir,
+            grid,
+            &avatar,
+            &channel,
+            &version,
+            &start_location,
+            &state_dir,
+            force,
+            cache_dir,
         )
         .await?;
         Ok(())
@@ -326,6 +339,10 @@ fn avatar_label(avatar: &Avatar) -> String {
 /// Log in to `grid` as `avatar`, answering any MFA challenge, and spawn the run
 /// loop, returning the live [`Session`].
 ///
+/// `start_location` is the `start` wire string the avatar logs in at (`"last"`
+/// for almost every case; a fixed `"uri:Region&x&y&z"` for a case that must be
+/// co-located with an in-world resource).
+///
 /// `cache_dir` is the per-account inventory disk-cache directory, or `None` to
 /// leave the inventory disk cache off (what every case but `inventory-cache-skip`
 /// passes). When `Some`, the runtime caches the agent's inventory tree there
@@ -335,16 +352,32 @@ fn avatar_label(avatar: &Avatar) -> String {
 ///
 /// Returns a [`TestFailure`] if the login URI is invalid, the start location
 /// cannot be parsed, MFA is required but unavailable, or the login fails.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the login parameters are all independent scalars threaded from the runner; \
+              a wrapper struct would only relocate them without simplifying the call"
+)]
 pub async fn login(
     grid: Grid,
     avatar: &Avatar,
     channel: &str,
     version: &str,
+    start_location: &str,
     state_dir: &Path,
     force: bool,
     cache_dir: Option<PathBuf>,
 ) -> Result<Session, TestFailure> {
-    connect_and_spawn(grid, avatar, channel, version, state_dir, force, cache_dir).await
+    connect_and_spawn(
+        grid,
+        avatar,
+        channel,
+        version,
+        start_location,
+        state_dir,
+        force,
+        cache_dir,
+    )
+    .await
 }
 
 /// Perform the XML-RPC login, spawn the run loop and its drains, and assemble a
@@ -360,11 +393,17 @@ pub async fn login(
 ///
 /// Returns a [`TestFailure`] if the login URI is invalid, the start location
 /// cannot be parsed, MFA is required but unavailable, or the login fails.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the login parameters are all independent scalars threaded from the runner; \
+              a wrapper struct would only relocate them without simplifying the call"
+)]
 async fn connect_and_spawn(
     grid: Grid,
     avatar: &Avatar,
     channel: &str,
     version: &str,
+    start_location: &str,
     state_dir: &Path,
     force: bool,
     cache_dir: Option<PathBuf>,
@@ -376,7 +415,7 @@ async fn connect_and_spawn(
         .parse()
         .map_err(|error: url::ParseError| TestFailure::Login(error.to_string()))?;
     let start: StartLocation =
-        "last"
+        start_location
             .parse()
             .map_err(|error: sl_client_tokio::StartLocationParseError| {
                 TestFailure::Login(error.to_string())
@@ -497,6 +536,7 @@ async fn connect_and_spawn(
         avatar: avatar.clone(),
         channel: channel.to_owned(),
         version: version.to_owned(),
+        start_location: start_location.to_owned(),
         state_dir: state_dir.to_path_buf(),
         force,
         cache_dir,
