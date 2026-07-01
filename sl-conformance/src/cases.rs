@@ -39,6 +39,7 @@ pub mod login_handshake;
 pub mod logout_clean;
 pub mod mute_list;
 pub mod object_properties;
+pub mod object_rez_derez;
 pub mod object_touch_grab;
 pub mod object_update_decode;
 pub mod offline_msg_fetch;

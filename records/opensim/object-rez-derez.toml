@@ -1,0 +1,33 @@
+test = "object-rez-derez"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "8567fa0-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T10:13:55.61627767Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+create_rtt_secs = 0.053939244
+created_object = "20451706-fb66-486a-aab6-3fedbbcce9e5"
+delete_rtt_secs = 0.014974839
+item_id = "a8b91540-2411-461e-a92e-074aa4b34bd1"
+item_name = "Object"
+rez_rtt_secs = 0.090530312
+rezzed_object = "f5593c13-150f-47af-9473-e924fc8682f5"
+take_rtt_secs = 0.090317709
+
+[run.metric_meta.create_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.delete_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.rez_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.take_rtt_secs]
+lower_is_better = true
