@@ -21,3 +21,24 @@ target_avatar = "bbbbbbbb-aaaa-cccc-dddd-000000000001"
 
 [run.metric_meta.properties_rtt_secs]
 lower_is_better = true
+
+[[run]]
+behavior_describe = "b17a588-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T05:55:07.600732076Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+about_text_present = false
+born_on = "6/16/2026"
+interests_received = true
+partner_present = false
+profile_flags_hex = "0x00000000"
+properties_rtt_secs = 0.049552234
+target_avatar = "bbbbbbbb-aaaa-cccc-dddd-000000000001"
+
+[run.metric_meta.properties_rtt_secs]
+lower_is_better = true

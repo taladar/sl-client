@@ -36,6 +36,7 @@ pub mod library_tree_fetch;
 pub mod login_handshake;
 pub mod logout_clean;
 pub mod offline_msg_fetch;
+pub mod picks_classifieds;
 pub mod presence_online_offline;
 pub mod profile_edit_roundtrip;
 pub mod region_info;

@@ -1,0 +1,158 @@
+test = "picks-classifieds"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "b17a588-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T05:42:52.006340979Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "b17a588-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T05:47:42.591444686Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "b17a588-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T05:49:04.558548286Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "b17a588-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T05:52:49.27592874Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "b17a588-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T05:56:43.00590707Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "b17a588-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T05:58:25.997065168Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "b17a588-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T06:00:29.675769549Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "b17a588-dirty"
+dirty = true
+outcome = "fail"
+completeness = "complete"
+recorded_at = "2026-07-01T06:02:31.529590323Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+
+[run.metric_meta]
+
+[[run]]
+behavior_describe = "b17a588-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T06:11:13.561337149Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+classified_create_secs = 0.015021512
+classified_deleted = false
+classified_edit_reflected = true
+classifieds_tested = true
+pick_create_secs = 0.022499761
+pick_deleted = true
+pick_edit_reflected = true
+pick_leftovers_swept = 0
+pick_listed = true
+
+[run.metric_meta.classified_create_secs]
+lower_is_better = true
+
+[run.metric_meta.pick_create_secs]
+lower_is_better = true
+
+[[run]]
+behavior_describe = "b17a588-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T06:11:55.312491792Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+classified_create_secs = 0.015070455
+classified_deleted = false
+classified_edit_reflected = true
+classifieds_tested = true
+pick_create_secs = 0.017671274
+pick_deleted = true
+pick_edit_reflected = true
+pick_leftovers_swept = 0
+pick_listed = true
+
+[run.metric_meta.classified_create_secs]
+lower_is_better = true
+
+[run.metric_meta.pick_create_secs]
+lower_is_better = true
