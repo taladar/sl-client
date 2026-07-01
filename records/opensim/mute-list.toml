@@ -1,0 +1,25 @@
+test = "mute-list"
+grid = "opensim"
+
+[[run]]
+behavior_describe = "d02c65d-dirty"
+dirty = true
+outcome = "pass"
+completeness = "complete"
+recorded_at = "2026-07-01T08:15:29.657952574Z"
+avatar = "Avatar Tester"
+sl_conformance_version = "0.1.0"
+
+[run.metrics]
+baseline_mutes_count = 0
+mute_readback = true
+mute_rtt_secs = 1.04177623
+mute_target = "c04f0117-0000-4000-8000-000000000001"
+mute_type = "agent"
+unmute_rtt_secs = 1.057937742
+
+[run.metric_meta.mute_rtt_secs]
+lower_is_better = true
+
+[run.metric_meta.unmute_rtt_secs]
+lower_is_better = true
