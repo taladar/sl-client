@@ -38,6 +38,7 @@
 - [Friends & Presence](content/friends.md)
 - [Experiences](content/experiences.md)
 - [Materials](content/materials.md)
+- [Textures & the Asset Pipeline](content/textures.md)
 
 ## Tools
 
