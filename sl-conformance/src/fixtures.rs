@@ -32,11 +32,16 @@
 //! # On OpenSim the case falls back to the local secondary test avatar, so this
 //! # is only needed on Second Life (where there is no built-in second avatar).
 //! other_avatar = "22222222-2222-2222-2222-222222222222"
+//!
+//! # A stable, fetchable mesh asset the `mesh-fetch-http` case pulls and decodes.
+//! # Optional: absent it, the case scans the region's object stream for a
+//! # mesh-shaped prim and records `partial` if it finds none.
+//! mesh_asset = "33333333-3333-3333-3333-333333333333"
 //! ```
 
 use std::path::{Path, PathBuf};
 
-use sl_client_tokio::{AgentKey, GroupKey, Uuid};
+use sl_client_tokio::{AgentKey, GroupKey, MeshKey, Uuid};
 
 use crate::grid::Grid;
 
@@ -51,6 +56,10 @@ pub struct Fixtures {
     /// Needed only on Second Life, which has no built-in second avatar; on
     /// OpenSim the case falls back to the local secondary test avatar.
     other_avatar: Option<AgentKey>,
+    /// A stable, fetchable mesh asset id the `mesh-fetch-http` case pulls and
+    /// decodes. Optional: when absent the case instead scans the region's object
+    /// stream for a mesh-shaped prim, and records `partial` if it finds none.
+    mesh_asset: Option<MeshKey>,
 }
 
 /// The raw TOML shape, before ids are parsed into typed keys.
@@ -65,6 +74,10 @@ struct RawFixtures {
     /// [`Fixtures::other_avatar`].
     #[serde(default)]
     other_avatar: Option<String>,
+    /// The mesh asset id as a UUID string, parsed into
+    /// [`Fixtures::mesh_asset`].
+    #[serde(default)]
+    mesh_asset: Option<String>,
 }
 
 /// Why a fixtures file could not be turned into [`Fixtures`].
@@ -175,9 +188,21 @@ impl Fixtures {
                     })
             })
             .transpose()?;
+        let mesh_asset = raw
+            .mesh_asset
+            .map(|value| {
+                Uuid::parse_str(&value)
+                    .map(MeshKey::from)
+                    .map_err(|_invalid| FixturesError::BadUuid {
+                        field: "mesh_asset",
+                        value,
+                    })
+            })
+            .transpose()?;
         Ok(Self {
             premade_groups,
             other_avatar,
+            mesh_asset,
         })
     }
 
@@ -196,6 +221,14 @@ impl Fixtures {
     #[must_use]
     pub const fn other_avatar(&self) -> Option<AgentKey> {
         self.other_avatar
+    }
+
+    /// The configured fetchable mesh asset the `mesh-fetch-http` case pulls, if
+    /// any. When absent the case scans the region's object stream for a
+    /// mesh-shaped prim instead.
+    #[must_use]
+    pub const fn mesh_asset(&self) -> Option<MeshKey> {
+        self.mesh_asset
     }
 }
 
@@ -244,6 +277,7 @@ mod tests {
                 "22222222-3333-4444-5555-666666666666".to_owned(),
             ],
             other_avatar: None,
+            mesh_asset: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.premade_group(0).is_some());
@@ -264,10 +298,43 @@ mod tests {
         let raw = RawFixtures {
             premade_groups: Vec::new(),
             other_avatar: Some("33333333-4444-5555-6666-777777777777".to_owned()),
+            mesh_asset: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.other_avatar().is_some());
         Ok(())
+    }
+
+    /// A well-formed `mesh_asset` parses into a typed key; an absent one is
+    /// `None`.
+    #[test]
+    fn parses_mesh_asset() -> Result<(), super::FixturesError> {
+        let raw = RawFixtures {
+            premade_groups: Vec::new(),
+            other_avatar: None,
+            mesh_asset: Some("44444444-5555-6666-7777-888888888888".to_owned()),
+        };
+        let fixtures = Fixtures::from_raw(raw)?;
+        assert!(fixtures.mesh_asset().is_some());
+        assert_eq!(Fixtures::default().mesh_asset(), None);
+        Ok(())
+    }
+
+    /// A malformed `mesh_asset` is a `BadUuid` error, not a silent drop.
+    #[test]
+    fn rejects_bad_mesh_asset() {
+        let raw = RawFixtures {
+            premade_groups: Vec::new(),
+            other_avatar: None,
+            mesh_asset: Some("not-a-uuid".to_owned()),
+        };
+        assert!(matches!(
+            Fixtures::from_raw(raw),
+            Err(super::FixturesError::BadUuid {
+                field: "mesh_asset",
+                ..
+            })
+        ));
     }
 
     /// A malformed `other_avatar` is a `BadUuid` error, not a silent drop.
@@ -276,6 +343,7 @@ mod tests {
         let raw = RawFixtures {
             premade_groups: Vec::new(),
             other_avatar: Some("not-a-uuid".to_owned()),
+            mesh_asset: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -293,6 +361,7 @@ mod tests {
         let raw = RawFixtures {
             premade_groups: vec!["not-a-uuid".to_owned()],
             other_avatar: None,
+            mesh_asset: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),

@@ -128,6 +128,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::teleport_cross_region::TeleportCrossRegion),
         Box::new(crate::cases::teleport_offer_accept::TeleportOfferAccept),
         Box::new(crate::cases::texture_fetch_http::TextureFetchHttp),
+        Box::new(crate::cases::mesh_fetch_http::MeshFetchHttp),
     ]
 }
 

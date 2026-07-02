@@ -11,7 +11,8 @@ use std::time::Duration;
 
 use sl_client_tokio::{
     AgentKey, CircuitId, Client, ClientDirectories, Command, Diagnostic, Event, GroupKey,
-    InventoryCacheConfig, LoginParams, LoginRejectKind, LoginRequest, RegionHandle, StartLocation,
+    InventoryCacheConfig, LoginParams, LoginRejectKind, LoginRequest, MeshKey, RegionHandle,
+    StartLocation,
 };
 use sl_repl::Avatar;
 use time::format_description::well_known::Rfc3339;
@@ -685,6 +686,14 @@ impl TestContext {
     #[must_use]
     pub const fn other_avatar(&self) -> Option<AgentKey> {
         self.fixtures.other_avatar()
+    }
+
+    /// The configured fetchable mesh asset the `mesh-fetch-http` case pulls, if
+    /// any. When absent the case scans the region's object stream for a
+    /// mesh-shaped prim instead.
+    #[must_use]
+    pub const fn mesh_asset(&self) -> Option<MeshKey> {
+        self.fixtures.mesh_asset()
     }
 
     /// The primary session.
