@@ -16,6 +16,7 @@ pub mod chat_self_echo;
 pub mod chat_whisper_shout_range;
 pub mod display_names;
 pub mod draw_distance;
+pub mod environment;
 pub mod friendship_offer_accept;
 pub mod friendship_terminate;
 pub mod give_inventory;
