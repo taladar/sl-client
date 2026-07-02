@@ -522,11 +522,11 @@ mod tests {
         let id = TextureKey::from(sl_proto::Uuid::from_u128(4));
         let first = store.request(id, DiscardLevel::FULL, Priority::new(1));
         let second = store.request(id, DiscardLevel::FULL, Priority::new(9));
-        // Two requesters share one entry; the effective priority is the max.
+        // Two requesters share one entry; effective = max(1, 9) + boost(2)=4.
         let entry = first.entry();
         assert_eq!(entry.interest(), 2);
-        assert_eq!(entry.effective_priority(), Priority::new(9));
-        // Dropping one requester leaves the other's interest intact.
+        assert_eq!(entry.effective_priority(), Priority::new(13));
+        // Dropping one requester leaves the other's interest and lowers to max(1).
         drop(second);
         assert_eq!(entry.interest(), 1);
         assert_eq!(entry.effective_priority(), Priority::new(1));

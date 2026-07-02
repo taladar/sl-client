@@ -41,13 +41,30 @@ impl Priority {
         self.0
     }
 
-    /// Combines two requesters' priorities into the effective scheduling
-    /// priority. The policy is the maximum: a texture is fetched as urgently as
-    /// its most-urgent requester needs.
+    /// The higher of two priorities — the *base* an entry's effective priority
+    /// is built from. The full effective priority also adds a popularity boost
+    /// for the number of requesters, so a texture used by many on-screen objects
+    /// outranks one used by few at the same base priority.
     #[must_use]
     pub fn combine(first: Self, second: Self) -> Self {
         Self(first.0.max(second.0))
     }
+}
+
+/// The popularity boost added per doubling of the requester count. A texture
+/// requested by `n` distinct on-screen uses is boosted by
+/// `floor(log2(n)) * POPULARITY_BOOST_SCALE` over its base (max) priority, so
+/// the boost grows with popularity but with diminishing returns.
+const POPULARITY_BOOST_SCALE: u32 = 4;
+
+/// The diminishing popularity boost for `count` concurrent requesters:
+/// `floor(log2(count)) * POPULARITY_BOOST_SCALE` (0 for a single requester).
+fn popularity_boost(count: usize) -> u32 {
+    let count = u32::try_from(count).unwrap_or(u32::MAX);
+    if count == 0 {
+        return 0;
+    }
+    count.ilog2().saturating_mul(POPULARITY_BOOST_SCALE)
 }
 
 /// The observable state of a texture request as it progresses.
@@ -122,13 +139,22 @@ impl Requesters {
         self.entries.len()
     }
 
-    /// The combined (max) priority across all requesters, or [`Priority::IDLE`]
-    /// when there are none.
+    /// The effective scheduling priority: the maximum requester priority plus a
+    /// diminishing popularity boost for the requester count (see
+    /// [`popularity_boost`]). [`Priority::IDLE`] when there are no requesters.
     pub(crate) fn effective_priority(&self) -> Priority {
-        self.entries
+        if self.entries.is_empty() {
+            return Priority::IDLE;
+        }
+        let base = self
+            .entries
             .iter()
             .map(|(_, priority, _)| *priority)
-            .fold(Priority::IDLE, Priority::combine)
+            .fold(Priority::IDLE, Priority::combine);
+        Priority::new(
+            base.get()
+                .saturating_add(popularity_boost(self.entries.len())),
+        )
     }
 
     /// The finest (smallest discard) target any requester wants, or `None` when
@@ -395,13 +421,13 @@ mod tests {
         requesters.add(1, Priority::new(2), DiscardLevel::from_clamped(3));
         requesters.add(2, Priority::new(9), DiscardLevel::from_clamped(1));
         assert_eq!(requesters.len(), 2);
-        // Effective priority is the max; target want is the finest (smallest).
-        assert_eq!(requesters.effective_priority(), Priority::new(9));
+        // Effective = max(2, 9) + popularity boost for 2 requesters (log2(2)*4=4).
+        assert_eq!(requesters.effective_priority(), Priority::new(13));
         assert_eq!(
             requesters.target_want(),
             Some(DiscardLevel::from_clamped(1))
         );
-        // Dropping the higher-priority requester lowers the effective priority.
+        // Dropping the higher-priority requester lowers to max(2) + boost(0).
         requesters.remove(2);
         assert_eq!(requesters.effective_priority(), Priority::new(2));
         assert_eq!(
@@ -411,6 +437,17 @@ mod tests {
         requesters.remove(1);
         assert_eq!(requesters.effective_priority(), Priority::IDLE);
         assert_eq!(requesters.target_want(), None);
+    }
+
+    #[test]
+    fn popularity_boost_grows_with_diminishing_returns() {
+        assert_eq!(super::popularity_boost(1), 0);
+        assert_eq!(super::popularity_boost(2), 4);
+        assert_eq!(super::popularity_boost(4), 8);
+        assert_eq!(super::popularity_boost(8), 12);
+        assert_eq!(super::popularity_boost(16), 16);
+        // Between doublings the boost is flat (7 requesters boost as 4).
+        assert_eq!(super::popularity_boost(7), 8);
     }
 
     #[test]
