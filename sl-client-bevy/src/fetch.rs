@@ -121,6 +121,6 @@ pub(crate) fn run_generic_asset_fetch(
 }
 
 /// Emits a disconnect event.
-pub(crate) fn emit_disconnect(events: &mut EventWriter<SlEvent>, reason: DisconnectReason) {
+pub(crate) fn emit_disconnect(events: &mut MessageWriter<SlEvent>, reason: DisconnectReason) {
     events.write(SlEvent(SessionEvent::Disconnected(reason)));
 }

@@ -71,9 +71,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Logs session events and schedules logout once the region handshake lands.
 fn on_events(
-    mut events: EventReader<SlEvent>,
+    mut events: MessageReader<SlEvent>,
     mut hold: ResMut<HoldState>,
-    mut exit: EventWriter<AppExit>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     for event in events.read() {
         match &event.0 {
@@ -414,7 +414,7 @@ fn on_events(
 }
 
 /// Requests a clean logout once the hold period has elapsed.
-fn maybe_logout(mut hold: ResMut<HoldState>, mut commands: EventWriter<SlCommand>) {
+fn maybe_logout(mut hold: ResMut<HoldState>, mut commands: MessageWriter<SlCommand>) {
     if hold.requested {
         return;
     }

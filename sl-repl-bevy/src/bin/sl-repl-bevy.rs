@@ -507,7 +507,7 @@ fn apply_meta(meta: MetaCommand, ctx: &mut SessionContext) {
 /// Handle one input line: a meta command updates the context, a grid command is
 /// resolved against the context and dispatched as an [`SlCommand`] event, and
 /// anything malformed is logged.
-fn handle_input(raw: &str, ctx: &mut SessionContext, commands: &mut EventWriter<SlCommand>) {
+fn handle_input(raw: &str, ctx: &mut SessionContext, commands: &mut MessageWriter<SlCommand>) {
     match parse_line(raw) {
         Ok(None) => {}
         Ok(Some(ReplAction::Meta(meta))) => apply_meta(meta, ctx),
@@ -536,14 +536,14 @@ fn repl_driver(
     mut recorder: NonSendMut<Recorder>,
     mut outcome: ResMut<MfaOutcome>,
     line_input: Res<LineInput>,
-    mut events: EventReader<SlEvent>,
-    mut diagnostics: EventReader<SlDiagnostic>,
-    mut capabilities: EventReader<SlCapabilities>,
+    mut events: MessageReader<SlEvent>,
+    mut diagnostics: MessageReader<SlDiagnostic>,
+    mut capabilities: MessageReader<SlCapabilities>,
     identity: Res<SlIdentity>,
-    mut mfa: EventReader<SlMfaChallenge>,
-    mut rejected: EventReader<SlLoginRejected>,
-    mut commands: EventWriter<SlCommand>,
-    mut exit: EventWriter<AppExit>,
+    mut mfa: MessageReader<SlMfaChallenge>,
+    mut rejected: MessageReader<SlLoginRejected>,
+    mut commands: MessageWriter<SlCommand>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     // The identity facts now live in a resource the plugin updates in place, so
     // fold them into the REPL context only when they change (login, region
@@ -669,7 +669,7 @@ fn run_session(
             challenge: None,
             rejected: None,
         })
-        .insert_non_send_resource(Recorder { inner: recorder })
+        .insert_non_send(Recorder { inner: recorder })
         .add_systems(Update, repl_driver);
     let _exit = app.run();
     let (challenge, rejected) = app
@@ -680,7 +680,7 @@ fn run_session(
         });
     let recorder = app
         .world_mut()
-        .remove_non_send_resource::<Recorder>()
+        .remove_non_send::<Recorder>()
         .and_then(|recorder| recorder.inner);
     SessionOutcome {
         challenge,

@@ -85,10 +85,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Logs every event and, on the region handshake, fires the survey commands.
 fn on_events(
-    mut events: EventReader<SlEvent>,
+    mut events: MessageReader<SlEvent>,
     mut state: ResMut<ProbeState>,
-    mut commands: EventWriter<SlCommand>,
-    mut exit: EventWriter<AppExit>,
+    mut commands: MessageWriter<SlCommand>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     for event in events.read() {
         match &event.0 {
@@ -353,7 +353,7 @@ fn on_events(
 }
 
 /// Requests a clean logout once the collection window has elapsed.
-fn maybe_logout(mut state: ResMut<ProbeState>, mut commands: EventWriter<SlCommand>) {
+fn maybe_logout(mut state: ResMut<ProbeState>, mut commands: MessageWriter<SlCommand>) {
     if state.requested {
         return;
     }

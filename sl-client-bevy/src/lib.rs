@@ -179,12 +179,12 @@ pub struct SlClientPlugin {
 
 impl Plugin for SlClientPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<SlEvent>()
-            .add_event::<SlDiagnostic>()
-            .add_event::<SlCapabilities>()
-            .add_event::<SlMfaChallenge>()
-            .add_event::<SlLoginRejected>()
-            .add_event::<SlCommand>()
+        app.add_message::<SlEvent>()
+            .add_message::<SlDiagnostic>()
+            .add_message::<SlCapabilities>()
+            .add_message::<SlMfaChallenge>()
+            .add_message::<SlLoginRejected>()
+            .add_message::<SlCommand>()
             .insert_resource(SlConfig {
                 params: self.params.clone(),
                 diagnostics: self.diagnostics,
@@ -202,7 +202,7 @@ impl Plugin for SlClientPlugin {
 }
 
 /// A high-level session event, emitted as a Bevy event.
-#[derive(Event, Debug, Clone)]
+#[derive(Message, Debug, Clone)]
 pub struct SlEvent(pub SessionEvent);
 
 /// A protocol diagnostic, emitted as a Bevy event. Surfaces anomalies the
@@ -210,20 +210,20 @@ pub struct SlEvent(pub SessionEvent);
 /// unknown CAPS events, missing expected replies). Only produced when
 /// diagnostics are enabled via [`SlClientPlugin::diagnostics`]; kept strictly
 /// separate from [`SlEvent`].
-#[derive(Event, Debug, Clone)]
+#[derive(Message, Debug, Clone)]
 pub struct SlDiagnostic(pub Diagnostic);
 
 /// The region's capability map (cap name → URL), emitted as a Bevy event each
 /// time the driver discovers it: once after the seed capability is fetched at
 /// startup and again after every region change. Useful for resolving or
 /// symbolizing `$cap:Name` placeholders in a REPL or diagnostic consumer.
-#[derive(Event, Debug, Clone)]
+#[derive(Message, Debug, Clone)]
 pub struct SlCapabilities(pub HashMap<String, String>);
 
 /// Emitted when the grid requires a multi-factor one-time code. To answer it,
 /// re-add the plugin with login parameters prepared via
 /// `LoginRequest::with_mfa`.
-#[derive(Event, Debug, Clone)]
+#[derive(Message, Debug, Clone)]
 pub struct SlMfaChallenge(pub MfaChallenge);
 
 /// Emitted when the grid rejected the login with a *retryable* "already logged
@@ -234,13 +234,13 @@ pub struct SlMfaChallenge(pub MfaChallenge);
 /// mirroring [`SlMfaChallenge`], so a driver can consult the user and re-add the
 /// plugin to retry the same login. The carried [`LoginFailure`] keeps the raw
 /// reason/message for display.
-#[derive(Event, Debug, Clone)]
+#[derive(Message, Debug, Clone)]
 pub struct SlLoginRejected(pub LoginFailure);
 
 /// A command to a running session, sent as a Bevy event. Wraps the shared
 /// [`Command`] vocabulary (defined in `sl-proto`) so it can be read as a Bevy
 /// event; match on its `.0` to dispatch.
-#[derive(Event, Debug)]
+#[derive(Message, Debug)]
 pub struct SlCommand(pub Command);
 
 /// The plugin configuration resource.
@@ -373,13 +373,13 @@ fn perform_login(url: &str, user_agent: &str, body: String) -> Result<String, St
 fn drive(
     mut state: ResMut<SlState>,
     config: Res<SlConfig>,
-    mut events: EventWriter<SlEvent>,
-    mut diagnostics: EventWriter<SlDiagnostic>,
-    mut capabilities: EventWriter<SlCapabilities>,
+    mut events: MessageWriter<SlEvent>,
+    mut diagnostics: MessageWriter<SlDiagnostic>,
+    mut capabilities: MessageWriter<SlCapabilities>,
     mut identity: ResMut<SlIdentity>,
-    mut mfa: EventWriter<SlMfaChallenge>,
-    mut rejected: EventWriter<SlLoginRejected>,
-    mut commands: EventReader<SlCommand>,
+    mut mfa: MessageWriter<SlMfaChallenge>,
+    mut rejected: MessageWriter<SlLoginRejected>,
+    mut commands: MessageReader<SlCommand>,
 ) {
     let now = Instant::now();
     let inner = std::mem::replace(&mut state.inner, SlInner::Done);
@@ -435,10 +435,10 @@ fn advance_login(
     directories: &ClientDirectories,
     inventory_cache_config: &InventoryCacheConfig,
     now: Instant,
-    events: &mut EventWriter<SlEvent>,
+    events: &mut MessageWriter<SlEvent>,
     identity: &mut SlIdentity,
-    mfa: &mut EventWriter<SlMfaChallenge>,
-    rejected: &mut EventWriter<SlLoginRejected>,
+    mfa: &mut MessageWriter<SlMfaChallenge>,
+    rejected: &mut MessageWriter<SlLoginRejected>,
 ) -> SlInner {
     match rx.try_recv() {
         Ok(Ok(body)) => match parse_login_response(&body) {
@@ -544,10 +544,10 @@ fn advance_running(
     mut chat_log: Box<ChatLog>,
     mut inventory_cache: Box<InventoryCache>,
     now: Instant,
-    events: &mut EventWriter<SlEvent>,
-    diagnostics: &mut EventWriter<SlDiagnostic>,
-    capabilities: &mut EventWriter<SlCapabilities>,
-    commands: &mut EventReader<SlCommand>,
+    events: &mut MessageWriter<SlEvent>,
+    diagnostics: &mut MessageWriter<SlDiagnostic>,
+    capabilities: &mut MessageWriter<SlCapabilities>,
+    commands: &mut MessageReader<SlCommand>,
 ) -> SlInner {
     // Drain all available inbound datagrams.
     loop {

@@ -117,7 +117,7 @@ pub(crate) struct SlRegionIndex {
 /// per-region entities/components. Scheduled after `drive`, so the events it
 /// reads were produced this same frame.
 pub(crate) fn maintain_world(
-    mut events: EventReader<SlEvent>,
+    mut events: MessageReader<SlEvent>,
     mut identity: ResMut<SlIdentity>,
     mut index: ResMut<SlRegionIndex>,
     mut commands: Commands,
@@ -285,7 +285,7 @@ mod tests {
     /// channel, the identity + index resources, and the `maintain_world` system.
     fn world_app() -> App {
         let mut app = App::new();
-        app.add_event::<SlEvent>()
+        app.add_message::<SlEvent>()
             .init_resource::<SlIdentity>()
             .init_resource::<SlRegionIndex>()
             .add_systems(Update, maintain_world);
@@ -298,7 +298,7 @@ mod tests {
         let handle = RegionHandle(0x0000_03e8_0000_03e8);
         app.world_mut().resource_mut::<SlIdentity>().region_handle = Some(handle);
         app.world_mut()
-            .send_event(SlEvent(SessionEvent::CircuitEstablished {
+            .write_message(SlEvent(SessionEvent::CircuitEstablished {
                 sim: sim(9000),
                 circuit: CircuitId(1),
             }));
@@ -319,12 +319,12 @@ mod tests {
         let next = RegionHandle(0x0000_03e9_0000_03e8);
         app.world_mut().resource_mut::<SlIdentity>().region_handle = Some(home);
         app.world_mut()
-            .send_event(SlEvent(SessionEvent::CircuitEstablished {
+            .write_message(SlEvent(SessionEvent::CircuitEstablished {
                 sim: sim(9000),
                 circuit: CircuitId(1),
             }));
         app.world_mut()
-            .send_event(SlEvent(SessionEvent::NeighborDiscovered(NeighborInfo {
+            .write_message(SlEvent(SessionEvent::NeighborDiscovered(NeighborInfo {
                 region_handle: next,
                 sim: sim(9001),
                 grid_coordinates: GridCoordinates::new(1001, 1000),
@@ -343,7 +343,7 @@ mod tests {
         // Cross into the neighbour: it becomes current, the marker leaves home,
         // and the global handle follows.
         app.world_mut()
-            .send_event(SlEvent(SessionEvent::RegionChanged {
+            .write_message(SlEvent(SessionEvent::RegionChanged {
                 region_handle: next,
                 sim: sim(9001),
                 circuit: CircuitId(2),
@@ -378,12 +378,13 @@ mod tests {
         let home = RegionHandle(0x0000_03e8_0000_03e8);
         app.world_mut().resource_mut::<SlIdentity>().region_handle = Some(home);
         app.world_mut()
-            .send_event(SlEvent(SessionEvent::CircuitEstablished {
+            .write_message(SlEvent(SessionEvent::CircuitEstablished {
                 sim: sim(9000),
                 circuit: CircuitId(1),
             }));
         app.update();
-        app.world_mut().send_event(SlEvent(SessionEvent::LoggedOut));
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::LoggedOut));
         app.update();
 
         let mut all = app.world_mut().query::<&SlRegion>();
