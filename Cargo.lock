@@ -3076,6 +3076,7 @@ dependencies = [
  "fs-err",
  "pretty_assertions",
  "reqwest",
+ "sl-mesh",
  "sl-proto",
  "sl-texture",
  "sl-wire",
