@@ -126,6 +126,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::teleport_local_phases::TeleportLocalPhases),
         Box::new(crate::cases::teleport_failed::TeleportFailed),
         Box::new(crate::cases::teleport_cross_region::TeleportCrossRegion),
+        Box::new(crate::cases::teleport_offer_accept::TeleportOfferAccept),
     ]
 }
 

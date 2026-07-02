@@ -70,5 +70,6 @@ pub mod task_inventory;
 pub mod teleport_cross_region;
 pub mod teleport_failed;
 pub mod teleport_local_phases;
+pub mod teleport_offer_accept;
 pub mod throttle_set;
 pub mod typing_indicator;
