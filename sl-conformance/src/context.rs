@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sl_client_tokio::{
-    AgentKey, Client, ClientDirectories, Command, Diagnostic, Event, GroupKey,
+    AgentKey, CircuitId, Client, ClientDirectories, Command, Diagnostic, Event, GroupKey,
     InventoryCacheConfig, LoginParams, LoginRejectKind, LoginRequest, RegionHandle, StartLocation,
 };
 use sl_repl::Avatar;
@@ -54,6 +54,11 @@ pub struct Session {
     /// Seeded from the login response; a case pairs it with a region-local
     /// position to issue an intra-region [`Command::Teleport`].
     region_handle: Option<RegionHandle>,
+    /// The identity of the root circuit the login established. A case pairs it
+    /// with a region-local parcel/object id to build the `ScopedParcelId` /
+    /// `ScopedObjectId` the scoped parcel/object commands take (e.g. the dwell
+    /// request in `parcel-info-dwell`).
+    circuit_id: Option<CircuitId>,
     /// Inbound events from the run loop, after a forwarder has drained them off
     /// the run loop's bounded channel into this unbounded one. A case typically
     /// waits on one session at a time, leaving the others' event channels unread;
@@ -118,6 +123,14 @@ impl Session {
     #[must_use]
     pub const fn region_handle(&self) -> Option<RegionHandle> {
         self.region_handle
+    }
+
+    /// The identity of the root circuit the login established, if known. A case
+    /// pairs it with a region-local parcel/object id to build the
+    /// `ScopedParcelId` a scoped parcel command (e.g. the dwell request) takes.
+    #[must_use]
+    pub const fn circuit_id(&self) -> Option<CircuitId> {
+        self.circuit_id
     }
 
     /// A snapshot of the protocol diagnostics seen so far on this session.
@@ -493,6 +506,7 @@ async fn connect_and_spawn(
 
     let agent_id = client.agent_id();
     let region_handle = client.region_handle();
+    let circuit_id = client.root_circuit_id();
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
     let (command_tx, command_rx) = mpsc::channel::<Command>(16);
     let (diag_tx, mut diag_rx) = mpsc::channel::<Diagnostic>(64);
@@ -528,6 +542,7 @@ async fn connect_and_spawn(
     Ok(Session {
         agent_id,
         region_handle,
+        circuit_id,
         events: events_rx,
         commands: command_tx,
         diagnostics,

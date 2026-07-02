@@ -74,27 +74,27 @@ pub use sl_proto::{
     MuteFlags, MuteType, NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink,
     Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
     ObjectPermMasks, ObjectProperties, ObjectPropertiesFamily, ObjectTransform, OpenSimExtras,
-    OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
-    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelOverlayInfo, ParcelRequestResult,
-    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
-    Permissions, Permissions5, PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId,
-    PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId,
-    ProposalVoteId, QueryId, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
-    RegionCombatSettings, RegionCoordinates, RegionFlags, RegionHandle, RegionIdentity,
-    RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionName,
-    Reliability, RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezObjectParams,
-    RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError,
-    ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData,
-    SculptOrMeshKey, SequenceNumber, SessionMessage, SetDisplayNameReply, SimulatorFeatures,
-    SoundFlags, SoundPreload, StartLocation, StartLocationParseError, TaskInventoryItem,
-    TaskInventoryKey, TaskInventoryReply, TerrainLayerType, TerrainPatch, Texture,
-    TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder,
-    ThrottleError, TimestampFormat, TransactionId, TransferId, TransferStatus, Transmit, Uuid,
-    Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable, WearableType, XferId,
-    avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
-    grid_to_handle, group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode,
-    sim_access, texture_anim_mode,
+    OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+    ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
+    ParcelVoiceInfo, ParticleSystem, PermissionField, Permissions, Permissions5, PhysicsShapeTypes,
+    PickInfo, PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape, PrimShapeParams,
+    ProductType, ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId, ReflectionProbe,
+    ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionCoordinates, RegionFlags,
+    RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId,
+    RegionLocalParcelId, RegionName, Reliability, RenderMaterialEntry, RenderMaterialRef,
+    RestoreItem, RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId,
+    ScopedParcelId, ScriptCompileError, ScriptControl, ScriptControlAction, ScriptDialog,
+    ScriptLanguage, ScriptPermissionRequest, ScriptPermissions, ScriptTarget,
+    ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber,
+    SessionMessage, SetDisplayNameReply, SimulatorFeatures, SoundFlags, SoundPreload,
+    StartLocation, StartLocationParseError, TaskInventoryItem, TaskInventoryKey,
+    TaskInventoryReply, TerrainLayerType, TerrainPatch, Texture, TextureAnimation, TextureEntry,
+    TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat,
+    TransactionId, TransferId, TransferStatus, Transmit, Uuid, Vector, VoiceAccountInfo,
+    VoiceProvisionRequest, Wearable, WearableType, XferId, avatar_texture, decode_particle_system,
+    decode_texture_anim, decode_texture_entry, grid_to_handle, group_powers, handle_to_global,
+    handle_to_grid, particle_pattern, pcode, sim_access, texture_anim_mode,
 };
 
 mod appearance;
@@ -261,6 +261,15 @@ impl Client {
     #[must_use]
     pub fn region_handle(&self) -> Option<RegionHandle> {
         self.session.region_handle()
+    }
+
+    /// The identity of the current root circuit, available once logged in (the
+    /// login response establishes it). A driver pairs it with a region-local id
+    /// to build a [`ScopedParcelId`] / [`ScopedObjectId`] for the region the
+    /// agent is in, before [`Client::run`] consumes the client.
+    #[must_use]
+    pub fn root_circuit_id(&self) -> Option<CircuitId> {
+        self.session.root_circuit_id()
     }
 
     /// The session id, available once logged in. Useful for symbolizing the

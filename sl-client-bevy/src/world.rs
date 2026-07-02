@@ -18,8 +18,8 @@ use std::net::SocketAddr;
 use bevy::prelude::*;
 
 use sl_proto::{
-    AgentKey, CircuitCode, Event as SessionEvent, ParcelInfo, RegionHandle, RegionIdentity,
-    RegionLimits, RegionLocalParcelId, Uuid,
+    AgentKey, CircuitCode, CircuitId, Event as SessionEvent, ParcelInfo, RegionHandle,
+    RegionIdentity, RegionLimits, RegionLocalParcelId, Uuid,
 };
 
 use crate::SlEvent;
@@ -49,6 +49,12 @@ pub struct SlIdentity {
     /// Seeded from the login response and updated on each `RegionChanged`. The
     /// matching region entity is the one marked [`SlCurrentRegion`].
     pub region_handle: Option<RegionHandle>,
+    /// The identity of the current root circuit. Seeded from the login response
+    /// and refreshed on each `CircuitEstablished` / `RegionChanged`. Pair it with
+    /// a region-local id to build the [`ScopedParcelId`](sl_proto::ScopedParcelId)
+    /// / [`ScopedObjectId`](sl_proto::ScopedObjectId) the scoped parcel/object
+    /// commands take.
+    pub circuit_id: Option<CircuitId>,
 }
 
 /// A region the client knows about — the login/root region and every neighbour
@@ -121,7 +127,8 @@ pub(crate) fn maintain_world(
             // The root circuit came up: the login region's handle is already in
             // the identity resource; pair it with the sim address to spawn (or
             // adopt) the current region entity.
-            SessionEvent::CircuitEstablished { sim, .. } => {
+            SessionEvent::CircuitEstablished { sim, circuit } => {
+                identity.circuit_id = Some(*circuit);
                 if let Some(handle) = identity.region_handle {
                     set_current_region(&mut commands, &mut index, handle, *sim);
                 }
@@ -149,9 +156,13 @@ pub(crate) fn maintain_world(
             // A teleport handover completed: the destination is now the root
             // region. Update the global handle and move the current marker.
             SessionEvent::RegionChanged {
-                region_handle, sim, ..
+                region_handle,
+                sim,
+                circuit,
+                ..
             } => {
                 identity.region_handle = Some(*region_handle);
+                identity.circuit_id = Some(*circuit);
                 set_current_region(&mut commands, &mut index, *region_handle, *sim);
             }
             SessionEvent::Disconnected(_) | SessionEvent::LoggedOut => {
