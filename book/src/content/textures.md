@@ -107,9 +107,13 @@ then re-upgrade its level of detail.
 
 ## Bevy
 
-`sl-client-bevy` integration — a bridge from the store's decoded RGBA8 output to
-`bevy::image::Image`, so decoded textures plug into Bevy's rendering — is
-forthcoming.
+`sl-client-bevy` (on Bevy 0.19) bridges the store to Bevy's renderer:
+`to_bevy_image` turns a decoded RGBA8 texture into a `bevy::image::Image`
+(`Rgba8UnormSrgb`), ready to insert into `Assets<Image>` and use as a rendered
+texture. `BevyTextureFetcher` is a blocking-HTTP `TextureFetcher` for a Bevy app
+with no async runtime — build a `TextureStore` over it and drive `get`/`request`
+by `block_on`-ing on a task/thread (the decode still runs off-thread on the
+store's `rayon` pool). The store surface is re-exported from `sl-client-bevy`.
 
 ---
 

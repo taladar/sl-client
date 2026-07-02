@@ -102,6 +102,16 @@ pub use sl_proto::{
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
+// The decoding, LOD-aware texture store, re-exported so a Bevy app can build and
+// drive one (`sl_texture::TextureEntry`/`TextureReadLease` stay accessible as
+// `sl_texture::…` to avoid colliding with `sl_proto`'s prim-face `TextureEntry`).
+pub use sl_proto::DiscardLevel;
+pub use sl_texture::{
+    CacheLimits, DecodedImage as DecodedTexture, Priority, TextureError, TextureFetcher,
+    TextureProgress, TextureRequest, TextureStore,
+};
+
+pub use crate::textures::{BevyTextureFetcher, to_bevy_image};
 
 mod caps;
 mod chat_log;
@@ -112,6 +122,7 @@ mod inventory;
 mod inventory_cache;
 mod materials;
 mod media;
+pub mod textures;
 mod upload;
 mod voice;
 mod world;

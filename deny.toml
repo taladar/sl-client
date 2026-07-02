@@ -92,6 +92,9 @@ allow = [
   # This workspace's own crates (LGPL-2.1-only, matching the SL viewer).
   "LGPL-2.1-only",
   "MIT",
+  # MIT No Attribution — a permissive MIT variant, pulled in by `encase` (via
+  # bevy_color) in sl-client-bevy's Bevy dependency tree.
+  "MIT-0",
   "Apache-2.0",
   "Unicode-3.0",
   "Apache-2.0 WITH LLVM-exception",
@@ -127,6 +130,9 @@ exceptions = [
   # for JPEG-2000 decoding) is BSD-2-Clause, a permissive license; allow it for
   # that crate rather than project-wide.
   { allow = ["BSD-2-Clause"], crate = "openjpeg-sys" },
+  # `arrayref` (BSD-2-Clause) is a transitive dependency of blake3 via bevy_asset
+  # in sl-client-bevy's Bevy dependency tree.
+  { allow = ["BSD-2-Clause"], crate = "arrayref" },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,
