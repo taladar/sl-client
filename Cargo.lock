@@ -2326,11 +2326,15 @@ dependencies = [
 name = "sl-client-tokio"
 version = "0.1.0"
 dependencies = [
+ "arc-swap",
+ "async-trait",
+ "bytes",
  "flate2",
  "fs-err",
  "pretty_assertions",
  "reqwest",
  "sl-proto",
+ "sl-texture",
  "sl-wire",
  "thiserror 2.0.18",
  "time",

@@ -98,6 +98,15 @@ pub use sl_proto::{
     grid_to_handle, group_powers, handle_to_global, handle_to_grid, j2c, particle_pattern, pcode,
     sim_access, texture_anim_mode,
 };
+// `sl_texture::TextureEntry` (the store's LOD-aware texture object) and
+// `TextureReadLease` are reachable as `sl_texture::…`; they are not re-exported
+// flat because `TextureEntry` would collide with `sl_proto`'s prim-face type.
+pub use sl_texture::{
+    CacheLimits, DecodedImage as DecodedTexture, Priority, TextureError, TextureProgress,
+    TextureRequest, TextureStore,
+};
+
+pub use crate::textures::ReqwestTextureFetcher;
 
 mod appearance;
 mod caps;
@@ -109,6 +118,7 @@ mod inventory;
 mod inventory_cache;
 mod materials;
 mod media;
+pub mod textures;
 mod upload;
 mod voice;
 use crate::appearance::request_server_appearance_update;

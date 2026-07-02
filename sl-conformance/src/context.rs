@@ -113,9 +113,23 @@ pub struct Session {
     /// down (the avatar goes offline on the grid) without discarding the identity
     /// needed to [`Session::relogin`].
     connected: bool,
+    /// The region's capability map (name → URL), captured from the run loop's
+    /// caps reporter and refreshed on every region change. A case reads a cap
+    /// (e.g. `GetTexture`) from it to drive a `TextureStore`.
+    caps: Arc<Mutex<std::collections::HashMap<String, String>>>,
 }
 
 impl Session {
+    /// The current region capability URL for `name` (e.g. `GetTexture`), or
+    /// `None` if the caps have not arrived yet or the region does not offer it.
+    #[must_use]
+    pub fn cap(&self, name: &str) -> Option<String> {
+        match self.caps.lock() {
+            Ok(caps) => caps.get(name).cloned(),
+            Err(poisoned) => poisoned.into_inner().get(name).cloned(),
+        }
+    }
+
     /// The agent's own id, if login reported one.
     #[must_use]
     pub const fn agent_id(&self) -> Option<AgentKey> {
@@ -531,6 +545,22 @@ async fn connect_and_spawn(
         });
     }
 
+    // Capture the region capability map so a case can drive a TextureStore off
+    // the live `GetTexture` cap. The reporter fires at startup and each region
+    // change; a drain keeps the shared map current.
+    let caps = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let (caps_tx, mut caps_rx) = mpsc::channel::<std::collections::HashMap<String, String>>(4);
+    client.set_caps_reporter(caps_tx);
+    let caps_sink = Arc::clone(&caps);
+    let _caps_drain = tokio::spawn(async move {
+        while let Some(map) = caps_rx.recv().await {
+            match caps_sink.lock() {
+                Ok(mut current) => *current = map,
+                Err(poisoned) => *poisoned.into_inner() = map,
+            }
+        }
+    });
+
     let agent_id = client.agent_id();
     let region_handle = client.region_handle();
     let circuit_id = client.root_circuit_id();
@@ -583,6 +613,7 @@ async fn connect_and_spawn(
         force,
         cache_dir,
         connected: true,
+        caps,
     })
 }
 
