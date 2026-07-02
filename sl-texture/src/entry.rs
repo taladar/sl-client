@@ -9,13 +9,16 @@
 //! downgrade wait until no pixels are leased to the GPU before it frees the
 //! finer buffer.
 
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use arc_swap::{ArcSwap, ArcSwapOption};
 use bytes::Bytes;
+use parking_lot::Mutex;
 use sl_proto::{DiscardLevel, TextureKey, j2c};
 
 use crate::decode::DecodedImage;
+use crate::schedule::{Priority, Requesters, TextureProgress};
 
 /// The JPEG-2000 codestream prefix fetched for a texture so far.
 pub(crate) struct Codestream {
@@ -61,6 +64,17 @@ pub struct TextureEntry {
     /// Held for reading while pixels are leased/GPU-mapped; a downgrade takes it
     /// for writing so it only frees a finer buffer once nothing is using it.
     pub(crate) usage: async_lock::RwLock<()>,
+    /// The current observable progress state.
+    pub(crate) progress: ArcSwap<TextureProgress>,
+    /// Signalled on every progress transition, to wake observers.
+    pub(crate) progress_changed: event_listener::Event,
+    /// The live requesters' `(priority, target)` contributions.
+    pub(crate) requesters: Mutex<Requesters>,
+    /// The combined (max) requester priority, cached for lock-free reads.
+    pub(crate) effective_priority: AtomicU32,
+    /// The finest requester target (as a raw discard level), cached; `u8::MAX`
+    /// means "no requester".
+    pub(crate) target_want: AtomicU8,
 }
 
 impl std::fmt::Debug for TextureEntry {
@@ -82,7 +96,86 @@ impl TextureEntry {
             image: ArcSwapOption::empty(),
             write_lock: async_lock::Mutex::new(()),
             usage: async_lock::RwLock::new(()),
+            progress: ArcSwap::from_pointee(TextureProgress::Queued),
+            progress_changed: event_listener::Event::new(),
+            requesters: Mutex::new(Requesters::default()),
+            effective_priority: AtomicU32::new(0),
+            target_want: AtomicU8::new(u8::MAX),
         })
+    }
+
+    /// The current observable progress state.
+    #[must_use]
+    pub fn progress(&self) -> TextureProgress {
+        **self.progress.load()
+    }
+
+    /// Publishes a new progress state and wakes observers if it changed.
+    pub(crate) fn set_progress(&self, progress: TextureProgress) {
+        if **self.progress.load() == progress {
+            return;
+        }
+        self.progress.store(Arc::new(progress));
+        let _notified = self.progress_changed.notify(usize::MAX);
+    }
+
+    /// Waits for the next progress transition.
+    pub async fn progress_changed(&self) {
+        self.progress_changed.listen().await;
+    }
+
+    /// The combined (max) priority across all current requesters.
+    #[must_use]
+    pub(crate) fn effective_priority(&self) -> Priority {
+        Priority::new(self.effective_priority.load(Ordering::Acquire))
+    }
+
+    /// The number of live requesters (interest); `0` means collectible/cancelled.
+    #[must_use]
+    pub(crate) fn interest(&self) -> usize {
+        let requesters = self.requesters.lock();
+        let count = requesters.len();
+        drop(requesters);
+        count
+    }
+
+    /// Registers a requester's `(priority, target)` contribution, refreshing the
+    /// cached aggregates.
+    pub(crate) fn add_requester(&self, id: u64, priority: Priority, target: DiscardLevel) {
+        let mut requesters = self.requesters.lock();
+        requesters.add(id, priority, target);
+        self.refresh_aggregates(&requesters);
+        drop(requesters);
+    }
+
+    /// Updates a requester's priority, refreshing the cached aggregates.
+    pub(crate) fn set_requester_priority(&self, id: u64, priority: Priority) {
+        let mut requesters = self.requesters.lock();
+        requesters.set_priority(id, priority);
+        self.refresh_aggregates(&requesters);
+        drop(requesters);
+    }
+
+    /// Removes a requester, refreshing the aggregates and returning how many
+    /// requesters remain.
+    pub(crate) fn remove_requester(&self, id: u64) -> usize {
+        let mut requesters = self.requesters.lock();
+        requesters.remove(id);
+        self.refresh_aggregates(&requesters);
+        let remaining = requesters.len();
+        drop(requesters);
+        remaining
+    }
+
+    /// Recomputes and stores the cached `effective_priority`/`target_want` from
+    /// the current requester set.
+    fn refresh_aggregates(&self, requesters: &Requesters) {
+        self.effective_priority
+            .store(requesters.effective_priority().get(), Ordering::Release);
+        let want = requesters
+            .target_want()
+            .map_or(u8::MAX, sl_proto::DiscardLevel::get);
+        self.target_want.store(want, Ordering::Release);
     }
 
     /// The texture's asset id.

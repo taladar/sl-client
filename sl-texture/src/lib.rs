@@ -10,17 +10,18 @@
 //! - [`fetcher`] — the runtime-agnostic network abstraction.
 //! - [`entry`] — the shared, LOD-aware texture object and its pixel lease.
 //! - [`store`] — the weak-reference fetch/decode/cache store.
-//!
-//! The `schedule` module (priority/progress/cancel) is added incrementally.
+//! - [`schedule`] — priority, progress observation, and cancellation.
 
 pub mod decode;
 pub mod disk;
 pub mod entry;
 pub mod fetcher;
+pub mod schedule;
 pub mod store;
 
 pub use decode::{DecodeError, DecodedImage, decode_j2c, downsample};
 pub use disk::{CacheLimits, TextureDiskCache};
 pub use entry::{TextureEntry, TextureReadLease};
 pub use fetcher::{FetchChunk, FetchError, TextureFetcher};
+pub use schedule::{Priority, TextureProgress, TextureRequest};
 pub use store::{TextureError, TextureStore};

@@ -2,6 +2,7 @@
 //! level-of-detail-aware textures, never fetching or decoding one twice while it
 //! is still referenced.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use bytes::Bytes;
@@ -13,6 +14,11 @@ use crate::decode::{DecodeError, DecodedImage, decode_j2c, downsample};
 use crate::disk::{CacheLimits, TextureDiskCache};
 use crate::entry::{Codestream, TextureEntry};
 use crate::fetcher::{FetchError, TextureFetcher};
+use crate::schedule::{Priority, PriorityGate, TextureProgress, TextureRequest};
+
+/// Maximum number of texture requests fetching/decoding at once; the rest queue
+/// behind the priority gate.
+const DEFAULT_INFLIGHT: usize = 16;
 
 /// A failure to obtain a decoded texture at the requested level of detail.
 #[derive(Debug, thiserror::Error)]
@@ -26,6 +32,9 @@ pub enum TextureError {
     /// A CPU (decode/downsample) task was lost before producing a result.
     #[error("texture worker did not produce a result")]
     WorkerLost,
+    /// All requesters withdrew before the work started.
+    #[error("texture request cancelled")]
+    Cancelled,
 }
 
 /// The shared inner state of a [`TextureStore`].
@@ -39,6 +48,10 @@ struct StoreInner {
     disk: Option<TextureDiskCache>,
     /// Bounds simultaneous CPU decode/downsample work.
     decode_permits: async_lock::Semaphore,
+    /// The priority-ordered admission gate bounding in-flight requests.
+    gate: PriorityGate,
+    /// Monotonic source of unique request ids.
+    request_counter: AtomicU64,
 }
 
 /// A cloneable handle to a texture fetch/decode/cache store.
@@ -75,6 +88,8 @@ impl TextureStore {
             fetcher,
             disk,
             decode_permits: async_lock::Semaphore::new(num_cpus::get().max(1)),
+            gate: PriorityGate::new(DEFAULT_INFLIGHT),
+            request_counter: AtomicU64::new(0),
         })))
     }
 
@@ -92,6 +107,46 @@ impl TextureStore {
     /// Drops dead weak references from the map. Cheap; call periodically.
     pub fn sweep(&self) {
         self.0.map.retain(|_id, weak| weak.strong_count() > 0);
+    }
+
+    /// Registers a non-blocking, observable, cancellable, re-prioritizable
+    /// request for `id` at least `target` resolution with the given `priority`.
+    /// Drive it to completion with [`TextureRequest::resolved`].
+    #[must_use]
+    pub fn request(
+        &self,
+        id: TextureKey,
+        target: DiscardLevel,
+        priority: Priority,
+    ) -> TextureRequest {
+        let entry = self.resolve_entry(id);
+        let request_id = self.0.request_counter.fetch_add(1, Ordering::Relaxed);
+        TextureRequest::new(self.clone(), entry, request_id, priority, target)
+    }
+
+    /// The admission gate (used by [`TextureRequest`]).
+    pub(crate) fn gate(&self) -> &PriorityGate {
+        &self.0.gate
+    }
+
+    /// Drives an upgrade with progress reporting: publishes a terminal
+    /// [`TextureProgress::Ready`] or [`TextureProgress::Failed`].
+    pub(crate) async fn drive(
+        &self,
+        entry: &Arc<TextureEntry>,
+        target: DiscardLevel,
+    ) -> Result<(), TextureError> {
+        match self.upgrade(entry, target).await {
+            Ok(()) => {
+                let level = entry.current_discard().unwrap_or(target);
+                entry.set_progress(TextureProgress::Ready(level));
+                Ok(())
+            }
+            Err(error) => {
+                entry.set_progress(TextureProgress::Failed);
+                Err(error)
+            }
+        }
     }
 
     /// Ensures `id` is decoded to at least `target` resolution and returns its
@@ -179,6 +234,7 @@ impl TextureStore {
         }
         self.ensure_codestream(entry, target).await?;
         let bytes = entry.codestream.load().bytes.clone();
+        entry.set_progress(TextureProgress::Decoding);
         let decoded = self.decode(bytes, target).await?;
         entry.image.store(Some(Arc::new(decoded)));
         drop(guard);
@@ -255,9 +311,17 @@ impl TextureStore {
                 .and_then(|disk| disk.read(entry.id.uuid()))
             && !bytes.is_empty()
         {
+            entry.set_progress(TextureProgress::ReadingDisk {
+                read: bytes.len(),
+                total: need,
+            });
             store_codestream(entry, bytes, false);
             return Ok(true);
         }
+        entry.set_progress(TextureProgress::Downloading {
+            covered,
+            needed: need,
+        });
         let chunk = self.0.fetcher.fetch_range(entry.id, covered, need).await?;
         if chunk.whole {
             self.persist(entry.id, &chunk.bytes);
@@ -432,5 +496,44 @@ mod tests {
     #[test]
     fn now_unix_is_nonzero() {
         assert!(now_unix() > 0);
+    }
+
+    #[test]
+    fn request_reports_progress_and_shares_the_entry() {
+        use crate::schedule::{Priority, TextureProgress};
+        let (store, _calls) = store_with(Bytes::from(vec![0_u8; 700]));
+        let id = TextureKey::from(sl_proto::Uuid::from_u128(3));
+        let request = store.request(id, DiscardLevel::FULL, Priority::new(5));
+        // A fresh request starts queued and exposes the shared entry.
+        assert_eq!(request.progress(), TextureProgress::Queued);
+        let entry = request.entry();
+        assert_eq!(entry.id(), id);
+        // Driving it fails to decode zeros, ending in the Failed progress state.
+        pollster::block_on(async {
+            let _outcome = request.resolved().await;
+        });
+        assert_eq!(request.progress(), TextureProgress::Failed);
+    }
+
+    #[test]
+    fn dropping_the_last_request_cancels_and_collects() {
+        use crate::schedule::Priority;
+        let (store, _calls) = store_with(Bytes::from_static(b"x"));
+        let id = TextureKey::from(sl_proto::Uuid::from_u128(4));
+        let first = store.request(id, DiscardLevel::FULL, Priority::new(1));
+        let second = store.request(id, DiscardLevel::FULL, Priority::new(9));
+        // Two requesters share one entry; the effective priority is the max.
+        let entry = first.entry();
+        assert_eq!(entry.interest(), 2);
+        assert_eq!(entry.effective_priority(), Priority::new(9));
+        // Dropping one requester leaves the other's interest intact.
+        drop(second);
+        assert_eq!(entry.interest(), 1);
+        assert_eq!(entry.effective_priority(), Priority::new(1));
+        // Dropping the last and the local entry ref makes it collectible.
+        drop(first);
+        drop(entry);
+        store.sweep();
+        assert!(store.peek(id).is_none());
     }
 }
