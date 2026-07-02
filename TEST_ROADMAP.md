@@ -1741,7 +1741,7 @@ Edits need the estate-owner avatar.
 
 ## Phase 13 — Asset & texture pipeline `[both]`
 
-- [ ] `texture-fetch-http` — HTTP CAPS texture fetch + decode (extends
+- [x] `texture-fetch-http` — HTTP CAPS texture fetch + decode (extends
   `asset-decode`). `1av`.
 - [ ] `mesh-fetch-http` — HTTP CAPS mesh fetch + decode. `1av`.
 - [ ] `asset-transfer-udp` — legacy UDP asset transfer fallback. `1av`.
