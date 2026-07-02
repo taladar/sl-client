@@ -3,6 +3,12 @@
 [files]
 extend-exclude = ["sl-wire/message_template.msg"]
 
+[default]
+# The conformance records stamp a git-describe hash (e.g. "a843ba4-dirty") in
+# `behavior_describe`; arbitrary hex can spell a "typo" (…ba… → by/be), so
+# ignore that field's quoted value.
+extend-ignore-re = ['behavior_describe = "[^"]*"']
+
 [default.extend-words]
 # "LOD" = level of detail (mesh rendering term), not a typo of "LOAD".
 LOD = "LOD"

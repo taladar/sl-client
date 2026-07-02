@@ -37,6 +37,7 @@ pub mod keepalive_ping;
 pub mod library_tree_fetch;
 pub mod login_handshake;
 pub mod logout_clean;
+pub mod modify_land;
 pub mod mute_list;
 pub mod object_edit;
 pub mod object_link_delink;

@@ -114,6 +114,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::parcel_properties::ParcelProperties),
         Box::new(crate::cases::parcel_info_dwell::ParcelInfoDwell),
         Box::new(crate::cases::parcel_access_list::ParcelAccessList),
+        Box::new(crate::cases::modify_land::ModifyLand),
     ]
 }
 
