@@ -110,7 +110,16 @@ pub use sl_texture::{
     CacheLimits, DecodedImage as DecodedTexture, Priority, TextureError, TextureFetcher,
     TextureProgress, TextureRequest, TextureStore,
 };
+// The decoding, LOD-aware mesh store (the mesh counterpart of the texture
+// store). `Priority` and `MeshKey` are already re-exported (from `sl_texture` /
+// `sl_proto`); the mesh `CacheLimits` is aliased so it does not collide with the
+// texture one.
+pub use sl_mesh::{
+    CacheLimits as MeshCacheLimits, DecodedMesh, MeshEntry, MeshError, MeshFetcher, MeshLod,
+    MeshPhysics, MeshProgress, MeshReadLease, MeshRequest, MeshSkin, MeshStore, Submesh,
+};
 
+pub use crate::meshes::{BevyMeshFetcher, to_bevy_mesh, to_bevy_meshes};
 pub use crate::textures::{BevyTextureFetcher, to_bevy_image};
 
 mod caps;
@@ -122,6 +131,7 @@ mod inventory;
 mod inventory_cache;
 mod materials;
 mod media;
+pub mod meshes;
 pub mod textures;
 mod upload;
 mod voice;
