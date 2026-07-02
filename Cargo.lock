@@ -109,6 +109,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-channel"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "924ed96dd52d1b75e9c1a3e6275715fd320f5f9439fb5a4a11fa51f4221158d2"
+dependencies = [
+ "concurrent-queue",
+ "event-listener-strategy",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "async-lock"
 version = "3.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1728,6 +1740,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "pollster"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
+
+[[package]]
 name = "portable-atomic"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2470,15 +2488,18 @@ name = "sl-texture"
 version = "0.1.0"
 dependencies = [
  "arc-swap",
+ "async-channel",
  "async-lock",
  "async-trait",
  "bytes",
  "dashmap",
  "event-listener",
+ "fs-err",
  "jpeg2k",
  "keyed_priority_queue",
  "num_cpus",
  "parking_lot",
+ "pollster",
  "pretty_assertions",
  "rayon",
  "sl-proto",
