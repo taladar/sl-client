@@ -67,5 +67,6 @@ pub mod script_upload;
 pub mod session_mark_read;
 pub mod simulator_features;
 pub mod task_inventory;
+pub mod teleport_local_phases;
 pub mod throttle_set;
 pub mod typing_indicator;
