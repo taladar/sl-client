@@ -5,6 +5,7 @@ members = [
     "sl-client-tokio",
     "sl-conformance",
     "sl-llsd",
+    "sl-mesh",
     "sl-msg-template",
     "sl-proto",
     "sl-repl",

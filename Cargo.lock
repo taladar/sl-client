@@ -3131,6 +3131,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-mesh"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "async-lock",
+ "async-trait",
+ "bytes",
+ "dashmap",
+ "event-listener",
+ "flate2",
+ "fs-err",
+ "num_cpus",
+ "parking_lot",
+ "pollster",
+ "pretty_assertions",
+ "sl-asset-sched",
+ "sl-proto",
+ "sl-wire",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "sl-msg-template"
 version = "0.1.0"
 dependencies = [

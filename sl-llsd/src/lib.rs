@@ -5,7 +5,7 @@ mod error;
 mod notation;
 mod value;
 
-pub use binary::parse_llsd_binary;
+pub use binary::{parse_llsd_binary, parse_llsd_binary_prefix};
 pub use error::LlsdError;
 pub use notation::Scan;
 pub use value::{Llsd, parse_llsd_xml, push_escaped};

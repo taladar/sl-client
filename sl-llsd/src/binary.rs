@@ -262,6 +262,21 @@ pub fn parse_llsd_binary(bytes: &[u8]) -> Result<Llsd, LlsdError> {
     parse_value(&mut cursor)
 }
 
+/// Parses the leading binary-LLSD value and also reports how many bytes it
+/// consumed, so a caller can find where the value ends within a larger buffer.
+///
+/// This is what the Second Life mesh asset format needs: its header is a binary
+/// LLSD map, and every block offset in that header is measured *from the end of
+/// the header* — i.e. from the number of bytes this parse consumes.
+///
+/// # Errors
+/// Returns the same errors as [`parse_llsd_binary`].
+pub fn parse_llsd_binary_prefix(bytes: &[u8]) -> Result<(Llsd, usize), LlsdError> {
+    let mut cursor = Cursor::new(bytes);
+    let value = parse_value(&mut cursor)?;
+    Ok((value, cursor.consumed()))
+}
+
 /// A forward-only reader over a binary-LLSD byte slice that yields
 /// [`LlsdError::TruncatedBinary`] instead of panicking on an out-of-bounds read.
 struct Cursor<'a> {
@@ -275,6 +290,11 @@ impl<'a> Cursor<'a> {
     /// Wraps `bytes` at offset zero.
     const fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, pos: 0 }
+    }
+
+    /// The number of bytes consumed so far (the offset of the next unread byte).
+    const fn consumed(&self) -> usize {
+        self.pos
     }
 
     /// Consumes and returns the next `n` bytes, or
@@ -675,6 +695,23 @@ mod tests {
         let mut bytes = Llsd::Integer(3).to_llsd_binary();
         bytes.push(b'\n');
         assert_eq!(parse_llsd_binary(&bytes)?, Llsd::Integer(3));
+        Ok(())
+    }
+
+    /// The prefix parser reports how many bytes the leading value consumed, so a
+    /// caller (e.g. the mesh header) can find where trailing block bytes begin.
+    #[test]
+    fn prefix_reports_bytes_consumed() -> Result<(), LlsdError> {
+        // An integer value is a 1-byte marker + 4-byte payload = 5 bytes.
+        let value = Llsd::Integer(7);
+        let encoded = value.to_llsd_binary();
+        let leading = encoded.len();
+        let mut buffer = encoded;
+        buffer.extend_from_slice(b"trailing block bytes");
+        let (parsed, consumed) = parse_llsd_binary_prefix(&buffer)?;
+        assert_eq!(parsed, value);
+        assert_eq!(consumed, leading);
+        assert_eq!(consumed, 5);
         Ok(())
     }
 }
