@@ -47,6 +47,7 @@ pub mod object_touch_grab;
 pub mod object_update_decode;
 pub mod offline_msg_fetch;
 pub mod parcel_access_list;
+pub mod parcel_divide_join;
 pub mod parcel_info_dwell;
 pub mod parcel_properties;
 pub mod picks_classifieds;
