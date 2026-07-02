@@ -4951,6 +4951,41 @@ mod test {
     }
 
     #[test]
+    fn script_running_reply_caps_surfaces_run_state() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // OpenSim answers a `GetScriptRunning` over the event queue when the
+        // region has one: `{ "Script": [ { ObjectID, ItemID, Running, Mono } ] }`.
+        let body = parse_llsd_xml(concat!(
+            "<llsd><map><key>Script</key><array><map>",
+            "<key>ObjectID</key><uuid>00000000-0000-0000-0000-00000000ab01</uuid>",
+            "<key>ItemID</key><uuid>00000000-0000-0000-0000-00000000ab02</uuid>",
+            "<key>Running</key><boolean>1</boolean>",
+            "<key>Mono</key><boolean>1</boolean>",
+            "</map></array></map></llsd>",
+        ))?;
+        session.handle_caps_event("ScriptRunningReply", &body, now)?;
+
+        let (object_id, item_id, running) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ScriptRunning {
+                    object_id,
+                    item_id,
+                    running,
+                } => Some((object_id, item_id, running)),
+                _ => None,
+            })
+            .ok_or("expected a ScriptRunning event")?;
+        assert_eq!(object_id, ObjectKey::from(uuid::Uuid::from_u128(0xab01)));
+        assert_eq!(item_id, InventoryKey::from(uuid::Uuid::from_u128(0xab02)));
+        assert!(running);
+        Ok(())
+    }
+
+    #[test]
     fn agent_drop_group_caps_surfaces_dropped_group() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;

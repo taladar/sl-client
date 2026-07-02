@@ -2232,6 +2232,26 @@ pub(crate) fn establish_agent_communication_from_llsd(
     Some((sim, seed))
 }
 
+/// Decodes a CAPS `ScriptRunningReply` event body into the task, script item and
+/// run flag. When a region has an event queue (OpenSim's default, and modern SL)
+/// a `GetScriptRunning` is answered over it rather than the UDP
+/// `ScriptRunningReply`: the body is `{ "Script": [ { "ObjectID": uuid,
+/// "ItemID": uuid, "Running": bool, "Mono": bool } ] }`. The ids and run flag are
+/// required (a missing or malformed one drops the event).
+pub(crate) fn script_running_from_caps_llsd(
+    body: &Llsd,
+) -> Option<(ObjectKey, InventoryKey, bool)> {
+    let script = body.get("Script").and_then(|s| s.index(0))?;
+    let object_id = script.get("ObjectID").and_then(Llsd::as_uuid)?;
+    let item_id = script.get("ItemID").and_then(Llsd::as_uuid)?;
+    let running = script.get("Running").and_then(Llsd::as_bool)?;
+    Some((
+        ObjectKey::from(object_id),
+        InventoryKey::from(item_id),
+        running,
+    ))
+}
+
 /// Decodes a CAPS `AgentStateUpdate` event body into the pathfinding
 /// `can_modify_navmesh` flag. The body is `{ "can_modify_navmesh": bool }`;
 /// the flag is required (a missing or non-boolean value drops the event).

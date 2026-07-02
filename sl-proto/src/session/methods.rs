@@ -21,7 +21,7 @@ use super::conversions::{
     open_region_info_from_llsd, pack_uuids, parcel_info, parcel_info_from_llsd,
     parse_lure_region_handle, parse_mute_list, parse_task_inventory, parse_uuid_string, pick_info,
     region_identity, region_limits, required_voice_version_from_llsd, script_dialog,
-    script_permission_request, server_appearance_update_from_llsd,
+    script_permission_request, script_running_from_caps_llsd, server_appearance_update_from_llsd,
     set_display_name_reply_from_llsd, sim_console_response_from_llsd, skeleton_folder,
     teleport_finish_from_llsd, trimmed_string, voice_channel_info_from_llsd,
     windlight_refresh_from_llsd,
@@ -333,6 +333,20 @@ impl Session {
                 if let Some(environment) = environment_from_llsd(body) {
                     self.events
                         .push_back(Event::Environment(Box::new(environment)));
+                } else {
+                    self.caps_decode_failed(message);
+                }
+            }
+            // A task script's run state, answered over the event queue when the
+            // region has one (OpenSim's default, and modern SL) in place of the
+            // UDP `ScriptRunningReply`, in response to a `GetScriptRunning`.
+            "ScriptRunningReply" => {
+                if let Some((object_id, item_id, running)) = script_running_from_caps_llsd(body) {
+                    self.events.push_back(Event::ScriptRunning {
+                        object_id,
+                        item_id,
+                        running,
+                    });
                 } else {
                     self.caps_decode_failed(message);
                 }
