@@ -1743,8 +1743,9 @@ Edits need the estate-owner avatar.
 
 - [x] `texture-fetch-http` — HTTP CAPS texture fetch + decode (extends
   `asset-decode`). `1av`.
-- [x] `mesh-fetch-http` — HTTP CAPS mesh fetch + decode. `1av`. (aditi green;
-  OpenSim `partial` — no mesh in the Default Region.)
+- [x] `mesh-fetch-http` — HTTP CAPS mesh fetch + decode. `1av`. (Green on both:
+  aditi finds a worn/in-view mesh; OpenSim green after provisioning a mesh prim
+  in the Default Region via `slclient-mesh.oar`.)
 - [ ] `asset-transfer-udp` — legacy UDP asset transfer fallback. `1av`.
 - [ ] `asset-upload` — upload via UDP and via CAPS
   `NewFileAgentInventory`. `1av`.
