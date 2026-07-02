@@ -1,71 +1,28 @@
-//! Priority scheduling, progress observation, and cancellation for texture
-//! requests.
+//! Progress observation, per-texture requester aggregation, and cancellation for
+//! texture requests.
 //!
 //! A [`TextureRequest`] is a cloneable handle to one in-flight (or queued)
 //! texture request. It carries the caller's [`Priority`], reports
 //! [`TextureProgress`], can be re-prioritized, and cancels the underlying work
 //! when the last clone drops (interest-counted, so cancelling one requester
 //! never starves another that still wants the same texture). When work is
-//! bounded, a priority gate lets the highest-priority queued request proceed
-//! first; a queued request that is cancelled is removed before it ever runs.
+//! bounded, the shared [`PriorityGate`](sl_asset_sched::PriorityGate) lets the
+//! highest-priority queued request proceed first; a queued request that is
+//! cancelled is removed before it ever runs.
+//!
+//! [`Priority`] and the gate live in the shared `sl-asset-sched` crate; only the
+//! LOD-carrying pieces ([`TextureProgress`], [`Requesters`], [`TextureRequest`])
+//! stay here.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
-use keyed_priority_queue::KeyedPriorityQueue;
-use parking_lot::Mutex;
+use sl_asset_sched::popularity_boost;
 use sl_proto::DiscardLevel;
+
+pub use sl_asset_sched::Priority;
 
 use crate::entry::TextureEntry;
 use crate::store::{TextureError, TextureStore};
-
-/// An abstract scheduling priority: higher is more urgent. How a caller derives
-/// it (expected users, on-screen, distance, size on screen) is out of scope —
-/// the store only combines and orders by the opaque value.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
-pub struct Priority(u32);
-
-impl Priority {
-    /// The lowest priority (background / idle work).
-    pub const IDLE: Self = Self(0);
-
-    /// A priority from a raw urgency value.
-    #[must_use]
-    pub const fn new(value: u32) -> Self {
-        Self(value)
-    }
-
-    /// The raw urgency value.
-    #[must_use]
-    pub const fn get(self) -> u32 {
-        self.0
-    }
-
-    /// The higher of two priorities — the *base* an entry's effective priority
-    /// is built from. The full effective priority also adds a popularity boost
-    /// for the number of requesters, so a texture used by many on-screen objects
-    /// outranks one used by few at the same base priority.
-    #[must_use]
-    pub fn combine(first: Self, second: Self) -> Self {
-        Self(first.0.max(second.0))
-    }
-}
-
-/// The popularity boost added per doubling of the requester count. A texture
-/// requested by `n` distinct on-screen uses is boosted by
-/// `floor(log2(n)) * POPULARITY_BOOST_SCALE` over its base (max) priority, so
-/// the boost grows with popularity but with diminishing returns.
-const POPULARITY_BOOST_SCALE: u32 = 4;
-
-/// The diminishing popularity boost for `count` concurrent requesters:
-/// `floor(log2(count)) * POPULARITY_BOOST_SCALE` (0 for a single requester).
-fn popularity_boost(count: usize) -> u32 {
-    let count = u32::try_from(count).unwrap_or(u32::MAX);
-    if count == 0 {
-        return 0;
-    }
-    count.ilog2().saturating_mul(POPULARITY_BOOST_SCALE)
-}
 
 /// The observable state of a texture request as it progresses.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -167,143 +124,6 @@ impl Requesters {
     }
 }
 
-/// The mutable state of a [`PriorityGate`]: the free-slot count and the
-/// priority-ordered set of waiting request ids.
-#[derive(Debug)]
-struct GateState {
-    /// Remaining concurrent work slots.
-    slots: usize,
-    /// Waiting request ids, ordered by priority (highest served first).
-    waiters: KeyedPriorityQueue<u64, Priority>,
-}
-
-/// A bounded, priority-ordered admission gate. Callers `acquire` a permit before
-/// doing bounded work; when a permit is released the highest-priority waiter is
-/// admitted. A waiter cancelled while queued is removed before it runs.
-#[derive(Debug)]
-pub(crate) struct PriorityGate {
-    /// The gate's mutable state.
-    state: Mutex<GateState>,
-    /// Signalled whenever a slot frees or priorities change, to re-poll waiters.
-    wake: event_listener::Event,
-    /// Total concurrency, for reporting.
-    capacity: AtomicUsize,
-}
-
-impl PriorityGate {
-    /// A gate admitting `capacity` concurrent permits.
-    pub(crate) fn new(capacity: usize) -> Self {
-        let capacity = capacity.max(1);
-        Self {
-            state: Mutex::new(GateState {
-                slots: capacity,
-                waiters: KeyedPriorityQueue::new(),
-            }),
-            wake: event_listener::Event::new(),
-            capacity: AtomicUsize::new(capacity),
-        }
-    }
-
-    /// Acquires a permit for request `id` at `priority`, waiting behind
-    /// higher-priority requests. If the returned future is dropped before it
-    /// resolves, the waiter is removed from the queue.
-    pub(crate) async fn acquire(&self, id: u64, priority: Priority) -> GatePermit<'_> {
-        {
-            let mut state = self.state.lock();
-            let _existing = state.waiters.push(id, priority);
-        }
-        // Remove the waiter if this future is dropped before it acquires.
-        let mut cleanup = WaiterCleanup {
-            gate: self,
-            id,
-            armed: true,
-        };
-        loop {
-            let listener = self.wake.listen();
-            let acquired = {
-                let mut state = self.state.lock();
-                let is_top = state.waiters.peek().is_some_and(|(top, _)| *top == id);
-                let claim = is_top && state.slots > 0;
-                if claim {
-                    state.slots = state.slots.saturating_sub(1);
-                    let _removed = state.waiters.remove(&id);
-                }
-                drop(state);
-                claim
-            };
-            if acquired {
-                cleanup.armed = false;
-                return GatePermit { gate: self };
-            }
-            listener.await;
-        }
-    }
-
-    /// Re-prioritizes a queued waiter and wakes the gate to re-evaluate.
-    pub(crate) fn set_priority(&self, id: u64, priority: Priority) {
-        {
-            let mut state = self.state.lock();
-            if state.waiters.get_priority(&id).is_some() {
-                let _old = state.waiters.set_priority(&id, priority);
-            }
-        }
-        let _notified = self.wake.notify(usize::MAX);
-    }
-
-    /// Removes a waiter (e.g. a cancelled request) from the queue.
-    pub(crate) fn remove(&self, id: u64) {
-        {
-            let mut state = self.state.lock();
-            let _removed = state.waiters.remove(&id);
-        }
-        let _notified = self.wake.notify(usize::MAX);
-    }
-
-    /// Releases one permit, waking waiters to admit the next one.
-    fn release(&self) {
-        {
-            let mut state = self.state.lock();
-            state.slots = state
-                .slots
-                .saturating_add(1)
-                .min(self.capacity.load(Ordering::Relaxed));
-        }
-        let _notified = self.wake.notify(usize::MAX);
-    }
-}
-
-/// A held admission permit; releases its slot back to the gate on drop.
-#[derive(Debug)]
-pub(crate) struct GatePermit<'gate> {
-    /// The gate to release back to.
-    gate: &'gate PriorityGate,
-}
-
-impl Drop for GatePermit<'_> {
-    fn drop(&mut self) {
-        self.gate.release();
-    }
-}
-
-/// Removes a still-queued waiter from the gate if the acquiring future is
-/// dropped before it obtains a permit.
-struct WaiterCleanup<'gate> {
-    /// The gate to clean up in.
-    gate: &'gate PriorityGate,
-    /// The waiting request id.
-    id: u64,
-    /// Whether cleanup is still needed (cleared once a permit is acquired).
-    armed: bool,
-}
-
-impl Drop for WaiterCleanup<'_> {
-    fn drop(&mut self) {
-        if self.armed {
-            self.gate.remove(self.id);
-        }
-    }
-}
-
 /// The shared inner state of a [`TextureRequest`].
 #[derive(Debug)]
 struct RequestInner {
@@ -402,18 +222,9 @@ impl TextureRequest {
 
 #[cfg(test)]
 mod tests {
-    use super::{Priority, PriorityGate, Requesters};
+    use super::{Priority, Requesters};
     use pretty_assertions::assert_eq;
     use sl_proto::DiscardLevel;
-
-    #[test]
-    fn priority_combine_takes_the_maximum() {
-        assert_eq!(
-            Priority::combine(Priority::new(3), Priority::new(7)),
-            Priority::new(7)
-        );
-        assert_eq!(Priority::combine(Priority::IDLE, Priority::new(1)).get(), 1);
-    }
 
     #[test]
     fn requesters_aggregate_priority_and_target() {
@@ -437,28 +248,5 @@ mod tests {
         requesters.remove(1);
         assert_eq!(requesters.effective_priority(), Priority::IDLE);
         assert_eq!(requesters.target_want(), None);
-    }
-
-    #[test]
-    fn popularity_boost_grows_with_diminishing_returns() {
-        assert_eq!(super::popularity_boost(1), 0);
-        assert_eq!(super::popularity_boost(2), 4);
-        assert_eq!(super::popularity_boost(4), 8);
-        assert_eq!(super::popularity_boost(8), 12);
-        assert_eq!(super::popularity_boost(16), 16);
-        // Between doublings the boost is flat (7 requesters boost as 4).
-        assert_eq!(super::popularity_boost(7), 8);
-    }
-
-    #[test]
-    fn gate_admits_up_to_capacity_then_serialises() {
-        pollster::block_on(async {
-            let gate = PriorityGate::new(1);
-            let first = gate.acquire(1, Priority::new(1)).await;
-            // Releasing the only permit lets the next acquirer through.
-            drop(first);
-            let second = gate.acquire(2, Priority::new(1)).await;
-            drop(second);
-        });
     }
 }

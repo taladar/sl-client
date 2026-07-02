@@ -8,13 +8,14 @@ use std::sync::{Arc, Weak};
 use bytes::Bytes;
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry as MapEntry;
+use sl_asset_sched::{PriorityGate, run_cpu};
 use sl_proto::{DiscardLevel, TextureKey, j2c};
 
 use crate::decode::{DecodeError, DecodedImage, decode_j2c, downsample};
 use crate::disk::{CacheLimits, TextureDiskCache};
 use crate::entry::{Codestream, TextureEntry};
 use crate::fetcher::{FetchError, TextureFetcher};
-use crate::schedule::{Priority, PriorityGate, TextureProgress, TextureRequest};
+use crate::schedule::{Priority, TextureProgress, TextureRequest};
 
 /// Maximum number of texture requests fetching/decoding at once; the rest queue
 /// behind the priority gate.
@@ -131,11 +132,19 @@ impl TextureStore {
 
     /// Drives an upgrade with progress reporting: publishes a terminal
     /// [`TextureProgress::Ready`] or [`TextureProgress::Failed`].
+    ///
+    /// The effective target is coalesced to the *finest* level any live
+    /// requester wants (this request's own `target` and the entry's cached
+    /// [`target_want`](TextureEntry::target_want)), so two concurrent requests
+    /// for the same texture at different LODs trigger a single decode at the
+    /// finest-wanted level rather than one decode each. A coarse consumer
+    /// harmlessly receives the finer image (downgradeable under memory pressure).
     pub(crate) async fn drive(
         &self,
         entry: &Arc<TextureEntry>,
         target: DiscardLevel,
     ) -> Result<(), TextureError> {
+        let target = finest(target, entry.finest_want());
         match self.upgrade(entry, target).await {
             Ok(()) => {
                 let level = entry.current_discard().unwrap_or(target);
@@ -363,22 +372,24 @@ impl TextureStore {
         }
     }
 
-    /// Runs a CPU-bound task on the rayon pool (off the caller's thread), bounded
-    /// by the decode semaphore, and awaits its result. Returns `None` if the
-    /// worker was lost (e.g. a panic).
+    /// Runs a CPU-bound task on the shared rayon bridge, bounded by the decode
+    /// semaphore. Returns `None` if the worker was lost (e.g. a panic).
     async fn run_cpu<T, F>(&self, task: F) -> Option<T>
     where
         T: Send + 'static,
         F: FnOnce() -> T + Send + 'static,
     {
-        let permit = self.0.decode_permits.acquire().await;
-        let (sender, receiver) = async_channel::bounded(1);
-        rayon::spawn(move || {
-            let _sent = sender.send_blocking(task());
-        });
-        let result = receiver.recv().await.ok();
-        drop(permit);
-        result
+        run_cpu(&self.0.decode_permits, task).await
+    }
+}
+
+/// The finer (smaller discard) of an explicit target and an optional cached
+/// finest-wanted level. Used to coalesce concurrent mixed-LOD requests to a
+/// single decode at the finest level any live requester wants.
+const fn finest(target: DiscardLevel, want: Option<DiscardLevel>) -> DiscardLevel {
+    match want {
+        Some(want) if want.is_at_least_as_fine_as(target) => want,
+        _other => target,
     }
 }
 
@@ -402,7 +413,7 @@ fn now_unix() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{TextureStore, now_unix};
-    use crate::fetcher::{FetchChunk, FetchError, TextureFetcher};
+    use crate::fetcher::{AssetFetcher, FetchChunk, FetchError, TextureFetcher};
     use bytes::Bytes;
     use pretty_assertions::assert_eq;
     use sl_proto::{DiscardLevel, TextureKey};
@@ -420,7 +431,7 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl TextureFetcher for CountingFetcher {
+    impl AssetFetcher<TextureKey> for CountingFetcher {
         async fn fetch_range(
             &self,
             _id: TextureKey,
@@ -513,6 +524,31 @@ mod tests {
             let _outcome = request.resolved().await;
         });
         assert_eq!(request.progress(), TextureProgress::Failed);
+    }
+
+    #[test]
+    fn mixed_lod_requests_coalesce_to_the_finest() {
+        use super::finest;
+        use crate::schedule::Priority;
+        // Two concurrent requesters for one texture at different LODs: one coarse
+        // (discard 3), one fine (full resolution). The store must decode once at
+        // the finest-wanted level so both are satisfied by the single image
+        // (rather than one decode per LOD, which would depend on arrival order).
+        let (store, _calls) = store_with(Bytes::from(vec![0_u8; 700]));
+        let id = TextureKey::from(sl_proto::Uuid::from_u128(5));
+        let coarse = DiscardLevel::from_clamped(3);
+        let coarse_request = store.request(id, coarse, Priority::new(1));
+        let fine_request = store.request(id, DiscardLevel::FULL, Priority::new(1));
+        let entry = fine_request.entry();
+        // The cached finest-wanted level reflects the finer of the two requests.
+        assert_eq!(entry.finest_want(), Some(DiscardLevel::FULL));
+        // So `drive` for the *coarse* request still targets full resolution: the
+        // single decode at the finest level satisfies the coarse consumer too.
+        assert_eq!(finest(coarse, entry.finest_want()), DiscardLevel::FULL);
+        // A lone coarse target with no finer requester is left untouched.
+        assert_eq!(finest(coarse, None), coarse);
+        drop(coarse_request);
+        drop(fine_request);
     }
 
     #[test]

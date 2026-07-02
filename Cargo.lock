@@ -3023,6 +3023,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
+name = "sl-asset-sched"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "async-lock",
+ "async-trait",
+ "bytes",
+ "event-listener",
+ "keyed_priority_queue",
+ "num_cpus",
+ "parking_lot",
+ "pollster",
+ "pretty_assertions",
+ "rayon",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "sl-client-bevy"
 version = "0.1.0"
 dependencies = [
@@ -3217,7 +3235,6 @@ name = "sl-texture"
 version = "0.1.0"
 dependencies = [
  "arc-swap",
- "async-channel",
  "async-lock",
  "async-trait",
  "bytes",
@@ -3225,12 +3242,11 @@ dependencies = [
  "event-listener",
  "fs-err",
  "jpeg2k",
- "keyed_priority_queue",
  "num_cpus",
  "parking_lot",
  "pollster",
  "pretty_assertions",
- "rayon",
+ "sl-asset-sched",
  "sl-proto",
  "thiserror 2.0.18",
  "tracing",

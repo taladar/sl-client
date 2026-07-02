@@ -184,6 +184,18 @@ impl TextureEntry {
         self.id
     }
 
+    /// The finest (smallest discard) level any live requester wants, or `None`
+    /// when there are no requesters. Read lock-free from the cached aggregate.
+    #[must_use]
+    pub(crate) fn finest_want(&self) -> Option<DiscardLevel> {
+        let raw = self.target_want.load(Ordering::Acquire);
+        if raw == u8::MAX {
+            None
+        } else {
+            Some(DiscardLevel::from_clamped(raw))
+        }
+    }
+
     /// The current decoded image, or `None` before the first decode. Cloning the
     /// returned `Arc` is cheap and pins the pixels until dropped.
     #[must_use]

@@ -11,7 +11,7 @@ use bytes::Bytes;
 use reqwest::Client as ReqwestClient;
 use reqwest::StatusCode as ReqwestStatusCode;
 use sl_proto::TextureKey;
-use sl_texture::{FetchChunk, FetchError, TextureFetcher};
+use sl_texture::{AssetFetcher, FetchChunk, FetchError};
 
 /// A `GetTexture` codestream fetcher over a shared async `reqwest` client.
 #[derive(Debug)]
@@ -52,7 +52,7 @@ impl ReqwestTextureFetcher {
 }
 
 #[async_trait]
-impl TextureFetcher for ReqwestTextureFetcher {
+impl AssetFetcher<TextureKey> for ReqwestTextureFetcher {
     async fn fetch_range(
         &self,
         id: TextureKey,

@@ -15,7 +15,7 @@ use bytes::Bytes;
 use reqwest::StatusCode as ReqwestStatusCode;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::TextureKey;
-use sl_texture::{DecodedImage, FetchChunk, FetchError, TextureFetcher};
+use sl_texture::{AssetFetcher, DecodedImage, FetchChunk, FetchError};
 use wgpu_types::{Extent3d, TextureDimension, TextureFormat};
 
 /// Converts a decoded RGBA8 texture into a Bevy [`Image`] (`Rgba8UnormSrgb`),
@@ -35,9 +35,10 @@ pub fn to_bevy_image(decoded: &DecodedImage) -> Image {
     )
 }
 
-/// A [`TextureFetcher`] over blocking `reqwest`, for a Bevy app with no async
-/// runtime. It fetches `GetTexture` codestream byte ranges; the capability URL
-/// is held in an [`ArcSwapOption`] so it can be refreshed on a region change.
+/// A [`TextureFetcher`](sl_texture::TextureFetcher) over blocking `reqwest`, for
+/// a Bevy app with no async runtime. It fetches `GetTexture` codestream byte
+/// ranges; the capability URL is held in an [`ArcSwapOption`] so it can be
+/// refreshed on a region change.
 #[derive(Debug)]
 pub struct BevyTextureFetcher {
     /// The shared blocking HTTP client.
@@ -111,7 +112,7 @@ impl Default for BevyTextureFetcher {
 }
 
 #[async_trait]
-impl TextureFetcher for BevyTextureFetcher {
+impl AssetFetcher<TextureKey> for BevyTextureFetcher {
     async fn fetch_range(
         &self,
         id: TextureKey,

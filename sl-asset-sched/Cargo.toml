@@ -1,0 +1,35 @@
+[package]
+name = "sl-asset-sched"
+description = "Generic, level-of-detail-agnostic asset fetch scheduling primitives (priority gate, popularity boost, CPU-pool bridge) shared by the Second Life / OpenSim asset stores"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "scheduler", "priority", "asset"]
+categories = ["network-programming", "game-development", "concurrency"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+async-channel = { version = "2.5.0" }
+async-lock = { version = "3.4.2" }
+async-trait = { version = "0.1.89" }
+bytes = { version = "1.12.0" }
+event-listener = { version = "5.4.1" }
+keyed_priority_queue = { version = "0.4.2" }
+num_cpus = { version = "1.17.0" }
+parking_lot = { version = "0.12.5" }
+rayon = { version = "1.12.0" }
+thiserror = { version = "2.0.18" }
+
+[dev-dependencies]
+pollster = { version = "0.4.0" }
+pretty_assertions = { version = "1.4.1" }
+
+[lints]
+workspace = true

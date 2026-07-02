@@ -22,6 +22,6 @@ pub mod store;
 pub use decode::{DecodeError, DecodedImage, decode_j2c, downsample};
 pub use disk::{CacheLimits, TextureDiskCache};
 pub use entry::{TextureEntry, TextureReadLease};
-pub use fetcher::{FetchChunk, FetchError, TextureFetcher};
+pub use fetcher::{AssetFetcher, FetchChunk, FetchError, TextureFetcher};
 pub use schedule::{Priority, TextureProgress, TextureRequest};
 pub use store::{TextureError, TextureStore};

@@ -22,7 +22,6 @@ decode = ["dep:jpeg2k"]
 
 [dependencies]
 arc-swap = { version = "1.9.2" }
-async-channel = { version = "2.5.0" }
 async-lock = { version = "3.4.2" }
 async-trait = { version = "0.1.89" }
 bytes = { version = "1.12.0" }
@@ -30,10 +29,9 @@ dashmap = { version = "6.2.1" }
 event-listener = { version = "5.4.1" }
 fs-err = { version = "3.3.0" }
 jpeg2k = { version = "0.10.1", optional = true }
-keyed_priority_queue = { version = "0.4.2" }
 num_cpus = { version = "1.17.0" }
 parking_lot = { version = "0.12.5" }
-rayon = { version = "1.12.0" }
+sl-asset-sched = { version = "0.1.0", path = "../sl-asset-sched" }
 sl-proto = { version = "0.1.0", path = "../sl-proto" }
 thiserror = { version = "2.0.18" }
 tracing = { version = "0.1.44" }

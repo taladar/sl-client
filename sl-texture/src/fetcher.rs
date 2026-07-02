@@ -6,52 +6,32 @@
 //! supplies a [`TextureFetcher`] that fetches a byte range of a texture's
 //! `GetTexture` codestream. Keeping this behind a trait is what lets the same
 //! store core run under either executor.
+//!
+//! [`TextureFetcher`] is [`AssetFetcher`] keyed by [`TextureKey`]: it is a
+//! blanket subtrait, so any `AssetFetcher<TextureKey>` *is* a `TextureFetcher`
+//! with no extra code, and the store's fetch method
+//! ([`fetch_range`](AssetFetcher::fetch_range)) comes straight from the shared
+//! crate. [`FetchChunk`] and [`FetchError`] are re-exported from there unchanged.
 
-use bytes::Bytes;
 use sl_proto::TextureKey;
 
-/// The result of fetching a codestream byte range.
-#[derive(Clone, Debug)]
-pub struct FetchChunk {
-    /// The returned bytes: the requested gap on a `206 Partial Content`, or the
-    /// entire asset when the server ignored the range and answered `200`.
-    pub bytes: Bytes,
-    /// Whether `bytes` is the whole asset (a `200` response), so the store should
-    /// replace rather than append and mark the codestream complete.
-    pub whole: bool,
-}
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "re-exported at the crate root, where `AssetFetcher` reads clearly"
+)]
+pub use sl_asset_sched::{AssetFetcher, FetchChunk, FetchError};
 
-/// A texture fetch failure.
-#[derive(Clone, Debug, thiserror::Error)]
-pub enum FetchError {
-    /// The texture does not exist (a `404`, the fetch equivalent of not found).
-    #[error("texture not found")]
-    NotFound,
-    /// A transport-level failure (connection, timeout, malformed response).
-    #[error("texture fetch failed: {0}")]
-    Transport(String),
-}
-
-/// Fetches ranges of a texture's `GetTexture` codestream. Implemented per
-/// frontend; the store calls it to grow a codestream toward a level of detail.
+/// Fetches ranges of a texture's `GetTexture` codestream: an [`AssetFetcher`]
+/// keyed by [`TextureKey`].
+///
+/// This is a blanket subtrait — every `AssetFetcher<TextureKey>` automatically
+/// implements it — so a frontend implements [`AssetFetcher`] for `TextureKey`
+/// (defining `fetch_range`) and gets `TextureFetcher` for free. The store stores
+/// a `dyn TextureFetcher` and calls the inherited `fetch_range`.
 #[expect(
     clippy::module_name_repetitions,
     reason = "re-exported at the crate root, where `TextureFetcher` reads clearly"
 )]
-#[async_trait::async_trait]
-pub trait TextureFetcher: Send + Sync + std::fmt::Debug {
-    /// Fetches the byte range `start..end` of `id`'s codestream. A conforming
-    /// server answers `206` with exactly that range; one that ignores the range
-    /// answers `200` with the whole asset (signalled by [`FetchChunk::whole`]).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`FetchError::NotFound`] for a missing texture, or
-    /// [`FetchError::Transport`] for a network/protocol failure.
-    async fn fetch_range(
-        &self,
-        id: TextureKey,
-        start: usize,
-        end: usize,
-    ) -> Result<FetchChunk, FetchError>;
-}
+pub trait TextureFetcher: AssetFetcher<TextureKey> {}
+
+impl<T: AssetFetcher<TextureKey> + ?Sized> TextureFetcher for T {}
