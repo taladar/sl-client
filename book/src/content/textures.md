@@ -121,4 +121,6 @@ The store, decode, cache, and scheduler live in the `sl-texture` crate; the
 `DiscardLevel` newtype and `j2c` header parsing live in `sl-proto`; the tokio
 network backend and re-exports live in `sl-client-tokio`.
 
-See also [Materials](materials.md), which shade surfaces on top of textures.
+See also [Materials](materials.md), which shade surfaces on top of textures, and
+[Meshes & the LLMesh Pipeline](meshes.md) — the mesh counterpart of this store,
+sharing the same `sl-asset-sched` scheduler.

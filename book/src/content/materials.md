@@ -2,10 +2,11 @@
 
 Materials control how object surfaces are shaded beyond a flat diffuse texture
 (see [Textures & the Asset Pipeline](textures.md) for how those textures are
-fetched, decoded, and cached). The protocol carries two generations side by
-side: the **legacy** materials system (normal + specular maps) and the modern
-**GLTF / PBR** system. A current client must understand both, because content of
-both kinds coexists in the world.
+fetched, decoded, and cached, and [Meshes & the LLMesh Pipeline](meshes.md) for
+the mesh *geometry* a material shades). The protocol carries two generations
+side by side: the **legacy** materials system (normal + specular maps) and the
+modern **GLTF / PBR** system. A current client must understand both, because
+content of both kinds coexists in the world.
 
 ## Legacy materials
 

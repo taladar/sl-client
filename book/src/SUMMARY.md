@@ -39,6 +39,7 @@
 - [Experiences](content/experiences.md)
 - [Materials](content/materials.md)
 - [Textures & the Asset Pipeline](content/textures.md)
+- [Meshes & the LLMesh Pipeline](content/meshes.md)
 
 ## Tools
 
