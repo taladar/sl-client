@@ -1673,7 +1673,10 @@ fn advance_running(
                 entries,
             } => {
                 session
-                    .update_parcel_access_list(*local_id, *scope, entries, now)
+                    // A fresh transaction id per update, so the simulator clears
+                    // the old entries before applying ours rather than appending
+                    // (see `update_parcel_access_list`).
+                    .update_parcel_access_list(*local_id, *scope, entries, Uuid::new_v4(), now)
                     .ok();
             }
             Command::RequestParcelDwell { local_id } => {

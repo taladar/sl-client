@@ -3826,11 +3826,18 @@ impl Circuit {
     /// Queues a `ParcelAccessListUpdate` reliably (replace the allow or ban list
     /// selected by `flags`). An empty list clears it (sent as one empty entry, as
     /// the reference viewer does).
+    ///
+    /// `transaction_id` groups the packets of one logical update and, on the
+    /// reference simulator, triggers a clear-before-add of the existing entries
+    /// for `flags` when it differs from the previous update's id — so a caller
+    /// that reuses a stale (or nil) id ends up *appending* to the list instead of
+    /// replacing it. The runtime therefore mints a fresh id per update.
     pub(crate) fn send_parcel_access_list_update(
         &mut self,
         local_id: RegionLocalParcelId,
         flags: u32,
         entries: &[ParcelAccessEntry],
+        transaction_id: Uuid,
         now: Instant,
     ) -> Result<(), WireError> {
         let list = if entries.is_empty() {
@@ -3857,7 +3864,7 @@ impl Circuit {
             data: ParcelAccessListUpdateDataBlock {
                 flags,
                 local_id: local_id.0,
-                transaction_id: Uuid::nil(),
+                transaction_id,
                 sequence_id: 1,
                 sections: 1,
             },

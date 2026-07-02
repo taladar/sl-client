@@ -1167,7 +1167,10 @@ impl Client {
                             self.session.request_parcel_access_list(local_id, scope, Instant::now())?;
                         }
                         Some(Command::UpdateParcelAccessList { local_id, scope, entries }) => {
-                            self.session.update_parcel_access_list(local_id, scope, &entries, Instant::now())?;
+                            // A fresh transaction id per update, so the simulator
+                            // clears the old entries before applying ours rather
+                            // than appending (see `update_parcel_access_list`).
+                            self.session.update_parcel_access_list(local_id, scope, &entries, Uuid::new_v4(), Instant::now())?;
                         }
                         Some(Command::RequestParcelDwell { local_id }) => {
                             self.session.request_parcel_dwell(local_id, Instant::now())?;

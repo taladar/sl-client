@@ -2103,9 +2103,14 @@ impl Session {
                         RegionLocalParcelId(reply.data.local_id),
                     ),
                     scope: ParcelAccessScope::from_u32(reply.data.flags),
+                    // A simulator represents an *empty* list as a single
+                    // nil-agent placeholder block (never as zero blocks), so a
+                    // nil id is the empty-list sentinel rather than a real member
+                    // — the reference viewer skips it, and so do we.
                     entries: reply
                         .list
                         .iter()
+                        .filter(|entry| !entry.id.is_nil())
                         .map(|entry| ParcelAccessEntry {
                             id: entry.id,
                             time: entry.time,
@@ -9370,6 +9375,12 @@ impl Session {
     /// empty `entries` clears the list. Requires parcel ownership / land edit
     /// rights.
     ///
+    /// `transaction_id` groups the packets of one logical update; it must be
+    /// unique per update (the runtime mints a fresh one), because the reference
+    /// simulator only clears the existing entries before applying the new ones
+    /// when the id differs from the previous update's — reusing a stale or nil id
+    /// *appends* to the list instead of replacing it.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
@@ -9379,11 +9390,18 @@ impl Session {
         local_id: ScopedParcelId,
         scope: ParcelAccessScope,
         entries: &[ParcelAccessEntry],
+        transaction_id: Uuid,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit_for_scope(local_id.circuit)?;
         let local_id = local_id.id;
-        circuit.send_parcel_access_list_update(local_id, scope.to_u32(), entries, now)?;
+        circuit.send_parcel_access_list_update(
+            local_id,
+            scope.to_u32(),
+            entries,
+            transaction_id,
+            now,
+        )?;
         Ok(())
     }
 

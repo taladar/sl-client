@@ -11485,6 +11485,7 @@ mod test {
                 // An experience allow flag must be OR'd onto the scope on the wire.
                 flags: ParcelAccessFlags::ALLOW_EXPERIENCE,
             }],
+            uuid::Uuid::from_u128(0x7A),
             now,
         )?;
         session.request_parcel_dwell(
@@ -11527,6 +11528,9 @@ mod test {
             })
             .ok_or("expected a ParcelAccessListUpdate")?;
         assert_eq!(upd.data.flags, 0x1);
+        // The caller-supplied transaction id is carried on the wire (the
+        // simulator keys its clear-before-add on it).
+        assert_eq!(upd.data.transaction_id, uuid::Uuid::from_u128(0x7A));
         let entry = upd.list.first().ok_or("expected one access entry")?;
         assert_eq!(entry.id, uuid::Uuid::from_u128(0x55));
         // Scope (AL_ACCESS, 0x1) OR'd with the per-entry AL_ALLOW_EXPERIENCE (0x8).
@@ -11604,7 +11608,8 @@ mod test {
         drain(&mut session)?;
         drain_events(&mut session);
 
-        // A ban list (flags 0x2) with two entries.
+        // A ban list (flags 0x2) with two real entries plus the nil-agent
+        // placeholder a simulator appends (here, to prove it is dropped).
         let reply = AnyMessage::ParcelAccessListReply(ParcelAccessListReply {
             data: ParcelAccessListReplyDataBlock {
                 agent_id: uuid::Uuid::from_u128(1),
@@ -11624,6 +11629,12 @@ mod test {
                     // A banned experience entry: AL_BAN (0x2) | AL_BLOCK_EXPERIENCE (0x10).
                     flags: 0x2 | 0x10,
                 },
+                // The empty-list sentinel: a nil agent id, filtered out on decode.
+                ParcelAccessListReplyListBlock {
+                    id: uuid::Uuid::nil(),
+                    time: 0,
+                    flags: 0,
+                },
             ],
         });
         session.handle_datagram(sim_addr(), &server_message(&reply, 9, true)?, now)?;
@@ -11641,7 +11652,9 @@ mod test {
             .ok_or("expected a ParcelAccessList event")?;
         assert_eq!(local_id.id, sl_proto::RegionLocalParcelId(7));
         assert_eq!(scope, ParcelAccessScope::Ban);
+        // The nil-agent placeholder is dropped, leaving the two real entries.
         assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|entry| !entry.id.is_nil()));
         let first = entries.first().ok_or("expected a first entry")?;
         assert_eq!(first.flags, ParcelAccessFlags::BAN);
         let second = entries.get(1).ok_or("expected a second entry")?;
