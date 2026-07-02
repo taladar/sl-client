@@ -144,6 +144,32 @@ fn map_int(map: &Llsd, key: &'static str) -> Result<i32, WireError> {
     Ok(map.field_i32(key, key)?.unwrap_or(0))
 }
 
+/// Reads OpenSim's `ExportSupported` flag, which the reference simulator encodes
+/// two different ways depending on where the value originates. The Second
+/// Life-style path (`SimulatorFeaturesModule`, `extrasMap["ExportSupported"] =
+/// true`) sends a boolean, but the grid-wide extra-features path
+/// (`GetGridExtraFeatures`, `extrasMap[key] = val`) injects it as the **string**
+/// `"true"`/`"false"` — every grid extra is stored as a string there, and the
+/// `GridService` default for the key is the literal string `"true"`. Accept
+/// either encoding (a boolean or integer via [`Llsd::field_bool`], else a
+/// case-insensitive `"true"`/`"false"` string, matching OpenSim's own
+/// `bool.TryParse(val, …)`) so a real OpenSim reply parses. An absent key
+/// decodes to [`None`]; a present value of any other kind is a hard error.
+fn map_export_supported(map: &Llsd) -> Result<Option<bool>, WireError> {
+    match map.get("ExportSupported") {
+        None | Some(Llsd::Undef) => Ok(None),
+        Some(Llsd::String(text)) => match text.trim().to_ascii_lowercase().as_str() {
+            "true" => Ok(Some(true)),
+            "false" => Ok(Some(false)),
+            _ => Err(WireError::Llsd(LlsdError::MalformedField {
+                field: "ExportSupported",
+                value: format!("string {text:?}"),
+            })),
+        },
+        Some(_) => Ok(map.field_bool("ExportSupported", "ExportSupported")?),
+    }
+}
+
 impl OpenSimExtras {
     /// Decodes the `OpenSimExtras` map. An absent key decodes to [`None`] (the
     /// grid did not advertise it); a present key of the wrong LLSD kind is a hard
@@ -156,7 +182,7 @@ impl OpenSimExtras {
             crate::optional_url_from_wire(key, map.field_str(key, key)?.unwrap_or(""))
         };
         Ok(Self {
-            export_supported: map.field_bool("ExportSupported", "ExportSupported")?,
+            export_supported: map_export_supported(map)?,
             map_server_url: url_field("map-server-url")?,
             search_server_url: url_field("search-server-url")?,
             destination_guide_url: url_field("destination-guide-url")?,
@@ -494,6 +520,56 @@ mod tests {
             parse_simulator_features(&parse_llsd_xml(&xml).map_err(|error| format!("{error:?}"))?)
                 .map_err(|error| format!("{error:?}"))?;
         assert_eq!(parsed, features);
+        Ok(())
+    }
+
+    /// OpenSim's grid-wide extra-features path injects `ExportSupported` into
+    /// `OpenSimExtras` as a **string** (`GetGridExtraFeatures` stores every grid
+    /// extra as a string; the `GridService` default is the literal `"true"`), so
+    /// a real OpenSim reply carries `<string>true</string>` where the Second
+    /// Life-style path would carry a boolean. The parser accepts the string form
+    /// rather than rejecting the whole reply as malformed.
+    #[test]
+    fn export_supported_string_decodes() -> Result<(), String> {
+        let body = parse_llsd_xml(concat!(
+            "<llsd><map>",
+            "<key>MeshUploadEnabled</key><boolean>true</boolean>",
+            "<key>OpenSimExtras</key><map>",
+            "<key>ExportSupported</key><string>true</string>",
+            "<key>currency</key><string>OS$</string></map>",
+            "</map></llsd>"
+        ))
+        .map_err(|error| format!("{error:?}"))?;
+        let features = parse_simulator_features(&body).map_err(|error| format!("{error:?}"))?;
+        let extras = features.open_sim_extras.ok_or("expected OpenSimExtras")?;
+        assert_eq!(extras.export_supported, Some(true));
+        assert_eq!(extras.currency.as_deref(), Some("OS$"));
+        Ok(())
+    }
+
+    /// A `false` string is honoured too, and an unparsable string is a hard
+    /// error rather than being silently coerced.
+    #[test]
+    fn export_supported_string_false_and_garbage() -> Result<(), String> {
+        let false_body = parse_llsd_xml(concat!(
+            "<llsd><map><key>OpenSimExtras</key><map>",
+            "<key>ExportSupported</key><string>False</string></map></map></llsd>"
+        ))
+        .map_err(|error| format!("{error:?}"))?;
+        let features =
+            parse_simulator_features(&false_body).map_err(|error| format!("{error:?}"))?;
+        let extras = features.open_sim_extras.ok_or("expected OpenSimExtras")?;
+        assert_eq!(extras.export_supported, Some(false));
+
+        let garbage_body = parse_llsd_xml(concat!(
+            "<llsd><map><key>OpenSimExtras</key><map>",
+            "<key>ExportSupported</key><string>maybe</string></map></map></llsd>"
+        ))
+        .map_err(|error| format!("{error:?}"))?;
+        match parse_simulator_features(&garbage_body) {
+            Err(_) => {}
+            Ok(_) => return Err("an unparsable ExportSupported string must be rejected".to_owned()),
+        }
         Ok(())
     }
 }

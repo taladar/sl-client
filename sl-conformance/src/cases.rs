@@ -60,6 +60,7 @@ pub mod script_permissions;
 pub mod script_running;
 pub mod script_upload;
 pub mod session_mark_read;
+pub mod simulator_features;
 pub mod task_inventory;
 pub mod throttle_set;
 pub mod typing_indicator;
