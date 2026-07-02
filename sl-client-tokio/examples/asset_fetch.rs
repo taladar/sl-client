@@ -18,8 +18,8 @@
 use std::time::Duration;
 
 use sl_client_tokio::{
-    AssetKey, AssetType, Client, Command, DisconnectReason, Error, Event, LoginParams,
-    LoginRequest, TextureKey, Throttle, Uuid,
+    AssetKey, AssetType, Client, Command, DiscardLevel, DisconnectReason, Error, Event,
+    LoginParams, LoginRequest, TextureKey, Throttle, Uuid,
 };
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -105,7 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 command_tx
                     .send(Command::FetchTexture {
                         texture_id,
-                        discard_level: 0,
+                        discard_level: DiscardLevel::FULL,
                     })
                     .await
                     .ok();
@@ -114,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 command_tx
                     .send(Command::FetchTexture {
                         texture_id,
-                        discard_level: 3,
+                        discard_level: DiscardLevel::from_clamped(3),
                     })
                     .await
                     .ok();

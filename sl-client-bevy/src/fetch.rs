@@ -6,7 +6,8 @@ use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use sl_proto::Event as SessionEvent;
 use sl_proto::{
-    Asset, AssetType, DisconnectReason, ImageCodec, Texture, TextureKey, TransferStatus, Uuid, j2c,
+    Asset, AssetType, DiscardLevel, DisconnectReason, ImageCodec, Texture, TextureKey,
+    TransferStatus, Uuid, j2c,
 };
 
 /// GETs a texture from the `GetTexture` capability and forwards a
@@ -16,7 +17,7 @@ use sl_proto::{
 pub(crate) fn run_texture_fetch(
     cap_url: &str,
     texture_id: TextureKey,
-    discard_level: u8,
+    discard_level: DiscardLevel,
     asset_tx: &Sender<SessionEvent>,
 ) {
     let url = format!("{cap_url}/?texture_id={texture_id}");
@@ -36,15 +37,15 @@ pub(crate) fn run_texture_fetch(
 /// the J2C [`j2c::Header`], from which the prefix length is computed, then a
 /// second `Range` request fetches exactly that prefix when the probe did not
 /// already cover it. Returns `None` on a 404 / network failure.
-pub(crate) fn fetch_texture_lod(url: &str, discard_level: u8) -> Option<Vec<u8>> {
-    if discard_level == 0 {
+pub(crate) fn fetch_texture_lod(url: &str, discard_level: DiscardLevel) -> Option<Vec<u8>> {
+    if discard_level.is_full() {
         return blocking_get_bytes(url, None);
     }
     let probe = blocking_get_bytes(url, Some(j2c::FIRST_PACKET_SIZE))?;
     let Some(header) = j2c::parse_header(&probe) else {
         return Some(probe);
     };
-    let target = header.discard_data_size(discard_level);
+    let target = discard_level.data_size(&header);
     if probe.len() >= target {
         return Some(probe.get(..target).unwrap_or(&probe).to_vec());
     }

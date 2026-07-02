@@ -3,7 +3,7 @@
 
 use std::time::Instant;
 
-use sl_client_tokio::{Command, Event, Throttle};
+use sl_client_tokio::{Command, DiscardLevel, Event, Throttle};
 
 use crate::context::TestContext;
 use crate::grid::Grid;
@@ -41,7 +41,7 @@ impl GridTest for AssetDecode {
             session
                 .send(Command::FetchTexture {
                     texture_id,
-                    discard_level: 0,
+                    discard_level: DiscardLevel::FULL,
                 })
                 .await?;
             let (codec, bytes) = session

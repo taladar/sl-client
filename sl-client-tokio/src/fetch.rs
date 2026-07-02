@@ -2,7 +2,8 @@
 
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
-    Asset, AssetType, Event, ImageCodec, Texture, TextureKey, TransferStatus, Uuid, j2c,
+    Asset, AssetType, DiscardLevel, Event, ImageCodec, Texture, TextureKey, TransferStatus, Uuid,
+    j2c,
 };
 use tokio::sync::mpsc;
 
@@ -20,7 +21,7 @@ use tokio::sync::mpsc;
 pub(crate) async fn fetch_texture_http(
     cap_url: String,
     texture_id: TextureKey,
-    discard_level: u8,
+    discard_level: DiscardLevel,
     http: ReqwestClient,
     events: mpsc::Sender<Event>,
 ) {
@@ -42,10 +43,10 @@ pub(crate) async fn fetch_texture_http(
 pub(crate) async fn fetch_texture_bytes(
     http: &ReqwestClient,
     url: &str,
-    discard_level: u8,
+    discard_level: DiscardLevel,
 ) -> Option<Vec<u8>> {
     // Full resolution: one plain GET of the entire codestream.
-    if discard_level == 0 {
+    if discard_level.is_full() {
         return http_get_prefix(http, url, None).await;
     }
     // Probe the header with a small Range request, then size the LOD prefix.
@@ -54,7 +55,7 @@ pub(crate) async fn fetch_texture_bytes(
         // Not a recognisable J2C codestream: return whatever the probe yielded.
         return Some(probe);
     };
-    let target = header.discard_data_size(discard_level);
+    let target = discard_level.data_size(&header);
     if probe.len() >= target {
         // The probe already covers the prefix (a coarse LOD, or a server that
         // ignored Range and sent the whole image).

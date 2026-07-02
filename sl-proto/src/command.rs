@@ -4,6 +4,7 @@
 //! lives here so the two stay in lock-step rather than maintaining parallel
 //! copies.
 
+use crate::j2c::DiscardLevel;
 use crate::scoped_id::{ScopedObjectId, ScopedParcelId};
 use crate::{
     AbuseReport, AgentKey, AgentPreferences, AnimationKey, AnyMessage, AssetKey, AssetType,
@@ -1595,8 +1596,9 @@ pub enum Command {
     FetchTexture {
         /// The texture's asset id.
         texture_id: TextureKey,
-        /// The level of detail (0 = full resolution; higher = coarser).
-        discard_level: u8,
+        /// The level of detail ([`DiscardLevel::FULL`] = full resolution; higher
+        /// = coarser).
+        discard_level: DiscardLevel,
     },
     /// Fetch a mesh asset over the HTTP `GetMesh2`/`GetMesh` capability; the data
     /// arrives as [`Event::AssetReceived`](crate::Event::AssetReceived). An optional `byte_range` (inclusive

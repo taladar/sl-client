@@ -25,6 +25,7 @@ use sl_proto::ChatSessionKind;
 use sl_proto::CircuitId;
 use sl_proto::ClassifiedKey;
 use sl_proto::Direction;
+use sl_proto::DiscardLevel;
 use sl_proto::Distance;
 use sl_proto::EventId;
 use sl_proto::ExperienceKey;
@@ -4430,7 +4431,13 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::FetchTexture {
                     texture_id: TextureKey::from(args.req_uuid(ctx, "texture_id", 0)?),
-                    discard_level: args.parse_or(ctx, "discard_level", 1, "u8", 0)?,
+                    discard_level: DiscardLevel::from_clamped(args.parse_or(
+                        ctx,
+                        "discard_level",
+                        1,
+                        "u8",
+                        0,
+                    )?),
                 })
             },
         },

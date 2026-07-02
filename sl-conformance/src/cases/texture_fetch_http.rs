@@ -11,7 +11,7 @@
 
 use std::time::Instant;
 
-use sl_client_tokio::{Command, Event, ImageCodec, Throttle, j2c};
+use sl_client_tokio::{Command, DiscardLevel, Event, ImageCodec, Throttle, j2c};
 
 use crate::context::TestContext;
 use crate::grid::Grid;
@@ -21,7 +21,7 @@ use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, check, fixtures};
 /// A coarse discard level to force the LOD-prefix / HTTP `Range` path. Level 3
 /// halves each dimension three times, so on any non-trivial texture the prefix
 /// is well below the full codestream.
-const COARSE_DISCARD_LEVEL: u8 = 3;
+const COARSE_DISCARD_LEVEL: DiscardLevel = DiscardLevel::from_clamped(3);
 
 /// Fetches the default plywood texture at full and coarse LOD over HTTP,
 /// decoding the J2C header and comparing prefix sizes.
@@ -58,7 +58,7 @@ impl GridTest for TextureFetchHttp {
             session
                 .send(Command::FetchTexture {
                     texture_id,
-                    discard_level: 0,
+                    discard_level: DiscardLevel::FULL,
                 })
                 .await?;
             let (full_codec, full_len, header) = session

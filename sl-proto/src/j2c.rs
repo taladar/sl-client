@@ -74,6 +74,117 @@ impl Header {
     }
 }
 
+/// The highest meaningful discard (LOD) level in the Second Life protocol,
+/// mirroring the viewer's `MAX_DISCARD_LEVEL`. Each level halves both image
+/// dimensions, so level 5 is a 1/32-scale thumbnail of the full image.
+pub const MAX_DISCARD_LEVEL: u8 = 5;
+
+/// A texture level-of-detail: a discard level in `0..=`[`MAX_DISCARD_LEVEL`],
+/// where `0` is full resolution and larger values are coarser (each step halves
+/// both dimensions). The newtype makes out-of-range levels unrepresentable and
+/// gives the LOD its own idiomatic operations.
+///
+/// Ordering follows resolution: a *smaller* discard level is *finer* (higher
+/// resolution), so `DiscardLevel::FULL` is the minimum and
+/// [`DiscardLevel::MAX`] the maximum. "At least as fine as" is therefore `<=`.
+///
+/// This types the HTTP `GetTexture` fetch/decode LOD path. It intentionally does
+/// **not** replace the signed discard field of the UDP `RequestImage` message
+/// (`Command::RequestTexture`), whose `-1` sentinel cancels an in-flight request
+/// and so needs its own signed representation.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct DiscardLevel(u8);
+
+impl DiscardLevel {
+    /// Full resolution (discard level `0`) — the finest, largest image.
+    pub const FULL: Self = Self(0);
+
+    /// The coarsest supported level ([`MAX_DISCARD_LEVEL`]).
+    pub const MAX: Self = Self(MAX_DISCARD_LEVEL);
+
+    /// Builds a level, returning `None` if it exceeds [`MAX_DISCARD_LEVEL`].
+    #[must_use]
+    pub const fn new(level: u8) -> Option<Self> {
+        if level > MAX_DISCARD_LEVEL {
+            None
+        } else {
+            Some(Self(level))
+        }
+    }
+
+    /// Builds a level, clamping anything above [`MAX_DISCARD_LEVEL`] to
+    /// [`DiscardLevel::MAX`].
+    #[must_use]
+    pub const fn from_clamped(level: u8) -> Self {
+        if level > MAX_DISCARD_LEVEL {
+            Self::MAX
+        } else {
+            Self(level)
+        }
+    }
+
+    /// The raw discard level (`0..=`[`MAX_DISCARD_LEVEL`]).
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+
+    /// The OpenJPEG resolution-reduction factor for decoding directly to this
+    /// LOD: the number of resolution levels to discard, i.e. the level itself.
+    #[must_use]
+    pub fn reduce_factor(self) -> u32 {
+        u32::from(self.0)
+    }
+
+    /// The next finer (higher-resolution) level, saturating at
+    /// [`DiscardLevel::FULL`].
+    #[must_use]
+    pub const fn finer(self) -> Self {
+        Self(self.0.saturating_sub(1))
+    }
+
+    /// The next coarser (lower-resolution) level, saturating at
+    /// [`DiscardLevel::MAX`].
+    #[must_use]
+    pub const fn coarser(self) -> Self {
+        let next = self.0.saturating_add(1);
+        if next > MAX_DISCARD_LEVEL {
+            Self::MAX
+        } else {
+            Self(next)
+        }
+    }
+
+    /// Whether this is full resolution (discard level `0`).
+    #[must_use]
+    pub const fn is_full(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Whether this level is at least as fine (high-resolution) as `other`,
+    /// i.e. its discard level is less than or equal to `other`'s.
+    #[must_use]
+    pub const fn is_at_least_as_fine_as(self, other: Self) -> bool {
+        self.0 <= other.0
+    }
+
+    /// The estimated leading-byte count of `header`'s codestream needed to
+    /// decode the image at this level (delegates to [`Header::discard_data_size`]).
+    #[must_use]
+    pub fn data_size(self, header: &Header) -> usize {
+        header.discard_data_size(self.0)
+    }
+
+    /// Clamps to a level no coarser than `header` supports — i.e. no greater
+    /// than the image's [`Header::max_discard_level`] — since coarser levels add
+    /// no distinct resolution for that image.
+    #[must_use]
+    pub fn clamp_to_image(self, header: &Header) -> Self {
+        let max = header.max_discard_level();
+        if self.0 > max { Self(max) } else { self }
+    }
+}
+
 /// Reads a big-endian `u16` at `offset` in `data`, or `None` if out of bounds.
 /// (Assembled by explicit shifts rather than `from_be_bytes` to satisfy the
 /// crate's endian-byte-method lint.)
@@ -179,7 +290,10 @@ pub fn truncate_to_discard(data: &[u8], discard_level: u8) -> &[u8] {
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use super::{FIRST_PACKET_SIZE, discard_data_size, parse_header, truncate_to_discard};
+    use super::{
+        DiscardLevel, FIRST_PACKET_SIZE, MAX_DISCARD_LEVEL, discard_data_size, parse_header,
+        truncate_to_discard,
+    };
 
     /// Appends `value` to `data` as big-endian bytes of `width` bytes (avoiding
     /// the endian-byte-method lint), e.g. `width = 4` for a `u32` field.
@@ -249,6 +363,51 @@ mod tests {
         assert_eq!(discard_data_size(512, 512, 3, 2), 6_144);
         // A tiny image floors at FIRST_PACKET_SIZE.
         assert_eq!(discard_data_size(8, 8, 3, 0), FIRST_PACKET_SIZE);
+    }
+
+    #[test]
+    fn discard_level_construction_validates_and_clamps() {
+        assert_eq!(DiscardLevel::new(0), Some(DiscardLevel::FULL));
+        assert_eq!(
+            DiscardLevel::new(MAX_DISCARD_LEVEL),
+            Some(DiscardLevel::MAX)
+        );
+        assert_eq!(DiscardLevel::new(MAX_DISCARD_LEVEL + 1), None);
+        assert_eq!(DiscardLevel::from_clamped(200), DiscardLevel::MAX);
+        assert_eq!(DiscardLevel::from_clamped(2).get(), 2);
+    }
+
+    #[test]
+    fn discard_level_finer_coarser_saturate() {
+        assert_eq!(DiscardLevel::FULL.finer(), DiscardLevel::FULL);
+        assert_eq!(DiscardLevel::MAX.coarser(), DiscardLevel::MAX);
+        assert_eq!(DiscardLevel::FULL.coarser().get(), 1);
+        assert_eq!(DiscardLevel::MAX.finer().get(), MAX_DISCARD_LEVEL - 1);
+        assert!(DiscardLevel::FULL.is_full());
+        assert!(!DiscardLevel::MAX.is_full());
+    }
+
+    #[test]
+    fn discard_level_ordering_is_finer_first() {
+        // Smaller discard level = finer = "less than".
+        assert!(DiscardLevel::FULL < DiscardLevel::MAX);
+        assert!(DiscardLevel::FULL.is_at_least_as_fine_as(DiscardLevel::MAX));
+        assert!(!DiscardLevel::MAX.is_at_least_as_fine_as(DiscardLevel::FULL));
+        let two = DiscardLevel::from_clamped(2);
+        assert!(two.is_at_least_as_fine_as(two));
+    }
+
+    #[test]
+    fn discard_level_clamp_to_image_respects_header() -> Result<(), TestError> {
+        let header = parse_header(&synth_header(512, 512, 3, 3)).ok_or("header")?;
+        // The image supports at most discard 3; a coarser request is clamped.
+        assert_eq!(DiscardLevel::MAX.clamp_to_image(&header).get(), 3);
+        // A finer request is left untouched.
+        let one = DiscardLevel::from_clamped(1);
+        assert_eq!(one.clamp_to_image(&header), one);
+        // data_size matches the free function at the same level.
+        assert_eq!(one.data_size(&header), discard_data_size(512, 512, 3, 1));
+        Ok(())
     }
 
     #[test]

@@ -1,0 +1,43 @@
+[package]
+name = "sl-texture"
+description = "Decoding texture fetch API and cache (LOD-aware store + Firestorm-compatible on-disk cache) for Second Life / OpenSim clients"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "texture", "jpeg2000", "cache"]
+categories = ["network-programming", "game-development", "caching"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[features]
+default = ["decode"]
+# Pulls in the OpenJPEG C dependency (via `jpeg2k`) for real pixel decoding.
+decode = ["dep:jpeg2k"]
+
+[dependencies]
+arc-swap = { version = "1.9.2" }
+async-lock = { version = "3.4.2" }
+async-trait = { version = "0.1.89" }
+bytes = { version = "1.12.0" }
+dashmap = { version = "6.2.1" }
+event-listener = { version = "5.4.1" }
+jpeg2k = { version = "0.10.1", optional = true }
+keyed_priority_queue = { version = "0.4.2" }
+num_cpus = { version = "1.17.0" }
+parking_lot = { version = "0.12.5" }
+rayon = { version = "1.12.0" }
+sl-proto = { version = "0.1.0", path = "../sl-proto" }
+thiserror = { version = "2.0.18" }
+tracing = { version = "0.1.44" }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+[lints]
+workspace = true
