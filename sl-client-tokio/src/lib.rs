@@ -56,7 +56,7 @@ pub use sl_proto::{
     ClientDirectories, ClockStyle, Command, ControlFlags, ConversationKind, CreateGroupParams,
     DeRezDestination, DetachOrder, Diagnostic, Direction, DisconnectReason, DisplayName,
     DisplayNameUpdate, Distance, EconomyData, EnvironmentSettings, EstateAccessDelta,
-    EstateAccessKind, EstateInfo, Event, ExperienceInfo, ExperiencePermission,
+    EstateAccessKind, EstateCovenant, EstateInfo, Event, ExperienceInfo, ExperiencePermission,
     ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, FolderInfo, FolderState,
     FolderType, Friend, FriendRights, GlobalCoordinates, GltfMaterialOverride, GridCoordinates,
     GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey,

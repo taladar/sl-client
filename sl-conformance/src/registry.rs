@@ -120,6 +120,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::simulator_features::SimulatorFeaturesCase),
         Box::new(crate::cases::environment::Environment),
         Box::new(crate::cases::open_region_info::OpenRegionInfoCase),
+        Box::new(crate::cases::estate_info::EstateInfoCase),
     ]
 }
 
