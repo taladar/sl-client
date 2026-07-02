@@ -111,6 +111,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::script_permissions::ScriptPermissionsCase),
         Box::new(crate::cases::script_running::ScriptRunning),
         Box::new(crate::cases::script_upload::ScriptUpload),
+        Box::new(crate::cases::parcel_properties::ParcelProperties),
     ]
 }
 
