@@ -50,14 +50,18 @@ const LOGOUT_GRACE: Duration = Duration::from_secs(15);
 pub struct Session {
     /// The agent's own id, available after login.
     agent_id: Option<AgentKey>,
-    /// The handle of the region the agent logged in to, available after login.
-    /// Seeded from the login response; a case pairs it with a region-local
-    /// position to issue an intra-region [`Command::Teleport`].
+    /// The handle of the region the agent is currently in. Seeded from the login
+    /// response and kept current as [`Session::wait_for`] observes region
+    /// handovers ([`Event::RegionChanged`] from a teleport or border crossing), so
+    /// a case pairs it with a region-local position to issue an intra-region
+    /// [`Command::Teleport`] against wherever the agent now is.
     region_handle: Option<RegionHandle>,
-    /// The identity of the root circuit the login established. A case pairs it
-    /// with a region-local parcel/object id to build the `ScopedParcelId` /
-    /// `ScopedObjectId` the scoped parcel/object commands take (e.g. the dwell
-    /// request in `parcel-info-dwell`).
+    /// The identity of the current root circuit. Seeded from the login response
+    /// and updated on each region handover ([`Event::RegionChanged`]) as
+    /// [`Session::wait_for`] observes it, so a case pairs it with a region-local
+    /// parcel/object id to build the `ScopedParcelId` / `ScopedObjectId` the
+    /// scoped parcel/object commands take (e.g. the dwell request in
+    /// `parcel-info-dwell`) for the region the agent is currently in.
     circuit_id: Option<CircuitId>,
     /// Inbound events from the run loop, after a forwarder has drained them off
     /// the run loop's bounded channel into this unbounded one. A case typically
@@ -118,16 +122,20 @@ impl Session {
         self.agent_id
     }
 
-    /// The handle of the region the agent logged in to, if login reported one.
-    /// A case needs it to target an intra-region [`Command::Teleport`].
+    /// The handle of the region the agent is currently in, if login reported one.
+    /// Kept current across region handovers (teleport / crossing) as the case
+    /// drives [`Session::wait_for`], so a case can target an intra-region
+    /// [`Command::Teleport`] against the agent's present region.
     #[must_use]
     pub const fn region_handle(&self) -> Option<RegionHandle> {
         self.region_handle
     }
 
-    /// The identity of the root circuit the login established, if known. A case
-    /// pairs it with a region-local parcel/object id to build the
-    /// `ScopedParcelId` a scoped parcel command (e.g. the dwell request) takes.
+    /// The identity of the current root circuit, if known. Kept current across
+    /// region handovers as the case drives [`Session::wait_for`], so a case pairs
+    /// it with a region-local parcel/object id to build the `ScopedParcelId` a
+    /// scoped parcel command (e.g. the dwell request) takes for the agent's
+    /// present region.
     #[must_use]
     pub const fn circuit_id(&self) -> Option<CircuitId> {
         self.circuit_id
@@ -175,7 +183,11 @@ impl Session {
     where
         P: FnMut(&Event) -> Option<T>,
     {
+        // Split the disjoint field borrows so the drain loop can keep the cached
+        // region identity current while it reads events.
         let events = &mut self.events;
+        let region_handle = &mut self.region_handle;
+        let circuit_id = &mut self.circuit_id;
         let wait = async {
             loop {
                 match events.recv().await {
@@ -183,6 +195,21 @@ impl Session {
                         return Err(TestFailure::Disconnected("event channel closed".to_owned()));
                     }
                     Some(event) => {
+                        // A region handover (teleport or border crossing) moves the
+                        // agent to a new region on a new root circuit. Track it as
+                        // events flow so `region_handle()` / `circuit_id()` reflect
+                        // where the agent is *now*, not merely where it logged in —
+                        // updated before the predicate runs, so the very event that
+                        // resolves the wait already sees the new region.
+                        if let Event::RegionChanged {
+                            region_handle: handle,
+                            circuit,
+                            ..
+                        } = &event
+                        {
+                            *region_handle = Some(*handle);
+                            *circuit_id = Some(*circuit);
+                        }
                         if let Some(value) = predicate(&event) {
                             return Ok(value);
                         }
