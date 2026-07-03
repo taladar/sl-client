@@ -1578,17 +1578,6 @@ pub enum Command {
         /// The download priority (larger is fetched sooner).
         priority: f32,
     },
-    /// Request a generic asset over the UDP transfer path (`TransferRequest`);
-    /// the reassembled asset arrives as [`Event::AssetReceived`](crate::Event::AssetReceived) (or
-    /// [`Event::AssetTransferFailed`](crate::Event::AssetTransferFailed)).
-    RequestAsset {
-        /// The asset's id.
-        asset_id: AssetKey,
-        /// The asset's class.
-        asset_type: AssetType,
-        /// The transfer priority.
-        priority: f32,
-    },
     /// Fetch a texture over the HTTP `GetTexture` capability; the image arrives
     /// as [`Event::TextureReceived`](crate::Event::TextureReceived) (or [`Event::TextureNotFound`](crate::Event::TextureNotFound)). When
     /// `discard_level` is non-zero the codestream is truncated to that

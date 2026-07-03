@@ -1746,7 +1746,15 @@ Edits need the estate-owner avatar.
 - [x] `mesh-fetch-http` — HTTP CAPS mesh fetch + decode. `1av`. (Green on both:
   aditi finds a worn/in-view mesh; OpenSim green after provisioning a mesh prim
   in the Default Region via `slclient-mesh.oar`.)
-- [ ] `asset-transfer-udp` — legacy UDP asset transfer fallback. `1av`.
+- [x] `asset-fetch-http` — HTTP `ViewerAsset` fetch through the caching
+  `AssetStore` (`sl-asset` crate). `1av`. (Replaces the planned
+  `asset-transfer-udp`: the legacy UDP `TransferRequest` path was **dropped** —
+  modern SL only used it as a fallback when the `ViewerAsset` cap is absent, and
+  SL always offers it, so the UDP client path was removed in favour of the
+  HTTP `ViewerAsset` cap, which both grids expose. Green on OpenSim
+  (in-memory + on-disk cache proven); **partial** on aditi — its `ViewerAsset`
+  service persistently answers `503 Service Unavailable`, handled as a soft
+  failure.)
 - [ ] `asset-upload` — upload via UDP and via CAPS
   `NewFileAgentInventory`. `1av`.
 - [ ] `baked-texture-upload` — upload a baked texture (CAPS). `1av`.

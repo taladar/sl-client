@@ -3193,6 +3193,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
+name = "sl-asset"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "async-lock",
+ "async-trait",
+ "bytes",
+ "dashmap",
+ "event-listener",
+ "fs-err",
+ "parking_lot",
+ "pollster",
+ "pretty_assertions",
+ "sl-asset-sched",
+ "sl-proto",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "sl-asset-sched"
 version = "0.1.0"
 dependencies = [
@@ -3223,6 +3244,7 @@ dependencies = [
  "fs-err",
  "pretty_assertions",
  "reqwest",
+ "sl-asset",
  "sl-mesh",
  "sl-proto",
  "sl-texture",
@@ -3247,6 +3269,7 @@ dependencies = [
  "fs-err",
  "pretty_assertions",
  "reqwest",
+ "sl-asset",
  "sl-mesh",
  "sl-proto",
  "sl-texture",

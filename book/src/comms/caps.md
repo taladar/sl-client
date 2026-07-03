@@ -48,7 +48,8 @@ region yields a new seed URL and therefore a fresh capability map.
 
 There are dozens. A non-exhaustive sense of the range:
 
-- **Bulk asset access** — `GetTexture`, `GetMesh2`, `GetAsset`.
+- **Bulk asset access** — `GetTexture`, `GetMesh2`, `ViewerAsset` (generic
+  assets by class, e.g. `?sound_id=`/`?bodypart_id=`).
 - **Inventory** — `FetchInventoryDescendents2`, `InventoryAPIv3`,
   `CreateInventoryCategory`. See [Inventory](../content/inventory.md).
 - **Appearance** — `UpdateAvatarAppearance`, `UploadBakedTexture`. See

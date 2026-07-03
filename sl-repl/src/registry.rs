@@ -4415,17 +4415,6 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
-            name: "request_asset",
-            usage: "<asset_id> <asset_type-code> [priority=1.0]",
-            build: |args, ctx| {
-                Ok(Command::RequestAsset {
-                    asset_id: AssetKey::from(args.req_uuid(ctx, "asset_id", 0)?),
-                    asset_type: enum_arg(args, ctx, "asset_type", 1, parse_asset_type)?,
-                    priority: args.parse_or(ctx, "priority", 2, "f32", 1.0)?,
-                })
-            },
-        },
-        CommandSpec {
             name: "fetch_texture",
             usage: "<texture_id> [discard_level=0]",
             build: |args, ctx| {
@@ -5830,22 +5819,22 @@ mod tests {
         // `asset_type` was a code-only enum; it now also accepts its name
         // (underscores optional), with the numeric code still working.
         assert!(matches!(
-            build(&format!("request_asset {ONE} texture")),
-            Ok(Command::RequestAsset {
+            build(&format!("fetch_asset {ONE} texture")),
+            Ok(Command::FetchAsset {
                 asset_type: AssetType::Texture,
                 ..
             })
         ));
         assert!(matches!(
-            build(&format!("request_asset {ONE} lsl_text")),
-            Ok(Command::RequestAsset {
+            build(&format!("fetch_asset {ONE} lsl_text")),
+            Ok(Command::FetchAsset {
                 asset_type: AssetType::ScriptText,
                 ..
             })
         ));
         assert!(matches!(
-            build(&format!("request_asset {ONE} 0")),
-            Ok(Command::RequestAsset {
+            build(&format!("fetch_asset {ONE} 0")),
+            Ok(Command::FetchAsset {
                 asset_type: AssetType::Texture,
                 ..
             })

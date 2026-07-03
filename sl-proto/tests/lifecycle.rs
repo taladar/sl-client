@@ -40,7 +40,7 @@ mod test {
         SculptOrMeshKey, Session, SessionMessage, SetDisplayNameReply, SimStatId,
         SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags, StartLocationSlot,
         TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea, TerrainLayerType,
-        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, TransferStatus, Transmit,
+        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, Transmit,
         UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
         WaterSettings, WearableType, avatar_texture, chat_session_request_body,
         decode_texture_entry, group_powers, pcode,
@@ -156,13 +156,12 @@ mod test {
         TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock, TeleportFailed,
         TeleportFailedAlertInfoBlock, TeleportFailedInfoBlock, TeleportFinish,
         TeleportFinishInfoBlock, TerminateFriendship, TerminateFriendshipAgentDataBlock,
-        TerminateFriendshipExBlockBlock, TransferInfo, TransferInfoTransferInfoBlock,
-        TransferPacket, TransferPacketTransferDataBlock, UUIDNameReply,
-        UUIDNameReplyUUIDNameBlockBlock, UpdateCreateInventoryItem,
-        UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
-        UseCachedMuteList, UseCachedMuteListAgentDataBlock, UserInfoReply,
-        UserInfoReplyAgentDataBlock, UserInfoReplyUserDataBlock,
-        ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
+        TerminateFriendshipExBlockBlock, UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock,
+        UpdateCreateInventoryItem, UpdateCreateInventoryItemAgentDataBlock,
+        UpdateCreateInventoryItemInventoryDataBlock, UseCachedMuteList,
+        UseCachedMuteListAgentDataBlock, UserInfoReply, UserInfoReplyAgentDataBlock,
+        UserInfoReplyUserDataBlock, ViewerEffect as ViewerEffectMessage,
+        ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
     };
     use sl_wire::{
         AnyMessage, CircuitCode, HomeLocation, Llsd, LoginFailure, LoginRequest, LoginResponse,
@@ -5575,135 +5574,6 @@ mod test {
                 |e| matches!(e, Event::TextureNotFound(id) if *id == TextureKey::from(texture))
             )
         );
-        Ok(())
-    }
-
-    #[test]
-    fn request_asset_reassembles_transfer_packets() -> Result<(), TestError> {
-        let now = Instant::now();
-        let mut session = established(now)?;
-        drain(&mut session)?;
-
-        let sound = uuid::Uuid::from_u128(0x5005);
-        session.request_asset(AssetKey::from(sound), AssetType::Sound, 1.0, now)?;
-
-        // The client sends a TransferRequest on the asset channel/source with a
-        // params blob of the asset UUID followed by its little-endian type code.
-        let sent = drain(&mut session)?;
-        let request = sent
-            .iter()
-            .find_map(|m| match m {
-                AnyMessage::TransferRequest(r) => Some(r),
-                _ => None,
-            })
-            .ok_or("expected a TransferRequest")?;
-        let transfer_id = request.transfer_info.transfer_id;
-        assert_eq!(request.transfer_info.channel_type, 2);
-        assert_eq!(request.transfer_info.source_type, 2);
-        let mut expected_params = sound.as_bytes().to_vec();
-        // AssetType::Sound == 1, little-endian i32.
-        expected_params.extend_from_slice(&[1, 0, 0, 0]);
-        assert_eq!(request.transfer_info.params, expected_params);
-
-        // The sim acknowledges with a TransferInfo (OK, size 6), then two
-        // TransferPackets; the second carries LLTS_DONE (1).
-        let info = AnyMessage::TransferInfo(TransferInfo {
-            transfer_info: TransferInfoTransferInfoBlock {
-                transfer_id,
-                channel_type: 2,
-                target_type: 0,
-                status: 0, // LLTS_OK
-                size: 6,
-                params: Vec::new(),
-            },
-        });
-        session.handle_datagram(sim_addr(), &server_message(&info, 9, true)?, now)?;
-        // A success TransferInfo surfaces a transfer-started event carrying the
-        // declared total size; the asset bytes still follow as TransferPackets.
-        let started = drain_events(&mut session)
-            .into_iter()
-            .find_map(|event| match event {
-                Event::AssetTransferStarted {
-                    asset_id,
-                    asset_type,
-                    size,
-                } => Some((asset_id, asset_type, size)),
-                _ => None,
-            })
-            .ok_or("expected an AssetTransferStarted event")?;
-        assert_eq!(started, (sound, AssetType::Sound, 6));
-
-        let packet0 = AnyMessage::TransferPacket(TransferPacket {
-            transfer_data: TransferPacketTransferDataBlock {
-                transfer_id,
-                channel_type: 2,
-                packet: 0,
-                status: 0, // LLTS_OK (more to come)
-                data: vec![9, 8, 7],
-            },
-        });
-        session.handle_datagram(sim_addr(), &server_message(&packet0, 10, true)?, now)?;
-        assert!(drain_events(&mut session).is_empty());
-
-        let packet1 = AnyMessage::TransferPacket(TransferPacket {
-            transfer_data: TransferPacketTransferDataBlock {
-                transfer_id,
-                channel_type: 2,
-                packet: 1,
-                status: 1, // LLTS_DONE
-                data: vec![6, 5, 4],
-            },
-        });
-        session.handle_datagram(sim_addr(), &server_message(&packet1, 11, true)?, now)?;
-
-        let asset = drain_events(&mut session)
-            .into_iter()
-            .find_map(|event| match event {
-                Event::AssetReceived(asset) => Some(asset),
-                _ => None,
-            })
-            .ok_or("expected an AssetReceived event")?;
-        assert_eq!(asset.id, sound);
-        assert_eq!(asset.asset_type, AssetType::Sound);
-        assert_eq!(asset.data, vec![9, 8, 7, 6, 5, 4]);
-        Ok(())
-    }
-
-    #[test]
-    fn transfer_info_failure_surfaces_asset_transfer_failed() -> Result<(), TestError> {
-        let now = Instant::now();
-        let mut session = established(now)?;
-        drain(&mut session)?;
-
-        let missing = uuid::Uuid::from_u128(0x404);
-        session.request_asset(AssetKey::from(missing), AssetType::Animation, 1.0, now)?;
-        let sent = drain(&mut session)?;
-        let transfer_id = sent
-            .iter()
-            .find_map(|m| match m {
-                AnyMessage::TransferRequest(r) => Some(r.transfer_info.transfer_id),
-                _ => None,
-            })
-            .ok_or("expected a TransferRequest")?;
-
-        // LLTS_UNKNOWN_SOURCE (-2): the asset does not exist.
-        let info = AnyMessage::TransferInfo(TransferInfo {
-            transfer_info: TransferInfoTransferInfoBlock {
-                transfer_id,
-                channel_type: 2,
-                target_type: 0,
-                status: -2,
-                size: 0,
-                params: Vec::new(),
-            },
-        });
-        session.handle_datagram(sim_addr(), &server_message(&info, 9, true)?, now)?;
-
-        assert!(drain_events(&mut session).iter().any(|e| matches!(
-            e,
-            Event::AssetTransferFailed { asset_id, status, .. }
-            if *asset_id == missing && *status == TransferStatus::UnknownSource
-        )));
         Ok(())
     }
 

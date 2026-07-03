@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "sl-asset",
     "sl-asset-sched",
     "sl-client-bevy",
     "sl-client-tokio",

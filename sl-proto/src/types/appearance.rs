@@ -346,8 +346,8 @@ pub struct AvatarAppearance {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlayingAnimation {
     /// The animation asset id (a built-in animation UUID or an uploaded
-    /// animation asset; fetch custom ones with
-    /// [`Session::request_asset`](crate::Session::request_asset)).
+    /// animation asset; fetch custom ones over the HTTP `ViewerAsset` capability,
+    /// a runtime [`FetchAsset`](crate::Command::FetchAsset) command).
     pub anim_id: Uuid,
     /// The simulator's per-avatar animation sequence number. It increments each
     /// time an animation (re)starts, so a viewer can tell a fresh start from an

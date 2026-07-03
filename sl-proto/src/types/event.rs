@@ -1286,32 +1286,13 @@ pub enum Event {
     /// (`ImageNotInDatabase`), or its HTTP fetch returned 404. Carries the
     /// texture's UUID.
     TextureNotFound(TextureKey),
-    /// A requested generic asset finished downloading: the reassembled
-    /// [`Asset`] from the UDP transfer path
-    /// ([`Session::request_asset`](crate::Session::request_asset)) or the HTTP
-    /// `GetAsset`/`GetMesh` capability.
+    /// A requested generic asset finished downloading: the [`Asset`] fetched
+    /// over the HTTP `ViewerAsset` / `GetMesh` capability (a runtime `FetchAsset`
+    /// / `FetchMesh` command).
     AssetReceived(Box<Asset>),
-    /// A generic asset [transfer](crate::Session::request_asset) has begun: the
-    /// simulator answered the `TransferRequest` with a success `TransferInfo`,
-    /// so the asset exists and its bytes will follow as `TransferPacket`s
-    /// (surfaced together as a single [`AssetReceived`](Event::AssetReceived)).
-    /// Carries the declared total asset [`size`](Event::AssetTransferStarted::size)
-    /// in bytes — useful for a progress indicator or buffer preallocation before
-    /// the packets arrive. A *non*-success `TransferInfo` instead surfaces
-    /// [`AssetTransferFailed`](Event::AssetTransferFailed) and no data follows.
-    AssetTransferStarted {
-        /// The asset UUID that is being transferred.
-        asset_id: Uuid,
-        /// The asset class being transferred.
-        asset_type: AssetType,
-        /// The declared total size of the asset in bytes (the `TransferInfo`
-        /// `Size` field). The simulator can send `0` when it does not know the
-        /// size up front.
-        size: i32,
-    },
-    /// A generic asset [transfer](crate::Session::request_asset) failed: the
-    /// simulator reported a non-success [`TransferStatus`] (e.g. the asset is
-    /// missing or permission was denied), or the HTTP fetch failed.
+    /// A generic asset fetch (a runtime `FetchAsset` / `FetchMesh` command over
+    /// the HTTP `ViewerAsset` / `GetMesh` capability) failed: the asset is
+    /// missing (a `404`) or the HTTP request errored.
     AssetTransferFailed {
         /// The asset UUID that was requested.
         asset_id: Uuid,
@@ -1579,7 +1560,7 @@ pub enum Event {
     /// a sound from a neighbouring region). Unlike [`Event::AttachedSound`] this
     /// sound is not bound to an object: it plays once at `position` and is then
     /// forgotten. Fetch the clip with
-    /// [`Session::request_asset`](crate::Session::request_asset).
+    /// the HTTP `ViewerAsset` capability (a runtime [`FetchAsset`](crate::Command::FetchAsset) command).
     SoundTrigger {
         /// The sound asset to play.
         sound_id: Uuid,
@@ -1604,7 +1585,7 @@ pub enum Event {
     /// follows the object; a later [`Event::AttachedSoundGainChange`] for the
     /// same `object_id` changes its volume, and the object stops the sound by
     /// sending a fresh `AttachedSound` with [`SoundFlags::STOP`]. Fetch the clip
-    /// with [`Session::request_asset`](crate::Session::request_asset).
+    /// with the HTTP `ViewerAsset` capability (a runtime [`FetchAsset`](crate::Command::FetchAsset) command).
     AttachedSound {
         /// The sound asset to play.
         sound_id: Uuid,
@@ -1629,7 +1610,7 @@ pub enum Event {
     /// The simulator asks the viewer to pre-fetch one or more sound assets it is
     /// about to play (`PreloadSound`), so playback is not delayed by the fetch.
     /// A client that wants gap-free audio can fetch each clip up front with
-    /// [`Session::request_asset`](crate::Session::request_asset); a client that
+    /// the HTTP `ViewerAsset` capability (a runtime [`FetchAsset`](crate::Command::FetchAsset) command); a client that
     /// does not care can ignore this event.
     PreloadSound {
         /// The sounds to pre-fetch (each with its owning object and owner).

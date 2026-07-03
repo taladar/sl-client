@@ -8,10 +8,9 @@ use uuid::Uuid;
 // ---------------------------------------------------------------------------
 
 /// The Second Life asset class (`LLAssetType` / `AT_*`), identifying what kind
-/// of asset a UUID names. Used to build a generic asset
-/// [transfer](crate::Session::request_asset) and to pick the
-/// [`GetAsset`](crate::CAP_GET_ASSET) HTTP query parameter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// of asset a UUID names. Used to pick the
+/// [`ViewerAsset`](crate::CAP_VIEWER_ASSET) HTTP fetch query parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum AssetType {
     /// A texture (`AT_TEXTURE`, a JPEG-2000 / `.j2c` image).
@@ -523,8 +522,9 @@ impl ImageCodec {
     }
 }
 
-/// The status of a generic asset [transfer](crate::Session::request_asset)
-/// (`LLTSCode`), reported in a `TransferInfo`/`TransferPacket`.
+/// The status of a generic asset transfer (`LLTSCode`), reported in a
+/// `TransferInfo`/`TransferPacket` on the wire and surfaced (for an HTTP fetch)
+/// in [`Event::AssetTransferFailed`](crate::Event::AssetTransferFailed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TransferStatus {

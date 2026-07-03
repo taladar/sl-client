@@ -27,19 +27,19 @@ use super::conversions::{
     windlight_refresh_from_llsd,
 };
 use super::{
-    AGENT_UPDATE_INTERVAL, AssetTransfer, AssetUpload, CAP_AGENT_EXPERIENCES,
-    CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST,
-    CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT,
-    CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
-    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
-    CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA,
-    CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_MODIFY_MATERIAL_PARAMS,
-    CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, ChatLifecycleView,
-    ChatSession, ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, Circuit,
-    DEFAULT_DRAW_DISTANCE, FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
-    Inventory, InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
+    AGENT_UPDATE_INTERVAL, AssetUpload, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
+    CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY,
+    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY,
+    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
+    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST,
+    CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES,
+    CAP_LIBRARY_API_V3, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, ChatLifecycleView, ChatSession,
+    ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE,
+    FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, Inventory,
+    InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
     MAX_INLINE_ASSET, MessageCursor, PING_INTERVAL, PendingInvite, SIT_TIMEOUT, ScriptGrant,
     ScriptHolder, Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT,
     TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, VoiceChannelInfo, XferDownload,
@@ -49,14 +49,14 @@ use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
 use crate::bookkeeping_ids::{
     GroupRequestId, ImSessionId, InventoryCallbackId, InvoiceId, LureId, PingId, QueryId,
-    TransactionId, TransferId, XferId,
+    TransactionId, XferId,
 };
 use crate::error::Error;
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::terrain;
 use crate::types::EventId;
 use crate::types::{
-    AlertInfo, Asset, AssetType, AttachmentMode, AttachmentPoint, AvatarClassified, AvatarPick,
+    AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarClassified, AvatarPick,
     AvatarPickerResult, Camera, ChatType, Child, ClassifiedCategory, ClassifiedUpdate, ClickAction,
     CoarseLocation, CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
@@ -81,8 +81,8 @@ use crate::types::{
     ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags,
     SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, TaskInventoryKey,
     TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
-    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
+    TextureEntry, Throttle, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
+    ViewerEffectData, ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -201,8 +201,6 @@ impl Session {
             pending_task_inventory: BTreeSet::new(),
             pending_task_inventory_unresolved: VecDeque::new(),
             texture_downloads: BTreeMap::new(),
-            asset_transfers: BTreeMap::new(),
-            next_transfer_id: 1,
             secure_session_id: Uuid::nil(),
             asset_uploads: BTreeMap::new(),
             upload_xfers: BTreeMap::new(),
@@ -2889,65 +2887,6 @@ impl Session {
                 self.texture_downloads.remove(&id);
                 self.events
                     .push_back(Event::TextureNotFound(TextureKey::from(id)));
-            }
-            AnyMessage::TransferInfo(info) => {
-                // The transfer's initial status/size. A non-success status here
-                // (e.g. the asset is missing or denied) means no data follows.
-                let transfer_id = TransferId(info.transfer_info.transfer_id);
-                let status = TransferStatus::from_code(info.transfer_info.status);
-                if matches!(status, TransferStatus::Ok | TransferStatus::Done) {
-                    // Success: the asset exists and its bytes follow as
-                    // `TransferPacket`s. Surface the declared total size so a
-                    // caller can show progress / preallocate before they arrive.
-                    if let Some(transfer) = self.asset_transfers.get(&transfer_id) {
-                        self.events.push_back(Event::AssetTransferStarted {
-                            asset_id: transfer.asset_id,
-                            asset_type: transfer.asset_type,
-                            size: info.transfer_info.size,
-                        });
-                    }
-                } else if let Some(transfer) = self.asset_transfers.remove(&transfer_id) {
-                    self.events.push_back(Event::AssetTransferFailed {
-                        asset_id: transfer.asset_id,
-                        asset_type: transfer.asset_type,
-                        status,
-                    });
-                }
-            }
-            AnyMessage::TransferPacket(packet) => {
-                // A data chunk of a generic asset transfer; the final packet
-                // carries `LLTS_DONE`.
-                let transfer_id = TransferId(packet.transfer_data.transfer_id);
-                let status = TransferStatus::from_code(packet.transfer_data.status);
-                let packet_index = packet.transfer_data.packet;
-                let mut done = false;
-                let mut failed = false;
-                if let Some(transfer) = self.asset_transfers.get_mut(&transfer_id) {
-                    transfer
-                        .chunks
-                        .insert(packet_index, packet.transfer_data.data.clone());
-                    match status {
-                        TransferStatus::Done => done = true,
-                        TransferStatus::Ok => {}
-                        _ => failed = true,
-                    }
-                }
-                if done {
-                    if let Some(transfer) = self.asset_transfers.remove(&transfer_id) {
-                        let asset = Asset {
-                            id: transfer.asset_id,
-                            asset_type: transfer.asset_type,
-                            data: transfer.assemble(),
-                        };
-                        self.events.push_back(Event::AssetReceived(Box::new(asset)));
-                    }
-                } else if failed && let Some(transfer) = self.asset_transfers.remove(&transfer_id) {
-                    self.events.push_back(Event::AssetTransferFailed {
-                        asset_id: transfer.asset_id,
-                        asset_type: transfer.asset_type,
-                        status,
-                    });
-                }
             }
             // Another avatar's appearance (baked textures + visual params),
             // pushed when it comes into range or restyles. Decoded for both the
@@ -6969,41 +6908,6 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         // `type` 0 is the normal image channel; start at packet 0.
         circuit.send_request_image(texture_id, discard_level, priority, 0, 0, now)?;
-        Ok(())
-    }
-
-    /// Requests a generic asset (sound, animation, notecard, landmark, mesh, …)
-    /// by asset id and class over the UDP transfer path (`TransferRequest`). The
-    /// simulator replies with a `TransferInfo` (size/status) then `TransferPacket`
-    /// chunks, reassembled and surfaced as [`Event::AssetReceived`] (or
-    /// [`Event::AssetTransferFailed`] if the asset is missing or denied).
-    /// `priority` orders concurrent transfers. The modern alternative is the HTTP
-    /// `GetAsset`/`GetMesh` capability (a runtime `FetchAsset`/`FetchMesh`
-    /// command).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
-    /// [`Error::Wire`] if the request fails to encode.
-    pub fn request_asset(
-        &mut self,
-        asset_id: AssetKey,
-        asset_type: AssetType,
-        priority: f32,
-        now: Instant,
-    ) -> Result<(), Error> {
-        let transfer_id = TransferId::from_u128(self.next_transfer_id);
-        self.next_transfer_id = self.next_transfer_id.checked_add(1).unwrap_or(1);
-        self.asset_transfers.insert(
-            transfer_id,
-            AssetTransfer {
-                asset_id: asset_id.uuid(),
-                asset_type,
-                chunks: BTreeMap::new(),
-            },
-        );
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_transfer_request(transfer_id, asset_id.uuid(), asset_type, priority, now)?;
         Ok(())
     }
 

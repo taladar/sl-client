@@ -1,11 +1,11 @@
 //! The sans-I/O session state machine: login, circuit establishment,
 //! keep-alive, and clean logout, driven entirely by passed-in time.
 
-use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
+use crate::bookkeeping_ids::{InventoryCallbackId, PingId, XferId};
 use crate::scoped_id::CircuitId;
 use crate::types::{
-    AssetType, Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams,
-    NewInventoryItem, Object, TerrainPatch, Throttle,
+    Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, NewInventoryItem,
+    Object, TerrainPatch, Throttle,
 };
 use sl_types::key::{AgentKey, ExperienceKey, FriendKey, InventoryKey, ObjectKey};
 use sl_types::lsl::Rotation;
@@ -97,9 +97,10 @@ pub const CAP_GET_MESH2: &str = "GetMesh2";
 
 /// The HTTP capability for fetching a generic asset by UUID and class (an HTTP
 /// `GET` of `?<class>_id=<uuid>`, e.g. `?sound_id=`/`?animatn_id=`). The modern
-/// path that replaces the legacy UDP `TransferRequest` for many asset classes;
-/// surfaces as an [`Event::AssetReceived`].
-pub const CAP_GET_ASSET: &str = "GetAsset";
+/// path that replaces the legacy UDP `TransferRequest` for every asset class;
+/// surfaces as an [`Event::AssetReceived`]. Both Second Life and OpenSim expose
+/// it under the name `ViewerAsset`.
+pub const CAP_VIEWER_ASSET: &str = "ViewerAsset";
 
 /// The HTTP capability for the modern Second Life **server-side appearance bake**
 /// ("Sunshine" / central baking): a POST of an LLSD `{ "cof_version": <int> }`
@@ -453,7 +454,7 @@ pub const CAP_SEND_USER_REPORT_WITH_SCREENSHOT: &str = "SendUserReportWithScreen
 /// these to the seed URL to obtain the capability map, then uses `EventQueueGet`
 /// for the event-queue long-poll, [`CAP_FETCH_INVENTORY`] for inventory fetches,
 /// [`CAP_GROUP_MEMBER_DATA`] for group rosters, the asset/texture/mesh caps
-/// ([`CAP_GET_TEXTURE`], [`CAP_GET_MESH`], [`CAP_GET_MESH2`], [`CAP_GET_ASSET`])
+/// ([`CAP_GET_TEXTURE`], [`CAP_GET_MESH`], [`CAP_GET_MESH2`], [`CAP_VIEWER_ASSET`])
 /// for the HTTP asset-fetch pipeline, and the upload caps
 /// ([`CAP_NEW_FILE_AGENT_INVENTORY`], [`CAP_UPLOAD_BAKED_TEXTURE`], and the
 /// `Update*AgentInventory` family) for the HTTP asset-upload pipeline.
@@ -465,7 +466,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_GET_TEXTURE,
     CAP_GET_MESH,
     CAP_GET_MESH2,
-    CAP_GET_ASSET,
+    CAP_VIEWER_ASSET,
     CAP_UPDATE_AVATAR_APPEARANCE,
     CAP_NEW_FILE_AGENT_INVENTORY,
     CAP_UPLOAD_BAKED_TEXTURE,
@@ -627,33 +628,6 @@ impl TextureDownload {
 
     /// Concatenates the buffered packets in index order into the full encoded
     /// image bytes.
-    fn assemble(&self) -> Vec<u8> {
-        let mut data = Vec::new();
-        for chunk in self.chunks.values() {
-            data.extend_from_slice(chunk);
-        }
-        data
-    }
-}
-
-/// An in-flight generic asset transfer (`TransferRequest` →
-/// `TransferInfo`/`TransferPacket`). The `TransferInfo` reply gives the total
-/// size; each `TransferPacket` carries an in-order chunk and a status (the last
-/// one is `LLTS_DONE`).
-#[derive(Debug)]
-struct AssetTransfer {
-    /// The requested asset id (for the surfaced event).
-    asset_id: Uuid,
-    /// The requested asset class (for the surfaced event).
-    asset_type: AssetType,
-    /// The received packet payloads, keyed by packet index, reassembled in
-    /// order once the transfer completes.
-    chunks: BTreeMap<i32, Vec<u8>>,
-}
-
-impl AssetTransfer {
-    /// Concatenates the buffered packets in index order into the full asset
-    /// bytes.
     fn assemble(&self) -> Vec<u8> {
         let mut data = Vec::new();
         for chunk in self.chunks.values() {
@@ -1103,13 +1077,6 @@ pub struct Session {
     /// (echoed in every `ImageData`/`ImagePacket`). Started by
     /// [`Session::request_texture`].
     texture_downloads: BTreeMap<Uuid, TextureDownload>,
-    /// In-flight generic asset transfers, keyed by the client-generated
-    /// transfer id (echoed in every `TransferInfo`/`TransferPacket`). Started by
-    /// [`Session::request_asset`].
-    asset_transfers: BTreeMap<TransferId, AssetTransfer>,
-    /// A monotonic counter for generating asset transfer ids (each packed into a
-    /// fresh `TransferID` UUID; never zero).
-    next_transfer_id: u128,
     /// The agent's secure session id, from the login response. Combined with an
     /// upload's transaction id to predict the stored asset's UUID
     /// ([`combine_uuids`](sl_wire::combine_uuids)), so an upload's

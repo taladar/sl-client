@@ -1,7 +1,9 @@
 //! Logs in to a Second Life / OpenSim grid and fetches a texture and (optionally)
-//! a generic asset by UUID over both transports (ROADMAP #19): the legacy UDP
-//! image / transfer path and the modern HTTP `GetTexture`/`GetAsset` capability.
-//! Reports the codec and byte length of whatever comes back.
+//! a generic asset by UUID (ROADMAP #19). The texture is fetched over both the
+//! HTTP `GetTexture` capability and the legacy UDP image path; the generic asset
+//! is fetched over the modern HTTP `ViewerAsset` capability (`FetchAsset`), which
+//! has replaced the legacy UDP transfer path. Reports the codec and byte length
+//! of whatever comes back.
 //!
 //! Configure via environment variables:
 //!   `SL_LOGIN_URI`  (default `http://127.0.0.1:9000/`)
@@ -135,14 +137,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         })
                         .await
                         .ok();
-                    command_tx
-                        .send(Command::RequestAsset {
-                            asset_id: AssetKey::from(asset_id),
-                            asset_type,
-                            priority: 1.0,
-                        })
-                        .await
-                        .ok();
                 }
                 let command_tx = command_tx.clone();
                 tokio::spawn(async move {
@@ -159,13 +153,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
             Event::TextureNotFound(id) => warn!("TextureNotFound {id}"),
-            Event::AssetTransferStarted {
-                asset_id,
-                asset_type,
-                size,
-            } => {
-                info!("AssetTransferStarted {asset_id} ({asset_type:?}, declared {size} bytes)");
-            }
             Event::AssetReceived(asset) => {
                 info!(
                     "AssetReceived {} ({:?}, {} bytes)",

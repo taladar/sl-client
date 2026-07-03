@@ -9,7 +9,7 @@ use super::{
 };
 use crate::AssetKey;
 use crate::GroupRoleKey;
-use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
+use crate::bookkeeping_ids::{InventoryCallbackId, PingId, XferId};
 use crate::encode_texture_entry;
 use crate::extra_params::extra_param_message_blocks;
 use crate::scoped_id::CircuitId;
@@ -198,16 +198,15 @@ use sl_wire::messages::{
     StartPingCheckPingIDBlock, TeleportLocationRequest, TeleportLocationRequestAgentDataBlock,
     TeleportLocationRequestInfoBlock, TeleportLureRequest, TeleportLureRequestInfoBlock,
     TerminateFriendship, TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock,
-    TrackAgent, TrackAgentAgentDataBlock, TrackAgentTargetDataBlock, TransferRequest,
-    TransferRequestTransferInfoBlock, UUIDGroupNameRequest, UUIDGroupNameRequestUUIDNameBlockBlock,
-    UUIDNameRequest, UUIDNameRequestUUIDNameBlockBlock, UpdateGroupInfo,
-    UpdateGroupInfoAgentDataBlock, UpdateGroupInfoGroupDataBlock, UpdateInventoryFolder,
-    UpdateInventoryFolderAgentDataBlock, UpdateInventoryFolderFolderDataBlock, UpdateInventoryItem,
-    UpdateInventoryItemAgentDataBlock, UpdateInventoryItemInventoryDataBlock, UpdateMuteListEntry,
-    UpdateMuteListEntryAgentDataBlock, UpdateMuteListEntryMuteDataBlock, UseCircuitCode,
-    UseCircuitCodeCircuitCodeBlock, UserReport, UserReportAgentDataBlock,
-    UserReportReportDataBlock, ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock,
-    ViewerEffectEffectBlock,
+    TrackAgent, TrackAgentAgentDataBlock, TrackAgentTargetDataBlock, UUIDGroupNameRequest,
+    UUIDGroupNameRequestUUIDNameBlockBlock, UUIDNameRequest, UUIDNameRequestUUIDNameBlockBlock,
+    UpdateGroupInfo, UpdateGroupInfoAgentDataBlock, UpdateGroupInfoGroupDataBlock,
+    UpdateInventoryFolder, UpdateInventoryFolderAgentDataBlock,
+    UpdateInventoryFolderFolderDataBlock, UpdateInventoryItem, UpdateInventoryItemAgentDataBlock,
+    UpdateInventoryItemInventoryDataBlock, UpdateMuteListEntry, UpdateMuteListEntryAgentDataBlock,
+    UpdateMuteListEntryMuteDataBlock, UseCircuitCode, UseCircuitCodeCircuitCodeBlock, UserReport,
+    UserReportAgentDataBlock, UserReportReportDataBlock, ViewerEffect as ViewerEffectMessage,
+    ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
 };
 use sl_wire::messages::{
     AgentDataUpdateRequest, AgentDataUpdateRequestAgentDataBlock, AgentQuitCopy,
@@ -2210,38 +2209,6 @@ impl Circuit {
                 packet,
                 r#type: image_type,
             }],
-        });
-        self.send(&message, Reliability::Reliable, now)
-    }
-
-    /// Queues a `TransferRequest` reliably to download a generic asset over the
-    /// transfer path: channel `LLTCT_ASSET` (2), source `LLTST_ASSET` (2), and a
-    /// `Params` block of the asset id (16 bytes) followed by its `LLAssetType`
-    /// code (a little-endian `i32`), matching the viewer's `LLTransferSourceAsset`.
-    pub(crate) fn send_transfer_request(
-        &mut self,
-        transfer_id: TransferId,
-        asset_id: Uuid,
-        asset_type: AssetType,
-        priority: f32,
-        now: Instant,
-    ) -> Result<(), WireError> {
-        // LLTCT_ASSET / LLTST_ASSET.
-        const CHANNEL_ASSET: i32 = 2;
-        const SOURCE_ASSET: i32 = 2;
-        // The viewer's `LLTransferSourceAsset` params: the asset UUID followed
-        // by its `LLAssetType` code as a little-endian `i32`.
-        let mut writer = Writer::new();
-        writer.put_uuid(asset_id);
-        writer.put_i32(asset_type.to_code());
-        let message = AnyMessage::TransferRequest(TransferRequest {
-            transfer_info: TransferRequestTransferInfoBlock {
-                transfer_id: transfer_id.get(),
-                channel_type: CHANNEL_ASSET,
-                source_type: SOURCE_ASSET,
-                priority,
-                params: writer.into_bytes(),
-            },
         });
         self.send(&message, Reliability::Reliable, now)
     }

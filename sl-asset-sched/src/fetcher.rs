@@ -28,7 +28,17 @@ pub enum FetchError {
     /// The asset does not exist (a `404`, the fetch equivalent of not found).
     #[error("asset not found")]
     NotFound,
-    /// A transport-level failure (connection, timeout, malformed response).
+    /// The asset service is unavailable: it kept answering with a transient
+    /// status (a `503`, and behind a proxy `502` / `504`) until the fetcher's
+    /// retries were exhausted. Distinct from [`Transport`](Self::Transport) so a
+    /// caller can treat a persistently-unavailable service as a soft failure. The
+    /// payload is the server's last response (status line + body snippet), so the
+    /// caller can log *why* the service was unavailable.
+    #[error("asset service unavailable (retries exhausted): {0}")]
+    Unavailable(String),
+    /// A transport-level failure: a connection/timeout/protocol error, or a
+    /// non-success HTTP status. The payload describes it (for an HTTP status, the
+    /// status line plus a body snippet).
     #[error("asset fetch failed: {0}")]
     Transport(String),
 }

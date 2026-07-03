@@ -609,7 +609,8 @@ are surfaced raw). Implemented:
   `Event::AssetTransferFailed`.
 - **HTTP CAPS** — runtime commands `FetchTexture { texture_id, discard_level }`
   (`GetTexture`, `?texture_id=`), `FetchMesh` (`GetMesh2`/`GetMesh`,
-  `?mesh_id=`) and `FetchAsset { asset_id, asset_type }` (`GetAsset`, by class),
+  `?mesh_id=`) and `FetchAsset { asset_id, asset_type }` (`ViewerAsset`, by
+  class),
   HTTP-GET on a background task and surfaced as the same `Texture`/`Asset`
   events. The seed now also requests these four caps.
 - **Minimal J2C LOD support** — new `sl-proto::j2c` parses the codestream `SIZ`/
@@ -634,6 +635,22 @@ and the UDP `RequestImage` path, and a default sound (`ed12…`, 9 431 bytes) ov
 needed.* Deferred: HTTP range requests (the LOD prefix is truncated client-side
 rather than byte-ranged), AIS3 inventory-asset semantics, J2C/mesh decode, and
 asset *upload* (#23).
+
+*Update (2026-07): the **legacy UDP generic-asset transfer** half of this item
+(`Session::request_asset` /
+`TransferRequest`→`TransferInfo`→`TransferPacket` on the client side, and
+`Event::AssetTransferStarted`) was **removed**. Modern Second Life always offers
+the HTTP asset capability and the viewer only ever used the UDP transfer as a
+fallback when it was absent, so the path was dead in practice (Second Life
+refuses `SOURCE_ASSET` fetches, returning an error). Two corrections/additions
+came with the removal: the generic-asset capability is named **`ViewerAsset`**
+(not `GetAsset`) — both Second Life and OpenSim register it under that name, and
+`FetchAsset` now selects it by that name — and a caching store, the **`sl-asset`
+crate** (`AssetStore`: weak-reference sharing + single-flight + Firestorm-style
+on-disk cache, no decode), was added as the opaque-asset counterpart of
+`sl-texture` / `sl-mesh`. The legacy UDP **texture** path (`RequestImage`) and
+the generated `TransferRequest`/`TransferInfo`/`TransferPacket` wire codec are
+kept.*
 
 **20. Avatar appearance & wearables (done) ✅ — `AvatarAppearance` (receive),
 `AgentSetAppearance`, `AgentWearablesUpdate`/`Request`, `AgentIsNowWearing`,

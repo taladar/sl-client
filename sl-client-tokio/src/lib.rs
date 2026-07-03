@@ -14,7 +14,7 @@ use sl_proto::{
     CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
     CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
     CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_ASSET, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
+    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
     CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_OBJECT_COST,
     CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
     CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
@@ -23,8 +23,8 @@ use sl_proto::{
     CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
-    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING,
-    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_VIEWER_ASSET,
+    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, RECV_BUFFER_SIZE, SelectedCostKind, Session,
     ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
     ais_create_category_url, ais_item_url, build_agent_preferences_request,
@@ -114,10 +114,21 @@ pub use sl_mesh::{
     MeshPhysics, MeshProgress, MeshReadLease, MeshRequest, MeshSkin, MeshStore, Submesh,
 };
 
+// The generic-asset store (the opaque-blob counterpart of the texture/mesh
+// stores), fetched whole over the `ViewerAsset` capability. Its `CacheLimits` is
+// aliased so it does not collide with the texture/mesh ones; `Priority`,
+// `AssetKey`, and `AssetType` are already re-exported.
+pub use sl_asset::{
+    AssetEntry, AssetError, AssetProgress, AssetRef, AssetStore, BlobFetcher,
+    CacheLimits as AssetCacheLimits, FetchError as AssetFetchError,
+};
+
+pub use crate::assets::ReqwestAssetFetcher;
 pub use crate::meshes::ReqwestMeshFetcher;
 pub use crate::textures::ReqwestTextureFetcher;
 
 mod appearance;
+pub mod assets;
 mod caps;
 mod chat_log;
 mod experiences;
@@ -1285,9 +1296,6 @@ impl Client {
                         Some(Command::RequestTexture { texture_id, discard_level, priority }) => {
                             self.session.request_texture(texture_id, discard_level, priority, Instant::now())?;
                         }
-                        Some(Command::RequestAsset { asset_id, asset_type, priority }) => {
-                            self.session.request_asset(asset_id, asset_type, priority, Instant::now())?;
-                        }
                         Some(Command::FetchTexture { texture_id, discard_level }) => {
                             if let Some(url) = caps.get(CAP_GET_TEXTURE).cloned() {
                                 tokio::spawn(fetch_texture_http(
@@ -1302,7 +1310,7 @@ impl Client {
                             }
                         }
                         Some(Command::FetchAsset { asset_id, asset_type, byte_range }) => {
-                            if let Some(url) = caps.get(CAP_GET_ASSET).cloned() {
+                            if let Some(url) = caps.get(CAP_VIEWER_ASSET).cloned() {
                                 tokio::spawn(fetch_asset_http(
                                     url, asset_id.uuid(), asset_type, byte_range, http.clone(), events.clone(),
                                 ));
