@@ -102,8 +102,8 @@ pub use sl_proto::{
 // `TextureReadLease` are reachable as `sl_texture::…`; they are not re-exported
 // flat because `TextureEntry` would collide with `sl_proto`'s prim-face type.
 pub use sl_texture::{
-    CacheLimits, DecodedImage as DecodedTexture, Priority, TextureError, TextureProgress,
-    TextureRequest, TextureStore,
+    AssetFetcher, CacheLimits, DecodedImage as DecodedTexture, FetchChunk, Priority, TextureError,
+    TextureFetcher, TextureProgress, TextureRequest, TextureStore,
 };
 // The decoding, LOD-aware mesh store (the mesh counterpart of the texture
 // store). `Priority` and `MeshKey` are already re-exported (from `sl_texture` /

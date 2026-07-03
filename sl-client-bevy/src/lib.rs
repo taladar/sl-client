@@ -107,8 +107,8 @@ pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessi
 // `sl_texture::…` to avoid colliding with `sl_proto`'s prim-face `TextureEntry`).
 pub use sl_proto::DiscardLevel;
 pub use sl_texture::{
-    CacheLimits, DecodedImage as DecodedTexture, Priority, TextureError, TextureFetcher,
-    TextureProgress, TextureRequest, TextureStore,
+    AssetFetcher, CacheLimits, DecodedImage as DecodedTexture, FetchChunk, Priority, TextureError,
+    TextureFetcher, TextureProgress, TextureRequest, TextureStore,
 };
 // The decoding, LOD-aware mesh store (the mesh counterpart of the texture
 // store). `Priority` and `MeshKey` are already re-exported (from `sl_texture` /

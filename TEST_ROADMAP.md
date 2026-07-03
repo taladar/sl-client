@@ -1822,7 +1822,46 @@ Edits need the estate-owner avatar.
   `roundtrip = match` on OpenSim, `skipped` on aditi where `ViewerAsset` 503s,
   as in `asset-fetch-http`). Added the missing `UpdatableAssetType` re-export to
   both runtime crates (`sl-client-tokio` / `sl-client-bevy`).
-- [ ] `baked-texture-upload` — upload a baked texture (CAPS). `1av`.
+- [x] `baked-texture-upload` — upload a client-baked avatar texture over
+  the `UploadBakedTexture` capability. `1av`. Same two-step CAPS uploader as
+  `asset-upload` but for a bake: an empty LLSD body to the capability returns an
+  `uploader` URL, the raw JPEG-2000 codestream goes there, and the completion
+  carries a *temporary* asset UUID with **no** inventory item
+  (`new_inventory_item = None`) — the outcome the legacy (client-side-bake)
+  appearance path relies on. The `UploadBakedTexture` command and its two-step
+  run-loop were already built during the texture work; this case is the first to
+  exercise them, and it re-exports `AssetFetcher`/`FetchChunk`/`TextureFetcher`
+  from both runtime crates so the case can pull raw codestream bytes. It uploads
+  a real J2C: the plywood texture's `GetTexture` codestream (the asset
+  `texture-fetch-http` drives, present on both grids) is refetched and
+  re-uploaded as the bake, so the payload is a valid codestream on SL — which
+  validates it — without a client-side
+  JPEG-2000 encoder (the decode-only `sl-texture` crate has none). **Grid
+  divergence:** `complete` on OpenSim, which registers the capability and caches
+  the ~79 KB bake verbatim as a temporary texture (upload ≈ 14 ms loopback);
+  `partial` on aditi, whose regions do **not** advertise `UploadBakedTexture`
+  (the client requests it in its seed-cap list, but modern SL uses server-side
+  "Sunshine" baking so the legacy client-upload capability is absent), recorded
+  with the reason. `[both]`.
+- [x] `server-appearance-bake` — trigger a modern **server-side** appearance
+  bake over the `UpdateAvatarAppearance` capability (SL "Sunshine" / central
+  baking). `1av`. The SL-native counterpart of `baked-texture-upload`: instead
+  of the client compositing and uploading each baked layer, the viewer only
+  POSTs `{ cof_version }` and the grid bakes the Current Outfit Folder, then
+  broadcasts the result over UDP `AvatarAppearance`. The case asserts on the
+  capability's own reply (`Event::ServerAppearanceUpdate`, the grid accepting
+  the bake), not the downstream broadcast (which reaches only *other*
+  observers). It drives the documented **COF-version handshake**: it starts from
+  version 0 and, on the grid's `success = false` / `expected = <n>` mismatch
+  reply, re-requests with `<n>` until the bake is accepted — needing no prior
+  inventory crawl to learn the current version. The
+  `RequestServerAppearanceUpdate` command and its reply decode were already
+  built; this is the first case to exercise them. **Grid divergence** (the
+  mirror of `baked-texture-upload`):
+  `complete` on aditi, where the handshake resolves in two attempts to the live
+  COF version (~15) and the bake is accepted in ≈ 1 s; `partial` on OpenSim,
+  which has no `UpdateAvatarAppearance` capability at all (it uses the legacy
+  client-side bake path) — recorded "capability not offered". `[both]`.
 
 ## Phase 14 — Appearance, attachments & animations `[both]`
 
