@@ -10,10 +10,12 @@
 //! The mapping is the proper rotation `(x, y, z) -> (x, z, -y)` (a `-90°` turn
 //! about the shared `X` axis). It has determinant `+1`, so it preserves
 //! handedness — a Second Life rotation stays a rotation, and winding order is
-//! unchanged. The rotation (quaternion) half of the boundary lands with object
-//! transforms in Phase 5.
+//! unchanged. [`sl_to_bevy_vec`] applies it to a position; its quaternion form
+//! [`sl_to_bevy_rotation`] applies it as an entity `Transform` rotation, so a
+//! mesh whose vertices are kept in Second Life space (as terrain patches and,
+//! in Phase 5, object meshes are) lands correctly in Bevy's Y-up world.
 
-use bevy::math::Vec3;
+use bevy::math::{Quat, Vec3};
 use sl_client_bevy::Vector;
 
 /// Convert a Second Life position [`Vector`] (Z-up metres) into a Bevy
@@ -26,9 +28,23 @@ pub(crate) fn sl_to_bevy_vec(vector: &Vector) -> Vec3 {
     Vec3::new(vector.x, vector.z, -vector.y)
 }
 
+/// The rotation half of the Second Life → Bevy boundary: the quaternion form of
+/// the `(x, y, z) -> (x, z, -y)` axis map, a `-90°` turn about the shared `X`
+/// axis.
+///
+/// Applied as an entity [`Transform`](bevy::prelude::Transform) rotation (with
+/// its translation set from [`sl_to_bevy_vec`]), it carries a mesh whose
+/// vertices — positions *and* normals — are kept in Second Life space (Z-up)
+/// into Bevy's Y-up world. Terrain patches build their geometry relative to the
+/// patch origin in Second Life space and rely on this to orient it.
+#[must_use]
+pub(crate) fn sl_to_bevy_rotation() -> Quat {
+    Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::sl_to_bevy_vec;
+    use super::{sl_to_bevy_rotation, sl_to_bevy_vec};
     use pretty_assertions::assert_eq;
     use sl_client_bevy::Vector;
 
@@ -56,5 +72,32 @@ mod tests {
             z: 0.0,
         });
         assert_eq!(east, bevy::math::Vec3::new(1.0, 0.0, 0.0));
+    }
+
+    /// The rotation quaternion reproduces the position axis map on any vector,
+    /// so a mesh kept in Second Life space lands where its converted origin
+    /// says it should.
+    #[test]
+    fn rotation_matches_the_position_map() {
+        let rotation = sl_to_bevy_rotation();
+        for vector in [
+            Vector {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+            Vector {
+                x: -4.0,
+                y: 5.0,
+                z: -6.0,
+            },
+        ] {
+            let rotated = rotation * bevy::math::Vec3::new(vector.x, vector.y, vector.z);
+            let mapped = sl_to_bevy_vec(&vector);
+            assert!(
+                rotated.abs_diff_eq(mapped, 1.0e-5),
+                "rotation {rotated:?} should match axis map {mapped:?}"
+            );
+        }
     }
 }

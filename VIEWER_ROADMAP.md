@@ -120,11 +120,20 @@ then tick the box here. Add sub-points as you discover them.
 
 ## Phase 2 — Terrain
 
-- [ ] **P2.1. Heightfield patches.** On `TerrainPatch`, build a mesh for the
+- [x] **P2.1. Heightfield patches.** On `TerrainPatch`, build a mesh for the
   patch (grid of cells at `values[..]`, computed normals, whole-region UVs)
   placed at its `patch_x * size, patch_y * size` origin (`sl_to_bevy`); keep a
   `HashMap<(patch_x, patch_y), Entity>` and replace on update. One flat
   `StandardMaterial` (no splatting). Verify terrain renders on OpenSim.
+- [ ] **P2.2. Height-blended texture splatting.** Replace the flat ground
+  material with the real Second Life terrain shading: the region's four
+  `TERRAIN_TEXTURE_*` UUIDs and per-corner low/high elevation ranges (from the
+  `RegionHandshake` / region info), blended by elevation with a Perlin-noise
+  transition band (Firestorm `llvosurfacepatch` / terrain shaders,
+  `llvlcomposition` for the CPU reference). Factor the Bevy-free blend-weight
+  math into a new **`sl-terrain`** crate (mirroring `sl-prim` / `sl-mesh`),
+  with the `StandardMaterial`/custom material living in `sl-client-bevy`; fetch
+  the four textures through the existing texture pipeline.
 
 ## Phase 3 — `sl-prim` (pure Linden prim tessellation)
 

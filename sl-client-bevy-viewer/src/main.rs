@@ -10,6 +10,7 @@
 mod camera;
 mod coords;
 mod session;
+mod terrain;
 
 use std::path::PathBuf;
 
@@ -27,6 +28,7 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberI
 
 use crate::camera::{FlyCamera, fly_camera};
 use crate::session::{ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input};
+use crate::terrain::{TerrainState, update_terrain};
 
 /// The local OpenSim grid login URI used when none is otherwise resolved.
 const DEFAULT_LOGIN_URI: &str = "http://127.0.0.1:9000/";
@@ -214,12 +216,14 @@ fn run_session(params: &LoginParams) -> LoginOutcome {
     })
     .init_resource::<ViewerSession>()
     .init_resource::<LoginOutcome>()
+    .init_resource::<TerrainState>()
     .add_systems(Startup, setup_scene)
     .add_systems(
         Update,
         (
             capture_login_outcome,
             drive_session,
+            update_terrain,
             handle_quit_input,
             enforce_quit_deadline,
             fly_camera,
