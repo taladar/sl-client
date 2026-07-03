@@ -1917,25 +1917,16 @@ pub enum Command {
         /// The event whose reminder to cancel.
         event_id: EventId,
     },
-    /// Upload a new asset over the legacy UDP path (`AssetUploadRequest`): stores
-    /// the asset bytes (small assets inline, larger ones over `Xfer`) without
-    /// creating an inventory item. Completion arrives as
-    /// [`Event::AssetUploadComplete`](crate::Event::AssetUploadComplete). For an upload that also creates an
-    /// inventory item, use [`Command::UploadAsset`].
-    UploadAssetUdp {
-        /// The asset class to store the bytes as.
-        asset_type: AssetType,
-        /// The raw asset bytes.
-        data: Vec<u8>,
-        /// Mark the asset temporary.
-        temp_file: bool,
-        /// Keep the asset on the simulator only (do not store it grid-wide).
-        store_local: bool,
-    },
     /// Upload a new asset and create an inventory item for it over the modern
     /// `NewFileAgentInventory` capability (the two-step CAPS uploader): POST the
     /// metadata, then the raw bytes. The result arrives as
     /// [`Event::AssetUploaded`](crate::Event::AssetUploaded) (or [`Event::AssetUploadFailed`](crate::Event::AssetUploadFailed)).
+    ///
+    /// Both grids offer the capability and the modern viewer uploads exclusively
+    /// over it, so the upload fails with
+    /// [`Event::AssetUploadFailed`](crate::Event::AssetUploadFailed) when the
+    /// capability is absent (the legacy UDP `AssetUploadRequest` fallback was
+    /// dropped).
     ///
     /// For a mesh, `data` must be the **fully-formed mesh asset bytes** —
     /// uploading does not run the viewer's model-import pipeline (LOD / physics /

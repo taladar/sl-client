@@ -682,7 +682,6 @@ impl Survey {
             | Event::TextureNotFound(_)
             | Event::AssetReceived(_)
             | Event::AssetTransferFailed { .. }
-            | Event::AssetUploadComplete { .. }
             | Event::AssetUploaded { .. }
             | Event::AssetUploadFailed { .. }
             | Event::ScriptUploaded { .. }

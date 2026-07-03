@@ -2239,16 +2239,6 @@ fn advance_running(
             Command::ResetScript { object_id, item_id } => {
                 session.reset_script(*object_id, *item_id, now).ok();
             }
-            Command::UploadAssetUdp {
-                asset_type,
-                data,
-                temp_file,
-                store_local,
-            } => {
-                session
-                    .upload_asset_udp(*asset_type, data.clone(), *temp_file, *store_local, now)
-                    .ok();
-            }
             Command::UploadAsset { asset_type, .. } if asset_type.is_script() => {
                 // Scripts must go through `UploadScript` so the simulator's
                 // compile result is surfaced; the generic create-with-body path
@@ -2272,9 +2262,9 @@ fn advance_running(
                 expected_upload_cost,
                 data,
             } => {
-                // Prefer the modern CAPS uploader when the region advertises it
-                // and can name both types; otherwise fall back to the legacy UDP
-                // asset-upload + create-item path.
+                // The modern CAPS uploader (the only upload path — the legacy UDP
+                // asset-upload fallback was dropped): needs both the region
+                // capability and a CAPS name for the asset and inventory classes.
                 let caps_available = matches!(
                     (asset_type.caps_asset_name(), inventory_type.caps_name()),
                     (Some(_), Some(_))
@@ -2296,19 +2286,10 @@ fn advance_running(
                         data.clone(),
                     );
                 } else {
-                    session
-                        .upload_asset_to_inventory_udp(
-                            *folder_id,
-                            *asset_type,
-                            *inventory_type,
-                            name.clone(),
-                            description.clone(),
-                            *next_owner_mask,
-                            WearableType::Shape,
-                            data.clone(),
-                            now,
-                        )
-                        .ok();
+                    emit_upload_failure(
+                        caps.as_ref(),
+                        "NewFileAgentInventory capability not available".to_owned(),
+                    );
                 }
             }
             Command::UploadBakedTexture { data } => {

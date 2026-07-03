@@ -27,23 +27,23 @@ use super::conversions::{
     windlight_refresh_from_llsd,
 };
 use super::{
-    AGENT_UPDATE_INTERVAL, AssetUpload, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
-    CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY,
-    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY,
-    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
-    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST,
-    CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES,
-    CAP_LIBRARY_API_V3, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
+    AGENT_UPDATE_INTERVAL, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
+    CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
+    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME,
+    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
+    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
+    CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
     CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, ChatLifecycleView, ChatSession,
     ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE,
     FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, Inventory,
     InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
-    MAX_INLINE_ASSET, MessageCursor, PING_INTERVAL, PendingInvite, SIT_TIMEOUT, ScriptGrant,
-    ScriptHolder, Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT,
-    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, VoiceChannelInfo, XferDownload,
-    XferPurpose, deadline, merge_deadline,
+    MessageCursor, PING_INTERVAL, PendingInvite, SIT_TIMEOUT, ScriptGrant, ScriptHolder, Session,
+    SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls,
+    TeleportPhase, TextureDownload, VoiceChannelInfo, XferDownload, XferPurpose, deadline,
+    merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -66,23 +66,23 @@ use crate::types::{
     GenericStreamingMessage, GestureActivation, GodRegionUpdate, GroupNoticeAttachment,
     GroupNoticeKey, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec,
     InterestsUpdate, InventoryCursor, InventoryFolder, InventoryItem, InventoryItemMove,
-    InventoryOffer, InventoryType, ItemInfo, Kick, LandEdit, LandSearchType, LandStatItem,
-    LandStatReportType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType,
-    Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode,
-    MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez, Object,
-    ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation,
-    ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
-    PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
-    RegionInfoUpdate, RegionStats, Reliability, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo,
-    ScriptGrantInfo, ScriptLanguage, ScriptPermissionState, ScriptPermissionStatus,
-    ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags,
-    SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, TaskInventoryKey,
-    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
-    TextureEntry, Throttle, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, Wearable, WearableType,
+    InventoryOffer, ItemInfo, Kick, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
+    LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType, Material, Maturity,
+    MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
+    NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez, Object, ObjectBuyItem,
+    ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation, ObjectPropertiesFamily,
+    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+    ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
+    ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult, Postcard,
+    PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionInfoUpdate, RegionStats,
+    Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
+    ScriptControl, ScriptControlAction, ScriptControlsInfo, ScriptGrantInfo, ScriptLanguage,
+    ScriptPermissionState, ScriptPermissionStatus, ScriptPermissions, ScriptTeleportRequest,
+    ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload,
+    StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags,
+    TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle, Transmit,
+    UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
+    WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -201,12 +201,6 @@ impl Session {
             pending_task_inventory: BTreeSet::new(),
             pending_task_inventory_unresolved: VecDeque::new(),
             texture_downloads: BTreeMap::new(),
-            secure_session_id: Uuid::nil(),
-            asset_uploads: BTreeMap::new(),
-            upload_xfers: BTreeMap::new(),
-            next_upload_id: 1,
-            pending_inventory_uploads: BTreeMap::new(),
-            pending_upload_callbacks: BTreeMap::new(),
             objects: BTreeMap::new(),
             terrain: BTreeMap::new(),
             regions: BTreeMap::new(),
@@ -1241,7 +1235,6 @@ impl Session {
                 self.inventory.set_library_root(success.library_root);
                 self.inventory
                     .set_library_owner(success.library_owner.map(OwnerKey::Agent));
-                self.secure_session_id = success.secure_session_id;
                 self.state = SessionState::AwaitingHandshake;
                 self.events.push_back(Event::CircuitEstablished {
                     sim: sim_addr,
@@ -2548,19 +2541,6 @@ impl Session {
                     self.cache_inventory_item(item.clone());
                     let callback_id = crate::types::optional_u32_from_wire(data.callback_id)
                         .map(InventoryCallbackId);
-                    // A fallback UDP inventory-upload's created item
-                    // (`upload_asset_to_inventory_udp`): surface the unified
-                    // `AssetUploaded` (matching the CAPS outcome) and keep it
-                    // cached, but suppress the raw `InventoryItemCreated`.
-                    if let Some(callback) = callback_id
-                        && let Some(asset_id) = self.pending_upload_callbacks.remove(&callback)
-                    {
-                        self.events.push_back(Event::AssetUploaded {
-                            new_asset: asset_id,
-                            new_inventory_item: Some(item.item_id.uuid()),
-                        });
-                        continue;
-                    }
                     self.events.push_back(Event::InventoryItemCreated {
                         sim_approved: reply.agent_data.sim_approved,
                         transaction_id: reply.agent_data.transaction_id,
@@ -2755,62 +2735,6 @@ impl Session {
             }
             AnyMessage::UseCachedMuteList(_) => {
                 self.events.push_back(Event::MuteListUnchanged);
-            }
-            // The simulator requesting an asset upload over the `Xfer` path: it
-            // answers a large (non-inlined) `AssetUploadRequest` with a
-            // `RequestXfer` whose `VFileID` is the asset id we predicted. Begin
-            // streaming `SendXferPacket`s; the simulator pulls each subsequent
-            // packet by acking the previous one (`ConfirmXferPacket`).
-            AnyMessage::RequestXfer(request) => {
-                let xfer_id = XferId(request.xfer_id.id);
-                let asset_id = request.xfer_id.v_file_id;
-                if self.asset_uploads.contains_key(&asset_id) {
-                    self.upload_xfers.insert(xfer_id, asset_id);
-                    self.advance_upload(xfer_id, asset_id, now)?;
-                }
-            }
-            // The simulator acknowledged one of our upload packets; send the
-            // next chunk (the terminal `AssetUploadComplete` follows the last).
-            AnyMessage::ConfirmXferPacket(ack) => {
-                let xfer_id = XferId(ack.xfer_id.id);
-                if let Some(&asset_id) = self.upload_xfers.get(&xfer_id) {
-                    let more = self
-                        .asset_uploads
-                        .get(&asset_id)
-                        .is_some_and(|upload| upload.sent < upload.packet_count());
-                    if more {
-                        self.advance_upload(xfer_id, asset_id, now)?;
-                    }
-                }
-            }
-            // A legacy UDP upload finished (inline or via `Xfer`): the simulator
-            // reports the stored asset's id and whether it succeeded.
-            AnyMessage::AssetUploadComplete(complete) => {
-                let asset_id = complete.asset_block.uuid;
-                let asset_type = AssetType::from_code(i32::from(complete.asset_block.r#type));
-                let success = complete.asset_block.success;
-                self.asset_uploads.remove(&asset_id);
-                self.upload_xfers.retain(|_, id| *id != asset_id);
-                if let Some(new) = self.pending_inventory_uploads.remove(&asset_id) {
-                    // The fallback path of `upload_asset_to_inventory_udp`: the
-                    // asset is stored, so now create the inventory item bound to
-                    // it (or report the store failure) rather than surfacing the
-                    // intermediate `AssetUploadComplete`.
-                    if success {
-                        let callback_id = self.create_inventory_item(&new, now)?;
-                        self.pending_upload_callbacks.insert(callback_id, asset_id);
-                    } else {
-                        self.events.push_back(Event::AssetUploadFailed {
-                            reason: "the simulator rejected the UDP asset upload".to_owned(),
-                        });
-                    }
-                } else {
-                    self.events.push_back(Event::AssetUploadComplete {
-                        asset_id,
-                        asset_type,
-                        success,
-                    });
-                }
             }
             AnyMessage::SendXferPacket(packet) => {
                 let xfer_id = XferId(packet.xfer_id.id);
@@ -6908,159 +6832,6 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         // `type` 0 is the normal image channel; start at packet 0.
         circuit.send_request_image(texture_id, discard_level, priority, 0, 0, now)?;
-        Ok(())
-    }
-
-    /// Uploads `data` as a new asset of class `asset_type` over the **legacy UDP
-    /// path** (`AssetUploadRequest`), returning the asset's predicted UUID (the
-    /// same id the simulator will report in the terminating
-    /// [`Event::AssetUploadComplete`]).
-    ///
-    /// Small assets (≤ `MAX_INLINE_ASSET` bytes) are inlined in the request;
-    /// larger ones are streamed over the `Xfer` path automatically (the simulator
-    /// answers with a `RequestXfer` and the session streams `SendXferPacket`s,
-    /// driven by the simulator's `ConfirmXferPacket`s). `temp_file` marks a
-    /// temporary asset; `store_local` keeps it on the simulator only.
-    ///
-    /// This path stores **only the asset** — it does not create an inventory
-    /// item (a viewer would follow up with a `CreateInventoryItem` referencing
-    /// the same transaction id). For an upload that also creates an inventory
-    /// item, use the modern CAPS path (the runtimes' `UploadAsset` command).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
-    /// [`Error::Wire`] if the request fails to encode.
-    pub fn upload_asset_udp(
-        &mut self,
-        asset_type: AssetType,
-        data: Vec<u8>,
-        temp_file: bool,
-        store_local: bool,
-        now: Instant,
-    ) -> Result<Uuid, Error> {
-        let (asset_id, _transaction_id) =
-            self.start_asset_upload_udp(asset_type, data, temp_file, store_local, now)?;
-        Ok(asset_id)
-    }
-
-    /// Uploads `data` as a new asset over the legacy UDP path (see
-    /// [`upload_asset_udp`](Self::upload_asset_udp)), returning both the predicted
-    /// asset id and the transaction id linking it (the transaction id a follow-up
-    /// `CreateInventoryItem` needs to bind the item to the uploaded asset).
-    fn start_asset_upload_udp(
-        &mut self,
-        asset_type: AssetType,
-        data: Vec<u8>,
-        temp_file: bool,
-        store_local: bool,
-        now: Instant,
-    ) -> Result<(Uuid, Uuid), Error> {
-        let transaction_id = Uuid::from_u128(self.next_upload_id);
-        self.next_upload_id = self.next_upload_id.checked_add(1).unwrap_or(1);
-        let asset_id = sl_wire::combine_uuids(transaction_id, self.secure_session_id);
-        let inline = data.len() <= MAX_INLINE_ASSET;
-        // The simulator treats an `AssetData` of more than 2 bytes as the inline
-        // asset; an empty payload forces the `Xfer` path.
-        let request_data = if inline { data.clone() } else { Vec::new() };
-        self.asset_uploads.insert(
-            asset_id,
-            AssetUpload {
-                // The inline path needs no buffered copy; only the `Xfer` path
-                // streams from `data`.
-                data: if inline { Vec::new() } else { data },
-                sent: 0,
-            },
-        );
-        // The `AssetUploadRequest` `Type` field is a signed byte; every real
-        // `LLAssetType` code fits, but clamp defensively.
-        let type_code = i8::try_from(asset_type.to_code()).unwrap_or(0);
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_asset_upload_request(
-            transaction_id,
-            type_code,
-            temp_file,
-            store_local,
-            request_data,
-            now,
-        )?;
-        Ok((asset_id, transaction_id))
-    }
-
-    /// Uploads `data` as a new asset **and creates an inventory item** for it over
-    /// the legacy UDP path — the fallback for the modern CAPS
-    /// `NewFileAgentInventory` upload when that capability is absent. The asset is
-    /// streamed the same way [`upload_asset_udp`](Self::upload_asset_udp) streams
-    /// it; once the simulator reports it stored (`AssetUploadComplete`) a
-    /// `CreateInventoryItem` bound to the same transaction id is sent, and the
-    /// resulting item surfaces as the unified
-    /// [`Event::AssetUploaded`](crate::Event::AssetUploaded) — matching the CAPS
-    /// outcome. A store failure surfaces as
-    /// [`Event::AssetUploadFailed`](crate::Event::AssetUploadFailed).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
-    /// [`Error::Wire`] if the request fails to encode.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "mirrors the CAPS NewFileAgentInventory upload's item parameters"
-    )]
-    pub fn upload_asset_to_inventory_udp(
-        &mut self,
-        folder_id: InventoryFolderKey,
-        asset_type: AssetType,
-        inv_type: InventoryType,
-        name: String,
-        description: String,
-        next_owner_mask: u32,
-        wearable_type: WearableType,
-        data: Vec<u8>,
-        now: Instant,
-    ) -> Result<(), Error> {
-        let (asset_id, transaction_id) =
-            self.start_asset_upload_udp(asset_type, data, false, false, now)?;
-        self.pending_inventory_uploads.insert(
-            asset_id,
-            NewInventoryItem {
-                folder_id,
-                transaction_id,
-                next_owner_mask,
-                asset_type,
-                inv_type,
-                wearable_type,
-                name,
-                description,
-            },
-        );
-        Ok(())
-    }
-
-    /// Sends the next `SendXferPacket` of the upload keyed by `asset_id` over the
-    /// root circuit, flagging the final packet, and advancing its sent counter.
-    fn advance_upload(
-        &mut self,
-        xfer_id: XferId,
-        asset_id: Uuid,
-        now: Instant,
-    ) -> Result<(), Error> {
-        let Some(upload) = self.asset_uploads.get_mut(&asset_id) else {
-            return Ok(());
-        };
-        let sequence = upload.sent;
-        let total = upload.packet_count();
-        // The final packet's number carries the high-bit last-packet flag.
-        let is_last = sequence.saturating_add(1) >= total;
-        let packet = if is_last {
-            sequence | 0x8000_0000
-        } else {
-            sequence
-        };
-        let data = upload.packet_data(sequence);
-        upload.sent = sequence.saturating_add(1);
-        if let Some(circuit) = self.circuit.as_mut() {
-            circuit.send_send_xfer_packet(xfer_id, packet, data, now)?;
-        }
         Ok(())
     }
 

@@ -1482,9 +1482,6 @@ impl Client {
                         Some(Command::ResetScript { object_id, item_id }) => {
                             self.session.reset_script(object_id, item_id, Instant::now())?;
                         }
-                        Some(Command::UploadAssetUdp { asset_type, data, temp_file, store_local }) => {
-                            self.session.upload_asset_udp(asset_type, data, temp_file, store_local, Instant::now())?;
-                        }
                         Some(Command::UploadAsset { asset_type, .. }) if asset_type.is_script() => {
                             // Scripts must go through `UploadScript` so the
                             // simulator's compile result is surfaced; the generic
@@ -1498,9 +1495,10 @@ impl Client {
                             folder_id, asset_type, inventory_type, name, description,
                             next_owner_mask, group_mask, everyone_mask, expected_upload_cost, data,
                         }) => {
-                            // Prefer the modern CAPS uploader when the region
-                            // advertises it and can name both types; otherwise fall
-                            // back to the legacy UDP asset-upload + create-item path.
+                            // The modern CAPS uploader (the only upload path — the
+                            // legacy UDP asset-upload fallback was dropped): needs
+                            // both the region capability and a CAPS name for the
+                            // asset and inventory classes.
                             let caps_upload = match (asset_type.caps_asset_name(), inventory_type.caps_name()) {
                                 (Some(asset_name), Some(inv_name)) => caps
                                     .get(CAP_NEW_FILE_AGENT_INVENTORY)
@@ -1515,10 +1513,9 @@ impl Client {
                                 );
                                 tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
                             } else {
-                                self.session.upload_asset_to_inventory_udp(
-                                    folder_id, asset_type, inventory_type, name, description,
-                                    next_owner_mask, WearableType::Shape, data, Instant::now(),
-                                )?;
+                                events.send(Event::AssetUploadFailed {
+                                    reason: "NewFileAgentInventory capability not available".to_owned(),
+                                }).await.ok();
                             }
                         }
                         Some(Command::UploadBakedTexture { data }) => {

@@ -8,6 +8,7 @@
 pub mod ais3_folder_lifecycle;
 pub mod asset_decode;
 pub mod asset_fetch_http;
+pub mod asset_upload;
 pub mod avatar_notes;
 pub mod avatar_properties;
 pub mod calling_card;

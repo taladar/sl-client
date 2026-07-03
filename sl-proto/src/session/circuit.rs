@@ -52,31 +52,31 @@ use sl_wire::messages::{
     AgentSetAppearanceVisualParamBlock, AgentSetAppearanceWearableDataBlock, AgentSit,
     AgentSitAgentDataBlock, AgentThrottle, AgentThrottleAgentDataBlock, AgentThrottleThrottleBlock,
     AgentUpdate, AgentUpdateAgentDataBlock, AgentWearablesRequest,
-    AgentWearablesRequestAgentDataBlock, AssetUploadRequest, AssetUploadRequestAssetBlockBlock,
-    AvatarInterestsUpdate, AvatarInterestsUpdateAgentDataBlock,
-    AvatarInterestsUpdatePropertiesDataBlock, AvatarNotesUpdate, AvatarNotesUpdateAgentDataBlock,
-    AvatarNotesUpdateDataBlock, AvatarPickerRequest, AvatarPickerRequestAgentDataBlock,
-    AvatarPickerRequestDataBlock, AvatarPropertiesRequest, AvatarPropertiesRequestAgentDataBlock,
-    AvatarPropertiesUpdate, AvatarPropertiesUpdateAgentDataBlock,
-    AvatarPropertiesUpdatePropertiesDataBlock, ChangeInventoryItemFlags,
-    ChangeInventoryItemFlagsAgentDataBlock, ChangeInventoryItemFlagsInventoryDataBlock,
-    ChatFromViewer, ChatFromViewerAgentDataBlock, ChatFromViewerChatDataBlock, ClassifiedDelete,
-    ClassifiedDeleteAgentDataBlock, ClassifiedDeleteDataBlock, ClassifiedGodDelete,
-    ClassifiedGodDeleteAgentDataBlock, ClassifiedGodDeleteDataBlock, ClassifiedInfoRequest,
-    ClassifiedInfoRequestAgentDataBlock, ClassifiedInfoRequestDataBlock, ClassifiedInfoUpdate,
-    ClassifiedInfoUpdateAgentDataBlock, ClassifiedInfoUpdateDataBlock, CompleteAgentMovement,
-    CompleteAgentMovementAgentDataBlock, CompletePingCheck, CompletePingCheckPingIDBlock,
-    ConfirmXferPacket, ConfirmXferPacketXferIDBlock, CopyInventoryItem,
-    CopyInventoryItemAgentDataBlock, CopyInventoryItemInventoryDataBlock, CreateGroupRequest,
-    CreateGroupRequestAgentDataBlock, CreateGroupRequestGroupDataBlock, CreateInventoryFolder,
-    CreateInventoryFolderAgentDataBlock, CreateInventoryFolderFolderDataBlock, CreateInventoryItem,
-    CreateInventoryItemAgentDataBlock, CreateInventoryItemInventoryBlockBlock, DeRezObject,
-    DeRezObjectAgentBlockBlock, DeRezObjectAgentDataBlock, DeRezObjectObjectDataBlock,
-    DeactivateGestures, DeactivateGesturesAgentDataBlock, DeactivateGesturesDataBlock,
-    DeclineCallingCard, DeclineCallingCardAgentDataBlock, DeclineCallingCardTransactionBlockBlock,
-    DeclineFriendship, DeclineFriendshipAgentDataBlock, DeclineFriendshipTransactionBlockBlock,
-    DirClassifiedQuery, DirClassifiedQueryAgentDataBlock, DirClassifiedQueryQueryDataBlock,
-    DirFindQuery, DirFindQueryAgentDataBlock, DirFindQueryQueryDataBlock, DirLandQuery,
+    AgentWearablesRequestAgentDataBlock, AvatarInterestsUpdate,
+    AvatarInterestsUpdateAgentDataBlock, AvatarInterestsUpdatePropertiesDataBlock,
+    AvatarNotesUpdate, AvatarNotesUpdateAgentDataBlock, AvatarNotesUpdateDataBlock,
+    AvatarPickerRequest, AvatarPickerRequestAgentDataBlock, AvatarPickerRequestDataBlock,
+    AvatarPropertiesRequest, AvatarPropertiesRequestAgentDataBlock, AvatarPropertiesUpdate,
+    AvatarPropertiesUpdateAgentDataBlock, AvatarPropertiesUpdatePropertiesDataBlock,
+    ChangeInventoryItemFlags, ChangeInventoryItemFlagsAgentDataBlock,
+    ChangeInventoryItemFlagsInventoryDataBlock, ChatFromViewer, ChatFromViewerAgentDataBlock,
+    ChatFromViewerChatDataBlock, ClassifiedDelete, ClassifiedDeleteAgentDataBlock,
+    ClassifiedDeleteDataBlock, ClassifiedGodDelete, ClassifiedGodDeleteAgentDataBlock,
+    ClassifiedGodDeleteDataBlock, ClassifiedInfoRequest, ClassifiedInfoRequestAgentDataBlock,
+    ClassifiedInfoRequestDataBlock, ClassifiedInfoUpdate, ClassifiedInfoUpdateAgentDataBlock,
+    ClassifiedInfoUpdateDataBlock, CompleteAgentMovement, CompleteAgentMovementAgentDataBlock,
+    CompletePingCheck, CompletePingCheckPingIDBlock, ConfirmXferPacket,
+    ConfirmXferPacketXferIDBlock, CopyInventoryItem, CopyInventoryItemAgentDataBlock,
+    CopyInventoryItemInventoryDataBlock, CreateGroupRequest, CreateGroupRequestAgentDataBlock,
+    CreateGroupRequestGroupDataBlock, CreateInventoryFolder, CreateInventoryFolderAgentDataBlock,
+    CreateInventoryFolderFolderDataBlock, CreateInventoryItem, CreateInventoryItemAgentDataBlock,
+    CreateInventoryItemInventoryBlockBlock, DeRezObject, DeRezObjectAgentBlockBlock,
+    DeRezObjectAgentDataBlock, DeRezObjectObjectDataBlock, DeactivateGestures,
+    DeactivateGesturesAgentDataBlock, DeactivateGesturesDataBlock, DeclineCallingCard,
+    DeclineCallingCardAgentDataBlock, DeclineCallingCardTransactionBlockBlock, DeclineFriendship,
+    DeclineFriendshipAgentDataBlock, DeclineFriendshipTransactionBlockBlock, DirClassifiedQuery,
+    DirClassifiedQueryAgentDataBlock, DirClassifiedQueryQueryDataBlock, DirFindQuery,
+    DirFindQueryAgentDataBlock, DirFindQueryQueryDataBlock, DirLandQuery,
     DirLandQueryAgentDataBlock, DirLandQueryQueryDataBlock, DirPlacesQuery,
     DirPlacesQueryAgentDataBlock, DirPlacesQueryQueryDataBlock, EconomyDataRequest,
     EjectGroupMemberRequest, EjectGroupMemberRequestAgentDataBlock,
@@ -190,8 +190,7 @@ use sl_wire::messages::{
     RezSingleAttachmentFromInvAgentDataBlock, RezSingleAttachmentFromInvObjectDataBlock,
     ScriptAnswerYes, ScriptAnswerYesAgentDataBlock, ScriptAnswerYesDataBlock, ScriptDialogReply,
     ScriptDialogReplyAgentDataBlock, ScriptDialogReplyDataBlock, SendPostcard,
-    SendPostcardAgentDataBlock, SendXferPacket, SendXferPacketDataPacketBlock,
-    SendXferPacketXferIDBlock, SetGroupAcceptNotices, SetGroupAcceptNoticesAgentDataBlock,
+    SendPostcardAgentDataBlock, SetGroupAcceptNotices, SetGroupAcceptNoticesAgentDataBlock,
     SetGroupAcceptNoticesDataBlock, SetGroupAcceptNoticesNewDataBlock, SetGroupContribution,
     SetGroupContributionAgentDataBlock, SetGroupContributionDataBlock, StartLure,
     StartLureAgentDataBlock, StartLureInfoBlock, StartLureTargetDataBlock, StartPingCheck,
@@ -2135,51 +2134,6 @@ impl Circuit {
                 id: xfer_id.get(),
                 packet,
             },
-        });
-        self.send(&message, Reliability::Reliable, now)
-    }
-
-    /// Queues an `AssetUploadRequest` reliably: a legacy UDP upload of `data` as
-    /// asset class `asset_type`, identified by `transaction_id`. `data` is the
-    /// inline payload (empty to force the `Xfer` path); `temp_file`/`store_local`
-    /// mark a temporary / sim-local-only asset.
-    pub(crate) fn send_asset_upload_request(
-        &mut self,
-        transaction_id: Uuid,
-        asset_type: i8,
-        temp_file: bool,
-        store_local: bool,
-        data: Vec<u8>,
-        now: Instant,
-    ) -> Result<(), WireError> {
-        let message = AnyMessage::AssetUploadRequest(AssetUploadRequest {
-            asset_block: AssetUploadRequestAssetBlockBlock {
-                transaction_id,
-                r#type: asset_type,
-                tempfile: temp_file,
-                store_local,
-                asset_data: data,
-            },
-        });
-        self.send(&message, Reliability::Reliable, now)
-    }
-
-    /// Queues a `SendXferPacket` reliably: the chunk `data` for sequence
-    /// `packet` of upload `xfer_id`. `packet` already carries the `0x80000000`
-    /// last-packet flag for the final chunk.
-    pub(crate) fn send_send_xfer_packet(
-        &mut self,
-        xfer_id: XferId,
-        packet: u32,
-        data: Vec<u8>,
-        now: Instant,
-    ) -> Result<(), WireError> {
-        let message = AnyMessage::SendXferPacket(SendXferPacket {
-            xfer_id: SendXferPacketXferIDBlock {
-                id: xfer_id.get(),
-                packet,
-            },
-            data_packet: SendXferPacketDataPacketBlock { data },
         });
         self.send(&message, Reliability::Reliable, now)
     }

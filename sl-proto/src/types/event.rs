@@ -1301,23 +1301,6 @@ pub enum Event {
         /// The failure status.
         status: TransferStatus,
     },
-    /// A legacy UDP asset upload finished (`AssetUploadComplete`), in reply to an
-    /// [`AssetUploadRequest`](crate::Session::upload_asset_udp) — whether the
-    /// asset was inlined in the request or streamed over the `Xfer` path. Carries
-    /// the stored asset's UUID (the same value
-    /// [`Session::upload_asset_udp`](crate::Session::upload_asset_udp) returned),
-    /// its class, and the success flag. The legacy path stores only the asset; it
-    /// does not create an inventory item (use the CAPS
-    /// [`Command::UploadAsset`](../sl_client_tokio/enum.Command.html) path for
-    /// that).
-    AssetUploadComplete {
-        /// The stored asset's UUID.
-        asset_id: Uuid,
-        /// The uploaded asset class.
-        asset_type: AssetType,
-        /// Whether the simulator stored the asset successfully.
-        success: bool,
-    },
     /// A CAPS asset upload finished successfully (the modern two-step uploader:
     /// `NewFileAgentInventory`, `UploadBakedTexture`, or one of the
     /// `Update*AgentInventory` capabilities). Carries the newly stored asset's

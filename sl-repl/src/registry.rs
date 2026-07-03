@@ -4919,18 +4919,6 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |_args, _ctx| Ok(Command::QueryScriptPermissions),
         },
         CommandSpec {
-            name: "upload_asset_udp",
-            usage: "<asset_type-code> data=<hex> [temp_file=] [store_local=]",
-            build: |args, ctx| {
-                Ok(Command::UploadAssetUdp {
-                    asset_type: enum_arg(args, ctx, "asset_type", 0, parse_asset_type)?,
-                    data: args.bytes_or_empty(ctx, "data", 100)?,
-                    temp_file: args.bool_or(ctx, "temp_file", 101, false)?,
-                    store_local: args.bool_or(ctx, "store_local", 102, false)?,
-                })
-            },
-        },
-        CommandSpec {
             name: "upload_asset",
             usage: "folder_id=<id> asset_type=<code> inventory_type=<code> name=<n> data=<hex> …",
             build: |args, ctx| {

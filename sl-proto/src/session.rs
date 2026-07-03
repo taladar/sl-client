@@ -1,11 +1,11 @@
 //! The sans-I/O session state machine: login, circuit establishment,
 //! keep-alive, and clean logout, driven entirely by passed-in time.
 
-use crate::bookkeeping_ids::{InventoryCallbackId, PingId, XferId};
+use crate::bookkeeping_ids::{PingId, XferId};
 use crate::scoped_id::CircuitId;
 use crate::types::{
-    Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, NewInventoryItem,
-    Object, TerrainPatch, Throttle,
+    Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, Object, TerrainPatch,
+    Throttle,
 };
 use sl_types::key::{AgentKey, ExperienceKey, FriendKey, InventoryKey, ObjectKey};
 use sl_types::lsl::Rotation;
@@ -637,67 +637,6 @@ impl TextureDownload {
     }
 }
 
-/// The maximum asset payload (bytes) inlined directly in an `AssetUploadRequest`.
-/// Larger assets are streamed over the `Xfer` path: the request is sent with an
-/// empty `AssetData`, the simulator replies with a `RequestXfer`, and the client
-/// streams the bytes in [`XFER_CHUNK`]-sized `SendXferPacket`s. Kept well under
-/// the UDP MTU so the whole request fits in one datagram.
-const MAX_INLINE_ASSET: usize = 1200;
-
-/// The asset-data payload (bytes) carried in each upload `SendXferPacket`. The
-/// first packet additionally carries a 4-byte little-endian length prefix, which
-/// the simulator strips. Sized to stay within the UDP MTU.
-const XFER_CHUNK: usize = 1000;
-
-/// An in-flight legacy UDP asset upload (`AssetUploadRequest` →, for a large
-/// asset, `RequestXfer` → `SendXferPacket`/`ConfirmXferPacket` → ...). Keyed by
-/// the predicted asset id (`combine(transaction_id, secure_session_id)`), which
-/// the simulator echoes as the `RequestXfer`'s `VFileID`. For an inlined asset
-/// the bytes travel in the request itself and no `Xfer` follows; this record is
-/// kept only so [`Event::AssetUploadComplete`] can name the asset class.
-#[derive(Debug)]
-struct AssetUpload {
-    /// The full asset bytes to stream (empty once inlined in the request — the
-    /// terminating `AssetUploadComplete` carries the asset class and id).
-    data: Vec<u8>,
-    /// The number of `SendXferPacket`s already sent (the next packet's sequence).
-    sent: u32,
-}
-
-impl AssetUpload {
-    /// The total number of `Xfer` packets needed to send [`data`](Self::data),
-    /// at least one (an empty trailing packet is never sent — the data is
-    /// chunked, and a final partial or full chunk carries the last-packet flag).
-    fn packet_count(&self) -> u32 {
-        let chunks = self.data.len().div_ceil(XFER_CHUNK).max(1);
-        u32::try_from(chunks).unwrap_or(u32::MAX)
-    }
-
-    /// Builds the `Data` field for packet `sequence`: the chunk of [`data`](Self::data)
-    /// at that index, with packet 0 prefixed by the 4-byte little-endian total
-    /// asset length the simulator expects.
-    fn packet_data(&self, sequence: u32) -> Vec<u8> {
-        let start = usize::try_from(sequence)
-            .unwrap_or(usize::MAX)
-            .saturating_mul(XFER_CHUNK);
-        let end = start.saturating_add(XFER_CHUNK).min(self.data.len());
-        let chunk = self.data.get(start..end).unwrap_or_default();
-        let mut out = Vec::with_capacity(chunk.len().saturating_add(4));
-        if sequence == 0 {
-            // The first packet carries the total asset length as a 4-byte
-            // little-endian prefix (the simulator strips it). Packed by hand: the
-            // `to_le_bytes` helper is denied by the `little_endian_bytes` lint.
-            let len = u32::try_from(self.data.len()).unwrap_or(u32::MAX);
-            out.push(u8::try_from(len & 0xff).unwrap_or(0));
-            out.push(u8::try_from((len >> 8) & 0xff).unwrap_or(0));
-            out.push(u8::try_from((len >> 16) & 0xff).unwrap_or(0));
-            out.push(u8::try_from((len >> 24) & 0xff).unwrap_or(0));
-        }
-        out.extend_from_slice(chunk);
-        out
-    }
-}
-
 /// What a completed inbound `Xfer` file download should become — the routing
 /// tag stored alongside each in-flight download in
 /// [`Session::xfer_downloads`](Session::xfer_downloads). Every consumer of the
@@ -1077,36 +1016,6 @@ pub struct Session {
     /// (echoed in every `ImageData`/`ImagePacket`). Started by
     /// [`Session::request_texture`].
     texture_downloads: BTreeMap<Uuid, TextureDownload>,
-    /// The agent's secure session id, from the login response. Combined with an
-    /// upload's transaction id to predict the stored asset's UUID
-    /// ([`combine_uuids`](sl_wire::combine_uuids)), so an upload's
-    /// simulator-initiated `RequestXfer` (whose `VFileID` is that asset id) can be
-    /// matched to its pending upload.
-    secure_session_id: Uuid,
-    /// In-flight legacy UDP asset uploads, keyed by the predicted asset id
-    /// (`combine(transaction_id, secure_session_id)`). Started by
-    /// [`Session::upload_asset_udp`]; removed on `AssetUploadComplete`.
-    asset_uploads: BTreeMap<Uuid, AssetUpload>,
-    /// Maps an active upload `Xfer` id (chosen by the simulator in its
-    /// `RequestXfer`) to the predicted asset id keying [`asset_uploads`](Self::asset_uploads),
-    /// so an inbound `ConfirmXferPacket` can find the upload to advance.
-    upload_xfers: BTreeMap<XferId, Uuid>,
-    /// A monotonic counter for generating upload transaction ids (each packed
-    /// into a fresh transaction UUID; never zero).
-    next_upload_id: u128,
-    /// Legacy UDP asset uploads that should also create an inventory item once
-    /// the asset is stored — the fallback path of
-    /// [`Session::upload_asset_to_inventory_udp`], keyed by the predicted asset
-    /// id. On the `AssetUploadComplete` for that asset a `CreateInventoryItem` is
-    /// sent to make the item the modern CAPS `NewFileAgentInventory` upload would
-    /// have created in one step.
-    pending_inventory_uploads: BTreeMap<Uuid, NewInventoryItem>,
-    /// Maps the `CreateInventoryItem` callback id of a
-    /// [`pending_inventory_uploads`](Self::pending_inventory_uploads) item back to
-    /// its asset id, so the resulting `UpdateCreateInventoryItem` can be turned
-    /// into the unified [`Event::AssetUploaded`](crate::Event::AssetUploaded)
-    /// (rather than a bare `InventoryItemCreated`).
-    pending_upload_callbacks: BTreeMap<InventoryCallbackId, Uuid>,
     /// The scene-graph object cache, keyed by the circuit instance the objects
     /// belong to (the root region *and* every child/neighbour circuit), then by
     /// region-local id. Region-local ids are only unique within a circuit, so

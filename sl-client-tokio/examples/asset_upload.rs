@@ -1,7 +1,9 @@
 //! Logs in to a Second Life / OpenSim grid and uploads an asset (ROADMAP #23)
-//! over both paths: the legacy UDP `AssetUploadRequest` (which stores the asset
-//! with no inventory item) and the modern `NewFileAgentInventory` capability
-//! (which also creates an inventory item). Uploads a small notecard by default.
+//! over the modern `NewFileAgentInventory` capability (the two-step CAPS
+//! uploader, which stores the asset *and* creates an inventory item). Uploads a
+//! small notecard by default. The legacy UDP `AssetUploadRequest` path was
+//! dropped — both grids offer the capability and the modern viewer uploads
+//! exclusively over it.
 //!
 //! For a mesh, this only uploads the **fully-formed mesh asset bytes** — it does
 //! not run the viewer's model-import pipeline (LOD / physics-shape / cost
@@ -94,16 +96,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .send(Command::SetThrottle(Throttle::preset_1000()))
                     .await
                     .ok();
-                // Legacy UDP path: stores the asset, no inventory item.
-                command_tx
-                    .send(Command::UploadAssetUdp {
-                        asset_type: AssetType::Notecard,
-                        data: asset_data.clone(),
-                        temp_file: false,
-                        store_local: false,
-                    })
-                    .await
-                    .ok();
                 // Modern CAPS path: stores the asset and creates an inventory item.
                 match root_folder {
                     Some(folder_id) => {
@@ -131,11 +123,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     command_tx.send(Command::Logout).await.ok();
                 });
             }
-            Event::AssetUploadComplete {
-                asset_id,
-                asset_type,
-                success,
-            } => info!("AssetUploadComplete (UDP) {asset_id} ({asset_type:?}) success={success}"),
             Event::AssetUploaded {
                 new_asset,
                 new_inventory_item,
