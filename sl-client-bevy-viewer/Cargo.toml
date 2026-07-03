@@ -1,0 +1,21 @@
+[package]
+name = "sl-client-bevy-viewer"
+description = "Minimal Bevy visual viewer for Second Life / OpenSim: logs in and renders a region (terrain, prims, meshes, sculpts) with diffuse textures"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "viewer", "bevy", "renderer"]
+categories = ["game-development", "rendering", "visualization"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+
+[lints]
+workspace = true

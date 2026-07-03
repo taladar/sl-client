@@ -3259,6 +3259,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-client-bevy-viewer"
+version = "0.1.0"
+
+[[package]]
 name = "sl-client-tokio"
 version = "0.1.0"
 dependencies = [
@@ -3358,6 +3362,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-prim"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "sl-proto",
+]
+
+[[package]]
 name = "sl-proto"
 version = "0.1.0"
 dependencies = [
@@ -3425,6 +3437,13 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "url",
+]
+
+[[package]]
+name = "sl-sculpt"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
 ]
 
 [[package]]

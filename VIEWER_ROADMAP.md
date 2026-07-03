@@ -89,16 +89,16 @@ then tick the box here. Add sub-points as you discover them.
 
 ## Phase 0 — Scaffold the three new crates
 
-- [ ] **P0.1. Create the crate skeletons.** Add `sl-prim/`, `sl-sculpt/`,
+- [x] **P0.1. Create the crate skeletons.** Add `sl-prim/`, `sl-sculpt/`,
   `sl-client-bevy-viewer/`, each with a `Cargo.toml` (`edition = "2024"`,
   `rust-version = "1.94.0"`, `publish = false`, `[lints] workspace = true`), a
   `CHANGELOG.md` (`# Changelog` / `## 0.1.0` / `Initial Release`), and a
   `cliff.toml` copied from `sl-mesh/cliff.toml` with the crate's own
   `tag_pattern` (`^sl_prim_[0-9.]*$`, `^sl_sculpt_[0-9.]*$`,
   `^sl_client_bevy_viewer_[0-9.]*$`) and matching version trim.
-- [ ] **P0.2. Register the members.** Add `"sl-prim"`, `"sl-sculpt"`, and
+- [x] **P0.2. Register the members.** Add `"sl-prim"`, `"sl-sculpt"`, and
   `"sl-client-bevy-viewer"` to the root `Cargo.toml` `members` array.
-- [ ] **P0.3. Green build.** Stub `lib.rs` / `main.rs` so
+- [x] **P0.3. Green build.** Stub `lib.rs` / `main.rs` so
   `cargo build --workspace` succeeds.
 
 ## Phase 1 — Viewer shell (window, login, camera, quit)

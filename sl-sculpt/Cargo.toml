@@ -1,0 +1,24 @@
+[package]
+name = "sl-sculpt"
+description = "Sculpt-texture (RGB sculpt-map → geometry) tessellation for Second Life / OpenSim clients, reusing sl-prim's mesh output type"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "sculpt", "tessellation", "geometry"]
+categories = ["game-development", "rendering", "rendering::data-formats"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+[lints]
+workspace = true
