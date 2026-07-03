@@ -9,9 +9,47 @@ fit the asset-download path. Modern grids have moved most bulk data to
 [CAPS](caps.md) HTTP, but Xfer is still how several features work today.
 
 This chapter covers the **download** direction and the two consumers this
-client parses: the mute list and the task-inventory listing. Uploads (assets
-stream to the simulator over the same messages) and the estate-terrain transfer
-are noted only in passing here; a later revision will cover them in full.
+client parses (the mute list and the task-inventory listing), then the
+**upload** direction and where asset uploads fit. The section below first
+inventories *everything* that still rides Xfer and whether it has a CAPS
+alternative — because that determines what can ever be retired.
+
+## What still uses Xfer (and whether it could move to CAPS)
+
+Xfer is legacy, but it is **not** retirable wholesale: a shared transport can
+only be dropped once *every* feature riding it has a modern alternative that
+works on **both** Second Life and OpenSim. Auditing the consumers (verified
+against the Firestorm viewer and the OpenSim server sources):
+
+- **Mute list — fetch** (download): Xfer-only, with **no capability on either
+  grid**. The viewer source even notes it *"ideally should be turned into a
+  capability"* — it never was. This alone keeps the Xfer *download* path alive.
+- **Mute list — add / remove** (mutation): **not** Xfer at all — each change is
+  a per-entry UDP message (`UpdateMuteListEntry` / `RemoveMuteListEntry`), also
+  with no CAPS equivalent. The simulator regenerates the list file, which the
+  viewer re-fetches over Xfer.
+- **Prim (task) inventory listing** (download): Xfer on OpenSim. Second Life
+  also offers a `RequestTaskInventory` **capability** (HTTP `?task_id=`), but
+  **OpenSim has no such cap** — it serves the listing purely over UDP + Xfer. So
+  this is a *dual-path* feature (CAPS on SL, UDP + Xfer on OpenSim), not
+  CAPS-only.
+- **Region terrain (RAW heightmap)** (upload *and* download):
+  `EstateOwnerMessage "terrain"` plus an Xfer transfer, with **no capability**
+  on either grid. This keeps the Xfer *upload* path alive.
+- **Estate access / ban lists (bulk)**: can transfer both ways over Xfer;
+  Second Life also has an `EstateAccess` cap, and the per-entry
+  `EstateOwnerMessage` `estateaccessdelta` is the common UDP path.
+- **Generic named file** (download): any message that hands the client a raw
+  Xfer `filename` — fetched with `Session::request_xfer`.
+- **Legacy asset upload** (upload): a large `AssetUploadRequest` streams the
+  asset back over Xfer. This is the **one** Xfer consumer with a both-grids CAPS
+  replacement — `NewFileAgentInventory` — so it (and only it) is being retired
+  in favour of CAPS; see
+  [Uploads and transport choice](#uploads-and-transport-choice).
+
+Net: the Xfer transport itself **stays** (the mute list pins the download half,
+terrain RAW pins the upload half). Only the legacy *asset* upload migrates to
+CAPS, because it is the only rider with a modern path on both grids.
 
 ## The transfer
 
@@ -104,16 +142,29 @@ inventory, so a parsed item's asset id is optional.
 ## Uploads and transport choice
 
 Legacy asset **uploads** run over the same messages in the other direction: a
-large `AssetUploadRequest` is answered with a `RequestXfer`, and the client
-streams the asset back in `SendXferPacket`s. The modern alternative is the CAPS
-`NewFileAgentInventory` uploader (pure HTTP, no Xfer). The runtimes' single
-`UploadAsset` command auto-selects: it uses the CAPS uploader when the region
-advertises the capability, and falls back to the UDP asset-upload plus a
-`CreateInventoryItem` otherwise — either way surfacing the same
-`Event::AssetUploaded`.
+small asset is inlined in the `AssetUploadRequest`, while a large one is
+answered with a `RequestXfer` and the client streams it back in
+`SendXferPacket`s (driven by the simulator's `ConfirmXferPacket`s). This is the
+Xfer *upload* path's asset consumer.
 
-> A later revision will cover the upload direction in full (the asset-upload
-> Xfer stream and the CAPS uploader internals) and the estate-terrain transfer.
+The modern alternative is the CAPS `NewFileAgentInventory` uploader — a two-step
+HTTP exchange (POST the metadata, then PUT the bytes to the returned uploader
+URL), no Xfer involved. The runtimes' single `UploadAsset` command auto-selects:
+it uses the CAPS uploader when the region advertises the capability, and falls
+back to the UDP asset-upload plus a `CreateInventoryItem` otherwise — either way
+surfacing the same `Event::AssetUploaded`.
+
+Crucially, though, **both** Second Life and OpenSim advertise
+`NewFileAgentInventory` (OpenSim registers it in its capability seed), and the
+modern viewer uploads exclusively over it. So — unlike terrain RAW or the mute
+list, which have no CAPS path on either grid — the legacy UDP asset upload is
+the one Xfer rider with a both-grids modern replacement, and is therefore
+slated for removal: the planned `asset-upload` conformance case is CAPS-only.
+
+Retiring it will **not** remove the Xfer transport: the `RequestXfer` →
+`SendXferPacket` machinery stays for terrain RAW (and any future bulk-file
+upload), which have no CAPS equivalent on either grid. Only the asset-specific
+layer (`AssetUploadRequest` and its bookkeeping) would go.
 
 ---
 

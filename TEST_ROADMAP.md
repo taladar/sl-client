@@ -1755,8 +1755,11 @@ Edits need the estate-owner avatar.
   (in-memory + on-disk cache proven); **partial** on aditi — its `ViewerAsset`
   service persistently answers `503 Service Unavailable`, handled as a soft
   failure.)
-- [ ] `asset-upload` — upload via UDP and via CAPS
-  `NewFileAgentInventory`. `1av`.
+- [ ] `asset-upload` — upload an asset via the CAPS `NewFileAgentInventory`
+  uploader. `1av`. (CAPS-only: both grids offer the cap and the modern viewer
+  uploads exclusively over it, so the legacy UDP `AssetUploadRequest` path is
+  dropped — same reasoning as `asset-fetch-http`. The shared `Xfer` transport is
+  kept for its other users (mute list, terrain RAW); see `comms/xfer.md`.)
 - [ ] `baked-texture-upload` — upload a baked texture (CAPS). `1av`.
 
 ## Phase 14 — Appearance, attachments & animations `[both]`
