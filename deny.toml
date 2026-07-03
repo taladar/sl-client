@@ -74,6 +74,15 @@ ignore = [
   # { id = "RUSTSEC-0000-0000", reason = "you can specify a reason the advisory is ignored" },
   # "a-crate-that-is-yanked@0.1.1", # you can also ignore yanked crate versions if you wish
   # { crate = "a-crate-that-is-yanked@0.1.1", reason = "you can specify why you are ignoring the yanked crate" },
+  # The following three advisories are transitive dependencies of winit's
+  # Wayland backend (client-side window decorations, `sctk-adwaita`), pulled in
+  # by `bevy_winit` when `sl-client-bevy-viewer` enables the full Bevy
+  # `DefaultPlugins`. None has an available upgrade path at the versions winit
+  # 0.30 / wayland-scanner 0.31 pin, and none is on a runtime attack surface for
+  # a viewer that only ever talks to trusted grids.
+  { id = "RUSTSEC-2026-0194", reason = "quick-xml <0.41 DoS: reachable only from wayland-scanner, a build-time proc-macro parsing the compositor's own trusted protocol XML — never runtime/untrusted input. wayland-scanner 0.31.10 pins quick-xml =0.39, so no upgrade path." },
+  { id = "RUSTSEC-2026-0195", reason = "quick-xml <0.41 DoS: same as RUSTSEC-2026-0194 — build-time-only via wayland-scanner, no upgrade path at the pinned version." },
+  { id = "RUSTSEC-2026-0192", reason = "ttf-parser unmaintained: pulled in via ab_glyph -> sctk-adwaita for winit's Wayland title-bar font rendering; no maintained replacement and no runtime exposure to untrusted fonts." },
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
@@ -109,6 +118,10 @@ allow = [
   "BSD-3-Clause",
   "ISC",
   "CDLA-Permissive-2.0",
+  # Public-domain-equivalent (FSF Free/Libre); pulled in by `hexf-parse` (and
+  # `blake3` / `constant_time_eq`) from the wgpu / naga render stack that
+  # sl-client-bevy-viewer's full Bevy DefaultPlugins bring in.
+  "CC0-1.0",
 ]
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the

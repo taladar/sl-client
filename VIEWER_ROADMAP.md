@@ -103,17 +103,17 @@ then tick the box here. Add sub-points as you discover them.
 
 ## Phase 1 — Viewer shell (window, login, camera, quit)
 
-- [ ] **P1.1. Login from credentials.** `clap` args `--credentials <path>` /
+- [x] **P1.1. Login from credentials.** `clap` args `--credentials <path>` /
   `--avatar <name>`; load via `Credentials::load().select()`; resolve the grid
   from `login_uri` / `grid` (default local `http://127.0.0.1:9000/`); acquire
   MFA via `Avatar::acquire_mfa()` + `LoginRequest::with_mfa` when configured.
   Build `LoginParams` and add `SlClientPlugin` (mirror `survey_probe.rs`).
-- [ ] **P1.2. Windowed app.** `App` with `DefaultPlugins`; spawn a `Camera3d`
+- [x] **P1.2. Windowed app.** `App` with `DefaultPlugins`; spawn a `Camera3d`
   and a directional light. Milestone: a window opens and the session logs in
   (tracing shows the circuit + region handshake).
-- [ ] **P1.3. Debug fly-camera.** WASD translate, Shift = fast, mouse-look on a
+- [x] **P1.3. Debug fly-camera.** WASD translate, Shift = fast, mouse-look on a
   captured cursor; camera starts at the agent login position (via `sl_to_bevy`).
-- [ ] **P1.4. Quit + draw distance.** `Esc` / `Q` sends
+- [x] **P1.4. Quit + draw distance.** `Esc` / `Q` sends
   `Command::Logout` then `AppExit::Success`; also exit on `LoggedOut` /
   `Disconnected`. On `RegionHandshakeComplete` send
   `Command::SetDrawDistance(Distance::new(128.0))` so the sim streams content.
