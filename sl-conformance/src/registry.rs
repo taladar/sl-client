@@ -134,6 +134,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::notecard_create_update::NotecardCreateUpdate),
         Box::new(crate::cases::baked_texture_upload::BakedTextureUpload),
         Box::new(crate::cases::server_appearance_bake::ServerAppearanceBake),
+        Box::new(crate::cases::wearables_request::WearablesRequest),
     ]
 }
 

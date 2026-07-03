@@ -80,3 +80,4 @@ pub mod teleport_offer_accept;
 pub mod texture_fetch_http;
 pub mod throttle_set;
 pub mod typing_indicator;
+pub mod wearables_request;
