@@ -9,6 +9,7 @@ pub mod ais3_folder_lifecycle;
 pub mod asset_decode;
 pub mod asset_fetch_http;
 pub mod asset_upload;
+pub mod attach_detach;
 pub mod avatar_notes;
 pub mod avatar_properties;
 pub mod baked_texture_upload;
