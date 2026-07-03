@@ -6,6 +6,7 @@
 //! stdout, so the runner can stamp and store the result.
 
 pub mod ais3_folder_lifecycle;
+pub mod animation_play_stop;
 pub mod asset_decode;
 pub mod asset_fetch_http;
 pub mod asset_upload;

@@ -138,6 +138,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::current_outfit_folder::CurrentOutfitFolder),
         Box::new(crate::cases::set_appearance::SetAppearance),
         Box::new(crate::cases::attach_detach::AttachDetach),
+        Box::new(crate::cases::animation_play_stop::AnimationPlayStop),
     ]
 }
 
