@@ -1645,6 +1645,29 @@ Edits need the estate-owner avatar.
       deferred with the batch (SL answers the same UDP requests; it may
       additionally serve the layer tile over a CAPS path, but the UDP replies
       still arrive).
+- [ ] `terrain-raw-transfer-download` — download the region's RAW heightmap over
+  the `Xfer` path. `[opensim] 1av` (estate owner). Sends `EstateOwnerMessage
+  "terrain"` with the `["download filename", <name>]` strings; the simulator
+  serialises the region heightmap to an LL RAW file and streams it back over the
+  **Xfer download** path, surfaced once reassembled. Asserts a non-empty RAW
+  terrain file of a plausible size arrives. Region-owner/god gated (Firestorm
+  enables the button only for `owner_or_god`), so runs as `--avatar
+  estate-owner`, who owns the local Default Region. `[opensim]` only — we own no
+  region on aditi (same constraint as the other estate-owner cases). Exercises
+  the Xfer download direction for a non-mute-list consumer; likely needs new
+  client code (the `"terrain"` `EstateOwnerMessage` + a terrain `XferPurpose`).
+- [ ] `terrain-raw-transfer-upload` — upload a RAW heightmap over the `Xfer`
+  path. `[opensim] 1av` (estate owner). Sends `EstateOwnerMessage
+  "terrain"` with `["upload filename", <name>]`; the simulator answers with a
+  `RequestXfer` and the client streams the RAW back over the **Xfer upload**
+  path (`SendXferPacket`s driven by `ConfirmXferPacket`s). Asserts the region
+  terrain changes (the re-broadcast `LayerData` patch, as `modify-land`
+  observes). This is the case that pins the Xfer **upload** direction — its only
+  consumer once the legacy UDP asset upload is dropped (see `comms/xfer.md`).
+  Same estate-owner gating and `[opensim]`-only constraint. Needs new client
+  code: a generalised Xfer-upload send of a caller-supplied file (distinct from
+  the asset-upload trigger). To leave the region clean, download the current RAW
+  first and re-upload it, or restore with a `Revert` brush afterwards.
 
 ## Phase 12 — Teleport (state machine) `[both]`
 
