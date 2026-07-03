@@ -162,7 +162,7 @@ then tick the box here. Add sub-points as you discover them.
 
 ## Phase 3 — `sl-prim` (pure Linden prim tessellation)
 
-- [ ] **P3.1. Types & LOD.** `PrimLod` newtype + a detail→step-count map
+- [x] **P3.1. Types & LOD.** `PrimLod` newtype + a detail→step-count map
   (details `{1.0, 1.5, 2.5, 4.0}`, profile sides `6 * detail`); output
   `PrimMesh { faces: Vec<PrimFace> }`, `PrimFace { positions, normals, uvs,
   indices, face_id }` (mirror `sl_mesh::DecodedMesh` / `Submesh`). Confirm or
