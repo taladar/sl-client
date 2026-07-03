@@ -95,8 +95,8 @@ pub use sl_proto::{
     ThrottleError, TimestampFormat, TransactionId, TransferId, TransferStatus, Transmit,
     UpdatableAssetType, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable,
     WearableType, XferId, avatar_texture, decode_particle_system, decode_texture_anim,
-    decode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid, j2c,
-    particle_pattern, pcode, sim_access, texture_anim_mode,
+    decode_texture_entry, encode_texture_entry, grid_to_handle, group_powers, handle_to_global,
+    handle_to_grid, j2c, particle_pattern, pcode, sim_access, texture_anim_mode,
 };
 // `sl_texture::TextureEntry` (the store's LOD-aware texture object) and
 // `TextureReadLease` are reachable as `sl_texture::…`; they are not re-exported
