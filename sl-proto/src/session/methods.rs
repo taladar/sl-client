@@ -1419,10 +1419,23 @@ impl Session {
                     });
                 }
             }
-            AnyMessage::RegionHandshake(_) => {
+            AnyMessage::RegionHandshake(handshake) => {
                 if let Some(circuit) = self.children.get_mut(&from) {
                     circuit.send_region_handshake_reply(now)?;
                 }
+                // Surface the neighbour region's identity (terrain textures +
+                // elevation bands, flags, maturity, …) just like the root
+                // handshake, keyed by this child circuit's region handle, so a
+                // viewer can shade neighbour terrain with its own textures.
+                let region_handle = self
+                    .circuit_id_for(from)
+                    .and_then(|circuit_id| self.regions.get(&circuit_id).copied())
+                    .unwrap_or(RegionHandle(0));
+                self.events
+                    .push_back(Event::RegionInfoHandshake(Box::new(region_identity(
+                        handshake,
+                        region_handle,
+                    )?)));
             }
             AnyMessage::PacketAck(ack) => {
                 if let Some(circuit) = self.children.get_mut(&from) {

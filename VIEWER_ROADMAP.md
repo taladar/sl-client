@@ -21,6 +21,10 @@ then tick the box here. Add sub-points as you discover them.
 
 - **`sl-prim`** — new pure crate (no Bevy, no I/O): Linden prim tessellation
   (path × profile sweep → geometry), mirroring `sl-mesh` / `sl-texture`.
+- **`sl-terrain`** — new pure crate (no Bevy, no I/O): terrain texture-splat
+  blend-weight math (elevation bilinear interpolation + Perlin transition band →
+  per-point four-texture weight), added in P2.2, mirroring `sl-prim` /
+  `sl-mesh`.
 - **`sl-sculpt`** — new pure crate: sculpt-texture (RGB sculpt-map) → geometry,
   reusing `sl-prim`'s `PrimMesh` / `PrimFace` output type.
 - **`sl-client-bevy`** — a small addition: a `to_bevy_prim_mesh` conversion +
@@ -125,15 +129,36 @@ then tick the box here. Add sub-points as you discover them.
   placed at its `patch_x * size, patch_y * size` origin (`sl_to_bevy`); keep a
   `HashMap<(patch_x, patch_y), Entity>` and replace on update. One flat
   `StandardMaterial` (no splatting). Verify terrain renders on OpenSim.
-- [ ] **P2.2. Height-blended texture splatting.** Replace the flat ground
+- [x] **P2.2. Height-blended texture splatting.** Replace the flat ground
   material with the real Second Life terrain shading: the region's four
   `TERRAIN_TEXTURE_*` UUIDs and per-corner low/high elevation ranges (from the
   `RegionHandshake` / region info), blended by elevation with a Perlin-noise
   transition band (Firestorm `llvosurfacepatch` / terrain shaders,
   `llvlcomposition` for the CPU reference). Factor the Bevy-free blend-weight
-  math into a new **`sl-terrain`** crate (mirroring `sl-prim` / `sl-mesh`),
-  with the `StandardMaterial`/custom material living in `sl-client-bevy`; fetch
-  the four textures through the existing texture pipeline.
+  math into a new **`sl-terrain`** crate (mirroring `sl-prim` / `sl-mesh`), with
+  the `StandardMaterial`/custom material living in `sl-client-bevy`; fetch the
+  four textures through the existing texture pipeline. **Done (GPU path):**
+  `sl-terrain` emits a per-vertex four-component blend weight; a custom
+  `TerrainMaterial` (`AsBindGroup`, four detail-texture bindings) +
+  `terrain.wgsl` in `sl-client-bevy` (behind a new `bevy_pbr` feature the viewer
+  enables) blends the four live textures on the GPU with the interpolated
+  weights + simple sun lighting. `RegionIdentity` gained a
+  `terrain: RegionTerrainComposition` field.
+- [x] **P2.3. Seamless patches + multi-region terrain.** Two fixes discovered
+  when rendering live: (a) each patch mesh now spans its full 16 m edge —
+  `(size+1)²` vertices sampling the far edge from the north/east/NE neighbour
+  patches (Firestorm `LLSurfacePatch` stitching) — closing the 1 m gaps that
+  made P2.1/P2.2 terrain look fragmented; (b) terrain now streams and renders
+  across the agent's region **and** its neighbour child circuits: patches are
+  keyed by `(region_handle, patch_x, patch_y)`, each region has its own
+  composition + splat material, and patches are placed at a global offset from a
+  moving scene origin that follows the root region (recenter shifts the
+  fly-camera by the same delta so `f32` precision holds far from the login
+  region while the world stays continuous across border crossings). The draw
+  distance was raised to 512 m so the sim announces neighbours. Required one
+  `sl-proto` fix: a neighbour's `RegionHandshake` on a child circuit now also
+  emits `RegionInfoHandshake` (previously dropped), so neighbour terrain gets
+  its own textures rather than the placeholder.
 
 ## Phase 3 — `sl-prim` (pure Linden prim tessellation)
 

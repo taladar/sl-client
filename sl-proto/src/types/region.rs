@@ -59,6 +59,39 @@ pub struct RegionIdentity {
     pub water_height: f32,
     /// The billing factor applied to land tier in this region.
     pub billable_factor: f32,
+    /// The region's terrain-compositing parameters — the four ground/detail
+    /// texture ids and per-corner elevation bands — used to shade the terrain by
+    /// altitude (from the `RegionHandshake` `RegionInfo` block).
+    pub terrain: RegionTerrainComposition,
+}
+
+/// A region's terrain texture-compositing parameters, parsed from the
+/// `RegionHandshake` `RegionInfo` block: the four ground ("detail") texture ids
+/// and, for each of the region's four corners, the elevation at which the
+/// texture blend begins and the elevation range it spans.
+///
+/// A viewer shades the ground by altitude, blending between the four detail
+/// textures as the terrain rises through the per-corner bands (see the
+/// `sl-terrain` crate for the blend-weight math). OpenSim and legacy Second Life
+/// use the `terrain_detail0..3` texture ids; the older `terrain_base0..3` ids
+/// are not carried here.
+///
+/// (Not `Eq`: the elevation fields are `f32`.)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RegionTerrainComposition {
+    /// The four ground/detail texture ids (`TerrainDetail0..3`), from the
+    /// lowest-elevation texture (index 0) to the highest (index 3).
+    pub detail_textures: [Uuid; 4],
+    /// The per-corner start heights (`TerrainStartHeight00 / 01 / 10 / 11`), the
+    /// elevation at which each corner's blend begins. The corners are ordered
+    /// `00, 01, 10, 11`, which the viewer treats as south-west, south-east,
+    /// north-west, north-east.
+    pub start_heights: [f32; 4],
+    /// The per-corner height ranges (`TerrainHeightRange00 / 01 / 10 / 11`), the
+    /// elevation span over which each corner blends through all four detail
+    /// textures, in the same `00, 01, 10, 11` corner order as
+    /// [`Self::start_heights`].
+    pub height_ranges: [f32; 4],
 }
 
 /// A region's agent and object capacity plus estate/terrain/chat/combat settings,

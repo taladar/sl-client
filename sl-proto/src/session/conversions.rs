@@ -18,9 +18,10 @@ use crate::types::{
     MuteType, NavMeshBuildStatus, NavMeshStatus, NeighborInfo, Object, ObjectProperties,
     OpenRegionInfo, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo,
     PickKey, PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
-    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits, RequiredVoiceVersion,
-    RestoreItem, SaleType, Scale, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    SetDisplayNameReply, SkySettings, TaskInventoryItem, WaterSettings, avatar_texture,
+    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits,
+    RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply, SkySettings,
+    TaskInventoryItem, WaterSettings, avatar_texture,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
@@ -518,14 +519,34 @@ pub(crate) fn region_identity(
         is_estate_manager: info.is_estate_manager,
         water_height: info.water_height,
         billable_factor: info.billable_factor,
+        terrain: RegionTerrainComposition {
+            detail_textures: [
+                info.terrain_detail0,
+                info.terrain_detail1,
+                info.terrain_detail2,
+                info.terrain_detail3,
+            ],
+            start_heights: [
+                info.terrain_start_height00,
+                info.terrain_start_height01,
+                info.terrain_start_height10,
+                info.terrain_start_height11,
+            ],
+            height_ranges: [
+                info.terrain_height_range00,
+                info.terrain_height_range01,
+                info.terrain_height_range10,
+                info.terrain_height_range11,
+            ],
+        },
     })
 }
 
 /// Builds a `RegionHandshake` message from a [`RegionIdentity`] — the server-side
 /// inverse of [`region_identity`]. The grid coordinates / handle are *not* wire
 /// fields of the handshake (the client derives them from the circuit), so they
-/// are not encoded here; the terrain texture/height fields are left at their
-/// defaults.
+/// are not encoded here; the legacy `terrain_base0..3` texture ids are left nil
+/// (unused by modern grids).
 pub(crate) fn region_handshake_message(
     identity: &RegionIdentity,
 ) -> sl_wire::messages::RegionHandshake {
@@ -534,6 +555,10 @@ pub(crate) fn region_handshake_message(
         RegionHandshakeRegionInfo4Block, RegionHandshakeRegionInfoBlock,
     };
     let nil = Uuid::nil();
+    let terrain = &identity.terrain;
+    let [detail0, detail1, detail2, detail3] = terrain.detail_textures;
+    let [start00, start01, start10, start11] = terrain.start_heights;
+    let [range00, range01, range10, range11] = terrain.height_ranges;
     RegionHandshake {
         region_info: RegionHandshakeRegionInfoBlock {
             region_flags: identity.region_flags,
@@ -548,18 +573,18 @@ pub(crate) fn region_handshake_message(
             terrain_base1: nil,
             terrain_base2: nil,
             terrain_base3: nil,
-            terrain_detail0: nil,
-            terrain_detail1: nil,
-            terrain_detail2: nil,
-            terrain_detail3: nil,
-            terrain_start_height00: 0.0,
-            terrain_start_height01: 0.0,
-            terrain_start_height10: 0.0,
-            terrain_start_height11: 0.0,
-            terrain_height_range00: 0.0,
-            terrain_height_range01: 0.0,
-            terrain_height_range10: 0.0,
-            terrain_height_range11: 0.0,
+            terrain_detail0: detail0,
+            terrain_detail1: detail1,
+            terrain_detail2: detail2,
+            terrain_detail3: detail3,
+            terrain_start_height00: start00,
+            terrain_start_height01: start01,
+            terrain_start_height10: start10,
+            terrain_start_height11: start11,
+            terrain_height_range00: range00,
+            terrain_height_range01: range01,
+            terrain_height_range10: range10,
+            terrain_height_range11: range11,
         },
         region_info2: RegionHandshakeRegionInfo2Block {
             region_id: identity.region_id,

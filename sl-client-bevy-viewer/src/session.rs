@@ -25,8 +25,10 @@ use crate::coords::sl_to_bevy_vec;
 /// The draw distance requested once the region handshake completes, in metres.
 ///
 /// The sim only streams object/terrain updates within the agent's interest
-/// radius, so the viewer must announce one before any content arrives.
-const DRAW_DISTANCE_METRES: f64 = 128.0;
+/// radius, so the viewer must announce one before any content arrives. A full
+/// region is 256 m; a draw distance past that lets the sim announce the
+/// neighbouring regions (opening child circuits) so their terrain streams too.
+const DRAW_DISTANCE_METRES: f64 = 512.0;
 
 /// How long, in seconds, to wait for a clean `LoggedOut` after a quit request
 /// before forcing the exit anyway.

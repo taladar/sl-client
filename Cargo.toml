@@ -16,6 +16,7 @@ members = [
     "sl-repl-tokio",
     "sl-sculpt",
     "sl-survey",
+    "sl-terrain",
     "sl-texture",
     "sl-wire",
 ]

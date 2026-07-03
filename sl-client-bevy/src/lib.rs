@@ -85,19 +85,19 @@ pub use sl_proto::{
     PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId,
     ReflectionProbe, ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings,
     RegionCoordinates, RegionFlags, RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits,
-    RegionLocalObjectId, RegionLocalParcelId, RegionName, Reliability, RenderMaterialEntry,
-    RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams, Rotation, SaleType,
-    ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl, ScriptControlAction,
-    ScriptDialog, ScriptLanguage, ScriptPermissionRequest, ScriptPermissions, ScriptTarget,
-    ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber,
-    SetDisplayNameReply, SimulatorFeatures, SoundFlags, SoundPreload, StartLocation,
-    StartLocationParseError, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply,
-    TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry, TextureFace, TextureKey,
-    Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit,
-    UpdatableAssetType, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, Wearable,
-    WearableType, XferId, avatar_texture, decode_particle_system, decode_texture_anim,
-    decode_texture_entry, encode_texture_entry, grid_to_handle, group_powers, handle_to_global,
-    handle_to_grid, particle_pattern, pcode, sim_access, texture_anim_mode,
+    RegionLocalObjectId, RegionLocalParcelId, RegionName, RegionTerrainComposition, Reliability,
+    RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams, Rotation,
+    SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl,
+    ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey,
+    SequenceNumber, SetDisplayNameReply, SimulatorFeatures, SoundFlags, SoundPreload,
+    StartLocation, StartLocationParseError, TaskInventoryItem, TaskInventoryKey,
+    TaskInventoryReply, TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry,
+    TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat,
+    TransactionId, TransferId, Transmit, UpdatableAssetType, Uuid, Vector, VoiceAccountInfo,
+    VoiceProvisionRequest, Wearable, WearableType, XferId, avatar_texture, decode_particle_system,
+    decode_texture_anim, decode_texture_entry, encode_texture_entry, grid_to_handle, group_powers,
+    handle_to_global, handle_to_grid, particle_pattern, pcode, sim_access, texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -130,6 +130,8 @@ pub use sl_asset::{
 
 pub use crate::assets::BevyAssetFetcher;
 pub use crate::meshes::{BevyMeshFetcher, to_bevy_mesh, to_bevy_meshes};
+#[cfg(feature = "bevy_pbr")]
+pub use crate::terrain::{ATTRIBUTE_TERRAIN_WEIGHTS, TerrainMaterial, TerrainMaterialPlugin};
 pub use crate::textures::{BevyTextureFetcher, to_bevy_image};
 
 pub mod assets;
@@ -143,6 +145,8 @@ mod inventory_cache;
 mod materials;
 mod media;
 pub mod meshes;
+#[cfg(feature = "bevy_pbr")]
+pub mod terrain;
 pub mod textures;
 mod upload;
 mod voice;

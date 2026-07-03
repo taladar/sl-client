@@ -15,6 +15,13 @@ categories = ["network-programming", "game-development"]
 
 exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
+[features]
+# Off by default: the headless client needs no renderer. The windowed viewer
+# enables this to pull in Bevy's PBR/render stack and the `TerrainMaterial`
+# (a custom 4-way terrain texture-splat material + shader).
+default = []
+bevy_pbr = ["bevy/bevy_pbr"]
+
 [dependencies]
 arc-swap = { version = "1.9.2" }
 async-trait = { version = "0.1.89" }

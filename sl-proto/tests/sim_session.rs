@@ -31,8 +31,8 @@ mod test {
         ParcelDetails, ParcelKey, ParcelObjectOwner, ParcelReturnType, Permissions, Permissions5,
         PingId, PlacesResult, PointAtType, Postcard, PrimShapeParams, ProductType, QueryId,
         RegionCoordinates, RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId,
-        RegionStats, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
-        RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
+        RegionStats, RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, RezAttachment,
+        RezObjectParams, RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
         ScriptControlAction, ScriptPermissions, ServerError, ServerEvent, Session,
         SetDisplayNameReply, SimSession, SimStatId, SimWideDeleteFlags, SimulatorTime,
         StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
@@ -4476,6 +4476,16 @@ mod test {
             is_estate_manager: true,
             water_height: 20.0,
             billable_factor: 1.0,
+            terrain: RegionTerrainComposition {
+                detail_textures: [
+                    uuid::Uuid::from_u128(0xD0),
+                    uuid::Uuid::from_u128(0xD1),
+                    uuid::Uuid::from_u128(0xD2),
+                    uuid::Uuid::from_u128(0xD3),
+                ],
+                start_heights: [1.0, 2.0, 3.0, 4.0],
+                height_ranges: [10.0, 20.0, 30.0, 40.0],
+            },
         };
         sim.send_region_handshake(&identity, now)?;
 
@@ -4507,6 +4517,24 @@ mod test {
             .ok_or("a RegionInfo4 block")?;
         assert_eq!(info4.region_flags_extended, 0x1_0000_0040);
         assert_eq!(info4.region_protocols, 0x5);
+        // The terrain detail textures and per-corner elevation bands survive the
+        // encode, in the `00, 01, 10, 11` corner order.
+        assert_eq!(
+            handshake.region_info.terrain_detail0,
+            uuid::Uuid::from_u128(0xD0)
+        );
+        assert_eq!(
+            handshake.region_info.terrain_detail3,
+            uuid::Uuid::from_u128(0xD3)
+        );
+        assert_eq!(
+            handshake.region_info.terrain_start_height00.to_bits(),
+            1.0_f32.to_bits()
+        );
+        assert_eq!(
+            handshake.region_info.terrain_height_range10.to_bits(),
+            30.0_f32.to_bits()
+        );
         Ok(())
     }
 

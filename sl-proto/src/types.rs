@@ -436,8 +436,8 @@ pub use parcel::{
 };
 pub use pathfinding::{NavMeshBuildStatus, NavMeshStatus};
 pub use region::{
-    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits, RegionStats, SimStatId,
-    SimulatorTime,
+    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits, RegionStats,
+    RegionTerrainComposition, SimStatId, SimulatorTime,
 };
 pub use report::Postcard;
 pub use script::{

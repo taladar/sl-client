@@ -21,6 +21,7 @@ use clap::Parser as _;
 use sl_client_bevy::{
     ChatLogConfig, ClientDirectories, InventoryCacheConfig, LoginFailure, LoginParams,
     LoginRequest, MfaChallenge, SlClientPlugin, SlLoginRejected, SlMfaChallenge, StartLocation,
+    TerrainMaterialPlugin,
 };
 use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
@@ -28,7 +29,7 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberI
 
 use crate::camera::{FlyCamera, fly_camera};
 use crate::session::{ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input};
-use crate::terrain::{TerrainState, update_terrain};
+use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
 
 /// The local OpenSim grid login URI used when none is otherwise resolved.
 const DEFAULT_LOGIN_URI: &str = "http://127.0.0.1:9000/";
@@ -214,6 +215,7 @@ fn run_session(params: &LoginParams) -> LoginOutcome {
         inventory_cache_config: InventoryCacheConfig::default(),
         background_inventory_fetch: false,
     })
+    .add_plugins(TerrainMaterialPlugin)
     .init_resource::<ViewerSession>()
     .init_resource::<LoginOutcome>()
     .init_resource::<TerrainState>()
@@ -223,7 +225,9 @@ fn run_session(params: &LoginParams) -> LoginOutcome {
         (
             capture_login_outcome,
             drive_session,
-            update_terrain,
+            // Recenter (origin follows the root region) before folding terrain
+            // events, so patches are placed on the current origin.
+            (recenter_terrain, update_terrain).chain(),
             handle_quit_input,
             enforce_quit_deadline,
             fly_camera,

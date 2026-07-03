@@ -5662,6 +5662,8 @@ dependencies = [
  "pretty_assertions",
  "sl-client-bevy",
  "sl-repl",
+ "sl-terrain",
+ "sl-texture",
  "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",
@@ -5872,6 +5874,13 @@ dependencies = [
  "tracing-journald",
  "tracing-subscriber",
  "url",
+]
+
+[[package]]
+name = "sl-terrain"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
 ]
 
 [[package]]
