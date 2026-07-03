@@ -3256,7 +3256,7 @@ pub(crate) fn inventory_descendents_from_llsd(body: &Llsd) -> Vec<Event> {
                 .unwrap_or(&[]);
             let items = folder.get("items").and_then(Llsd::as_array).unwrap_or(&[]);
             Event::InventoryDescendents {
-                folder_id: InventoryFolderKey::from(uuid_member(folder, "folder_id")),
+                folder_id: InventoryFolderKey::from(uuid_member_lenient(folder, "folder_id")),
                 version: i32_member(folder, "version"),
                 descendents: i32_member(folder, "descendents"),
                 folders: categories
@@ -3403,10 +3403,16 @@ pub(crate) fn created_category_from_llsd(body: &Llsd) -> Option<InventoryFolder>
 }
 
 /// Builds an [`InventoryFolder`] from a CAPS `categories` entry.
+///
+/// The ids are read leniently: OpenSim's `FetchInventoryDescendents2` encodes the
+/// nested `category_id` / `parent_id` as LLSD `uuid`, but Second Life encodes them
+/// as LLSD `string` (only the top-level folder envelope uses `uuid`), so a strict
+/// `uuid` read would coerce every Second Life sub-folder id to nil and the caller
+/// would drop it as a placeholder — silently losing the whole sub-tree.
 pub(crate) fn inventory_folder_from_llsd(category: &Llsd) -> InventoryFolder {
     InventoryFolder {
-        folder_id: InventoryFolderKey::from(uuid_member(category, "category_id")),
-        parent_id: crate::types::optional_key_from_wire(uuid_member(category, "parent_id")),
+        folder_id: InventoryFolderKey::from(uuid_member_lenient(category, "category_id")),
+        parent_id: crate::types::optional_key_from_wire(uuid_member_lenient(category, "parent_id")),
         name: string_member(category, "name"),
         folder_type: i8::try_from(i32_member(category, "type_default")).unwrap_or(-1),
         version: i32_member(category, "version"),
@@ -3415,6 +3421,12 @@ pub(crate) fn inventory_folder_from_llsd(category: &Llsd) -> InventoryFolder {
 
 /// Builds an [`InventoryItem`] from a CAPS `items` entry (with nested
 /// `permissions` and `sale_info` maps).
+///
+/// The ids are read leniently for the same reason as
+/// [`inventory_folder_from_llsd`]: Second Life encodes the item's `item_id` /
+/// `parent_id` / `asset_id` (and the nested permission ids) as LLSD `string`,
+/// OpenSim as LLSD `uuid`; a strict read would nil every Second Life item id and
+/// the caller would drop the entire folder's contents.
 pub(crate) fn inventory_item_from_llsd(item: &Llsd) -> Option<InventoryItem> {
     let permissions = item.get("permissions");
     let sale_info = item.get("sale_info");
@@ -3423,13 +3435,13 @@ pub(crate) fn inventory_item_from_llsd(item: &Llsd) -> Option<InventoryItem> {
             .map_or(0, |p| i32_member(p, key))
             .cast_unsigned()
     };
-    let perm_uuid = |key: &str| permissions.map_or_else(Uuid::nil, |p| uuid_member(p, key));
+    let perm_uuid = |key: &str| permissions.map_or_else(Uuid::nil, |p| uuid_member_lenient(p, key));
     Some(InventoryItem {
-        item_id: InventoryKey::from(uuid_member(item, "item_id")),
-        folder_id: InventoryFolderKey::from(uuid_member(item, "parent_id")),
+        item_id: InventoryKey::from(uuid_member_lenient(item, "item_id")),
+        folder_id: InventoryFolderKey::from(uuid_member_lenient(item, "parent_id")),
         name: string_member(item, "name"),
         description: string_member(item, "desc"),
-        asset_id: uuid_member(item, "asset_id"),
+        asset_id: uuid_member_lenient(item, "asset_id"),
         item_type: i8::try_from(i32_member(item, "type")).unwrap_or(-1),
         inv_type: i8::try_from(i32_member(item, "inv_type")).unwrap_or(-1),
         flags: i32_member(item, "flags").cast_unsigned(),
@@ -4824,7 +4836,7 @@ mod caps_serializer_tests {
         Event, GroupMember, GroupMembership, ImDialog, InstantMessage, InventoryFolder,
         InventoryItem, LandingType, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus,
     };
-    use sl_wire::{Permissions, Permissions5};
+    use sl_wire::{Llsd, Permissions, Permissions5};
 
     /// A V4 socket address for the given octets and port.
     fn addr(a: u8, b: u8, c: u8, d: u8, port: u16) -> SocketAddr {
@@ -5275,6 +5287,66 @@ mod caps_serializer_tests {
             events
         );
         Ok(())
+    }
+
+    #[test]
+    fn inventory_descendents_parses_string_encoded_uuids() {
+        // Second Life's `FetchInventoryDescendents2` encodes the nested category /
+        // item ids as LLSD `string` (only the top-level folder envelope uses
+        // `uuid`), unlike OpenSim which uses `uuid` throughout. A strict `uuid`
+        // read would coerce every Second Life sub-folder / item id to nil, and the
+        // parser's nil-id placeholder filter would then drop the whole folder's
+        // contents — so the lenient parse must accept the string form.
+        let folder_id = Uuid::from_u128(0xA0);
+        let item_id = Uuid::from_u128(0xA1);
+        let asset_id = Uuid::from_u128(0xA2);
+        let sub_id = Uuid::from_u128(0xA3);
+        let item = super::llsd_map(vec![
+            ("item_id", Llsd::String(item_id.to_string())),
+            ("parent_id", Llsd::String(folder_id.to_string())),
+            ("asset_id", Llsd::String(asset_id.to_string())),
+            ("name", Llsd::String("Shape".to_owned())),
+            ("type", Llsd::Integer(13)),
+            ("inv_type", Llsd::Integer(18)),
+            ("flags", Llsd::Integer(0)),
+        ]);
+        let category = super::llsd_map(vec![
+            ("category_id", Llsd::String(sub_id.to_string())),
+            ("parent_id", Llsd::String(folder_id.to_string())),
+            ("name", Llsd::String("Sub".to_owned())),
+            ("type_default", Llsd::Integer(-1)),
+            ("version", Llsd::Integer(1)),
+        ]);
+        let folder = super::llsd_map(vec![
+            ("folder_id", Llsd::Uuid(folder_id)),
+            ("version", Llsd::Integer(2)),
+            ("descendents", Llsd::Integer(2)),
+            ("categories", Llsd::Array(vec![category])),
+            ("items", Llsd::Array(vec![item])),
+        ]);
+        let body = super::llsd_map(vec![("folders", Llsd::Array(vec![folder]))]);
+
+        let events = inventory_descendents_from_llsd(&body);
+        let item_ids: Vec<(Uuid, Uuid)> = events
+            .iter()
+            .flat_map(|event| match event {
+                Event::InventoryDescendents { items, .. } => items.clone(),
+                _other => Vec::new(),
+            })
+            .map(|item| (item.item_id.uuid(), item.asset_id))
+            .collect();
+        let folder_ids: Vec<Uuid> = events
+            .iter()
+            .flat_map(|event| match event {
+                Event::InventoryDescendents { folders, .. } => folders.clone(),
+                _other => Vec::new(),
+            })
+            .map(|folder| folder.folder_id.uuid())
+            .collect();
+        // The string-encoded item and sub-folder ids must survive (a strict `uuid`
+        // read would nil them and the placeholder filter would drop them).
+        assert_eq!(item_ids, vec![(item_id, asset_id)]);
+        assert_eq!(folder_ids, vec![sub_id]);
     }
 
     #[test]

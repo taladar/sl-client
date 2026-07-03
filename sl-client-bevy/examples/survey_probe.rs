@@ -184,6 +184,7 @@ fn on_events(
             | SlSessionEvent::FriendsSnapshot(_)
             | SlSessionEvent::InventoryFolderPage { .. }
             | SlSessionEvent::InventoryRoots { .. }
+            | SlSessionEvent::InventoryFolders(_)
             | SlSessionEvent::SetFollowCamProperties { .. }
             | SlSessionEvent::ClearFollowCamProperties { .. }
             | SlSessionEvent::MuteList(_)

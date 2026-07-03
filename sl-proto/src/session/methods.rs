@@ -8019,6 +8019,33 @@ impl Session {
         self.inventory.folders_iter()
     }
 
+    /// Owning [`FolderInfo`] snapshots of every cached folder in the agent's own
+    /// tree — each with its resolved [`FolderType`] and fetch [`FolderState`] — in
+    /// key order. The login skeleton seeds the whole agent folder structure into
+    /// the held model at login, so this is populated (types and all) before any
+    /// contents fetch. The `Arc`-friendly, channel-crossing counterpart of
+    /// [`Session::inventory_folders`] behind the
+    /// [`Command`](crate::Command)/[`Event`](crate::Event) pull-bridge (the reply
+    /// to [`Command::QueryInventoryFolders`](crate::Command::QueryInventoryFolders));
+    /// the read-only Library tree is excluded (query its root via
+    /// [`Session::library_root`]).
+    #[must_use]
+    pub fn inventory_folder_infos(&self) -> Vec<FolderInfo> {
+        self.inventory
+            .folders_iter()
+            .filter(|folder| {
+                self.inventory.folder_owner(folder.folder_id) != Some(InventoryOwner::Library)
+            })
+            .map(|folder| {
+                let state = self
+                    .inventory
+                    .folder_state(folder.folder_id)
+                    .unwrap_or(FolderState::Unknown);
+                FolderInfo::from_folder(folder, state)
+            })
+            .collect()
+    }
+
     /// All cached inventory items, in key order.
     pub fn inventory_items(&self) -> impl Iterator<Item = &InventoryItem> {
         self.inventory.items_iter()

@@ -3027,6 +3027,13 @@ fn advance_running(
                     library_root: session.library_root(),
                 }));
             }
+            Command::QueryInventoryFolders => {
+                // Local query: snapshot the agent tree's known folders (seeded
+                // from the login skeleton, so present before any contents fetch).
+                events.write(SlEvent(SessionEvent::InventoryFolders(
+                    session.inventory_folder_infos().into(),
+                )));
+            }
             Command::QueryFriends => {
                 // Local query: build the buddy snapshot with online flags.
                 events.write(SlEvent(SessionEvent::FriendsSnapshot(

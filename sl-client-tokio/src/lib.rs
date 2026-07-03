@@ -1943,6 +1943,15 @@ impl Client {
                                 library_root: self.session.library_root(),
                             }).await.ok();
                         }
+                        Some(Command::QueryInventoryFolders) => {
+                            // Local query: snapshot the agent tree's known folders
+                            // (seeded from the login skeleton, so present before any
+                            // contents fetch). `Arc` so the clone across the channel
+                            // is cheap regardless of tree size.
+                            let folders: std::sync::Arc<[FolderInfo]> =
+                                self.session.inventory_folder_infos().into();
+                            events.send(Event::InventoryFolders(folders)).await.ok();
+                        }
                         Some(Command::QueryFriends) => {
                             // Local query: build the buddy snapshot with online flags.
                             events.send(Event::FriendsSnapshot(

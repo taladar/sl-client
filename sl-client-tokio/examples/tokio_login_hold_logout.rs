@@ -616,6 +616,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::FriendsSnapshot(_)
             | Event::InventoryFolderPage { .. }
             | Event::InventoryRoots { .. }
+            | Event::InventoryFolders(_)
             | Event::Ping { .. }
             | Event::LandStatReply { .. } => {}
         }

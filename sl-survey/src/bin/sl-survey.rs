@@ -659,6 +659,7 @@ impl Survey {
             | Event::FriendsSnapshot(_)
             | Event::InventoryFolderPage { .. }
             | Event::InventoryRoots { .. }
+            | Event::InventoryFolders(_)
             | Event::SetFollowCamProperties { .. }
             | Event::ClearFollowCamProperties { .. }
             | Event::MuteList(_)

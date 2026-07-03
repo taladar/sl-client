@@ -1017,6 +1017,17 @@ pub enum Event {
         /// The read-only shared Library root folder, or `None` if not present.
         library_root: Option<InventoryFolderKey>,
     },
+    /// A snapshot of the agent's known inventory **folders** — each with its
+    /// resolved [`FolderType`](crate::FolderType) and fetch
+    /// [`FolderState`](crate::FolderState) — surfaced in reply to a
+    /// [`Command::QueryInventoryFolders`](crate::Command::QueryInventoryFolders)
+    /// and **synthesized locally** from
+    /// [`Session::inventory_folder_infos`](crate::Session::inventory_folder_infos).
+    /// The login skeleton seeds every folder into the held model at login, so this
+    /// carries the whole folder structure (types and all) even before any contents
+    /// fetch — the reliable way to locate a system folder such as the Current
+    /// Outfit folder by type.
+    InventoryFolders(Arc<[FolderInfo]>),
     /// A scripted object set follow-camera parameters (`SetFollowCamProperties`,
     /// i.e. `llSetCameraParams`), after the agent granted it
     /// [`ScriptPermissions::CONTROL_CAMERA`](crate::ScriptPermissions::CONTROL_CAMERA).

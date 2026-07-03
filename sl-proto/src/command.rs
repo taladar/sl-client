@@ -200,6 +200,20 @@ pub enum Command {
     /// bevy reader may instead borrow the `Session` and call the accessors
     /// directly.
     QueryInventoryRoots,
+    /// Query the known inventory **folders** of the agent's own tree (the login
+    /// skeleton seeds every folder — with its preferred type and version — into
+    /// the held model at login, so the whole folder structure is queryable before
+    /// any contents fetch). The runtime replies with
+    /// [`Event::InventoryFolders`](crate::Event::InventoryFolders), a snapshot of
+    /// [`FolderInfo`](crate::FolderInfo)s built from
+    /// [`Session::inventory_folder_infos`](crate::Session::inventory_folder_infos);
+    /// no wire send. Use it to locate a system folder by its
+    /// [`FolderType`](crate::FolderType) (e.g. the Current Outfit folder) without
+    /// racing to capture the one-shot
+    /// [`Event::InventorySkeleton`](crate::Event::InventorySkeleton). A bevy reader
+    /// may instead borrow the `Session` and iterate
+    /// [`Session::inventory_folders`](crate::Session::inventory_folders) directly.
+    QueryInventoryFolders,
     /// Create an inventory folder (`CreateInventoryFolder`, UDP). `folder_id` is a
     /// fresh, caller-chosen id. The simulator sends no reply; the folder is added
     /// to the local cache optimistically. Use [`Command::CreateInventoryCategory`]
