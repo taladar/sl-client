@@ -46,6 +46,7 @@ pub mod map_blocks_items;
 pub mod mesh_fetch_http;
 pub mod modify_land;
 pub mod mute_list;
+pub mod notecard_create_update;
 pub mod object_edit;
 pub mod object_link_delink;
 pub mod object_properties;

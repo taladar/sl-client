@@ -131,6 +131,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::mesh_fetch_http::MeshFetchHttp),
         Box::new(crate::cases::asset_fetch_http::AssetFetchHttp),
         Box::new(crate::cases::asset_upload::AssetUpload),
+        Box::new(crate::cases::notecard_create_update::NotecardCreateUpdate),
     ]
 }
 
