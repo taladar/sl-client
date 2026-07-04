@@ -16,7 +16,7 @@
 //! in Phase 5, object meshes are) lands correctly in Bevy's Y-up world.
 
 use bevy::math::{Quat, Vec3};
-use sl_client_bevy::Vector;
+use sl_client_bevy::{Rotation, Vector};
 
 /// Convert a Second Life position [`Vector`] (Z-up metres) into a Bevy
 /// [`Vec3`] (Y-up).
@@ -42,11 +42,50 @@ pub(crate) fn sl_to_bevy_rotation() -> Quat {
     Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)
 }
 
+/// A Second Life [`Rotation`] (a unit quaternion in Second Life's Z-up frame) as
+/// a Bevy [`Quat`], with the axis components carried across verbatim.
+///
+/// This does **not** apply the Second Life → Bevy basis change: it is the
+/// rotation expressed in Second Life space, for use as the *local* rotation of a
+/// linkset child whose parent entity already carries the single
+/// [`sl_to_bevy_rotation`] basis change (so the whole subtree stays in Second
+/// Life space and is converted once at the root).
+#[must_use]
+pub(crate) fn sl_rotation_to_quat(rotation: &Rotation) -> Quat {
+    let quat = Quat::from_xyzw(rotation.x, rotation.y, rotation.z, rotation.s);
+    // The wire always carries a unit quaternion, but guard a degenerate (zero /
+    // non-finite) one so a bad object update can never poison a `Transform` with
+    // a NaN rotation.
+    if quat.length_squared().is_finite() && quat.length_squared() > f32::EPSILON {
+        quat.normalize()
+    } else {
+        Quat::IDENTITY
+    }
+}
+
+/// A Second Life object's world [`Rotation`] as a Bevy [`Quat`], composing the
+/// Second Life → Bevy basis change with the object's own orientation.
+///
+/// This is the rotation half of a *root* object's world `Transform` (its
+/// translation coming from [`sl_to_bevy_vec`]): it maps the object's Second Life
+/// local space directly into Bevy's Y-up world, the same way
+/// [`sl_to_bevy_rotation`] orients a terrain patch. Linkset children instead use
+/// the un-changed [`sl_rotation_to_quat`], relying on the parent to carry the
+/// basis change.
+#[must_use]
+pub(crate) fn sl_to_bevy_object_rotation(rotation: &Rotation) -> Quat {
+    // `Quat::mul_quat` rather than the `*` operator to stay clear of the
+    // workspace `arithmetic_side_effects` lint.
+    sl_to_bevy_rotation().mul_quat(sl_rotation_to_quat(rotation))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{sl_to_bevy_rotation, sl_to_bevy_vec};
+    use super::{
+        sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_rotation, sl_to_bevy_vec,
+    };
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::Vector;
+    use sl_client_bevy::{Rotation, Vector};
 
     /// The east/north/up Second Life axes map to Bevy right/forward-negation/up.
     #[test]
@@ -99,5 +138,55 @@ mod tests {
                 "rotation {rotated:?} should match axis map {mapped:?}"
             );
         }
+    }
+
+    /// The identity Second Life rotation maps (as an object's local rotation) to
+    /// the Bevy identity, and (as a world rotation) to the plain basis change.
+    #[test]
+    fn identity_rotation_is_identity() {
+        let identity = Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            s: 1.0,
+        };
+        assert!(sl_rotation_to_quat(&identity).abs_diff_eq(bevy::math::Quat::IDENTITY, 1.0e-6));
+        assert!(sl_to_bevy_object_rotation(&identity).abs_diff_eq(sl_to_bevy_rotation(), 1.0e-6));
+    }
+
+    /// A degenerate (zero) rotation is guarded to the identity rather than
+    /// poisoning a `Transform` with a NaN.
+    #[test]
+    fn degenerate_rotation_falls_back_to_identity() {
+        let zero = Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            s: 0.0,
+        };
+        assert_eq!(sl_rotation_to_quat(&zero), bevy::math::Quat::IDENTITY);
+    }
+
+    /// A root object's world rotation composes the basis change with the
+    /// object's own orientation, so a mesh point kept in Second Life local space
+    /// lands where applying the object rotation then the axis map would put it.
+    #[test]
+    fn object_rotation_composes_with_the_basis_change() {
+        // A 90° yaw about Second Life +Z (up): east (+X) turns to north (+Y).
+        let half = core::f32::consts::FRAC_1_SQRT_2;
+        let yaw = Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: half,
+            s: half,
+        };
+        let world = sl_to_bevy_object_rotation(&yaw);
+        // The object's local +X (Second Life east) should end up at Bevy -Z
+        // (Second Life north, after the Z-up → Y-up map).
+        let mapped = world * bevy::math::Vec3::X;
+        assert!(
+            mapped.abs_diff_eq(bevy::math::Vec3::new(0.0, 0.0, -1.0), 1.0e-5),
+            "object +X mapped to {mapped:?}"
+        );
     }
 }

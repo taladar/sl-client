@@ -9,6 +9,7 @@
 
 mod camera;
 mod coords;
+mod objects;
 mod session;
 mod terrain;
 
@@ -28,6 +29,7 @@ use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 use crate::camera::{FlyCamera, fly_camera};
+use crate::objects::{ObjectState, update_objects};
 use crate::session::{ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input};
 use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
 
@@ -219,6 +221,7 @@ fn run_session(params: &LoginParams) -> LoginOutcome {
     .init_resource::<ViewerSession>()
     .init_resource::<LoginOutcome>()
     .init_resource::<TerrainState>()
+    .init_resource::<ObjectState>()
     .add_systems(Startup, setup_scene)
     .add_systems(
         Update,
@@ -228,6 +231,7 @@ fn run_session(params: &LoginParams) -> LoginOutcome {
             // Recenter (origin follows the root region) before folding terrain
             // events, so patches are placed on the current origin.
             (recenter_terrain, update_terrain).chain(),
+            update_objects,
             handle_quit_input,
             enforce_quit_deadline,
             fly_camera,
