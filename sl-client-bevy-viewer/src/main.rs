@@ -7,6 +7,7 @@
 //! with terrain, prims, meshes, sculpts, avatars, and chat landing in later
 //! phases.
 
+mod avatars;
 mod camera;
 mod coords;
 mod meshes;
@@ -30,6 +31,10 @@ use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
+use crate::avatars::{
+    AvatarState, apply_avatar_names, position_name_tags, update_avatar_objects,
+    update_coarse_avatars,
+};
 use crate::camera::{FlyCamera, fly_camera};
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::objects::{ObjectState, apply_object_meshes, apply_object_sculpts, update_objects};
@@ -229,6 +234,7 @@ fn run_session(params: &LoginParams) -> LoginOutcome {
     .init_resource::<LoginOutcome>()
     .init_resource::<TerrainState>()
     .init_resource::<ObjectState>()
+    .init_resource::<AvatarState>()
     .init_resource::<TextureManager>()
     .init_resource::<PrimTextures>()
     .init_resource::<MeshManager>()
@@ -256,6 +262,12 @@ fn run_session(params: &LoginParams) -> LoginOutcome {
             apply_object_meshes,
             apply_object_sculpts,
             apply_prim_textures,
+            // Avatar placeholder spheres: full-object avatars first, then the
+            // coarse-only ones (which dedupe against the full-object set); then
+            // fold resolved names in and float each name tag over its sphere.
+            (update_avatar_objects, update_coarse_avatars).chain(),
+            apply_avatar_names,
+            position_name_tags,
             handle_quit_input,
             enforce_quit_deadline,
             fly_camera,
