@@ -12,6 +12,7 @@ mod coords;
 mod objects;
 mod session;
 mod terrain;
+mod textures;
 
 use std::path::PathBuf;
 
@@ -29,9 +30,13 @@ use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 use crate::camera::{FlyCamera, fly_camera};
-use crate::objects::{ObjectState, PrimMaterials, update_objects};
+use crate::objects::{ObjectState, update_objects};
 use crate::session::{ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input};
 use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
+use crate::textures::{
+    PrimTextures, TextureDecoded, TextureManager, apply_prim_textures, poll_textures,
+    update_texture_caps,
+};
 
 /// The local OpenSim grid login URI used when none is otherwise resolved.
 const DEFAULT_LOGIN_URI: &str = "http://127.0.0.1:9000/";
@@ -222,17 +227,24 @@ fn run_session(params: &LoginParams) -> LoginOutcome {
     .init_resource::<LoginOutcome>()
     .init_resource::<TerrainState>()
     .init_resource::<ObjectState>()
-    .init_resource::<PrimMaterials>()
+    .init_resource::<TextureManager>()
+    .init_resource::<PrimTextures>()
+    .add_message::<TextureDecoded>()
     .add_systems(Startup, setup_scene)
     .add_systems(
         Update,
         (
             capture_login_outcome,
             drive_session,
+            // Keep the texture store's `GetTexture` cap current, then poll
+            // finished fetches before the consumers that apply them.
+            update_texture_caps,
+            poll_textures,
             // Recenter (origin follows the root region) before folding terrain
             // events, so patches are placed on the current origin.
             (recenter_terrain, update_terrain).chain(),
             update_objects,
+            apply_prim_textures,
             handle_quit_input,
             enforce_quit_deadline,
             fly_camera,

@@ -1,5 +1,5 @@
 //! Fetch, decode, and cache a texture through the higher-level
-//! [`TextureStore`](sl_client_tokio::TextureStore): pull the plywood texture over
+//! [`TextureStore`]: pull the plywood texture over
 //! the live `GetTexture` capability, decode it to RGBA8, confirm a second request
 //! is served from the in-memory cache (the same shared entry, no re-fetch), and
 //! exercise a level-of-detail downgrade (downsample, no re-decode) and re-upgrade.

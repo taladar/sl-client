@@ -1,5 +1,5 @@
 //! Fetch and cache a worn wearable asset through the higher-level
-//! [`AssetStore`](sl_client_tokio::AssetStore): pull a body-part (or clothing)
+//! [`AssetStore`]: pull a body-part (or clothing)
 //! asset over the live `ViewerAsset` capability, confirm a second request is
 //! served from the in-memory cache (the same shared entry, no re-fetch), and
 //! confirm a fresh store over the same on-disk cache directory serves it *from

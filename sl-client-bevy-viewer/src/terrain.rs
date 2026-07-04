@@ -13,11 +13,14 @@
 //! Texture splatting (P2.2): a region's `RegionHandshake` carries four ground
 //! ("detail") texture ids and per-corner elevation bands.
 //! [`SlSessionEvent::RegionInfoHandshake`] delivers them; the viewer requests
-//! the four textures over the existing texture pipeline and, from the elevation
+//! the four textures through the shared [`textures`](crate::textures) store (the
+//! same fetch/decode/disk-cache pipeline the prims use) and, from the elevation
 //! bands, builds a [`sl_terrain::TerrainComposition`] that weights each vertex
-//! between the four textures. The GPU blend + lighting is the custom
+//! between the four textures. Each store-decoded detail texture arrives as a
+//! [`TextureDecoded`] message; the GPU blend + lighting is the custom
 //! [`TerrainMaterial`]; one shared material per region has its four textures
-//! swapped in as they decode, showing a flat olive placeholder until then.
+//! swapped in (with a tiling sampler) as they decode, showing a flat olive
+//! placeholder until then.
 //!
 //! Multi-region: terrain streams from the agent's own region *and* every
 //! neighbour child circuit (the session opens those automatically). Patches are
@@ -43,14 +46,14 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    ATTRIBUTE_TERRAIN_WEIGHTS, Command, DiscardLevel, RegionHandle, RegionIdentity, SlCommand,
-    SlEvent, SlIdentity, SlSessionEvent, TerrainMaterial, TerrainPatch, TextureKey, Vector,
-    to_bevy_image,
+    ATTRIBUTE_TERRAIN_WEIGHTS, RegionHandle, RegionIdentity, SlEvent, SlIdentity, SlSessionEvent,
+    TerrainMaterial, TerrainPatch, TextureKey, Vector, to_bevy_image,
 };
 use sl_terrain::TerrainComposition;
 
 use crate::camera::FlyCamera;
 use crate::coords::{sl_to_bevy_rotation, sl_to_bevy_vec};
+use crate::textures::{TextureDecoded, TextureManager};
 
 /// The region edge length in metres. A standard Second Life / OpenSim region is
 /// 256 m (16×16 patches of 16×16 cells).
@@ -156,13 +159,20 @@ pub(crate) fn recenter_terrain(
 /// Fold terrain events into the scene: build (or rebuild) each land patch's
 /// heightfield mesh, learn each region's compositing parameters and request its
 /// detail textures, and swap each decoded texture into the right material(s).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected ECS resources and event \
+              readers; folding terrain now also reads the texture store and its \
+              decode messages"
+)]
 pub(crate) fn update_terrain(
     mut events: MessageReader<SlEvent>,
+    mut decoded: MessageReader<TextureDecoded>,
     mut state: ResMut<TerrainState>,
+    mut manager: ResMut<TextureManager>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
     mut images: ResMut<Assets<Image>>,
-    mut sl_commands: MessageWriter<SlCommand>,
     mut commands: Commands,
 ) {
     for event in events.read() {
@@ -177,14 +187,16 @@ pub(crate) fn update_terrain(
                 rebuild_neighbours(&state, key, &mut meshes, &mut commands);
             }
             SlSessionEvent::RegionInfoHandshake(identity) => {
-                learn_composition(&mut state, identity, &mut sl_commands, &mut materials);
+                learn_composition(&mut state, identity, &mut manager, &mut materials);
                 rebuild_region_patches(&state, identity.region_handle, &mut meshes, &mut commands);
-            }
-            SlSessionEvent::TextureReceived(texture) => {
-                apply_detail_texture(&mut state, texture, &mut images, &mut materials);
             }
             _other => {}
         }
+    }
+    // A detail texture the store finished decoding: build its (tiling) image and
+    // swap it into every region material that requested it.
+    for &TextureDecoded(id) in decoded.read() {
+        apply_detail_texture(&mut state, id, &manager, &mut images, &mut materials);
     }
 }
 
@@ -336,11 +348,11 @@ fn replace_all_transforms(state: &TerrainState, commands: &mut Commands) {
 }
 
 /// Learn a region's terrain-compositing parameters from its `RegionHandshake`
-/// and request its four detail textures over the texture pipeline (once).
+/// and request its four detail textures through the shared texture store (once).
 fn learn_composition(
     state: &mut TerrainState,
     identity: &RegionIdentity,
-    sl_commands: &mut MessageWriter<SlCommand>,
+    manager: &mut TextureManager,
     materials: &mut Assets<TerrainMaterial>,
 ) {
     let region = identity.region_handle;
@@ -364,10 +376,7 @@ fn learn_composition(
                 }
                 let key = TextureKey::from(*texture);
                 *slot = Some(key);
-                sl_commands.write(SlCommand(Command::FetchTexture {
-                    texture_id: key,
-                    discard_level: DiscardLevel::FULL,
-                }));
+                manager.request(key);
             }
             entry.requested = true;
         }
@@ -377,41 +386,37 @@ fn learn_composition(
     reconcile_region(state, region, materials);
 }
 
-/// Route an arriving decoded texture into every region material that requested
-/// it, decoding the J2C codestream to an RGBA image with a tiling (repeating)
-/// sampler once and caching it.
+/// Route a store-decoded texture into every region material that requested it as
+/// a ground detail: build a Bevy image with a tiling (repeating) sampler once and
+/// cache it. Ignores a texture no region wants, or one the store failed to decode
+/// (the material keeps its placeholder).
 fn apply_detail_texture(
     state: &mut TerrainState,
-    texture: &sl_client_bevy::Texture,
+    id: TextureKey,
+    manager: &TextureManager,
     images: &mut Assets<Image>,
     materials: &mut Assets<TerrainMaterial>,
 ) {
     let wanted = state
         .regions
         .values()
-        .any(|entry| entry.detail_keys.contains(&Some(texture.id)));
+        .any(|entry| entry.detail_keys.contains(&Some(id)));
     if !wanted {
         return;
     }
-    if let std::collections::hash_map::Entry::Vacant(slot) = state.decoded.entry(texture.id) {
-        let decoded = match sl_texture::decode_j2c(&texture.data, DiscardLevel::FULL) {
-            Ok(decoded) => decoded,
-            Err(error) => {
-                warn!(
-                    "failed to decode terrain detail texture {}: {error}",
-                    texture.id
-                );
-                return;
-            }
+    if let std::collections::hash_map::Entry::Vacant(slot) = state.decoded.entry(id) {
+        let Some(decoded) = manager.decoded(id) else {
+            // The fetch/decode failed; the region keeps the flat placeholder.
+            return;
         };
-        let mut image = to_bevy_image(&decoded);
+        let mut image = to_bevy_image(decoded);
         image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
             address_mode_u: ImageAddressMode::Repeat,
             address_mode_v: ImageAddressMode::Repeat,
             ..ImageSamplerDescriptor::linear()
         });
         slot.insert(images.add(image));
-        debug!("decoded terrain detail texture {}", texture.id);
+        debug!("built tiling image for terrain detail texture {id}");
     }
     let regions: Vec<RegionHandle> = state.regions.keys().copied().collect();
     for region in regions {

@@ -259,26 +259,63 @@ then tick the box here. Add sub-points as you discover them.
 
 ## Phase 6 — Texturing (diffuse only)
 
-- [ ] **P6.1. Per-face diffuse.** Decode each face's
-  `TextureEntry.faces[face_id]` (`decode_texture_entry`); request the texture;
-  on `TextureReceived` convert with `to_bevy_image` and build
+- [x] **P6.1. Per-face diffuse.** Decode each face's
+  `TextureEntry.faces[face_id]` (`decode_texture_entry`); request the texture,
+  convert the decoded RGBA8 with `to_bevy_image`, and build
   `StandardMaterial { base_color_texture, base_color = face tint }`. Dedupe
-  with `HashMap<TextureKey, Handle<Image>>`; faces whose texture has not arrived
-  use a flat colour from `face.color`. No normal / specular / PBR / glow / bump.
+  with `HashMap<TextureKey, Handle<Image>>`; faces whose texture has not
+  arrived use a flat colour from `face.color`. No normal / specular / PBR /
+  glow / bump. **Done — via the shared `TextureStore`, not inline decode.** On
+  user direction the viewer drives the LOD-aware `sl_texture::TextureStore`
+  (the same fetch / off-thread-decode / Firestorm-disk-cache / weak-ref-dedupe
+  pipeline the headless client uses) rather than decoding J2C on the render
+  thread. A new `textures.rs` module owns a `TextureManager` resource (store
+  over a `BevyTextureFetcher` whose `GetTexture` cap URL is refreshed from
+  `SlCapabilities`); each texture is fetched on a background `IoTaskPool` task
+  (blocking HTTP off-thread, decode on the store's own rayon pool), and
+  `poll_textures` folds a finished decode into a shared cache and announces it
+  with a `TextureDecoded` message. `build_prim_faces` decodes the object's
+  `TextureEntry`, builds one `StandardMaterial` per face (tint now, texture
+  parked in `PrimTextures` until decoded), and `apply_prim_textures` uploads
+  (deduped) the diffuse `Image` into each parked material's
+  `base_color_texture`; a no-texture / failed face keeps its flat tint. The
+  P5.2 shared placeholder material is gone (each face owns its material).
+  **Terrain (P2.2) was migrated onto the same store**: `learn_composition` now
+  calls `manager.request`, and its detail textures arrive as `TextureDecoded`
+  (built with a tiling sampler) instead of the old
+  `Command::FetchTexture` / `TextureReceived` + inline `decode_j2c`, so the
+  viewer has one texture pipeline. New re-export: `CAP_GET_TEXTURE` from
+  `sl-client-bevy`. Verified live on OpenSim (prims render textured, incl. the
+  default plywood; terrain detail textures decode + tile; the on-disk cache
+  populates under `~/.cache/sl-client-bevy-viewer/texturecache`).
 
 ## Phase 7 — Mesh objects
 
-- [ ] **P7.1. Mesh geometry.** For `SculptOrMeshKey::Mesh(_)`, request the mesh
-  (`BevyMeshFetcher` / `Command::FetchMesh`), convert with `to_bevy_mesh`, and
-  spawn one child entity per submesh; texture via the Phase 6 path. Verify
-  against the provisioned OpenSim mesh prim (`slclient-mesh.oar`).
+- [ ] **P7.1. Mesh geometry.** For `SculptOrMeshKey::Mesh(_)`, fetch and decode
+  the mesh **through the shared `sl_mesh::MeshStore`** — the mesh counterpart of
+  the `TextureStore` the Phase 6 texturing drives (weak-ref dedupe, off-thread
+  decode, Firestorm per-UUID `.mesh` disk cache, LOD-aware). Mirror the P6
+  `TextureManager` shape: a viewer `MeshManager` resource holding a `MeshStore`
+  over a `BevyMeshFetcher` (cap URL from `SlCapabilities`; `GetMesh2` /
+  `GetMesh`), fetch each mesh on a background `IoTaskPool` task, poll it, and
+  announce it with a `MeshDecoded` message the object system reacts to. Do
+  **not** decode on the render thread or drive the raw `Command::FetchMesh` /
+  `MeshReceived` path — that is the low-level equivalent the Phase 6 texture
+  work deliberately moved off of. Convert each decoded submesh with
+  `to_bevy_mesh`, spawn one child entity per submesh, and texture it via the
+  Phase 6 `face_material` / `TextureManager` path. Verify against the
+  provisioned OpenSim mesh prim (`slclient-mesh.oar`).
 
 ## Phase 8 — `sl-sculpt` (sculpt-texture → geometry)
 
 - [ ] **P8.1. Map → grid.** The crate takes a decoded RGBA8 sculpt map
   (`sl_texture::DecodedImage`) + `sculpt_type` / flags and returns
   `sl_prim::PrimMesh`. Resample to a fixed working size (bilinear); pixel
-  `(r, g, b) / 255 - 0.5` → a grid vertex.
+  `(r, g, b) / 255 - 0.5` → a grid vertex. The crate itself stays I/O-free
+  (like `sl-prim`): it never fetches or decodes. The `DecodedImage` it consumes
+  must be sourced from the shared `TextureStore` (the same fetch /
+  off-thread-decode / disk-cache pipeline the Phase 6 texturing drives), which
+  the viewer supplies at P9.1. Do not add an inline JPEG-2000 decode here.
 - [ ] **P8.2. Stitch modes.** Stitch per type — plane (no wrap), cylinder
   (wrap U), sphere (wrap U + collapse the pole rows), torus (wrap U + V); honour
   the mirror / invert flags (winding / normals). Build indices, per-vertex
@@ -290,10 +327,12 @@ then tick the box here. Add sub-points as you discover them.
 ## Phase 9 — Sculpt rendering in the viewer
 
 - [ ] **P9.1. Sculpt objects.** For `SculptOrMeshKey::Sculpt(texture_key)`,
-  fetch + decode that texture as geometry input (reuse the texture pipeline; the
-  object stays in the same "waiting on asset" state as a mesh), feed the
-  pixels + type into `sl_sculpt`, convert with `to_bevy_prim_mesh`, and texture
-  via Phase 6.
+  fetch + decode that sculpt map **through the same Phase 6 `TextureManager` /
+  `TextureStore`** (request the texture id, react to its `TextureDecoded`, read
+  the decoded `DecodedTexture` pixels as geometry input — reusing the store's
+  fetch / off-thread-decode / disk-cache, not a fresh inline decode); the object
+  stays in the "waiting on asset" state as a mesh does. Feed the pixels + type
+  into `sl_sculpt`, convert with `to_bevy_prim_mesh`, and texture via Phase 6.
 
 ## Phase 10 — Avatar placeholders
 

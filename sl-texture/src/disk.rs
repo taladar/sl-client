@@ -25,6 +25,7 @@
 use std::collections::HashMap;
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::Bytes;
 use parking_lot::Mutex;
@@ -209,6 +210,10 @@ pub struct TextureDiskCache {
     index: Mutex<Index>,
     /// The configured size ceilings.
     limits: CacheLimits,
+    /// A monotonic counter making each atomic-write temp file name unique, so
+    /// concurrent writes (many textures decoding at once) never share — and race
+    /// on — the same `.tmp` path.
+    tmp_seq: AtomicU64,
 }
 
 impl TextureDiskCache {
@@ -226,7 +231,18 @@ impl TextureDiskCache {
             dir,
             index: Mutex::new(index),
             limits,
+            tmp_seq: AtomicU64::new(0),
         })
+    }
+
+    /// A unique temp path for an atomic write of `path`: `<path>.<pid>.<seq>.tmp`.
+    /// The per-cache sequence number keeps concurrent writers from colliding on
+    /// (and racing to rename) a shared temp file.
+    fn tmp_path(&self, path: &std::path::Path) -> PathBuf {
+        let seq = self.tmp_seq.fetch_add(1, Ordering::Relaxed);
+        let mut name = path.to_path_buf().into_os_string();
+        name.push(format!(".{}.{seq}.tmp", std::process::id()));
+        PathBuf::from(name)
     }
 
     /// Returns the cached codestream prefix for `id`, or `None` on a miss or any
@@ -324,9 +340,7 @@ impl TextureDiskCache {
         if let Some(parent) = path.parent() {
             fs_err::create_dir_all(parent)?;
         }
-        let mut name = path.clone().into_os_string();
-        name.push(format!(".{}.tmp", std::process::id()));
-        let tmp = PathBuf::from(name);
+        let tmp = self.tmp_path(&path);
         {
             let mut file = fs_err::File::create(&tmp)?;
             file.write_all(body)?;
@@ -348,9 +362,7 @@ impl TextureDiskCache {
     fn persist_index(&self) -> std::io::Result<()> {
         let bytes = self.serialize_index();
         let path = self.dir.join(ENTRIES_FILE);
-        let mut name = path.clone().into_os_string();
-        name.push(format!(".{}.tmp", std::process::id()));
-        let tmp = PathBuf::from(name);
+        let tmp = self.tmp_path(&path);
         {
             let mut file = fs_err::File::create(&tmp)?;
             file.write_all(&bytes)?;

@@ -26,20 +26,24 @@
 //! one child entity per [`PrimFace`](sl_client_bevy::PrimFace) parented to the
 //! object entity — so each face can carry its own material — kept in Second Life
 //! space with the object entity's `Transform` carrying the single basis change
-//! (and the object's scale / rotation / position). Until Phase 6 textures each
-//! face, every face uses a shared neutral placeholder material. Mesh objects
-//! (P7), sculpts (P9), and avatar placeholders (P10) attach their geometry to
-//! these entities in the same way.
+//! (and the object's scale / rotation / position). Since Phase 6 each face
+//! carries its own diffuse material built from the object's decoded
+//! [`TextureEntry`](sl_client_bevy::TextureEntry) slot (tint + texture) by the
+//! [`textures`](crate::textures) pipeline. Mesh objects (P7), sculpts (P9), and
+//! avatar placeholders (P10) attach their geometry to these entities in the same
+//! way.
 
 use std::collections::HashMap;
 
 use bevy::prelude::*;
 use sl_client_bevy::{
     Object, PrimFaceId, PrimLod, PrimShapeFloat, PrimShapeParams, ScopedObjectId, SculptOrMeshKey,
-    SlEvent, SlSessionEvent, Vector, pcode, tessellate, to_bevy_prim_mesh,
+    SlEvent, SlSessionEvent, TextureFace, TextureKey, Uuid, Vector, decode_texture_entry, pcode,
+    tessellate, to_bevy_prim_mesh,
 };
 
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
+use crate::textures::{PrimTextures, TextureManager, face_material};
 
 /// The broad render classification of an in-world object, decided from its
 /// `pcode` and sculpt/mesh extra parameters. It routes the object to the right
@@ -109,44 +113,18 @@ pub(crate) struct SceneObject {
 /// [`PrimFace`](sl_client_bevy::PrimFace) of its parent prim, carrying the
 /// Linden face index its material is looked up by (`TextureEntry.faces[face_id]`).
 ///
-/// P5.2 spawns the marker and renders the face with a shared placeholder
-/// material; the per-face diffuse texturing pass (Phase 6) reads the `face_id` to
-/// pair each face with its own material.
+/// Phase 6 builds each face's diffuse material at tessellation time (indexing the
+/// `TextureEntry` by this face index); the marker's `face_id` is retained for the
+/// later phases that re-address an individual face (per-face material overrides,
+/// object picking).
 #[derive(Component, Debug, Clone, Copy)]
 #[expect(
     dead_code,
-    reason = "face_id read by the Phase 6 per-face diffuse texturing pass"
+    reason = "face_id retained for later per-face addressing (material overrides, picking)"
 )]
 pub(crate) struct PrimFaceEntity {
     /// The Linden semantic face index this face is textured from.
     pub(crate) face_id: PrimFaceId,
-}
-
-/// Shared prim-rendering materials. Until per-face diffuse texturing lands
-/// (Phase 6), every tessellated prim face uses one neutral placeholder material.
-#[derive(Resource)]
-pub(crate) struct PrimMaterials {
-    /// The neutral placeholder material every prim face renders with until Phase
-    /// 6 textures it. It is double-sided (culling off) so a face renders
-    /// regardless of its winding while the geometry is being brought up.
-    placeholder: Handle<StandardMaterial>,
-}
-
-impl FromWorld for PrimMaterials {
-    /// Create the shared placeholder material in the world's
-    /// `Assets<StandardMaterial>` (registered by Bevy's PBR plugin before this
-    /// resource is initialised).
-    fn from_world(world: &mut World) -> Self {
-        let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
-        let placeholder = materials.add(StandardMaterial {
-            base_color: Color::srgb(0.7, 0.7, 0.72),
-            perceptual_roughness: 0.9,
-            double_sided: true,
-            cull_mode: None,
-            ..default()
-        });
-        Self { placeholder }
-    }
 }
 
 /// Per-object viewer-side bookkeeping, paired with the object's [`SceneObject`]
@@ -232,7 +210,9 @@ pub(crate) fn update_objects(
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    prim_materials: Res<PrimMaterials>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut manager: ResMut<TextureManager>,
+    mut prim_textures: ResMut<PrimTextures>,
 ) {
     for event in events.read() {
         match &event.0 {
@@ -242,7 +222,9 @@ pub(crate) fn update_objects(
                     object,
                     &mut commands,
                     &mut meshes,
-                    &prim_materials,
+                    &mut materials,
+                    &mut manager,
+                    &mut prim_textures,
                 );
             }
             SlSessionEvent::ObjectRemoved { local_id, .. } => {
@@ -255,9 +237,16 @@ pub(crate) fn update_objects(
 
 /// Tessellate a plain prim at a fixed high level of detail and spawn one child
 /// entity per non-empty [`PrimFace`](sl_client_bevy::PrimFace) under `parent`,
-/// each carrying its geometry mesh, the shared placeholder material, and a
+/// each carrying its geometry mesh, its per-face diffuse material (from the
+/// object's decoded [`TextureEntry`](sl_client_bevy::TextureEntry)), and a
 /// [`PrimFaceEntity`] tag naming its Linden face index. Returns the spawned face
 /// entities so a later shape change can despawn and rebuild them.
+///
+/// Each face's material is built from its `TextureEntry` slot (tint + texture
+/// id) by [`face_material`], which requests the texture through `manager` and
+/// parks the material in `prim_textures` until it decodes (Phase 6). A face whose
+/// slot is missing (an object with no texture entry) falls back to an untextured
+/// white material.
 ///
 /// The face geometry stays in the prim's local Second Life space; the object
 /// entity's `Transform` carries the object's scale / rotation / position and the
@@ -267,20 +256,28 @@ fn build_prim_faces(
     parent: Entity,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    materials: &PrimMaterials,
+    materials: &mut Assets<StandardMaterial>,
+    manager: &mut TextureManager,
+    prim_textures: &mut PrimTextures,
 ) -> Vec<Entity> {
     let shape = PrimShapeFloat::from_params(&object.shape);
     let prim = tessellate(&shape, PrimLod::High);
+    let entry = decode_texture_entry(&object.texture_entry, prim.faces.len());
+    // The slot every face falls back to when the object carries no texture entry:
+    // an untextured, opaque-white (untinted) face.
+    let default_face = TextureFace::new(TextureKey::from(Uuid::nil()));
     let mut face_entities = Vec::new();
     for face in &prim.faces {
         if face.is_empty() {
             continue;
         }
         let mesh = meshes.add(to_bevy_prim_mesh(face));
+        let texture_face = entry.face(face.face_id.as_usize()).unwrap_or(&default_face);
+        let material = face_material(texture_face, materials, manager, prim_textures);
         let entity = commands
             .spawn((
                 Mesh3d(mesh),
-                MeshMaterial3d(materials.placeholder.clone()),
+                MeshMaterial3d(material),
                 PrimFaceEntity {
                     face_id: face.face_id,
                 },
@@ -307,7 +304,9 @@ fn apply_object(
     object: &Object,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    materials: &PrimMaterials,
+    materials: &mut Assets<StandardMaterial>,
+    manager: &mut TextureManager,
+    prim_textures: &mut PrimTextures,
 ) {
     let scoped = object.scoped_id();
     let parent = object.scoped_parent_id();
@@ -340,7 +339,15 @@ fn apply_object(
             debug!("object {scoped} shape changed; re-tessellating");
             despawn_prim_faces(&existing.face_entities, commands);
             existing.face_entities = if category == ObjectCategory::Prim {
-                build_prim_faces(object, existing.entity, commands, meshes, materials)
+                build_prim_faces(
+                    object,
+                    existing.entity,
+                    commands,
+                    meshes,
+                    materials,
+                    manager,
+                    prim_textures,
+                )
             } else {
                 Vec::new()
             };
@@ -380,7 +387,15 @@ fn apply_object(
     // A plain prim tessellates immediately; the other categories (mesh / sculpt /
     // avatar) grow their geometry in later phases.
     let face_entities = if category == ObjectCategory::Prim {
-        build_prim_faces(object, entity, commands, meshes, materials)
+        build_prim_faces(
+            object,
+            entity,
+            commands,
+            meshes,
+            materials,
+            manager,
+            prim_textures,
+        )
     } else {
         Vec::new()
     };
