@@ -9,6 +9,7 @@
 
 mod avatars;
 mod camera;
+mod chat;
 mod coords;
 mod meshes;
 mod objects;
@@ -36,6 +37,7 @@ use crate::avatars::{
     update_coarse_avatars,
 };
 use crate::camera::{FlyCamera, fly_camera};
+use crate::chat::{ChatOverlay, setup_chat_overlay, update_chat_overlay};
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::objects::{ObjectState, apply_object_meshes, apply_object_sculpts, update_objects};
 use crate::session::{ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input};
@@ -235,12 +237,13 @@ fn run_session(params: &LoginParams) -> LoginOutcome {
     .init_resource::<TerrainState>()
     .init_resource::<ObjectState>()
     .init_resource::<AvatarState>()
+    .init_resource::<ChatOverlay>()
     .init_resource::<TextureManager>()
     .init_resource::<PrimTextures>()
     .init_resource::<MeshManager>()
     .add_message::<TextureDecoded>()
     .add_message::<MeshDecoded>()
-    .add_systems(Startup, setup_scene)
+    .add_systems(Startup, (setup_scene, setup_chat_overlay))
     .add_systems(
         Update,
         (
@@ -268,6 +271,8 @@ fn run_session(params: &LoginParams) -> LoginOutcome {
             (update_avatar_objects, update_coarse_avatars).chain(),
             apply_avatar_names,
             position_name_tags,
+            // Append newly received local chat to the on-screen overlay.
+            update_chat_overlay,
             handle_quit_input,
             enforce_quit_deadline,
             fly_camera,

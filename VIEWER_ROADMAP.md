@@ -446,10 +446,33 @@ then tick the box here. Add sub-points as you discover them.
 
 ## Phase 11 — Chat overlay
 
-- [ ] **P11.1. On-screen chat.** A `bevy_ui` `Text` node pinned to a corner; on
+- [x] **P11.1. On-screen chat.** A `bevy_ui` `Text` node pinned to a corner; on
   `ChatReceived` append `"{from_name}: {message}"` (shout / whisper as a prefix
   label), keep the last N lines bottom-up. Read-only, no input box. Verify with
-  chat from the second avatar.
+  chat from the second avatar. **Done.** A new `chat.rs` module owns a
+  `ChatOverlay` resource (a bounded `VecDeque` of the last `CHAT_HISTORY_LINES`
+  = 12 formatted lines) and one persistent overlay text node, tagged
+  `ChatOverlayText`, spawned by a `setup_chat_overlay` startup system anchored
+  at the bottom-left corner (`PositionType::Absolute`, `left`/`bottom`
+  inset) so the node grows upward and the newest line sits at the bottom.
+  `update_chat_overlay` folds every `SlSessionEvent::ChatReceived` message
+  (`ChatFromSimulator`) into the history and rewrites the node's `Text` only
+  when a displayable line arrives. Each line is
+  `"{from_name}: {message}"`, with a `[whisper]` / `[shout]` prefix label for
+  those two volumes and none for a normal say; the simulator already supplies
+  the speaker's display name, so (unlike the avatar name tags) no
+  `UUIDNameRequest` resolution is needed. Typing triggers
+  (`StartTyping` / `StopTyping`, which actually arrive as
+  `SlSessionEvent::ChatTyping` rather than `ChatReceived`) and empty-text
+  messages are filtered so blank lines never accumulate. Viewer-only, no
+  library change: `ChatMessage`, `ChatType`, and the other chat value types
+  were already re-exported from `sl-client-bevy`.
+  Verified live on OpenSim with a second avatar (a `sl-repl-tokio` login of
+  `Friend Tester` co-located in the Default Region): the viewer rendered all
+  three volumes correctly — `Friend Tester: hello from Friend Tester`,
+  `[whisper] Friend Tester: psst over here`, and
+  `[shout] Friend Tester: HELLO EVERYONE` — and the lines persist in the corner
+  (user-confirmed).
 
 ## Phase 12 — Live verification & polish
 
