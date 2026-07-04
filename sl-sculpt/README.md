@@ -18,4 +18,12 @@ placeholder grid rather than panicking.
 The tessellation follows Firestorm's `LLVolume::sculpt` /
 `sculptGenerateMapVertices`, reimplemented idiomatically rather than copied.
 
-This is a Phase 0 scaffold: the stitching itself lands in a later phase.
+## Usage
+
+`tessellate(map, sculpt_type)` (or `tessellate_with(map, params)` when the
+`sculpt_type` byte is already parsed) takes an `sl_texture::DecodedImage` and
+returns a single-face `sl_prim::PrimMesh`. Seam and pole vertices are *shared*
+(one vertex referenced by the surrounding quads), never duplicated, so the
+per-vertex normals accumulated from the incident triangles are smooth across
+them. The caller sources the decoded map from the shared `sl-texture`
+`TextureStore` — this crate never fetches or decodes.

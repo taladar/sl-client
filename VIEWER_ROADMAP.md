@@ -345,7 +345,7 @@ then tick the box here. Add sub-points as you discover them.
 
 ## Phase 8 — `sl-sculpt` (sculpt-texture → geometry)
 
-- [ ] **P8.1. Map → grid.** The crate takes a decoded RGBA8 sculpt map
+- [x] **P8.1. Map → grid.** The crate takes a decoded RGBA8 sculpt map
   (`sl_texture::DecodedImage`) + `sculpt_type` / flags and returns
   `sl_prim::PrimMesh`. Resample to a fixed working size (bilinear); pixel
   `(r, g, b) / 255 - 0.5` → a grid vertex. The crate itself stays I/O-free
@@ -353,13 +353,29 @@ then tick the box here. Add sub-points as you discover them.
   must be sourced from the shared `TextureStore` (the same fetch /
   off-thread-decode / disk-cache pipeline the Phase 6 texturing drives), which
   the viewer supplies at P9.1. Do not add an inline JPEG-2000 decode here.
-- [ ] **P8.2. Stitch modes.** Stitch per type — plane (no wrap), cylinder
+  Delivered as `tessellate(map, sculpt_type)` / `tessellate_with(map, params)`.
+  `sl-texture` is depended on with `default-features = false` so the pure crate
+  does not pull the OpenJPEG C dependency (only the `DecodedImage` type); the
+  fixed working grid is `WORKING_SUBDIVISIONS = 32` quad cells per side
+  (Firestorm's top sculpt LOD), bilinearly resampled per grid vertex.
+- [x] **P8.2. Stitch modes.** Stitch per type — plane (no wrap), cylinder
   (wrap U), sphere (wrap U + collapse the pole rows), torus (wrap U + V); honour
   the mirror / invert flags (winding / normals). Build indices, per-vertex
   normals, and grid UVs; emit a single `PrimFace`. Fall back to a placeholder
-  grid on a degenerate map (never panic).
-- [ ] **P8.3. Stitch tests.** Unit tests per stitch type (counts; seam and pole
-  vertices are shared, not duplicated). `cargo test -p sl-sculpt`.
+  grid on a degenerate map (never panic). Seam / pole vertices are *shared* (one
+  canonical vertex per lattice slot, wrapped edges fold to column / row `0`,
+  pole rows collapse to a single vertex), so accumulated normals are smooth
+  across them with no seam-wrapping pass. The flags follow Firestorm's
+  `sculptGenerateMapVertices` — `reverse_u = invert XOR mirror` reverses the U
+  sampling and `mirror` negates X — which, with one fixed triangle winding,
+  compose to the four intended facings (so no separate winding flip). The
+  degenerate fallback is a procedural sphere placeholder.
+- [x] **P8.3. Stitch tests.** Unit tests per stitch type (counts; seam and pole
+  vertices are shared, not duplicated). `cargo test -p sl-sculpt`. 14 tests:
+  exact per-type vertex counts (plane `(N+1)²` > cylinder `N(N+1)` > torus `N²`
+  > sphere `N²-N+2`), face integrity (parallel arrays, in-range whole triangles,
+  unit normals, finite positions), degenerate + truncated fallback, and the
+  mirror X-reflection.
 
 ## Phase 9 — Sculpt rendering in the viewer
 

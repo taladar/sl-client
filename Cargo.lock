@@ -5852,7 +5852,11 @@ dependencies = [
 name = "sl-sculpt"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "pretty_assertions",
+ "sl-prim",
+ "sl-proto",
+ "sl-texture",
 ]
 
 [[package]]

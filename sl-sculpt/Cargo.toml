@@ -16,9 +16,13 @@ categories = ["game-development", "rendering", "rendering::data-formats"]
 exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
 [dependencies]
+sl-prim = { version = "0.1.0", path = "../sl-prim" }
+sl-texture = { version = "0.1.0", path = "../sl-texture", default-features = false }
 
 [dev-dependencies]
+bytes = { version = "1.12.0" }
 pretty_assertions = { version = "1.4.1" }
+sl-proto = { version = "0.1.0", path = "../sl-proto" }
 
 [lints]
 workspace = true
