@@ -178,9 +178,19 @@ then tick the box here. Add sub-points as you discover them.
 - [x] **P3.3. Extrusion path.** `path.rs`: line / circle / circle2 paths
   applying twist, scale, shear, taper, radius-offset, skew, revolutions, and
   path begin/end cut.
-- [ ] **P3.4. Sweep & faces.** `volume.rs`: sweep the profile along the path and
+- [x] **P3.4. Sweep & faces.** `volume.rs`: sweep the profile along the path and
   assemble per-face vertices / normals / UVs / indices (`createSide` /
-  `createCap`, fan-triangulated caps), carrying the Linden `face_id`.
+  `createCap`, fan-triangulated caps), carrying the Linden `face_id`. A public
+  `tessellate` builds the swept vertex grid (each profile point placed into
+  each path frame), then emits one `PrimFace` per semantic profile face — the
+  i-th face becoming Linden face index `i`. Sides are a `count × path.total`
+  grid strip (grid positions, sweep-parameter/`tex_t` UVs, two-triangles-per-
+  cell indices, accumulated-then-normalized normals with the reference viewer's
+  closed-seam / pole normal wrapping); caps are a centre-vertex triangle fan
+  with planar UVs and one flat normal. Two documented MVP simplifications in the
+  road map's "fan-triangulated caps" scope: hollow caps are a filled centre fan
+  (no annulus triangulation), and a hollow inner wall is a single smoothed strip
+  (no flat-column doubling).
 - [ ] **P3.5. Shape tests.** Unit tests asserting non-degenerate counts and
   correct face counts: box (6), cylinder, sphere, torus, hollow box (+ inner
   face), cut prim (+ cut-edge faces). Deterministic-fixture style, as in the
