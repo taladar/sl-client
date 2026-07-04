@@ -29,7 +29,7 @@ use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 use crate::camera::{FlyCamera, fly_camera};
-use crate::objects::{ObjectState, update_objects};
+use crate::objects::{ObjectState, PrimMaterials, update_objects};
 use crate::session::{ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input};
 use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
 
@@ -222,6 +222,7 @@ fn run_session(params: &LoginParams) -> LoginOutcome {
     .init_resource::<LoginOutcome>()
     .init_resource::<TerrainState>()
     .init_resource::<ObjectState>()
+    .init_resource::<PrimMaterials>()
     .add_systems(Startup, setup_scene)
     .add_systems(
         Update,

@@ -12,25 +12,31 @@
 //!   Bevy [coordinate map](crate::coords);
 //! - each [`SlSessionEvent::ObjectUpdated`] moves the existing entity (a
 //!   motion-only update just re-places it) and, only when the object's *shape*
-//!   parameters actually change, flags it for re-tessellation (consumed by the
-//!   Phase 5.2 prim-mesh path — a motion update never re-tessellates);
+//!   parameters actually change, re-tessellates its geometry (a motion update
+//!   never re-tessellates);
 //! - linkset children are parented to their root entity so the root's transform
 //!   carries the whole set; a child that arrives before its root is held
 //!   parentless and re-parented once the root appears;
 //! - each [`SlSessionEvent::ObjectRemoved`] despawns the entity (and, via Bevy's
-//!   hierarchy, its parented children) and drops it — and any tracked
-//!   descendants — from the map.
+//!   hierarchy, its parented children — including the face meshes) and drops it —
+//!   and any tracked descendants — from the map.
 //!
-//! No geometry is spawned here: the entities carry only a `Transform` and the
-//! [`SceneObject`] marker. Tessellated prims (P5.2), mesh objects (P7), sculpts
-//! (P9), and avatar placeholders (P10) attach their meshes to these entities.
+//! Since Phase 5.2 a plain prim ([`ObjectCategory::Prim`]) is tessellated with
+//! [`sl_prim`](sl_client_bevy) at a fixed high level of detail and rendered as
+//! one child entity per [`PrimFace`](sl_client_bevy::PrimFace) parented to the
+//! object entity — so each face can carry its own material — kept in Second Life
+//! space with the object entity's `Transform` carrying the single basis change
+//! (and the object's scale / rotation / position). Until Phase 6 textures each
+//! face, every face uses a shared neutral placeholder material. Mesh objects
+//! (P7), sculpts (P9), and avatar placeholders (P10) attach their geometry to
+//! these entities in the same way.
 
 use std::collections::HashMap;
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    Object, PrimShapeParams, ScopedObjectId, SculptOrMeshKey, SlEvent, SlSessionEvent, Vector,
-    pcode,
+    Object, PrimFaceId, PrimLod, PrimShapeFloat, PrimShapeParams, ScopedObjectId, SculptOrMeshKey,
+    SlEvent, SlSessionEvent, Vector, pcode, tessellate, to_bevy_prim_mesh,
 };
 
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
@@ -99,6 +105,50 @@ pub(crate) struct SceneObject {
     pub(crate) category: ObjectCategory,
 }
 
+/// A marker component tagging one child entity as a single tessellated
+/// [`PrimFace`](sl_client_bevy::PrimFace) of its parent prim, carrying the
+/// Linden face index its material is looked up by (`TextureEntry.faces[face_id]`).
+///
+/// P5.2 spawns the marker and renders the face with a shared placeholder
+/// material; the per-face diffuse texturing pass (Phase 6) reads the `face_id` to
+/// pair each face with its own material.
+#[derive(Component, Debug, Clone, Copy)]
+#[expect(
+    dead_code,
+    reason = "face_id read by the Phase 6 per-face diffuse texturing pass"
+)]
+pub(crate) struct PrimFaceEntity {
+    /// The Linden semantic face index this face is textured from.
+    pub(crate) face_id: PrimFaceId,
+}
+
+/// Shared prim-rendering materials. Until per-face diffuse texturing lands
+/// (Phase 6), every tessellated prim face uses one neutral placeholder material.
+#[derive(Resource)]
+pub(crate) struct PrimMaterials {
+    /// The neutral placeholder material every prim face renders with until Phase
+    /// 6 textures it. It is double-sided (culling off) so a face renders
+    /// regardless of its winding while the geometry is being brought up.
+    placeholder: Handle<StandardMaterial>,
+}
+
+impl FromWorld for PrimMaterials {
+    /// Create the shared placeholder material in the world's
+    /// `Assets<StandardMaterial>` (registered by Bevy's PBR plugin before this
+    /// resource is initialised).
+    fn from_world(world: &mut World) -> Self {
+        let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
+        let placeholder = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.7, 0.7, 0.72),
+            perceptual_roughness: 0.9,
+            double_sided: true,
+            cull_mode: None,
+            ..default()
+        });
+        Self { placeholder }
+    }
+}
+
 /// Per-object viewer-side bookkeeping, paired with the object's [`SceneObject`]
 /// entity.
 struct TrackedObject {
@@ -114,6 +164,10 @@ struct TrackedObject {
     /// Whether this object's entity has been parented to its root entity yet (a
     /// child whose root has not arrived stays `false` until it does).
     parented: bool,
+    /// The per-face child entities carrying this prim's tessellated geometry (one
+    /// per non-empty [`PrimFace`](sl_client_bevy::PrimFace)), rebuilt on a shape
+    /// change. Empty for a non-prim object or one not yet tessellated.
+    face_entities: Vec<Entity>,
 }
 
 /// Viewer-side object bookkeeping: the entity and metadata for every in-world
@@ -177,11 +231,19 @@ pub(crate) fn update_objects(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    prim_materials: Res<PrimMaterials>,
 ) {
     for event in events.read() {
         match &event.0 {
             SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
-                apply_object(&mut state, object, &mut commands);
+                apply_object(
+                    &mut state,
+                    object,
+                    &mut commands,
+                    &mut meshes,
+                    &prim_materials,
+                );
             }
             SlSessionEvent::ObjectRemoved { local_id, .. } => {
                 remove_object(&mut state, *local_id, &mut commands);
@@ -191,9 +253,62 @@ pub(crate) fn update_objects(
     }
 }
 
+/// Tessellate a plain prim at a fixed high level of detail and spawn one child
+/// entity per non-empty [`PrimFace`](sl_client_bevy::PrimFace) under `parent`,
+/// each carrying its geometry mesh, the shared placeholder material, and a
+/// [`PrimFaceEntity`] tag naming its Linden face index. Returns the spawned face
+/// entities so a later shape change can despawn and rebuild them.
+///
+/// The face geometry stays in the prim's local Second Life space; the object
+/// entity's `Transform` carries the object's scale / rotation / position and the
+/// single Second Life → Bevy basis change for the whole prim.
+fn build_prim_faces(
+    object: &Object,
+    parent: Entity,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &PrimMaterials,
+) -> Vec<Entity> {
+    let shape = PrimShapeFloat::from_params(&object.shape);
+    let prim = tessellate(&shape, PrimLod::High);
+    let mut face_entities = Vec::new();
+    for face in &prim.faces {
+        if face.is_empty() {
+            continue;
+        }
+        let mesh = meshes.add(to_bevy_prim_mesh(face));
+        let entity = commands
+            .spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(materials.placeholder.clone()),
+                PrimFaceEntity {
+                    face_id: face.face_id,
+                },
+                ChildOf(parent),
+            ))
+            .id();
+        face_entities.push(entity);
+    }
+    face_entities
+}
+
+/// Despawn every face child entity of a prim (used before rebuilding on a shape
+/// change), leaving the caller to clear the tracked list.
+fn despawn_prim_faces(face_entities: &[Entity], commands: &mut Commands) {
+    for &face in face_entities {
+        commands.entity(face).try_despawn();
+    }
+}
+
 /// Spawn or update the entity for `object`, keeping its transform, classification,
 /// and linkset parenting current.
-fn apply_object(state: &mut ObjectState, object: &Object, commands: &mut Commands) {
+fn apply_object(
+    state: &mut ObjectState,
+    object: &Object,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &PrimMaterials,
+) {
     let scoped = object.scoped_id();
     let parent = object.scoped_parent_id();
     let is_root = object.parent_id.get() == 0;
@@ -209,8 +324,8 @@ fn apply_object(state: &mut ObjectState, object: &Object, commands: &mut Command
     };
 
     if let Some(existing) = state.objects.get_mut(&scoped) {
-        // A known object: re-place it, refresh its classification, and note a
-        // genuine shape change (a motion-only update leaves the shape alone).
+        // A known object: re-place it and refresh its classification (a
+        // motion-only update stops here — the geometry is untouched).
         commands.entity(existing.entity).insert((
             transform,
             SceneObject {
@@ -219,7 +334,16 @@ fn apply_object(state: &mut ObjectState, object: &Object, commands: &mut Command
             },
         ));
         if existing.shape != shape {
-            debug!("object {scoped} shape changed; flagged for re-tessellation");
+            // A genuine shape (or category) change: drop the old face meshes and
+            // re-tessellate. A category change is subsumed here, since the
+            // fingerprint covers pcode and the sculpt/mesh key.
+            debug!("object {scoped} shape changed; re-tessellating");
+            despawn_prim_faces(&existing.face_entities, commands);
+            existing.face_entities = if category == ObjectCategory::Prim {
+                build_prim_faces(object, existing.entity, commands, meshes, materials)
+            } else {
+                Vec::new()
+            };
             existing.shape = shape;
         }
         // Reconcile parenting: an object relinked to a root becomes a child of
@@ -240,6 +364,10 @@ fn apply_object(state: &mut ObjectState, object: &Object, commands: &mut Command
                 category,
             },
             transform,
+            // The per-face child meshes carry `Visibility` (required by
+            // `Mesh3d`); the object entity needs it too so Bevy's visibility
+            // propagation down the linkset hierarchy stays consistent.
+            Visibility::default(),
         ))
         .id();
     let parented = match parent_entity {
@@ -249,6 +377,13 @@ fn apply_object(state: &mut ObjectState, object: &Object, commands: &mut Command
         }
         None => false,
     };
+    // A plain prim tessellates immediately; the other categories (mesh / sculpt /
+    // avatar) grow their geometry in later phases.
+    let face_entities = if category == ObjectCategory::Prim {
+        build_prim_faces(object, entity, commands, meshes, materials)
+    } else {
+        Vec::new()
+    };
     state.objects.insert(
         scoped,
         TrackedObject {
@@ -257,6 +392,7 @@ fn apply_object(state: &mut ObjectState, object: &Object, commands: &mut Command
             parent,
             is_root,
             parented,
+            face_entities,
         },
     );
     debug!(
