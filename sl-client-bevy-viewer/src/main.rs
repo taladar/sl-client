@@ -32,7 +32,7 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberI
 
 use crate::camera::{FlyCamera, fly_camera};
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
-use crate::objects::{ObjectState, apply_object_meshes, update_objects};
+use crate::objects::{ObjectState, apply_object_meshes, apply_object_sculpts, update_objects};
 use crate::session::{ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input};
 use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
 use crate::textures::{
@@ -251,8 +251,10 @@ fn run_session(params: &LoginParams) -> LoginOutcome {
             // events, so patches are placed on the current origin.
             (recenter_terrain, update_terrain).chain(),
             update_objects,
-            // Build the geometry of any mesh object whose asset just decoded.
+            // Build the geometry of any mesh object whose asset just decoded, and
+            // of any sculpted prim whose sculpt map just decoded.
             apply_object_meshes,
+            apply_object_sculpts,
             apply_prim_textures,
             handle_quit_input,
             enforce_quit_deadline,

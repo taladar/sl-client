@@ -148,6 +148,21 @@ pub use sl_prim::{
     ProfileCurve, tessellate,
 };
 
+// The pure sculpt-texture tessellation geometry (the sculpt counterpart of
+// `sl_prim`; likewise no store/fetcher — a sculpt is stitched on the CPU from a
+// decoded sculpt map, which the viewer sources from the shared `TextureStore`).
+// Re-exported so the viewer can feed a `DecodedTexture` (= `sl_texture`'s
+// `DecodedImage`) plus the object's `sculpt_type` byte into the stitcher and feed
+// the resulting `PrimMesh` faces through `to_bevy_prim_mesh`. Its `tessellate` is
+// aliased `tessellate_sculpt` so it does not collide with `sl_prim`'s prim
+// `tessellate`; `PrimFace` / `PrimMesh` are already re-exported (from `sl_prim`).
+// The function is taken by its module-qualified path (`tessellate::tessellate`)
+// so only the value is aliased — `sl_sculpt::tessellate` is *both* a module and a
+// function, and a bare `tessellate as …` would rename both and make doc links to
+// the name ambiguous.
+pub use sl_sculpt::tessellate::tessellate as tessellate_sculpt;
+pub use sl_sculpt::{SculptParams, SculptStitch};
+
 pub use crate::assets::BevyAssetFetcher;
 pub use crate::meshes::{BevyMeshFetcher, to_bevy_mesh, to_bevy_meshes};
 pub use crate::prims::{to_bevy_prim_mesh, to_bevy_prim_meshes};

@@ -5643,6 +5643,7 @@ dependencies = [
  "sl-mesh",
  "sl-prim",
  "sl-proto",
+ "sl-sculpt",
  "sl-texture",
  "sl-wire",
  "thiserror 2.0.18",

@@ -42,6 +42,7 @@ sl-asset = { version = "0.1.0", path = "../sl-asset" }
 sl-mesh = { version = "0.1.0", path = "../sl-mesh" }
 sl-prim = { version = "0.1.0", path = "../sl-prim" }
 sl-proto = { version = "0.1.0", path = "../sl-proto" }
+sl-sculpt = { version = "0.1.0", path = "../sl-sculpt" }
 sl-texture = { version = "0.1.0", path = "../sl-texture" }
 sl-wire = { version = "0.1.0", path = "../sl-wire" }
 thiserror = { version = "2.0.18" }

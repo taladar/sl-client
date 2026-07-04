@@ -29,23 +29,27 @@
 //! (and the object's scale / rotation / position). Since Phase 6 each face
 //! carries its own diffuse material built from the object's decoded
 //! [`TextureEntry`](sl_client_bevy::TextureEntry) slot (tint + texture) by the
-//! [`textures`](crate::textures) pipeline. Mesh objects (P7), sculpts (P9), and
-//! avatar placeholders (P10) attach their geometry to these entities in the same
-//! way.
+//! [`textures`](crate::textures) pipeline. Since Phase 7 a mesh object fetches
+//! and decodes its `LLMesh` asset through the shared [`MeshManager`] and spawns
+//! one child entity per submesh; since Phase 9 a sculpted prim fetches its sculpt
+//! map through the shared [`TextureManager`], stitches it into geometry with
+//! [`tessellate_sculpt`], and spawns its face the same way. Avatar placeholders
+//! (P10) attach their geometry to these entities in the same way.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    DecodedMesh, MeshKey, Object, PrimFaceId, PrimLod, PrimShapeFloat, PrimShapeParams,
-    ScopedObjectId, SculptOrMeshKey, SlEvent, SlSessionEvent, TextureFace, TextureKey, Uuid,
-    Vector, decode_texture_entry, pcode, tessellate, to_bevy_mesh, to_bevy_prim_mesh,
+    DecodedMesh, DecodedTexture, MeshKey, Object, PrimFaceId, PrimLod, PrimMesh, PrimShapeFloat,
+    PrimShapeParams, ScopedObjectId, SculptOrMeshKey, SlEvent, SlSessionEvent, TextureFace,
+    TextureKey, Uuid, Vector, decode_texture_entry, pcode, tessellate, tessellate_sculpt,
+    to_bevy_mesh, to_bevy_prim_mesh,
 };
 
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
 use crate::meshes::{MeshDecoded, MeshManager};
-use crate::textures::{PrimTextures, TextureManager, face_material};
+use crate::textures::{PrimTextures, TextureDecoded, TextureManager, face_material};
 
 /// The broad render classification of an in-world object, decided from its
 /// `pcode` and sculpt/mesh extra parameters. It routes the object to the right
@@ -145,15 +149,26 @@ struct TrackedObject {
     /// child whose root has not arrived stays `false` until it does).
     parented: bool,
     /// The per-face child entities carrying this object's geometry: one per
-    /// non-empty [`PrimFace`](sl_client_bevy::PrimFace) for a plain prim, or one
-    /// per non-empty submesh for a mesh object. Rebuilt on a shape change. Empty
-    /// for an object not yet tessellated (a mesh still waiting on its asset, or a
-    /// non-rendered category).
+    /// non-empty [`PrimFace`](sl_client_bevy::PrimFace) for a plain prim or a
+    /// sculpt, or one per non-empty submesh for a mesh object. Rebuilt on a shape
+    /// change. Empty for an object not yet tessellated (a mesh or sculpt still
+    /// waiting on its asset, or a non-rendered category).
     face_entities: Vec<Entity>,
-    /// For a mesh object still waiting on its mesh asset to decode, the pending
-    /// build request (the mesh key + the object's texture-entry bytes); `None`
-    /// once the geometry is built or for a non-mesh object.
-    mesh: Option<PendingMesh>,
+    /// For an object still waiting on an asset fetch to decode (a mesh's `LLMesh`
+    /// asset or a sculpt's map texture), the pending build request; `None` once
+    /// the geometry is built or for an object whose geometry needs no fetch.
+    pending: Option<PendingGeometry>,
+}
+
+/// A deferred geometry build waiting on an asset fetch — a mesh object on its
+/// `LLMesh` asset, or a sculpted prim on its sculpt map texture — retained so the
+/// object's face entities can be spawned (and textured) once the asset decodes.
+enum PendingGeometry {
+    /// A mesh object waiting on its mesh asset (built by [`apply_object_meshes`]).
+    Mesh(PendingMesh),
+    /// A sculpted prim waiting on its sculpt map texture (built by
+    /// [`apply_object_sculpts`]).
+    Sculpt(PendingSculpt),
 }
 
 /// A mesh object's deferred geometry build: the mesh asset key it is waiting on
@@ -164,6 +179,21 @@ struct PendingMesh {
     key: MeshKey,
     /// The object's raw texture-entry bytes, decoded per-submesh at build time to
     /// texture each face.
+    texture_entry: Vec<u8>,
+}
+
+/// A sculpted prim's deferred geometry build: the sculpt map texture key it is
+/// waiting on, the sculpt topology byte, and the object's texture-entry bytes,
+/// retained so its face entity can be spawned (and textured) once
+/// [`TextureManager`] decodes the map.
+struct PendingSculpt {
+    /// The sculpt map texture key whose decoded pixels are the geometry input.
+    map: TextureKey,
+    /// The sculpt type byte (plane / cylinder / sphere / torus topology + the
+    /// invert / mirror flags), passed to [`tessellate_sculpt`].
+    sculpt_type: u8,
+    /// The object's raw texture-entry bytes, decoded at build time to texture the
+    /// sculpt's single face.
     texture_entry: Vec<u8>,
 }
 
@@ -268,14 +298,28 @@ fn mesh_key(object: &Object) -> Option<MeshKey> {
     }
 }
 
+/// The sculpt map texture key and topology byte of a sculpted prim, or `None` if
+/// the object is not a sculpt (a plain prim, a mesh, or a non-prim).
+fn sculpt_key(object: &Object) -> Option<(TextureKey, u8)> {
+    let sculpt = object.extra.sculpt?;
+    match sculpt.texture {
+        SculptOrMeshKey::Sculpt(key) => Some((key, sculpt.sculpt_type)),
+        SculptOrMeshKey::Mesh(_) => None,
+    }
+}
+
 /// Build an object's renderable geometry for its category, returning the spawned
-/// child entities and — for a mesh whose asset has not decoded yet — the pending
-/// build to finish once [`MeshManager`] decodes it.
+/// child entities and — for a mesh or sculpt whose asset has not decoded yet — the
+/// pending build to finish once the asset arrives.
 ///
 /// A plain prim is tessellated and spawned immediately. A mesh requests its asset
 /// through `mesh_manager` and, if the geometry is already decoded, spawns its
-/// submeshes now; otherwise it returns a [`PendingMesh`] so [`apply_object_meshes`]
-/// can build it on decode. Every other category renders nothing here.
+/// submeshes now; otherwise it returns a [`PendingGeometry::Mesh`] so
+/// [`apply_object_meshes`] can build it on decode. A sculpt requests its map
+/// texture through `manager` (the shared texture store) and, if the map is already
+/// decoded, stitches and spawns its face now; otherwise it returns a
+/// [`PendingGeometry::Sculpt`] so [`apply_object_sculpts`] can build it on decode.
+/// Every other category renders nothing here.
 #[expect(
     clippy::too_many_arguments,
     reason = "threads the several ECS resources the geometry build needs"
@@ -290,7 +334,7 @@ fn build_object_geometry(
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     mesh_manager: &mut MeshManager,
-) -> (Vec<Entity>, Option<PendingMesh>) {
+) -> (Vec<Entity>, Option<PendingGeometry>) {
     match category {
         ObjectCategory::Prim => (
             build_prim_faces(
@@ -328,16 +372,46 @@ fn build_object_geometry(
                 ),
                 None => (
                     Vec::new(),
-                    Some(PendingMesh {
+                    Some(PendingGeometry::Mesh(PendingMesh {
                         key,
                         texture_entry: object.texture_entry.clone(),
-                    }),
+                    })),
                 ),
             }
         }
-        ObjectCategory::Avatar | ObjectCategory::Sculpt | ObjectCategory::Other => {
-            (Vec::new(), None)
+        ObjectCategory::Sculpt => {
+            let Some((map, sculpt_type)) = sculpt_key(object) else {
+                return (Vec::new(), None);
+            };
+            manager.request(map);
+            // The store hands back an `Arc`; clone it out so the immutable borrow
+            // of `manager` ends before the face build borrows it mutably.
+            match manager.decoded(map).map(Arc::clone) {
+                Some(map_image) => (
+                    build_sculpt_faces(
+                        &map_image,
+                        sculpt_type,
+                        &object.texture_entry,
+                        entity,
+                        commands,
+                        meshes,
+                        materials,
+                        manager,
+                        prim_textures,
+                    ),
+                    None,
+                ),
+                None => (
+                    Vec::new(),
+                    Some(PendingGeometry::Sculpt(PendingSculpt {
+                        map,
+                        sculpt_type,
+                        texture_entry: object.texture_entry.clone(),
+                    })),
+                ),
+            }
         }
+        ObjectCategory::Avatar | ObjectCategory::Other => (Vec::new(), None),
     }
 }
 
@@ -368,7 +442,87 @@ fn build_prim_faces(
 ) -> Vec<Entity> {
     let shape = PrimShapeFloat::from_params(&object.shape);
     let prim = tessellate(&shape, PrimLod::High);
-    let entry = decode_texture_entry(&object.texture_entry, prim.faces.len());
+    spawn_prim_faces(
+        &prim,
+        &object.texture_entry,
+        parent,
+        commands,
+        meshes,
+        materials,
+        manager,
+        prim_textures,
+    )
+}
+
+/// Stitch a sculpted prim's decoded sculpt map into geometry and spawn its face
+/// entity under `parent`, textured via the Phase 6 pipeline exactly as a plain
+/// prim's faces are.
+///
+/// The map pixels come from the shared [`TextureManager`] (the same fetch /
+/// off-thread-decode / disk-cache the Phase 6 texturing drives — the sculpt is
+/// not decoded on the render thread), and are stitched by [`tessellate_sculpt`]
+/// into a single-face [`PrimMesh`] honouring the object's `sculpt_type`
+/// (plane / cylinder / sphere / torus + invert / mirror flags). The resulting face
+/// is textured from the object's `TextureEntry` slot 0 and spawned as one child
+/// entity, kept in the prim's local Second Life space — the object entity's
+/// `Transform` carries its scale / rotation / position and the single basis
+/// change, like a plain prim.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the several ECS resources the geometry build needs"
+)]
+fn build_sculpt_faces(
+    map: &DecodedTexture,
+    sculpt_type: u8,
+    texture_entry: &[u8],
+    parent: Entity,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    manager: &mut TextureManager,
+    prim_textures: &mut PrimTextures,
+) -> Vec<Entity> {
+    let prim = tessellate_sculpt(map, sculpt_type);
+    spawn_prim_faces(
+        &prim,
+        texture_entry,
+        parent,
+        commands,
+        meshes,
+        materials,
+        manager,
+        prim_textures,
+    )
+}
+
+/// Spawn one child entity per non-empty [`PrimFace`](sl_client_bevy::PrimFace) of
+/// a tessellated [`PrimMesh`] under `parent`, each carrying its geometry mesh, its
+/// per-face diffuse material (from `texture_entry`), and a [`PrimFaceEntity`] tag.
+/// Returns the spawned face entities so a later shape change can despawn and
+/// rebuild them. Shared by the plain-prim ([`build_prim_faces`]) and sculpt
+/// ([`build_sculpt_faces`]) paths, which differ only in how the `PrimMesh` was
+/// produced.
+///
+/// Each face's material is built from its `TextureEntry` slot (tint + texture id)
+/// by [`face_material`], which requests the texture through `manager` and parks
+/// the material in `prim_textures` until it decodes (Phase 6). A face whose slot is
+/// missing (an object with no texture entry) falls back to an untextured white
+/// material. The face geometry stays in the object's local Second Life space.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the several ECS resources the geometry build needs"
+)]
+fn spawn_prim_faces(
+    prim: &PrimMesh,
+    texture_entry: &[u8],
+    parent: Entity,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    manager: &mut TextureManager,
+    prim_textures: &mut PrimTextures,
+) -> Vec<Entity> {
+    let entry = decode_texture_entry(texture_entry, prim.faces.len());
     // The slot every face falls back to when the object carries no texture entry:
     // an untextured, opaque-white (untinted) face.
     let default_face = TextureFace::new(TextureKey::from(Uuid::nil()));
@@ -504,7 +658,7 @@ fn apply_object(
             // fingerprint covers pcode and the sculpt/mesh key.
             debug!("object {scoped} shape changed; re-tessellating");
             despawn_prim_faces(&existing.face_entities, commands);
-            let (face_entities, mesh) = build_object_geometry(
+            let (face_entities, pending) = build_object_geometry(
                 object,
                 category,
                 existing.entity,
@@ -516,7 +670,7 @@ fn apply_object(
                 mesh_manager,
             );
             existing.face_entities = face_entities;
-            existing.mesh = mesh;
+            existing.pending = pending;
             existing.shape = shape;
         }
         // Reconcile parenting: an object relinked to a root becomes a child of
@@ -550,10 +704,10 @@ fn apply_object(
         }
         None => false,
     };
-    // A plain prim tessellates immediately; a mesh requests its asset and builds
-    // its submeshes now if already decoded, else on decode; sculpt / avatar grow
-    // their geometry in later phases.
-    let (face_entities, mesh) = build_object_geometry(
+    // A plain prim tessellates immediately; a mesh or sculpt requests its asset and
+    // builds its geometry now if already decoded, else on decode; an avatar grows
+    // its placeholder in a later phase.
+    let (face_entities, pending) = build_object_geometry(
         object,
         category,
         entity,
@@ -573,7 +727,7 @@ fn apply_object(
             is_root,
             parented,
             face_entities,
-            mesh,
+            pending,
         },
     );
     debug!(
@@ -698,29 +852,83 @@ pub(crate) fn apply_object_meshes(
             continue;
         };
         for tracked in state.objects.values_mut() {
-            // Take the pending build so a built object is not rebuilt; a mesh
-            // pending on a *different* key is put back untouched.
-            let Some(pending) = tracked.mesh.take() else {
-                continue;
-            };
-            if pending.key != key {
-                tracked.mesh = Some(pending);
-                continue;
+            // Take the pending build so a built object is not rebuilt; a build
+            // pending on a *different* asset (another mesh, or a sculpt) is put
+            // back untouched.
+            match tracked.pending.take() {
+                Some(PendingGeometry::Mesh(pending)) if pending.key == key => {
+                    tracked.face_entities = build_mesh_submeshes(
+                        &mesh,
+                        &pending.texture_entry,
+                        tracked.entity,
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &mut manager,
+                        &mut prim_textures,
+                    );
+                    debug!(
+                        "built mesh {key}: {} submesh entities",
+                        tracked.face_entities.len()
+                    );
+                }
+                other => tracked.pending = other,
             }
-            tracked.face_entities = build_mesh_submeshes(
-                &mesh,
-                &pending.texture_entry,
-                tracked.entity,
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &mut manager,
-                &mut prim_textures,
-            );
-            debug!(
-                "built mesh {key}: {} submesh entities",
-                tracked.face_entities.len()
-            );
+        }
+    }
+}
+
+/// Build the deferred geometry of every sculpted prim waiting on a sculpt map
+/// texture that just decoded: for each [`TextureDecoded`], stitch and spawn the
+/// face of every tracked object pending on that key (texturing it via the Phase 6
+/// pipeline). A decode that failed leaves the objects geometry-less (they keep
+/// waiting until a later update re-requests the map).
+///
+/// This reads the same [`TextureDecoded`] stream as
+/// [`apply_prim_textures`](crate::textures::apply_prim_textures) — the sculpt map
+/// flows through the shared [`TextureManager`] like any face texture — but keys off
+/// a *pending sculpt build* rather than a parked face material, so the two
+/// consumers never contend for the same decoded texture.
+pub(crate) fn apply_object_sculpts(
+    mut decoded: MessageReader<TextureDecoded>,
+    mut state: ResMut<ObjectState>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut manager: ResMut<TextureManager>,
+    mut prim_textures: ResMut<PrimTextures>,
+) {
+    for &TextureDecoded(id) in decoded.read() {
+        // The decoded sculpt-map pixels; clone the `Arc` out so the immutable
+        // borrow of `manager` ends before the face build borrows it mutably.
+        let Some(map) = manager.decoded(id).map(Arc::clone) else {
+            // The fetch failed: sculpts pending on this map stay geometry-less.
+            continue;
+        };
+        for tracked in state.objects.values_mut() {
+            // Take the pending build so a built object is not rebuilt; a build
+            // pending on a *different* asset (a mesh, or another sculpt map) is put
+            // back untouched.
+            match tracked.pending.take() {
+                Some(PendingGeometry::Sculpt(pending)) if pending.map == id => {
+                    tracked.face_entities = build_sculpt_faces(
+                        &map,
+                        pending.sculpt_type,
+                        &pending.texture_entry,
+                        tracked.entity,
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &mut manager,
+                        &mut prim_textures,
+                    );
+                    debug!(
+                        "built sculpt {id}: {} face entities",
+                        tracked.face_entities.len()
+                    );
+                }
+                other => tracked.pending = other,
+            }
         }
     }
 }
