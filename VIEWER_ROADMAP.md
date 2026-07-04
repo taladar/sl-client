@@ -198,11 +198,16 @@ then tick the box here. Add sub-points as you discover them.
 
 ## Phase 4 — `sl-client-bevy` conversion
 
-- [ ] **P4.1. `to_bevy_prim_mesh`.** Add `to_bevy_prim_mesh(&PrimFace) -> Mesh`
+- [x] **P4.1. `to_bevy_prim_mesh`.** Add `to_bevy_prim_mesh(&PrimFace) -> Mesh`
   and `to_bevy_prim_meshes(&PrimMesh) -> Vec<Mesh>` (TriangleList; POSITION +
   optional NORMAL + UV_0 + `Indices::U32`), an analogue of `to_bevy_mesh`. Add
   the `sl-prim` dependency; re-export the conversion and the `sl_prim` types the
-  viewer needs. Add a `feat` entry to `sl-client-bevy/CHANGELOG.md`.
+  viewer needs (`PrimShape` aliased `PrimShapeFloat` so it does not collide with
+  `sl_proto`'s quantized rez-params `PrimShape`). `sl-prim` is a pure geometry
+  crate with no store/fetcher, so — unlike `sl-mesh` / `sl-texture` — it has no
+  `sl-client-tokio` runtime counterpart and this stays a `sl-client-bevy`-only
+  change. The CHANGELOG is `git-cliff`-generated from commits, so no manual
+  entry was added.
 
 ## Phase 5 — Prim rendering in the viewer
 

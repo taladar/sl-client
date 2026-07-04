@@ -128,8 +128,20 @@ pub use sl_asset::{
     CacheLimits as AssetCacheLimits,
 };
 
+// The pure prim-tessellation geometry (no store/fetcher — a prim is tessellated
+// on the CPU from its shape parameters, not fetched). Re-exported so the viewer
+// can dequantize a `PrimShapeParams` into a float shape, tessellate it at a
+// `PrimLod`, and feed the resulting faces through `to_bevy_prim_mesh`. The
+// dequantized float shape is aliased `PrimShapeFloat` so it does not collide
+// with `sl_proto`'s quantized rez-params `PrimShape`.
+pub use sl_prim::{
+    HoleType, PathCurve, PrimFace, PrimFaceId, PrimLod, PrimMesh, PrimShape as PrimShapeFloat,
+    ProfileCurve, tessellate,
+};
+
 pub use crate::assets::BevyAssetFetcher;
 pub use crate::meshes::{BevyMeshFetcher, to_bevy_mesh, to_bevy_meshes};
+pub use crate::prims::{to_bevy_prim_mesh, to_bevy_prim_meshes};
 #[cfg(feature = "bevy_pbr")]
 pub use crate::terrain::{ATTRIBUTE_TERRAIN_WEIGHTS, TerrainMaterial, TerrainMaterialPlugin};
 pub use crate::textures::{BevyTextureFetcher, to_bevy_image};
@@ -145,6 +157,7 @@ mod inventory_cache;
 mod materials;
 mod media;
 pub mod meshes;
+pub mod prims;
 #[cfg(feature = "bevy_pbr")]
 pub mod terrain;
 pub mod textures;
