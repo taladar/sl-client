@@ -27,8 +27,25 @@ then tick the box here. Add sub-points as you discover them.
   `sl-mesh`.
 - **`sl-sculpt`** — new pure crate: sculpt-texture (RGB sculpt-map) → geometry,
   reusing `sl-prim`'s `PrimMesh` / `PrimFace` output type.
+- **`sl-avatar`** — new pure crate (no Bevy; I/O-free, parses from bytes like
+  `sl-mesh`): avatar skeleton (`avatar_skeleton.xml`), legacy base-body `.llm`
+  mesh decode, the visual-param / morph-target / skeletal-scale / driver system
+  (`avatar_lad.xml`), and generic matrix-palette skinning math shared by the
+  base body and rigged mesh (added in Phase 12).
+- **`sl-anim`** — new pure crate (no Bevy; I/O-free): Linden keyframe-motion
+  (`.anim`) decode → per-joint keyframe tracks + priority / ease / loop /
+  constraint metadata (added in Phase 18).
+- **`sl-bake`** — new pure crate (no Bevy; I/O-free, depends on `sl-texture`
+  with `default-features = false` for just `DecodedImage`, like `sl-sculpt`):
+  **client-side** avatar bake — composite the wearable layer images + layer
+  params (order, tint, alpha mask, tex-gen) into a baked RGBA per bake region.
+  This is what OpenSim (legacy `UploadBakedTexture` client-bake) and any grid
+  that doesn't server-bake require; the SL "Sunshine" server bake is the other
+  path (added in Phase 15).
 - **`sl-client-bevy`** — a small addition: a `to_bevy_prim_mesh` conversion +
-  re-exports, mirroring the existing `to_bevy_mesh` / `to_bevy_image`.
+  re-exports, mirroring the existing `to_bevy_mesh` / `to_bevy_image`; later
+  (Phases 13–18) it also gains skeleton-instance + `SkinnedMesh` conversions
+  and an animation driver, mirroring the existing `to_bevy_*` additions.
 - **`sl-client-bevy-viewer`** — new binary crate: the windowed viewer app.
 
 ## Scope reminders
@@ -474,24 +491,224 @@ then tick the box here. Add sub-points as you discover them.
   `[shout] Friend Tester: HELLO EVERYONE` — and the lines persist in the corner
   (user-confirmed).
 
-## Phase 12 — Live verification & polish
+The remaining phases replace the placeholder avatar spheres (Phase 10) with real
+avatars: the system-avatar body, server- and client-side baked texturing (incl.
+alpha), attachments, rigged mesh with bake-on-mesh, animations, and HUD
+attachments. They follow the same top-to-bottom, one-point-per-session cadence.
 
-- [ ] **P12.1. OpenSim end-to-end.** Window opens, login succeeds, and terrain +
-  prims + textures + mesh + sculpt + avatar-spheres + chat all render; fly
-  around; `Esc` logs out cleanly and exits with success.
-- [ ] **P12.2. Aditi smoke (optional).** Run against `credentials.aditi.toml`
-  with the MFA wrapper; expect terrain + server-baked-avatar spheres — prim /
-  mesh content depends on the landing region.
-- [ ] **P12.3. Clean sweep.** `cargo clippy --workspace --all-targets` clean,
-  `cargo fmt --all`, `rumdl` on this file; tick the remaining boxes.
+A new CLI flag `--viewer-assets <dir>` is added in P13.2 and reused by every
+avatar / animation phase; absent it, avatars keep the Phase-10 sphere. The
+standard Linden `character/` assets (`avatar_skeleton.xml`, `avatar_lad.xml`,
+base-body `.llm` meshes, visual-param definitions, the built-in animation
+library) are client-side viewer files, not fetched from the grid — the viewer
+reads them from that path (point at an installed Firestorm / SL viewer), and the
+pure crates stay I/O-free (parse from `&[u8]` / `&str`), mirroring `sl-mesh` /
+`sl-texture`. Pure-crate phases verify with `cargo test -p <crate>` using small
+committed **fixture** XML / `.llm` / `.anim` files (deterministic-fixture style,
+as in `sl-mesh` — not the full LL assets, which stay runtime-loaded); viewer
+phases verify with a live run: OpenSim first, then aditi (real SL) for the paths
+OpenSim can't exercise (server-side bake, BoM, HUDs).
+
+Key net-new library facts (reused across the phases): `sl-proto` already carries
+`AvatarAppearance { texture_entry, visual_params, cof_version, attachments, .. }`
+and `PlayingAnimation`, the baked-slot constants
+`avatar_texture::{HEAD,UPPER,LOWER,EYES,SKIRT,HAIR,LEFT_ARM,LEFT_LEG,AUX*}_BAKED`
+(`COUNT = 45`), `decode_texture_entry`, `WearableType::Alpha`, and the
+`AttachmentPoint` enum (HUD points 31–38). `sl-mesh` already decodes rigged-mesh
+skin data (`MeshSkin` joint names / inverse-bind / bind-shape / alt-bind /
+`pelvis_offset` + per-vertex `VertexWeights`), so rigged mesh needs skinning
+*math*, not a new decoder. The BoM magic `IMG_USE_BAKED_*` UUID constants live
+only in Firestorm today and are added to `sl-proto` in P17.3.
+
+## Phase 12 — `sl-avatar`: skeleton & base body (pure crate)
+
+- [ ] **P12.1. Scaffold `sl-avatar`.** New crate (`edition = "2024"`,
+  `publish = false`, `[lints] workspace = true`), `CHANGELOG.md`, `cliff.toml`
+  (`tag_pattern ^sl_avatar_[0-9.]*$`), registered in the root `members`. Stub
+  `lib.rs`; green `cargo build --workspace`. Mirror P0.
+- [ ] **P12.2. Skeleton parse.** `skeleton.rs`: parse `avatar_skeleton.xml`
+  (from `&str`) → `Skeleton { joints }` with hierarchy, rest pos/rot/scale,
+  pivot, and collision volumes; plus the attachment-point→joint map and HUD-
+  point set from `avatar_lad.xml` `<attachment_point>`. Accessor helpers over
+  indices (restriction lints). Committed minimal fixture skeleton for tests.
+- [ ] **P12.3. Base-mesh `.llm` decode.** `basemesh.rs`: decode the legacy
+  Linden avatar mesh format → `BaseMesh { positions, normals, uvs, weights }`
+  (per-vertex skin weights to skeleton joints) + the mesh's morph-target deltas.
+  One decoder per base part (head, upper, lower, eyes, hair, skirt, eyelashes)
+  with their LOD chains. Distinct from `sl_mesh` (`LLMesh`).
+- [ ] **P12.4. `avatar_lad.xml` params.** `params.rs`: parse the visual-param
+  table — id, group, min/max/default, and each param's effect (`param_morph`
+  mesh delta ref, `param_skeleton` bone scale/offset, driver→driven links).
+  Produce a `VisualParams` model that maps an `AvatarAppearance.visual_params:
+  Vec<u8>` (quantized 0–255, viewer order) onto typed param values.
+- [ ] **P12.5. Tests.** Skeleton hierarchy + attachment/HUD point maps; `.llm`
+  decode non-degenerate counts + weight normalization; param-table lookups and
+  byte→value dequantization. `cargo test -p sl-avatar`.
+
+## Phase 13 — Base avatar in the viewer (replace spheres)
+
+- [ ] **P13.1. Bevy skinned-mesh conversion.** In `sl-client-bevy`: build a
+  per-avatar Bevy skeleton instance (joint entity hierarchy + `SkinnedMesh`
+  inverse bindposes) from `sl_avatar::Skeleton`, and `to_bevy` for each base-
+  body part → a `Mesh` with `JOINT_INDEX` / `JOINT_WEIGHT` attributes. Add the
+  `sl-avatar` dep + re-exports (`Skeleton`, `BaseMesh`, `VisualParams`,
+  `AvatarAppearance`). Mirror P4.
+- [ ] **P13.2. Un-morphed rigged body.** `--viewer-assets <dir>` CLI flag; load
+  the `character/` assets once into an `AvatarAssetLibrary` resource (skeleton +
+  base meshes + params), reading files here (crate stays I/O-free). In
+  `avatars.rs`, for each `pcode == 47` object spawn the rigged base body (all
+  parts) skinned to a fresh skeleton instance in the **default (un-morphed) rest
+  shape**, replacing the placeholder sphere; keep the sphere as fallback when no
+  assets / load fails, and keep the name tags. Verify a body renders on OpenSim.
+- [ ] **P13.3. Visual-param morph targets.** Apply
+  `AvatarAppearance.visual_params` (defaults where absent) → blend the base
+  meshes' morph-target deltas so the body takes its real shape (face, weight,
+  muscle, etc.). Re-morph on appearance update. One feature on top of P13.2.
+- [ ] **P13.4. Skeletal-scale & driver params.** Apply `param_skeleton` bone
+  scale/position params and driver→driven propagation so proportions (height,
+  limb/head scale, pelvis) match; rebuild the skeleton instance's rest
+  transforms accordingly. Verify a shaped avatar (2nd login) looks correct.
+
+## Phase 14 — Server-published baked texturing (incl. alpha)
+
+- [ ] **P14.1. Ingest `AvatarAppearance`.** In `avatars.rs`, on
+  `Event::AvatarAppearance` decode `texture_entry`
+  (`decode_texture_entry(_, avatar_texture::COUNT)`), read the baked-slot UUIDs
+  (`avatar_texture::*_BAKED`), and request each through the shared
+  `TextureManager` / `TextureStore` (the Phase-6 pipeline). Track per-avatar.
+  (On SL these come from the server "Sunshine" bake; on OpenSim they come from
+  *other* avatars' viewers' client-side bakes — either way they are published
+  baked UUIDs we just fetch.)
+- [ ] **P14.2. Map bakes onto body regions.** Build one `StandardMaterial` per
+  base-body region from its baked slot (head→head, upper→upper body, lower→lower
+  body, eyes→eyes, hair→hair, skirt→skirt), uploaded via the same
+  `TextureDecoded` path as `apply_prim_textures`. Verify a textured other-avatar
+  body on both grids.
+- [ ] **P14.3. Alpha.** Baked textures carry the alpha wearables composited into
+  their alpha channel; render body-region materials with `AlphaMode::Blend` (or
+  `Mask`) so alpha'd regions turn invisible — essential so a worn mesh body's
+  underlying system body is hidden. Fully-transparent region → hide that part.
+- [ ] **P14.4. Refresh on rebake.** Re-request bakes on `RebakeAvatarTextures`
+  and on a newer `cof_version` in a later `AvatarAppearance`.
+
+## Phase 15 — Client-side baking (`sl-bake`, the OpenSim/legacy path)
+
+The server-published path (Phase 14) covers *other* avatars on both grids, and
+our *own* avatar on SL. It does **not** cover our own avatar on OpenSim (and any
+grid without server bake): those grids expect the *client* to composite the bake
+from wearable layers (legacy `UploadBakedTexture`). Without it our own avatar is
+an untextured cloud. This phase composites the bake ourselves, primarily for our
+own avatar and as the fallback whenever a baked slot is absent / default.
+
+- [ ] **P15.1. Scaffold `sl-bake` + region compositing.** New pure crate
+  (scaffold like P12.1; `sl-texture` dep with `default-features = false`). Given
+  the ordered per-region layers (skin → tattoo → clothing → alpha mask) as
+  decoded `DecodedImage`s + their params (tint colour, alpha, tex-gen),
+  composite each bake region (head/upper/lower/eyes/skirt/hair) into a baked
+  RGBA. Alpha layers carve the alpha channel. Tests over synthetic layers.
+  `cargo test -p sl-bake`.
+- [ ] **P15.2. Wearable layer inputs.** Read the agent's worn wearables
+  (`AgentWearables` / the COF), fetch each wearable **asset** (skin / tattoo /
+  clothing / alpha) to get its layer texture ids + tint (which visual params
+  colour a layer, e.g. skin tone), and decode the layer textures through the
+  shared `TextureManager`. Assemble the per-region layer lists `sl-bake` needs.
+- [ ] **P15.3. Composite & render our own bake.** When no server bake is
+  published for an avatar (our own on OpenSim), composite its regions with
+  `sl-bake` and drive the Phase-14 body-region materials + Phase-17 BoM from the
+  local composite instead of a fetched baked UUID (alpha honoured). Verify our
+  own avatar renders skin/clothing-textured on OpenSim.
+- [ ] **P15.4. (Optional) Publish the bake.** J2C-**encode** the composited
+  regions and upload via the existing `UploadBakedTexture` cap so the sim /
+  other viewers see us. **Needs a J2C encoder** (OpenJPEG encode) — the one
+  heavy net-new dependency; may slip to a follow-up. Local rendering (P15.3)
+  does not depend on it.
+
+## Phase 16 — Attachments (rigid)
+
+- [ ] **P16.1. Detect & parent.** In `objects.rs` `reconcile_parent`, when an
+  object's `parent_id` resolves to a **pcode-47 avatar** (not a prim linkset),
+  decode `attachment_point()`, look up that avatar's skeleton **joint entity**
+  (Phase 13), and parent the attachment there via `ChildOf` so it follows the
+  posed skeleton. Hold-pending when the avatar/joint is not present yet (reuse
+  the existing pending-adoption path).
+- [ ] **P16.2. Attachment transform.** Place the attachment at its stored local
+  offset/rotation relative to the joint; honour attachment `ADD_FLAG` vs
+  replace. Verify a rigid prim/mesh attachment (e.g. a worn hat) tracks the
+  avatar on OpenSim.
+
+## Phase 17 — Rigged mesh & bake-on-mesh
+
+- [ ] **P17.1. Skinning math.** In `sl-avatar` `skin.rs`: a matrix-palette
+  helper taking `sl_mesh::MeshSkin` (joint names + inverse-bind + bind-shape +
+  alt-bind + `pelvis_offset` + `lock_scale_if_joint_position`) and per-vertex
+  `VertexWeights` against a `Skeleton` instance's current joint world transforms
+  → skinned vertices (≤4 weights). Tests with a synthetic skeleton.
+- [ ] **P17.2. Rigged-mesh rendering.** A mesh object with a skin block worn on
+  an avatar renders as a Bevy `SkinnedMesh` bound to that avatar's skeleton
+  instance (not a static child), so mesh bodies/clothing deform with the avatar.
+  Reuse the `MeshManager` fetch/decode; join to the avatar via the Phase-16
+  attachment association.
+- [ ] **P17.3. Bake-on-mesh.** Add the `IMG_USE_BAKED_*` magic UUID constants to
+  `sl-proto` (+ slot↔UUID map). In the viewer, when a face's
+  `TextureFace.texture_id` equals a BoM magic UUID, texture that face with the
+  wearer's corresponding **baked** avatar texture — the server-published bake
+  (Phase 14) or the client-side composite (Phase 15) — instead of fetching,
+  honouring alpha. This is what makes modern mesh bodies show the avatar's skin.
+  Verify a BoM mesh body on aditi (server bake) and on OpenSim (client bake).
+
+## Phase 18 — Animations (full pipeline)
+
+- [ ] **P18.1. Scaffold `sl-anim` + `.anim` decode.** New pure crate (scaffold
+  like P12.1). `motion.rs`: decode the Linden keyframe-motion binary → `Motion`
+  with per-joint rotation/position keyframe tracks, priority, ease-in/out, loop
+  points, and constraints. Fixture-based tests. `cargo test -p sl-anim`.
+- [ ] **P18.2. Built-in animation library.** Resolve an `anim_id` to its asset:
+  built-in fixed-UUID motions from the `--viewer-assets` path, else fetch an
+  uploaded `.anim` over `ViewerAsset` (reuse the asset fetch path). Cache
+  decoded motions.
+- [ ] **P18.3. Drive the skeleton.** On `Event::AvatarAnimation`, for each
+  `PlayingAnimation` sample its `Motion` each frame and pose the target avatar's
+  skeleton-instance joints (via a `sl-client-bevy` animation driver / Bevy
+  clip). Attachments (Phase 16) and rigged mesh (Phase 17) follow automatically.
+  Verify a walking/waving avatar.
+- [ ] **P18.4. Priority blending.** Resolve concurrently-playing animations
+  per-joint by priority with ease-in/out transitions (higher priority wins a
+  joint, blend on start/stop). Verify layered animations (e.g. an AO stand + a
+  gesture) compose correctly.
+
+## Phase 19 — HUD attachments
+
+- [ ] **P19.1. Detect HUD.** Classify an attachment whose `attachment_point()`
+  is a HUD slot (31–38, `HudCenter` / `HudTopLeft` / …); route it out of the
+  world scene to a dedicated screen-space HUD layer, and only for the **agent's
+  own** attachments.
+- [ ] **P19.2. HUD rendering.** Render HUD-attached prims/mesh on a HUD camera /
+  render layer anchored per the HUD attachment-point screen layout (orthographic
+  / screen-relative), reusing the existing prim/mesh geometry+texture build.
+  Verify a simple HUD renders fixed to the screen on aditi.
+
+## Phase 20 — Aditi (real SL) verification
+
+OpenSim end-to-end and the clippy / fmt / `rumdl` clean sweep are **not** a
+separate phase — they happen inside every phase above as it builds, live-tests,
+and commits (per the Legend). What OpenSim can't exercise is the SL-only
+appearance stack, so this final phase is the real-SL pass:
+
+- [ ] **P20.1. Aditi (real SL).** Run against `credentials.aditi.toml` + the MFA
+  wrapper for the SL-only paths OpenSim can't exercise: **server-side**-baked
+  bodies (vs. OpenSim's client-side bake), BoM mesh bodies with alpha, and the
+  agent's HUDs.
 
 ---
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 
 Advanced materials (PBR / GLTF `GltfMaterialOverride`, legacy normal / specular
-`RenderMaterials`, bump / shiny / glow / fullbright), avatar meshes / rigging /
-baked textures / animation (spheres only), flexi / particles / lights /
+`RenderMaterials`, bump / shiny / glow / fullbright), avatar cloth / flexi /
+breast-butt physics params, facial-morph lip-sync, flexi / particles / lights /
 reflection probes, water surface, sky / atmosphere, distance-based LOD switching
 (fixed High LOD), object selection / interaction, any chat *input* or non-quit
-UI, and sound.
+UI, and sound. Client-side baking *is* in scope (Phase 15) for local rendering;
+only the J2C-**encode** + re-upload of our own bake via `UploadBakedTexture` (so
+*other* viewers see us) may slip to a follow-up, since it needs an OpenJPEG
+encoder the stack does not have yet.
