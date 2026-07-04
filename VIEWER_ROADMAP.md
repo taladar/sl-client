@@ -522,7 +522,7 @@ only in Firestorm today and are added to `sl-proto` in P17.3.
 
 ## Phase 12 — `sl-avatar`: skeleton & base body (pure crate)
 
-- [ ] **P12.1. Scaffold `sl-avatar`.** New crate (`edition = "2024"`,
+- [x] **P12.1. Scaffold `sl-avatar`.** New crate (`edition = "2024"`,
   `publish = false`, `[lints] workspace = true`), `CHANGELOG.md`, `cliff.toml`
   (`tag_pattern ^sl_avatar_[0-9.]*$`), registered in the root `members`. Stub
   `lib.rs`; green `cargo build --workspace`. Mirror P0.

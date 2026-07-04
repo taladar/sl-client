@@ -5627,6 +5627,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-avatar"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "sl-proto",
+]
+
+[[package]]
 name = "sl-client-bevy"
 version = "0.1.0"
 dependencies = [

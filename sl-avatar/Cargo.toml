@@ -1,0 +1,25 @@
+[package]
+name = "sl-avatar"
+description = "Second Life / OpenSim avatar skeleton, base-body mesh, and visual-param decoding (pure, I/O-free), mirroring sl-mesh / sl-texture"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "avatar", "skeleton", "skinning"]
+categories = ["game-development", "rendering", "rendering::data-formats"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+sl-proto = { version = "0.1.0", path = "../sl-proto" }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+[lints]
+workspace = true
