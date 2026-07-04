@@ -167,9 +167,14 @@ then tick the box here. Add sub-points as you discover them.
   `PrimMesh { faces: Vec<PrimFace> }`, `PrimFace { positions, normals, uvs,
   indices, face_id }` (mirror `sl_mesh::DecodedMesh` / `Submesh`). Confirm or
   derive the float `PrimShape` input from `PrimShapeParams`.
-- [ ] **P3.2. Profile ring.** `profile.rs`: 2D profile (square / circle /
+- [x] **P3.2. Profile ring.** `profile.rs`: 2D profile (square / circle /
   half-circle / triangles) via `genNGon`, with profile begin/end cut and hollow
-  (`addHole`) plus the semantic face-index ranges.
+  (`addHole`) plus the semantic face-index ranges. A `Profile` of
+  `ProfilePoint`s (2D position + sweep-parameter `u`) and `ProfileFace` ranges
+  (`index`/`count`/`scale_u`/`cap`/`flat` + a `ProfileFaceId` `LL_FACE_*` bit
+  flag), built by a private `Builder` mirroring `LLProfile::generate` /
+  `genNGon` / `addHole` / `addCap` (per-edge `split`, path caps, open-ring
+  profile edges, sphere-close special case).
 - [ ] **P3.3. Extrusion path.** `path.rs`: line / circle / circle2 paths
   applying twist, scale, shear, taper, radius-offset, skew, revolutions, and
   path begin/end cut.
