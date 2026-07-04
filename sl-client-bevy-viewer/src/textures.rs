@@ -222,10 +222,10 @@ pub(crate) fn face_material(
     let mut material = StandardMaterial {
         base_color: tint_color(face.color),
         perceptual_roughness: 0.9,
-        // Double-sided (culling off) so a face renders regardless of its winding
-        // while the prim geometry is being brought up (matching P5.2).
-        double_sided: true,
-        cull_mode: None,
+        // Single-sided (default back-face culling): Second Life renders a face
+        // only from its front, so a one-sided surface (a flat mesh quad, a prim
+        // cut face) is invisible from behind rather than doubled. The tessellated
+        // prim faces and decoded mesh submeshes carry outward-facing windings.
         ..default()
     };
     if has_texture && let Some(image) = prim_textures.images.get(&texture_id) {

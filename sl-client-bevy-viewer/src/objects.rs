@@ -34,15 +34,17 @@
 //! way.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    Object, PrimFaceId, PrimLod, PrimShapeFloat, PrimShapeParams, ScopedObjectId, SculptOrMeshKey,
-    SlEvent, SlSessionEvent, TextureFace, TextureKey, Uuid, Vector, decode_texture_entry, pcode,
-    tessellate, to_bevy_prim_mesh,
+    DecodedMesh, MeshKey, Object, PrimFaceId, PrimLod, PrimShapeFloat, PrimShapeParams,
+    ScopedObjectId, SculptOrMeshKey, SlEvent, SlSessionEvent, TextureFace, TextureKey, Uuid,
+    Vector, decode_texture_entry, pcode, tessellate, to_bevy_mesh, to_bevy_prim_mesh,
 };
 
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
+use crate::meshes::{MeshDecoded, MeshManager};
 use crate::textures::{PrimTextures, TextureManager, face_material};
 
 /// The broad render classification of an in-world object, decided from its
@@ -142,10 +144,27 @@ struct TrackedObject {
     /// Whether this object's entity has been parented to its root entity yet (a
     /// child whose root has not arrived stays `false` until it does).
     parented: bool,
-    /// The per-face child entities carrying this prim's tessellated geometry (one
-    /// per non-empty [`PrimFace`](sl_client_bevy::PrimFace)), rebuilt on a shape
-    /// change. Empty for a non-prim object or one not yet tessellated.
+    /// The per-face child entities carrying this object's geometry: one per
+    /// non-empty [`PrimFace`](sl_client_bevy::PrimFace) for a plain prim, or one
+    /// per non-empty submesh for a mesh object. Rebuilt on a shape change. Empty
+    /// for an object not yet tessellated (a mesh still waiting on its asset, or a
+    /// non-rendered category).
     face_entities: Vec<Entity>,
+    /// For a mesh object still waiting on its mesh asset to decode, the pending
+    /// build request (the mesh key + the object's texture-entry bytes); `None`
+    /// once the geometry is built or for a non-mesh object.
+    mesh: Option<PendingMesh>,
+}
+
+/// A mesh object's deferred geometry build: the mesh asset key it is waiting on
+/// and the object's texture-entry bytes, retained so its submesh entities can be
+/// spawned (and textured) once [`MeshManager`] decodes the mesh.
+struct PendingMesh {
+    /// The mesh asset key to look the decoded geometry up by.
+    key: MeshKey,
+    /// The object's raw texture-entry bytes, decoded per-submesh at build time to
+    /// texture each face.
+    texture_entry: Vec<u8>,
 }
 
 /// Viewer-side object bookkeeping: the entity and metadata for every in-world
@@ -205,6 +224,10 @@ const fn local_translation(position: &Vector) -> Vec3 {
 /// Fold the object event stream into the scene graph: spawn/update/despawn
 /// entities, classify them, keep their transforms current, and maintain linkset
 /// parenting.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system reading the object stream and the ECS resources the geometry build needs"
+)]
 pub(crate) fn update_objects(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<ObjectState>,
@@ -213,6 +236,7 @@ pub(crate) fn update_objects(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
+    mut mesh_manager: ResMut<MeshManager>,
 ) {
     for event in events.read() {
         match &event.0 {
@@ -225,12 +249,94 @@ pub(crate) fn update_objects(
                     &mut materials,
                     &mut manager,
                     &mut prim_textures,
+                    &mut mesh_manager,
                 );
             }
             SlSessionEvent::ObjectRemoved { local_id, .. } => {
                 remove_object(&mut state, *local_id, &mut commands);
             }
             _other => {}
+        }
+    }
+}
+
+/// The mesh asset key of a mesh object, or `None` if the object is not a mesh.
+fn mesh_key(object: &Object) -> Option<MeshKey> {
+    match object.extra.sculpt.map(|sculpt| sculpt.texture) {
+        Some(SculptOrMeshKey::Mesh(key)) => Some(key),
+        _other => None,
+    }
+}
+
+/// Build an object's renderable geometry for its category, returning the spawned
+/// child entities and — for a mesh whose asset has not decoded yet — the pending
+/// build to finish once [`MeshManager`] decodes it.
+///
+/// A plain prim is tessellated and spawned immediately. A mesh requests its asset
+/// through `mesh_manager` and, if the geometry is already decoded, spawns its
+/// submeshes now; otherwise it returns a [`PendingMesh`] so [`apply_object_meshes`]
+/// can build it on decode. Every other category renders nothing here.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the several ECS resources the geometry build needs"
+)]
+fn build_object_geometry(
+    object: &Object,
+    category: ObjectCategory,
+    entity: Entity,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    manager: &mut TextureManager,
+    prim_textures: &mut PrimTextures,
+    mesh_manager: &mut MeshManager,
+) -> (Vec<Entity>, Option<PendingMesh>) {
+    match category {
+        ObjectCategory::Prim => (
+            build_prim_faces(
+                object,
+                entity,
+                commands,
+                meshes,
+                materials,
+                manager,
+                prim_textures,
+            ),
+            None,
+        ),
+        ObjectCategory::Mesh => {
+            let Some(key) = mesh_key(object) else {
+                return (Vec::new(), None);
+            };
+            mesh_manager.request(key);
+            // The store hands back an `Arc`; clone it out so the immutable borrow
+            // of `mesh_manager` ends before the submesh build borrows the other
+            // resources.
+            match mesh_manager.decoded(key).map(Arc::clone) {
+                Some(decoded) => (
+                    build_mesh_submeshes(
+                        &decoded,
+                        &object.texture_entry,
+                        entity,
+                        commands,
+                        meshes,
+                        materials,
+                        manager,
+                        prim_textures,
+                    ),
+                    None,
+                ),
+                None => (
+                    Vec::new(),
+                    Some(PendingMesh {
+                        key,
+                        texture_entry: object.texture_entry.clone(),
+                    }),
+                ),
+            }
+        }
+        ObjectCategory::Avatar | ObjectCategory::Sculpt | ObjectCategory::Other => {
+            (Vec::new(), None)
         }
     }
 }
@@ -289,6 +395,61 @@ fn build_prim_faces(
     face_entities
 }
 
+/// Spawn one child entity per non-empty submesh of a decoded mesh under `parent`,
+/// each carrying its geometry mesh, its per-face diffuse material (from the
+/// object's decoded [`TextureEntry`](sl_client_bevy::TextureEntry) slot), and a
+/// [`PrimFaceEntity`] tag naming the submesh (Linden face) index. Returns the
+/// spawned entities so a later shape change can despawn and rebuild them.
+///
+/// Each submesh maps to one Linden face: the material comes from the object's
+/// `TextureEntry` slot at the submesh's index (via [`face_material`], sharing the
+/// Phase 6 texture pipeline), and empty `NoGeometry` submeshes are skipped while
+/// still counting as a face slot (so later submeshes keep their correct index).
+/// The mesh geometry stays in the object's local Second Life space; the object
+/// entity's `Transform` carries the object's scale / rotation / position and the
+/// single Second Life → Bevy basis change for the whole object.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the several ECS resources the geometry build needs"
+)]
+fn build_mesh_submeshes(
+    decoded: &DecodedMesh,
+    texture_entry: &[u8],
+    parent: Entity,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    manager: &mut TextureManager,
+    prim_textures: &mut PrimTextures,
+) -> Vec<Entity> {
+    let entry = decode_texture_entry(texture_entry, decoded.submeshes.len());
+    // The slot every face falls back to when the object carries no texture entry:
+    // an untextured, opaque-white (untinted) face.
+    let default_face = TextureFace::new(TextureKey::from(Uuid::nil()));
+    let mut face_entities = Vec::new();
+    for (index, submesh) in decoded.submeshes.iter().enumerate() {
+        if submesh.no_geometry {
+            continue;
+        }
+        let mesh = meshes.add(to_bevy_mesh(submesh));
+        let texture_face = entry.face(index).unwrap_or(&default_face);
+        let material = face_material(texture_face, materials, manager, prim_textures);
+        // The submesh index is the Linden face index; a mesh has few faces, so the
+        // widening never saturates in practice (a clamp keeps it lint-clean).
+        let face_id = PrimFaceId::new(u16::try_from(index).unwrap_or(u16::MAX));
+        let entity = commands
+            .spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                PrimFaceEntity { face_id },
+                ChildOf(parent),
+            ))
+            .id();
+        face_entities.push(entity);
+    }
+    face_entities
+}
+
 /// Despawn every face child entity of a prim (used before rebuilding on a shape
 /// change), leaving the caller to clear the tracked list.
 fn despawn_prim_faces(face_entities: &[Entity], commands: &mut Commands) {
@@ -299,6 +460,10 @@ fn despawn_prim_faces(face_entities: &[Entity], commands: &mut Commands) {
 
 /// Spawn or update the entity for `object`, keeping its transform, classification,
 /// and linkset parenting current.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the several ECS resources the geometry build needs"
+)]
 fn apply_object(
     state: &mut ObjectState,
     object: &Object,
@@ -307,6 +472,7 @@ fn apply_object(
     materials: &mut Assets<StandardMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
+    mesh_manager: &mut MeshManager,
 ) {
     let scoped = object.scoped_id();
     let parent = object.scoped_parent_id();
@@ -338,19 +504,19 @@ fn apply_object(
             // fingerprint covers pcode and the sculpt/mesh key.
             debug!("object {scoped} shape changed; re-tessellating");
             despawn_prim_faces(&existing.face_entities, commands);
-            existing.face_entities = if category == ObjectCategory::Prim {
-                build_prim_faces(
-                    object,
-                    existing.entity,
-                    commands,
-                    meshes,
-                    materials,
-                    manager,
-                    prim_textures,
-                )
-            } else {
-                Vec::new()
-            };
+            let (face_entities, mesh) = build_object_geometry(
+                object,
+                category,
+                existing.entity,
+                commands,
+                meshes,
+                materials,
+                manager,
+                prim_textures,
+                mesh_manager,
+            );
+            existing.face_entities = face_entities;
+            existing.mesh = mesh;
             existing.shape = shape;
         }
         // Reconcile parenting: an object relinked to a root becomes a child of
@@ -384,21 +550,20 @@ fn apply_object(
         }
         None => false,
     };
-    // A plain prim tessellates immediately; the other categories (mesh / sculpt /
-    // avatar) grow their geometry in later phases.
-    let face_entities = if category == ObjectCategory::Prim {
-        build_prim_faces(
-            object,
-            entity,
-            commands,
-            meshes,
-            materials,
-            manager,
-            prim_textures,
-        )
-    } else {
-        Vec::new()
-    };
+    // A plain prim tessellates immediately; a mesh requests its asset and builds
+    // its submeshes now if already decoded, else on decode; sculpt / avatar grow
+    // their geometry in later phases.
+    let (face_entities, mesh) = build_object_geometry(
+        object,
+        category,
+        entity,
+        commands,
+        meshes,
+        materials,
+        manager,
+        prim_textures,
+        mesh_manager,
+    );
     state.objects.insert(
         scoped,
         TrackedObject {
@@ -408,6 +573,7 @@ fn apply_object(
             is_root,
             parented,
             face_entities,
+            mesh,
         },
     );
     debug!(
@@ -505,6 +671,58 @@ fn tracked_descendants(state: &ObjectState, root: ScopedObjectId) -> Vec<ScopedO
         }
     }
     descendants
+}
+
+/// Build the deferred geometry of every mesh object waiting on a mesh that just
+/// decoded: for each [`MeshDecoded`], spawn the submesh entities of every tracked
+/// object pending on that key (texturing them via the Phase 6 pipeline). A decode
+/// that failed leaves the objects geometry-less (they keep waiting until a later
+/// update re-requests the mesh).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system reading decoded meshes and the ECS resources the geometry build needs"
+)]
+pub(crate) fn apply_object_meshes(
+    mut decoded: MessageReader<MeshDecoded>,
+    mut state: ResMut<ObjectState>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut manager: ResMut<TextureManager>,
+    mut prim_textures: ResMut<PrimTextures>,
+    mesh_manager: Res<MeshManager>,
+) {
+    for &MeshDecoded(key) in decoded.read() {
+        let Some(mesh) = mesh_manager.decoded(key).map(Arc::clone) else {
+            // The fetch failed: objects pending on this key stay geometry-less.
+            continue;
+        };
+        for tracked in state.objects.values_mut() {
+            // Take the pending build so a built object is not rebuilt; a mesh
+            // pending on a *different* key is put back untouched.
+            let Some(pending) = tracked.mesh.take() else {
+                continue;
+            };
+            if pending.key != key {
+                tracked.mesh = Some(pending);
+                continue;
+            }
+            tracked.face_entities = build_mesh_submeshes(
+                &mesh,
+                &pending.texture_entry,
+                tracked.entity,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut manager,
+                &mut prim_textures,
+            );
+            debug!(
+                "built mesh {key}: {} submesh entities",
+                tracked.face_entities.len()
+            );
+        }
+    }
 }
 
 #[cfg(test)]

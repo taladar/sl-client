@@ -9,6 +9,7 @@
 
 mod camera;
 mod coords;
+mod meshes;
 mod objects;
 mod session;
 mod terrain;
@@ -30,7 +31,8 @@ use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 use crate::camera::{FlyCamera, fly_camera};
-use crate::objects::{ObjectState, update_objects};
+use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
+use crate::objects::{ObjectState, apply_object_meshes, update_objects};
 use crate::session::{ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input};
 use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
 use crate::textures::{
@@ -229,7 +231,9 @@ fn run_session(params: &LoginParams) -> LoginOutcome {
     .init_resource::<ObjectState>()
     .init_resource::<TextureManager>()
     .init_resource::<PrimTextures>()
+    .init_resource::<MeshManager>()
     .add_message::<TextureDecoded>()
+    .add_message::<MeshDecoded>()
     .add_systems(Startup, setup_scene)
     .add_systems(
         Update,
@@ -240,10 +244,15 @@ fn run_session(params: &LoginParams) -> LoginOutcome {
             // finished fetches before the consumers that apply them.
             update_texture_caps,
             poll_textures,
+            // The same for the mesh store's `GetMesh2` / `GetMesh` cap.
+            update_mesh_caps,
+            poll_meshes,
             // Recenter (origin follows the root region) before folding terrain
             // events, so patches are placed on the current origin.
             (recenter_terrain, update_terrain).chain(),
             update_objects,
+            // Build the geometry of any mesh object whose asset just decoded.
+            apply_object_meshes,
             apply_prim_textures,
             handle_quit_input,
             enforce_quit_deadline,
