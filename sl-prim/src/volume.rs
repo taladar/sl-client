@@ -757,6 +757,45 @@ mod tests {
     }
 
     #[test]
+    fn hollow_box_adds_an_inner_face() {
+        let solid = tessellate(
+            &PrimShape::from_params(&default_box_params()),
+            PrimLod::High,
+        );
+        let mut params = default_box_params();
+        // Half hollow, square hole (same as the outer square profile).
+        params.profile_hollow = 25000;
+        let hollow = tessellate(&PrimShape::from_params(&params), PrimLod::High);
+        // A solid box is four sides + two caps; a hollow box adds the inner-side
+        // wall face — one more drawable face than the solid box.
+        assert_eq!(solid.face_count(), 6);
+        assert_eq!(hollow.face_count(), 7);
+        assert_mesh_integrity(&hollow);
+        // The inner wall doubles the swept ring, so more geometry overall.
+        assert!(hollow.vertex_count() > solid.vertex_count());
+    }
+
+    #[test]
+    fn cut_prim_adds_cut_edge_faces() {
+        let uncut = tessellate(
+            &PrimShape::from_params(&default_box_params()),
+            PrimLod::High,
+        );
+        let mut params = default_box_params();
+        // Cut the profile to a quarter: begin 0.25, end 0.5.
+        params.profile_begin = 12500;
+        params.profile_end = 25000;
+        let cut = tessellate(&PrimShape::from_params(&params), PrimLod::High);
+        // Cutting the ring opens it: the four closed sides collapse to the one
+        // spanned side (the 0.25..0.5 cut covers exactly one square edge), and
+        // the two cut edges (profile-begin / profile-end) plus the two path caps
+        // make five faces.
+        assert_eq!(uncut.face_count(), 6);
+        assert_eq!(cut.face_count(), 5);
+        assert_mesh_integrity(&cut);
+    }
+
+    #[test]
     fn detail_scales_geometry() {
         let shape = PrimShape::from_params(&default_box_params());
         let low = tessellate(&shape, PrimLod::Lowest);

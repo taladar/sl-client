@@ -191,7 +191,7 @@ then tick the box here. Add sub-points as you discover them.
   road map's "fan-triangulated caps" scope: hollow caps are a filled centre fan
   (no annulus triangulation), and a hollow inner wall is a single smoothed strip
   (no flat-column doubling).
-- [ ] **P3.5. Shape tests.** Unit tests asserting non-degenerate counts and
+- [x] **P3.5. Shape tests.** Unit tests asserting non-degenerate counts and
   correct face counts: box (6), cylinder, sphere, torus, hollow box (+ inner
   face), cut prim (+ cut-edge faces). Deterministic-fixture style, as in the
   `sl-mesh` tests. `cargo test -p sl-prim`.
