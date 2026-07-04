@@ -175,7 +175,7 @@ then tick the box here. Add sub-points as you discover them.
   flag), built by a private `Builder` mirroring `LLProfile::generate` /
   `genNGon` / `addHole` / `addCap` (per-edge `split`, path caps, open-ring
   profile edges, sphere-close special case).
-- [ ] **P3.3. Extrusion path.** `path.rs`: line / circle / circle2 paths
+- [x] **P3.3. Extrusion path.** `path.rs`: line / circle / circle2 paths
   applying twist, scale, shear, taper, radius-offset, skew, revolutions, and
   path begin/end cut.
 - [ ] **P3.4. Sweep & faces.** `volume.rs`: sweep the profile along the path and
