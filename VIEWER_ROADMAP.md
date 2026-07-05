@@ -583,9 +583,32 @@ only in Firestorm today and are added to `sl-proto` in P17.3.
   (morph 223 / skeleton 83 / driver 164 / color 108 / alpha 94, none 0); first
   wire ids `Big_Brow`(1)/`Nose_Big_Out`(2)/`Broad_Nostrils`(4)…, and the
   `Male_Skeleton`(32) param carrying 22 skeletal bones.
-- [ ] **P12.5. Tests.** Skeleton hierarchy + attachment/HUD point maps; `.llm`
+- [x] **P12.5. Tests.** Skeleton hierarchy + attachment/HUD point maps; `.llm`
   decode non-degenerate counts + weight normalization; param-table lookups and
-  byte→value dequantization. `cargo test -p sl-avatar`.
+  byte→value dequantization. `cargo test -p sl-avatar`. **Done:** the P12.2–
+  P12.4 modules each already ship their own `#[cfg(test)]` unit tests over the
+  private surface; this adds `tests/avatar.rs`, an *integration* suite that
+  drives only the re-exported public API (`sl_avatar::*`) an external consumer
+  sees and asserts the structural invariants the three bullets call out rather
+  than fixed fixture values: the skeleton is a coherent tree (single parentless
+  root, every parent index precedes its child, each child listed once under its
+  parent) with round-tripping name/alias lookups; the attachment map, per-point
+  `is_hud`, `hud_points()`, and the wire enum's own `AttachmentPoint::is_hud`
+  all agree, and a shared joint (`mChest`) proves the cross-asset lad→skeleton
+  reference resolves; the base `.llm` has non-degenerate counts with every
+  per-vertex stream one-entry-per-vertex, all face / morph-delta / shared-vertex
+  indices in range, one skin weight per vertex whose joint indexes the mesh's
+  own joint table and whose blend is normalized to `[0, 1)` (the last joint
+  never blends past the table), and a reduced LOD whose `vertex_count` is
+  exactly its max referenced index + 1; the param table is strictly id-sorted
+  with id lookups round-tripping, `transmitted()` is exactly the wire-carrying
+  groups (length matching `transmitted_count()`, complement covering the rest),
+  and a full appearance vector dequantizes so that `AppearanceValues::weight`
+  matches each param's own `weight_from_byte` slot-for-slot and stays within the
+  param's min/max, with empty / short vectors falling back to defaults and
+  recording no raw byte. The `clippy::tests_outside_test_module` restriction
+  lint applies to `tests/` targets too, so the suite lives in a `#[cfg(test)]
+  mod tests`. 10 integration tests (21 unit + 10 = 31 total green).
 
 ## Phase 13 — Base avatar in the viewer (replace spheres)
 
