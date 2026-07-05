@@ -16,11 +16,14 @@
 //!   per-part positions / normals / UVs / skin weights and morph-target deltas.
 //! - `params` (P12.4) — parse the `avatar_lad.xml` visual-param table and map an
 //!   `AvatarAppearance.visual_params` byte vector onto typed param values.
+//! - `morph` (P13.3) — blend the base-mesh morph-target deltas by the resolved
+//!   visual-param weights so the body takes its real shape.
 //!
-//! P12.2 lands the [`skeleton`] module, P12.3 the [`basemesh`] module, and
-//! P12.4 the [`params`] module.
+//! P12.2 lands the [`skeleton`] module, P12.3 the [`basemesh`] module, P12.4 the
+//! [`params`] module, and P13.3 the [`morph`] module.
 
 pub mod basemesh;
+pub mod morph;
 pub mod params;
 pub mod skeleton;
 
@@ -28,6 +31,7 @@ pub use basemesh::{
     BaseMesh, BaseMeshError, LodMesh, MeshTransform, MorphDelta, MorphTarget, SharedVertex,
     VertexSkinWeight,
 };
+pub use morph::{MorphWeights, MorphedMesh};
 pub use params::{
     AppearanceValues, BoneOffset, DrivenParam, ParamEffect, ParamError, ParamGroup, ParamSex,
     ParamValue, VisualParam, VisualParams,

@@ -12,7 +12,8 @@
 mod tests {
     use pretty_assertions::assert_eq;
     use sl_avatar::{
-        AttachmentPoint, AttachmentPoints, BaseMesh, LodMesh, ParamGroup, Skeleton, VisualParams,
+        AttachmentPoint, AttachmentPoints, BaseMesh, LodMesh, MorphWeights, ParamGroup, Skeleton,
+        VisualParams,
     };
 
     /// A boxed error so tests can use `?` instead of the disallowed
@@ -344,6 +345,39 @@ mod tests {
             .filter(|value| value.byte.is_some())
             .count();
         assert_eq!(supplied, 1, "exactly one slot carries a raw byte");
+        Ok(())
+    }
+
+    #[test]
+    fn morph_blend_invariants_hold() -> Result<(), TestError> {
+        let mesh = BaseMesh::from_bytes(MINI_BASEMESH)?;
+        let params = VisualParams::from_xml(MINI_PARAMS)?;
+
+        // Resolving an appearance vector against the table yields morph weights
+        // only for morph-effect params (the fixture's single morph param), never
+        // for the skeletal / colour / alpha ones — and a full-weight vector still
+        // does not drive the base mesh's own morph, whose name differs.
+        let resolved = MorphWeights::from_appearance(&params, &[255, 255, 255, 255, 255]);
+        let morph = mesh.morphs().first().ok_or("a morph target")?;
+        assert!(resolved.weight(&morph.name).abs() < f32::EPSILON);
+
+        // Applying any weights preserves the vertex count exactly (a morph adds or
+        // drops no vertices) and re-normalizes every normal to unit length (or a
+        // preserved degenerate zero).
+        let morphed = resolved.apply(&mesh);
+        assert_eq!(morphed.positions().len(), mesh.vertex_count());
+        assert_eq!(morphed.normals().len(), mesh.vertex_count());
+        for normal in morphed.normals() {
+            let [x, y, z] = *normal;
+            let length = (x * x + y * y + z * z).sqrt();
+            assert!(
+                (length - 1.0).abs() < 1.0e-3 || length < f32::EPSILON,
+                "normal stays unit length",
+            );
+        }
+
+        // No matching driven param → the blend is the identity on positions.
+        assert_eq!(morphed.positions(), mesh.positions());
         Ok(())
     }
 }

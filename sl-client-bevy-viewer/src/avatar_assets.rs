@@ -213,6 +213,12 @@ impl AvatarAssetLibrary {
         &self.parts
     }
 
+    /// The visual-param table, used to resolve an `AvatarAppearance.visual_params`
+    /// vector into morph-target weights (P13.3).
+    pub(crate) const fn params(&self) -> &VisualParams {
+        &self.params
+    }
+
     /// The rest height (Second Life Z, metres) of the pelvis joint — the offset
     /// used to plant the body so its pelvis sits at the reported avatar object
     /// position. Falls back to `0.0` if the joint is somehow absent.
@@ -223,8 +229,7 @@ impl AvatarAssetLibrary {
             .map_or(0.0, |transform| transform.translation.z)
     }
 
-    /// Log a one-line summary of what was loaded (also the sole reader of the
-    /// visual-param table until the morph phases consume it).
+    /// Log a one-line summary of what was loaded.
     fn log_summary(&self) {
         tracing::info!(
             "loaded avatar assets: {} joints, {} base parts, {} visual params",

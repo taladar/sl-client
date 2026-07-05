@@ -696,14 +696,66 @@ only in Firestorm today and are added to `sl-proto` in P17.3.
   an **untextured default "Ruth" avatar in the T-pose** rest shape replaces the
   placeholder sphere — no skinning / wgpu validation errors, the skinned body
   rendering in bind pose exactly as authored.
-- [ ] **P13.3. Visual-param morph targets.** Apply
+- [x] **P13.3. Visual-param morph targets.** Apply
   `AvatarAppearance.visual_params` (defaults where absent) → blend the base
   meshes' morph-target deltas so the body takes its real shape (face, weight,
   muscle, etc.). Re-morph on appearance update. One feature on top of P13.2.
+  **Done:** new pure `sl-avatar` module `morph` — `MorphWeights` resolves a
+  wire `visual_params` byte vector against the `VisualParams` table into a
+  `morph-target name → weight` lookup (only `param_morph`-effect params,
+  weighted from the appearance vector or their default; non-morph colour /
+  alpha / skeletal params never move geometry), built once per avatar and
+  reused across every base part; `MorphWeights::apply(&BaseMesh) -> MorphedMesh`
+  blends the part's morph-target deltas exactly as Firestorm
+  `LLPolyMorphTarget::apply` — `position += weight * delta` and
+  `normal = normalize(base + Σ weight * delta * 0.65)` (the
+  `NORMAL_SOFTEN_FACTOR`), producing morphed positions + normals in Second Life
+  Z-up space (UV / binormal deltas are silhouette-neutral and left to the base,
+  matching what the un-textured body needs). Driver → driven propagation stays
+  deferred to P13.4, so a morph param not directly transmitted sits at its
+  default. In `sl-client-bevy`, `to_bevy_base_mesh` is refactored onto a shared
+  builder and joined by `to_bevy_morphed_mesh(&BaseMesh, &MorphedMesh)` —
+  identical UV / skin / index data over the morphed positions / normals, so a
+  morphed mesh stays skin-compatible (same vertex count + `JOINT_INDEX` /
+  `JOINT_WEIGHT`) and a re-morph is a plain mesh swap on the same skeleton
+  instance. In the viewer, each rigged base-part entity now carries an
+  `AvatarBodyPart { agent, part }` marker, and a new `apply_avatar_morphs`
+  system caches each avatar's latest `visual_params` vector and, on a fresh
+  appearance or a just-spawned body part (`Added<AvatarBodyPart>`), rebuilds
+  that avatar's part meshes from the resolved `MorphWeights` — deferred and
+  idempotent so an appearance that arrives before the body still lands, and a
+  newer appearance re-morphs. Net-new library surface was three re-exports
+  (`MorphWeights`, `MorphedMesh`, `to_bevy_morphed_mesh`) plus the `sl-avatar`
+  module. Verified live on OpenSim: the agent's own `AvatarAppearance` arrives
+  and all 8 base parts morph (`morphed 8 body part(s) across 1 avatar(s)`) with
+  no skinning / wgpu errors, the rigged body re-shaping from its real
+  transmitted visual params.
 - [ ] **P13.4. Skeletal-scale & driver params.** Apply `param_skeleton` bone
   scale/position params and driver→driven propagation so proportions (height,
   limb/head scale, pelvis) match; rebuild the skeleton instance's rest
   transforms accordingly. Verify a shaped avatar (2nd login) looks correct.
+- [ ] **P13.5. Conditional mesh-part visibility (skirt & clothing morphs).** Two
+  Second Life mechanisms that show or hide system-avatar geometry from what is
+  worn, so the base body renders only the right parts. **(a) Whole-mesh
+  show/hide** (Firestorm `updateMeshVisibility` / `renderTransparent`): render
+  the skirt part (`avatar_skirt.llm`) only when a skirt is worn — the classic
+  `WT_SKIRT` wearable / a visible `TEX_SKIRT_BAKED` slot — and hide a whole base
+  region (head / upper / lower / skirt / hair / eyes) when a worn attachment
+  face carries the matching `IMG_USE_BAKED_*` magic UUID (a mesh body/clothing
+  that replaces that region); the default (no skirt, no mesh body) hides it.
+  **(b) Clothing-morph alpha masks** (Firestorm `LLPolyMorphTarget::applyMask` /
+  `mIsClothingMorph`): the flared sleeve / pant-leg / long-cuff / loose-body
+  geometry is driven by `clothing_morph="true"` params (`Shirtsleeve_flair`,
+  `Leg_Pantflair`, `Leg_Longcuffs`, `Displace_Loose_Upper/Lowerbody`, the
+  `skirt_*` morphs) whose `<mask layer="upper_clothes/lower_pants/skirt">` makes
+  that geometry transparent unless the matching clothing layer is worn — apply
+  the per-vertex clothing alpha through the base-mesh shared-vertex remap table
+  (`SharedVertex`, already decoded) and render those vertices with
+  `AlphaMode::Blend` / `Mask`, so an un-clothed body shows no stray flared
+  cuffs.
+  Depends on the worn clothing layers, so it lands with / after the
+  appearance-driven wearable info (Phase 14 baked slots for other avatars; COF /
+  `AgentWearables` for our own).
 
 ## Phase 14 — Server-published baked texturing (incl. alpha)
 

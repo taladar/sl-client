@@ -35,8 +35,8 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberI
 
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{
-    AvatarState, apply_avatar_names, position_name_tags, setup_avatar_body, update_avatar_objects,
-    update_coarse_avatars,
+    AvatarState, apply_avatar_morphs, apply_avatar_names, position_name_tags, setup_avatar_body,
+    update_avatar_objects, update_coarse_avatars,
 };
 use crate::camera::{FlyCamera, fly_camera};
 use crate::chat::{ChatOverlay, setup_chat_overlay, update_chat_overlay};
@@ -298,6 +298,8 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
             // fold resolved names in and float each name tag over its sphere.
             (update_avatar_objects, update_coarse_avatars).chain(),
             apply_avatar_names,
+            // Re-shape each rigged body from its avatar's visual params (P13.3).
+            apply_avatar_morphs,
             position_name_tags,
             // Append newly received local chat to the on-screen overlay.
             update_chat_overlay,

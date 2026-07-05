@@ -29,7 +29,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::math::{Mat4, Quat, Vec3};
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
 use bevy::transform::components::Transform;
-use sl_avatar::{BaseMesh, Joint, Skeleton};
+use sl_avatar::{BaseMesh, Joint, MorphedMesh, Skeleton};
 
 /// Converts one decoded base-body part into a Bevy [`Mesh`] (a `TriangleList`
 /// with position, normal, and UV0 attributes plus `u32` indices).
@@ -45,13 +45,33 @@ use sl_avatar::{BaseMesh, Joint, Skeleton};
 /// [`BevySkeleton::base_mesh_skin`]).
 #[must_use]
 pub fn to_bevy_base_mesh(base: &BaseMesh) -> Mesh {
+    build_base_mesh(base, base.positions(), base.normals())
+}
+
+/// Converts a base-body part into a Bevy [`Mesh`] using morphed geometry (P13.3):
+/// identical to [`to_bevy_base_mesh`] but the positions and normals come from a
+/// [`MorphedMesh`] ([`MorphWeights::apply`](sl_avatar::MorphWeights::apply))
+/// so the body takes its real, visual-param-driven shape. The UV, skin, and index
+/// data are unchanged, so the result stays skin-compatible with the un-morphed
+/// mesh (same vertex count and `JOINT_INDEX` / `JOINT_WEIGHT` attributes), and a
+/// re-morph simply swaps this mesh on the same skeleton instance.
+#[must_use]
+pub fn to_bevy_morphed_mesh(base: &BaseMesh, morphed: &MorphedMesh) -> Mesh {
+    build_base_mesh(base, morphed.positions(), morphed.normals())
+}
+
+/// Shared builder for [`to_bevy_base_mesh`] / [`to_bevy_morphed_mesh`]: builds the
+/// `TriangleList` from the given per-vertex `positions` / `normals` (either the
+/// base rest values or their morphed counterparts) plus the part's own UV, skin,
+/// and face data.
+fn build_base_mesh(base: &BaseMesh, positions: &[[f32; 3]], normals: &[[f32; 3]]) -> Mesh {
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
     )
-    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, base.positions().to_vec());
-    if !base.normals().is_empty() {
-        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, base.normals().to_vec());
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions.to_vec());
+    if !normals.is_empty() {
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals.to_vec());
     }
     if !base.tex_coords().is_empty() {
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, base.tex_coords().to_vec());

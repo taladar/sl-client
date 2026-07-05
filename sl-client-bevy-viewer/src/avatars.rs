@@ -36,8 +36,8 @@ use std::collections::{HashMap, HashSet};
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, AvatarName, CoarseLocation, Command, Object, ScopedObjectId, SlCommand, SlEvent,
-    SlSessionEvent, pcode, to_bevy_base_mesh,
+    AgentKey, AvatarName, CoarseLocation, Command, MorphWeights, Object, ScopedObjectId, SlCommand,
+    SlEvent, SlSessionEvent, pcode, to_bevy_base_mesh, to_bevy_morphed_mesh,
 };
 
 use crate::avatar_assets::{AvatarAssetLibrary, LoadedBinding};
@@ -86,6 +86,19 @@ pub(crate) struct AvatarSphere;
 /// [`position_name_tags`] projects to place the floating name tag.
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct AvatarAnchor;
+
+/// A marker on one rigged base-part render entity, tying it back to its avatar
+/// and its index in [`AvatarBody::parts`] / [`AvatarAssetLibrary::parts`] so the
+/// morph system ([`apply_avatar_morphs`]) can rebuild just that part's mesh from
+/// the avatar's resolved visual-param weights.
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct AvatarBodyPart {
+    /// The avatar this part belongs to.
+    agent: AgentKey,
+    /// The part's index into the shared part list (base-mesh and render data
+    /// share the same order).
+    part: usize,
+}
 
 /// A `bevy_ui` name-tag text node, pointing back at the avatar anchor it floats
 /// over so [`position_name_tags`] can project the anchor's world position to the
@@ -143,6 +156,13 @@ pub(crate) struct AvatarState {
     /// Agents whose legacy name has already been requested (but has not
     /// necessarily arrived), so the same `UUIDNameRequest` is not sent twice.
     requested: HashSet<AgentKey>,
+    /// The latest `AvatarAppearance.visual_params` byte vector per avatar, kept so
+    /// a body spawned after (or re-spawned) can be morphed from the last known
+    /// appearance (P13.3).
+    appearances: HashMap<AgentKey, Vec<u8>>,
+    /// Avatars whose rigged body needs its morphs (re)applied — set on a fresh
+    /// appearance and on a newly spawned body, drained by [`apply_avatar_morphs`].
+    morph_dirty: HashSet<AgentKey>,
     /// The shared placeholder sphere mesh + material, built lazily on first use.
     assets: Option<AvatarAssets>,
 }
@@ -260,13 +280,19 @@ fn body_root_transform(object: &Object, pelvis_height: f32) -> Transform {
 /// Spawn one base part's render entity into a skeleton instance: a `SkinnedMesh`
 /// under the body root for a skinned part, or a plain mesh parented to a single
 /// joint for a rigid part. A part whose joints cannot be resolved is skipped.
+///
+/// Each spawned entity carries an [`AvatarBodyPart`] marker (its `agent` and part
+/// `index`) so [`apply_avatar_morphs`] can later swap in a morphed mesh.
 fn spawn_body_part(
     part: &BodyPart,
+    index: usize,
+    agent: AgentKey,
     joints: &[Entity],
     root: Entity,
     material: &Handle<StandardMaterial>,
     commands: &mut Commands,
 ) {
+    let marker = AvatarBodyPart { agent, part: index };
     match &part.binding {
         BodyPartBinding::Skinned {
             inverse_bindposes,
@@ -288,10 +314,11 @@ fn spawn_body_part(
                     joints: part_joints,
                 },
                 ChildOf(root),
+                marker,
             ));
         }
-        BodyPartBinding::Rigid(index) => {
-            let Some(joint) = joints.get(*index).copied() else {
+        BodyPartBinding::Rigid(joint_index) => {
+            let Some(joint) = joints.get(*joint_index).copied() else {
                 return;
             };
             commands.spawn((
@@ -299,6 +326,7 @@ fn spawn_body_part(
                 MeshMaterial3d(material.clone()),
                 Transform::default(),
                 ChildOf(joint),
+                marker,
             ));
         }
     }
@@ -459,8 +487,8 @@ impl AvatarState {
                 .unwrap_or(root);
             commands.entity(*entity).insert(ChildOf(target));
         }
-        for part in &body.parts {
-            spawn_body_part(part, &joints, root, &body.material, commands);
+        for (index, part) in body.parts.iter().enumerate() {
+            spawn_body_part(part, index, agent, &joints, root, &body.material, commands);
         }
         let label = self.spawn_label(agent, root, BODY_TAG_HEIGHT, commands);
         AvatarEntities {
@@ -684,6 +712,80 @@ pub(crate) fn apply_avatar_names(
             }
         }
     }
+}
+
+/// Apply visual-param morph targets to each rigged avatar body (P13.3): resolve
+/// an `AvatarAppearance.visual_params` vector into per-morph weights and rebuild
+/// every affected base part's mesh so the body takes its real shape, re-morphing
+/// whenever a newer appearance arrives.
+///
+/// The work is deferred and idempotent: a fresh appearance (or a body part that
+/// just spawned, matched by [`Added`]) marks the avatar dirty, and the morph is
+/// (re)built from the cached appearance vector — so an appearance that arrives
+/// before the body still lands once the body exists. A no-op when no avatar asset
+/// library loaded (avatars stay as un-morphed bodies or spheres).
+pub(crate) fn apply_avatar_morphs(
+    mut events: MessageReader<SlEvent>,
+    library: Option<Res<AvatarAssetLibrary>>,
+    mut state: ResMut<AvatarState>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    added: Query<&AvatarBodyPart, Added<AvatarBodyPart>>,
+    mut parts: Query<(&AvatarBodyPart, &mut Mesh3d)>,
+) {
+    // Fold any fresh appearance vectors into the cache and flag those avatars.
+    for event in events.read() {
+        if let SlSessionEvent::AvatarAppearance(appearance) = &event.0 {
+            state
+                .appearances
+                .insert(appearance.avatar_id, appearance.visual_params.clone());
+            state.morph_dirty.insert(appearance.avatar_id);
+        }
+    }
+    // A body part that just spawned needs its cached appearance applied (the
+    // appearance can arrive before the body object does).
+    for part in &added {
+        if state.appearances.contains_key(&part.agent) {
+            state.morph_dirty.insert(part.agent);
+        }
+    }
+    if state.morph_dirty.is_empty() {
+        return;
+    }
+    let Some(library) = library else {
+        state.morph_dirty.clear();
+        return;
+    };
+    // Resolve each dirty avatar's appearance into morph-target weights once, then
+    // rebuild the mesh of every part belonging to a resolved avatar.
+    let weights: HashMap<AgentKey, MorphWeights> = state
+        .morph_dirty
+        .iter()
+        .filter_map(|&agent| {
+            state.appearances.get(&agent).map(|bytes| {
+                (
+                    agent,
+                    MorphWeights::from_appearance(library.params(), bytes),
+                )
+            })
+        })
+        .collect();
+    let mut morphed_parts = 0_usize;
+    for (part, mut mesh) in &mut parts {
+        if let Some(weights) = weights.get(&part.agent)
+            && let Some(loaded) = library.parts().get(part.part)
+        {
+            let morphed = weights.apply(&loaded.mesh);
+            *mesh = Mesh3d(meshes.add(to_bevy_morphed_mesh(&loaded.mesh, &morphed)));
+            morphed_parts = morphed_parts.saturating_add(1);
+        }
+    }
+    if morphed_parts > 0 {
+        debug!(
+            "morphed {morphed_parts} body part(s) across {} avatar(s)",
+            weights.len()
+        );
+    }
+    state.morph_dirty.clear();
 }
 
 /// Position each avatar name tag over its anchor by projecting the anchor's world

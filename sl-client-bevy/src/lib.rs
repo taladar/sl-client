@@ -171,11 +171,12 @@ pub use sl_sculpt::{SculptParams, SculptStitch};
 // re-exported (from `sl_proto`, which `sl_avatar` re-exports too).
 pub use sl_avatar::{
     AppearanceValues, AttachmentPointDef, AttachmentPoints, BaseMesh, BaseMeshError,
-    CollisionVolume, Joint, ParamError, Skeleton, SkeletonError, VisualParam, VisualParams,
+    CollisionVolume, Joint, MorphWeights, MorphedMesh, ParamError, Skeleton, SkeletonError,
+    VisualParam, VisualParams,
 };
 
 pub use crate::assets::BevyAssetFetcher;
-pub use crate::avatars::{BaseMeshSkin, BevySkeleton, to_bevy_base_mesh};
+pub use crate::avatars::{BaseMeshSkin, BevySkeleton, to_bevy_base_mesh, to_bevy_morphed_mesh};
 pub use crate::meshes::{BevyMeshFetcher, to_bevy_mesh, to_bevy_meshes};
 pub use crate::prims::{to_bevy_prim_mesh, to_bevy_prim_meshes};
 #[cfg(feature = "bevy_pbr")]
