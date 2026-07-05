@@ -52,18 +52,18 @@ use sl_proto::{
 // Bevy's `Event` derive.
 pub use sl_proto::{
     ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnimationKey,
-    AnyMessage, AssetKey, AttachmentMode, AttachmentPoint, AvatarClassified, AvatarGroupMembership,
-    AvatarInterests, AvatarName, AvatarPick, AvatarProperties, Camera, CameraError, ChatAudible,
-    ChatChannel, ChatLogConfig, ChatMessage, ChatSource, ChatSourceType, ChatType,
-    ChatTypeNotAVolume, Child, CircuitCode, CircuitId, ClassifiedCategory, ClassifiedInfo,
-    ClassifiedKey, ClassifiedUpdate, ClickAction, ClientDirectories, ClockStyle, CoarseLocation,
-    Command, ControlFlags, ConversationKind, CreateGroupParams, DeRezDestination, DetachOrder,
-    Diagnostic, Direction, DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EconomyData,
-    EnvironmentSettings, EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo,
-    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh,
-    FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendRights, GlobalCoordinates,
-    GltfMaterialOverride, GridCoordinates, GroupMember, GroupMembership, GroupNotice,
-    GroupNoticeAttachment, GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole,
+    AnyMessage, AssetKey, AttachmentMode, AttachmentPoint, AvatarAppearance, AvatarClassified,
+    AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPick, AvatarProperties, Camera,
+    CameraError, ChatAudible, ChatChannel, ChatLogConfig, ChatMessage, ChatSource, ChatSourceType,
+    ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId, ClassifiedCategory,
+    ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, ClickAction, ClientDirectories, ClockStyle,
+    CoarseLocation, Command, ControlFlags, ConversationKind, CreateGroupParams, DeRezDestination,
+    DetachOrder, Diagnostic, Direction, DisconnectReason, DisplayName, DisplayNameUpdate, Distance,
+    EconomyData, EnvironmentSettings, EstateAccessDelta, EstateAccessKind, EstateCovenant,
+    EstateInfo, ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate,
+    ExtendedMesh, FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendRights,
+    GlobalCoordinates, GltfMaterialOverride, GridCoordinates, GroupMember, GroupMembership,
+    GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole,
     GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange,
     GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog, ImSessionId,
     InstantMessage, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId, InventoryCursor,
@@ -164,7 +164,18 @@ pub use sl_prim::{
 pub use sl_sculpt::tessellate::tessellate as tessellate_sculpt;
 pub use sl_sculpt::{SculptParams, SculptStitch};
 
+// The pure system-avatar decoders (skeleton / base body / visual params), the
+// avatar counterpart of `sl_mesh` / `sl_texture`. Re-exported so the viewer can
+// parse the standard Linden `character/` assets and drive them through
+// [`to_bevy_base_mesh`] / [`BevySkeleton`]. `AttachmentPoint` is already
+// re-exported (from `sl_proto`, which `sl_avatar` re-exports too).
+pub use sl_avatar::{
+    AppearanceValues, AttachmentPointDef, AttachmentPoints, BaseMesh, CollisionVolume, Joint,
+    Skeleton, VisualParam, VisualParams,
+};
+
 pub use crate::assets::BevyAssetFetcher;
+pub use crate::avatars::{BaseMeshSkin, BevySkeleton, to_bevy_base_mesh};
 pub use crate::meshes::{BevyMeshFetcher, to_bevy_mesh, to_bevy_meshes};
 pub use crate::prims::{to_bevy_prim_mesh, to_bevy_prim_meshes};
 #[cfg(feature = "bevy_pbr")]
@@ -172,6 +183,7 @@ pub use crate::terrain::{ATTRIBUTE_TERRAIN_WEIGHTS, TerrainMaterial, TerrainMate
 pub use crate::textures::{BevyTextureFetcher, to_bevy_image};
 
 pub mod assets;
+pub mod avatars;
 mod caps;
 mod chat_log;
 mod experiences;
