@@ -17,15 +17,20 @@
 //! - `params` (P12.4) — parse the `avatar_lad.xml` visual-param table and map an
 //!   `AvatarAppearance.visual_params` byte vector onto typed param values.
 //!
-//! P12.2 lands the [`skeleton`] module and P12.3 the [`basemesh`] module; the
-//! `params` module follows in a subsequent point.
+//! P12.2 lands the [`skeleton`] module, P12.3 the [`basemesh`] module, and
+//! P12.4 the [`params`] module.
 
 pub mod basemesh;
+pub mod params;
 pub mod skeleton;
 
 pub use basemesh::{
     BaseMesh, BaseMeshError, LodMesh, MeshTransform, MorphDelta, MorphTarget, SharedVertex,
     VertexSkinWeight,
+};
+pub use params::{
+    AppearanceValues, BoneOffset, DrivenParam, ParamEffect, ParamError, ParamGroup, ParamSex,
+    ParamValue, VisualParam, VisualParams,
 };
 pub use skeleton::{
     AttachmentPointDef, AttachmentPoints, CollisionVolume, Joint, Skeleton, SkeletonError,

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="us-ascii" standalone="yes"?>
+<linden_avatar version="2.0" wearable_definition_version="22">
+  <skeleton file_name="avatar_skeleton.xml">
+    <param id="32" group="0" wearable="shape" name="Male_Skeleton" label_min="Female" label_max="Male" value_min="0" value_max="1" sex="male">
+      <param_skeleton>
+        <bone name="mNeck" scale="0 0 .2"/>
+        <bone name="mHead" scale=".1 .1 .1" offset="0 0 .05"/>
+      </param_skeleton>
+    </param>
+  </skeleton>
+  <mesh type="headMesh" lod="0" file_name="avatar_head.llm">
+    <param id="1" group="0" wearable="shape" name="Big_Brow" value_min="-0.3" value_max="2" value_default="0">
+      <param_morph/>
+    </param>
+    <param id="10" group="1" wearable="shape" name="Animatable_One" value_min="0" value_max="1">
+      <param_morph/>
+    </param>
+  </mesh>
+  <layer_set body_region="head">
+    <layer name="skin_color">
+      <param id="111" group="0" wearable="skin" name="Skin_Color" value_min="0" value_max="1">
+        <param_color>
+          <value color="252, 215, 200, 255"/>
+          <value color="90, 40, 16, 255"/>
+        </param_color>
+      </param>
+      <param id="112" group="0" wearable="skin" name="Skin_Alpha" value_min="0" value_max="1">
+        <param_alpha domain="0"/>
+      </param>
+    </layer>
+  </layer_set>
+  <driver_parameters>
+    <param id="4" group="0" wearable="shape" name="Nose_Big_Out" value_min="-0.8" value_max="2.5">
+      <param_driver>
+        <driven id="1"/>
+        <driven id="112" min1="-2" max1="-2" max2="-2" min2="0"/>
+      </param_driver>
+    </param>
+  </driver_parameters>
+</linden_avatar>
