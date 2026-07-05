@@ -26,9 +26,9 @@ use sl_proto::{
     CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SIMULATOR_FEATURES, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
-    CAP_UPLOAD_BAKED_TEXTURE, CAP_VIEWER_ASSET, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT,
-    CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE, ChatSessionKind, Event as SessionEvent,
-    GroupKey, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse, MessageCursor, RECV_BUFFER_SIZE,
+    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
+    CHAT_SESSION_DECLINE_P2P_VOICE, ChatSessionKind, Event as SessionEvent, GroupKey,
+    INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse, MessageCursor, RECV_BUFFER_SIZE,
     SelectedCostKind, Session, SessionMessage, ais_category_children_fetch_url,
     ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
     build_agent_preferences_request, build_ais_create_category_body, build_ais_move_body,
@@ -116,6 +116,12 @@ pub use sl_proto::CAP_UPDATE_AVATAR_APPEARANCE;
 // `Command::FetchMesh` path) resolves the cap URL from an [`SlCapabilities`] map
 // and hands it to a [`BevyMeshFetcher`].
 pub use sl_proto::{CAP_GET_MESH, CAP_GET_MESH2};
+// The `ViewerAsset` capability name, the generic-asset counterpart of
+// [`CAP_GET_TEXTURE`]: a frontend driving the [`AssetStore`] directly resolves
+// the cap URL from an [`SlCapabilities`] map and hands it to a
+// [`BevyAssetFetcher`] (used to fetch worn wearable assets for client-side
+// baking).
+pub use sl_proto::CAP_VIEWER_ASSET;
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 // The decoding, LOD-aware texture store, re-exported so a Bevy app can build and
 // drive one (`sl_texture::TextureEntry`/`TextureReadLease` stay accessible as
@@ -176,9 +182,17 @@ pub use sl_sculpt::{SculptParams, SculptStitch};
 // re-exported (from `sl_proto`, which `sl_avatar` re-exports too).
 pub use sl_avatar::{
     AppearanceValues, AttachmentPointDef, AttachmentPoints, BaseMesh, BaseMeshError, BoneDeform,
-    CollisionVolume, Joint, MaskTexture, MorphMask, MorphMasks, MorphWeights, MorphedMesh,
-    ParamError, PartMorphMask, ResolvedParams, SkeletalDeformations, Skeleton, SkeletonError,
-    VisualParam, VisualParams,
+    CollisionVolume, ColorOp, ColorRamp, Joint, MaskTexture, MorphMask, MorphMasks, MorphWeights,
+    MorphedMesh, ParamError, PartMorphMask, ResolvedParams, SkeletalDeformations, Skeleton,
+    SkeletonError, VisualParam, VisualParams, WearableAsset, WearableError, combine_layer_color,
+    global_color, global_color_params,
+};
+
+// The client-side avatar baker (`sl-bake`, the OpenSim / legacy path): compose a
+// bake region from ordered wearable layers, and the per-region layer plan (P15).
+pub use sl_bake::{
+    BakeRegion, BakedImage, Layer, LayerKind, LayerTint, PlannedLayer, TexGen, composite_region,
+    region_layers, region_plan,
 };
 
 pub use crate::assets::BevyAssetFetcher;

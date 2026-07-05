@@ -178,13 +178,93 @@ pub enum ParamEffect {
     Skeleton(Vec<BoneOffset>),
     /// `<param_driver>` — drives the listed params.
     Driver(Vec<DrivenParam>),
-    /// `<param_color>` — a texture-layer colour ramp (RGBA stops); a baking
-    /// input, kept so the param still occupies its wire slot.
-    Color(Vec<[u8; 4]>),
+    /// `<param_color>` — a texture-layer colour ramp (RGBA stops) plus the
+    /// operation combining it with the layers below; a baking input (see
+    /// [`ColorRamp`]), kept so the param still occupies its wire slot.
+    Color(ColorRamp),
     /// `<param_alpha>` — a texture-layer alpha mask; a baking input.
     Alpha,
     /// No recognized effect child element.
     None,
+}
+
+/// How a [`ParamEffect::Color`] param's evaluated colour combines with the
+/// running net colour of the layers below it, mirroring the reference viewer's
+/// `LLTexLayerParamColor::EColorOperation` (`<param_color operation="…">`). The
+/// reference viewer defaults an unrecognized / absent operation (including the
+/// XML's `"add_multiply"`) to [`Add`](ColorOp::Add).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ColorOp {
+    /// `OP_ADD`: add this param's colour to the running total (also the default).
+    #[default]
+    Add,
+    /// `OP_MULTIPLY`: multiply the running total by this param's colour.
+    Multiply,
+    /// `OP_BLEND`: linearly interpolate the running total towards this param's
+    /// colour by the param's weight (must have exactly one stop).
+    Blend,
+}
+
+impl ColorOp {
+    /// Classify a `<param_color operation="…">` string; anything the reference
+    /// viewer does not recognize (including `"add_multiply"`) is [`Self::Add`].
+    #[must_use]
+    pub fn from_operation(operation: &str) -> Self {
+        match operation {
+            "multiply" => Self::Multiply,
+            "blend" => Self::Blend,
+            _ => Self::Add,
+        }
+    }
+}
+
+/// A texture-layer colour ramp from a `<param_color>`: the ordered RGBA stops the
+/// param interpolates between as its weight sweeps `0..=1`, plus the [`ColorOp`]
+/// combining the result with the layers below. This is the reference viewer's
+/// `LLTexLayerParamColorInfo`; [`ColorRamp::net_color`] is its `getNetColor`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ColorRamp {
+    /// How the evaluated colour combines with the running net colour.
+    pub operation: ColorOp,
+    /// The ordered RGBA stops (`0..=255`), at least one; `getNetColor`
+    /// interpolates across them by the param's weight.
+    pub stops: Vec<[u8; 4]>,
+}
+
+impl ColorRamp {
+    /// The ramp colour at `weight` as linear RGBA in `0.0..=1.0`, replicating the
+    /// reference viewer's `LLTexLayerParamColor::getNetColor`: `weight` (clamped
+    /// to `0..=1`) is scaled across `stops.len() - 1` and the two bracketing
+    /// stops are linearly interpolated. An empty ramp is opaque white.
+    #[must_use]
+    pub fn net_color(&self, weight: f32) -> [f32; 4] {
+        let last = self.stops.len().saturating_sub(1);
+        let Some(&first) = self.stops.first() else {
+            return [1.0, 1.0, 1.0, 1.0];
+        };
+        let weight = weight.clamp(0.0, 1.0);
+        // `weight * last`, split into the lower stop index and the fraction into
+        // the next stop.
+        let scaled = weight * f32_from_usize(last);
+        let index_start = usize_floor(scaled).min(last);
+        if index_start == last {
+            return rgba_to_unit(self.stops.get(last).copied().unwrap_or(first));
+        }
+        let frac = scaled - f32_from_usize(index_start);
+        let start = rgba_to_unit(self.stops.get(index_start).copied().unwrap_or(first));
+        let end = rgba_to_unit(
+            self.stops
+                .get(index_start.saturating_add(1))
+                .copied()
+                .unwrap_or(first),
+        );
+        [
+            start[0] + (end[0] - start[0]) * frac,
+            start[1] + (end[1] - start[1]) * frac,
+            start[2] + (end[2] - start[2]) * frac,
+            start[3] + (end[3] - start[3]) * frac,
+        ]
+    }
 }
 
 /// One visual parameter parsed from an `avatar_lad.xml` `<param>` element.
@@ -441,6 +521,43 @@ fn u8_to_f32(byte: u8, lower: f32, upper: f32) -> f32 {
     if val.abs() < max_error { 0.0 } else { val }
 }
 
+/// An RGBA byte quad as linear `0.0..=1.0` components (a [`ColorRamp`] stop).
+fn rgba_to_unit(rgba: [u8; 4]) -> [f32; 4] {
+    [
+        f32::from(rgba[0]) / 255.0,
+        f32::from(rgba[1]) / 255.0,
+        f32::from(rgba[2]) / 255.0,
+        f32::from(rgba[3]) / 255.0,
+    ]
+}
+
+/// Widen a small `usize` (a colour-ramp stop count) to `f32`; ramp lengths are
+/// tiny, far within the exact-integer range.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_precision_loss,
+    reason = "colour-ramp stop counts are tiny, well within f32's exact-integer range"
+)]
+const fn f32_from_usize(value: usize) -> f32 {
+    value as f32
+}
+
+/// Floor a non-negative `f32` (a clamped ramp index) to `usize`; a negative or
+/// non-finite value maps to `0`.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "value is a clamped, non-negative ramp index; its floor fits usize"
+)]
+fn usize_floor(value: f32) -> usize {
+    if value.is_finite() && value >= 0.0 {
+        value.floor() as usize
+    } else {
+        0
+    }
+}
+
 /// Parse one `<param>` element into a [`VisualParam`].
 fn parse_param(node: roxmltree::Node<'_, '_>) -> Result<VisualParam, ParamError> {
     let id = req_i32(node, "param", "id")?;
@@ -480,7 +597,14 @@ fn parse_effect(
             "param_skeleton" => return Ok(ParamEffect::Skeleton(parse_bones(child)?)),
             "param_driver" => return Ok(ParamEffect::Driver(parse_driven(child, min, max)?)),
             "param_morph" => return Ok(ParamEffect::Morph),
-            "param_color" => return Ok(ParamEffect::Color(parse_colors(child)?)),
+            "param_color" => {
+                return Ok(ParamEffect::Color(ColorRamp {
+                    operation: ColorOp::from_operation(
+                        child.attribute("operation").unwrap_or_default(),
+                    ),
+                    stops: parse_colors(child)?,
+                }));
+            }
             "param_alpha" => return Ok(ParamEffect::Alpha),
             _ => {}
         }
@@ -764,10 +888,11 @@ mod tests {
         );
 
         // Colour ramp.
-        let ParamEffect::Color(stops) = &params.get(111).ok_or("111")?.effect else {
+        let ParamEffect::Color(ramp) = &params.get(111).ok_or("111")?.effect else {
             return Err("param 111 is colour".into());
         };
-        assert_eq!(stops, &[[252, 215, 200, 255], [90, 40, 16, 255]]);
+        assert_eq!(ramp.stops, [[252, 215, 200, 255], [90, 40, 16, 255]]);
+        assert_eq!(ramp.operation, super::ColorOp::Add);
 
         // Alpha.
         assert_eq!(

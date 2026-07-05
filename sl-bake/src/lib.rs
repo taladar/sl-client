@@ -29,9 +29,11 @@
 //! publishing the composite (P15.3 / P15.4) is the runtime crates' job.
 
 pub mod composite;
+pub mod plan;
 pub mod region;
 
 pub use composite::{BakedImage, Layer, LayerKind, TexGen, composite_region};
+pub use plan::{LayerTint, PlannedLayer, region_layers, region_plan};
 pub use region::BakeRegion;
 
 pub use sl_texture::DecodedImage;

@@ -5661,6 +5661,7 @@ dependencies = [
  "reqwest",
  "sl-asset",
  "sl-avatar",
+ "sl-bake",
  "sl-mesh",
  "sl-prim",
  "sl-proto",

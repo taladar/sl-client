@@ -29,6 +29,7 @@
 //! [`params`] module, P13.3 the [`morph`] module, and P13.4 the [`resolve`] and
 //! [`skeletal`] modules.
 
+pub mod bakecolor;
 pub mod basemesh;
 pub mod masks;
 pub mod morph;
@@ -36,7 +37,9 @@ pub mod params;
 pub mod resolve;
 pub mod skeletal;
 pub mod skeleton;
+pub mod wearable;
 
+pub use bakecolor::{combine_layer_color, global_color, global_color_params};
 pub use basemesh::{
     BaseMesh, BaseMeshError, LodMesh, MeshTransform, MorphDelta, MorphTarget, SharedVertex,
     VertexSkinWeight,
@@ -52,5 +55,8 @@ pub use skeletal::{BoneDeform, SkeletalDeformations};
 pub use skeleton::{
     AttachmentPointDef, AttachmentPoints, CollisionVolume, Joint, Skeleton, SkeletonError,
 };
+pub use wearable::{WearableAsset, WearableError};
+
+pub use params::{ColorOp, ColorRamp};
 
 pub use sl_proto::AttachmentPoint;

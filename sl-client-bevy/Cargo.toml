@@ -40,6 +40,7 @@ reqwest = { version = "0.12.15", default-features = false, features = [
 ] }
 sl-asset = { version = "0.1.0", path = "../sl-asset" }
 sl-avatar = { version = "0.1.0", path = "../sl-avatar" }
+sl-bake = { version = "0.1.0", path = "../sl-bake" }
 sl-mesh = { version = "0.1.0", path = "../sl-mesh" }
 sl-prim = { version = "0.1.0", path = "../sl-prim" }
 sl-proto = { version = "0.1.0", path = "../sl-proto" }

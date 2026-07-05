@@ -10,6 +10,7 @@
 mod appearance;
 mod avatar_assets;
 mod avatars;
+mod bake_inputs;
 mod camera;
 mod chat;
 mod coords;
@@ -41,6 +42,10 @@ use crate::avatars::{
     apply_avatar_names, apply_avatar_part_visibility, assign_avatar_bake_materials,
     ingest_avatar_bakes, position_name_tags, setup_avatar_body, update_avatar_objects,
     update_coarse_avatars,
+};
+use crate::bake_inputs::{
+    OwnBakeInputs, WearableAssetFetched, WearableAssetManager, assemble_own_bake,
+    drive_wearable_requests, poll_wearable_assets, update_asset_caps,
 };
 use crate::camera::{FlyCamera, fly_camera};
 use crate::chat::{ChatOverlay, setup_chat_overlay, update_chat_overlay};
@@ -272,8 +277,11 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
     .init_resource::<AvatarBakeMaterials>()
     .init_resource::<ServerBakeState>()
     .init_resource::<MeshManager>()
+    .init_resource::<OwnBakeInputs>()
+    .init_resource::<WearableAssetManager>()
     .add_message::<TextureDecoded>()
     .add_message::<MeshDecoded>()
+    .add_message::<WearableAssetFetched>()
     .add_systems(
         Startup,
         (setup_scene, setup_chat_overlay, setup_avatar_body),
@@ -289,9 +297,19 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
             // finished fetches before the consumers that apply them.
             update_texture_caps,
             poll_textures,
-            // The same for the mesh store's `GetMesh2` / `GetMesh` cap.
-            update_mesh_caps,
-            poll_meshes,
+            // The same for the mesh store's `GetMesh2` / `GetMesh` cap, plus the
+            // client-side bake inputs (P15.2): keep the wearable-asset store's
+            // `ViewerAsset` cap current, request our own outfit and fetch its
+            // wearable assets, then assemble each bake region's layer list.
+            // Nested into one tuple to stay within Bevy's per-tuple system limit.
+            (
+                update_mesh_caps,
+                poll_meshes,
+                update_asset_caps,
+                drive_wearable_requests,
+                poll_wearable_assets,
+                assemble_own_bake,
+            ),
             // Recenter (origin follows the root region) before folding terrain
             // events, so patches are placed on the current origin.
             (recenter_terrain, update_terrain).chain(),

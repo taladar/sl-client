@@ -178,6 +178,139 @@ pub mod avatar_texture {
         (AUX3_BAKED, "aux3"),
     ];
 
+    // The per-wearable *layer* texture slots (the non-baked `TEX_*` faces of
+    // `ETextureIndex`): the individual wearable textures the client composites
+    // *into* the base-body bakes above. Each is contributed by one wearable type
+    // (see [`LAYER_TEXTURES`]); the client-side baker (`sl-bake`) reads these
+    // from the worn wearable assets to build a bake when the grid publishes none
+    // (P15.2). Names match the reference viewer's `local_texture` names.
+    /// `TEX_HEAD_BODYPAINT`: the skin's head layer.
+    pub const HEAD_BODYPAINT: usize = 0;
+    /// `TEX_UPPER_SHIRT`: the shirt layer.
+    pub const UPPER_SHIRT: usize = 1;
+    /// `TEX_LOWER_PANTS`: the pants layer.
+    pub const LOWER_PANTS: usize = 2;
+    /// `TEX_EYES_IRIS`: the eyes' iris layer.
+    pub const EYES_IRIS: usize = 3;
+    /// `TEX_HAIR`: the hair layer (`hair_grain`).
+    pub const HAIR: usize = 4;
+    /// `TEX_UPPER_BODYPAINT`: the skin's upper-body layer.
+    pub const UPPER_BODYPAINT: usize = 5;
+    /// `TEX_LOWER_BODYPAINT`: the skin's lower-body layer.
+    pub const LOWER_BODYPAINT: usize = 6;
+    /// `TEX_LOWER_SHOES`: the shoes layer.
+    pub const LOWER_SHOES: usize = 7;
+    /// `TEX_LOWER_SOCKS`: the socks layer.
+    pub const LOWER_SOCKS: usize = 12;
+    /// `TEX_UPPER_JACKET`: the jacket's upper-body layer.
+    pub const UPPER_JACKET: usize = 13;
+    /// `TEX_LOWER_JACKET`: the jacket's lower-body layer.
+    pub const LOWER_JACKET: usize = 14;
+    /// `TEX_UPPER_GLOVES`: the gloves layer.
+    pub const UPPER_GLOVES: usize = 15;
+    /// `TEX_UPPER_UNDERSHIRT`: the undershirt layer.
+    pub const UPPER_UNDERSHIRT: usize = 16;
+    /// `TEX_LOWER_UNDERPANTS`: the underpants layer.
+    pub const LOWER_UNDERPANTS: usize = 17;
+    /// `TEX_SKIRT`: the skirt's fabric layer.
+    pub const SKIRT: usize = 18;
+    /// `TEX_LOWER_ALPHA`: the lower-body alpha (mask) layer.
+    pub const LOWER_ALPHA: usize = 21;
+    /// `TEX_UPPER_ALPHA`: the upper-body alpha (mask) layer.
+    pub const UPPER_ALPHA: usize = 22;
+    /// `TEX_HEAD_ALPHA`: the head alpha (mask) layer.
+    pub const HEAD_ALPHA: usize = 23;
+    /// `TEX_EYES_ALPHA`: the eyes alpha (mask) layer.
+    pub const EYES_ALPHA: usize = 24;
+    /// `TEX_HAIR_ALPHA`: the hair alpha (mask) layer.
+    pub const HAIR_ALPHA: usize = 25;
+    /// `TEX_HEAD_TATTOO`: the tattoo's head layer.
+    pub const HEAD_TATTOO: usize = 26;
+    /// `TEX_UPPER_TATTOO`: the tattoo's upper-body layer.
+    pub const UPPER_TATTOO: usize = 27;
+    /// `TEX_LOWER_TATTOO`: the tattoo's lower-body layer.
+    pub const LOWER_TATTOO: usize = 28;
+    /// `TEX_HEAD_UNIVERSAL_TATTOO`: the universal wearable's head layer.
+    pub const HEAD_UNIVERSAL_TATTOO: usize = 29;
+    /// `TEX_UPPER_UNIVERSAL_TATTOO`: the universal wearable's upper-body layer.
+    pub const UPPER_UNIVERSAL_TATTOO: usize = 30;
+    /// `TEX_LOWER_UNIVERSAL_TATTOO`: the universal wearable's lower-body layer.
+    pub const LOWER_UNIVERSAL_TATTOO: usize = 31;
+    /// `TEX_SKIRT_TATTOO`: the universal wearable's skirt layer.
+    pub const SKIRT_TATTOO: usize = 32;
+    /// `TEX_HAIR_TATTOO`: the universal wearable's hair layer.
+    pub const HAIR_TATTOO: usize = 33;
+    /// `TEX_EYES_TATTOO`: the universal wearable's eyes layer.
+    pub const EYES_TATTOO: usize = 34;
+
+    use super::WearableType;
+
+    /// The per-wearable layer texture slots used by the six base-body bakes, each
+    /// with its `local_texture` name and the wearable type that supplies it. The
+    /// client-side baker walks a bake region's layers (see `sl-bake`) and reads
+    /// each slot's texture from the matching worn wearable asset.
+    pub const LAYER_TEXTURES: [(usize, &str, WearableType); 29] = [
+        (HEAD_BODYPAINT, "head_bodypaint", WearableType::Skin),
+        (UPPER_BODYPAINT, "upper_bodypaint", WearableType::Skin),
+        (LOWER_BODYPAINT, "lower_bodypaint", WearableType::Skin),
+        (EYES_IRIS, "eyes_iris", WearableType::Eyes),
+        (HAIR, "hair_grain", WearableType::Hair),
+        (UPPER_SHIRT, "upper_shirt", WearableType::Shirt),
+        (LOWER_PANTS, "lower_pants", WearableType::Pants),
+        (LOWER_SHOES, "lower_shoes", WearableType::Shoes),
+        (LOWER_SOCKS, "lower_socks", WearableType::Socks),
+        (UPPER_JACKET, "upper_jacket", WearableType::Jacket),
+        (LOWER_JACKET, "lower_jacket", WearableType::Jacket),
+        (UPPER_GLOVES, "upper_gloves", WearableType::Gloves),
+        (
+            UPPER_UNDERSHIRT,
+            "upper_undershirt",
+            WearableType::Undershirt,
+        ),
+        (
+            LOWER_UNDERPANTS,
+            "lower_underpants",
+            WearableType::Underpants,
+        ),
+        (SKIRT, "skirt", WearableType::Skirt),
+        (HEAD_ALPHA, "head_alpha", WearableType::Alpha),
+        (UPPER_ALPHA, "upper_alpha", WearableType::Alpha),
+        (LOWER_ALPHA, "lower_alpha", WearableType::Alpha),
+        (EYES_ALPHA, "eyes_alpha", WearableType::Alpha),
+        (HAIR_ALPHA, "hair_alpha", WearableType::Alpha),
+        (HEAD_TATTOO, "head_tattoo", WearableType::Tattoo),
+        (UPPER_TATTOO, "upper_tattoo", WearableType::Tattoo),
+        (LOWER_TATTOO, "lower_tattoo", WearableType::Tattoo),
+        (
+            HEAD_UNIVERSAL_TATTOO,
+            "head_universal_tattoo",
+            WearableType::Universal,
+        ),
+        (
+            UPPER_UNIVERSAL_TATTOO,
+            "upper_universal_tattoo",
+            WearableType::Universal,
+        ),
+        (
+            LOWER_UNIVERSAL_TATTOO,
+            "lower_universal_tattoo",
+            WearableType::Universal,
+        ),
+        (SKIRT_TATTOO, "skirt_tattoo", WearableType::Universal),
+        (HAIR_TATTOO, "hair_tattoo", WearableType::Universal),
+        (EYES_TATTOO, "eyes_tattoo", WearableType::Universal),
+    ];
+
+    /// The wearable type that supplies the layer texture at `slot`, or `None` for
+    /// a slot that is not a per-wearable layer (a baked slot, or an unknown
+    /// index). The inverse lookup of [`LAYER_TEXTURES`].
+    #[must_use]
+    pub fn layer_wearable_type(slot: usize) -> Option<WearableType> {
+        LAYER_TEXTURES
+            .iter()
+            .find_map(|&(index, _, wearable)| (index == slot).then_some(wearable))
+    }
+
     use sl_types::key::TextureKey;
     use uuid::Uuid;
 
@@ -912,6 +1045,38 @@ mod tests {
             glow: 0.0,
             material_id: None,
         }
+    }
+
+    #[test]
+    fn layer_textures_are_consistent() {
+        use super::avatar_texture::{
+            self, EYES_IRIS, HEAD_BODYPAINT, LAYER_TEXTURES, layer_wearable_type,
+        };
+        // Every layer slot round-trips to its wearable type and is a non-baked
+        // slot, and the table has no duplicate indices.
+        let mut seen = std::collections::HashSet::new();
+        for &(slot, name, wearable) in &LAYER_TEXTURES {
+            assert!(seen.insert(slot), "duplicate layer slot {slot} ({name})");
+            assert_eq!(layer_wearable_type(slot), Some(wearable));
+            assert!(slot < avatar_texture::COUNT);
+            // A layer slot is never one of the pre-composited baked slots.
+            assert!(
+                !avatar_texture::BAKED
+                    .iter()
+                    .any(|&(baked, _)| baked == slot),
+                "layer slot {slot} ({name}) collides with a baked slot"
+            );
+        }
+        assert_eq!(
+            layer_wearable_type(HEAD_BODYPAINT),
+            Some(super::WearableType::Skin)
+        );
+        assert_eq!(
+            layer_wearable_type(EYES_IRIS),
+            Some(super::WearableType::Eyes)
+        );
+        // A baked slot is not a layer slot.
+        assert_eq!(layer_wearable_type(avatar_texture::HEAD_BAKED), None);
     }
 
     #[test]
