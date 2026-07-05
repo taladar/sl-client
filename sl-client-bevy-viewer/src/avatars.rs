@@ -954,25 +954,45 @@ pub(crate) struct AvatarBakeMaterials {
     /// Region materials parked on a not-yet-decoded baked texture id, filled by
     /// [`apply_avatar_bake_textures`] once it decodes.
     pending: HashMap<TextureKey, Vec<Handle<StandardMaterial>>>,
+    /// The composited-alpha classification of each decoded baked texture (P14.3),
+    /// computed once per id: whether it is opaque, alpha-masked, or wholly carved
+    /// away (a worn mesh body's alpha layer). Drives each region material's
+    /// [`AlphaMode`] and, when [`Transparent`](BakeAlpha::Transparent), hides the
+    /// base region outright ([`apply_avatar_part_visibility`]).
+    alpha: HashMap<TextureKey, BakeAlpha>,
 }
 
 impl AvatarBakeMaterials {
-    /// The uploaded Bevy [`Image`] for a baked texture `id`, uploading it from the
-    /// manager's decoded pixels on first use, or `None` if the bake is not decoded
-    /// yet (still in flight or the fetch failed).
-    fn image_for(
+    /// The uploaded Bevy [`Image`] for a baked texture `id` together with its
+    /// composited-alpha classification (P14.3), uploading and classifying it from
+    /// the manager's decoded pixels on first use (both cached), or `None` if the
+    /// bake is not decoded yet (still in flight or the fetch failed).
+    fn ensure_bake(
         &mut self,
         id: TextureKey,
         manager: &TextureManager,
         images: &mut Assets<Image>,
-    ) -> Option<Handle<Image>> {
+    ) -> Option<(Handle<Image>, BakeAlpha)> {
         if let Some(handle) = self.images.get(&id) {
-            return Some(handle.clone());
+            let alpha = self.alpha.get(&id).copied().unwrap_or(BakeAlpha::Opaque);
+            return Some((handle.clone(), alpha));
         }
         let decoded = manager.decoded(id)?;
+        let alpha = classify_bake_alpha(decoded.components, &decoded.pixels);
         let handle = images.add(to_bevy_image(decoded));
         let _inserted = self.images.insert(id, handle.clone());
-        Some(handle)
+        let _classified = self.alpha.insert(id, alpha);
+        Some((handle, alpha))
+    }
+
+    /// Whether the decoded bake `id` is wholly transparent — an alpha wearable
+    /// carved the entire region away (typically a worn mesh body) — so the base
+    /// region mesh it drapes should be hidden (P14.3). `false` for a bake that is
+    /// opaque, partly masked, or not yet decoded.
+    fn region_transparent(&self, id: TextureKey) -> bool {
+        self.alpha
+            .get(&id)
+            .is_some_and(|alpha| alpha.hides_region())
     }
 
     /// The material for one avatar body region, keyed by `(agent, slot)`: reused
@@ -993,10 +1013,10 @@ impl AvatarBakeMaterials {
             .entry((agent, slot))
             .or_insert_with(|| materials.add(baked_region_material()))
             .clone();
-        match self.image_for(id, manager, images) {
-            Some(image) => {
+        match self.ensure_bake(id, manager, images) {
+            Some((image, alpha)) => {
                 if let Some(mut material) = materials.get_mut(&handle) {
-                    apply_bake_image(&mut material, image);
+                    apply_bake_image(&mut material, image, alpha.alpha_mode());
                 }
             }
             None => self.pending.entry(id).or_default().push(handle.clone()),
@@ -1006,9 +1026,10 @@ impl AvatarBakeMaterials {
 }
 
 /// The un-textured base material for a body region: the skin tint as a fallback
-/// until the baked texture decodes and is draped over it (P14.2). Once the bake
-/// fills `base_color_texture`, [`apply_bake_image`] resets the tint to white so
-/// the composited bake shows unmodified.
+/// until the baked texture decodes and is draped over it (P14.2). Opaque until a
+/// bake with alpha overrides it; once the bake fills `base_color_texture`,
+/// [`apply_bake_image`] resets the tint to white and sets the region's
+/// [`AlphaMode`] from the bake's composited alpha (P14.3).
 fn baked_region_material() -> StandardMaterial {
     StandardMaterial {
         base_color: BODY_COLOR,
@@ -1019,13 +1040,96 @@ fn baked_region_material() -> StandardMaterial {
     }
 }
 
-/// Drape a decoded baked texture over a region material: set its diffuse image
-/// and reset `base_color` to white so the composited bake (which already carries
-/// the skin / clothing colour) is shown unmodified rather than tinted by the
-/// fallback skin colour.
-fn apply_bake_image(material: &mut StandardMaterial, image: Handle<Image>) {
+/// Drape a decoded baked texture over a region material: set its diffuse image,
+/// reset `base_color` to white so the composited bake (which already carries the
+/// skin / clothing colour) is shown unmodified rather than tinted by the fallback
+/// skin colour, and set its [`AlphaMode`] from the bake's composited alpha (P14.3)
+/// so an alpha wearable carved into the bake turns that part of the region
+/// invisible.
+fn apply_bake_image(material: &mut StandardMaterial, image: Handle<Image>, alpha_mode: AlphaMode) {
     material.base_color = Color::WHITE;
     material.base_color_texture = Some(image);
+    material.alpha_mode = alpha_mode;
+}
+
+/// The alpha threshold, as a fraction, below which a baked-texture fragment is
+/// discarded — an alpha wearable carved it away. Matches the classification
+/// cutoff [`BAKE_ALPHA_CUTOFF`] (`0.5 * 255`), and is the [`AlphaMode::Mask`]
+/// cutoff used for a masked region (P14.3).
+const BAKE_ALPHA_MASK_THRESHOLD: f32 = 0.5;
+
+/// The 8-bit alpha value below which a baked-texture pixel counts as carved away
+/// when classifying a bake ([`classify_bake_alpha`]) — `0.5 * 255`, rounded, to
+/// match [`BAKE_ALPHA_MASK_THRESHOLD`].
+const BAKE_ALPHA_CUTOFF: u8 = 128;
+
+/// How a decoded baked texture's composited alpha channel renders its body
+/// region (P14.3): the alpha wearables the grid composited into the bake carve
+/// pixels away, and the region is drawn accordingly.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum BakeAlpha {
+    /// Fully opaque — no alpha channel, or every pixel at or above the cutoff.
+    /// Rendered as [`AlphaMode::Opaque`] (cheapest, and correct for plain skin).
+    Opaque,
+    /// A mix of kept and carved pixels — an alpha wearable cut part of the region
+    /// away. Rendered as [`AlphaMode::Mask`] so the carved pixels vanish.
+    Masked,
+    /// Every pixel carved away — the whole region is invisible (typically a worn
+    /// mesh body's alpha layer). The base region mesh is hidden outright.
+    Transparent,
+}
+
+impl BakeAlpha {
+    /// The Bevy [`AlphaMode`] to render a region bake with: opaque skin stays in
+    /// the cheap opaque pass, anything carved uses masking (a wholly transparent
+    /// region also masks, though it is normally hidden by
+    /// [`hides_region`](Self::hides_region) before it draws).
+    const fn alpha_mode(self) -> AlphaMode {
+        match self {
+            Self::Opaque => AlphaMode::Opaque,
+            Self::Masked | Self::Transparent => AlphaMode::Mask(BAKE_ALPHA_MASK_THRESHOLD),
+        }
+    }
+
+    /// Whether the region this bake drapes should be hidden entirely — true only
+    /// when the whole bake is carved away ([`Transparent`](Self::Transparent)).
+    const fn hides_region(self) -> bool {
+        matches!(self, Self::Transparent)
+    }
+}
+
+/// Classify a decoded baked texture's composited alpha (P14.3) from its source
+/// component count and RGBA8 pixels: a source with no alpha channel
+/// (`components < 4`) is always [`Opaque`](BakeAlpha::Opaque); otherwise the
+/// alpha bytes are scanned once — all at or above the cutoff is `Opaque`, all
+/// below is [`Transparent`](BakeAlpha::Transparent), and any mix is
+/// [`Masked`](BakeAlpha::Masked).
+fn classify_bake_alpha(components: u16, pixels: &[u8]) -> BakeAlpha {
+    // No alpha channel: the decoder filled alpha to fully opaque.
+    if components < 4 {
+        return BakeAlpha::Opaque;
+    }
+    let mut any_kept = false;
+    let mut any_carved = false;
+    for &alpha in pixels.iter().skip(3).step_by(4) {
+        if alpha < BAKE_ALPHA_CUTOFF {
+            any_carved = true;
+        } else {
+            any_kept = true;
+        }
+        // Once both kinds are seen the region is masked; stop scanning.
+        if any_kept && any_carved {
+            return BakeAlpha::Masked;
+        }
+    }
+    match (any_kept, any_carved) {
+        // Nothing carved (or no pixels at all) → opaque.
+        (_, false) => BakeAlpha::Opaque,
+        // Every pixel carved → wholly transparent.
+        (false, true) => BakeAlpha::Transparent,
+        // A mix is returned inside the loop; kept here for totality.
+        (true, true) => BakeAlpha::Masked,
+    }
 }
 
 /// Drape each avatar's server-published baked textures over its system body
@@ -1119,13 +1223,13 @@ pub(crate) fn apply_avatar_bake_textures(
             // Not a bake any avatar region is waiting on (e.g. a prim texture).
             continue;
         };
-        let Some(image) = bake_mats.image_for(id, &manager, &mut images) else {
+        let Some((image, alpha)) = bake_mats.ensure_bake(id, &manager, &mut images) else {
             // The fetch failed: the parked regions keep their flat skin tint.
             continue;
         };
         for material_handle in parked {
             if let Some(mut material) = materials.get_mut(&material_handle) {
-                apply_bake_image(&mut material, image.clone());
+                apply_bake_image(&mut material, image.clone(), alpha.alpha_mode());
                 filled = filled.saturating_add(1);
             }
         }
@@ -1248,21 +1352,35 @@ pub(crate) fn apply_avatar_appearance(
 /// `IMG_USE_BAKED_*` sentinel (a mesh body replacing it), and render the skirt
 /// part only when the avatar's `TEX_SKIRT_BAKED` slot holds a visible bake.
 ///
+/// A region is also hidden when its whole baked texture is transparent (P14.3):
+/// an alpha wearable carved the entire region away (typically a worn mesh body),
+/// which the `IMG_USE_BAKED_*` sentinel path may not signal on its own.
+///
 /// Runs every frame — cheap (a handful of parts per avatar, and only the rare
 /// `IMG_USE_BAKED_*`-bearing attachment is chased) and idempotent: it only writes
 /// a [`Visibility`] that actually changed, so it never churns change-detection.
-/// The (P13.5-deferred) clothing-morph alpha masks — which need the baked-texture
-/// alpha channel from Phase 14 — are not applied here.
+/// The (P14.5-deferred) clothing-morph alpha masks — the per-vertex flared-cuff
+/// carving — are not applied here.
 pub(crate) fn apply_avatar_part_visibility(
     state: Res<AvatarState>,
+    bake_mats: Res<AvatarBakeMaterials>,
     mut parts: Query<(&AvatarBodyPart, &mut Visibility)>,
 ) {
     let hidden = state.hidden_slots_per_agent();
     let mut changed = 0_usize;
     for (part, mut visibility) in &mut parts {
-        let region_hidden = hidden
+        let slot = part.region.baked_slot();
+        // Hidden either by a worn mesh's `IMG_USE_BAKED_*` sentinel (P13.5) or by
+        // the region's own bake being wholly carved away by alpha (P14.3).
+        let alpha_hidden = state
+            .baked_textures
             .get(&part.agent)
-            .is_some_and(|slots| slots.contains(&part.region.baked_slot()));
+            .and_then(|bakes| bakes.get(&slot))
+            .is_some_and(|&id| bake_mats.region_transparent(id));
+        let region_hidden = alpha_hidden
+            || hidden
+                .get(&part.agent)
+                .is_some_and(|slots| slots.contains(&slot));
         let visible = match part.region {
             // A skirt shows only when worn (and not itself replaced by a mesh).
             BodyRegion::Skirt => {
@@ -1340,12 +1458,13 @@ pub(crate) fn position_name_tags(
 #[cfg(test)]
 mod tests {
     use super::{
-        AvatarState, PROVISIONAL_ID_CHARS, body_root_transform, coarse_translation,
-        provisional_label, used_baked_slots, visible_body_bakes,
+        AvatarState, BakeAlpha, PROVISIONAL_ID_CHARS, body_root_transform, classify_bake_alpha,
+        coarse_translation, provisional_label, used_baked_slots, visible_body_bakes,
     };
     use crate::avatar_assets::BodyRegion;
     use crate::coords::sl_to_bevy_rotation;
     use bevy::math::Vec3;
+    use bevy::prelude::AlphaMode;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
         AgentKey, CircuitId, CoarseLocation, Object, ObjectMotion, RegionHandle,
@@ -1536,6 +1655,49 @@ mod tests {
         assert!(!bakes.contains_key(&avatar_texture::LOWER_BAKED));
         assert!(!bakes.contains_key(&avatar_texture::EYES_BAKED));
         assert_eq!(bakes.len(), 2, "only the two real bakes are picked up");
+    }
+
+    /// A baked texture's composited alpha (P14.3) is classified from its source
+    /// component count and RGBA8 pixels: no alpha channel is opaque, an all-carved
+    /// alpha is wholly transparent, an all-kept alpha is opaque, and any mix is
+    /// masked.
+    #[test]
+    fn classify_bake_alpha_reads_the_alpha_channel() {
+        // No alpha channel (RGB source): opaque regardless of the filled byte.
+        assert_eq!(classify_bake_alpha(3, &[10, 20, 30, 0]), BakeAlpha::Opaque);
+        // Every alpha at/above the cutoff → opaque.
+        assert_eq!(
+            classify_bake_alpha(4, &[0, 0, 0, 255, 1, 1, 1, 200]),
+            BakeAlpha::Opaque
+        );
+        // Every alpha below the cutoff → wholly transparent (hide the region).
+        assert_eq!(
+            classify_bake_alpha(4, &[9, 9, 9, 0, 9, 9, 9, 10]),
+            BakeAlpha::Transparent
+        );
+        // A mix of kept and carved pixels → masked.
+        assert_eq!(
+            classify_bake_alpha(4, &[9, 9, 9, 255, 9, 9, 9, 0]),
+            BakeAlpha::Masked
+        );
+        // No pixels at all → opaque (nothing is carved away).
+        assert_eq!(classify_bake_alpha(4, &[]), BakeAlpha::Opaque);
+    }
+
+    /// Each classification maps to the right render behaviour: opaque skin stays
+    /// opaque, a carved bake masks, and only a wholly transparent bake hides its
+    /// region.
+    #[test]
+    fn bake_alpha_drives_render_mode_and_hiding() {
+        assert_eq!(BakeAlpha::Opaque.alpha_mode(), AlphaMode::Opaque);
+        assert!(matches!(BakeAlpha::Masked.alpha_mode(), AlphaMode::Mask(_)));
+        assert!(matches!(
+            BakeAlpha::Transparent.alpha_mode(),
+            AlphaMode::Mask(_)
+        ));
+        assert!(!BakeAlpha::Opaque.hides_region());
+        assert!(!BakeAlpha::Masked.hides_region());
+        assert!(BakeAlpha::Transparent.hides_region());
     }
 
     /// An attachment's `IMG_USE_BAKED_*` hide is attributed to the avatar it hangs
