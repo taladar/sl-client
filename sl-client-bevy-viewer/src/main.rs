@@ -7,6 +7,7 @@
 //! with terrain, prims, meshes, sculpts, avatars, and chat landing in later
 //! phases.
 
+mod avatar_assets;
 mod avatars;
 mod camera;
 mod chat;
@@ -17,7 +18,7 @@ mod session;
 mod terrain;
 mod textures;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
@@ -32,8 +33,9 @@ use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
+use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{
-    AvatarState, apply_avatar_names, position_name_tags, update_avatar_objects,
+    AvatarState, apply_avatar_names, position_name_tags, setup_avatar_body, update_avatar_objects,
     update_coarse_avatars,
 };
 use crate::camera::{FlyCamera, fly_camera};
@@ -111,6 +113,12 @@ struct Options {
     /// The viewer version reported to the grid.
     #[clap(long, default_value = clap::crate_version!())]
     version: String,
+    /// Directory holding the standard Linden `character/` assets
+    /// (`avatar_skeleton.xml`, `avatar_lad.xml`, the base-body `.llm` meshes) —
+    /// point this at an installed Firestorm / Second Life viewer to render real
+    /// system-avatar bodies. Without it, avatars stay placeholder spheres.
+    #[clap(long, env = "SL_VIEWER_ASSETS")]
+    viewer_assets: Option<PathBuf>,
 }
 
 /// Map a grid nickname to its XML-RPC login URI, or `None` if unknown.
@@ -198,9 +206,26 @@ fn capture_login_outcome(
     }
 }
 
+/// Load the system-avatar `character/` assets from `dir`, logging (and swallowing)
+/// a failure so a bad `--viewer-assets` path leaves avatars as placeholder
+/// spheres rather than aborting the session.
+fn load_avatar_library(dir: Option<&Path>) -> Option<AvatarAssetLibrary> {
+    let dir = dir?;
+    match AvatarAssetLibrary::load(dir) {
+        Ok(library) => Some(library),
+        Err(error) => {
+            warn!(
+                "failed to load avatar assets from {}: {error}; avatars stay spheres",
+                dir.display()
+            );
+            None
+        }
+    }
+}
+
 /// Run one windowed session to completion, returning any recoverable login
 /// outcome (an MFA challenge or a retryable rejection) it stopped on.
-fn run_session(params: &LoginParams) -> LoginOutcome {
+fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutcome {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
@@ -243,7 +268,10 @@ fn run_session(params: &LoginParams) -> LoginOutcome {
     .init_resource::<MeshManager>()
     .add_message::<TextureDecoded>()
     .add_message::<MeshDecoded>()
-    .add_systems(Startup, (setup_scene, setup_chat_overlay))
+    .add_systems(
+        Startup,
+        (setup_scene, setup_chat_overlay, setup_avatar_body),
+    )
     .add_systems(
         Update,
         (
@@ -278,6 +306,11 @@ fn run_session(params: &LoginParams) -> LoginOutcome {
             fly_camera,
         ),
     );
+    // Load the client-side avatar assets (if a directory was given) so rigged
+    // bodies replace the placeholder spheres; absent them the viewer keeps spheres.
+    if let Some(library) = load_avatar_library(viewer_assets) {
+        app.insert_resource(library);
+    }
     let _exit = app.run();
     app.world_mut()
         .remove_resource::<LoginOutcome>()
@@ -314,7 +347,7 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
             login_uri: login_uri.parse()?,
             request: request.clone(),
         };
-        let outcome = run_session(&params);
+        let outcome = run_session(&params, options.viewer_assets.as_deref());
         if let Some(challenge) = outcome.challenge {
             info!(
                 "multi-factor authentication required: {}",

@@ -170,8 +170,8 @@ pub use sl_sculpt::{SculptParams, SculptStitch};
 // [`to_bevy_base_mesh`] / [`BevySkeleton`]. `AttachmentPoint` is already
 // re-exported (from `sl_proto`, which `sl_avatar` re-exports too).
 pub use sl_avatar::{
-    AppearanceValues, AttachmentPointDef, AttachmentPoints, BaseMesh, CollisionVolume, Joint,
-    Skeleton, VisualParam, VisualParams,
+    AppearanceValues, AttachmentPointDef, AttachmentPoints, BaseMesh, BaseMeshError,
+    CollisionVolume, Joint, ParamError, Skeleton, SkeletonError, VisualParam, VisualParams,
 };
 
 pub use crate::assets::BevyAssetFetcher;

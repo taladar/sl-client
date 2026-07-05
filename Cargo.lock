@@ -5672,6 +5672,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "clap",
+ "fs-err",
  "pretty_assertions",
  "sl-client-bevy",
  "sl-repl",
