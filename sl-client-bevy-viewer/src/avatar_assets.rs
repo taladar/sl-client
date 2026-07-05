@@ -22,9 +22,45 @@ use std::path::Path;
 use bevy::prelude::Resource;
 use sl_client_bevy::{
     BaseMesh, BaseMeshError, BaseMeshSkin, BevySkeleton, ParamError, Skeleton, SkeletonError,
-    VisualParams,
+    VisualParams, avatar_texture,
 };
 use tracing::warn;
+
+/// Which baked-texture region a base part belongs to, driving the P13.5
+/// conditional-visibility rules: a region is hidden when a worn attachment
+/// replaces it (an `IMG_USE_BAKED_*` face), and the skirt region renders only
+/// when the avatar's `TEX_SKIRT_BAKED` slot holds a visible bake.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BodyRegion {
+    /// The head (and eyelashes, which the reference viewer hides with the head).
+    Head,
+    /// The hair.
+    Hair,
+    /// The eyes (both eyeballs).
+    Eyes,
+    /// The upper body.
+    Upper,
+    /// The lower body.
+    Lower,
+    /// The skirt.
+    Skirt,
+}
+
+impl BodyRegion {
+    /// The avatar baked-texture slot this region's visibility keys off — the
+    /// eyelashes ride with the head and the eyeballs with the eyes, matching the
+    /// reference viewer's `updateMeshVisibility`.
+    pub(crate) const fn baked_slot(self) -> usize {
+        match self {
+            Self::Head => avatar_texture::HEAD_BAKED,
+            Self::Hair => avatar_texture::HAIR_BAKED,
+            Self::Eyes => avatar_texture::EYES_BAKED,
+            Self::Upper => avatar_texture::UPPER_BAKED,
+            Self::Lower => avatar_texture::LOWER_BAKED,
+            Self::Skirt => avatar_texture::SKIRT_BAKED,
+        }
+    }
+}
 
 /// How a base part is attached to the avatar skeleton.
 #[derive(Debug, Clone, Copy)]
@@ -37,8 +73,8 @@ enum PartBinding {
     Rigid(&'static str),
 }
 
-/// One base part to load: a display label, its `lod = 0` `.llm` file name, and
-/// how it binds to the skeleton.
+/// One base part to load: a display label, its `lod = 0` `.llm` file name, how
+/// it binds to the skeleton, and which baked region it belongs to.
 #[derive(Debug, Clone, Copy)]
 struct BasePartSpec {
     /// A short human-readable label, used only for log messages.
@@ -47,6 +83,8 @@ struct BasePartSpec {
     file: &'static str,
     /// How the part attaches to the skeleton.
     binding: PartBinding,
+    /// Which baked region this part belongs to (for P13.5 visibility).
+    region: BodyRegion,
 }
 
 /// The standard base-body parts and their `lod = 0` files, as referenced by
@@ -57,41 +95,49 @@ const BASE_PARTS: &[BasePartSpec] = &[
         label: "head",
         file: "avatar_head.llm",
         binding: PartBinding::Skinned,
+        region: BodyRegion::Head,
     },
     BasePartSpec {
         label: "hair",
         file: "avatar_hair.llm",
         binding: PartBinding::Skinned,
+        region: BodyRegion::Hair,
     },
     BasePartSpec {
         label: "eyelashes",
         file: "avatar_eyelashes.llm",
         binding: PartBinding::Skinned,
+        region: BodyRegion::Head,
     },
     BasePartSpec {
         label: "upper body",
         file: "avatar_upper_body.llm",
         binding: PartBinding::Skinned,
+        region: BodyRegion::Upper,
     },
     BasePartSpec {
         label: "lower body",
         file: "avatar_lower_body.llm",
         binding: PartBinding::Skinned,
+        region: BodyRegion::Lower,
     },
     BasePartSpec {
         label: "skirt",
         file: "avatar_skirt.llm",
         binding: PartBinding::Skinned,
+        region: BodyRegion::Skirt,
     },
     BasePartSpec {
         label: "left eye",
         file: "avatar_eye.llm",
         binding: PartBinding::Rigid("mEyeLeft"),
+        region: BodyRegion::Eyes,
     },
     BasePartSpec {
         label: "right eye",
         file: "avatar_eye.llm",
         binding: PartBinding::Rigid("mEyeRight"),
+        region: BodyRegion::Eyes,
     },
 ];
 
@@ -101,13 +147,16 @@ const BASE_PARTS: &[BasePartSpec] = &[
 /// [`AvatarAssetLibrary::pelvis_height`].
 const PELVIS_JOINT: &str = "mPelvis";
 
-/// A resolved base part: its decoded mesh and how it binds to the skeleton.
+/// A resolved base part: its decoded mesh, how it binds to the skeleton, and
+/// which baked region it belongs to.
 #[derive(Debug)]
 pub(crate) struct LoadedPart {
     /// The decoded `lod = 0` base mesh (Second Life Z-up space).
     pub(crate) mesh: BaseMesh,
     /// How this part attaches to the skeleton.
     pub(crate) binding: LoadedBinding,
+    /// Which baked region this part belongs to (for P13.5 visibility).
+    pub(crate) region: BodyRegion,
 }
 
 /// A base part's resolved skeleton binding.
@@ -191,7 +240,11 @@ impl AvatarAssetLibrary {
                     }
                 },
             };
-            parts.push(LoadedPart { mesh, binding });
+            parts.push(LoadedPart {
+                mesh,
+                binding,
+                region: spec.region,
+            });
         }
 
         let library = Self {

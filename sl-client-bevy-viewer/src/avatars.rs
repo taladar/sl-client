@@ -36,12 +36,12 @@ use std::collections::{HashMap, HashSet};
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, AvatarName, CoarseLocation, Command, MorphWeights, Object, ResolvedParams,
-    ScopedObjectId, SkeletalDeformations, SlCommand, SlEvent, SlSessionEvent, pcode,
-    to_bevy_base_mesh, to_bevy_morphed_mesh,
+    AgentKey, AvatarName, CoarseLocation, Command, MAX_FACES, MorphWeights, Object, ResolvedParams,
+    ScopedObjectId, SkeletalDeformations, SlCommand, SlEvent, SlSessionEvent, avatar_texture,
+    decode_texture_entry, pcode, to_bevy_base_mesh, to_bevy_morphed_mesh,
 };
 
-use crate::avatar_assets::{AvatarAssetLibrary, LoadedBinding};
+use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
 use crate::coords::{sl_to_bevy_object_rotation, sl_to_bevy_vec};
 
 /// The radius, in metres, of an avatar placeholder sphere (a ~2 m-diameter
@@ -99,6 +99,10 @@ pub(crate) struct AvatarBodyPart {
     /// The part's index into the shared part list (base-mesh and render data
     /// share the same order).
     part: usize,
+    /// Which baked region this part belongs to, so the visibility system
+    /// ([`apply_avatar_part_visibility`]) can hide it when a worn attachment
+    /// replaces its region, or (for the skirt) show it only when a skirt is worn.
+    region: BodyRegion,
 }
 
 /// A marker on one skeleton-instance joint entity, tying it back to its avatar
@@ -177,9 +181,28 @@ pub(crate) struct AvatarState {
     /// re-blended and its skeleton re-deformed — set on a fresh appearance and on
     /// a newly spawned body, drained by [`apply_avatar_appearance`].
     appearance_dirty: HashSet<AgentKey>,
+    /// Whether each avatar's `TEX_SKIRT_BAKED` slot holds a visible bake, from its
+    /// latest appearance — the reference viewer's skirt-worn test. Absent means
+    /// not yet known, treated as no skirt (the base skirt mesh stays hidden).
+    skirt_visible: HashMap<AgentKey, bool>,
+    /// The parent scoped id of every tracked non-root object (linkset children and
+    /// attachments), so an attachment's chain can be chased up to its avatar root
+    /// (P13.5 `IMG_USE_BAKED_*` region hide).
+    object_parents: HashMap<ScopedObjectId, ScopedObjectId>,
+    /// For every tracked non-root object whose texture entry carries
+    /// `IMG_USE_BAKED_*` sentinels, the baked slots it replaces — aggregated up the
+    /// attachment chain to hide the matching base-avatar mesh regions.
+    baked_hides: HashMap<ScopedObjectId, Vec<usize>>,
+    /// Non-root objects whose texture entry has already been scanned for
+    /// `IMG_USE_BAKED_*` sentinels, so a motion-only update never re-decodes it.
+    scanned_objects: HashSet<ScopedObjectId>,
     /// The shared placeholder sphere mesh + material, built lazily on first use.
     assets: Option<AvatarAssets>,
 }
+
+/// The maximum attachment/linkset depth chased when attributing an object's
+/// `IMG_USE_BAKED_*` hide to its avatar, a guard against a malformed parent cycle.
+const MAX_ATTACHMENT_DEPTH: usize = 32;
 
 /// The shared, per-avatar-invariant render assets for the rigged base body,
 /// built once from [`AvatarAssetLibrary`] and reused by every avatar body: one
@@ -213,6 +236,8 @@ struct BodyPart {
     mesh: Handle<Mesh>,
     /// How the part binds to a skeleton instance's joint entities.
     binding: BodyPartBinding,
+    /// Which baked region this part belongs to (for P13.5 visibility).
+    region: BodyRegion,
 }
 
 /// A base part's skeleton binding, resolved to Bevy render data.
@@ -262,7 +287,11 @@ pub(crate) fn setup_avatar_body(
             },
             LoadedBinding::Rigid(index) => BodyPartBinding::Rigid(*index),
         };
-        parts.push(BodyPart { mesh, binding });
+        parts.push(BodyPart {
+            mesh,
+            binding,
+            region: part.region,
+        });
     }
     let skeleton = library.skeleton();
     let part_count = parts.len();
@@ -306,7 +335,19 @@ fn spawn_body_part(
     material: &Handle<StandardMaterial>,
     commands: &mut Commands,
 ) {
-    let marker = AvatarBodyPart { agent, part: index };
+    let marker = AvatarBodyPart {
+        agent,
+        part: index,
+        region: part.region,
+    };
+    // The skirt is hidden until an appearance says a skirt is worn; every other
+    // region shows by default, hidden only if a worn attachment replaces it. The
+    // per-frame [`apply_avatar_part_visibility`] keeps this current; the initial
+    // value only avoids a one-frame flash of an un-worn skirt.
+    let initial = match part.region {
+        BodyRegion::Skirt => Visibility::Hidden,
+        _other => Visibility::Inherited,
+    };
     match &part.binding {
         BodyPartBinding::Skinned {
             inverse_bindposes,
@@ -323,6 +364,7 @@ fn spawn_body_part(
                 Mesh3d(part.mesh.clone()),
                 MeshMaterial3d(material.clone()),
                 Transform::default(),
+                initial,
                 SkinnedMesh {
                     inverse_bindposes: inverse_bindposes.clone(),
                     joints: part_joints,
@@ -339,6 +381,7 @@ fn spawn_body_part(
                 Mesh3d(part.mesh.clone()),
                 MeshMaterial3d(material.clone()),
                 Transform::default(),
+                initial,
                 ChildOf(joint),
                 marker,
             ));
@@ -647,6 +690,82 @@ impl AvatarState {
         debug!("resolved avatar name {agent} = {resolved:?}");
         self.names.insert(agent, resolved);
     }
+
+    /// Record the parenting of an in-world object and, once, scan its texture
+    /// entry for the `IMG_USE_BAKED_*` sentinels a worn attachment uses to hide a
+    /// base-avatar region. Called for every object; a *root* object (no parent)
+    /// can never be an attachment, so it is ignored.
+    fn track_object(&mut self, object: &Object) {
+        if object.parent_id.get() == 0 {
+            return;
+        }
+        let scoped = object.scoped_id();
+        self.object_parents
+            .insert(scoped, object.scoped_parent_id());
+        // Decode + scan a given object's texture entry only once (attachments do
+        // not change their baked-body sentinels under normal wear).
+        if self.scanned_objects.insert(scoped) {
+            let slots = used_baked_slots(&object.texture_entry);
+            if !slots.is_empty() {
+                self.baked_hides.insert(scoped, slots);
+            }
+        }
+    }
+
+    /// Forget a departed object's attachment bookkeeping.
+    fn forget_object(&mut self, scoped: ScopedObjectId) {
+        self.object_parents.remove(&scoped);
+        self.baked_hides.remove(&scoped);
+        self.scanned_objects.remove(&scoped);
+    }
+
+    /// The agent whose avatar `scoped` hangs off, by chasing parent links up to a
+    /// tracked avatar root; `None` if the chain does not reach an avatar (an
+    /// ordinary in-world linkset) or is malformed.
+    fn avatar_root_of(&self, scoped: ScopedObjectId) -> Option<AgentKey> {
+        let mut current = scoped;
+        for _ in 0..MAX_ATTACHMENT_DEPTH {
+            if let Some(&agent) = self.by_scoped.get(&current) {
+                return Some(agent);
+            }
+            match self.object_parents.get(&current) {
+                Some(&parent) => current = parent,
+                None => return None,
+            }
+        }
+        None
+    }
+
+    /// The set of baked slots to hide for each avatar: every tracked attachment
+    /// whose texture entry carries `IMG_USE_BAKED_*` sentinels is attributed to
+    /// its avatar (by chasing its chain), and its replaced slots unioned in.
+    fn hidden_slots_per_agent(&self) -> HashMap<AgentKey, HashSet<usize>> {
+        let mut hidden: HashMap<AgentKey, HashSet<usize>> = HashMap::new();
+        for (&scoped, slots) in &self.baked_hides {
+            if let Some(agent) = self.avatar_root_of(scoped) {
+                hidden
+                    .entry(agent)
+                    .or_default()
+                    .extend(slots.iter().copied());
+            }
+        }
+        hidden
+    }
+}
+
+/// Scan a raw texture-entry blob for the `IMG_USE_BAKED_*` sentinels and return
+/// the (sorted, de-duplicated) baked slots it signals should be replaced — empty
+/// for an ordinary object.
+fn used_baked_slots(texture_entry: &[u8]) -> Vec<usize> {
+    let entry = decode_texture_entry(texture_entry, MAX_FACES);
+    let mut slots: Vec<usize> = entry
+        .faces
+        .iter()
+        .filter_map(|face| avatar_texture::use_baked_slot(face.texture_id))
+        .collect();
+    slots.sort_unstable();
+    slots.dedup();
+    slots
 }
 
 /// Despawn both entities of an avatar (its anchor — sphere or body root, whose
@@ -672,6 +791,10 @@ pub(crate) fn update_avatar_objects(
     for event in events.read() {
         match &event.0 {
             SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
+                // Track every object's attachment linkage (an avatar's worn mesh
+                // hides base-body regions via `IMG_USE_BAKED_*` faces), then render
+                // the avatars themselves.
+                state.track_object(object);
                 if object.pcode == pcode::AVATAR {
                     state.apply_object(
                         object,
@@ -684,6 +807,7 @@ pub(crate) fn update_avatar_objects(
                 }
             }
             SlSessionEvent::ObjectRemoved { local_id, .. } => {
+                state.forget_object(*local_id);
                 state.remove_object(*local_id, &mut commands);
             }
             _other => {}
@@ -762,6 +886,22 @@ pub(crate) fn apply_avatar_appearance(
             state
                 .appearances
                 .insert(appearance.avatar_id, appearance.visual_params.clone());
+            // The base skirt mesh renders only when the skirt bake is visible (the
+            // reference viewer's `isWearingWearableType(WT_SKIRT) &&
+            // isTextureVisible(TEX_SKIRT_BAKED)`, which for another avatar reduces
+            // to the baked slot holding a real, non-invisible texture).
+            let skirt_visible = appearance
+                .texture_entry
+                .texture_id(avatar_texture::SKIRT_BAKED)
+                .is_some_and(avatar_texture::is_bake_visible);
+            state
+                .skirt_visible
+                .insert(appearance.avatar_id, skirt_visible);
+            debug!(
+                "appearance for {}: skirt {}",
+                appearance.avatar_id,
+                if skirt_visible { "worn" } else { "not worn" }
+            );
             state.appearance_dirty.insert(appearance.avatar_id);
         }
     }
@@ -825,6 +965,54 @@ pub(crate) fn apply_avatar_appearance(
     state.appearance_dirty.clear();
 }
 
+/// Show or hide each rigged base-part mesh from the avatar's worn items (P13.5
+/// whole-mesh show/hide): hide a whole base region (head / hair / eyes / upper /
+/// lower / skirt) when a worn attachment face carries the matching
+/// `IMG_USE_BAKED_*` sentinel (a mesh body replacing it), and render the skirt
+/// part only when the avatar's `TEX_SKIRT_BAKED` slot holds a visible bake.
+///
+/// Runs every frame — cheap (a handful of parts per avatar, and only the rare
+/// `IMG_USE_BAKED_*`-bearing attachment is chased) and idempotent: it only writes
+/// a [`Visibility`] that actually changed, so it never churns change-detection.
+/// The (P13.5-deferred) clothing-morph alpha masks — which need the baked-texture
+/// alpha channel from Phase 14 — are not applied here.
+pub(crate) fn apply_avatar_part_visibility(
+    state: Res<AvatarState>,
+    mut parts: Query<(&AvatarBodyPart, &mut Visibility)>,
+) {
+    let hidden = state.hidden_slots_per_agent();
+    let mut changed = 0_usize;
+    for (part, mut visibility) in &mut parts {
+        let region_hidden = hidden
+            .get(&part.agent)
+            .is_some_and(|slots| slots.contains(&part.region.baked_slot()));
+        let visible = match part.region {
+            // A skirt shows only when worn (and not itself replaced by a mesh).
+            BodyRegion::Skirt => {
+                !region_hidden
+                    && state
+                        .skirt_visible
+                        .get(&part.agent)
+                        .copied()
+                        .unwrap_or(false)
+            }
+            _other => !region_hidden,
+        };
+        let desired = if visible {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *visibility != desired {
+            *visibility = desired;
+            changed = changed.saturating_add(1);
+        }
+    }
+    if changed > 0 {
+        debug!("updated visibility of {changed} avatar body part(s)");
+    }
+}
+
 /// Position each avatar name tag over its anchor by projecting the anchor's world
 /// position (offset up by the tag's own height) to the screen and anchoring the
 /// tag's *bottom-centre* on that point, so the text is centred over the avatar
@@ -874,13 +1062,18 @@ pub(crate) fn position_name_tags(
 
 #[cfg(test)]
 mod tests {
-    use super::{PROVISIONAL_ID_CHARS, body_root_transform, coarse_translation, provisional_label};
+    use super::{
+        AvatarState, PROVISIONAL_ID_CHARS, body_root_transform, coarse_translation,
+        provisional_label, used_baked_slots,
+    };
+    use crate::avatar_assets::BodyRegion;
     use crate::coords::sl_to_bevy_rotation;
     use bevy::math::Vec3;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
         AgentKey, CircuitId, CoarseLocation, Object, ObjectMotion, RegionHandle,
-        RegionLocalObjectId, Rotation, Uuid, Vector,
+        RegionLocalObjectId, Rotation, ScopedObjectId, TextureEntry, TextureFace, TextureKey, Uuid,
+        Vector, avatar_texture, encode_texture_entry,
     };
 
     /// The zero vector (`Vector` does not derive `Default`).
@@ -996,6 +1189,77 @@ mod tests {
             transform
                 .rotation
                 .abs_diff_eq(sl_to_bevy_rotation(), 1.0e-6)
+        );
+    }
+
+    /// Each body region keys its visibility off its own baked slot — the head
+    /// (and eyelashes) off the head bake, the eyes off the eyes bake, and so on.
+    #[test]
+    fn body_region_maps_to_its_baked_slot() {
+        assert_eq!(BodyRegion::Head.baked_slot(), avatar_texture::HEAD_BAKED);
+        assert_eq!(BodyRegion::Hair.baked_slot(), avatar_texture::HAIR_BAKED);
+        assert_eq!(BodyRegion::Eyes.baked_slot(), avatar_texture::EYES_BAKED);
+        assert_eq!(BodyRegion::Upper.baked_slot(), avatar_texture::UPPER_BAKED);
+        assert_eq!(BodyRegion::Lower.baked_slot(), avatar_texture::LOWER_BAKED);
+        assert_eq!(BodyRegion::Skirt.baked_slot(), avatar_texture::SKIRT_BAKED);
+    }
+
+    /// A texture entry carrying an `IMG_USE_BAKED_*` sentinel yields that region's
+    /// baked slot; an ordinary entry yields none.
+    #[test]
+    fn used_baked_slots_reads_the_sentinels() {
+        let with_sentinel = TextureEntry {
+            faces: vec![
+                TextureFace::new(TextureKey::from(Uuid::from_u128(0x1234))),
+                TextureFace::new(TextureKey::from(avatar_texture::IMG_USE_BAKED_UPPER)),
+            ],
+        };
+        assert_eq!(
+            used_baked_slots(&encode_texture_entry(&with_sentinel)),
+            vec![avatar_texture::UPPER_BAKED]
+        );
+
+        let ordinary = TextureEntry {
+            faces: vec![TextureFace::new(TextureKey::from(Uuid::from_u128(0x99)))],
+        };
+        assert!(used_baked_slots(&encode_texture_entry(&ordinary)).is_empty());
+        // An empty blob decodes to no faces, so no slots.
+        assert!(used_baked_slots(&[]).is_empty());
+    }
+
+    /// An attachment's `IMG_USE_BAKED_*` hide is attributed to the avatar it hangs
+    /// off, by chasing the parent chain up (through nested linkset prims) to the
+    /// avatar root; an object whose chain does not reach an avatar is ignored.
+    #[test]
+    fn hidden_slots_chase_the_attachment_chain_to_the_avatar() {
+        let mut state = AvatarState::default();
+        let agent = AgentKey::from(Uuid::from_u128(0xa5));
+        let circuit = CircuitId::new(1);
+        let avatar = ScopedObjectId::new(circuit, RegionLocalObjectId(100));
+        let attachment = ScopedObjectId::new(circuit, RegionLocalObjectId(200));
+        let child_prim = ScopedObjectId::new(circuit, RegionLocalObjectId(300));
+        let orphan = ScopedObjectId::new(circuit, RegionLocalObjectId(400));
+
+        state.by_scoped.insert(avatar, agent);
+        // child prim -> attachment root -> avatar root.
+        state.object_parents.insert(attachment, avatar);
+        state.object_parents.insert(child_prim, attachment);
+        // A deep child prim of the worn mesh replaces the upper region.
+        state
+            .baked_hides
+            .insert(child_prim, vec![avatar_texture::UPPER_BAKED]);
+        // An object whose chain does not reach any avatar is not attributed.
+        state
+            .baked_hides
+            .insert(orphan, vec![avatar_texture::HEAD_BAKED]);
+
+        let hidden = state.hidden_slots_per_agent();
+        assert_eq!(hidden.len(), 1, "only the one avatar gets a hide set");
+        let slots = hidden.get(&agent).cloned().unwrap_or_default();
+        assert!(slots.contains(&avatar_texture::UPPER_BAKED));
+        assert!(
+            !slots.contains(&avatar_texture::HEAD_BAKED),
+            "the orphan's hide must not leak onto the avatar"
         );
     }
 }

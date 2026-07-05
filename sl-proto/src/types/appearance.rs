@@ -177,6 +177,84 @@ pub mod avatar_texture {
         (AUX2_BAKED, "aux2"),
         (AUX3_BAKED, "aux3"),
     ];
+
+    use sl_types::key::TextureKey;
+    use uuid::Uuid;
+
+    /// The "default avatar" sentinel texture id (`IMG_DEFAULT_AVATAR`): a baked
+    /// slot left at this dataserver placeholder carries no real bake.
+    pub const IMG_DEFAULT_AVATAR: Uuid = Uuid::from_u128(0xc228_d1cf_4b5d_4ba8_84f4_899a_0796_aa97);
+    /// The fully-transparent "invisible" texture id (`IMG_INVISIBLE`): a baked
+    /// slot set to this renders nothing.
+    pub const IMG_INVISIBLE: Uuid = Uuid::from_u128(0x3a36_7d1c_bef1_6d43_7595_e88c_1e3a_adb3);
+
+    /// `IMG_USE_BAKED_HEAD`: an attachment face carrying this sentinel signals a
+    /// mesh replaces the avatar's baked head region (hide the base head mesh).
+    pub const IMG_USE_BAKED_HEAD: Uuid = Uuid::from_u128(0x5a9f_4a74_30f2_821c_b88d_7049_9d3e_7183);
+    /// `IMG_USE_BAKED_UPPER`: a mesh replaces the baked upper-body region.
+    pub const IMG_USE_BAKED_UPPER: Uuid =
+        Uuid::from_u128(0xae2d_e45c_d252_50b8_5c6e_19f3_9ce7_9317);
+    /// `IMG_USE_BAKED_LOWER`: a mesh replaces the baked lower-body region.
+    pub const IMG_USE_BAKED_LOWER: Uuid =
+        Uuid::from_u128(0x24da_ea5f_0539_cfcf_047f_fbc4_0b27_86ba);
+    /// `IMG_USE_BAKED_EYES`: a mesh replaces the baked eyes region.
+    pub const IMG_USE_BAKED_EYES: Uuid = Uuid::from_u128(0x52cc_6bb6_2ee5_e632_d3ad_5019_7b1d_cb8a);
+    /// `IMG_USE_BAKED_SKIRT`: a mesh replaces the baked skirt region.
+    pub const IMG_USE_BAKED_SKIRT: Uuid =
+        Uuid::from_u128(0x4352_9ce8_7faa_ad92_165a_bc40_7837_1687);
+    /// `IMG_USE_BAKED_HAIR`: a mesh replaces the baked hair region.
+    pub const IMG_USE_BAKED_HAIR: Uuid = Uuid::from_u128(0x09aa_c1fb_6bce_0bee_7d44_caac_6dbb_6c63);
+    /// `IMG_USE_BAKED_LEFTARM`: a mesh replaces the universal left-arm bake.
+    pub const IMG_USE_BAKED_LEFTARM: Uuid =
+        Uuid::from_u128(0xff62_763f_d60a_9855_890b_0c96_f8f8_cd98);
+    /// `IMG_USE_BAKED_LEFTLEG`: a mesh replaces the universal left-leg bake.
+    pub const IMG_USE_BAKED_LEFTLEG: Uuid =
+        Uuid::from_u128(0x8e91_5e25_31d1_cc95_ae08_d58a_4748_8251);
+    /// `IMG_USE_BAKED_AUX1`: a mesh replaces the universal aux1 bake.
+    pub const IMG_USE_BAKED_AUX1: Uuid = Uuid::from_u128(0x9742_065b_19b5_297c_858a_2971_1d53_9043);
+    /// `IMG_USE_BAKED_AUX2`: a mesh replaces the universal aux2 bake.
+    pub const IMG_USE_BAKED_AUX2: Uuid = Uuid::from_u128(0x0364_2e83_2bd1_4eb9_34b4_4c47_ed58_6d2d);
+    /// `IMG_USE_BAKED_AUX3`: a mesh replaces the universal aux3 bake.
+    pub const IMG_USE_BAKED_AUX3: Uuid = Uuid::from_u128(0xedd5_1b77_fc10_ce7a_4b3d_011d_fc34_9e4f);
+
+    /// The `IMG_USE_BAKED_*` sentinel → baked-slot mapping, in slot order.
+    const USE_BAKED: [(Uuid, usize); 11] = [
+        (IMG_USE_BAKED_HEAD, HEAD_BAKED),
+        (IMG_USE_BAKED_UPPER, UPPER_BAKED),
+        (IMG_USE_BAKED_LOWER, LOWER_BAKED),
+        (IMG_USE_BAKED_EYES, EYES_BAKED),
+        (IMG_USE_BAKED_SKIRT, SKIRT_BAKED),
+        (IMG_USE_BAKED_HAIR, HAIR_BAKED),
+        (IMG_USE_BAKED_LEFTARM, LEFT_ARM_BAKED),
+        (IMG_USE_BAKED_LEFTLEG, LEFT_LEG_BAKED),
+        (IMG_USE_BAKED_AUX1, AUX1_BAKED),
+        (IMG_USE_BAKED_AUX2, AUX2_BAKED),
+        (IMG_USE_BAKED_AUX3, AUX3_BAKED),
+    ];
+
+    /// Whether a baked-slot texture id names a real, renderable bake — i.e. it is
+    /// not the null id, the [`IMG_DEFAULT_AVATAR`] placeholder, or the transparent
+    /// [`IMG_INVISIBLE`] sentinel. Mirrors the reference viewer's `isTextureVisible`
+    /// test on a baked avatar slot (used, for example, to decide whether the base
+    /// skirt mesh should render).
+    #[must_use]
+    pub fn is_bake_visible(id: TextureKey) -> bool {
+        let id = id.uuid();
+        !id.is_nil() && id != IMG_DEFAULT_AVATAR && id != IMG_INVISIBLE
+    }
+
+    /// If `id` is one of the `IMG_USE_BAKED_*` sentinels a worn attachment face
+    /// uses to signal "a mesh replaces this baked region", the baked slot it names
+    /// — so the corresponding base-avatar mesh region can be hidden. Mirrors the
+    /// reference viewer's `updateMeshVisibility` scan. `None` for any ordinary
+    /// texture.
+    #[must_use]
+    pub fn use_baked_slot(id: TextureKey) -> Option<usize> {
+        let id = id.uuid();
+        USE_BAKED
+            .iter()
+            .find_map(|&(magic, slot)| (magic == id).then_some(slot))
+    }
 }
 
 /// One decoded face of a `TextureEntry`: its texture and surface parameters. A
@@ -918,5 +996,96 @@ mod tests {
                 assert_eq!(super::AttachmentPoint::split_code(byte), (point, mode));
             }
         }
+    }
+
+    /// Every magic avatar-texture constant equals its canonical
+    /// `indra_constants` UUID string — a guard against a transcription slip in the
+    /// `from_u128` literals.
+    #[test]
+    fn magic_texture_uuids_match_indra_constants() {
+        use super::TextureKey;
+        use super::avatar_texture as at;
+        use uuid::Uuid;
+        // Compare each constant's canonical hyphenated form against the literal
+        // `indra_constants` string (avoids a fallible parse in the assertion).
+        for (value, canonical) in [
+            (
+                at::IMG_DEFAULT_AVATAR,
+                "c228d1cf-4b5d-4ba8-84f4-899a0796aa97",
+            ),
+            (at::IMG_INVISIBLE, "3a367d1c-bef1-6d43-7595-e88c1e3aadb3"),
+            (
+                at::IMG_USE_BAKED_HEAD,
+                "5a9f4a74-30f2-821c-b88d-70499d3e7183",
+            ),
+            (
+                at::IMG_USE_BAKED_UPPER,
+                "ae2de45c-d252-50b8-5c6e-19f39ce79317",
+            ),
+            (
+                at::IMG_USE_BAKED_LOWER,
+                "24daea5f-0539-cfcf-047f-fbc40b2786ba",
+            ),
+            (
+                at::IMG_USE_BAKED_EYES,
+                "52cc6bb6-2ee5-e632-d3ad-50197b1dcb8a",
+            ),
+            (
+                at::IMG_USE_BAKED_SKIRT,
+                "43529ce8-7faa-ad92-165a-bc4078371687",
+            ),
+            (
+                at::IMG_USE_BAKED_HAIR,
+                "09aac1fb-6bce-0bee-7d44-caac6dbb6c63",
+            ),
+            (
+                at::IMG_USE_BAKED_LEFTARM,
+                "ff62763f-d60a-9855-890b-0c96f8f8cd98",
+            ),
+            (
+                at::IMG_USE_BAKED_LEFTLEG,
+                "8e915e25-31d1-cc95-ae08-d58a47488251",
+            ),
+            (
+                at::IMG_USE_BAKED_AUX1,
+                "9742065b-19b5-297c-858a-29711d539043",
+            ),
+            (
+                at::IMG_USE_BAKED_AUX2,
+                "03642e83-2bd1-4eb9-34b4-4c47ed586d2d",
+            ),
+            (
+                at::IMG_USE_BAKED_AUX3,
+                "edd51b77-fc10-ce7a-4b3d-011dfc349e4f",
+            ),
+        ] {
+            assert_eq!(value.hyphenated().to_string(), canonical);
+        }
+
+        // Each `IMG_USE_BAKED_*` sentinel resolves to its region's baked slot, and
+        // an ordinary texture resolves to none.
+        assert_eq!(
+            at::use_baked_slot(TextureKey::from(at::IMG_USE_BAKED_SKIRT)),
+            Some(at::SKIRT_BAKED)
+        );
+        assert_eq!(
+            at::use_baked_slot(TextureKey::from(at::IMG_USE_BAKED_HEAD)),
+            Some(at::HEAD_BAKED)
+        );
+        assert_eq!(
+            at::use_baked_slot(TextureKey::from(Uuid::from_u128(0x1234))),
+            None
+        );
+
+        // A real bake is visible; the null id, the placeholder, and the invisible
+        // sentinel are not.
+        assert!(at::is_bake_visible(TextureKey::from(Uuid::from_u128(
+            0xabcd
+        ))));
+        assert!(!at::is_bake_visible(TextureKey::from(Uuid::nil())));
+        assert!(!at::is_bake_visible(TextureKey::from(
+            at::IMG_DEFAULT_AVATAR
+        )));
+        assert!(!at::is_bake_visible(TextureKey::from(at::IMG_INVISIBLE)));
     }
 }
