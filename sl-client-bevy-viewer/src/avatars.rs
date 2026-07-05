@@ -193,6 +193,12 @@ pub(crate) struct AvatarState {
     /// the system body. Keyed by baked slot ([`BODY_BAKE_SLOTS`]); a slot with no
     /// real bake is simply absent.
     baked_textures: HashMap<AgentKey, HashMap<usize, TextureKey>>,
+    /// The Current Outfit Folder version whose bakes were last fetched per avatar
+    /// (P14.4), so a later `AvatarAppearance` with a strictly-older `cof_version`
+    /// (an out-of-order / duplicate resend) is skipped and cannot clobber a newer
+    /// bake. Absent means none seen yet; an appearance with no `cof_version`
+    /// (OpenSim / the older path) is always ingested.
+    baked_cof_version: HashMap<AgentKey, i32>,
     /// Avatars whose body-region bake materials need (re)assigning — set on a
     /// fresh appearance and on a newly spawned body, drained by
     /// [`assign_avatar_bake_materials`] (P14.2).
@@ -920,6 +926,13 @@ pub(crate) fn ingest_avatar_bakes(
 ) {
     for event in events.read() {
         if let SlSessionEvent::AvatarAppearance(appearance) = &event.0 {
+            // Skip an out-of-order / duplicate resend so a stale appearance cannot
+            // clobber a newer bake (P14.4); a newer or equal COF version, or one
+            // with no COF version at all, is (re)fetched.
+            let seen = state.baked_cof_version.get(&appearance.avatar_id).copied();
+            if !should_refetch_bakes(seen, appearance.cof_version) {
+                continue;
+            }
             let bakes = visible_body_bakes(&appearance.texture_entry);
             for &id in bakes.values() {
                 manager.request(id);
@@ -929,12 +942,34 @@ pub(crate) fn ingest_avatar_bakes(
                 bakes.len(),
                 appearance.avatar_id
             );
+            if let Some(cof_version) = appearance.cof_version {
+                state
+                    .baked_cof_version
+                    .insert(appearance.avatar_id, cof_version);
+            }
             state.baked_textures.insert(appearance.avatar_id, bakes);
             // Flag the avatar so its body-region materials are (re)assigned to the
             // new bakes (P14.2); the actual draping is deferred until the textures
             // decode.
             state.bake_dirty.insert(appearance.avatar_id);
         }
+    }
+}
+
+/// Whether a newly arrived `AvatarAppearance` should have its baked textures
+/// (re)fetched (P14.4), given the COF version whose bakes were last fetched for
+/// that avatar (`seen`) and the new appearance's COF version (`cof`).
+///
+/// A later appearance whose COF version is *strictly older* than the one already
+/// fetched is an out-of-order / duplicate resend and is skipped, so a stale
+/// appearance cannot clobber a newer bake. An *equal* version is still ingested —
+/// a same-outfit rebake (e.g. after a `RebakeAvatarTextures`) can republish new
+/// baked ids at the same version — and an appearance with *no* COF version
+/// (OpenSim / the older path, where there is nothing to compare) always ingests.
+const fn should_refetch_bakes(seen: Option<i32>, cof: Option<i32>) -> bool {
+    match (seen, cof) {
+        (Some(seen), Some(cof)) => cof >= seen,
+        _ => true,
     }
 }
 
@@ -1459,7 +1494,8 @@ pub(crate) fn position_name_tags(
 mod tests {
     use super::{
         AvatarState, BakeAlpha, PROVISIONAL_ID_CHARS, body_root_transform, classify_bake_alpha,
-        coarse_translation, provisional_label, used_baked_slots, visible_body_bakes,
+        coarse_translation, provisional_label, should_refetch_bakes, used_baked_slots,
+        visible_body_bakes,
     };
     use crate::avatar_assets::BodyRegion;
     use crate::coords::sl_to_bevy_rotation;
@@ -1698,6 +1734,24 @@ mod tests {
         assert!(!BakeAlpha::Opaque.hides_region());
         assert!(!BakeAlpha::Masked.hides_region());
         assert!(BakeAlpha::Transparent.hides_region());
+    }
+
+    /// Bake re-fetch is gated on the COF version (P14.4): a first appearance and
+    /// any appearance without a COF version always ingest, a newer or equal COF
+    /// version re-fetches, and only a strictly-older (out-of-order / duplicate)
+    /// appearance is skipped.
+    #[test]
+    fn should_refetch_bakes_gates_on_cof_version() {
+        // No COF version seen yet, or none on the appearance: always ingest.
+        assert!(should_refetch_bakes(None, Some(15)));
+        assert!(should_refetch_bakes(None, None));
+        assert!(should_refetch_bakes(Some(15), None));
+        // Newer and equal COF versions re-fetch (equal covers a same-outfit
+        // rebake republishing new baked ids).
+        assert!(should_refetch_bakes(Some(15), Some(16)));
+        assert!(should_refetch_bakes(Some(15), Some(15)));
+        // A strictly-older appearance is a stale resend and is skipped.
+        assert!(!should_refetch_bakes(Some(15), Some(14)));
     }
 
     /// An attachment's `IMG_USE_BAKED_*` hide is attributed to the avatar it hangs

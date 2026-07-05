@@ -54,6 +54,11 @@ pub(crate) struct ServerBakeState {
     cof_version: i32,
     /// The number of bake requests sent, bounding the mismatch-recovery loop.
     attempts: u32,
+    /// Whether the central-baking capability has been offered this session, so a
+    /// later `RebakeAvatarTextures` request can re-run the handshake (P14.4). On a
+    /// grid that never offers the capability (OpenSim) this stays `false` and a
+    /// rebake request is inert.
+    cap_available: bool,
 }
 
 /// The version of the agent's Current Outfit Folder in the inventory-folder
@@ -80,10 +85,13 @@ pub(crate) fn drive_server_bake(
     // Kick off the handshake once the central-baking capability is offered, by
     // snapshotting the inventory folders to learn the current COF version.
     for SlCapabilities(map) in capabilities.read() {
-        if state.stage == BakeStage::Idle && map.contains_key(CAP_UPDATE_AVATAR_APPEARANCE) {
-            writer.write(SlCommand(Command::QueryInventoryFolders));
-            state.stage = BakeStage::FoldersRequested;
-            debug!("central baking offered; reading the Current Outfit Folder version");
+        if map.contains_key(CAP_UPDATE_AVATAR_APPEARANCE) {
+            state.cap_available = true;
+            if state.stage == BakeStage::Idle {
+                writer.write(SlCommand(Command::QueryInventoryFolders));
+                state.stage = BakeStage::FoldersRequested;
+                debug!("central baking offered; reading the Current Outfit Folder version");
+            }
         }
     }
     for event in events.read() {
@@ -132,6 +140,19 @@ pub(crate) fn drive_server_bake(
                         .unwrap_or_else(|| "no reason given".to_owned());
                     warn!("server appearance bake not accepted: {reason}");
                 }
+            }
+            // The simulator lost one of our baked textures and is asking for a
+            // rebake (P14.4). On a central-baking grid the response is to re-run
+            // the server-side bake handshake so the grid re-composites and
+            // re-publishes our appearance; a rebake mid-handshake is ignored since
+            // the in-flight bake will satisfy it. Inert without the capability.
+            SlSessionEvent::RebakeAvatarTextures { .. }
+                if state.cap_available && state.stage == BakeStage::Done =>
+            {
+                writer.write(SlCommand(Command::QueryInventoryFolders));
+                state.stage = BakeStage::FoldersRequested;
+                state.attempts = 0;
+                debug!("simulator requested a rebake; re-running the server appearance bake");
             }
             _other => {}
         }
