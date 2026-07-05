@@ -25,6 +25,7 @@
 use std::collections::HashMap;
 
 use crate::basemesh::BaseMesh;
+use crate::masks::PartMorphMask;
 use crate::params::{AppearanceValues, ParamEffect, VisualParams};
 use crate::resolve::ResolvedParams;
 
@@ -125,6 +126,32 @@ impl MorphWeights {
     /// range) contributes nothing.
     #[must_use]
     pub fn apply(&self, base: &BaseMesh) -> MorphedMesh {
+        self.apply_inner(base, None)
+    }
+
+    /// Blend `base`'s morph targets by these weights with per-vertex clothing-morph
+    /// masks (P14.5), returning the morphed rest geometry.
+    ///
+    /// Identical to [`apply`](Self::apply), except that any morph the `masks`
+    /// carry per-delta weights for (a clothing morph like `Shirtsleeve_flair`) is
+    /// scaled *additionally* by its per-vertex mask weight — so the flared cuff
+    /// applies only where the region's baked clothing layer is opaque, and an
+    /// un-clothed limb shows no stray flare. A morph not present in `masks`
+    /// applies at full strength exactly as [`apply`](Self::apply) does.
+    #[must_use]
+    pub fn apply_masked(&self, base: &BaseMesh, masks: &PartMorphMask) -> MorphedMesh {
+        self.apply_inner(base, Some(masks))
+    }
+
+    /// The shared morph-blend, with an optional per-morph per-vertex mask.
+    ///
+    /// Each driven morph adds `weight * delta` (times the per-vertex mask weight
+    /// when `masks` supplies one for that morph) to the affected vertices'
+    /// positions and (softened, then re-normalized) normals, exactly as
+    /// Firestorm `LLPolyMorphTarget::apply` accumulates them onto the base mesh.
+    /// A morph target with no weight (or a delta whose vertex index is out of
+    /// range) contributes nothing.
+    fn apply_inner(&self, base: &BaseMesh, masks: Option<&PartMorphMask>) -> MorphedMesh {
         let mut positions = base.positions().to_vec();
         // Accumulate morphed normals into the scaled base normals, then
         // normalize once at the end (the reference viewer's `scaled_normals`).
@@ -134,12 +161,23 @@ impl MorphWeights {
             if !is_significant(weight) {
                 continue;
             }
-            for delta in &morph.deltas {
+            // The clothing-morph mask, if this morph is masked in this part.
+            let mask = masks.and_then(|masks| masks.get(&morph.name));
+            for (delta_index, delta) in morph.deltas.iter().enumerate() {
+                // Per-vertex mask weight (1.0 = unmasked / full strength).
+                let mask_weight = mask
+                    .and_then(|weights| weights.get(delta_index))
+                    .copied()
+                    .unwrap_or(1.0);
+                let effective = weight * mask_weight;
+                if !is_significant(effective) {
+                    continue;
+                }
                 if let Some(position) = positions.get_mut(delta.vertex_index) {
-                    add_scaled(position, delta.position, weight);
+                    add_scaled(position, delta.position, effective);
                 }
                 if let Some(normal) = scaled_normals.get_mut(delta.vertex_index) {
-                    add_scaled(normal, delta.normal, weight * NORMAL_SOFTEN_FACTOR);
+                    add_scaled(normal, delta.normal, effective * NORMAL_SOFTEN_FACTOR);
                 }
             }
         }
@@ -298,6 +336,49 @@ mod tests {
         assert!((resolved.weight("Big_Brow") - 2.0).abs() < 1.0e-4);
         // A name with no morph param is not driven.
         assert!(resolved.weight("Nonexistent").abs() < f32::EPSILON);
+        Ok(())
+    }
+
+    #[test]
+    fn mask_scales_the_morph_per_vertex() -> Result<(), TestError> {
+        use crate::masks::PartMorphMask;
+        let mesh = BaseMesh::from_bytes(MINI_BASEMESH)?;
+        // The fixture's `Fatten` morph has two deltas (vertices 0 and 3); mask the
+        // first fully off (0.0) and leave the second at full (1.0).
+        let mask = PartMorphMask::from_pairs_for_test(&[("Fatten", vec![0.0, 1.0])]);
+        let morphed = weights(&[("Fatten", 1.0)]).apply_masked(&mesh, &mask);
+        // Vertex 0 (first delta, masked off) stays at rest.
+        assert_eq!(morphed.positions().first(), mesh.positions().first());
+        // Vertex 3 (second delta, full) moves by the delta.
+        let base3 = *mesh.positions().get(3).ok_or("base vertex 3")?;
+        let morphed3 = *morphed.positions().get(3).ok_or("morphed vertex 3")?;
+        assert!(!close(morphed3, base3));
+        Ok(())
+    }
+
+    #[test]
+    fn half_mask_scales_the_delta_by_half() -> Result<(), TestError> {
+        use crate::masks::PartMorphMask;
+        let mesh = BaseMesh::from_bytes(MINI_BASEMESH)?;
+        let base0 = *mesh.positions().first().ok_or("base vertex 0")?;
+        // Full weight, but the first delta is half-masked → half the delta (0.05).
+        let mask = PartMorphMask::from_pairs_for_test(&[("Fatten", vec![0.5, 0.0])]);
+        let morphed = weights(&[("Fatten", 1.0)]).apply_masked(&mesh, &mask);
+        let morphed0 = *morphed.positions().first().ok_or("morphed vertex 0")?;
+        assert!(close(morphed0, [base0[0] + 0.05, base0[1], base0[2]]));
+        Ok(())
+    }
+
+    #[test]
+    fn unmasked_morph_applies_at_full_strength() -> Result<(), TestError> {
+        use crate::masks::PartMorphMask;
+        let mesh = BaseMesh::from_bytes(MINI_BASEMESH)?;
+        // A mask that names a different morph leaves `Fatten` at full strength, so
+        // the result matches the plain `apply`.
+        let mask = PartMorphMask::from_pairs_for_test(&[("Other", vec![0.0])]);
+        let masked = weights(&[("Fatten", 1.0)]).apply_masked(&mesh, &mask);
+        let plain = weights(&[("Fatten", 1.0)]).apply(&mesh);
+        assert_eq!(masked.positions(), plain.positions());
         Ok(())
     }
 

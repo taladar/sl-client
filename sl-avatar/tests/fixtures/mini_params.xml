@@ -37,4 +37,8 @@
       </param_driver>
     </param>
   </driver_parameters>
+  <morph_masks>
+    <mask morph_name="Fatten" body_region="upper_body" layer="upper_clothes"/>
+    <mask morph_name="Low_Crotch" body_region="lower_body" layer="lower_pants" invert="true"/>
+  </morph_masks>
 </linden_avatar>

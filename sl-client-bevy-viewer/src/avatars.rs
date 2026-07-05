@@ -36,10 +36,10 @@ use std::collections::{HashMap, HashSet};
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, AvatarName, CoarseLocation, Command, MAX_FACES, MorphWeights, Object, ResolvedParams,
-    ScopedObjectId, SkeletalDeformations, SlCommand, SlEvent, SlSessionEvent, TextureEntry,
-    TextureKey, avatar_texture, decode_texture_entry, pcode, to_bevy_base_mesh, to_bevy_image,
-    to_bevy_morphed_mesh,
+    AgentKey, AvatarName, BaseMesh, CoarseLocation, Command, MAX_FACES, MaskTexture, MorphWeights,
+    Object, PartMorphMask, ResolvedParams, ScopedObjectId, SkeletalDeformations, SlCommand,
+    SlEvent, SlSessionEvent, TextureEntry, TextureKey, avatar_texture, decode_texture_entry, pcode,
+    to_bevy_base_mesh, to_bevy_image, to_bevy_morphed_mesh,
 };
 
 use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
@@ -72,6 +72,10 @@ const BODY_TAG_HEIGHT: f32 = 1.9;
 /// A skin-toned base colour for the un-textured Phase-13.2 body, before the
 /// baked-texture phases (P14) drape real textures over it.
 const BODY_COLOR: Color = Color::srgb(0.85, 0.70, 0.62);
+
+/// The channel count of a decoded RGBA8 texture — the pixel stride used when
+/// sampling a bake's alpha for the clothing-morph masks (P14.5).
+const RGBA_CHANNELS: usize = 4;
 
 /// The name-tag font size, in logical pixels.
 const NAME_TAG_FONT_SIZE: f32 = 16.0;
@@ -1287,15 +1291,39 @@ pub(crate) fn apply_avatar_bake_textures(
 /// appearance is (re)built from the cached vector — so an appearance that arrives
 /// before the body still lands once the body exists. A no-op when no avatar asset
 /// library loaded (avatars stay as un-shaped bodies or spheres).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system folding appearances and bakes into the morphed body meshes"
+)]
 pub(crate) fn apply_avatar_appearance(
     mut events: MessageReader<SlEvent>,
+    mut decoded: MessageReader<TextureDecoded>,
     library: Option<Res<AvatarAssetLibrary>>,
+    manager: Res<TextureManager>,
     mut state: ResMut<AvatarState>,
     mut meshes: ResMut<Assets<Mesh>>,
     added: Query<&AvatarBodyPart, Added<AvatarBodyPart>>,
     mut parts: Query<(&AvatarBodyPart, &mut Mesh3d)>,
     mut joints: Query<(&AvatarJoint, &mut Transform)>,
 ) {
+    // A decoded baked texture of a masked body region (head / upper / lower)
+    // supplies the clothing-morph mask, so re-shape any avatar wearing it: its
+    // flared morphs were applied unmasked until the bake decoded (P14.5).
+    for &TextureDecoded(id) in decoded.read() {
+        let wearers: Vec<AgentKey> = state
+            .baked_textures
+            .iter()
+            .filter(|(_, bakes)| {
+                bakes
+                    .iter()
+                    .any(|(&slot, &bake)| bake == id && is_masked_body_slot(slot))
+            })
+            .map(|(&agent, _)| agent)
+            .collect();
+        for agent in wearers {
+            state.appearance_dirty.insert(agent);
+        }
+    }
     // Fold any fresh appearance vectors into the cache and flag those avatars.
     for event in events.read() {
         if let SlSessionEvent::AvatarAppearance(appearance) = &event.0 {
@@ -1351,13 +1379,23 @@ pub(crate) fn apply_avatar_appearance(
             joint_transforms.insert(agent, library.skeleton().deformed_local_transforms(&deform));
         }
     }
-    // Rebuild the mesh of every part belonging to a resolved avatar.
+    // Rebuild the mesh of every part belonging to a resolved avatar, masking its
+    // clothing morphs by the region's decoded bake where one is available (P14.5).
     let mut morphed_parts = 0_usize;
     for (part, mut mesh) in &mut parts {
         if let Some(weights) = morph_weights.get(&part.agent)
             && let Some(loaded) = library.parts().get(part.part)
         {
-            let morphed = weights.apply(&loaded.mesh);
+            let morphed = match part_clothing_mask(
+                &library,
+                &manager,
+                state.baked_textures.get(&part.agent),
+                part.region,
+                &loaded.mesh,
+            ) {
+                Some(mask) => weights.apply_masked(&loaded.mesh, &mask),
+                None => weights.apply(&loaded.mesh),
+            };
             *mesh = Mesh3d(meshes.add(to_bevy_morphed_mesh(&loaded.mesh, &morphed)));
             morphed_parts = morphed_parts.saturating_add(1);
         }
@@ -1381,6 +1419,46 @@ pub(crate) fn apply_avatar_appearance(
     state.appearance_dirty.clear();
 }
 
+/// Whether a baked-texture `slot` supplies a clothing-morph mask (P14.5) — the
+/// head, upper-body and lower-body region bakes, whose alpha channel masks the
+/// flared clothing morphs. A decode of one of these re-shapes the wearing avatar.
+const fn is_masked_body_slot(slot: usize) -> bool {
+    slot == avatar_texture::HEAD_BAKED
+        || slot == avatar_texture::UPPER_BAKED
+        || slot == avatar_texture::LOWER_BAKED
+}
+
+/// The per-vertex clothing-morph mask (P14.5) for one base part, sampled from its
+/// region's decoded baked texture, or `None` when the part has no masked morphs,
+/// no published bake for its region, or the bake has not decoded yet (its morphs
+/// then apply unmasked — the full flare — until the bake arrives and re-shapes it).
+fn part_clothing_mask(
+    library: &AvatarAssetLibrary,
+    manager: &TextureManager,
+    baked: Option<&HashMap<usize, TextureKey>>,
+    region: BodyRegion,
+    mesh: &BaseMesh,
+) -> Option<PartMorphMask> {
+    let region_name = region.morph_mask_region()?;
+    if !library.masks().has_region(region_name) {
+        return None;
+    }
+    let id = *baked?.get(&region.baked_slot())?;
+    let decoded = manager.decoded(id)?;
+    // The decoded pixels are always expanded to RGBA8 (stride 4, alpha at offset
+    // 3) regardless of the source component count; a source with no alpha channel
+    // decodes to opaque alpha (255), which masks nothing — the correct fallback
+    // when a bake carries no clothing-coverage mask (Firestorm's null-aux path).
+    let texture = MaskTexture {
+        pixels: &decoded.pixels,
+        width: usize::try_from(decoded.width).unwrap_or(0),
+        height: usize::try_from(decoded.height).unwrap_or(0),
+        components: RGBA_CHANNELS,
+    };
+    let mask = library.masks().sample_part(mesh, region_name, &texture);
+    if mask.is_empty() { None } else { Some(mask) }
+}
+
 /// Show or hide each rigged base-part mesh from the avatar's worn items (P13.5
 /// whole-mesh show/hide): hide a whole base region (head / hair / eyes / upper /
 /// lower / skirt) when a worn attachment face carries the matching
@@ -1394,8 +1472,9 @@ pub(crate) fn apply_avatar_appearance(
 /// Runs every frame — cheap (a handful of parts per avatar, and only the rare
 /// `IMG_USE_BAKED_*`-bearing attachment is chased) and idempotent: it only writes
 /// a [`Visibility`] that actually changed, so it never churns change-detection.
-/// The (P14.5-deferred) clothing-morph alpha masks — the per-vertex flared-cuff
-/// carving — are not applied here.
+/// The clothing-morph alpha masks (P14.5) — the per-vertex flared-cuff carving —
+/// are a *geometry* mask applied in [`apply_avatar_appearance`], not a visibility
+/// toggle, so they are not handled here.
 pub(crate) fn apply_avatar_part_visibility(
     state: Res<AvatarState>,
     bake_mats: Res<AvatarBakeMaterials>,
@@ -1634,6 +1713,27 @@ mod tests {
         assert_eq!(BodyRegion::Upper.baked_slot(), avatar_texture::UPPER_BAKED);
         assert_eq!(BodyRegion::Lower.baked_slot(), avatar_texture::LOWER_BAKED);
         assert_eq!(BodyRegion::Skirt.baked_slot(), avatar_texture::SKIRT_BAKED);
+    }
+
+    /// Only the head, upper-body and lower-body regions carry masked clothing
+    /// morphs (P14.5); their bakes are the ones whose decode re-shapes the body,
+    /// and they map to the `<morph_masks>` `body_region` names.
+    #[test]
+    fn masked_body_regions_map_to_morph_mask_names() {
+        assert_eq!(BodyRegion::Head.morph_mask_region(), Some("head"));
+        assert_eq!(BodyRegion::Upper.morph_mask_region(), Some("upper_body"));
+        assert_eq!(BodyRegion::Lower.morph_mask_region(), Some("lower_body"));
+        assert_eq!(BodyRegion::Hair.morph_mask_region(), None);
+        assert_eq!(BodyRegion::Eyes.morph_mask_region(), None);
+        assert_eq!(BodyRegion::Skirt.morph_mask_region(), None);
+
+        // The masked slots are exactly the head / upper / lower bakes.
+        assert!(super::is_masked_body_slot(avatar_texture::HEAD_BAKED));
+        assert!(super::is_masked_body_slot(avatar_texture::UPPER_BAKED));
+        assert!(super::is_masked_body_slot(avatar_texture::LOWER_BAKED));
+        assert!(!super::is_masked_body_slot(avatar_texture::HAIR_BAKED));
+        assert!(!super::is_masked_body_slot(avatar_texture::EYES_BAKED));
+        assert!(!super::is_masked_body_slot(avatar_texture::SKIRT_BAKED));
     }
 
     /// A texture entry carrying an `IMG_USE_BAKED_*` sentinel yields that region's

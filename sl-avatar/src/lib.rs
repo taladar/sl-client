@@ -22,12 +22,15 @@
 //!   turning a partial appearance vector into every param's effective weight.
 //! - `skeletal` (P13.4) — resolve `param_skeleton` params into per-bone scale /
 //!   position deformations for the skeleton instance.
+//! - `masks` (P14.5) — parse the `<morph_masks>` table and sample per-vertex
+//!   clothing-morph mask weights from a region's decoded baked texture.
 //!
 //! P12.2 lands the [`skeleton`] module, P12.3 the [`basemesh`] module, P12.4 the
 //! [`params`] module, P13.3 the [`morph`] module, and P13.4 the [`resolve`] and
 //! [`skeletal`] modules.
 
 pub mod basemesh;
+pub mod masks;
 pub mod morph;
 pub mod params;
 pub mod resolve;
@@ -38,6 +41,7 @@ pub use basemesh::{
     BaseMesh, BaseMeshError, LodMesh, MeshTransform, MorphDelta, MorphTarget, SharedVertex,
     VertexSkinWeight,
 };
+pub use masks::{MaskTexture, MorphMask, MorphMasks, PartMorphMask};
 pub use morph::{MorphWeights, MorphedMesh};
 pub use params::{
     AppearanceValues, BoneOffset, DrivenParam, ParamEffect, ParamError, ParamGroup, ParamSex,

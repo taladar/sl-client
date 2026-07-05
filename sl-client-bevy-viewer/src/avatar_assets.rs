@@ -21,8 +21,8 @@ use std::path::Path;
 
 use bevy::prelude::Resource;
 use sl_client_bevy::{
-    BaseMesh, BaseMeshError, BaseMeshSkin, BevySkeleton, ParamError, Skeleton, SkeletonError,
-    VisualParams, avatar_texture,
+    BaseMesh, BaseMeshError, BaseMeshSkin, BevySkeleton, MorphMasks, ParamError, Skeleton,
+    SkeletonError, VisualParams, avatar_texture,
 };
 use tracing::warn;
 
@@ -58,6 +58,20 @@ impl BodyRegion {
             Self::Upper => avatar_texture::UPPER_BAKED,
             Self::Lower => avatar_texture::LOWER_BAKED,
             Self::Skirt => avatar_texture::SKIRT_BAKED,
+        }
+    }
+
+    /// The `avatar_lad.xml` `<morph_masks>` `body_region` name this region matches,
+    /// for the clothing-morph alpha masks (P14.5), or `None` for a region with no
+    /// masked morphs. Only the head, upper body and lower body carry clothing
+    /// morphs; the eyelashes ride with the head region but define no masked morphs
+    /// of their own.
+    pub(crate) const fn morph_mask_region(self) -> Option<&'static str> {
+        match self {
+            Self::Head => Some("head"),
+            Self::Upper => Some("upper_body"),
+            Self::Lower => Some("lower_body"),
+            Self::Hair | Self::Eyes | Self::Skirt => None,
         }
     }
 }
@@ -202,6 +216,8 @@ pub(crate) struct AvatarAssetLibrary {
     parts: Vec<LoadedPart>,
     /// The visual-param table (used by later morph phases).
     params: VisualParams,
+    /// The `<morph_masks>` table driving the clothing-morph alpha masks (P14.5).
+    masks: MorphMasks,
 }
 
 impl AvatarAssetLibrary {
@@ -216,7 +232,11 @@ impl AvatarAssetLibrary {
         let skeleton =
             Skeleton::from_xml(&fs_err::read_to_string(dir.join("avatar_skeleton.xml"))?)?;
         let skeleton = BevySkeleton::from_skeleton(&skeleton);
-        let params = VisualParams::from_xml(&fs_err::read_to_string(dir.join("avatar_lad.xml"))?)?;
+        // Parse the visual-param table and the morph-mask table from the one
+        // `avatar_lad.xml` read.
+        let lad = fs_err::read_to_string(dir.join("avatar_lad.xml"))?;
+        let params = VisualParams::from_xml(&lad)?;
+        let masks = MorphMasks::from_xml(&lad)?;
 
         let mut parts = Vec::with_capacity(BASE_PARTS.len());
         for spec in BASE_PARTS {
@@ -251,6 +271,7 @@ impl AvatarAssetLibrary {
             skeleton,
             parts,
             params,
+            masks,
         };
         library.log_summary();
         Ok(library)
@@ -272,6 +293,12 @@ impl AvatarAssetLibrary {
         &self.params
     }
 
+    /// The `<morph_masks>` table, used to mask the clothing morphs per vertex from
+    /// each region's decoded baked texture (P14.5).
+    pub(crate) const fn masks(&self) -> &MorphMasks {
+        &self.masks
+    }
+
     /// The rest height (Second Life Z, metres) of the pelvis joint — the offset
     /// used to plant the body so its pelvis sits at the reported avatar object
     /// position. Falls back to `0.0` if the joint is somehow absent.
@@ -285,10 +312,11 @@ impl AvatarAssetLibrary {
     /// Log a one-line summary of what was loaded.
     fn log_summary(&self) {
         tracing::info!(
-            "loaded avatar assets: {} joints, {} base parts, {} visual params",
+            "loaded avatar assets: {} joints, {} base parts, {} visual params, {} morph masks",
             self.skeleton.len(),
             self.parts.len(),
             self.params.all().len(),
+            self.masks.len(),
         );
     }
 }
