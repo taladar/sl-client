@@ -37,12 +37,14 @@ use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, AvatarName, CoarseLocation, Command, MAX_FACES, MorphWeights, Object, ResolvedParams,
-    ScopedObjectId, SkeletalDeformations, SlCommand, SlEvent, SlSessionEvent, avatar_texture,
-    decode_texture_entry, pcode, to_bevy_base_mesh, to_bevy_morphed_mesh,
+    ScopedObjectId, SkeletalDeformations, SlCommand, SlEvent, SlSessionEvent, TextureEntry,
+    TextureKey, avatar_texture, decode_texture_entry, pcode, to_bevy_base_mesh, to_bevy_image,
+    to_bevy_morphed_mesh,
 };
 
 use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
 use crate::coords::{sl_to_bevy_object_rotation, sl_to_bevy_vec};
+use crate::textures::{TextureDecoded, TextureManager};
 
 /// The radius, in metres, of an avatar placeholder sphere (a ~2 m-diameter
 /// UV-sphere, roughly avatar-sized).
@@ -185,6 +187,16 @@ pub(crate) struct AvatarState {
     /// latest appearance — the reference viewer's skirt-worn test. Absent means
     /// not yet known, treated as no skirt (the base skirt mesh stays hidden).
     skirt_visible: HashMap<AgentKey, bool>,
+    /// The visible baked-texture id in each base-body region slot per avatar,
+    /// from its latest appearance (P14.1): the published baked UUIDs the viewer
+    /// fetches through the shared [`TextureManager`] and (from P14.2) drapes over
+    /// the system body. Keyed by baked slot ([`BODY_BAKE_SLOTS`]); a slot with no
+    /// real bake is simply absent.
+    baked_textures: HashMap<AgentKey, HashMap<usize, TextureKey>>,
+    /// Avatars whose body-region bake materials need (re)assigning — set on a
+    /// fresh appearance and on a newly spawned body, drained by
+    /// [`assign_avatar_bake_materials`] (P14.2).
+    bake_dirty: HashSet<AgentKey>,
     /// The parent scoped id of every tracked non-root object (linkset children and
     /// attachments), so an attachment's chain can be chased up to its avatar root
     /// (P13.5 `IMG_USE_BAKED_*` region hide).
@@ -753,6 +765,36 @@ impl AvatarState {
     }
 }
 
+/// The base-body baked-texture slots the viewer fetches and drapes over the
+/// system body (P14): the six region bakes — head, upper body, lower body, eyes,
+/// hair, and skirt. The "universal" baked slots (`*_ARM` / `*_LEG` / `AUX*`) are
+/// not used by the base mesh, so they are not fetched.
+const BODY_BAKE_SLOTS: [usize; 6] = [
+    avatar_texture::HEAD_BAKED,
+    avatar_texture::UPPER_BAKED,
+    avatar_texture::LOWER_BAKED,
+    avatar_texture::EYES_BAKED,
+    avatar_texture::HAIR_BAKED,
+    avatar_texture::SKIRT_BAKED,
+];
+
+/// The visible baked texture id in each base-body region slot of an avatar's
+/// texture entry — every [`BODY_BAKE_SLOTS`] slot whose id names a real,
+/// renderable bake ([`is_bake_visible`](avatar_texture::is_bake_visible)), keyed
+/// by baked slot. A slot that is empty, defaulted, or invisible is omitted, so a
+/// region with no published bake has nothing to fetch.
+fn visible_body_bakes(texture_entry: &TextureEntry) -> HashMap<usize, TextureKey> {
+    let mut bakes = HashMap::new();
+    for slot in BODY_BAKE_SLOTS {
+        if let Some(id) = texture_entry.texture_id(slot)
+            && avatar_texture::is_bake_visible(id)
+        {
+            let _replaced = bakes.insert(slot, id);
+        }
+    }
+    bakes
+}
+
 /// Scan a raw texture-entry blob for the `IMG_USE_BAKED_*` sentinels and return
 /// the (sorted, de-duplicated) baked slots it signals should be replaced — empty
 /// for an ordinary object.
@@ -855,6 +897,241 @@ pub(crate) fn apply_avatar_names(
                 state.set_name(name, &mut texts);
             }
         }
+    }
+}
+
+/// Ingest each avatar's server-published baked textures (P14.1): on an
+/// `AvatarAppearance`, read the baked-slot UUIDs from its texture entry
+/// ([`visible_body_bakes`]), fetch each visible bake through the shared
+/// [`TextureManager`] (the Phase-6 fetch / off-thread-decode / disk-cache
+/// pipeline — deduped, so a bake shared by many avatars is fetched once), and
+/// record them per avatar for the region materials (P14.2) to drape over the
+/// system body.
+///
+/// These baked UUIDs are the composited avatar textures other clients render: on
+/// Second Life they come from the server "Sunshine" bake, on OpenSim from other
+/// avatars' viewers' client-side bakes — either way they are published ids the
+/// viewer simply fetches. A slot with no real bake (empty / default / invisible)
+/// is skipped, so a region with no published texture keeps its flat skin tint.
+pub(crate) fn ingest_avatar_bakes(
+    mut events: MessageReader<SlEvent>,
+    mut state: ResMut<AvatarState>,
+    mut manager: ResMut<TextureManager>,
+) {
+    for event in events.read() {
+        if let SlSessionEvent::AvatarAppearance(appearance) = &event.0 {
+            let bakes = visible_body_bakes(&appearance.texture_entry);
+            for &id in bakes.values() {
+                manager.request(id);
+            }
+            debug!(
+                "requested {} baked texture(s) for {}",
+                bakes.len(),
+                appearance.avatar_id
+            );
+            state.baked_textures.insert(appearance.avatar_id, bakes);
+            // Flag the avatar so its body-region materials are (re)assigned to the
+            // new bakes (P14.2); the actual draping is deferred until the textures
+            // decode.
+            state.bake_dirty.insert(appearance.avatar_id);
+        }
+    }
+}
+
+/// The per-region baked-texture materials draped over the system body (P14.2):
+/// one [`StandardMaterial`] per `(avatar, baked slot)`, plus the uploaded baked
+/// images (deduped across avatars) and the materials parked on a bake that has
+/// not decoded yet.
+#[derive(Resource, Default)]
+pub(crate) struct AvatarBakeMaterials {
+    /// Uploaded baked Bevy images by texture id, so a bake shared by several
+    /// avatars (or regions) is turned into a Bevy [`Image`] once.
+    images: HashMap<TextureKey, Handle<Image>>,
+    /// The material draped on each avatar body region, keyed by
+    /// `(avatar, baked slot)`; its `base_color_texture` is filled once the bake
+    /// decodes.
+    materials: HashMap<(AgentKey, usize), Handle<StandardMaterial>>,
+    /// Region materials parked on a not-yet-decoded baked texture id, filled by
+    /// [`apply_avatar_bake_textures`] once it decodes.
+    pending: HashMap<TextureKey, Vec<Handle<StandardMaterial>>>,
+}
+
+impl AvatarBakeMaterials {
+    /// The uploaded Bevy [`Image`] for a baked texture `id`, uploading it from the
+    /// manager's decoded pixels on first use, or `None` if the bake is not decoded
+    /// yet (still in flight or the fetch failed).
+    fn image_for(
+        &mut self,
+        id: TextureKey,
+        manager: &TextureManager,
+        images: &mut Assets<Image>,
+    ) -> Option<Handle<Image>> {
+        if let Some(handle) = self.images.get(&id) {
+            return Some(handle.clone());
+        }
+        let decoded = manager.decoded(id)?;
+        let handle = images.add(to_bevy_image(decoded));
+        let _inserted = self.images.insert(id, handle.clone());
+        Some(handle)
+    }
+
+    /// The material for one avatar body region, keyed by `(agent, slot)`: reused
+    /// across the region's parts (and re-pointed on a fresh appearance), with its
+    /// baked texture filled immediately when already decoded, else parked on the
+    /// bake id so [`apply_avatar_bake_textures`] fills it when it decodes.
+    fn region_material(
+        &mut self,
+        agent: AgentKey,
+        slot: usize,
+        id: TextureKey,
+        manager: &TextureManager,
+        images: &mut Assets<Image>,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> Handle<StandardMaterial> {
+        let handle = self
+            .materials
+            .entry((agent, slot))
+            .or_insert_with(|| materials.add(baked_region_material()))
+            .clone();
+        match self.image_for(id, manager, images) {
+            Some(image) => {
+                if let Some(mut material) = materials.get_mut(&handle) {
+                    apply_bake_image(&mut material, image);
+                }
+            }
+            None => self.pending.entry(id).or_default().push(handle.clone()),
+        }
+        handle
+    }
+}
+
+/// The un-textured base material for a body region: the skin tint as a fallback
+/// until the baked texture decodes and is draped over it (P14.2). Once the bake
+/// fills `base_color_texture`, [`apply_bake_image`] resets the tint to white so
+/// the composited bake shows unmodified.
+fn baked_region_material() -> StandardMaterial {
+    StandardMaterial {
+        base_color: BODY_COLOR,
+        perceptual_roughness: 0.9,
+        // Single-sided, matching the prim / base-body surfaces: Second Life
+        // renders a face only from its front.
+        ..default()
+    }
+}
+
+/// Drape a decoded baked texture over a region material: set its diffuse image
+/// and reset `base_color` to white so the composited bake (which already carries
+/// the skin / clothing colour) is shown unmodified rather than tinted by the
+/// fallback skin colour.
+fn apply_bake_image(material: &mut StandardMaterial, image: Handle<Image>) {
+    material.base_color = Color::WHITE;
+    material.base_color_texture = Some(image);
+}
+
+/// Drape each avatar's server-published baked textures over its system body
+/// (P14.2): give every base part a per-`(avatar, region)` material carrying that
+/// region's baked texture (head → head bake, upper → upper-body bake, …), so the
+/// avatar renders skin- and clothing-textured instead of flat skin tone. A region
+/// with no published bake keeps the shared un-textured skin material.
+///
+/// Deferred and idempotent, mirroring [`apply_avatar_appearance`]: a fresh
+/// appearance (or a body part that just spawned, matched by [`Added`]) flags the
+/// avatar, and its region materials are (re)assigned from the tracked bakes — so a
+/// bake ingested before the body still lands once the body exists. The baked
+/// image itself is filled in when it decodes ([`apply_avatar_bake_textures`]). A
+/// no-op when no avatar asset library / body loaded (avatars stay spheres).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system reading the tracked bakes and the ECS resources the region materials need"
+)]
+pub(crate) fn assign_avatar_bake_materials(
+    mut state: ResMut<AvatarState>,
+    body: Option<Res<AvatarBody>>,
+    mut bake_mats: ResMut<AvatarBakeMaterials>,
+    manager: Res<TextureManager>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    added: Query<&AvatarBodyPart, Added<AvatarBodyPart>>,
+    mut parts: Query<(&AvatarBodyPart, &mut MeshMaterial3d<StandardMaterial>)>,
+) {
+    // A newly spawned part needs its region material assigned (the bakes can
+    // arrive before the body object does).
+    for part in &added {
+        if state.baked_textures.contains_key(&part.agent) {
+            state.bake_dirty.insert(part.agent);
+        }
+    }
+    if state.bake_dirty.is_empty() {
+        return;
+    }
+    let Some(body) = body else {
+        state.bake_dirty.clear();
+        return;
+    };
+    let mut draped = 0_usize;
+    for (part, mut material) in &mut parts {
+        if !state.bake_dirty.contains(&part.agent) {
+            continue;
+        }
+        let slot = part.region.baked_slot();
+        let desired = match state
+            .baked_textures
+            .get(&part.agent)
+            .and_then(|bakes| bakes.get(&slot))
+        {
+            // A published bake for this region: its per-avatar region material.
+            Some(&id) => bake_mats.region_material(
+                part.agent,
+                slot,
+                id,
+                &manager,
+                &mut images,
+                &mut materials,
+            ),
+            // No bake for this region: the shared un-textured skin material.
+            None => body.material.clone(),
+        };
+        if material.0 != desired {
+            *material = MeshMaterial3d(desired);
+            draped = draped.saturating_add(1);
+        }
+    }
+    if draped > 0 {
+        debug!("assigned bake material to {draped} avatar body part(s)");
+    }
+    state.bake_dirty.clear();
+}
+
+/// Fill each newly decoded avatar bake into the region materials parked on it
+/// (P14.2): upload (and cache) the baked [`Image`], then drop it into every parked
+/// material's `base_color_texture`. Mirrors [`apply_prim_textures`](crate::textures::apply_prim_textures);
+/// a decode that failed leaves the parked materials on their fallback skin tint.
+pub(crate) fn apply_avatar_bake_textures(
+    mut decoded: MessageReader<TextureDecoded>,
+    manager: Res<TextureManager>,
+    mut bake_mats: ResMut<AvatarBakeMaterials>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let mut filled = 0_usize;
+    for &TextureDecoded(id) in decoded.read() {
+        let Some(parked) = bake_mats.pending.remove(&id) else {
+            // Not a bake any avatar region is waiting on (e.g. a prim texture).
+            continue;
+        };
+        let Some(image) = bake_mats.image_for(id, &manager, &mut images) else {
+            // The fetch failed: the parked regions keep their flat skin tint.
+            continue;
+        };
+        for material_handle in parked {
+            if let Some(mut material) = materials.get_mut(&material_handle) {
+                apply_bake_image(&mut material, image.clone());
+                filled = filled.saturating_add(1);
+            }
+        }
+    }
+    if filled > 0 {
+        debug!("draped {filled} decoded bake(s) onto avatar body region material(s)");
     }
 }
 
@@ -1064,7 +1341,7 @@ pub(crate) fn position_name_tags(
 mod tests {
     use super::{
         AvatarState, PROVISIONAL_ID_CHARS, body_root_transform, coarse_translation,
-        provisional_label, used_baked_slots,
+        provisional_label, used_baked_slots, visible_body_bakes,
     };
     use crate::avatar_assets::BodyRegion;
     use crate::coords::sl_to_bevy_rotation;
@@ -1225,6 +1502,40 @@ mod tests {
         assert!(used_baked_slots(&encode_texture_entry(&ordinary)).is_empty());
         // An empty blob decodes to no faces, so no slots.
         assert!(used_baked_slots(&[]).is_empty());
+    }
+
+    /// `visible_body_bakes` picks out the visible baked texture in each base-body
+    /// region slot (keyed by slot) and skips a slot left empty or set to the
+    /// invisible / default sentinel.
+    #[test]
+    fn visible_body_bakes_reads_the_region_slots() {
+        let head = TextureKey::from(Uuid::from_u128(0xabc));
+        let upper = TextureKey::from(Uuid::from_u128(0xdef));
+        // Build a full-length face table so every baked slot index exists, with a
+        // real bake in head/upper, the invisible sentinel in lower, and the null
+        // id everywhere else (built by index to avoid slice indexing).
+        let faces = (0..avatar_texture::COUNT)
+            .map(|slot| {
+                let id = if slot == avatar_texture::HEAD_BAKED {
+                    head
+                } else if slot == avatar_texture::UPPER_BAKED {
+                    upper
+                } else if slot == avatar_texture::LOWER_BAKED {
+                    TextureKey::from(avatar_texture::IMG_INVISIBLE)
+                } else {
+                    TextureKey::from(Uuid::nil())
+                };
+                TextureFace::new(id)
+            })
+            .collect();
+        let bakes = visible_body_bakes(&TextureEntry { faces });
+        assert_eq!(bakes.get(&avatar_texture::HEAD_BAKED), Some(&head));
+        assert_eq!(bakes.get(&avatar_texture::UPPER_BAKED), Some(&upper));
+        // The invisible-sentinel lower slot and the empty eyes/hair/skirt slots
+        // are not visible bakes.
+        assert!(!bakes.contains_key(&avatar_texture::LOWER_BAKED));
+        assert!(!bakes.contains_key(&avatar_texture::EYES_BAKED));
+        assert_eq!(bakes.len(), 2, "only the two real bakes are picked up");
     }
 
     /// An attachment's `IMG_USE_BAKED_*` hide is attributed to the avatar it hangs

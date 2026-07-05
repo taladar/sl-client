@@ -72,6 +72,27 @@ impl Header {
     pub fn max_discard_level(&self) -> u8 {
         self.decomposition_levels.unwrap_or(0)
     }
+
+    /// A safe upper bound on the *full-resolution* codestream length: the
+    /// uncompressed pixel-byte count (`width * height * components`). A JPEG-2000
+    /// codestream is always smaller than its raw pixels for real Second Life
+    /// textures, so fetching this many leading bytes is guaranteed to cover the
+    /// entire codestream.
+    ///
+    /// Unlike [`Self::discard_data_size`]'s `1/8`-rate *estimate* — a valid
+    /// prefix boundary only for coarser LODs — this is what a full-resolution
+    /// (discard 0) fetch must use: the estimate can fall short of a
+    /// poorly-compressing texture's true length and truncate it mid-tile-part,
+    /// which OpenJPEG then rejects. Never below [`FIRST_PACKET_SIZE`].
+    #[must_use]
+    pub fn full_data_size_bound(&self) -> usize {
+        let raw = u64::from(self.width)
+            .saturating_mul(u64::from(self.height))
+            .saturating_mul(u64::from(self.components));
+        usize::try_from(raw)
+            .unwrap_or(usize::MAX)
+            .max(FIRST_PACKET_SIZE)
+    }
 }
 
 /// The highest meaningful discard (LOD) level in the Second Life protocol,
@@ -351,6 +372,19 @@ mod tests {
         assert_eq!(header.components, 3);
         assert_eq!(header.decomposition_levels, Some(5));
         assert_eq!(header.max_discard_level(), 5);
+        Ok(())
+    }
+
+    #[test]
+    fn full_data_size_bound_is_the_uncompressed_pixel_count() -> Result<(), TestError> {
+        let header = parse_header(&synth_header(512, 512, 4, 5)).ok_or("header")?;
+        // The uncompressed size (512*512*4) bounds the codestream, and is far
+        // larger than the 1/8-rate discard-0 estimate that could truncate it.
+        assert_eq!(header.full_data_size_bound(), 512 * 512 * 4);
+        assert!(header.full_data_size_bound() > header.discard_data_size(0));
+        // A tiny image still floors at FIRST_PACKET_SIZE.
+        let tiny = parse_header(&synth_header(4, 4, 3, 1)).ok_or("tiny header")?;
+        assert_eq!(tiny.full_data_size_bound(), FIRST_PACKET_SIZE);
         Ok(())
     }
 

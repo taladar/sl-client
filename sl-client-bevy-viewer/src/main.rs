@@ -7,6 +7,7 @@
 //! with terrain, prims, meshes, sculpts, avatars, and chat landing in later
 //! phases.
 
+mod appearance;
 mod avatar_assets;
 mod avatars;
 mod camera;
@@ -33,10 +34,13 @@ use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
+use crate::appearance::{ServerBakeState, drive_server_bake};
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{
-    AvatarState, apply_avatar_appearance, apply_avatar_names, apply_avatar_part_visibility,
-    position_name_tags, setup_avatar_body, update_avatar_objects, update_coarse_avatars,
+    AvatarBakeMaterials, AvatarState, apply_avatar_appearance, apply_avatar_bake_textures,
+    apply_avatar_names, apply_avatar_part_visibility, assign_avatar_bake_materials,
+    ingest_avatar_bakes, position_name_tags, setup_avatar_body, update_avatar_objects,
+    update_coarse_avatars,
 };
 use crate::camera::{FlyCamera, fly_camera};
 use crate::chat::{ChatOverlay, setup_chat_overlay, update_chat_overlay};
@@ -265,6 +269,8 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
     .init_resource::<ChatOverlay>()
     .init_resource::<TextureManager>()
     .init_resource::<PrimTextures>()
+    .init_resource::<AvatarBakeMaterials>()
+    .init_resource::<ServerBakeState>()
     .init_resource::<MeshManager>()
     .add_message::<TextureDecoded>()
     .add_message::<MeshDecoded>()
@@ -277,6 +283,8 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
         (
             capture_login_outcome,
             drive_session,
+            // Trigger our own avatar's server-side bake so P14 has bakes to fetch.
+            drive_server_bake,
             // Keep the texture store's `GetTexture` cap current, then poll
             // finished fetches before the consumers that apply them.
             update_texture_caps,
@@ -298,11 +306,20 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
             // fold resolved names in and float each name tag over its sphere.
             (update_avatar_objects, update_coarse_avatars).chain(),
             apply_avatar_names,
-            // Re-shape each rigged body from its avatar's visual params: morph
-            // targets (P13.3) and skeletal proportions (P13.4), then show/hide
-            // whole base regions from the worn skirt / mesh-body items (P13.5).
-            apply_avatar_appearance,
-            apply_avatar_part_visibility,
+            // Re-shape each rigged body from its avatar's visual params — morph
+            // targets (P13.3) and skeletal proportions (P13.4) — show/hide whole
+            // base regions from the worn skirt / mesh-body items (P13.5), then
+            // fetch each avatar's server-published baked textures (P14.1) and
+            // drape them over the matching body regions (P14.2), filling each
+            // region material once its bake decodes. Nested into one tuple to stay
+            // within Bevy's per-tuple system limit.
+            (
+                apply_avatar_appearance,
+                apply_avatar_part_visibility,
+                ingest_avatar_bakes,
+                assign_avatar_bake_materials,
+                apply_avatar_bake_textures,
+            ),
             position_name_tags,
             // Append newly received local chat to the on-screen overlay.
             update_chat_overlay,

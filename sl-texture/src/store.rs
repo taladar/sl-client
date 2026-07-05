@@ -241,10 +241,28 @@ impl TextureStore {
             drop(guard);
             return Ok(());
         }
-        self.ensure_codestream(entry, target).await?;
+        self.ensure_codestream(entry, target, false).await?;
         let bytes = entry.codestream.load().bytes.clone();
         entry.set_progress(TextureProgress::Decoding);
-        let decoded = self.decode(bytes, target).await?;
+        let decoded = match self.decode(bytes, target).await {
+            Ok(decoded) => decoded,
+            Err(error) => {
+                // The per-LOD byte estimate is only an *estimate* of the prefix a
+                // level needs; for a texture that compresses worse than the
+                // viewer's assumed 1/8 rate it can fall short and hand OpenJPEG a
+                // codestream truncated mid-tile-part, which it rejects. If we do
+                // not yet have the whole asset, grow to the full-resolution bound
+                // (the uncompressed size — always enough) and decode once more.
+                // Only a texture that actually failed pays this cost, so the common
+                // case keeps the fast, small estimate fetch.
+                if entry.codestream.load().complete {
+                    return Err(error);
+                }
+                self.ensure_codestream(entry, target, true).await?;
+                let bytes = entry.codestream.load().bytes.clone();
+                self.decode(bytes, target).await?
+            }
+        };
         entry.image.store(Some(Arc::new(decoded)));
         drop(guard);
         Ok(())
@@ -275,19 +293,35 @@ impl TextureStore {
     /// Grows `entry`'s codestream until it covers `target` (or the whole asset),
     /// pulling from the disk cache first and the network for the rest. Assumes
     /// the caller holds the entry's write lock.
+    ///
+    /// `full` selects how many bytes "enough" is. Normally (`false`) it is the
+    /// viewer's per-LOD byte *estimate* (`data_size` / `calcDataSizeJ2C`), a small
+    /// prefix that decodes to `target` for the common, well-compressing texture —
+    /// the fast path. When a decode of that prefix fails (a texture that
+    /// compresses worse than the assumed 1/8 rate, whose codestream the estimate
+    /// truncates mid-tile-part), the caller retries with `full = true`, which
+    /// grows to the uncompressed-size upper bound — always enough to cover the
+    /// whole codestream — so only the rare failing texture pays for the larger
+    /// fetch.
     async fn ensure_codestream(
         &self,
         entry: &Arc<TextureEntry>,
         target: DiscardLevel,
+        full: bool,
     ) -> Result<(), TextureError> {
         loop {
             let current = entry.codestream.load_full();
             if current.complete {
                 return Ok(());
             }
-            let need = entry
-                .header()
-                .map_or(j2c::FIRST_PACKET_SIZE, |header| target.data_size(&header));
+            // No header yet ⇒ probe with `FIRST_PACKET_SIZE` first to read it.
+            let need = entry.header().map_or(j2c::FIRST_PACKET_SIZE, |header| {
+                if full {
+                    header.full_data_size_bound()
+                } else {
+                    target.data_size(&header)
+                }
+            });
             let covered = current.covered();
             if covered >= need {
                 return Ok(());
