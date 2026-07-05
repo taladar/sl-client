@@ -18,13 +18,20 @@
 //!   `AvatarAppearance.visual_params` byte vector onto typed param values.
 //! - `morph` (P13.3) — blend the base-mesh morph-target deltas by the resolved
 //!   visual-param weights so the body takes its real shape.
+//! - `resolve` (P13.4) — driver → driven propagation and avatar-sex resolution,
+//!   turning a partial appearance vector into every param's effective weight.
+//! - `skeletal` (P13.4) — resolve `param_skeleton` params into per-bone scale /
+//!   position deformations for the skeleton instance.
 //!
 //! P12.2 lands the [`skeleton`] module, P12.3 the [`basemesh`] module, P12.4 the
-//! [`params`] module, and P13.3 the [`morph`] module.
+//! [`params`] module, P13.3 the [`morph`] module, and P13.4 the [`resolve`] and
+//! [`skeletal`] modules.
 
 pub mod basemesh;
 pub mod morph;
 pub mod params;
+pub mod resolve;
+pub mod skeletal;
 pub mod skeleton;
 
 pub use basemesh::{
@@ -36,6 +43,8 @@ pub use params::{
     AppearanceValues, BoneOffset, DrivenParam, ParamEffect, ParamError, ParamGroup, ParamSex,
     ParamValue, VisualParam, VisualParams,
 };
+pub use resolve::ResolvedParams;
+pub use skeletal::{BoneDeform, SkeletalDeformations};
 pub use skeleton::{
     AttachmentPointDef, AttachmentPoints, CollisionVolume, Joint, Skeleton, SkeletonError,
 };

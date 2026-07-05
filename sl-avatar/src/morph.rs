@@ -26,6 +26,7 @@ use std::collections::HashMap;
 
 use crate::basemesh::BaseMesh;
 use crate::params::{AppearanceValues, ParamEffect, VisualParams};
+use crate::resolve::ResolvedParams;
 
 /// The factor Firestorm scales each morph's normal delta by before
 /// re-normalizing (`LLPolyMorphTarget::apply`'s `NORMAL_SOFTEN_FACTOR`), so a
@@ -55,21 +56,38 @@ impl MorphWeights {
     /// Resolve the weights from a visual-param table and a raw wire
     /// `AvatarAppearance.visual_params` byte vector.
     ///
-    /// Transmitted params take their dequantized weight from the vector; every
-    /// other morph param falls back to its [`default`](crate::VisualParam::default).
+    /// Transmitted params take their dequantized weight from the vector; driven
+    /// morph params take their driver-propagated weight; every other morph param
+    /// falls back to its [`default`](crate::VisualParam::default). Sex gating is
+    /// applied throughout ([`ResolvedParams::effective_weight`]).
     #[must_use]
     pub fn from_appearance(params: &VisualParams, visual_params: &[u8]) -> Self {
-        Self::from_values(params, &params.map_appearance(visual_params))
+        Self::from_resolved(
+            params,
+            &ResolvedParams::from_appearance(params, visual_params),
+        )
     }
 
     /// Resolve the weights from a visual-param table and already-mapped
     /// [`AppearanceValues`] (avoids re-dequantizing when the caller kept them).
     #[must_use]
     pub fn from_values(params: &VisualParams, appearance: &AppearanceValues) -> Self {
+        Self::from_resolved(params, &ResolvedParams::from_values(params, appearance))
+    }
+
+    /// Resolve the weights from a visual-param table and already-resolved
+    /// [`ResolvedParams`] (driver propagation + sex already applied) — the shared
+    /// path both other constructors funnel through, and the one to use when the
+    /// caller already built [`ResolvedParams`] for the skeletal resolver too.
+    ///
+    /// Only params whose effect is [`ParamEffect::Morph`] with a significant
+    /// (non-zero) effective weight are retained.
+    #[must_use]
+    pub fn from_resolved(params: &VisualParams, resolved: &ResolvedParams) -> Self {
         let mut by_name = HashMap::new();
         for param in params.all() {
             if matches!(param.effect, ParamEffect::Morph) {
-                let weight = appearance.weight(param.id).unwrap_or(param.default);
+                let weight = resolved.effective_weight(param);
                 if is_significant(weight) {
                     by_name.insert(param.name.clone(), weight);
                 }

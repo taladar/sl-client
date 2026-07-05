@@ -36,8 +36,9 @@ use std::collections::{HashMap, HashSet};
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, AvatarName, CoarseLocation, Command, MorphWeights, Object, ScopedObjectId, SlCommand,
-    SlEvent, SlSessionEvent, pcode, to_bevy_base_mesh, to_bevy_morphed_mesh,
+    AgentKey, AvatarName, CoarseLocation, Command, MorphWeights, Object, ResolvedParams,
+    ScopedObjectId, SkeletalDeformations, SlCommand, SlEvent, SlSessionEvent, pcode,
+    to_bevy_base_mesh, to_bevy_morphed_mesh,
 };
 
 use crate::avatar_assets::{AvatarAssetLibrary, LoadedBinding};
@@ -89,7 +90,7 @@ pub(crate) struct AvatarAnchor;
 
 /// A marker on one rigged base-part render entity, tying it back to its avatar
 /// and its index in [`AvatarBody::parts`] / [`AvatarAssetLibrary::parts`] so the
-/// morph system ([`apply_avatar_morphs`]) can rebuild just that part's mesh from
+/// appearance system ([`apply_avatar_appearance`]) can rebuild just that part's mesh from
 /// the avatar's resolved visual-param weights.
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct AvatarBodyPart {
@@ -98,6 +99,18 @@ pub(crate) struct AvatarBodyPart {
     /// The part's index into the shared part list (base-mesh and render data
     /// share the same order).
     part: usize,
+}
+
+/// A marker on one skeleton-instance joint entity, tying it back to its avatar
+/// and its index in the shared [`BevySkeleton`](sl_client_bevy::BevySkeleton) so
+/// the appearance system ([`apply_avatar_appearance`]) can re-set that joint's
+/// local transform from the avatar's resolved skeletal deformations (P13.4).
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct AvatarJoint {
+    /// The avatar this joint belongs to.
+    agent: AgentKey,
+    /// The joint's index into the shared skeleton (joint order).
+    index: usize,
 }
 
 /// A `bevy_ui` name-tag text node, pointing back at the avatar anchor it floats
@@ -160,9 +173,10 @@ pub(crate) struct AvatarState {
     /// a body spawned after (or re-spawned) can be morphed from the last known
     /// appearance (P13.3).
     appearances: HashMap<AgentKey, Vec<u8>>,
-    /// Avatars whose rigged body needs its morphs (re)applied — set on a fresh
-    /// appearance and on a newly spawned body, drained by [`apply_avatar_morphs`].
-    morph_dirty: HashSet<AgentKey>,
+    /// Avatars whose rigged body needs its appearance (re)applied — its morphs
+    /// re-blended and its skeleton re-deformed — set on a fresh appearance and on
+    /// a newly spawned body, drained by [`apply_avatar_appearance`].
+    appearance_dirty: HashSet<AgentKey>,
     /// The shared placeholder sphere mesh + material, built lazily on first use.
     assets: Option<AvatarAssets>,
 }
@@ -282,7 +296,7 @@ fn body_root_transform(object: &Object, pelvis_height: f32) -> Transform {
 /// joint for a rigid part. A part whose joints cannot be resolved is skipped.
 ///
 /// Each spawned entity carries an [`AvatarBodyPart`] marker (its `agent` and part
-/// `index`) so [`apply_avatar_morphs`] can later swap in a morphed mesh.
+/// `index`) so [`apply_avatar_appearance`] can later swap in a morphed mesh.
 fn spawn_body_part(
     part: &BodyPart,
     index: usize,
@@ -475,11 +489,17 @@ impl AvatarState {
             .id();
         // A fresh joint entity per skeleton joint, parented in a second pass once
         // all entities exist (a parent always precedes its children, but building
-        // first keeps the parenting simple).
+        // first keeps the parenting simple). Each carries an [`AvatarJoint`]
+        // marker so the appearance system can re-deform it (P13.4).
         let joints: Vec<Entity> = body
             .joint_locals
             .iter()
-            .map(|local| commands.spawn((*local, Visibility::default())).id())
+            .enumerate()
+            .map(|(index, local)| {
+                commands
+                    .spawn((*local, Visibility::default(), AvatarJoint { agent, index }))
+                    .id()
+            })
             .collect();
         for (entity, parent) in joints.iter().zip(body.joint_parents.iter().copied()) {
             let target = parent
@@ -714,23 +734,27 @@ pub(crate) fn apply_avatar_names(
     }
 }
 
-/// Apply visual-param morph targets to each rigged avatar body (P13.3): resolve
-/// an `AvatarAppearance.visual_params` vector into per-morph weights and rebuild
-/// every affected base part's mesh so the body takes its real shape, re-morphing
-/// whenever a newer appearance arrives.
+/// Apply each rigged avatar's appearance (P13.3 morphs + P13.4 skeletal shape):
+/// resolve an `AvatarAppearance.visual_params` vector once into its
+/// driver-propagated, sex-gated weights, then (a) rebuild every affected base
+/// part's mesh from the morph-target deltas so the body takes its real shape and
+/// (b) re-deform the skeleton instance's joint transforms so the avatar's
+/// proportions (height, limb / head scale, hips) match. Re-applied whenever a
+/// newer appearance arrives.
 ///
 /// The work is deferred and idempotent: a fresh appearance (or a body part that
-/// just spawned, matched by [`Added`]) marks the avatar dirty, and the morph is
-/// (re)built from the cached appearance vector — so an appearance that arrives
+/// just spawned, matched by [`Added`]) marks the avatar dirty, and the
+/// appearance is (re)built from the cached vector — so an appearance that arrives
 /// before the body still lands once the body exists. A no-op when no avatar asset
-/// library loaded (avatars stay as un-morphed bodies or spheres).
-pub(crate) fn apply_avatar_morphs(
+/// library loaded (avatars stay as un-shaped bodies or spheres).
+pub(crate) fn apply_avatar_appearance(
     mut events: MessageReader<SlEvent>,
     library: Option<Res<AvatarAssetLibrary>>,
     mut state: ResMut<AvatarState>,
     mut meshes: ResMut<Assets<Mesh>>,
     added: Query<&AvatarBodyPart, Added<AvatarBodyPart>>,
     mut parts: Query<(&AvatarBodyPart, &mut Mesh3d)>,
+    mut joints: Query<(&AvatarJoint, &mut Transform)>,
 ) {
     // Fold any fresh appearance vectors into the cache and flag those avatars.
     for event in events.read() {
@@ -738,40 +762,43 @@ pub(crate) fn apply_avatar_morphs(
             state
                 .appearances
                 .insert(appearance.avatar_id, appearance.visual_params.clone());
-            state.morph_dirty.insert(appearance.avatar_id);
+            state.appearance_dirty.insert(appearance.avatar_id);
         }
     }
     // A body part that just spawned needs its cached appearance applied (the
-    // appearance can arrive before the body object does).
+    // appearance can arrive before the body object does). The joints spawn with
+    // the same body, so this one signal covers both morphs and skeleton.
     for part in &added {
         if state.appearances.contains_key(&part.agent) {
-            state.morph_dirty.insert(part.agent);
+            state.appearance_dirty.insert(part.agent);
         }
     }
-    if state.morph_dirty.is_empty() {
+    if state.appearance_dirty.is_empty() {
         return;
     }
     let Some(library) = library else {
-        state.morph_dirty.clear();
+        state.appearance_dirty.clear();
         return;
     };
-    // Resolve each dirty avatar's appearance into morph-target weights once, then
-    // rebuild the mesh of every part belonging to a resolved avatar.
-    let weights: HashMap<AgentKey, MorphWeights> = state
-        .morph_dirty
-        .iter()
-        .filter_map(|&agent| {
-            state.appearances.get(&agent).map(|bytes| {
-                (
-                    agent,
-                    MorphWeights::from_appearance(library.params(), bytes),
-                )
-            })
-        })
-        .collect();
+    // Resolve each dirty avatar's appearance once into its morph weights and the
+    // deformed joint transforms (both share one `ResolvedParams`).
+    let mut morph_weights: HashMap<AgentKey, MorphWeights> = HashMap::new();
+    let mut joint_transforms: HashMap<AgentKey, Vec<Transform>> = HashMap::new();
+    for &agent in &state.appearance_dirty {
+        if let Some(bytes) = state.appearances.get(&agent) {
+            let resolved = ResolvedParams::from_appearance(library.params(), bytes);
+            morph_weights.insert(
+                agent,
+                MorphWeights::from_resolved(library.params(), &resolved),
+            );
+            let deform = SkeletalDeformations::from_resolved(library.params(), &resolved);
+            joint_transforms.insert(agent, library.skeleton().deformed_local_transforms(&deform));
+        }
+    }
+    // Rebuild the mesh of every part belonging to a resolved avatar.
     let mut morphed_parts = 0_usize;
     for (part, mut mesh) in &mut parts {
-        if let Some(weights) = weights.get(&part.agent)
+        if let Some(weights) = morph_weights.get(&part.agent)
             && let Some(loaded) = library.parts().get(part.part)
         {
             let morphed = weights.apply(&loaded.mesh);
@@ -779,13 +806,23 @@ pub(crate) fn apply_avatar_morphs(
             morphed_parts = morphed_parts.saturating_add(1);
         }
     }
-    if morphed_parts > 0 {
+    // Re-set every joint transform of a resolved avatar's skeleton instance.
+    let mut deformed_joints = 0_usize;
+    for (joint, mut transform) in &mut joints {
+        if let Some(transforms) = joint_transforms.get(&joint.agent)
+            && let Some(deformed) = transforms.get(joint.index)
+        {
+            *transform = *deformed;
+            deformed_joints = deformed_joints.saturating_add(1);
+        }
+    }
+    if morphed_parts > 0 || deformed_joints > 0 {
         debug!(
-            "morphed {morphed_parts} body part(s) across {} avatar(s)",
-            weights.len()
+            "shaped {morphed_parts} body part(s) + {deformed_joints} joint(s) across {} avatar(s)",
+            morph_weights.len()
         );
     }
-    state.morph_dirty.clear();
+    state.appearance_dirty.clear();
 }
 
 /// Position each avatar name tag over its anchor by projecting the anchor's world

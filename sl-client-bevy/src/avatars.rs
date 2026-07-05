@@ -29,7 +29,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::math::{Mat4, Quat, Vec3};
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
 use bevy::transform::components::Transform;
-use sl_avatar::{BaseMesh, Joint, MorphedMesh, Skeleton};
+use sl_avatar::{BaseMesh, Joint, MorphedMesh, SkeletalDeformations, Skeleton};
 
 /// Converts one decoded base-body part into a Bevy [`Mesh`] (a `TriangleList`
 /// with position, normal, and UV0 attributes plus `u32` indices).
@@ -146,6 +146,9 @@ pub struct BevySkeleton {
     parents: Vec<Option<usize>>,
     /// Global rest (bind-pose) matrix of each joint, Z-up.
     bind_globals: Vec<Mat4>,
+    /// Each joint's canonical name, parallel to [`locals`](Self::locals); used to
+    /// look a joint's skeletal deformation up by bone name.
+    names: Vec<String>,
     /// Joint canonical-name / alias → index (a canonical name wins over an
     /// alias, matching [`Skeleton`]'s own lookup).
     lookup: HashMap<String, usize>,
@@ -162,6 +165,7 @@ impl BevySkeleton {
         let joints = skeleton.joints();
         let mut locals = Vec::with_capacity(joints.len());
         let mut parents = Vec::with_capacity(joints.len());
+        let mut names = Vec::with_capacity(joints.len());
         let mut bind_globals: Vec<Mat4> = Vec::with_capacity(joints.len());
         for joint in joints {
             let local = joint_transform(joint);
@@ -173,6 +177,7 @@ impl BevySkeleton {
             // `arithmetic_side_effects` lint.
             bind_globals.push(parent_global.mul_mat4(&local.to_matrix()));
             parents.push(joint.parent);
+            names.push(joint.name.clone());
             locals.push(local);
         }
 
@@ -192,6 +197,7 @@ impl BevySkeleton {
             locals,
             parents,
             bind_globals,
+            names,
             lookup,
         }
     }
@@ -220,6 +226,101 @@ impl BevySkeleton {
     #[must_use]
     pub fn parents(&self) -> &[Option<usize>] {
         &self.parents
+    }
+
+    /// The per-joint **local** rest transforms deformed by `deform`
+    /// (`param_skeleton` scale / offset), in joint order — what the viewer sets
+    /// each spawned joint entity's `Transform` to so a shaped avatar's
+    /// proportions match (P13.4). At rest (no deformation) this equals
+    /// [`local_transforms`](Self::local_transforms).
+    ///
+    /// The Second Life skeleton has semantics a plain nested transform hierarchy
+    /// cannot express: a bone's own scale stretches only its bound geometry (it
+    /// is *not* inherited into a child's world scale, unlike
+    /// `LLAvatarJointCollisionVolume`), while a parent's *local* scale does
+    /// stretch its immediate child's position offset (the `scaleChildOffset`
+    /// mechanism that drives height / limb length — Firestorm `LLXformMatrix`).
+    /// So the deformed **world** matrix of each joint is built by that exact
+    /// recurrence here, and each returned local transform is
+    /// `parent_world⁻¹ · own_world` — the relative transform that, re-composed by
+    /// Bevy's ordinary hierarchy propagation, reproduces the correct world matrix
+    /// regardless of how Bevy accumulates scale. (For the transmitted skeletal
+    /// params, adjacent scaled bones are axis-aligned, so these relative
+    /// transforms carry no shear and decompose losslessly into a `Transform`.)
+    ///
+    /// The rest (bind-pose) globals — and hence the inverse bindposes a base part
+    /// is skinned against — are left untouched, so the deformation shows up as
+    /// the skin's deviation from its bind pose.
+    #[must_use]
+    pub fn deformed_local_transforms(&self, deform: &SkeletalDeformations) -> Vec<Transform> {
+        // First pass: each joint's deformed world position / rotation / local
+        // scale, and the full world matrix, by the Second Life recurrence.
+        let mut world_rot: Vec<Quat> = Vec::with_capacity(self.locals.len());
+        let mut world_pos: Vec<Vec3> = Vec::with_capacity(self.locals.len());
+        let mut local_scale: Vec<Vec3> = Vec::with_capacity(self.locals.len());
+        let mut world: Vec<Mat4> = Vec::with_capacity(self.locals.len());
+        for (index, local) in self.locals.iter().enumerate() {
+            let name = self.names.get(index).map_or("", String::as_str);
+            let deform_scale = deform.scale(name);
+            let deform_offset = deform.offset(name);
+            // Component-wise so the workspace `arithmetic_side_effects` lint does
+            // not trip on the glam `Vec3` operators.
+            let scale = Vec3::new(
+                local.scale.x + deform_scale[0],
+                local.scale.y + deform_scale[1],
+                local.scale.z + deform_scale[2],
+            );
+            let position = Vec3::new(
+                local.translation.x + deform_offset[0],
+                local.translation.y + deform_offset[1],
+                local.translation.z + deform_offset[2],
+            );
+            let (rotation, translation) = match self.parents.get(index).copied().flatten() {
+                Some(parent) => {
+                    let parent_rot = world_rot.get(parent).copied().unwrap_or(Quat::IDENTITY);
+                    let parent_pos = world_pos.get(parent).copied().unwrap_or(Vec3::ZERO);
+                    let parent_scale = local_scale.get(parent).copied().unwrap_or(Vec3::ONE);
+                    // Child offset scaled by the parent's *local* scale, rotated
+                    // into and translated by the parent's world frame.
+                    let scaled = Vec3::new(
+                        parent_scale.x * position.x,
+                        parent_scale.y * position.y,
+                        parent_scale.z * position.z,
+                    );
+                    let rotated = parent_rot.mul_vec3(scaled);
+                    (
+                        parent_rot.mul_quat(local.rotation),
+                        Vec3::new(
+                            parent_pos.x + rotated.x,
+                            parent_pos.y + rotated.y,
+                            parent_pos.z + rotated.z,
+                        ),
+                    )
+                }
+                None => (local.rotation, position),
+            };
+            world_rot.push(rotation);
+            world_pos.push(translation);
+            local_scale.push(scale);
+            world.push(Mat4::from_scale_rotation_translation(
+                scale,
+                rotation,
+                translation,
+            ));
+        }
+
+        // Second pass: relative-to-parent local transforms.
+        let mut out = Vec::with_capacity(self.locals.len());
+        for (index, own) in world.iter().enumerate() {
+            let matrix = match self.parents.get(index).copied().flatten() {
+                Some(parent) => world
+                    .get(parent)
+                    .map_or(*own, |parent_world| parent_world.inverse().mul_mat4(own)),
+                None => *own,
+            };
+            out.push(Transform::from_matrix(matrix));
+        }
+        out
     }
 
     /// The index of the joint with the given canonical name or alias.
@@ -289,8 +390,9 @@ mod tests {
     use super::{BevySkeleton, to_bevy_base_mesh};
     use bevy::math::Vec3;
     use bevy::mesh::{Mesh, VertexAttributeValues};
+    use bevy::transform::components::Transform;
     use pretty_assertions::assert_eq;
-    use sl_avatar::{BaseMesh, Skeleton};
+    use sl_avatar::{BaseMesh, SkeletalDeformations, Skeleton, VisualParams};
 
     /// A boxed error so tests can use `?` instead of disallowed `unwrap`/`expect`.
     type TestError = Box<dyn core::error::Error>;
@@ -387,6 +489,97 @@ mod tests {
         assert_eq!(
             mesh.indices().map(bevy::mesh::Indices::len),
             Some(base.faces().len() * 3)
+        );
+        Ok(())
+    }
+
+    /// A visual-param table with one transmitted `param_skeleton` that scales
+    /// `mTorso` up along Z, to exercise the deformed-transform recurrence.
+    const TORSO_SCALE_LAD: &str = r#"<?xml version="1.0"?>
+<linden_avatar version="2.0">
+  <skeleton file_name="avatar_skeleton.xml">
+    <param id="33" group="0" name="Height" value_min="0" value_max="1" value_default="0">
+      <param_skeleton>
+        <bone name="mTorso" scale="0 0 0.1"/>
+      </param_skeleton>
+    </param>
+  </skeleton>
+</linden_avatar>"#;
+
+    /// Reconstruct each joint's world matrix from the relative-to-parent local
+    /// transforms (the Bevy hierarchy composition the viewer relies on).
+    fn compose_globals(skeleton: &BevySkeleton, locals: &[Transform]) -> Vec<bevy::math::Mat4> {
+        let mut globals: Vec<bevy::math::Mat4> = Vec::with_capacity(locals.len());
+        for (index, local) in locals.iter().enumerate() {
+            let parent_global = skeleton
+                .parents()
+                .get(index)
+                .copied()
+                .flatten()
+                .and_then(|parent| globals.get(parent).copied())
+                .unwrap_or(bevy::math::Mat4::IDENTITY);
+            globals.push(parent_global.mul_mat4(&local.to_matrix()));
+        }
+        globals
+    }
+
+    #[test]
+    fn deformed_transforms_match_rest_without_deformation() -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        let bevy = BevySkeleton::from_skeleton(&skeleton);
+        let deformed = bevy.deformed_local_transforms(&SkeletalDeformations::default());
+        assert_eq!(deformed.len(), bevy.len());
+        for (rest, moved) in bevy.local_transforms().iter().zip(deformed.iter()) {
+            assert!(rest.translation.abs_diff_eq(moved.translation, 1e-4));
+            assert!(rest.scale.abs_diff_eq(moved.scale, 1e-4));
+            assert!(rest.rotation.abs_diff_eq(moved.rotation, 1e-4));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn bone_scale_stretches_child_position_but_not_child_scale() -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        let bevy = BevySkeleton::from_skeleton(&skeleton);
+        let params = VisualParams::from_xml(TORSO_SCALE_LAD)?;
+        // `mTorso` scaled up along Z by 0.1 at full Height weight.
+        let deform = SkeletalDeformations::from_appearance(&params, &[255]);
+
+        let rest = compose_globals(&bevy, bevy.local_transforms());
+        let moved = compose_globals(&bevy, &bevy.deformed_local_transforms(&deform));
+
+        let torso = bevy.find("mTorso").ok_or("mTorso")?;
+        let chest = bevy.find("mChest").ok_or("mChest")?;
+
+        let (torso_scale, _, _) = moved
+            .get(torso)
+            .ok_or("torso global")?
+            .to_scale_rotation_translation();
+        // mTorso's own world scale takes the +0.1 (rest 1 -> 1.1).
+        assert!(
+            (torso_scale.z - 1.1).abs() < 1e-3,
+            "torso z scale {torso_scale}"
+        );
+
+        let (chest_scale, _, chest_pos) = moved
+            .get(chest)
+            .ok_or("chest global")?
+            .to_scale_rotation_translation();
+        // The child bone's world scale is NOT inherited (stays ~1, not 1.1).
+        assert!(
+            (chest_scale.z - 1.0).abs() < 1e-3,
+            "chest z scale {chest_scale}"
+        );
+        // But its world position IS stretched up by the parent's local scale:
+        // rest chest Z + 0.1 * (chest local Z offset 0.205) = +0.0205.
+        let (_, _, rest_chest_pos) = rest
+            .get(chest)
+            .ok_or("rest chest global")?
+            .to_scale_rotation_translation();
+        assert!(
+            (chest_pos.z - rest_chest_pos.z - 0.0205).abs() < 1e-3,
+            "chest lifted by {}",
+            chest_pos.z - rest_chest_pos.z
         );
         Ok(())
     }
