@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="us-ascii" standalone="yes"?>
+<linden_avatar version="2.0" wearable_definition_version="22">
+  <skeleton file_name="avatar_skeleton.xml">
+    <attachment_point id="1" group="6" pie_slice="2" name="Chest" joint="mChest" location="ATTACH_CHEST" position="0.15 0 -0.1" rotation="0 90 90" visible_in_first_person="true"/>
+    <attachment_point id="2" group="2" pie_slice="2" name="Skull" joint="mHead" location="ATTACH_HEAD" position="0 0 0.15" rotation="0 0 90" visible_in_first_person="false"/>
+    <attachment_point id="35" group="9" name="Center" joint="mScreen" location="ATTACH_HUD_CENTER_1" position="0 0 0" rotation="0 0 0" hud="true" max_attachment_offset="2.0" visible_in_first_person="true"/>
+  </skeleton>
+</linden_avatar>

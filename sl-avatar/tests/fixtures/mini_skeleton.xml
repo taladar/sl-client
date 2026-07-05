@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<linden_skeleton num_bones="4" num_collision_volumes="2" version="2.0">
+  <bone aliases="hip avatar_mPelvis" connected="false" end="0.000 0.000 0.084" group="Torso" name="mPelvis" pivot="0.000000 0.000000 1.067015" pos="0.000 0.000 1.067" rot="0.000000 0.000000 0.000000" scale="1.000 1.000 1.000" support="base">
+    <collision_volume end="0.030 0.000 0.095" group="Collision" name="PELVIS" pos="-0.01 0 -0.02" rot="0.000000 8.00000 0.000000" scale="0.12 0.16 0.17" support="base"/>
+    <bone aliases="abdomen avatar_mTorso" connected="true" end="-0.015 0.000 0.205" group="Torso" name="mTorso" pivot="0.000000 0.000000 0.084073" pos="0.000 0.000 0.084" rot="0.000000 0.000000 0.000000" scale="1.000 1.000 1.000" support="base">
+      <collision_volume end="0.028 0.000 0.094" group="Collision" name="BELLY" pos="0.028 0 0.04" rot="0.000000 8.00000 0.000000" scale="0.09 0.13 0.15" support="base"/>
+      <bone aliases="chest avatar_mChest" connected="true" end="-0.010 0.000 0.250" group="Torso" name="mChest" pivot="-0.015368 0.000000 0.204877" pos="-0.015 0.000 0.205" rot="0.000000 0.000000 0.000000" scale="1.000 1.000 1.000" support="base"/>
+    </bone>
+    <bone aliases="avatar_mHipRight" connected="false" end="0.000 0.000 -0.400" group="Leg" name="mHipRight" pivot="-0.014000 -0.128000 -0.002000" pos="-0.014 -0.128 -0.002" rot="0.000000 0.000000 0.000000" scale="1.000 1.000 1.000" support="base"/>
+  </bone>
+</linden_skeleton>

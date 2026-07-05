@@ -16,7 +16,9 @@ categories = ["game-development", "rendering", "rendering::data-formats"]
 exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
 [dependencies]
+roxmltree = { version = "0.20.0" }
 sl-proto = { version = "0.1.0", path = "../sl-proto" }
+thiserror = { version = "2.0.18" }
 
 [dev-dependencies]
 pretty_assertions = { version = "1.4.1" }

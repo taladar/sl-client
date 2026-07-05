@@ -526,7 +526,7 @@ only in Firestorm today and are added to `sl-proto` in P17.3.
   `publish = false`, `[lints] workspace = true`), `CHANGELOG.md`, `cliff.toml`
   (`tag_pattern ^sl_avatar_[0-9.]*$`), registered in the root `members`. Stub
   `lib.rs`; green `cargo build --workspace`. Mirror P0.
-- [ ] **P12.2. Skeleton parse.** `skeleton.rs`: parse `avatar_skeleton.xml`
+- [x] **P12.2. Skeleton parse.** `skeleton.rs`: parse `avatar_skeleton.xml`
   (from `&str`) → `Skeleton { joints }` with hierarchy, rest pos/rot/scale,
   pivot, and collision volumes; plus the attachment-point→joint map and HUD-
   point set from `avatar_lad.xml` `<attachment_point>`. Accessor helpers over

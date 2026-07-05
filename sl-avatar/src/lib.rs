@@ -17,5 +17,13 @@
 //! - `params` (P12.4) — parse the `avatar_lad.xml` visual-param table and map an
 //!   `AvatarAppearance.visual_params` byte vector onto typed param values.
 //!
-//! This P12.1 scaffold is an empty stub; the modules above land in the
-//! subsequent points.
+//! P12.2 lands the [`skeleton`] module; the `basemesh` / `params` modules follow
+//! in the subsequent points.
+
+pub mod skeleton;
+
+pub use skeleton::{
+    AttachmentPointDef, AttachmentPoints, CollisionVolume, Joint, Skeleton, SkeletonError,
+};
+
+pub use sl_proto::AttachmentPoint;
