@@ -1,0 +1,27 @@
+[package]
+name = "sl-bake"
+description = "Client-side avatar bake compositing (ordered wearable layers → per-region baked RGBA) for Second Life / OpenSim clients, the legacy/OpenSim path"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "avatar", "bake", "compositing"]
+categories = ["game-development", "rendering", "rendering::data-formats"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+bytes = { version = "1.12.0" }
+sl-proto = { version = "0.1.0", path = "../sl-proto" }
+sl-texture = { version = "0.1.0", path = "../sl-texture", default-features = false }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+[lints]
+workspace = true

@@ -3,6 +3,7 @@ members = [
     "sl-asset",
     "sl-asset-sched",
     "sl-avatar",
+    "sl-bake",
     "sl-client-bevy",
     "sl-client-bevy-viewer",
     "sl-client-tokio",

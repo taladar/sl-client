@@ -5637,6 +5637,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-bake"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "pretty_assertions",
+ "sl-proto",
+ "sl-texture",
+]
+
+[[package]]
 name = "sl-client-bevy"
 version = "0.1.0"
 dependencies = [
