@@ -30,6 +30,7 @@ use bevy::math::{Mat4, Quat, Vec3};
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
 use bevy::transform::components::Transform;
 use sl_avatar::{BaseMesh, CollisionVolume, Joint, MorphedMesh, SkeletalDeformations, Skeleton};
+use sl_mesh::MeshSkin;
 
 /// Converts one decoded base-body part into a Bevy [`Mesh`] (a `TriangleList`
 /// with position, normal, and UV0 attributes plus `u32` indices).
@@ -291,6 +292,30 @@ impl BevySkeleton {
     /// the skin's deviation from its bind pose.
     #[must_use]
     pub fn deformed_local_transforms(&self, deform: &SkeletalDeformations) -> Vec<Transform> {
+        self.deformed_local_transforms_with(deform, &JointOverrides::default())
+    }
+
+    /// Like [`deformed_local_transforms`](Self::deformed_local_transforms) but with
+    /// a worn rigged mesh's **joint position overrides** (R1) folded in — the
+    /// reference viewer's `LLVOAvatar::addAttachmentOverridesForObject`.
+    ///
+    /// A rigged mesh (a mesh body/head, or fitted clothing) that ships an
+    /// alternate-bind matrix per joint moves the avatar's skeleton joints to the
+    /// positions its own inverse-bind matrices were baked against; without this the
+    /// mesh distorts (vertex clusters dragged toward the wrong joint), worst at the
+    /// extremities where the position error compounds down the chain. Each
+    /// [`JointOverrides`] entry **replaces** that joint's local (parent-relative)
+    /// rest position — winning over the appearance skeletal offset, exactly as the
+    /// reference viewer's override wins over `m_posBeforeOverrides` — and, when the
+    /// rig locks scale (`lock_scale_if_joint_position`), pins the joint to its
+    /// default scale so the appearance scale does not stretch the fitted mesh.
+    /// A joint with no override keeps its ordinary appearance-deformed transform.
+    #[must_use]
+    pub fn deformed_local_transforms_with(
+        &self,
+        deform: &SkeletalDeformations,
+        overrides: &JointOverrides,
+    ) -> Vec<Transform> {
         // First pass: each joint's deformed world position / rotation / local
         // scale, and the full world matrix, by the Second Life recurrence.
         let mut world_rot: Vec<Quat> = Vec::with_capacity(self.locals.len());
@@ -301,18 +326,30 @@ impl BevySkeleton {
             let name = self.names.get(index).map_or("", String::as_str);
             let deform_scale = deform.scale(name);
             let deform_offset = deform.offset(name);
+            let override_pos = overrides.position(index);
             // Component-wise so the workspace `arithmetic_side_effects` lint does
-            // not trip on the glam `Vec3` operators.
-            let scale = Vec3::new(
-                local.scale.x + deform_scale[0],
-                local.scale.y + deform_scale[1],
-                local.scale.z + deform_scale[2],
-            );
-            let position = Vec3::new(
-                local.translation.x + deform_offset[0],
-                local.translation.y + deform_offset[1],
-                local.translation.z + deform_offset[2],
-            );
+            // not trip on the glam `Vec3` operators. An overridden joint with a
+            // scale lock keeps its default scale (the rig fits at that scale); every
+            // other joint takes the appearance-driven scale.
+            let scale = if override_pos.is_some() && overrides.lock_scale() {
+                local.scale
+            } else {
+                Vec3::new(
+                    local.scale.x + deform_scale[0],
+                    local.scale.y + deform_scale[1],
+                    local.scale.z + deform_scale[2],
+                )
+            };
+            // A rig override replaces the joint's local position outright; else the
+            // appearance offset shifts the default rest position.
+            let position = match override_pos {
+                Some(pos) => pos,
+                None => Vec3::new(
+                    local.translation.x + deform_offset[0],
+                    local.translation.y + deform_offset[1],
+                    local.translation.z + deform_offset[2],
+                ),
+            };
             let (rotation, translation) = match self.parents.get(index).copied().flatten() {
                 Some(parent) => {
                     let parent_rot = world_rot.get(parent).copied().unwrap_or(Quat::IDENTITY);
@@ -440,6 +477,133 @@ impl BevySkeleton {
     }
 }
 
+/// The reference viewer's joint-position-override threshold (`LLJoint`'s 0.1 mm
+/// offset limit): a rig joint whose position matches the skeleton default within
+/// this distance imposes no override.
+const JOINT_POS_OVERRIDE_THRESHOLD: f32 = 0.0001;
+
+/// A worn rigged mesh's **joint position overrides** (R1): the skeleton joint
+/// index → its rig-supplied local (parent-relative) rest position (Second Life
+/// Z-up metres), plus whether the rig locks bone scale to the default.
+///
+/// Built by [`joint_position_overrides`] from a mesh's [`MeshSkin`] and consumed by
+/// [`BevySkeleton::deformed_local_transforms_with`]. A mesh body/head or fitted
+/// clothing repositions the avatar skeleton to the pose its inverse-bind matrices
+/// were baked against; feeding these overrides in is what makes such a mesh render
+/// undistorted at rest (the reference viewer's `addAttachmentOverridesForObject`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct JointOverrides {
+    /// Skeleton joint index → overridden local rest position.
+    positions: HashMap<usize, Vec3>,
+    /// Whether the rig locks overridden joints to their default scale.
+    lock_scale: bool,
+}
+
+impl JointOverrides {
+    /// Whether no joint is overridden.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.positions.is_empty()
+    }
+
+    /// The number of overridden joints.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.positions.len()
+    }
+
+    /// Whether overridden joints are pinned to their default scale.
+    #[must_use]
+    pub const fn lock_scale(&self) -> bool {
+        self.lock_scale
+    }
+
+    /// The overridden local rest position of the joint at `index`, if any.
+    #[must_use]
+    pub fn position(&self, index: usize) -> Option<Vec3> {
+        self.positions.get(&index).copied()
+    }
+
+    /// Record an override of the joint at `index` to local `position`.
+    pub fn set_position(&mut self, index: usize, position: Vec3) {
+        let _prev = self.positions.insert(index, position);
+    }
+
+    /// Set whether overridden joints are pinned to their default scale.
+    pub const fn set_lock_scale(&mut self, lock_scale: bool) {
+        self.lock_scale = lock_scale;
+    }
+
+    /// Merge another mesh's overrides into this set (a shared skeleton accumulates
+    /// the overrides of every worn rigged mesh): a later mesh's override of the same
+    /// joint wins, and the scale lock is sticky once any rig requests it.
+    pub fn merge(&mut self, other: &Self) {
+        for (&index, &position) in &other.positions {
+            let _prev = self.positions.insert(index, position);
+        }
+        self.lock_scale = self.lock_scale || other.lock_scale;
+    }
+}
+
+/// The joint position overrides a worn rigged mesh imposes on an avatar skeleton
+/// (R1), resolved against that skeleton's name lookup and default local transforms
+/// — the reference viewer's `LLVOAvatar::addAttachmentOverridesForObject`.
+///
+/// The overrides exist only when the rig ships an alternate-bind matrix per joint
+/// (the mesh-upload "include joint positions" option), aligned 1:1 with the
+/// joint-name table; otherwise the result is empty. Each joint's overridden local
+/// (parent-relative) position is the translation row of its alternate-bind matrix
+/// (Second Life row-major, row-vector: elements 12..15), applied only when it
+/// deviates from the skeleton default by more than 0.1 mm — matching
+/// `LLJoint::aboveJointPosThreshold`. `lookup` and `default_locals` come
+/// from the same skeleton the overrides will be applied to (e.g.
+/// [`BevySkeleton::lookup`] / [`BevySkeleton::local_transforms`]).
+#[must_use]
+pub fn joint_position_overrides(
+    skin: &MeshSkin,
+    lookup: &HashMap<String, usize>,
+    default_locals: &[Transform],
+) -> JointOverrides {
+    let mut overrides = JointOverrides::default();
+    // No per-joint alternate-bind matrices (or a malformed count) → no overrides.
+    if skin.alt_inverse_bind_matrix.len() != skin.joint_names.len() {
+        return overrides;
+    }
+    for (name, matrix) in skin
+        .joint_names
+        .iter()
+        .zip(skin.alt_inverse_bind_matrix.iter())
+    {
+        let Some(&index) = lookup.get(name) else {
+            continue;
+        };
+        let Some(default) = default_locals.get(index) else {
+            continue;
+        };
+        // The overridden local position is the alternate-bind matrix's translation
+        // row (elements 12..14), in the same Second Life Z-up frame as the skeleton
+        // default local transforms.
+        let position = Vec3::new(
+            matrix.get(12).copied().unwrap_or(0.0),
+            matrix.get(13).copied().unwrap_or(0.0),
+            matrix.get(14).copied().unwrap_or(0.0),
+        );
+        let diff = Vec3::new(
+            position.x - default.translation.x,
+            position.y - default.translation.y,
+            position.z - default.translation.z,
+        );
+        if diff.length_squared() > JOINT_POS_OVERRIDE_THRESHOLD * JOINT_POS_OVERRIDE_THRESHOLD {
+            overrides.set_position(index, position);
+        }
+    }
+    // The scale lock only matters when the rig actually overrides a position.
+    if !overrides.is_empty() {
+        overrides.set_lock_scale(skin.lock_scale_if_joint_position);
+    }
+    overrides
+}
+
 /// Builds a joint's local rest [`Transform`] from its Second Life fields (Z-up
 /// metres, Euler XYZ degrees, unitless scale).
 fn joint_transform(joint: &Joint) -> Transform {
@@ -481,12 +645,42 @@ fn euler_deg_to_quat(rot: [f32; 3]) -> Quat {
 
 #[cfg(test)]
 mod tests {
-    use super::{BevySkeleton, to_bevy_base_mesh};
+    use super::{BevySkeleton, JointOverrides, joint_position_overrides, to_bevy_base_mesh};
     use bevy::math::Vec3;
     use bevy::mesh::{Mesh, VertexAttributeValues};
     use bevy::transform::components::Transform;
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_avatar::{BaseMesh, SkeletalDeformations, Skeleton, VisualParams};
+    use sl_mesh::MeshSkin;
+
+    /// A row-major, row-vector 4×4 matrix (the `sl_mesh` layout) whose only
+    /// non-identity part is the translation row (elements 12..14) — enough to stand
+    /// in for a rig's alternate-bind matrix, whose translation is the joint's
+    /// overridden local position.
+    fn translation_matrix(x: f32, y: f32, z: f32) -> [f32; 16] {
+        [
+            1.0, 0.0, 0.0, 0.0, //
+            0.0, 1.0, 0.0, 0.0, //
+            0.0, 0.0, 1.0, 0.0, //
+            x, y, z, 1.0, //
+        ]
+    }
+
+    /// A minimal rigged-mesh skin over `joints`, each carrying the given
+    /// alternate-bind (joint position) matrix.
+    fn skin_with_alt(joints: &[(&str, [f32; 16])], lock_scale: bool) -> MeshSkin {
+        MeshSkin {
+            joint_names: joints.iter().map(|(name, _)| (*name).to_owned()).collect(),
+            inverse_bind_matrix: joints
+                .iter()
+                .map(|_| translation_matrix(0.0, 0.0, 0.0))
+                .collect(),
+            bind_shape_matrix: translation_matrix(0.0, 0.0, 0.0),
+            alt_inverse_bind_matrix: joints.iter().map(|(_, m)| *m).collect(),
+            pelvis_offset: None,
+            lock_scale_if_joint_position: lock_scale,
+        }
+    }
 
     /// A boxed error so tests can use `?` instead of disallowed `unwrap`/`expect`.
     type TestError = Box<dyn core::error::Error>;
@@ -769,5 +963,133 @@ mod tests {
         let base = BaseMesh::from_bytes(MINI_BASEMESH)?;
         assert!(bevy.base_mesh_skin(&base).is_none());
         Ok(())
+    }
+
+    #[test]
+    fn joint_overrides_extract_above_threshold_positions() -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        let bevy = BevySkeleton::from_skeleton(&skeleton);
+        let torso = bevy.find("mTorso").ok_or("mTorso present")?;
+        let hip = bevy.find("mHipRight").ok_or("mHipRight present")?;
+        // `mTorso` is moved well above the 0.1 mm threshold; `mChest` is left at its
+        // default local position (0.01 mm off, below threshold), so only `mTorso`
+        // and `mHipRight` override.
+        let skin = skin_with_alt(
+            &[
+                ("mTorso", translation_matrix(0.0, 0.0, 0.2)),
+                ("mChest", translation_matrix(-0.015, 0.0, 0.205_01)),
+                ("mHipRight", translation_matrix(-0.05, -0.128, -0.002)),
+            ],
+            false,
+        );
+        let overrides = joint_position_overrides(&skin, bevy.lookup(), bevy.local_transforms());
+        assert_eq!(overrides.len(), 2);
+        assert_eq!(overrides.position(torso), Some(Vec3::new(0.0, 0.0, 0.2)));
+        assert_eq!(
+            overrides.position(hip),
+            Some(Vec3::new(-0.05, -0.128, -0.002))
+        );
+        assert!(
+            overrides
+                .position(bevy.find("mChest").ok_or("mChest")?)
+                .is_none()
+        );
+        assert!(!overrides.lock_scale());
+        Ok(())
+    }
+
+    #[test]
+    fn joint_overrides_empty_without_alt_matrices() -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        let bevy = BevySkeleton::from_skeleton(&skeleton);
+        // A rig with no alternate-bind matrices (an unfitted rig) imposes nothing.
+        let mut skin = skin_with_alt(&[("mTorso", translation_matrix(0.0, 0.0, 0.2))], true);
+        skin.alt_inverse_bind_matrix.clear();
+        let overrides = joint_position_overrides(&skin, bevy.lookup(), bevy.local_transforms());
+        assert!(overrides.is_empty());
+        // A mismatched alt-matrix count is likewise ignored (faulty rig).
+        let mut skin2 = skin_with_alt(
+            &[
+                ("mTorso", translation_matrix(0.0, 0.0, 0.2)),
+                ("mHipRight", translation_matrix(-0.05, -0.128, -0.002)),
+            ],
+            false,
+        );
+        skin2.alt_inverse_bind_matrix.pop();
+        assert!(
+            joint_position_overrides(&skin2, bevy.lookup(), bevy.local_transforms()).is_empty()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn overridden_joint_moves_itself_and_its_children() -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        let bevy = BevySkeleton::from_skeleton(&skeleton);
+        let torso = bevy.find("mTorso").ok_or("mTorso present")?;
+        let chest = bevy.find("mChest").ok_or("mChest present")?;
+        // Override `mTorso`'s local position; `mChest` (its child) is not overridden
+        // but must follow it in world space.
+        let rest = bevy.deformed_local_transforms(&SkeletalDeformations::default());
+        let rest_chest_local = rest.get(chest).ok_or("chest rest")?.translation;
+        let mut overrides = JointOverrides::default();
+        overrides.set_position(torso, Vec3::new(0.0, 0.1, 0.084));
+        let deformed =
+            bevy.deformed_local_transforms_with(&SkeletalDeformations::default(), &overrides);
+        // The overridden joint takes the new local position (within the float error
+        // of the world-relative recompose).
+        assert!(
+            (deformed.get(torso).ok_or("torso")?.translation - Vec3::new(0.0, 0.1, 0.084)).length()
+                < 1.0e-5
+        );
+        // The un-overridden child keeps its own local offset (it rides its parent),
+        // so its world position shifts by the same +0.1 Y the parent moved.
+        assert!(
+            (deformed.get(chest).ok_or("chest")?.translation - rest_chest_local).length() < 1.0e-5
+        );
+        let rest_world = compose_globals(&bevy, &rest);
+        let moved_world = compose_globals(&bevy, &deformed);
+        let shift = moved_world
+            .get(chest)
+            .ok_or("chest world")?
+            .transform_point3(Vec3::ZERO)
+            - rest_world
+                .get(chest)
+                .ok_or("chest rest world")?
+                .transform_point3(Vec3::ZERO);
+        assert!((shift - Vec3::new(0.0, 0.1, 0.0)).length() < 1.0e-5);
+        Ok(())
+    }
+
+    #[test]
+    fn lock_scale_flag_flows_from_the_skin() -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        let bevy = BevySkeleton::from_skeleton(&skeleton);
+        // A rig that overrides a joint *and* locks scale reports the lock; the
+        // deformed transform keeps the overridden joint at its default scale (unit
+        // for the standard skeleton).
+        let skin = skin_with_alt(&[("mTorso", translation_matrix(0.0, 0.0, 0.2))], true);
+        let overrides = joint_position_overrides(&skin, bevy.lookup(), bevy.local_transforms());
+        assert!(overrides.lock_scale());
+        let torso = bevy.find("mTorso").ok_or("mTorso present")?;
+        let deformed =
+            bevy.deformed_local_transforms_with(&SkeletalDeformations::default(), &overrides);
+        assert_eq!(deformed.get(torso).ok_or("torso")?.scale, Vec3::ONE);
+        Ok(())
+    }
+
+    #[test]
+    fn joint_overrides_merge_accumulates_and_locks() {
+        let mut base = JointOverrides::default();
+        base.set_position(1, Vec3::new(1.0, 0.0, 0.0));
+        let mut other = JointOverrides::default();
+        other.set_position(2, Vec3::new(0.0, 2.0, 0.0));
+        other.set_lock_scale(true);
+        base.merge(&other);
+        assert_eq!(base.len(), 2);
+        assert_eq!(base.position(1), Some(Vec3::new(1.0, 0.0, 0.0)));
+        assert_eq!(base.position(2), Some(Vec3::new(0.0, 2.0, 0.0)));
+        // The scale lock is sticky once any merged rig requests it.
+        assert!(base.lock_scale());
     }
 }

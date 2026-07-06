@@ -42,8 +42,8 @@ use std::sync::Arc;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, DecodedMesh, DecodedTexture, MeshKey, MeshSkin, Object, PrimFaceId, PrimLod,
-    PrimMesh, PrimShapeFloat, PrimShapeParams, ScopedObjectId, SculptOrMeshKey, SlEvent,
+    AgentKey, DecodedMesh, DecodedTexture, JointOverrides, MeshKey, MeshSkin, Object, PrimFaceId,
+    PrimLod, PrimMesh, PrimShapeFloat, PrimShapeParams, ScopedObjectId, SculptOrMeshKey, SlEvent,
     SlSessionEvent, TextureFace, TextureKey, Uuid, Vector, avatar_texture, decode_texture_entry,
     pcode, rigged_inverse_bindposes, tessellate, tessellate_sculpt, to_bevy_mesh,
     to_bevy_prim_mesh, to_bevy_rigged_mesh,
@@ -168,6 +168,26 @@ struct TrackedObject {
     /// asset or a sculpt's map texture), the pending build request; `None` once
     /// the geometry is built or for an object whose geometry needs no fetch.
     pending: Option<PendingGeometry>,
+    /// Whether this object is an **animated object** (animesh) — its
+    /// `ExtendedMesh` param carries the `ANIMATED_MESH_ENABLED` flag. Set on the
+    /// linkset root; a worn animesh drives its own control-avatar skeleton, so its
+    /// rig joint positions must NOT override the wearer's skeleton (R1), matching
+    /// the reference viewer's `!vo->isAnimatedObject()` filter.
+    animated: bool,
+}
+
+/// The `ExtendedMesh` `ANIMATED_MESH_ENABLED` flag (`llprimitive.h`): the object
+/// is an animated object (animesh).
+const ANIMATED_MESH_ENABLED_FLAG: u32 = 0x1;
+
+/// Whether `object` carries the animated-object (animesh) flag in its
+/// `ExtendedMesh` extra params.
+fn is_animated_object(object: &Object) -> bool {
+    object
+        .extra
+        .extended_mesh
+        .as_ref()
+        .is_some_and(|mesh| mesh.flags & ANIMATED_MESH_ENABLED_FLAG != 0)
 }
 
 /// A deferred geometry build waiting on an asset fetch — a mesh object on its
@@ -716,6 +736,7 @@ fn apply_object(
         existing.parent = parent;
         existing.is_root = is_root;
         existing.attachment_point = attachment_point;
+        existing.animated = is_animated_object(object);
         return;
     }
 
@@ -766,6 +787,7 @@ fn apply_object(
             attachment_point,
             face_entities,
             pending,
+            animated: is_animated_object(object),
         },
     );
     debug!(
@@ -996,6 +1018,40 @@ pub(crate) fn apply_object_meshes(
     }
 }
 
+/// Whether worn rigged meshes' joint position overrides (R1) are applied to the
+/// avatar skeleton. On by default; `SL_VIEWER_JOINT_OVERRIDES=0` disables it, so the
+/// pre-override skeleton behaviour can be compared side by side in one session.
+fn joint_overrides_enabled() -> bool {
+    std::env::var("SL_VIEWER_JOINT_OVERRIDES").as_deref() != Ok("0")
+}
+
+/// Whether the object `scoped` belongs to an **animated object** (animesh) linkset:
+/// walk its parent chain (the animated flag sits on the linkset root) up to the
+/// avatar. An animesh drives its own control-avatar skeleton, so its rig joint
+/// positions must not override the wearer's skeleton (R1) — the reference viewer's
+/// `!vo->isAnimatedObject()` filter.
+fn belongs_to_animesh(state: &ObjectState, scoped: ScopedObjectId) -> bool {
+    let mut current = scoped;
+    for _ in 0..MAX_LINKSET_DEPTH {
+        let Some(tracked) = state.objects.get(&current) else {
+            return false;
+        };
+        if tracked.animated {
+            return true;
+        }
+        // A root's `parent` is its own scoped id; stop before looping forever.
+        if tracked.parent == current {
+            return false;
+        }
+        current = tracked.parent;
+    }
+    false
+}
+
+/// A guard on the linkset-chain walk in [`belongs_to_animesh`], against a malformed
+/// parent cycle.
+const MAX_LINKSET_DEPTH: usize = 32;
+
 /// Bind every worn rigged mesh attachment whose skeleton instance is now
 /// available (P17.2): for each object holding a [`PendingGeometry::RiggedMesh`],
 /// resolve the wearer avatar's skeleton-instance joint entities and spawn the
@@ -1019,7 +1075,7 @@ pub(crate) fn apply_object_meshes(
 )]
 pub(crate) fn apply_rigged_attachments(
     mut state: ResMut<ObjectState>,
-    avatars: Res<AvatarState>,
+    mut avatars: ResMut<AvatarState>,
     body: Option<Res<AvatarBody>>,
     mesh_manager: Res<MeshManager>,
     mut commands: Commands,
@@ -1058,10 +1114,12 @@ pub(crate) fn apply_rigged_attachments(
             continue;
         };
         // The wearer's rigged body and its skeleton-instance joints; retry next
-        // frame if the avatar (or its body) is not spawned yet.
+        // frame if the avatar (or its body) is not spawned yet. The joint entities
+        // are cloned so the immutable `avatars` borrow ends before the override
+        // record below borrows it mutably.
         let (Some(root), Some(joints)) = (
             avatars.body_root_of(agent),
-            avatars.joint_entities_of(agent),
+            avatars.joint_entities_of(agent).cloned(),
         ) else {
             continue;
         };
@@ -1127,6 +1185,27 @@ pub(crate) fn apply_rigged_attachments(
             // must not also be pinned to a rigid attachment-point node.
             tracked.parented = true;
         }
+        // Fold the rig's joint position overrides into the wearer's skeleton (R1):
+        // a fitted mesh body/head repositions the joints its inverse-bind matrices
+        // were baked against, so without these the mesh distorts at the extremities.
+        // Recording flags the avatar for a skeleton re-deform (the reference
+        // viewer's `addAttachmentOverridesForObject`). Skipped for an animesh (its
+        // overrides drive its own control avatar, not the wearer) and when disabled
+        // via `SL_VIEWER_JOINT_OVERRIDES=0` (A/B against the pre-override behaviour).
+        let overrides = if joint_overrides_enabled() && !belongs_to_animesh(&state, scoped) {
+            body.joint_overrides(&skin)
+        } else {
+            JointOverrides::default()
+        };
+        if !overrides.is_empty() {
+            debug!(
+                "rigged mesh {key} on avatar {agent}: {} joint position override(s), \
+                 lock_scale={}",
+                overrides.len(),
+                overrides.lock_scale()
+            );
+        }
+        avatars.record_joint_overrides(agent, key.uuid(), overrides);
         debug!("bound rigged mesh {key} on avatar {agent} to its skeleton");
     }
 }

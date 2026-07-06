@@ -1314,15 +1314,43 @@ review on aditi in P17.3. These are **pre-existing** gaps separate from the
 feature phases above; each needs iterative visual debugging against a live
 avatar, so they are collected here to be worked one at a time.
 
-- [ ] **R1. Rigged-mesh skinning distortion.** At **rest** (T-pose) a worn
-  rigged mesh should reproduce its bind pose undistorted, but clusters of
-  vertices are pulled to the wrong place — the **pants** streak toward the
-  extended arm, the **fingers** are broken, and the **feet** look wrong. The
-  signature (a vertex cluster dragged toward another joint) points at a
-  per-vertex joint-index / weight mapping error (off-by-one in the
-  `joint_names`→skeleton-index resolution, a stray influence, or a
-  joint rest-transform vs inverse-bind mismatch), not the texturing. Affects
-  clothing and BoM bodies.
+- [x] **R1. Rigged-mesh skinning distortion.** Two independent fixes, the first
+  being the actual cause of the visible distortion (confirmed live: pants, feet,
+  and the mesh-head teeth / eyes / eyelids all render cleanly after it).
+  - **Un-normalized skin weights (the real fix).** A worn rigged mesh's
+    per-vertex weights were fed to Bevy raw. Second Life stores each influence
+    as an independent quantized fraction and drops influences past the fourth,
+    so a vertex's weights need not sum to one — but Bevy's skinning shader
+    (unlike the reference viewer's `getPerVertexSkinMatrix`) does **not**
+    renormalize, so a weight sum `s < 1` blends in `(1 - s)` of the zero matrix
+    and drags the vertex a fraction of the way to the mesh origin — the downward
+    "streak toward the feet" of a rigged garment / head part. Fixed by
+    renormalizing the four weights to sum to one in `pack_influences`
+    (`sl-client-bevy` `meshes.rs`); a zero-sum vertex binds fully to slot 0.
+    This is what fixed the pants / feet and, as a bonus, the BoM-head teeth /
+    eyes / eyelids (also worn rigged mesh). The base system body was never
+    affected — it uses the (already normalized) adjacent-joint blend path.
+  - **Joint position overrides (fitted-body proportions / fingers).** A fitted
+    mesh body/head also ships an `alt_inverse_bind_matrix` per joint (the upload
+    "include joint positions" option) that repositions the skeleton to the pose
+    its inverse-binds assume; a worn rigged mesh carries its **own**
+    inverse-binds, so without the overrides its extremities sit slightly off
+    (the base body self-cancels, being skinned against *our own* bindposes).
+    Implemented as the reference viewer's `addAttachmentOverridesForObject`:
+    `joint_position_overrides` / `JointOverrides` +
+    `BevySkeleton::deformed_local_transforms_with` (0.1 mm threshold, replaces
+    the joint's local rest position, honours `lock_scale_if_joint_position`),
+    stored per contributing mesh so a per-joint conflict resolves to the highest
+    mesh id (`findActiveOverride`) and the set rebuilds as meshes come and go
+    (`clearAttachmentOverrides`). **Animesh (animated objects) are excluded** —
+    they drive their own control-avatar skeleton (`!vo->isAnimatedObject()`),
+    detected via the linkset root's `ExtendedMesh` `ANIMATED_MESH_ENABLED` flag;
+    without this a giant / rotated-frame animesh worn nearby would catapult the
+    wearer's skeleton. On the test avatar its own body's overrides are ≈0, so
+    this part is a near-no-op there; it targets bodies that genuinely reposition
+    joints. Toggle `SL_VIEWER_JOINT_OVERRIDES=0` disables it. `pelvis_offset` is
+    left unapplied (a hover/height concern, not distortion; `0.0` on every
+    observed body).
 - [ ] **R2. Fix rigid eyeball placement (was P15.5).** Once our own avatar was
   textured (P15.3), the classic rigid eyeballs (`avatar_eye.llm` pinned to
   `mEyeLeft` / `mEyeRight`) read as ~one eye-height too low on the face, their
@@ -1338,12 +1366,16 @@ avatar, so they are collected here to be worked one at a time.
   seats the eyeball in the socket; then correct the placement (likely a live
   visual iteration, since it renders "correct" by the numbers). Verify the
   eyeballs sit in the sockets on OpenSim.
-- [ ] **R3. System eyes/teeth show through a BoM head.** Under a worn mesh head
-  the system head parts should be hidden, but the rigid eyes (R2) and the
-  teeth (baked into the skinned `avatar_head.llm`, head region) poke through
-  — the head-region hide is incomplete and/or the rigid eyes are misplaced,
-  and there is a general head-top oddness. Ensure a BoM head fully hides the
-  system head/eyes/teeth.
+- [x] **R3. System eyes/teeth show through a BoM head.** Fixed by the R1
+  **weight-normalization** fix (confirmed live: the mesh head's teeth, eyes, and
+  eyelids now render cleanly). The "show through" was **misdiagnosed** as a
+  hiding gap: those parts are the *worn mesh head's own* rigged eyes / eyelids /
+  teeth, which had the R1 un-normalized-weight streak and protruded through the
+  mesh face — not the system `avatar_head.llm` parts poking out. Renormalizing
+  the skin weights seats them back inside the head. (The only remaining eye gap
+  is a missing eye *texture*, a fetch/material matter, not geometry — out of
+  scope here.) Note: this is distinct from **R2**, the *rigid* system eyeballs
+  (`avatar_eye.llm`), which are unaffected by the skinning fix and stay open.
 - [ ] **R4. Prim rendering fidelity.** Prims render too large, misplaced, and
   flat, and the per-face `TextureEntry` surface params — texture
   **repeat / offset / rotation** (and bump / shiny / glow / fullbright) —

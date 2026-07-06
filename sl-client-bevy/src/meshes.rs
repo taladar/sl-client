@@ -94,6 +94,16 @@ pub fn to_bevy_rigged_mesh(submesh: &Submesh) -> Mesh {
 /// Pack one vertex's [`VertexWeights`] into the four `(joint index, weight)` slots
 /// a Bevy `SkinnedMesh` reads. Influences beyond the fourth are dropped (Second
 /// Life rigs carry at most four); a vertex with none binds fully to joint `0`.
+///
+/// The four weights are **renormalized to sum to one**. Second Life stores each
+/// influence as an independent quantized fraction, and dropping influences past the
+/// fourth leaves the remainder summing to less than one — but Bevy's skinning
+/// shader (unlike the reference viewer's `getPerVertexSkinMatrix`) does *not*
+/// renormalize, so an un-normalized weight sum `s < 1` blends in `(1 - s)` of the
+/// zero matrix and drags the vertex a fraction of the way to the mesh origin (the
+/// downward "streak toward the feet" of a rigged garment). Normalizing here is the
+/// equivalent of the reference viewer's per-vertex weight scale. A vertex whose
+/// weights sum to zero (no usable influence) binds fully to joint `0`.
 fn pack_influences(weights: Option<&VertexWeights>) -> ([u16; 4], [f32; 4]) {
     let influences = weights.map_or(&[][..], |weights| weights.influences.as_slice());
     let indices = std::array::from_fn(|slot| {
@@ -101,15 +111,19 @@ fn pack_influences(weights: Option<&VertexWeights>) -> ([u16; 4], [f32; 4]) {
             .get(slot)
             .map_or(0_u16, |&(joint, _weight)| u16::from(joint))
     });
-    if influences.is_empty() {
-        return (indices, [1.0, 0.0, 0.0, 0.0]);
-    }
-    let weights = std::array::from_fn(|slot| {
+    let raw: [f32; 4] = std::array::from_fn(|slot| {
         influences
             .get(slot)
             .map_or(0.0_f32, |&(_joint, weight)| weight)
     });
-    (indices, weights)
+    let sum: f32 = raw.iter().sum();
+    if sum <= 0.0 {
+        // No usable influence: bind fully to the first slot rather than collapse to
+        // the origin under an all-zero skinning matrix.
+        return (indices, [1.0, 0.0, 0.0, 0.0]);
+    }
+    let inverse = 1.0 / sum;
+    (indices, raw.map(|weight| weight * inverse))
 }
 
 /// Build the inverse-bindpose matrices a rigged mesh's Bevy `SkinnedMesh` needs
@@ -345,6 +359,44 @@ mod tests {
         assert!(weights_close(weights.first(), [1.0, 0.0, 0.0, 0.0]));
         assert!(weights_close(weights.get(1), [0.25, 0.75, 0.0, 0.0]));
         assert!(weights_close(weights.get(2), [1.0, 0.0, 0.0, 0.0]));
+        Ok(())
+    }
+
+    #[test]
+    fn rigged_weights_are_renormalized_to_sum_to_one() -> Result<(), TestError> {
+        // Second Life weights need not sum to one (quantization + dropped influences
+        // past the fourth). Bevy does not renormalize, so we must: a vertex weighted
+        // 0.3 / 0.3 (sum 0.6) must become 0.5 / 0.5, not stay short and drag toward
+        // the origin; a five-influence vertex keeps only its first four, renormalized.
+        let mut submesh = triangle();
+        submesh.weights = Some(vec![
+            VertexWeights {
+                influences: vec![(1, 0.3), (2, 0.3)],
+            },
+            VertexWeights {
+                influences: vec![(0, 0.1), (1, 0.1), (2, 0.1), (3, 0.1), (4, 0.1)],
+            },
+            VertexWeights {
+                influences: vec![(0, 0.0)],
+            },
+        ]);
+        let mesh = to_bevy_rigged_mesh(&submesh);
+        let Some(VertexAttributeValues::Float32x4(weights)) =
+            mesh.attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT)
+        else {
+            return Err("JOINT_WEIGHT is not a Float32x4 attribute".into());
+        };
+        // 0.3 / 0.3 → 0.5 / 0.5.
+        assert!(weights_close(weights.first(), [0.5, 0.5, 0.0, 0.0]));
+        // Only the first four influences survive (each 0.1, sum 0.4) → each 0.25.
+        assert!(weights_close(weights.get(1), [0.25, 0.25, 0.25, 0.25]));
+        // A single zero-weight influence sums to zero → bind fully to slot 0.
+        assert!(weights_close(weights.get(2), [1.0, 0.0, 0.0, 0.0]));
+        // Every vertex's weights sum to one.
+        for slot in weights {
+            let sum: f32 = slot.iter().sum();
+            assert!((sum - 1.0).abs() < 1.0e-5, "weights sum to one");
+        }
         Ok(())
     }
 

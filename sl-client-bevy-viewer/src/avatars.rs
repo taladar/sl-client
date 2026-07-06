@@ -36,11 +36,12 @@ use std::collections::{HashMap, HashSet};
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, AvatarName, BakeRegion, BaseMesh, CoarseLocation, Command, DecodedTexture, MAX_FACES,
-    MaskTexture, MorphWeights, Object, PartMorphMask, ResolvedParams, ScopedObjectId,
-    SkeletalDeformations, SlCommand, SlEvent, SlIdentity, SlSessionEvent, TextureEntry, TextureKey,
-    avatar_texture, composite_region, decode_texture_entry, pcode, to_bevy_base_mesh,
-    to_bevy_image, to_bevy_morphed_mesh,
+    AgentKey, AvatarName, BakeRegion, BaseMesh, CoarseLocation, Command, DecodedTexture,
+    JointOverrides, MAX_FACES, MaskTexture, MeshSkin, MorphWeights, Object, PartMorphMask,
+    ResolvedParams, ScopedObjectId, SkeletalDeformations, SlCommand, SlEvent, SlIdentity,
+    SlSessionEvent, TextureEntry, TextureKey, Uuid, avatar_texture, composite_region,
+    decode_texture_entry, joint_position_overrides, pcode, to_bevy_base_mesh, to_bevy_image,
+    to_bevy_morphed_mesh,
 };
 
 use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
@@ -223,6 +224,15 @@ pub(crate) struct AvatarState {
     /// re-blended and its skeleton re-deformed — set on a fresh appearance and on
     /// a newly spawned body, drained by [`apply_avatar_appearance`].
     appearance_dirty: HashSet<AgentKey>,
+    /// The joint position overrides each avatar's worn rigged meshes impose (R1),
+    /// keyed by agent id then by the contributing **mesh asset id**. Kept per-mesh
+    /// (rather than pre-merged) so the set can be rebuilt as meshes come and go — the
+    /// reference viewer's `clearAttachmentOverrides` + rebuild — and so a per-joint
+    /// conflict resolves to the highest-mesh-id override (`findActiveOverride`), via
+    /// [`effective_joint_overrides`](Self::effective_joint_overrides). Absent for an
+    /// avatar wearing no position-carrying rig — its skeleton stays on the plain
+    /// appearance shape. `apply_avatar_appearance` folds the effective set in.
+    joint_overrides: HashMap<AgentKey, HashMap<Uuid, JointOverrides>>,
     /// Whether each avatar's `TEX_SKIRT_BAKED` slot holds a visible bake, from its
     /// latest appearance — the reference viewer's skirt-worn test. Absent means
     /// not yet known, treated as no skirt (the base skirt mesh stays hidden).
@@ -310,6 +320,16 @@ impl AvatarBody {
     /// region material resolves (P17.3).
     pub(crate) const fn skin_material(&self) -> &Handle<StandardMaterial> {
         &self.material
+    }
+
+    /// The joint position overrides a worn rigged mesh `skin` imposes on this
+    /// skeleton (R1): its rig-supplied per-joint rest positions, resolved against
+    /// the shared skeleton's name lookup and default local transforms. Empty when
+    /// the rig ships no joint positions (an unfitted rig). The result is applied by
+    /// [`apply_avatar_appearance`] so the mesh deforms undistorted (the reference
+    /// viewer's `addAttachmentOverridesForObject`).
+    pub(crate) fn joint_overrides(&self, skin: &MeshSkin) -> JointOverrides {
+        joint_position_overrides(skin, &self.joint_lookup, &self.joint_locals)
     }
 }
 
@@ -787,9 +807,11 @@ impl AvatarState {
         }
         // The body's joint entities and attachment-point nodes are despawned with
         // its anchor; drop the stores so a later attachment can no longer resolve
-        // them (P16.1/P16.2).
+        // them (P16.1/P16.2). The recorded joint overrides go too, so a re-spawn
+        // rebuilds them from the meshes that re-bind (R1).
         let _dropped = self.joints.remove(&agent);
         let _dropped_nodes = self.attachment_nodes.remove(&agent);
+        self.clear_joint_overrides(agent);
     }
 
     /// The attachment-point node entity a worn attachment parents to (P16.2): the
@@ -821,6 +843,58 @@ impl AvatarState {
     /// no-`--viewer-assets` avatar, or simply not spawned yet).
     pub(crate) fn joint_entities_of(&self, agent: AgentKey) -> Option<&Vec<Entity>> {
         self.joints.get(&agent)
+    }
+
+    /// Record the joint position overrides that worn rigged `mesh` imposes on
+    /// `agent`'s skeleton (R1), replacing any previous contribution from that mesh
+    /// (a rebind is idempotent). Flags the avatar for a skeleton re-deform **only
+    /// when the contribution actually changed**, so re-binding identical rig parts
+    /// (a mesh body's many same-rigged pieces) does not thrash the appearance pass.
+    pub(crate) fn record_joint_overrides(
+        &mut self,
+        agent: AgentKey,
+        mesh: Uuid,
+        overrides: JointOverrides,
+    ) {
+        let per_mesh = self.joint_overrides.entry(agent).or_default();
+        if per_mesh.get(&mesh) == Some(&overrides) {
+            return;
+        }
+        if overrides.is_empty() {
+            // A mesh that used to override but no longer does: drop its entry so the
+            // rebuilt effective set no longer carries it.
+            if per_mesh.remove(&mesh).is_none() {
+                return;
+            }
+        } else {
+            let _prev = per_mesh.insert(mesh, overrides);
+        }
+        self.appearance_dirty.insert(agent);
+    }
+
+    /// The effective joint position overrides for `agent` (R1): the per-joint winner
+    /// across every worn rigged mesh, resolved to the **highest mesh id** on a
+    /// conflict (the reference viewer's `findActiveOverride`) with the scale lock
+    /// sticky. `None` when the avatar wears no position-carrying rig.
+    pub(crate) fn effective_joint_overrides(&self, agent: AgentKey) -> Option<JointOverrides> {
+        let per_mesh = self.joint_overrides.get(&agent)?;
+        if per_mesh.is_empty() {
+            return None;
+        }
+        // Merge in ascending mesh-id order so the highest mesh id wins each joint.
+        let mut meshes: Vec<(&Uuid, &JointOverrides)> = per_mesh.iter().collect();
+        meshes.sort_by_key(|(mesh, _)| **mesh);
+        let mut effective = JointOverrides::default();
+        for (_mesh, overrides) in meshes {
+            effective.merge(overrides);
+        }
+        Some(effective)
+    }
+
+    /// Forget every joint position override recorded for `agent` (R1) — e.g. when
+    /// the avatar despawns, so a re-spawn rebuilds them from scratch.
+    pub(crate) fn clear_joint_overrides(&mut self, agent: AgentKey) {
+        let _prev = self.joint_overrides.remove(&agent);
     }
 
     /// The agent whose avatar a worn object `scoped` hangs off — chasing parent
@@ -1826,7 +1900,16 @@ pub(crate) fn apply_avatar_appearance(
                 MorphWeights::from_resolved(library.params(), &resolved),
             );
             let deform = SkeletalDeformations::from_resolved(library.params(), &resolved);
-            joint_transforms.insert(agent, library.skeleton().deformed_local_transforms(&deform));
+            // Fold in the worn rigged meshes' joint position overrides (R1) so a
+            // fitted mesh body/head poses the skeleton to the positions its
+            // inverse-bind matrices were baked against, rather than the plain shape.
+            let overrides = state.effective_joint_overrides(agent).unwrap_or_default();
+            joint_transforms.insert(
+                agent,
+                library
+                    .skeleton()
+                    .deformed_local_transforms_with(&deform, &overrides),
+            );
         }
     }
     // Rebuild the mesh of every part belonging to a resolved avatar, masking its

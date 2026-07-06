@@ -197,7 +197,10 @@ pub use sl_bake::{
 };
 
 pub use crate::assets::BevyAssetFetcher;
-pub use crate::avatars::{BaseMeshSkin, BevySkeleton, to_bevy_base_mesh, to_bevy_morphed_mesh};
+pub use crate::avatars::{
+    BaseMeshSkin, BevySkeleton, JointOverrides, joint_position_overrides, to_bevy_base_mesh,
+    to_bevy_morphed_mesh,
+};
 pub use crate::meshes::{
     BevyMeshFetcher, rigged_inverse_bindposes, to_bevy_mesh, to_bevy_meshes, to_bevy_rigged_mesh,
 };
