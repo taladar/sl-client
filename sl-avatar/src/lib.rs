@@ -24,10 +24,12 @@
 //!   position deformations for the skeleton instance.
 //! - `masks` (P14.5) — parse the `<morph_masks>` table and sample per-vertex
 //!   clothing-morph mask weights from a region's decoded baked texture.
+//! - `skin` (P17.1) — the matrix-palette skinning math that deforms a rigged
+//!   `sl-mesh` body/clothing with an avatar's posed skeleton instance.
 //!
 //! P12.2 lands the [`skeleton`] module, P12.3 the [`basemesh`] module, P12.4 the
-//! [`params`] module, P13.3 the [`morph`] module, and P13.4 the [`resolve`] and
-//! [`skeletal`] modules.
+//! [`params`] module, P13.3 the [`morph`] module, P13.4 the [`resolve`] and
+//! [`skeletal`] modules, and P17.1 the [`skin`] module.
 
 pub mod bakecolor;
 pub mod basemesh;
@@ -37,6 +39,7 @@ pub mod params;
 pub mod resolve;
 pub mod skeletal;
 pub mod skeleton;
+pub mod skin;
 pub mod wearable;
 
 pub use bakecolor::{combine_layer_color, global_color, global_color_params};
@@ -55,6 +58,7 @@ pub use skeletal::{BoneDeform, SkeletalDeformations};
 pub use skeleton::{
     AttachmentPointDef, AttachmentPoints, CollisionVolume, Joint, Skeleton, SkeletonError,
 };
+pub use skin::SkinningPalette;
 pub use wearable::{WearableAsset, WearableError};
 
 pub use params::{ColorOp, ColorRamp};
