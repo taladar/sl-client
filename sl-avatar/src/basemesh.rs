@@ -74,17 +74,25 @@ pub enum BaseMeshError {
 }
 
 /// A per-vertex skin weight in the legacy base body: the vertex is rigidly
-/// bound between two adjacent skin joints and linearly blended between them.
+/// bound between two adjacent joints in the mesh's **joint-render-data** list and
+/// linearly blended between them.
 ///
-/// The on-disk form is a single `f32` whose integer part selects the first
-/// joint and whose fractional part is the blend toward the *next* joint in the
-/// mesh's own [`joint_names`](BaseMesh::joint_names) table (Firestorm
-/// `LLViewerJointMesh::updateGeometry`: `joint = floor(w); blend = w - joint`).
+/// The on-disk form is a single `f32` whose integer part selects the first joint
+/// and whose fractional part is the blend toward the *next* joint (the Firestorm
+/// avatar skinning shader `avatarSkinV.glsl`: `i = floor(weight); mix(palette[i],
+/// palette[i+1], fract(weight))`). Crucially the integer part indexes the
+/// reference viewer's `mJointRenderData` — a depth-first walk of the skeleton with
+/// each disjoint group's base ancestor prepended — **not** the mesh's own
+/// [`joint_names`](BaseMesh::joint_names) table (the two orders differ; e.g. the
+/// head names `[mHead, mNeck]` but its render list is `[…, mNeck, mHead]`, so a
+/// face vertex's weight `2.0` means `mHead`, not the second name). The runtime
+/// rebuilds that render list (`sl-client-bevy`'s `base_mesh_skin`) and this index
+/// lands into it directly.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VertexSkinWeight {
-    /// The index of the first bound joint within
-    /// [`BaseMesh::joint_names`]. The second joint is `joint + 1` (clamped to
-    /// the last joint when `blend` is `0`).
+    /// The index of the first bound joint within the mesh's joint-render-data
+    /// list. The second joint is `joint + 1` (clamped to the last render-list
+    /// entry when `blend` is `0`).
     pub joint: usize,
     /// The blend factor toward `joint + 1`, in `0.0..=1.0`.
     pub blend: f32,
@@ -216,7 +224,7 @@ impl BaseMesh {
             Vec::new()
         };
 
-        let weights = decode_weights(&raw_weights, joint_names.len());
+        let weights = decode_weights(&raw_weights);
 
         let morphs = cursor.read_morphs()?;
         let shared_verts = cursor.read_shared_verts()?;
@@ -383,24 +391,35 @@ impl LodMesh {
 
 /// Split each raw skin-weight float into its `(joint, blend)` form: `joint =
 /// floor(w)` (clamped to the joint table) and `blend = w - joint`.
-fn decode_weights(raw: &[f32], num_joints: usize) -> Vec<VertexSkinWeight> {
-    raw.iter()
-        .map(|&weight| split_weight(weight, num_joints))
-        .collect()
+fn decode_weights(raw: &[f32]) -> Vec<VertexSkinWeight> {
+    raw.iter().copied().map(split_weight).collect()
 }
 
-/// Split one raw skin-weight float into `(joint, blend)` without a float→int
-/// cast (the workspace lints forbid `as`): step the joint index up while the
-/// next integer boundary still fits under the (non-negative) weight and a
-/// further joint remains.
-fn split_weight(weight: f32, num_joints: usize) -> VertexSkinWeight {
+/// An upper bound on a decoded skin-weight's integer part, guarding
+/// [`split_weight`]'s loop against a garbage weight (the reference viewer's
+/// matrix palette holds 45 joints; base-body render lists are far smaller).
+const MAX_SKIN_JOINT_INDEX: usize = 63;
+
+/// Split one raw skin-weight float into `(joint, blend)` without a float→int cast
+/// (the workspace lints forbid `as`): step the joint index up while the next
+/// integer boundary still fits under the (non-negative) weight.
+///
+/// The integer part is kept **raw** — it indexes the mesh's *joint-render-data*
+/// list (the reference viewer's `mJointRenderData`: a depth-first walk of the
+/// skeleton with each disjoint group's base ancestor prepended), **not** the
+/// mesh's own `joint_names` table, and the two orders differ. The runtime
+/// (`sl-client-bevy`'s `base_mesh_skin`) rebuilds that render list so this index
+/// lands on the right joint; clamping it to `joint_names.len()` here would bind,
+/// for example, every head-mesh face vertex (weight `2.0`) to `mNeck` instead of
+/// `mHead`, which only shows up as a skinning distortion once the skeleton is
+/// deformed.
+fn split_weight(weight: f32) -> VertexSkinWeight {
     let clamped = weight.max(0.0);
-    let last_joint = num_joints.saturating_sub(1);
     let mut joint = 0_usize;
     loop {
         let next = joint.saturating_add(1);
         let next_boundary = u16::try_from(next).map_or(f32::MAX, f32::from);
-        if next <= last_joint && next_boundary <= clamped {
+        if next <= MAX_SKIN_JOINT_INDEX && next_boundary <= clamped {
             joint = next;
         } else {
             break;
@@ -702,7 +721,7 @@ mod tests {
         assert_eq!(mesh.weights().len(), 4);
 
         // Weight 0.0 -> joint 0, no blend; weight 0.25 -> joint 0, blend 0.25;
-        // weight 1.0 -> joint 1 (clamped last), blend 0.
+        // weight 1.0 -> joint 1 (the raw integer part), blend 0.
         let w0 = mesh.weights().first().ok_or("weight 0")?;
         assert_eq!(w0.joint, 0);
         assert!((w0.blend - 0.0).abs() < 1.0e-4);

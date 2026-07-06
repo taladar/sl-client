@@ -78,7 +78,16 @@ fn build_base_mesh(base: &BaseMesh, positions: &[[f32; 3]], normals: &[[f32; 3]]
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, base.tex_coords().to_vec());
     }
     if base.has_weights() {
-        let last_joint = base.joint_names().len().saturating_sub(1);
+        // Weights index the part's joint-render-data list (rebuilt by
+        // [`BevySkeleton::base_mesh_skin`]), whose last valid index is the largest
+        // integer part across the part's weights. Clamp the second (blend-toward)
+        // joint to that so a top-weighted vertex (blend 0) stays in range.
+        let last_joint = base
+            .weights()
+            .iter()
+            .map(|weight| weight.joint)
+            .max()
+            .unwrap_or(0);
         let mut joint_indices: Vec<[u16; 4]> = Vec::with_capacity(base.weights().len());
         let mut joint_weights: Vec<[f32; 4]> = Vec::with_capacity(base.weights().len());
         for weight in base.weights() {
@@ -454,18 +463,26 @@ impl BevySkeleton {
         self.bind_globals.get(index).map(|global| global.inverse())
     }
 
-    /// Resolves a base part's own joint-name table against this skeleton,
-    /// producing the [`BaseMeshSkin`] the caller feeds into a `SkinnedMesh`.
+    /// Resolves a base part's skinning against this skeleton, producing the
+    /// [`BaseMeshSkin`] the caller feeds into a `SkinnedMesh`.
+    ///
+    /// The part's per-vertex weights index the reference viewer's
+    /// **joint-render-data** list, not the mesh's `joint_names` table, so this
+    /// rebuilds that list (`joint_render_data`) — a
+    /// depth-first walk of the skeleton over the part's skin joints with each
+    /// group's base ancestor prepended — and returns its joints (in render order)
+    /// and their parallel inverse bind matrices.
     ///
     /// Returns `None` if any of the part's joint names is absent from the
     /// skeleton (the part cannot be skinned to it).
     #[must_use]
     pub fn base_mesh_skin(&self, base: &BaseMesh) -> Option<BaseMeshSkin> {
-        let joints: Vec<usize> = base
+        let skin_joints: Vec<usize> = base
             .joint_names()
             .iter()
             .map(|name| self.find(name))
             .collect::<Option<Vec<usize>>>()?;
+        let joints = self.joint_render_data(&skin_joints);
         let inverse_bindposes: Vec<Mat4> = joints
             .iter()
             .map(|&index| self.inverse_bindpose(index))
@@ -474,6 +491,40 @@ impl BevySkeleton {
             joints,
             inverse_bindposes,
         })
+    }
+
+    /// Rebuild the reference viewer's mesh joint-render-data ordering
+    /// (`LLAvatarJointMesh::setupJoint`) for a base part skinned to `skin_joints`:
+    /// walk the skeleton in depth-first (parent-before-child) order and, for each
+    /// joint the part skins to, append it — prepending its base ancestor first
+    /// whenever the previous render-list entry is not already that ancestor. The
+    /// per-vertex weight's integer part indexes into the returned list.
+    ///
+    /// The skeleton's joint order is already depth-first pre-order (a parent
+    /// always precedes its children), so a single forward scan reproduces the
+    /// recursive traversal; a base part's ancestor is its direct parent (every
+    /// base-body joint is a base-support joint).
+    #[must_use]
+    fn joint_render_data(&self, skin_joints: &[usize]) -> Vec<usize> {
+        let skin: std::collections::HashSet<usize> = skin_joints.iter().copied().collect();
+        let mut render: Vec<usize> = Vec::new();
+        for index in 0..self.locals.len() {
+            if !skin.contains(&index) {
+                continue;
+            }
+            match self.parents.get(index).copied().flatten() {
+                // Previous entry already the ancestor: just append this joint.
+                Some(ancestor) if render.last() == Some(&ancestor) => render.push(index),
+                // Otherwise prepend the base ancestor, then this joint.
+                Some(ancestor) => {
+                    render.push(ancestor);
+                    render.push(index);
+                }
+                // A root skin joint has no ancestor to prepend.
+                None => render.push(index),
+            }
+        }
+        render
     }
 }
 
@@ -719,6 +770,25 @@ mod tests {
         assert_eq!(bevy.parents().get(chest), Some(&Some(torso)));
         // Alias resolution matches the underlying skeleton.
         assert_eq!(bevy.find("chest"), Some(chest));
+        Ok(())
+    }
+
+    #[test]
+    fn joint_render_data_matches_depth_first_with_ancestor() -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        let bevy = BevySkeleton::from_skeleton(&skeleton);
+        let pelvis = bevy.find("mPelvis").ok_or("mPelvis present")?;
+        let torso = bevy.find("mTorso").ok_or("mTorso present")?;
+        let chest = bevy.find("mChest").ok_or("mChest present")?;
+        // A base part naming its joints leaf-first (`[mChest, mTorso]`, like the
+        // head mesh's `[mHead, mNeck]`) still yields the reference viewer's render
+        // list: a depth-first walk (parent before child) with the base ancestor
+        // (`mPelvis`) prepended. So a per-vertex weight of `1.0` resolves to
+        // `mTorso` (index 1) and `2.0` to `mChest` (index 2) — not the reversed
+        // `joint_names` order, which was the skinning bug that dragged the head's
+        // face by the neck under deformation.
+        let render = bevy.joint_render_data(&[chest, torso]);
+        assert_eq!(render, vec![pelvis, torso, chest]);
         Ok(())
     }
 

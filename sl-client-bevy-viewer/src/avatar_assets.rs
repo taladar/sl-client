@@ -22,8 +22,9 @@ use std::path::Path;
 
 use bevy::prelude::Resource;
 use sl_client_bevy::{
-    AttachmentPoints, BaseMesh, BaseMeshError, BaseMeshSkin, BevySkeleton, MorphMasks, ParamError,
-    Skeleton, SkeletonError, VisualParams, avatar_texture,
+    AttachmentPoints, BaseMesh, BaseMeshError, BaseMeshSkin, BevySkeleton, DecodedTexture,
+    MorphMasks, ParamError, Skeleton, SkeletonError, VisualParams, avatar_texture,
+    static_layer_files,
 };
 use tracing::warn;
 
@@ -238,6 +239,11 @@ pub(crate) struct AvatarAssetLibrary {
     /// The `<attachment_point>` table, mapping each attachment point to the
     /// skeleton joint an attached object hangs from (P16.1).
     attachment_points: AttachmentPoints,
+    /// The decoded static `character/` TGA layer textures the client-side bake
+    /// composites (the skin-grain base, eye sclera, and skin colour details), keyed
+    /// by file name. A file that could not be read / decoded is simply absent, and
+    /// its bake layer falls back (a static base to a solid skin fill).
+    static_textures: HashMap<&'static str, DecodedTexture>,
 }
 
 impl AvatarAssetLibrary {
@@ -292,15 +298,25 @@ impl AvatarAssetLibrary {
             });
         }
 
+        let static_textures = load_static_layer_textures(dir);
+
         let library = Self {
             skeleton,
             parts,
             params,
             masks,
             attachment_points,
+            static_textures,
         };
         library.log_summary();
         Ok(library)
+    }
+
+    /// The decoded static `character/` TGA layer texture of `name`, if it loaded —
+    /// the `static_image` source for the client-side bake plan
+    /// ([`region_layers`](sl_client_bevy::region_layers)).
+    pub(crate) fn static_texture(&self, name: &str) -> Option<&DecodedTexture> {
+        self.static_textures.get(name)
     }
 
     /// The Bevy skeleton (joint rest transforms, parents, bind poses).
@@ -364,12 +380,55 @@ impl AvatarAssetLibrary {
     /// Log a one-line summary of what was loaded.
     fn log_summary(&self) {
         tracing::info!(
-            "loaded avatar assets: {} joints, {} base parts, {} visual params, {} morph masks, {} attachment points",
+            "loaded avatar assets: {} joints, {} base parts, {} visual params, {} morph masks, {} attachment points, {} static bake layers",
             self.skeleton.len(),
             self.parts.len(),
             self.params.all().len(),
             self.masks.len(),
             self.attachment_points.all().len(),
+            self.static_textures.len(),
         );
     }
+}
+
+/// Load and decode the static `character/` TGA bake-layer textures the
+/// client-side compositor needs (the skin-grain base, eye sclera, and skin colour
+/// details — [`static_layer_files`]) from `dir`, keyed by file name. A file that
+/// cannot be read or decoded is logged and skipped (its bake layer then falls
+/// back), never failing the whole load.
+fn load_static_layer_textures(dir: &Path) -> HashMap<&'static str, DecodedTexture> {
+    let mut textures = HashMap::new();
+    for file in static_layer_files() {
+        match fs_err::read(dir.join(file)) {
+            Ok(bytes) => match decode_tga(&bytes) {
+                Ok(decoded) => {
+                    let _prev = textures.insert(file, decoded);
+                }
+                Err(error) => warn!("decoding static bake layer `{file}`: {error}; skipping"),
+            },
+            Err(error) => warn!("reading static bake layer `{file}`: {error}; skipping"),
+        }
+    }
+    textures
+}
+
+/// Decode a TGA image's bytes into a [`DecodedTexture`] (RGBA8), recording the
+/// source component count so the compositor reads a colour-detail layer's alpha
+/// but treats a grayscale skin-grain base as opaque.
+fn decode_tga(bytes: &[u8]) -> Result<DecodedTexture, image::ImageError> {
+    let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Tga)?;
+    let components = match image.color() {
+        image::ColorType::L8 | image::ColorType::L16 => 1,
+        image::ColorType::La8 | image::ColorType::La16 => 2,
+        image::ColorType::Rgb8 | image::ColorType::Rgb16 | image::ColorType::Rgb32F => 3,
+        _other => 4,
+    };
+    let rgba = image.to_rgba8();
+    Ok(DecodedTexture {
+        width: rgba.width(),
+        height: rgba.height(),
+        components,
+        discard_level: sl_client_bevy::DiscardLevel::FULL,
+        pixels: bytes::Bytes::from(rgba.into_raw()),
+    })
 }

@@ -33,7 +33,9 @@ pub mod plan;
 pub mod region;
 
 pub use composite::{BakedImage, Layer, LayerKind, TexGen, composite_region};
-pub use plan::{LayerTint, PlannedLayer, region_layers, region_plan};
+pub use plan::{
+    LayerSource, LayerTint, PlannedLayer, region_layers, region_plan, static_layer_files,
+};
 pub use region::BakeRegion;
 
 pub use sl_texture::DecodedImage;

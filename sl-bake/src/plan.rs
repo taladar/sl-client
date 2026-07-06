@@ -6,10 +6,14 @@
 //! lipstick, blush, freckles, bump maps) driven purely by visual params with no
 //! wearable texture. Those need a per-param procedural renderer the simplified
 //! [`composite`](crate::composite) engine does not have, so the plan here keeps
-//! only the layers backed by a **worn wearable's texture** (the skin bodypaint,
-//! clothing, tattoos, alpha masks) plus the solid skin-tone base — the inputs a
-//! client-side bake actually composites from fetched assets. Layer order and
-//! membership follow `avatar_lad.xml`'s `<layer_set>` blocks.
+//! the layers backed by a **worn wearable's texture** (the skin bodypaint,
+//! clothing, tattoos, alpha masks) and the **static `character/` TGA** diffuse
+//! layers the reference viewer bakes into every avatar regardless of wearables —
+//! the skin-grain base, the eye sclera (`eyewhite.tga`), and the skin colour
+//! details (nipples / toenails / face colour). The purely procedural cosmetic /
+//! bump layers (shading, highlights, lipstick, blush, freckles) are still out of
+//! scope: they need the per-param colour renderer this crate does not have.
+//! Layer order and membership follow `avatar_lad.xml`'s `<layer_set>` blocks.
 //!
 //! [`region_layers`] turns a plan into the ordered [`Layer`] list the compositor
 //! wants, given closures that resolve each slot's decoded texture and each
@@ -38,15 +42,31 @@ pub enum LayerTint {
     Params(&'static [i32]),
 }
 
-/// One planned layer of a bake region: which worn wearable and `TextureEntry`
-/// slot supply it, how it composites, and how it is tinted.
+/// Where a planned layer's texture comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayerSource {
+    /// No texture — a solid fill of the layer's [`tint`](PlannedLayer::tint) (the
+    /// skin-tone base, or a static base whose TGA could not be loaded).
+    Solid,
+    /// A worn wearable's `TextureEntry` layer slot (`sl-proto`'s
+    /// `avatar_texture` indices) supplies the texture.
+    Wearable(usize),
+    /// A static `character/` TGA file supplies the texture — the reference
+    /// viewer's baked-in skin-grain / sclera / colour-detail layers, present on
+    /// every avatar regardless of the worn wearables.
+    Static(&'static str),
+}
+
+/// One planned layer of a bake region: where its texture comes from, which
+/// wearable it belongs to, how it composites, and how it is tinted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PlannedLayer {
-    /// The avatar `TextureEntry` layer slot supplying this layer's texture, or
-    /// `None` for a solid tint fill (the skin-tone base).
-    pub slot: Option<usize>,
+    /// Where this layer's texture comes from.
+    pub source: LayerSource,
     /// The wearable type that supplies this layer (decides whether it is worn and
-    /// which wearable's params tint it).
+    /// which wearable's params tint it). For a [`LayerSource::Static`] layer this
+    /// is the region's owning body part (skin / eyes), used only for the tint /
+    /// base worn-gate.
     pub wearable: WearableType,
     /// How this layer composites over the ones below it.
     pub kind: LayerKind,
@@ -57,18 +77,6 @@ pub struct PlannedLayer {
 }
 
 impl PlannedLayer {
-    /// A solid tint-fill base layer (no texture) from `wearable`, tinted by
-    /// `tint` — the skin-tone foundation of the head / upper / lower bakes.
-    const fn solid_base(wearable: WearableType, tint: LayerTint) -> Self {
-        Self {
-            slot: None,
-            wearable,
-            kind: LayerKind::Base,
-            tex_gen: TexGen::Default,
-            tint,
-        }
-    }
-
     /// A textured layer of `kind` from `wearable`'s `slot`, tinted by `tint`.
     const fn textured(
         slot: usize,
@@ -77,7 +85,40 @@ impl PlannedLayer {
         tint: LayerTint,
     ) -> Self {
         Self {
-            slot: Some(slot),
+            source: LayerSource::Wearable(slot),
+            wearable,
+            kind,
+            tex_gen: TexGen::Default,
+            tint,
+        }
+    }
+
+    /// A static-TGA base layer from `file` (a `character/` TGA), attributed to
+    /// `wearable` (for the base worn-gate) and tinted by `tint` — the skin-grain
+    /// foundation, or the eye sclera. Falls back to a solid tint fill if the TGA
+    /// cannot be loaded, so the region never loses its base.
+    const fn static_base(file: &'static str, wearable: WearableType, tint: LayerTint) -> Self {
+        Self {
+            source: LayerSource::Static(file),
+            wearable,
+            kind: LayerKind::Base,
+            tex_gen: TexGen::Default,
+            tint,
+        }
+    }
+
+    /// A static-TGA layer of `kind` from `file` (a `character/` TGA), attributed
+    /// to `wearable` and tinted by `tint` — the reference viewer's baked-in skin
+    /// colour details (nipples / toenails / face colour). Skipped if the TGA
+    /// cannot be loaded.
+    const fn static_layer(
+        file: &'static str,
+        wearable: WearableType,
+        kind: LayerKind,
+        tint: LayerTint,
+    ) -> Self {
+        Self {
+            source: LayerSource::Static(file),
             wearable,
             kind,
             tex_gen: TexGen::Default,
@@ -93,11 +134,21 @@ use WearableType::{
     Undershirt, Universal,
 };
 
-/// The head bake's layers, in composite order (skin tone → skin paint → alpha →
-/// tattoos), following `avatar_lad.xml`'s `head` `<layer_set>`.
+/// The head bake's layers, in composite order (skin-grain base → face colour →
+/// skin paint → alpha → tattoos), following `avatar_lad.xml`'s `head`
+/// `<layer_set>` (the `base` skin-grain and `headcolor` static TGAs, minus the
+/// procedural shading / make-up layers).
 const HEAD: &[PlannedLayer] = &[
-    PlannedLayer::solid_base(Skin, LayerTint::Global("skin_color")),
+    PlannedLayer::static_base("head_skingrain.tga", Skin, LayerTint::Global("skin_color")),
+    PlannedLayer::static_layer("head_color.tga", Skin, Blend, LayerTint::White),
     PlannedLayer::textured(tex::HEAD_BODYPAINT, Skin, Blend, LayerTint::White),
+    // The eyelash-shape alpha (`avatar_lad.xml`'s `head` `eyelash alpha`
+    // visibility-mask layer): carves the lash surround out of the head bake's
+    // alpha so the eyelash mesh — which shares the head bake — renders the lashes
+    // over a transparent surround rather than an opaque skin-coloured quad. It is
+    // near-fully-opaque everywhere but the eyelash UV corner, so the head skin
+    // stays opaque.
+    PlannedLayer::static_layer("head_alpha.tga", Skin, AlphaMask, LayerTint::White),
     PlannedLayer::textured(tex::HEAD_ALPHA, Alpha, AlphaMask, LayerTint::White),
     PlannedLayer::textured(
         tex::HEAD_TATTOO,
@@ -115,7 +166,8 @@ const HEAD: &[PlannedLayer] = &[
 
 /// The upper-body bake's layers, in composite order.
 const UPPER: &[PlannedLayer] = &[
-    PlannedLayer::solid_base(Skin, LayerTint::Global("skin_color")),
+    PlannedLayer::static_base("body_skingrain.tga", Skin, LayerTint::Global("skin_color")),
+    PlannedLayer::static_layer("upperbody_color.tga", Skin, Blend, LayerTint::White),
     PlannedLayer::textured(tex::UPPER_BODYPAINT, Skin, Blend, LayerTint::White),
     PlannedLayer::textured(
         tex::UPPER_TATTOO,
@@ -158,7 +210,8 @@ const UPPER: &[PlannedLayer] = &[
 
 /// The lower-body bake's layers, in composite order.
 const LOWER: &[PlannedLayer] = &[
-    PlannedLayer::solid_base(Skin, LayerTint::Global("skin_color")),
+    PlannedLayer::static_base("body_skingrain.tga", Skin, LayerTint::Global("skin_color")),
+    PlannedLayer::static_layer("lowerbody_color.tga", Skin, Blend, LayerTint::White),
     PlannedLayer::textured(tex::LOWER_BODYPAINT, Skin, Blend, LayerTint::White),
     PlannedLayer::textured(
         tex::LOWER_TATTOO,
@@ -205,10 +258,13 @@ const LOWER: &[PlannedLayer] = &[
     PlannedLayer::textured(tex::LOWER_ALPHA, Alpha, AlphaMask, LayerTint::White),
 ];
 
-/// The eyes bake's layers: the iris (tinted by eye colour), its alpha, and a
-/// universal tattoo overlay.
+/// The eyes bake's layers: the opaque white sclera base (`eyewhite.tga`), the
+/// iris blended over it (tinted by eye colour), its alpha, and a universal tattoo
+/// overlay. The sclera base is what gives the eyeball its white — without it the
+/// iris (a transparent-surround texture) reads as an untextured blob.
 const EYES: &[PlannedLayer] = &[
-    PlannedLayer::textured(tex::EYES_IRIS, Eyes, Base, LayerTint::Global("eye_color")),
+    PlannedLayer::static_base("eyewhite.tga", Eyes, LayerTint::White),
+    PlannedLayer::textured(tex::EYES_IRIS, Eyes, Blend, LayerTint::Global("eye_color")),
     PlannedLayer::textured(tex::EYES_ALPHA, Alpha, AlphaMask, LayerTint::White),
     PlannedLayer::textured(
         tex::EYES_TATTOO,
@@ -263,38 +319,48 @@ pub const fn region_plan(region: BakeRegion) -> &'static [PlannedLayer] {
 }
 
 /// Assemble the ordered [`Layer`] list a bake region composites from, resolving
-/// each planned layer against the worn wearables.
+/// each planned layer against the worn wearables and the static `character/`
+/// TGAs.
 ///
-/// - `worn(type)` — whether a wearable of that type is worn (gates the solid
-///   skin-tone base, which has no texture to key off).
+/// - `worn(type)` — whether a wearable of that type is worn (gates every base
+///   layer, which is the region's opaque foundation).
 /// - `image_for(slot)` — the decoded texture for a `TextureEntry` layer slot, or
 ///   `None` when no worn wearable supplies it (that layer is then omitted).
+/// - `static_image(file)` — the decoded static `character/` TGA of that name, or
+///   `None` when it could not be loaded (a static base then falls back to a solid
+///   tint fill; a static detail layer is omitted).
 /// - `tint_for(tint, wearable)` — the linear-RGBA tint for a layer, resolved from
 ///   the wearable's visual params (opaque white for [`LayerTint::White`]).
 ///
-/// A textured layer whose `image_for` yields `None` is skipped; the solid base is
-/// skipped unless its wearable is worn. The result feeds
+/// A worn-wearable layer whose `image_for` yields `None` is skipped; a base layer
+/// is skipped unless its wearable is worn. The result feeds
 /// [`composite_region`](crate::composite_region).
 pub fn region_layers(
     region: BakeRegion,
     worn: impl Fn(WearableType) -> bool,
     image_for: impl Fn(usize) -> Option<DecodedImage>,
+    static_image: impl Fn(&str) -> Option<DecodedImage>,
     tint_for: impl Fn(LayerTint, WearableType) -> [f32; 4],
 ) -> Vec<Layer> {
     let mut layers = Vec::new();
     for planned in region_plan(region) {
+        // A base layer (the region's opaque foundation — skin grain, eye sclera)
+        // renders only when its wearable is worn, matching the reference layer-set.
+        if planned.kind == LayerKind::Base && !worn(planned.wearable) {
+            continue;
+        }
         let tint = tint_for(planned.tint, planned.wearable);
-        let layer = match planned.slot {
-            None => {
-                if !worn(planned.wearable) {
-                    continue;
-                }
-                Layer::solid(planned.kind, tint).with_tex_gen(planned.tex_gen)
-            }
-            Some(slot) => {
-                let Some(image) = image_for(slot) else {
-                    continue;
-                };
+        let image = match planned.source {
+            LayerSource::Solid => None,
+            // A worn-wearable layer with no decoded texture contributes nothing.
+            LayerSource::Wearable(slot) => match image_for(slot) {
+                Some(image) => Some(image),
+                None => continue,
+            },
+            LayerSource::Static(file) => static_image(file),
+        };
+        let layer = match image {
+            Some(image) => {
                 let base = match planned.kind {
                     LayerKind::Base => Layer::base(image),
                     LayerKind::Blend => Layer::blend(image),
@@ -302,10 +368,37 @@ pub fn region_layers(
                 };
                 base.with_tint(tint).with_tex_gen(planned.tex_gen)
             }
+            // No image: only a base falls back to a solid tint fill (the skin-tone
+            // foundation, or a static base whose TGA was unavailable); a
+            // detail / mask layer with no texture is dropped.
+            None => {
+                if planned.kind != LayerKind::Base {
+                    continue;
+                }
+                Layer::solid(LayerKind::Base, tint).with_tex_gen(planned.tex_gen)
+            }
         };
         layers.push(layer);
     }
     layers
+}
+
+/// The distinct static `character/` TGA file names the bake plans reference, so a
+/// runtime can pre-load and decode them once for
+/// [`region_layers`]'s `static_image` closure.
+#[must_use]
+pub fn static_layer_files() -> Vec<&'static str> {
+    let mut files = Vec::new();
+    for region in BakeRegion::ALL {
+        for planned in region_plan(region) {
+            if let LayerSource::Static(file) = planned.source
+                && !files.contains(&file)
+            {
+                files.push(file);
+            }
+        }
+    }
+    files
 }
 
 #[cfg(test)]
@@ -345,18 +438,36 @@ mod tests {
     }
 
     /// Every plan references non-baked layer slots that map to the plan's
-    /// wearable type (the solid base excepted), so the tables stay consistent
-    /// with the `sl-proto` layer dictionary.
+    /// wearable type (the solid / static bases excepted), so the tables stay
+    /// consistent with the `sl-proto` layer dictionary.
     #[test]
     fn plans_reference_consistent_slots() {
         for region in BakeRegion::ALL {
             for planned in region_plan(region) {
-                if let Some(slot) = planned.slot {
+                if let super::LayerSource::Wearable(slot) = planned.source {
                     assert_eq!(
                         tex::layer_wearable_type(slot),
                         Some(planned.wearable),
                         "region {region:?} slot {slot}"
                     );
+                }
+            }
+        }
+    }
+
+    /// Every static-TGA layer the plans reference is reported by
+    /// [`static_layer_files`], with no duplicates.
+    #[test]
+    fn static_layer_files_are_listed_and_unique() {
+        let files = super::static_layer_files();
+        let mut seen = std::collections::HashSet::new();
+        for file in &files {
+            assert!(seen.insert(*file), "duplicate static file {file}");
+        }
+        for region in BakeRegion::ALL {
+            for planned in region_plan(region) {
+                if let super::LayerSource::Static(file) = planned.source {
+                    assert!(files.contains(&file), "missing static file {file}");
                 }
             }
         }
@@ -370,6 +481,9 @@ mod tests {
             BakeRegion::Head,
             |wearable| wearable == WearableType::Skin,
             |slot| (slot == tex::HEAD_BODYPAINT).then(|| image([200, 150, 100, 255])),
+            // No static TGAs available: the skin-grain base falls back to a solid
+            // skin-tone fill, the face-colour detail is dropped.
+            |_file| None,
             |tint, _wearable| match tint {
                 LayerTint::Global("skin_color") => [0.8, 0.6, 0.5, 1.0],
                 _ => [1.0, 1.0, 1.0, 1.0],
@@ -388,6 +502,49 @@ mod tests {
         Ok(())
     }
 
+    /// The eyes bake gains a white sclera base from `eyewhite.tga` when the
+    /// static TGA is available, with the iris blended over it.
+    #[test]
+    fn eyes_gain_white_sclera_base() -> Result<(), TestError> {
+        let layers = region_layers(
+            BakeRegion::Eyes,
+            |wearable| wearable == WearableType::Eyes,
+            |slot| (slot == tex::EYES_IRIS).then(|| image([90, 60, 30, 255])),
+            // The eye sclera TGA is available (a solid white here).
+            |file| (file == "eyewhite.tga").then(|| image([255, 255, 255, 255])),
+            |_tint, _wearable| [1.0, 1.0, 1.0, 1.0],
+        );
+        // White sclera base (from the TGA) + the iris blended over it.
+        assert_eq!(layers.len(), 2);
+        let sclera = layers.first().ok_or("sclera base")?;
+        assert_eq!(sclera.kind, LayerKind::Base);
+        assert!(sclera.image.is_some());
+        let iris = layers.get(1).ok_or("iris layer")?;
+        assert_eq!(iris.kind, LayerKind::Blend);
+        assert!(iris.image.is_some());
+        Ok(())
+    }
+
+    /// A static base whose TGA is unavailable falls back to a solid tint fill, so
+    /// the region never loses its opaque foundation.
+    #[test]
+    fn static_base_falls_back_to_solid() -> Result<(), TestError> {
+        let layers = region_layers(
+            BakeRegion::Eyes,
+            |wearable| wearable == WearableType::Eyes,
+            |_slot| None,
+            // No static TGAs available.
+            |_file| None,
+            |_tint, _wearable| [0.5, 0.5, 0.5, 1.0],
+        );
+        // Just the fallback solid sclera base (iris has no texture).
+        assert_eq!(layers.len(), 1);
+        let base = layers.first().ok_or("fallback base")?;
+        assert_eq!(base.kind, LayerKind::Base);
+        assert!(base.image.is_none());
+        Ok(())
+    }
+
     /// With no skin worn and no textures, a bake region has no layers.
     #[test]
     fn nothing_worn_is_empty() {
@@ -395,6 +552,7 @@ mod tests {
             BakeRegion::UpperBody,
             |_wearable| false,
             |_slot| None,
+            |_file| None,
             |_tint, _wearable| [1.0, 1.0, 1.0, 1.0],
         );
         assert!(layers.is_empty());
@@ -408,6 +566,7 @@ mod tests {
             BakeRegion::UpperBody,
             |wearable| matches!(wearable, WearableType::Skin | WearableType::Shirt),
             |slot| (slot == tex::UPPER_SHIRT).then(|| image([10, 20, 200, 255])),
+            |_file| None,
             |tint, _wearable| match tint {
                 LayerTint::Global("skin_color") => [0.9, 0.7, 0.6, 1.0],
                 LayerTint::Params(_) => [0.2, 0.2, 0.9, 1.0],

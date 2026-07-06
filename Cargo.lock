@@ -5683,8 +5683,10 @@ name = "sl-client-bevy-viewer"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bytes",
  "clap",
  "fs-err",
+ "image",
  "pretty_assertions",
  "sl-client-bevy",
  "sl-repl",

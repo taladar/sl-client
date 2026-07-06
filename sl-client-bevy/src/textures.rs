@@ -1,6 +1,6 @@
 //! Bevy integration for the decoding [`TextureStore`](sl_texture::TextureStore):
 //! a bridge from the store's decoded RGBA8 output to Bevy's [`Image`], and a
-//! blocking-HTTP [`TextureFetcher`](sl_texture::TextureFetcher) so a Bevy app
+//! blocking-HTTP [`TextureFetcher`] so a Bevy app
 //! (which has no async runtime of its own) can build and drive a store.
 //!
 //! Because the store's `get`/`request` are `async`, a Bevy app drives them by
@@ -35,7 +35,7 @@ pub fn to_bevy_image(decoded: &DecodedImage) -> Image {
     )
 }
 
-/// A [`TextureFetcher`](sl_texture::TextureFetcher) over blocking `reqwest`, for
+/// A [`TextureFetcher`] over blocking `reqwest`, for
 /// a Bevy app with no async runtime. It fetches `GetTexture` codestream byte
 /// ranges; the capability URL is held in an [`ArcSwapOption`] so it can be
 /// refreshed on a region change.

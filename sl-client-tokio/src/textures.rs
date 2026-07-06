@@ -1,4 +1,4 @@
-//! A [`TextureFetcher`](sl_texture::TextureFetcher) backed by async `reqwest`,
+//! A [`TextureFetcher`] backed by async `reqwest`,
 //! for driving an [`sl_texture::TextureStore`] from the tokio client.
 //!
 //! It fetches byte ranges of a texture's `GetTexture` codestream. The cap URL is

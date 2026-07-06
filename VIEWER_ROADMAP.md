@@ -1351,21 +1351,50 @@ avatar, so they are collected here to be worked one at a time.
     joints. Toggle `SL_VIEWER_JOINT_OVERRIDES=0` disables it. `pelvis_offset` is
     left unapplied (a hover/height concern, not distortion; `0.0` on every
     observed body).
-- [ ] **R2. Fix rigid eyeball placement (was P15.5).** Once our own avatar was
-  textured (P15.3), the classic rigid eyeballs (`avatar_eye.llm` pinned to
-  `mEyeLeft` / `mEyeRight`) read as ~one eye-height too low on the face, their
-  white sclera poking through the lower-face skin. This is a **pre-existing P13
-  avatar-fidelity gap**, not a bake issue: extensive measurement (offline
-  `.llm`/skeleton probes + in-viewer `GlobalTransform` logging) put each eyeball
-  centred on its eye joint at Z ≈ 1.762, within ~6 mm of the morphed head
-  eye-socket geometry and correctly sized — i.e. geometrically it matches the
-  reference viewer's classic setup, yet it *looks* too low. Resolve the
-  perception-vs-measurement gap: re-check the head eye-opening / eyelid geometry
-  vs. the eyeball, whether an eye-region visual param (eye depth / spacing /
-  opening) should move the eye bone or the eyeball, and how the reference viewer
-  seats the eyeball in the socket; then correct the placement (likely a live
-  visual iteration, since it renders "correct" by the numbers). Verify the
-  eyeballs sit in the sockets on OpenSim.
+- [x] **R2. Fix rigid eyeball placement (was P15.5).** The rigid eyeballs read
+  too low / recessed in the socket (a see-through gap above the eyeball). The
+  perception-vs-measurement gap was **real**, with two independent causes, both
+  now fixed (confirmed live on OpenSim — the eyes seat cleanly with white sclera
+  and visible irises):
+  - **Base-mesh skinning joint mapping (the actual placement cause).** Second
+    Life base parts store one weight float per vertex whose integer part indexes
+    the reference viewer's **`mJointRenderData`** list — a depth-first skeleton
+    walk with each group's base ancestor prepended
+    (`LLAvatarJointMesh::setupJoint`; `avatarSkinV.glsl`:
+    `mix(palette[floor(w)], palette[floor(w)+1], fract(w))`) — **not** the
+    mesh's own `joint_names` table. Our decoder mapped it into `joint_names` and
+    clamped, so the head's `[mHead, mNeck]` names sent every face vertex (weight
+    `2.0`) to `mNeck` instead of `mHead`. It renders correct at rest (the
+    inverse bind-pose cancels it) but under skeletal deformation the whole face
+    was dragged by the
+    *neck* while the rigid eyeball (correctly on `mEyeLeft` → `mHead`) was not —
+    the divergence. Fixed by keeping the raw weight index (`sl-avatar`
+    `split_weight`) and rebuilding the render list (`sl-client-bevy`
+    `base_mesh_skin` / `joint_render_data`). Also corrects the whole base body's
+    shape under deformation, not just the eye.
+  - **Missing eye sclera (the "untextured" half).** Our client-side eye bake
+    carried only the iris layer, so the eyeball read as a featureless blob
+    (easily misread as misplaced). Added the reference `eyes` layer-set's white
+    sclera base (`eyewhite.tga`) under the iris — part of the broader static-TGA
+    bake layers below.
+  Note: the *rigid* eyeball itself has **no** placement offset in Firestorm
+  (`setMesh` uses the `.llm` origin, pinned to `mEyeLeft`; eye tracking is
+  rotation-only) — the fix was upstream, in the skeleton/skinning.
+- [x] **R2b. Broader static-TGA bake layers.** The client-side bake modelled
+  only worn-wearable texture layers + a solid skin-tone base; the reference
+  bakes in static `character/` TGA diffuse layers on every avatar. Added a
+  `LayerSource::Static` plan source (`sl-bake`) that loads/decodes the TGAs
+  (`image` crate, viewer side) and composites them: the skin-grain base
+  (`head_skingrain.tga` / `body_skingrain.tga`, tinted by skin colour, replacing
+  the flat fill), the skin colour details (`head_color.tga` / `upperbody_color`
+  / `lowerbody_color`), the eye sclera (`eyewhite.tga`), and the eyelash-shape
+  alpha (`head_alpha.tga` — carves the lash surround out of the head bake so the
+  eyelash mesh, which shares the head material, no longer renders an opaque
+  quad). The procedural cosmetic / bump layers (shading, highlights, lipstick,
+  blush, freckles) stay out — they need a per-param colour renderer. Eyelash
+  rendering is only partly done: the opaque quad is gone, but the thin lashes
+  need `AlphaMode::Blend` (they fall below the masked-bake cutoff) — folded into
+  **R5**.
 - [x] **R3. System eyes/teeth show through a BoM head.** Fixed by the R1
   **weight-normalization** fix (confirmed live: the mesh head's teeth, eyes, and
   eyelids now render cleanly). The "show through" was **misdiagnosed** as a
@@ -1381,6 +1410,17 @@ avatar, so they are collected here to be worked one at a time.
   **repeat / offset / rotation** (and bump / shiny / glow / fullbright) —
   are not applied, so textured prim faces map wrong. Apply the TE placement
   params and fix prim scale/placement.
+- [ ] **R5. Transparent-texture handling / alpha modes.** Transparency is a
+  general gap: prim faces (`textures.rs` `face_material`) always build an
+  `AlphaMode::Opaque` material, so a texture's alpha channel and the face's own
+  colour alpha are ignored — a transparent prim renders solid. Second Life sets
+  a per-face **alpha mode** (the legacy-materials `DiffuseAlphaMode`: *None* /
+  *Alpha blending* / *Alpha masking* with a cutoff, plus *Emissive mask*); wire
+  that (and the face colour alpha) through to the Bevy `StandardMaterial`
+  `alpha_mode` for both prim faces and avatar faces. Includes finishing the
+  **eyelashes** (from R2b): the eyelash mesh needs `AlphaMode::Blend` (its own
+  material variant, à la the reference's separate eyelash render pass) so the
+  thin lashes show instead of being cut by the masked-bake 0.5 cutoff.
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 

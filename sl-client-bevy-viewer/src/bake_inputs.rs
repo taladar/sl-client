@@ -400,6 +400,7 @@ fn assemble(
             region,
             |wearable| assets.iter().any(|asset| asset.wearable_type == wearable),
             |slot| layer_image(&assets, texture_manager, slot),
+            |file| library.and_then(|lib| lib.static_texture(file).cloned()),
             |tint, wearable| layer_tint(&assets, params, tint, wearable),
         );
         summary.push(format!("{}={}", region.name(), region_layers.len()));
