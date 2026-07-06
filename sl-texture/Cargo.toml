@@ -19,6 +19,9 @@ exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 default = ["decode"]
 # Pulls in the OpenJPEG C dependency (via `jpeg2k`) for real pixel decoding.
 decode = ["dep:jpeg2k"]
+# Pulls in the in-workspace OpenJPEG encoder (`sl-j2c-encode`) for real pixel
+# encoding (RGBA8 -> `.j2c`), used to publish a client-composited avatar bake.
+encode = ["dep:sl-j2c-encode"]
 
 [dependencies]
 arc-swap = { version = "1.9.2" }
@@ -32,6 +35,7 @@ jpeg2k = { version = "0.10.1", optional = true }
 num_cpus = { version = "1.17.0" }
 parking_lot = { version = "0.12.5" }
 sl-asset-sched = { version = "0.1.0", path = "../sl-asset-sched" }
+sl-j2c-encode = { version = "0.1.0", path = "../sl-j2c-encode", optional = true }
 sl-proto = { version = "0.1.0", path = "../sl-proto" }
 thiserror = { version = "2.0.18" }
 tracing = { version = "0.1.44" }

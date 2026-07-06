@@ -1,0 +1,39 @@
+[package]
+name = "sl-j2c-encode"
+description = "In-memory JPEG-2000 (`.j2c`) encoder for canonical RGBA8 images, built on the OpenJPEG C library — the isolated home of the FFI needed to publish a client-composited Second Life / OpenSim avatar bake"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "jpeg2000", "encode", "texture"]
+categories = ["encoding", "multimedia::images", "game-development"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+# The OpenJPEG C library bindings — deliberately the SAME backend `jpeg2k`
+# decodes with (via `sl-texture`), so only one OpenJPEG implementation is linked
+# into any binary. Using the pure-Rust `openjp2` port here instead would export
+# duplicate `#[no_mangle]` `opj_*` C symbols that collide with this library at
+# link time and corrupt `jpeg2k`'s decode path.
+openjpeg-sys = { version = "1.0.12" }
+thiserror = { version = "2.0.18" }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+# This crate deliberately does NOT inherit the workspace lints: it is the one
+# place in the workspace that owns `unsafe` FFI (the OpenJPEG encode bindings),
+# which the workspace-wide `unsafe_code = "forbid"` policy would reject. Unsafe
+# is permitted here but every block must still carry a safety comment.
+[lints.rust]
+unsafe_code = "allow"
+missing_docs = "warn"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"

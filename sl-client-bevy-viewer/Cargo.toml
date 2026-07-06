@@ -24,7 +24,9 @@ sl-client-bevy = { version = "0.1.0", path = "../sl-client-bevy", features = [
 ] }
 sl-repl = { version = "0.1.0", path = "../sl-repl" }
 sl-terrain = { version = "0.1.0", path = "../sl-terrain" }
-sl-texture = { version = "0.1.0", path = "../sl-texture" }
+sl-texture = { version = "0.1.0", path = "../sl-texture", features = [
+    "encode",
+] }
 thiserror = { version = "2.0.18" }
 tracing = { version = "0.1.44" }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "tracing-log"] }

@@ -8,6 +8,7 @@ members = [
     "sl-client-bevy-viewer",
     "sl-client-tokio",
     "sl-conformance",
+    "sl-j2c-encode",
     "sl-llsd",
     "sl-mesh",
     "sl-msg-template",

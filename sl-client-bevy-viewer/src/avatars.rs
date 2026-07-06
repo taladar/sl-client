@@ -36,11 +36,11 @@ use std::collections::{HashMap, HashSet};
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, AvatarName, BakeRegion, BaseMesh, CoarseLocation, Command, MAX_FACES, MaskTexture,
-    MorphWeights, Object, PartMorphMask, ResolvedParams, ScopedObjectId, SkeletalDeformations,
-    SlCommand, SlEvent, SlIdentity, SlSessionEvent, TextureEntry, TextureKey, avatar_texture,
-    composite_region, decode_texture_entry, pcode, to_bevy_base_mesh, to_bevy_image,
-    to_bevy_morphed_mesh,
+    AgentKey, AvatarName, BakeRegion, BaseMesh, CoarseLocation, Command, DecodedTexture, MAX_FACES,
+    MaskTexture, MorphWeights, Object, PartMorphMask, ResolvedParams, ScopedObjectId,
+    SkeletalDeformations, SlCommand, SlEvent, SlIdentity, SlSessionEvent, TextureEntry, TextureKey,
+    avatar_texture, composite_region, decode_texture_entry, pcode, to_bevy_base_mesh,
+    to_bevy_image, to_bevy_morphed_mesh,
 };
 
 use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
@@ -1373,13 +1373,49 @@ fn force_alpha_opaque(pixels: &mut [u8]) {
     }
 }
 
+/// Composite one bake region of our own avatar from its ready client-side bake
+/// inputs (P15.2) into the canonical baked RGBA image for that region, or `None`
+/// when the region has no worn layers (an empty composite is wholly transparent
+/// and would wrongly carve the region away).
+///
+/// The result is the orientation a Second Life baked texture is stored and
+/// consumed in — the same bytes are both draped onto our own body (P15.3) and,
+/// when published, J2C-encoded and uploaded (P15.4):
+///
+/// - **Vertical flip.** SL avatar `.llm` UVs are authored bottom-up (V = 0 at the
+///   bottom), so the body samples a baked texture upside down relative to a
+///   top-down decoded image. The compositor works top-down (like a fetched J2C),
+///   which would land the head bake's chin/teeth on the forehead, so its rows are
+///   flipped — matching how a server-published bake is stored (the reference
+///   viewer bakes into a bottom-up GL surface), which is why the P14 fetched-bake
+///   drape path renders straight without a flip.
+/// - **Opaque eyes.** The eyeball is an opaque surface, but our simplified eye
+///   composite carries only the iris layer (not the opaque sclera base the
+///   reference eye layer-set builds), whose transparent surround would classify
+///   the bake as masked and carve the eyeballs into empty sockets — so the eye
+///   region is forced fully opaque.
+pub(crate) fn composite_own_region(
+    inputs: &OwnBakeInputs,
+    region: BakeRegion,
+) -> Option<DecodedTexture> {
+    let layers = inputs.region_layers(region);
+    if layers.is_empty() {
+        return None;
+    }
+    let mut baked = composite_region(region, LOCAL_BAKE_SIZE, layers);
+    let side = usize::try_from(LOCAL_BAKE_SIZE).unwrap_or(0);
+    flip_rows_vertically(&mut baked.pixels, side, side);
+    if region == BakeRegion::Eyes {
+        force_alpha_opaque(&mut baked.pixels);
+    }
+    Some(baked.to_decoded_image())
+}
+
 /// Composite our own avatar's ready client-side bake inputs (P15.2) into one
-/// uploaded [`Image`] + alpha classification per baked slot: walk each bake
-/// region's ordered layer list ([`OwnBakeInputs::region_layers`]) through
-/// [`composite_region`], classify the composited alpha (so an alpha wearable
-/// carved into the bake renders masked, P14.3), and upload the RGBA to a Bevy
-/// [`Image`]. A region with no worn layers is skipped — an empty composite is
-/// wholly transparent and would wrongly carve the region away.
+/// uploaded [`Image`] + alpha classification per baked slot: composite each bake
+/// region ([`composite_own_region`]), classify the composited alpha (so an alpha
+/// wearable carved into the bake renders masked, P14.3), and upload the RGBA to a
+/// Bevy [`Image`]. A region with no worn layers is skipped.
 fn build_local_bake(
     inputs: &OwnBakeInputs,
     images: &mut Assets<Image>,
@@ -1387,35 +1423,16 @@ fn build_local_bake(
     let mut regions = HashMap::new();
     let mut summary: Vec<String> = Vec::new();
     for region in BakeRegion::ALL {
-        let layers = inputs.region_layers(region);
-        if layers.is_empty() {
+        let Some(decoded) = composite_own_region(inputs, region) else {
             continue;
-        }
-        let mut baked = composite_region(region, LOCAL_BAKE_SIZE, layers);
-        // Second Life avatar `.llm` UVs are authored in the OpenGL bottom-up
-        // convention (V = 0 at the bottom), so the body samples a baked texture
-        // upside down relative to a top-down decoded image — the composite (like
-        // a fetched J2C) is top-down, which would land the head bake's chin/teeth
-        // (low in the image) on the forehead. Flip the composited rows so the
-        // body-region UVs sample it the right way up.
-        let side = usize::try_from(LOCAL_BAKE_SIZE).unwrap_or(0);
-        flip_rows_vertically(&mut baked.pixels, side, side);
-        // The eyeball is an opaque surface. Our simplified eye composite carries
-        // only the iris layer, not the opaque sclera base the reference viewer's
-        // eye layer set builds, so the iris texture's own transparent surround
-        // would classify the bake as masked and carve the eyeballs into empty
-        // sockets. Force the eye bake opaque so the eyeballs render solid.
-        if region == BakeRegion::Eyes {
-            force_alpha_opaque(&mut baked.pixels);
-        }
-        let decoded = baked.to_decoded_image();
+        };
         let alpha = classify_bake_alpha(decoded.components, &decoded.pixels);
         let handle = images.add(to_bevy_image(&decoded));
         let _prev = regions.insert(region.slot(), (handle, alpha));
         summary.push(format!(
             "{}={} layer(s)/{alpha:?}",
             region.name(),
-            layers.len()
+            inputs.region_layers(region).len()
         ));
     }
     info!(

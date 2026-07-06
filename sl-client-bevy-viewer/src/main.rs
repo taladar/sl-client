@@ -11,6 +11,7 @@ mod appearance;
 mod avatar_assets;
 mod avatars;
 mod bake_inputs;
+mod bake_publish;
 mod camera;
 mod chat;
 mod coords;
@@ -47,6 +48,7 @@ use crate::bake_inputs::{
     OwnBakeInputs, WearableAssetFetched, WearableAssetManager, assemble_own_bake,
     drive_wearable_requests, poll_wearable_assets, update_asset_caps,
 };
+use crate::bake_publish::{OwnBakePublish, drive_bake_publish};
 use crate::camera::{FlyCamera, fly_camera};
 use crate::chat::{ChatOverlay, setup_chat_overlay, update_chat_overlay};
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
@@ -279,6 +281,7 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
     .init_resource::<ServerBakeState>()
     .init_resource::<MeshManager>()
     .init_resource::<OwnBakeInputs>()
+    .init_resource::<OwnBakePublish>()
     .init_resource::<WearableAssetManager>()
     .add_message::<TextureDecoded>()
     .add_message::<MeshDecoded>()
@@ -342,6 +345,10 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
                 assign_avatar_bake_materials,
                 apply_avatar_bake_textures,
                 apply_own_local_bake.after(assign_avatar_bake_materials),
+                // Publish our own client-side bake to the grid (P15.4): encode +
+                // upload each composited region over `UploadBakedTexture`, then
+                // advertise them in an `AgentSetAppearance` (OpenSim-only path).
+                drive_bake_publish,
             ),
             position_name_tags,
             // Append newly received local chat to the on-screen overlay.

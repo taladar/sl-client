@@ -5750,6 +5750,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-j2c-encode"
+version = "0.1.0"
+dependencies = [
+ "openjpeg-sys",
+ "pretty_assertions",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "sl-llsd"
 version = "0.1.0"
 dependencies = [
@@ -5929,6 +5938,7 @@ dependencies = [
  "pollster",
  "pretty_assertions",
  "sl-asset-sched",
+ "sl-j2c-encode",
  "sl-proto",
  "thiserror 2.0.18",
  "tracing",

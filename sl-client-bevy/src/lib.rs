@@ -26,19 +26,18 @@ use sl_proto::{
     CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SIMULATOR_FEATURES, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
-    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-    CHAT_SESSION_DECLINE_P2P_VOICE, ChatSessionKind, Event as SessionEvent, GroupKey,
-    INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse, MessageCursor, RECV_BUFFER_SIZE,
-    SelectedCostKind, Session, SessionMessage, ais_category_children_fetch_url,
-    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
-    build_agent_preferences_request, build_ais_create_category_body, build_ais_move_body,
-    build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request, build_get_object_cost_request,
-    build_get_object_physics_data_request, build_modify_material_params_request,
-    build_object_media_navigate_request, build_object_media_update_request,
-    build_parcel_voice_info_request, build_provision_voice_account_request,
-    build_region_experiences_request, build_remote_parcel_request,
-    build_resource_cost_selected_request, build_send_user_report,
+    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    ChatSessionKind, Event as SessionEvent, GroupKey, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd,
+    LoginResponse, MessageCursor, RECV_BUFFER_SIZE, SelectedCostKind, Session, SessionMessage,
+    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    ais_create_category_url, ais_item_url, build_agent_preferences_request,
+    build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
+    build_ais_update_item_body, build_create_inventory_category_request,
+    build_get_object_cost_request, build_get_object_physics_data_request,
+    build_modify_material_params_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_parcel_voice_info_request,
+    build_provision_voice_account_request, build_region_experiences_request,
+    build_remote_parcel_request, build_resource_cost_selected_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_update_script_agent_request,
     build_update_script_task_request, build_upload_baked_texture_request,
@@ -121,6 +120,7 @@ pub use sl_proto::{CAP_GET_MESH, CAP_GET_MESH2};
 // the cap URL from an [`SlCapabilities`] map and hands it to a
 // [`BevyAssetFetcher`] (used to fetch worn wearable assets for client-side
 // baking).
+pub use sl_proto::CAP_UPLOAD_BAKED_TEXTURE;
 pub use sl_proto::CAP_VIEWER_ASSET;
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 // The decoding, LOD-aware texture store, re-exported so a Bevy app can build and
