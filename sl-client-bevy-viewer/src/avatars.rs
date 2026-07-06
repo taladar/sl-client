@@ -175,6 +175,11 @@ pub(crate) struct AvatarState {
     /// A reverse map from an object's scoped id to its agent id, so an
     /// `ObjectRemoved` can find the avatar to despawn.
     by_scoped: HashMap<ScopedObjectId, AgentKey>,
+    /// The skeleton-instance joint entities of each rigged-body avatar, in joint
+    /// order (parallel to [`AvatarBody`]'s joint tables), keyed by agent id — the
+    /// entities a worn attachment is parented to so it follows the posed skeleton
+    /// (P16.1). Absent for a sphere-only (no `--viewer-assets`) avatar.
+    joints: HashMap<AgentKey, Vec<Entity>>,
     /// Resolved legacy names, keyed by agent id — the "simple name cache" that
     /// keeps a repeatedly-seen avatar from being re-requested.
     names: HashMap<AgentKey, String>,
@@ -251,6 +256,19 @@ pub(crate) struct AvatarBody {
     /// The pelvis rest height (Second Life Z, metres) used to plant the body
     /// vertically so its pelvis sits at the reported object position.
     pelvis_height: f32,
+    /// Each attachment point's raw numeric id mapped to the skeleton joint index
+    /// an object worn there hangs from (P16.1). Built from the `avatar_lad.xml`
+    /// `<attachment_point>` table; a HUD point (whose `mScreen` pseudo-joint is
+    /// not a body joint) is absent, so only body attachments resolve to a joint.
+    attachment_joints: HashMap<u8, usize>,
+}
+
+impl AvatarBody {
+    /// The skeleton joint index an object worn on attachment-point id `point_id`
+    /// hangs from, if the point maps to a real body joint (P16.1).
+    pub(crate) fn attachment_joint_index(&self, point_id: u8) -> Option<usize> {
+        self.attachment_joints.get(&point_id).copied()
+    }
 }
 
 /// One base part's shared render data.
@@ -325,6 +343,7 @@ pub(crate) fn setup_avatar_body(
         joint_locals: skeleton.local_transforms().to_vec(),
         joint_parents: skeleton.parents().to_vec(),
         pelvis_height: library.pelvis_height(),
+        attachment_joints: library.attachment_joints(),
     });
     info!("built rigged avatar body ({part_count} parts)");
 }
@@ -540,13 +559,17 @@ impl AvatarState {
     /// Spawn a rigged base body for `agent` from the shared [`AvatarBody`]
     /// assets: a fresh joint-entity skeleton instance under a body-root anchor,
     /// with each base part skinned or pinned to it, plus the floating name tag.
+    ///
+    /// Returns the pair of avatar entities along with the fresh joint-entity list
+    /// (in joint order), which the caller records so a worn attachment can be
+    /// parented to the right joint (P16.1).
     fn spawn_body(
         &self,
         agent: AgentKey,
         object: &Object,
         body: &AvatarBody,
         commands: &mut Commands,
-    ) -> AvatarEntities {
+    ) -> (AvatarEntities, Vec<Entity>) {
         let root = commands
             .spawn((
                 body_root_transform(object, body.pelvis_height),
@@ -578,10 +601,13 @@ impl AvatarState {
             spawn_body_part(part, index, agent, &joints, root, &body.material, commands);
         }
         let label = self.spawn_label(agent, root, BODY_TAG_HEIGHT, commands);
-        AvatarEntities {
-            anchor: root,
-            label,
-        }
+        (
+            AvatarEntities {
+                anchor: root,
+                label,
+            },
+            joints,
+        )
     }
 
     /// Request the legacy name of `agent` once — skipped if it is already cached
@@ -625,7 +651,13 @@ impl AvatarState {
         }
         self.request_name(agent, writer);
         let entities = match body {
-            Some(body) => self.spawn_body(agent, object, body, commands),
+            Some(body) => {
+                let (entities, joints) = self.spawn_body(agent, object, body, commands);
+                // Record the joint entities so a worn attachment can be parented to
+                // the right joint once it arrives (P16.1).
+                self.joints.insert(agent, joints);
+                entities
+            }
             None => self.spawn_sphere(
                 agent,
                 sl_to_bevy_vec(&object.motion.position),
@@ -651,6 +683,23 @@ impl AvatarState {
         if let Some(entities) = self.objects.remove(&agent) {
             despawn_avatar(entities, commands);
         }
+        // The body's joint entities are despawned with its anchor; drop the store
+        // so a later attachment can no longer resolve them (P16.1).
+        let _dropped = self.joints.remove(&agent);
+    }
+
+    /// The skeleton-instance joint entity a worn attachment parents to (P16.1):
+    /// the joint at `joint_index` of the rigged body of the avatar tracked under
+    /// `avatar_scoped`. `None` if that avatar is not a tracked full-object rigged
+    /// body yet, or the joint index is out of range — in which case the caller
+    /// holds the attachment pending and retries.
+    pub(crate) fn attachment_joint_entity(
+        &self,
+        avatar_scoped: ScopedObjectId,
+        joint_index: usize,
+    ) -> Option<Entity> {
+        let agent = self.by_scoped.get(&avatar_scoped)?;
+        self.joints.get(agent)?.get(joint_index).copied()
     }
 
     /// Reconcile the coarse-only avatar placeholders with one

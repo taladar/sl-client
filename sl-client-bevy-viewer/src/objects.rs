@@ -47,6 +47,7 @@ use sl_client_bevy::{
     to_bevy_mesh, to_bevy_prim_mesh,
 };
 
+use crate::avatars::{AvatarBody, AvatarState};
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
 use crate::meshes::{MeshDecoded, MeshManager};
 use crate::textures::{PrimTextures, TextureDecoded, TextureManager, face_material};
@@ -146,8 +147,15 @@ struct TrackedObject {
     /// Whether this object is a root (has no parent object).
     is_root: bool,
     /// Whether this object's entity has been parented to its root entity yet (a
-    /// child whose root has not arrived stays `false` until it does).
+    /// child whose root has not arrived stays `false` until it does). For an
+    /// attachment (see [`attachment_point`](Self::attachment_point)) this instead
+    /// tracks whether it has been parented to its avatar's skeleton joint (P16.1).
     parented: bool,
+    /// The raw attachment-point id if this object is an attachment worn on an
+    /// avatar (its `parent` is the avatar), else `None`. An attachment is parented
+    /// to its avatar's skeleton joint rather than a linkset root, by
+    /// [`adopt_pending_attachments`] (P16.1).
+    attachment_point: Option<u8>,
     /// The per-face child entities carrying this object's geometry: one per
     /// non-empty [`PrimFace`](sl_client_bevy::PrimFace) for a plain prim or a
     /// sculpt, or one per non-empty submesh for a mesh object. Rebuilt on a shape
@@ -631,12 +639,17 @@ fn apply_object(
     let scoped = object.scoped_id();
     let parent = object.scoped_parent_id();
     let is_root = object.parent_id.get() == 0;
+    // A non-zero attachment-point id marks an attachment worn on an avatar: its
+    // `parent` is the avatar, and it is parented to that avatar's skeleton joint
+    // (P16.1) by `adopt_pending_attachments`, not to a linkset root here.
+    let attachment_point = object.attachment_point_id();
     let category = classify(object);
     let shape = ShapeFingerprint::of(object);
     let transform = object_transform(object, is_root);
     // The parent's entity, if its root is already tracked (looked up before the
-    // mutable borrow of the object's own entry below).
-    let parent_entity = if is_root {
+    // mutable borrow of the object's own entry below). A root has no parent, and
+    // an attachment is left for the skeleton-joint parenting path — both `None`.
+    let parent_entity = if is_root || attachment_point.is_some() {
         None
     } else {
         state.objects.get(&parent).map(|root| root.entity)
@@ -675,10 +688,15 @@ fn apply_object(
         }
         // Reconcile parenting: an object relinked to a root becomes a child of
         // it; an unlinked one (now a root) drops its parent. A child whose new
-        // root is not tracked yet is left parentless until it arrives.
-        reconcile_parent(existing, is_root, parent_entity, commands);
+        // root is not tracked yet is left parentless until it arrives. An
+        // attachment keeps its skeleton-joint parent (managed by
+        // [`adopt_pending_attachments`]) rather than reconciling a linkset root.
+        if attachment_point.is_none() {
+            reconcile_parent(existing, is_root, parent_entity, commands);
+        }
         existing.parent = parent;
         existing.is_root = is_root;
+        existing.attachment_point = attachment_point;
         return;
     }
 
@@ -726,6 +744,7 @@ fn apply_object(
             parent,
             is_root,
             parented,
+            attachment_point,
             face_entities,
             pending,
         },
@@ -783,9 +802,71 @@ fn adopt_pending_children(
     commands: &mut Commands,
 ) {
     for child in state.objects.values_mut() {
-        if !child.parented && !child.is_root && child.parent == scoped {
+        // An attachment parents to its avatar's skeleton joint, not the linkset
+        // root entity — [`adopt_pending_attachments`] handles it (P16.1).
+        if !child.parented
+            && !child.is_root
+            && child.attachment_point.is_none()
+            && child.parent == scoped
+        {
             commands.entity(child.entity).insert(ChildOf(root_entity));
             child.parented = true;
+        }
+    }
+}
+
+/// Parent every tracked attachment that is not yet parented to the skeleton joint
+/// of the avatar it is worn on (P16.1), so it follows the posed skeleton rather
+/// than sitting at a fixed world offset.
+///
+/// Attachments arrive in the same object stream as everything else but hang off a
+/// **pcode-47 avatar** (not a prim linkset), so [`apply_object`] holds them
+/// parentless and this system — running after the avatars (and their skeleton
+/// instances) are spawned — resolves each one's target joint from the avatar's
+/// [rigged body](AvatarBody): its raw attachment-point id maps to a skeleton
+/// joint index ([`AvatarBody::attachment_joint_index`]), which resolves to the
+/// avatar's joint entity ([`AvatarState::attachment_joint_entity`]). An
+/// attachment whose avatar / joint is not present yet (a HUD point, a sphere-only
+/// avatar, or the avatar simply not spawned yet) stays pending and is retried on
+/// a later frame.
+///
+/// When no `--viewer-assets` avatar body is loaded the avatars are placeholder
+/// spheres with no skeleton, so an attachment instead falls back to the avatar's
+/// own object entity (its previous, position-only parent) so it at least tracks
+/// the avatar's location.
+pub(crate) fn adopt_pending_attachments(
+    mut state: ResMut<ObjectState>,
+    avatars: Res<AvatarState>,
+    body: Option<Res<AvatarBody>>,
+    mut commands: Commands,
+) {
+    // Snapshot the pending attachments first so the target lookup can read
+    // `state.objects` immutably (for the sphere-mode fallback) before the
+    // `parented` flag is set.
+    let pending: Vec<(ScopedObjectId, Entity, u8, ScopedObjectId)> = state
+        .objects
+        .iter()
+        .filter_map(|(&scoped, tracked)| {
+            let point_id = tracked.attachment_point?;
+            (!tracked.parented).then_some((scoped, tracked.entity, point_id, tracked.parent))
+        })
+        .collect();
+    for (scoped, entity, point_id, avatar) in pending {
+        let target = match body.as_deref() {
+            // Rigged body: parent to the avatar's skeleton joint (the P16.1 goal).
+            Some(body) => body
+                .attachment_joint_index(point_id)
+                .and_then(|joint_index| avatars.attachment_joint_entity(avatar, joint_index)),
+            // Sphere-only avatars (no assets): fall back to the avatar's object
+            // entity so the attachment at least follows its position.
+            None => state.objects.get(&avatar).map(|tracked| tracked.entity),
+        };
+        if let Some(target) = target {
+            commands.entity(entity).insert(ChildOf(target));
+            if let Some(tracked) = state.objects.get_mut(&scoped) {
+                tracked.parented = true;
+            }
+            debug!("parented attachment {scoped} (point {point_id}) to avatar {avatar} joint");
         }
     }
 }

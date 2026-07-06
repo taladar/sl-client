@@ -17,12 +17,13 @@
 //! follows it. A part whose binding cannot be resolved is skipped with a warning
 //! rather than failing the whole load.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use bevy::prelude::Resource;
 use sl_client_bevy::{
-    BaseMesh, BaseMeshError, BaseMeshSkin, BevySkeleton, MorphMasks, ParamError, Skeleton,
-    SkeletonError, VisualParams, avatar_texture,
+    AttachmentPoints, BaseMesh, BaseMeshError, BaseMeshSkin, BevySkeleton, MorphMasks, ParamError,
+    Skeleton, SkeletonError, VisualParams, avatar_texture,
 };
 use tracing::warn;
 
@@ -218,6 +219,9 @@ pub(crate) struct AvatarAssetLibrary {
     params: VisualParams,
     /// The `<morph_masks>` table driving the clothing-morph alpha masks (P14.5).
     masks: MorphMasks,
+    /// The `<attachment_point>` table, mapping each attachment point to the
+    /// skeleton joint an attached object hangs from (P16.1).
+    attachment_points: AttachmentPoints,
 }
 
 impl AvatarAssetLibrary {
@@ -231,12 +235,17 @@ impl AvatarAssetLibrary {
     pub(crate) fn load(dir: &Path) -> Result<Self, AvatarAssetError> {
         let skeleton =
             Skeleton::from_xml(&fs_err::read_to_string(dir.join("avatar_skeleton.xml"))?)?;
-        let skeleton = BevySkeleton::from_skeleton(&skeleton);
+        let mut skeleton = BevySkeleton::from_skeleton(&skeleton);
+        // The reference viewer synthesizes an `mRoot` joint above `mPelvis` (it is
+        // not in `avatar_skeleton.xml`); add it so the avatar-centre attachment
+        // point (`joint="mRoot"`) resolves to a real joint entity (P16.1).
+        skeleton.insert_synthetic_root("mRoot");
         // Parse the visual-param table and the morph-mask table from the one
         // `avatar_lad.xml` read.
         let lad = fs_err::read_to_string(dir.join("avatar_lad.xml"))?;
         let params = VisualParams::from_xml(&lad)?;
         let masks = MorphMasks::from_xml(&lad)?;
+        let attachment_points = AttachmentPoints::from_xml(&lad)?;
 
         let mut parts = Vec::with_capacity(BASE_PARTS.len());
         for spec in BASE_PARTS {
@@ -272,6 +281,7 @@ impl AvatarAssetLibrary {
             parts,
             params,
             masks,
+            attachment_points,
         };
         library.log_summary();
         Ok(library)
@@ -299,6 +309,24 @@ impl AvatarAssetLibrary {
         &self.masks
     }
 
+    /// The attachment-point → skeleton-joint-index map (P16.1): for each
+    /// `<attachment_point>` in `avatar_lad.xml`, its raw numeric id paired with the
+    /// index of the joint it hangs from in this library's skeleton. A point whose
+    /// joint is absent from the skeleton (e.g. a HUD point's `mScreen`
+    /// pseudo-joint) is omitted, so a body attachment always resolves to a real
+    /// skeleton joint and a HUD point simply does not.
+    pub(crate) fn attachment_joints(&self) -> HashMap<u8, usize> {
+        self.attachment_points
+            .all()
+            .iter()
+            .filter_map(|def| {
+                self.skeleton
+                    .find(&def.joint)
+                    .map(|joint_index| (def.id, joint_index))
+            })
+            .collect()
+    }
+
     /// The rest height (Second Life Z, metres) of the pelvis joint — the offset
     /// used to plant the body so its pelvis sits at the reported avatar object
     /// position. Falls back to `0.0` if the joint is somehow absent.
@@ -312,11 +340,12 @@ impl AvatarAssetLibrary {
     /// Log a one-line summary of what was loaded.
     fn log_summary(&self) {
         tracing::info!(
-            "loaded avatar assets: {} joints, {} base parts, {} visual params, {} morph masks",
+            "loaded avatar assets: {} joints, {} base parts, {} visual params, {} morph masks, {} attachment points",
             self.skeleton.len(),
             self.parts.len(),
             self.params.all().len(),
             self.masks.len(),
+            self.attachment_points.all().len(),
         );
     }
 }

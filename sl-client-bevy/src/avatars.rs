@@ -323,6 +323,40 @@ impl BevySkeleton {
         out
     }
 
+    /// Insert a synthetic identity **root** joint named `name` above the
+    /// skeleton's current root joint(s), mirroring the reference viewer's `mRoot`
+    /// — which `LLVOAvatar` creates in code, *not* from `avatar_skeleton.xml`
+    /// (whose topmost joint is `mPelvis`). The new joint sits at the avatar origin
+    /// (identity local rest transform and bind pose) and every former root is
+    /// reparented to it, so the joint hierarchy is geometrically unchanged but
+    /// gains a joint that the avatar-centre attachment point (`joint="mRoot"`) and
+    /// the reference viewer's `mRoot` bone can resolve to (P16.1).
+    ///
+    /// Appended at the end, so every existing joint index is unchanged (base-mesh
+    /// skin joint maps and inverse-bindpose order stay valid). A no-op if a joint
+    /// of that name is already present.
+    pub fn insert_synthetic_root(&mut self, name: &str) {
+        if self.lookup.contains_key(name) {
+            return;
+        }
+        let new_index = self.locals.len();
+        // Reparent every current root (the former topmost joints) to the new
+        // synthetic root; iterated before the push so only pre-existing joints are
+        // considered.
+        for parent in &mut self.parents {
+            if parent.is_none() {
+                *parent = Some(new_index);
+            }
+        }
+        // The synthetic root is at the avatar origin: identity local rest
+        // transform and identity bind-pose global, with no parent of its own.
+        self.locals.push(Transform::IDENTITY);
+        self.parents.push(None);
+        self.bind_globals.push(Mat4::IDENTITY);
+        self.names.push(name.to_owned());
+        let _prev = self.lookup.insert(name.to_owned(), new_index);
+    }
+
     /// The index of the joint with the given canonical name or alias.
     #[must_use]
     pub fn find(&self, name: &str) -> Option<usize> {
@@ -442,6 +476,45 @@ mod tests {
         assert!((origin.x - (-0.015)).abs() < 1e-4);
         assert!(origin.y.abs() < 1e-4);
         assert!((origin.z - (1.067 + 0.084 + 0.205)).abs() < 1e-4);
+        Ok(())
+    }
+
+    #[test]
+    fn synthetic_root_reparents_former_roots_without_shifting_indices() -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        let mut bevy = BevySkeleton::from_skeleton(&skeleton);
+        let joints = bevy.len();
+        let pelvis = bevy.find("mPelvis").ok_or("mPelvis present")?;
+        let torso = bevy.find("mTorso").ok_or("mTorso present")?;
+        // `mPelvis` (and `mHipRight`) are the pre-existing roots.
+        assert_eq!(bevy.parents().get(pelvis), Some(&None));
+
+        bevy.insert_synthetic_root("mRoot");
+
+        // Appended, not inserted: every original index is unchanged, and one joint
+        // was added.
+        assert_eq!(bevy.len(), joints + 1);
+        assert_eq!(bevy.find("mPelvis"), Some(pelvis));
+        assert_eq!(bevy.find("mTorso"), Some(torso));
+        let root = bevy.find("mRoot").ok_or("mRoot present")?;
+        assert_eq!(root, joints);
+        // The former roots now hang off `mRoot`, which is itself the sole root.
+        assert_eq!(bevy.parents().get(pelvis), Some(&Some(root)));
+        assert_eq!(bevy.parents().get(root), Some(&None));
+        // The synthetic root is an identity joint at the avatar origin.
+        let root_local = bevy.local_transforms().get(root).ok_or("root local")?;
+        assert_eq!(*root_local, Transform::IDENTITY);
+        // Geometrically neutral: the deformed rest locals of the original joints
+        // are unchanged (the identity root adds nothing to their world frames).
+        let rest = bevy.deformed_local_transforms(&SkeletalDeformations::default());
+        let pelvis_rest = rest.get(pelvis).ok_or("pelvis rest")?;
+        let source = Skeleton::from_xml(MINI_SKELETON)?;
+        let plain = BevySkeleton::from_skeleton(&source);
+        let plain_pelvis = plain.local_transforms().get(pelvis).ok_or("plain pelvis")?;
+        assert!((pelvis_rest.translation - plain_pelvis.translation).length() < 1e-5);
+        // A second call is a no-op (the name is already present).
+        bevy.insert_synthetic_root("mRoot");
+        assert_eq!(bevy.len(), joints + 1);
         Ok(())
     }
 
