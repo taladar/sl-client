@@ -195,6 +195,7 @@ impl Session {
             online: BTreeSet::new(),
             chat_sessions: BTreeMap::new(),
             seed_capability: None,
+            agent_appearance_service: None,
             login_account: None,
             xfer_downloads: BTreeMap::new(),
             next_xfer_id: XferId(1),
@@ -293,6 +294,15 @@ impl Session {
     #[must_use]
     pub const fn seed_capability(&self) -> Option<&url::Url> {
         self.seed_capability.as_ref()
+    }
+
+    /// The agent-appearance (server-side "Sunshine" bake) service base URL from
+    /// login, or `None` on a grid without central baking. Server-baked avatar
+    /// textures are fetched from here (`<url>texture/<avatar>/<slot>/<uuid>`), not
+    /// by UUID from the `GetTexture` CDN which rejects a baked id.
+    #[must_use]
+    pub const fn agent_appearance_service(&self) -> Option<&url::Url> {
+        self.agent_appearance_service.as_ref()
     }
 
     /// Feeds a parsed CAPS response into the session, surfacing any recognised
@@ -1231,6 +1241,8 @@ impl Session {
                         .insert(circuit_id, RegionHandle::from_global(region_x, region_y));
                 }
                 self.seed_capability = Some(success.seed_capability.clone());
+                self.agent_appearance_service
+                    .clone_from(&success.agent_appearance_service);
                 self.inventory.set_agent_root(success.inventory_root);
                 self.inventory.set_library_root(success.library_root);
                 self.inventory

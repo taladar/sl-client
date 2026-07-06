@@ -43,7 +43,13 @@ pub fn to_bevy_mesh(submesh: &Submesh) -> Mesh {
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, submesh.normals.clone());
     }
     if !submesh.uvs.is_empty() {
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, submesh.uvs.clone());
+        // Second Life mesh UVs use the OpenGL bottom-up convention (V = 0 at the
+        // bottom of the texture); Bevy samples top-down (V = 0 at the top), so the
+        // V coordinate is flipped. Without this a mesh (clothing, or a bake-on-mesh
+        // body sampling the avatar bake) is textured vertically mirrored and, for
+        // the tightly-packed avatar UV layout, looks wrong / near-uniform.
+        let uvs: Vec<[f32; 2]> = submesh.uvs.iter().map(|&[u, v]| [u, 1.0 - v]).collect();
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     }
     mesh.insert_indices(Indices::U32(submesh.indices.clone()));
     mesh

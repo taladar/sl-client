@@ -41,8 +41,9 @@ use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{
     AvatarBakeMaterials, AvatarState, OwnLocalBake, apply_avatar_appearance,
     apply_avatar_bake_textures, apply_avatar_names, apply_avatar_part_visibility,
-    apply_own_local_bake, assign_avatar_bake_materials, ingest_avatar_bakes, position_name_tags,
-    setup_avatar_body, update_avatar_objects, update_coarse_avatars,
+    apply_bom_face_materials, apply_own_local_bake, assign_avatar_bake_materials,
+    ingest_avatar_bakes, position_name_tags, setup_avatar_body, update_avatar_objects,
+    update_coarse_avatars,
 };
 use crate::bake_inputs::{
     OwnBakeInputs, WearableAssetFetched, WearableAssetManager, assemble_own_bake,
@@ -189,6 +190,14 @@ fn setup_scene(mut commands: Commands) {
     // agent's avatar object arrives.
     commands.spawn((
         Camera3d::default(),
+        // A close near plane (2 cm) so the camera can push right up to fine detail
+        // — an avatar's face — without the surface clipping away, and a far plane
+        // well beyond a region's diagonal so distant objects do not vanish.
+        Projection::Perspective(PerspectiveProjection {
+            near: 0.02,
+            far: 4096.0,
+            ..default()
+        }),
         Transform::from_xyz(128.0, 30.0, -128.0),
         FlyCamera::default(),
     ));
@@ -364,6 +373,12 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
                 assign_avatar_bake_materials,
                 apply_avatar_bake_textures,
                 apply_own_local_bake.after(assign_avatar_bake_materials),
+                // Point each worn bake-on-mesh (BoM) rigged face at its wearer's
+                // baked region material (P17.3), after both bake-assignment paths
+                // have settled the region materials this frame.
+                apply_bom_face_materials
+                    .after(assign_avatar_bake_materials)
+                    .after(apply_own_local_bake),
                 // Publish our own client-side bake to the grid (P15.4): encode +
                 // upload each composited region over `UploadBakedTexture`, then
                 // advertise them in an `AgentSetAppearance` (OpenSim-only path).

@@ -25,6 +25,9 @@ pub use decode::{DecodeError, DecodedImage, decode_j2c, downsample};
 pub use disk::{CacheLimits, TextureDiskCache};
 pub use encode::{EncodeError, encode_j2c};
 pub use entry::{TextureEntry, TextureReadLease};
-pub use fetcher::{AssetFetcher, FetchChunk, FetchError, TextureFetcher};
+pub use fetcher::{
+    AssetFetcher, FetchChunk, FetchError, NotRemotelyFetchable, RemoteTextureSource,
+    TextureFetchType, TextureFetcher,
+};
 pub use schedule::{Priority, TextureProgress, TextureRequest};
 pub use store::{TextureError, TextureStore};

@@ -45,6 +45,11 @@ pub struct SlIdentity {
     pub circuit_code: Option<CircuitCode>,
     /// The seed capability URL, if the login response carried one.
     pub seed_capability: Option<url::Url>,
+    /// The agent-appearance (server-side "Sunshine" bake) service base URL from
+    /// login, if the grid central-bakes. Server-baked avatar textures are fetched
+    /// from here (`<url>texture/<avatar>/<slot>/<uuid>`), not by UUID from the
+    /// `GetTexture` CDN. `None` on a grid without central baking (OpenSim).
+    pub agent_appearance_service: Option<url::Url>,
     /// The handle of the region the agent's root circuit currently occupies.
     /// Seeded from the login response and updated on each `RegionChanged`. The
     /// matching region entity is the one marked [`SlCurrentRegion`].

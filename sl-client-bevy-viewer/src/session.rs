@@ -20,7 +20,7 @@ use bevy::prelude::*;
 use sl_client_bevy::{Command, Distance, SlCommand, SlEvent, SlIdentity, SlSessionEvent};
 
 use crate::camera::FlyCamera;
-use crate::coords::sl_to_bevy_vec;
+use crate::coords::{sl_to_bevy_object_rotation, sl_to_bevy_vec};
 
 /// The draw distance requested once the region handshake completes, in metres.
 ///
@@ -88,7 +88,7 @@ pub(crate) fn drive_session(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
     mut session: ResMut<ViewerSession>,
-    mut cameras: Query<&mut Transform, With<FlyCamera>>,
+    mut cameras: Query<(&mut Transform, &mut FlyCamera)>,
     mut commands: MessageWriter<SlCommand>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -107,11 +107,35 @@ pub(crate) fn drive_session(
                         .is_some_and(|agent| agent.uuid() == object.full_id.uuid())
                 {
                     let position = sl_to_bevy_vec(&object.motion.position);
-                    for mut transform in &mut cameras {
-                        transform.translation = position;
+                    // Seat the fly-camera a few metres in front of the agent (along
+                    // the way it faces), slightly above pelvis height, looking back
+                    // at it — so the avatar is fully framed head-on on login rather
+                    // than the camera sitting inside it (first person) or off to the
+                    // side. A Second Life avatar faces its local +X, so its forward
+                    // in Bevy world is that rotation applied to `X`. WASD/mouse-look
+                    // take over from here. Per-component `f32` maths keeps clear of
+                    // the workspace `arithmetic_side_effects` lint (it does not apply
+                    // to plain floating-point), which `Vec3`'s operators trip.
+                    let forward = sl_to_bevy_object_rotation(&object.motion.rotation)
+                        .mul_vec3(Vec3::X)
+                        .normalize_or_zero();
+                    let distance = 4.0_f32;
+                    let camera_pos = Vec3::new(
+                        position.x + forward.x * distance,
+                        position.y + forward.y * distance + 0.3,
+                        position.z + forward.z * distance,
+                    );
+                    let look = Vec3::new(
+                        position.x - camera_pos.x,
+                        position.y - camera_pos.y,
+                        position.z - camera_pos.z,
+                    );
+                    for (mut transform, mut camera) in &mut cameras {
+                        transform.translation = camera_pos;
+                        camera.aim_along(look);
                     }
                     session.camera_positioned = true;
-                    info!("placed camera at agent login position {position:?}");
+                    info!("placed camera facing agent at {camera_pos:?}");
                 }
             }
             SlSessionEvent::LoggedOut => {

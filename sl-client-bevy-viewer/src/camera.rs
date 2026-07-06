@@ -50,6 +50,24 @@ impl Default for FlyCamera {
     }
 }
 
+impl FlyCamera {
+    /// Aim the camera along `direction` (Bevy Y-up space) by setting the yaw/pitch
+    /// the [`fly_camera`] system drives the rotation from, so the aim survives the
+    /// next frame's mouse-look re-derivation. A zero direction is ignored.
+    ///
+    /// Yaw is measured so `direction = -Z` gives yaw `0` (matching
+    /// [`Default`](Self::default)); pitch is the elevation of `direction`, clamped
+    /// to the same `±MAX_PITCH` the mouse-look uses.
+    pub(crate) fn aim_along(&mut self, direction: Vec3) {
+        let dir = direction.normalize_or_zero();
+        if dir == Vec3::ZERO {
+            return;
+        }
+        self.yaw = (-dir.x).atan2(-dir.z);
+        self.pitch = dir.y.asin().clamp(-MAX_PITCH, MAX_PITCH);
+    }
+}
+
 /// Drive the fly-camera each frame: apply mouse-look, then translate along the
 /// resulting orientation from the WASD / Space / Ctrl keys.
 pub(crate) fn fly_camera(

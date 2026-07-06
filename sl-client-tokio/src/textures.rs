@@ -11,7 +11,7 @@ use bytes::Bytes;
 use reqwest::Client as ReqwestClient;
 use reqwest::StatusCode as ReqwestStatusCode;
 use sl_proto::TextureKey;
-use sl_texture::{AssetFetcher, FetchChunk, FetchError};
+use sl_texture::{FetchChunk, FetchError, RemoteTextureSource, TextureFetcher};
 
 /// A `GetTexture` codestream fetcher over a shared async `reqwest` client.
 #[derive(Debug)]
@@ -49,20 +49,37 @@ impl ReqwestTextureFetcher {
     pub fn set_cap_url(&self, url: Option<String>) {
         self.cap_url.store(url.map(std::sync::Arc::new));
     }
+
+    /// The URL a fetch of `id` from `source` targets: the `GetTexture` capability
+    /// queried by UUID for a default texture, or the appearance-service URL carried
+    /// by a server bake (`FTT_SERVER_BAKE`).
+    fn source_url(
+        &self,
+        id: TextureKey,
+        source: &RemoteTextureSource,
+    ) -> Result<String, FetchError> {
+        match source {
+            RemoteTextureSource::Default => {
+                let cap = self.cap_url.load_full().ok_or_else(|| {
+                    FetchError::Transport("GetTexture capability not available".to_owned())
+                })?;
+                Ok(format!("{cap}/?texture_id={id}"))
+            }
+            RemoteTextureSource::ServerBake { url } => Ok(url.clone()),
+        }
+    }
 }
 
 #[async_trait]
-impl AssetFetcher<TextureKey> for ReqwestTextureFetcher {
+impl TextureFetcher for ReqwestTextureFetcher {
     async fn fetch_range(
         &self,
         id: TextureKey,
+        source: &RemoteTextureSource,
         start: usize,
         end: usize,
     ) -> Result<FetchChunk, FetchError> {
-        let cap = self.cap_url.load_full().ok_or_else(|| {
-            FetchError::Transport("GetTexture capability not available".to_owned())
-        })?;
-        let url = format!("{cap}/?texture_id={id}");
+        let url = self.source_url(id, source)?;
         let response = self
             .http
             .get(&url)

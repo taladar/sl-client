@@ -988,6 +988,11 @@ pub struct Session {
     /// The current region's capability-seed URL (from login or a teleport), for
     /// the driver to fetch the CAPS map and event queue.
     seed_capability: Option<url::Url>,
+    /// The agent-appearance (server-side "Sunshine" bake) service base URL, from
+    /// the `agent_appearance_service` login field. Server-baked avatar textures are
+    /// fetched from here (`<url>texture/<avatar>/<slot>/<uuid>`), not by UUID from
+    /// the `GetTexture` CDN. `None` on a grid without central baking (OpenSim).
+    agent_appearance_service: Option<url::Url>,
     /// Account-level facts from the login response (home, maturity, group limit,
     /// Library roots), or `None` before login.
     login_account: Option<LoginAccount>,

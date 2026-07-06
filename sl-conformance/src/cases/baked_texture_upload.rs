@@ -28,7 +28,9 @@
 
 use std::time::Instant;
 
-use sl_client_tokio::{AssetFetcher as _, Command, Event, ReqwestTextureFetcher, Throttle};
+use sl_client_tokio::{
+    Command, Event, RemoteTextureSource, ReqwestTextureFetcher, TextureFetcher as _, Throttle,
+};
 
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
@@ -87,7 +89,7 @@ impl GridTest for BakedTextureUpload {
             let fetcher = ReqwestTextureFetcher::with_default_client();
             fetcher.set_cap_url(Some(cap));
             let chunk = fetcher
-                .fetch_range(texture_id, 0, MAX_BAKE_BYTES)
+                .fetch_range(texture_id, &RemoteTextureSource::Default, 0, MAX_BAKE_BYTES)
                 .await
                 .map_err(|error| {
                     TestFailure::Assertion(format!("fetch plywood codestream: {error}"))

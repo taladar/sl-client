@@ -14,7 +14,7 @@ use sl_proto::{DiscardLevel, TextureKey, j2c};
 use crate::decode::{DecodeError, DecodedImage, decode_j2c, downsample};
 use crate::disk::{CacheLimits, TextureDiskCache};
 use crate::entry::{Codestream, TextureEntry};
-use crate::fetcher::{FetchError, TextureFetcher};
+use crate::fetcher::{FetchError, RemoteTextureSource, TextureFetcher};
 use crate::schedule::{Priority, TextureProgress, TextureRequest};
 
 /// Maximum number of texture requests fetching/decoding at once; the rest queue
@@ -119,8 +119,10 @@ impl TextureStore {
         id: TextureKey,
         target: DiscardLevel,
         priority: Priority,
+        source: RemoteTextureSource,
     ) -> TextureRequest {
         let entry = self.resolve_entry(id);
+        entry.source.store(Arc::new(source));
         let request_id = self.0.request_counter.fetch_add(1, Ordering::Relaxed);
         TextureRequest::new(self.clone(), entry, request_id, priority, target)
     }
@@ -168,8 +170,10 @@ impl TextureStore {
         &self,
         id: TextureKey,
         target: DiscardLevel,
+        source: RemoteTextureSource,
     ) -> Result<Arc<TextureEntry>, TextureError> {
         let entry = self.resolve_entry(id);
+        entry.source.store(Arc::new(source));
         if let Some(image) = entry.image()
             && image.discard_level.is_at_least_as_fine_as(target)
         {
@@ -365,7 +369,15 @@ impl TextureStore {
             covered,
             needed: need,
         });
-        let chunk = self.0.fetcher.fetch_range(entry.id, covered, need).await?;
+        // The texture's source (default CDN, or a bake's appearance-service URL)
+        // was recorded on the entry by `get`/`request`; the fetcher picks the
+        // endpoint from it.
+        let source = entry.source.load_full();
+        let chunk = self
+            .0
+            .fetcher
+            .fetch_range(entry.id, &source, covered, need)
+            .await?;
         if chunk.whole {
             self.persist(entry.id, &chunk.bytes);
             let empty = chunk.bytes.is_empty();
@@ -447,7 +459,7 @@ fn now_unix() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{TextureStore, now_unix};
-    use crate::fetcher::{AssetFetcher, FetchChunk, FetchError, TextureFetcher};
+    use crate::fetcher::{FetchChunk, FetchError, RemoteTextureSource, TextureFetcher};
     use bytes::Bytes;
     use pretty_assertions::assert_eq;
     use sl_proto::{DiscardLevel, TextureKey};
@@ -465,10 +477,11 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl AssetFetcher<TextureKey> for CountingFetcher {
+    impl TextureFetcher for CountingFetcher {
         async fn fetch_range(
             &self,
             _id: TextureKey,
+            _source: &RemoteTextureSource,
             _start: usize,
             _end: usize,
         ) -> Result<FetchChunk, FetchError> {
@@ -527,8 +540,12 @@ mod tests {
         .unwrap_or_else(|_error| unreachable!("disk cache open"));
         let id = TextureKey::from(sl_proto::Uuid::from_u128(2));
         pollster::block_on(async {
-            let _first = store.get(id, DiscardLevel::FULL).await;
-            let _second = store.get(id, DiscardLevel::FULL).await;
+            let _first = store
+                .get(id, DiscardLevel::FULL, RemoteTextureSource::Default)
+                .await;
+            let _second = store
+                .get(id, DiscardLevel::FULL, RemoteTextureSource::Default)
+                .await;
         });
         assert_eq!(
             calls.load(Ordering::SeqCst),
@@ -548,7 +565,12 @@ mod tests {
         use crate::schedule::{Priority, TextureProgress};
         let (store, _calls) = store_with(Bytes::from(vec![0_u8; 700]));
         let id = TextureKey::from(sl_proto::Uuid::from_u128(3));
-        let request = store.request(id, DiscardLevel::FULL, Priority::new(5));
+        let request = store.request(
+            id,
+            DiscardLevel::FULL,
+            Priority::new(5),
+            RemoteTextureSource::Default,
+        );
         // A fresh request starts queued and exposes the shared entry.
         assert_eq!(request.progress(), TextureProgress::Queued);
         let entry = request.entry();
@@ -571,8 +593,14 @@ mod tests {
         let (store, _calls) = store_with(Bytes::from(vec![0_u8; 700]));
         let id = TextureKey::from(sl_proto::Uuid::from_u128(5));
         let coarse = DiscardLevel::from_clamped(3);
-        let coarse_request = store.request(id, coarse, Priority::new(1));
-        let fine_request = store.request(id, DiscardLevel::FULL, Priority::new(1));
+        let coarse_request =
+            store.request(id, coarse, Priority::new(1), RemoteTextureSource::Default);
+        let fine_request = store.request(
+            id,
+            DiscardLevel::FULL,
+            Priority::new(1),
+            RemoteTextureSource::Default,
+        );
         let entry = fine_request.entry();
         // The cached finest-wanted level reflects the finer of the two requests.
         assert_eq!(entry.finest_want(), Some(DiscardLevel::FULL));
@@ -590,8 +618,18 @@ mod tests {
         use crate::schedule::Priority;
         let (store, _calls) = store_with(Bytes::from_static(b"x"));
         let id = TextureKey::from(sl_proto::Uuid::from_u128(4));
-        let first = store.request(id, DiscardLevel::FULL, Priority::new(1));
-        let second = store.request(id, DiscardLevel::FULL, Priority::new(9));
+        let first = store.request(
+            id,
+            DiscardLevel::FULL,
+            Priority::new(1),
+            RemoteTextureSource::Default,
+        );
+        let second = store.request(
+            id,
+            DiscardLevel::FULL,
+            Priority::new(9),
+            RemoteTextureSource::Default,
+        );
         // Two requesters share one entry; effective = max(1, 9) + boost(2)=4.
         let entry = first.entry();
         assert_eq!(entry.interest(), 2);

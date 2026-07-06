@@ -29,8 +29,9 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
-    BevyTextureFetcher, CAP_GET_TEXTURE, CacheLimits, DecodedTexture, DiscardLevel, SlCapabilities,
-    TextureFace, TextureFetcher, TextureKey, TextureStore, to_bevy_image,
+    BevyTextureFetcher, CAP_GET_TEXTURE, CacheLimits, DecodedTexture, DiscardLevel,
+    RemoteTextureSource, SlCapabilities, TextureFace, TextureFetcher, TextureKey, TextureStore,
+    to_bevy_image,
 };
 
 /// The outcome of one background texture fetch: the decoded RGBA8 image, or
@@ -84,23 +85,41 @@ impl FromWorld for TextureManager {
 }
 
 impl TextureManager {
-    /// Ensure `id` is being fetched: spawn a background fetch task if the texture
-    /// is not already decoded or in flight. A nil id (no texture) is ignored.
+    /// Ensure `id` is being fetched from the default `GetTexture` service (a plain
+    /// prim/terrain texture). A nil id (no texture) is ignored.
     ///
     /// Idempotent — many faces requesting the same texture trigger a single
     /// fetch, on top of the store's own single-flight dedupe.
     pub(crate) fn request(&mut self, id: TextureKey) {
+        self.request_from(id, RemoteTextureSource::Default);
+    }
+
+    /// Ensure a server-side ("Sunshine") avatar bake `id` is being fetched from the
+    /// appearance service at `url` (`FTT_SERVER_BAKE`) — a baked id is not fetchable
+    /// by UUID from the `GetTexture` CDN. The decoded bake is stored in the same
+    /// [`TextureStore`] keyed by `id`, so every consumer reads it exactly like any
+    /// other texture (P17.3 / P14).
+    pub(crate) fn request_server_bake(&mut self, id: TextureKey, url: String) {
+        self.request_from(id, RemoteTextureSource::ServerBake { url });
+    }
+
+    /// Spawn a background fetch of `id` from `source` if it is not already decoded
+    /// or in flight; the decode runs off-thread on the store's own pool.
+    fn request_from(&mut self, id: TextureKey, source: RemoteTextureSource) {
         if id.uuid().is_nil() || self.decoded.contains_key(&id) || self.inflight.contains_key(&id) {
             return;
         }
         let store = self.store.clone();
         let task = IoTaskPool::get().spawn(async move {
-            // The blocking `GetTexture` fetch runs on this IoTaskPool thread; the
-            // decode is dispatched onto the store's own CPU pool, so the render
-            // thread never decodes.
-            match store.get(id, DiscardLevel::FULL).await {
+            // The blocking fetch runs on this IoTaskPool thread; the decode is
+            // dispatched onto the store's own CPU pool, so the render thread never
+            // decodes.
+            match store.get(id, DiscardLevel::FULL, source).await {
                 Ok(entry) => entry.image(),
-                Err(_error) => None,
+                Err(error) => {
+                    warn!("texture {id} fetch/decode failed: {error}");
+                    None
+                }
             }
         });
         self.inflight.insert(id, task);

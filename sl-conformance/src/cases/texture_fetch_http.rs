@@ -8,7 +8,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use sl_client_tokio::{
-    CacheLimits, Command, DiscardLevel, ReqwestTextureFetcher, TextureStore, Throttle,
+    CacheLimits, Command, DiscardLevel, RemoteTextureSource, ReqwestTextureFetcher, TextureStore,
+    Throttle,
 };
 
 use crate::context::{TestContext, TestFailure};
@@ -62,7 +63,7 @@ impl GridTest for TextureFetchHttp {
             // Full-resolution fetch + decode.
             let start = Instant::now();
             let entry = store
-                .get(texture_id, DiscardLevel::FULL)
+                .get(texture_id, DiscardLevel::FULL, RemoteTextureSource::Default)
                 .await
                 .map_err(|error| TestFailure::Assertion(format!("get full texture: {error}")))?;
             let full_secs = start.elapsed().as_secs_f64();
@@ -83,7 +84,7 @@ impl GridTest for TextureFetchHttp {
             // A second request for the same held texture returns the same shared
             // entry from memory (no re-fetch, no re-decode).
             let again = store
-                .get(texture_id, DiscardLevel::FULL)
+                .get(texture_id, DiscardLevel::FULL, RemoteTextureSource::Default)
                 .await
                 .map_err(|error| TestFailure::Assertion(format!("second get: {error}")))?;
             check(

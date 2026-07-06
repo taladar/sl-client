@@ -101,6 +101,7 @@ mod test {
   <member><name>sim_ip</name><value><string>127.0.0.1</string></value></member>
   <member><name>sim_port</name><value><i4>9000</i4></value></member>
   <member><name>seed_capability</name><value><string>http://127.0.0.1:9000/CAPS/seed</string></value></member>
+  <member><name>agent_appearance_service</name><value><string>https://appearance.example/</string></value></member>
   <member><name>message</name><value><string>Welcome</string></value></member>
 </struct></value></param></params></methodResponse>"#;
 
@@ -113,6 +114,13 @@ mod test {
         assert_eq!(
             success.seed_capability.as_str(),
             "http://127.0.0.1:9000/CAPS/seed"
+        );
+        assert_eq!(
+            success
+                .agent_appearance_service
+                .as_ref()
+                .map(url::Url::as_str),
+            Some("https://appearance.example/")
         );
         assert_eq!(success.message.as_deref(), Some("Welcome"));
         Ok(())
@@ -585,6 +593,7 @@ mod test {
                 8,
                 1,
             )?],
+            agent_appearance_service: None,
         })
     }
 

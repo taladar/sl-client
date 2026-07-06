@@ -113,6 +113,29 @@ pub(crate) struct AvatarBodyPart {
     region: BodyRegion,
 }
 
+/// A marker on one rigged-mesh submesh face whose `TextureEntry` slot carries a
+/// bake-on-mesh sentinel (`IMG_USE_BAKED_*`), tying it back to its wearer avatar
+/// and the baked slot it should show (P17.3). A "BoM" mesh body face is textured
+/// not from a fetched texture but from the wearer's own baked avatar texture — the
+/// same server / client bake the base body region wears — so
+/// [`apply_bom_face_materials`] keeps the face pointing at that region's material,
+/// falling back to the opaque skin placeholder until the bake resolves.
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct BomFace {
+    /// The wearer avatar whose bake textures this face samples.
+    agent: AgentKey,
+    /// The baked slot ([`avatar_texture`]) the sentinel named — the region whose
+    /// bake material this face mirrors.
+    slot: usize,
+}
+
+impl BomFace {
+    /// Build a marker for a bake-on-mesh face on `agent` sampling baked `slot`.
+    pub(crate) const fn new(agent: AgentKey, slot: usize) -> Self {
+        Self { agent, slot }
+    }
+}
+
 /// A marker on one skeleton-instance joint entity, tying it back to its avatar
 /// and its index in the shared [`BevySkeleton`](sl_client_bevy::BevySkeleton) so
 /// the appearance system ([`apply_avatar_appearance`]) can re-set that joint's
@@ -280,6 +303,13 @@ impl AvatarBody {
     /// name the standard skeleton does not carry.
     pub(crate) fn joint_index(&self, name: &str) -> Option<usize> {
         self.joint_lookup.get(name).copied()
+    }
+
+    /// The shared un-textured body skin material (opaque skin tint), used as the
+    /// opaque placeholder for a bake-on-mesh rigged face until its wearer's baked
+    /// region material resolves (P17.3).
+    pub(crate) const fn skin_material(&self) -> &Handle<StandardMaterial> {
+        &self.material
     }
 }
 
@@ -777,23 +807,29 @@ impl AvatarState {
         self.attachment_nodes.get(agent)?.get(&point_id).copied()
     }
 
-    /// The rigged-body root (anchor) entity of the avatar tracked under
-    /// `avatar_scoped` (P17.2): the entity a worn rigged mesh's skinned submeshes
-    /// are parented to so they despawn with the avatar and inherit its visibility.
-    /// `None` if that avatar is not a tracked full-object avatar yet.
-    pub(crate) fn body_root(&self, avatar_scoped: ScopedObjectId) -> Option<Entity> {
-        let agent = self.by_scoped.get(&avatar_scoped)?;
-        self.objects.get(agent).map(|entities| entities.anchor)
+    /// The rigged-body root (anchor) entity of `agent`'s avatar (P17.2): the entity
+    /// a worn rigged mesh's skinned submeshes are parented to so they despawn with
+    /// the avatar and inherit its visibility. `None` if that avatar is not a tracked
+    /// full-object avatar yet.
+    pub(crate) fn body_root_of(&self, agent: AgentKey) -> Option<Entity> {
+        self.objects.get(&agent).map(|entities| entities.anchor)
     }
 
-    /// The skeleton-instance joint entities (in joint order) of the avatar tracked
-    /// under `avatar_scoped` (P17.2): the entities a worn rigged mesh's
-    /// `SkinnedMesh` binds to, indexed by skeleton joint index. `None` if that
-    /// avatar has no rigged body (a sphere-only, no-`--viewer-assets` avatar, or
-    /// simply not spawned yet).
-    pub(crate) fn joint_entities(&self, avatar_scoped: ScopedObjectId) -> Option<&Vec<Entity>> {
-        let agent = self.by_scoped.get(&avatar_scoped)?;
-        self.joints.get(agent)
+    /// The skeleton-instance joint entities (in joint order) of `agent`'s avatar
+    /// (P17.2): the entities a worn rigged mesh's `SkinnedMesh` binds to, indexed by
+    /// skeleton joint index. `None` if that avatar has no rigged body (a sphere-only,
+    /// no-`--viewer-assets` avatar, or simply not spawned yet).
+    pub(crate) fn joint_entities_of(&self, agent: AgentKey) -> Option<&Vec<Entity>> {
+        self.joints.get(&agent)
+    }
+
+    /// The agent whose avatar a worn object `scoped` hangs off — chasing parent
+    /// links up to the tracked avatar root, so a rigged mesh that is a *child link*
+    /// of a multi-prim attachment linkset (a mesh body, whose parts parent to the
+    /// linkset root prim, not the avatar) still resolves to its wearer (P17.2).
+    /// `None` if the chain does not reach an avatar.
+    pub(crate) fn wearer_of(&self, scoped: ScopedObjectId) -> Option<AgentKey> {
+        self.avatar_root_of(scoped)
     }
 
     /// Reconcile the coarse-only avatar placeholders with one
@@ -932,6 +968,22 @@ const BODY_BAKE_SLOTS: [usize; 6] = [
     avatar_texture::HAIR_BAKED,
     avatar_texture::SKIRT_BAKED,
 ];
+
+/// The appearance-service URL path name for a baked slot — the reference viewer's
+/// per-slot `mDefaultImageName`, the `<slot>` segment of a server bake's URL
+/// (`<service>texture/<avatar>/<slot>/<uuid>`). `None` for a slot with no service
+/// name (the "universal" bakes, which the base body does not fetch).
+const fn bake_service_slot_name(slot: usize) -> Option<&'static str> {
+    match slot {
+        avatar_texture::HEAD_BAKED => Some("head"),
+        avatar_texture::UPPER_BAKED => Some("upper"),
+        avatar_texture::LOWER_BAKED => Some("lower"),
+        avatar_texture::EYES_BAKED => Some("eyes"),
+        avatar_texture::HAIR_BAKED => Some("hair"),
+        avatar_texture::SKIRT_BAKED => Some("skirt"),
+        _other => None,
+    }
+}
 
 /// The visible baked texture id in each base-body region slot of an avatar's
 /// texture entry — every [`BODY_BAKE_SLOTS`] slot whose id names a real,
@@ -1072,7 +1124,12 @@ pub(crate) fn ingest_avatar_bakes(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<AvatarState>,
     mut manager: ResMut<TextureManager>,
+    identity: Res<SlIdentity>,
 ) {
+    // The server-bake ("Sunshine") appearance service, if the grid central-bakes.
+    // Present -> baked textures are fetched from it (`FTT_SERVER_BAKE`); absent
+    // (OpenSim) -> the published baked ids are ordinary assets fetched by UUID.
+    let appearance_service = identity.agent_appearance_service.clone();
     for event in events.read() {
         if let SlSessionEvent::AvatarAppearance(appearance) = &event.0 {
             // Skip an out-of-order / duplicate resend so a stale appearance cannot
@@ -1083,13 +1140,27 @@ pub(crate) fn ingest_avatar_bakes(
                 continue;
             }
             let bakes = visible_body_bakes(&appearance.texture_entry);
-            for &id in bakes.values() {
-                manager.request(id);
+            for (&slot, &id) in &bakes {
+                // On a central-baking grid a baked id is fetched from the appearance
+                // service (`<svc>texture/<avatar>/<slot>/<uuid>`), not by UUID from
+                // the CDN which rejects it. Fall back to a plain fetch when the grid
+                // has no such service or the slot has no service name.
+                match appearance_service
+                    .as_ref()
+                    .zip(bake_service_slot_name(slot))
+                {
+                    Some((service, name)) => {
+                        let url = format!("{service}texture/{}/{name}/{id}", appearance.avatar_id);
+                        manager.request_server_bake(id, url);
+                    }
+                    None => manager.request(id),
+                }
             }
             debug!(
-                "requested {} baked texture(s) for {}",
+                "requested {} baked texture(s) for {} (server-bake service: {})",
                 bakes.len(),
-                appearance.avatar_id
+                appearance.avatar_id,
+                appearance_service.is_some()
             );
             if let Some(cof_version) = appearance.cof_version {
                 state
@@ -1898,6 +1969,56 @@ pub(crate) fn apply_avatar_part_visibility(
     }
     if changed > 0 {
         debug!("updated visibility of {changed} avatar body part(s)");
+    }
+}
+
+/// Keep every bake-on-mesh (BoM) rigged-mesh face pointing at its wearer's baked
+/// region material (P17.3): a modern mesh body's faces carry an `IMG_USE_BAKED_*`
+/// sentinel instead of a real texture, meaning "show the avatar's own baked skin
+/// here". Rather than fetch anything, each such [`BomFace`] mirrors the material
+/// the wearer's matching base body region wears — whichever bake resolved it (the
+/// server "Sunshine" bake on Second Life via [`assign_avatar_bake_materials`], or
+/// the client-side composite on OpenSim via [`apply_own_local_bake`]) — so the BoM
+/// body shows the same skin, honours the bake's composited alpha
+/// ([`apply_bake_image`] set the region material's [`AlphaMode`]), and updates in
+/// place as the bake decodes (both share one material handle).
+///
+/// Runs every frame after the region materials are (re)assigned and is idempotent:
+/// it only re-points a face whose material actually differs. A face whose region
+/// has no bake yet keeps the opaque skin placeholder it was spawned with (the
+/// shared body skin material), so a BoM body stays visibly present — never an
+/// invisible shell (the P17.2 finding) — while its bake loads. A face on a
+/// "universal" baked slot the base body does not track (no matching region part)
+/// keeps that placeholder too.
+pub(crate) fn apply_bom_face_materials(
+    parts: Query<(&AvatarBodyPart, &MeshMaterial3d<StandardMaterial>), Without<BomFace>>,
+    mut faces: Query<(&BomFace, &mut MeshMaterial3d<StandardMaterial>), Without<AvatarBodyPart>>,
+) {
+    if faces.is_empty() {
+        return;
+    }
+    // The material each avatar body region currently wears, keyed by (agent, baked
+    // slot) — whatever the server / client bake assignment resolved it to (a real
+    // bake material, or the shared skin placeholder for a region with no bake).
+    let mut region_material: HashMap<(AgentKey, usize), Handle<StandardMaterial>> = HashMap::new();
+    for (part, material) in &parts {
+        let _prev =
+            region_material.insert((part.agent, part.region.baked_slot()), material.0.clone());
+    }
+    let mut retargeted = 0_usize;
+    for (face, mut material) in &mut faces {
+        let Some(desired) = region_material.get(&(face.agent, face.slot)) else {
+            // A universal baked slot (or an avatar with no body parts): keep the
+            // placeholder the face was spawned with.
+            continue;
+        };
+        if material.0 != *desired {
+            *material = MeshMaterial3d(desired.clone());
+            retargeted = retargeted.saturating_add(1);
+        }
+    }
+    if retargeted > 0 {
+        debug!("retargeted {retargeted} bake-on-mesh face(s) to their wearer's bake material");
     }
 }
 

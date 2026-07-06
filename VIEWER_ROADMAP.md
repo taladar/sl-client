@@ -1107,21 +1107,6 @@ own avatar and as the fallback whenever a baked slot is absent / default.
   the deferred high-level appearance API (a Phase-14 follow-up note). Verifying
   *other* viewers see the result needs a second observer and was not done here;
   the sim accepting each upload + the publish is the guarantee.
-- [ ] **P15.5. Fix rigid eyeball placement (follow-up from P15.3).** Once our
-  own avatar was textured (P15.3), the classic rigid eyeballs (`avatar_eye.llm`
-  pinned to `mEyeLeft` / `mEyeRight`) read as ~one eye-height too low on the
-  face, their white sclera poking through the lower-face skin. This is a
-  **pre-existing P13 avatar-fidelity gap**, not a bake issue: extensive
-  measurement (offline `.llm`/skeleton probes + in-viewer `GlobalTransform`
-  logging) put each eyeball centred on its eye joint at Z ≈ 1.762, within ~6 mm
-  of the morphed head eye-socket geometry and correctly sized — i.e.
-  geometrically it matches the reference viewer's classic setup, yet it *looks*
-  too low. Resolve the perception-vs-measurement gap: re-check the head
-  eye-opening / eyelid geometry vs. the eyeball, whether an eye-region visual
-  param (eye depth / spacing / opening) should move the eye bone or the eyeball,
-  and how the reference viewer seats the eyeball in the socket; then correct the
-  placement (likely a live visual iteration, since it renders "correct" by the
-  numbers). Verify the eyeballs sit in the sockets on OpenSim.
 
 ## Phase 16 — Attachments (rigid)
 
@@ -1235,20 +1220,47 @@ own avatar and as the fallback whenever a baked slot is absent / default.
   every collision-volume weight fell back to the pelvis and the mesh ballooned
   into a sphere. Verified live on aditi (a worn mesh body + clothing binds and
   deforms correctly; the body's own **skin** stays untextured until P17.3).
-- [ ] **P17.3. Bake-on-mesh.** Add the `IMG_USE_BAKED_*` magic UUID constants to
-  `sl-proto` (+ slot↔UUID map). In the viewer, when a face's
-  `TextureFace.texture_id` equals a BoM magic UUID, texture that face with the
-  wearer's corresponding **baked** avatar texture — the server-published bake
-  (Phase 14) or the client-side composite (Phase 15) — instead of fetching,
-  honouring alpha. This is what makes modern mesh bodies show the avatar's skin.
-  Verify a BoM mesh body on aditi (server bake) and on OpenSim (client bake).
-  **Placeholder:** while a BoM face's baked avatar texture has not been fetched
-  yet (or is unavailable), the face must fall back to a **visible, opaque**
-  placeholder (e.g. the flat skin tint used for un-baked body regions), *not* a
-  transparent one — a P17.2 live finding was that a BoM mesh body renders as a
-  correctly-deforming but **invisible** shell until its skin resolves, so the
-  wearer looks bodiless. An opaque placeholder keeps the avatar present while
-  the bake loads.
+- [x] **P17.3. Bake-on-mesh.** A worn rigged (BoM) body face whose
+  `TextureEntry` slot is an `IMG_USE_BAKED_*` sentinel is textured from the
+  wearer's own baked avatar texture rather than fetched. **Shape:** a
+  `BomFace` marker (agent + baked slot) tags such faces in
+  `build_rigged_submeshes` (spawned with the opaque body-skin placeholder,
+  never the sentinel — the P17.2 invisible-shell finding);
+  `apply_bom_face_materials` then mirrors each face onto its wearer's
+  matching base-region material every frame, so it follows whichever bake
+  resolved that region (server bake on SL, client composite on OpenSim) and
+  its alpha, updating in place as the bake decodes. The `IMG_USE_BAKED_*`
+  constants already existed from P16's region-hide.
+  **Three cross-cutting fixes were needed to render a real SL mesh body:**
+  (1) **P17.2 binding bug** — a mesh body is worn as a multi-prim *linkset*
+  whose rigged parts parent to the linkset **root prim**, not the avatar, so
+  the old `body_root(tracked.parent)` never resolved (146k "skeleton not
+  ready" retries → invisible body); `apply_rigged_attachments` now chases
+  the parent chain to the wearer (`AvatarState::wearer_of` →
+  `avatar_root_of`). (2) **Server-bake fetch** — a SL server ("Sunshine")
+  bake is *not* fetchable by UUID from the `GetTexture`/`ViewerAsset` CDN
+  (it 503s); it lives on a separate **appearance service** whose base URL
+  arrives in the `agent_appearance_service` login field. Added: parse it in
+  `sl-wire` `LoginSuccess` → expose on `Session` → deliver as
+  `SlIdentity::agent_appearance_service`; a typed `sl-texture`
+  `TextureFetchType` (full, mirrors the reference `FTType`) narrowed to a
+  remote-only `RemoteTextureSource` via `TryFrom` (local-generated kinds —
+  media-on-a-prim, local files — error at that boundary before the store)
+  threaded through `TextureStore::get`/`request` and both runtime fetchers,
+  which pick the CDN (by UUID) or the bake's URL
+  (`<svc>texture/<avatar>/<slot>/<uuid>`); the bake is stored/decoded in the
+  normal store keyed by its UUID. (3) **5-component J2C** — a server bake is
+  a 5-component codestream (`R, G, B, bump, clothing`), which `jpeg2k`'s
+  `get_pixels` rejects; `decode_j2c` reads the diffuse RGB from the first
+  three components (opaque alpha, dropping bump/clothing), matching the
+  reference `decodeChannels(.., 0, 4)`. Also fixed the **mesh UV V-flip**
+  (SL mesh UVs are OpenGL bottom-up, Bevy samples top-down) so clothing and
+  the BoM body map correctly instead of near-uniform, and set a
+  **0.02 m camera near plane**. Verified live on aditi: a BoM mesh body
+  binds, deforms, and shows the wearer's server-baked skin +
+  correctly-mapped clothing. Remaining avatar-fidelity bugs this surfaced
+  (skinning distortion, rigid eyes/teeth, prim params) are collected under
+  **Known rendering issues** below.
 
 ## Phase 18 — Animations (full pipeline)
 
@@ -1294,6 +1306,49 @@ appearance stack, so this final phase is the real-SL pass:
   agent's HUDs.
 
 ---
+
+## Known rendering issues (to fix)
+
+Avatar / prim rendering-fidelity bugs, several surfaced by the live BoM-avatar
+review on aditi in P17.3. These are **pre-existing** gaps separate from the
+feature phases above; each needs iterative visual debugging against a live
+avatar, so they are collected here to be worked one at a time.
+
+- [ ] **R1. Rigged-mesh skinning distortion.** At **rest** (T-pose) a worn
+  rigged mesh should reproduce its bind pose undistorted, but clusters of
+  vertices are pulled to the wrong place — the **pants** streak toward the
+  extended arm, the **fingers** are broken, and the **feet** look wrong. The
+  signature (a vertex cluster dragged toward another joint) points at a
+  per-vertex joint-index / weight mapping error (off-by-one in the
+  `joint_names`→skeleton-index resolution, a stray influence, or a
+  joint rest-transform vs inverse-bind mismatch), not the texturing. Affects
+  clothing and BoM bodies.
+- [ ] **R2. Fix rigid eyeball placement (was P15.5).** Once our own avatar was
+  textured (P15.3), the classic rigid eyeballs (`avatar_eye.llm` pinned to
+  `mEyeLeft` / `mEyeRight`) read as ~one eye-height too low on the face, their
+  white sclera poking through the lower-face skin. This is a **pre-existing P13
+  avatar-fidelity gap**, not a bake issue: extensive measurement (offline
+  `.llm`/skeleton probes + in-viewer `GlobalTransform` logging) put each eyeball
+  centred on its eye joint at Z ≈ 1.762, within ~6 mm of the morphed head
+  eye-socket geometry and correctly sized — i.e. geometrically it matches the
+  reference viewer's classic setup, yet it *looks* too low. Resolve the
+  perception-vs-measurement gap: re-check the head eye-opening / eyelid geometry
+  vs. the eyeball, whether an eye-region visual param (eye depth / spacing /
+  opening) should move the eye bone or the eyeball, and how the reference viewer
+  seats the eyeball in the socket; then correct the placement (likely a live
+  visual iteration, since it renders "correct" by the numbers). Verify the
+  eyeballs sit in the sockets on OpenSim.
+- [ ] **R3. System eyes/teeth show through a BoM head.** Under a worn mesh head
+  the system head parts should be hidden, but the rigid eyes (R2) and the
+  teeth (baked into the skinned `avatar_head.llm`, head region) poke through
+  — the head-region hide is incomplete and/or the rigid eyes are misplaced,
+  and there is a general head-top oddness. Ensure a BoM head fully hides the
+  system head/eyes/teeth.
+- [ ] **R4. Prim rendering fidelity.** Prims render too large, misplaced, and
+  flat, and the per-face `TextureEntry` surface params — texture
+  **repeat / offset / rotation** (and bump / shiny / glow / fullbright) —
+  are not applied, so textured prim faces map wrong. Apply the TE placement
+  params and fix prim scale/placement.
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 

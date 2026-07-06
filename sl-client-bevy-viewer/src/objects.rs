@@ -42,13 +42,14 @@ use std::sync::Arc;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    DecodedMesh, DecodedTexture, MeshKey, MeshSkin, Object, PrimFaceId, PrimLod, PrimMesh,
-    PrimShapeFloat, PrimShapeParams, ScopedObjectId, SculptOrMeshKey, SlEvent, SlSessionEvent,
-    TextureFace, TextureKey, Uuid, Vector, decode_texture_entry, pcode, rigged_inverse_bindposes,
-    tessellate, tessellate_sculpt, to_bevy_mesh, to_bevy_prim_mesh, to_bevy_rigged_mesh,
+    AgentKey, DecodedMesh, DecodedTexture, MeshKey, MeshSkin, Object, PrimFaceId, PrimLod,
+    PrimMesh, PrimShapeFloat, PrimShapeParams, ScopedObjectId, SculptOrMeshKey, SlEvent,
+    SlSessionEvent, TextureFace, TextureKey, Uuid, Vector, avatar_texture, decode_texture_entry,
+    pcode, rigged_inverse_bindposes, tessellate, tessellate_sculpt, to_bevy_mesh,
+    to_bevy_prim_mesh, to_bevy_rigged_mesh,
 };
 
-use crate::avatars::{AvatarBody, AvatarState};
+use crate::avatars::{AvatarBody, AvatarState, BomFace};
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
 use crate::meshes::{MeshDecoded, MeshManager};
 use crate::textures::{PrimTextures, TextureDecoded, TextureManager, face_material};
@@ -1004,7 +1005,7 @@ pub(crate) fn apply_object_meshes(
 /// A rigged mesh's build is deferred here (rather than in [`apply_object_meshes`])
 /// because it needs the wearer's spawned skeleton — which can arrive before or
 /// after the mesh decodes. The pending build is retried each frame until the
-/// avatar's rigged body ([`AvatarState::joint_entities`]) is present; an avatar
+/// avatar's rigged body ([`AvatarState::joint_entities_of`]) is present; an avatar
 /// with no rigged body (a sphere-only, no-`--viewer-assets` run) never resolves,
 /// so the mesh simply stays unbuilt there. Each rig joint name is mapped to the
 /// avatar's matching skeleton joint entity ([`AvatarBody::joint_index`]), falling
@@ -1049,12 +1050,19 @@ pub(crate) fn apply_rigged_attachments(
             continue;
         };
         let key = build.key;
-        let avatar = tracked.parent;
+        // The wearer avatar, found by chasing this mesh's parent links up to the
+        // avatar root — a mesh body is worn as a multi-prim linkset whose parts
+        // parent to the linkset root prim, not the avatar directly, so its direct
+        // `parent` is not the avatar (P17.2 fix; verified live on a real mesh body).
+        let Some(agent) = avatars.wearer_of(scoped) else {
+            continue;
+        };
         // The wearer's rigged body and its skeleton-instance joints; retry next
         // frame if the avatar (or its body) is not spawned yet.
-        let (Some(root), Some(joints)) =
-            (avatars.body_root(avatar), avatars.joint_entities(avatar))
-        else {
+        let (Some(root), Some(joints)) = (
+            avatars.body_root_of(agent),
+            avatars.joint_entities_of(agent),
+        ) else {
             continue;
         };
         let Some(fallback) = joints.first().copied() else {
@@ -1095,12 +1103,16 @@ pub(crate) fn apply_rigged_attachments(
             );
         }
         let texture_entry = build.texture_entry.clone();
+        // The wearer's agent id (resolved above) keys its baked textures (P17.3): a
+        // bake-on-mesh face is textured from the wearer's own bake, not a fetch.
         let face_entities = build_rigged_submeshes(
             &decoded,
             &skin,
             &joint_entities,
             &texture_entry,
             root,
+            Some(agent),
+            body.skin_material(),
             &mut commands,
             &mut meshes,
             &mut materials,
@@ -1115,7 +1127,7 @@ pub(crate) fn apply_rigged_attachments(
             // must not also be pinned to a rigid attachment-point node.
             tracked.parented = true;
         }
-        debug!("bound rigged mesh {key} on avatar {avatar} to its skeleton");
+        debug!("bound rigged mesh {key} on avatar {agent} to its skeleton");
     }
 }
 
@@ -1140,6 +1152,8 @@ fn build_rigged_submeshes(
     joint_entities: &[Entity],
     texture_entry: &[u8],
     root: Entity,
+    agent: Option<AgentKey>,
+    skin_placeholder: &Handle<StandardMaterial>,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
@@ -1160,25 +1174,39 @@ fn build_rigged_submeshes(
         }
         let mesh = meshes.add(to_bevy_rigged_mesh(submesh));
         let texture_face = entry.face(index).unwrap_or(&default_face);
-        let material = face_material(texture_face, materials, manager, prim_textures);
+        // A bake-on-mesh face (P17.3): its texture id is an `IMG_USE_BAKED_*`
+        // sentinel meaning "show the wearer's own baked skin here". Spawn it with an
+        // opaque skin placeholder and tag it [`BomFace`] so `apply_bom_face_materials`
+        // points it at the wearer's baked region material (never fetch the sentinel,
+        // which is not a real texture — the P17.2 invisible-shell finding). Only
+        // when the wearer's agent is known; otherwise fall through to a plain fetch.
+        let bom = agent.and_then(|agent| {
+            avatar_texture::use_baked_slot(texture_face.texture_id)
+                .map(|slot| BomFace::new(agent, slot))
+        });
+        let material = match bom {
+            Some(_) => skin_placeholder.clone(),
+            None => face_material(texture_face, materials, manager, prim_textures),
+        };
         // The submesh index is the Linden face index; a mesh has few faces, so the
         // widening never saturates in practice (a clamp keeps it lint-clean).
         let face_id = PrimFaceId::new(u16::try_from(index).unwrap_or(u16::MAX));
-        let entity = commands
-            .spawn((
-                Mesh3d(mesh),
-                MeshMaterial3d(material),
-                SkinnedMesh {
-                    inverse_bindposes: inverse_bindposes.clone(),
-                    joints: joint_entities.to_vec(),
-                },
-                Transform::default(),
-                Visibility::default(),
-                PrimFaceEntity { face_id },
-                ChildOf(root),
-            ))
-            .id();
-        face_entities.push(entity);
+        let mut spawned = commands.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            SkinnedMesh {
+                inverse_bindposes: inverse_bindposes.clone(),
+                joints: joint_entities.to_vec(),
+            },
+            Transform::default(),
+            Visibility::default(),
+            PrimFaceEntity { face_id },
+            ChildOf(root),
+        ));
+        if let Some(bom) = bom {
+            spawned.insert(bom);
+        }
+        face_entities.push(spawned.id());
     }
     face_entities
 }

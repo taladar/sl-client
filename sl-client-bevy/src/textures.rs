@@ -15,7 +15,7 @@ use bytes::Bytes;
 use reqwest::StatusCode as ReqwestStatusCode;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::TextureKey;
-use sl_texture::{AssetFetcher, DecodedImage, FetchChunk, FetchError};
+use sl_texture::{DecodedImage, FetchChunk, FetchError, RemoteTextureSource, TextureFetcher};
 use wgpu_types::{Extent3d, TextureDimension, TextureFormat};
 
 /// Converts a decoded RGBA8 texture into a Bevy [`Image`] (`Rgba8UnormSrgb`),
@@ -66,17 +66,34 @@ impl BevyTextureFetcher {
         self.cap_url.store(url.map(std::sync::Arc::new));
     }
 
+    /// The URL a fetch of `id` from `source` targets: for a default texture the
+    /// `GetTexture` capability queried by UUID, for a server bake the appearance-
+    /// service URL supplied with the source (`FTT_SERVER_BAKE`).
+    fn source_url(
+        &self,
+        id: TextureKey,
+        source: &RemoteTextureSource,
+    ) -> Result<String, FetchError> {
+        match source {
+            RemoteTextureSource::Default => {
+                let cap = self.cap_url.load_full().ok_or_else(|| {
+                    FetchError::Transport("GetTexture capability not available".to_owned())
+                })?;
+                Ok(format!("{cap}/?texture_id={id}"))
+            }
+            RemoteTextureSource::ServerBake { url } => Ok(url.clone()),
+        }
+    }
+
     /// Performs the blocking range request, returning the chunk.
     fn fetch_blocking(
         &self,
         id: TextureKey,
+        source: &RemoteTextureSource,
         start: usize,
         end: usize,
     ) -> Result<FetchChunk, FetchError> {
-        let cap = self.cap_url.load_full().ok_or_else(|| {
-            FetchError::Transport("GetTexture capability not available".to_owned())
-        })?;
-        let url = format!("{cap}/?texture_id={id}");
+        let url = self.source_url(id, source)?;
         let response = self
             .http
             .get(&url)
@@ -112,16 +129,17 @@ impl Default for BevyTextureFetcher {
 }
 
 #[async_trait]
-impl AssetFetcher<TextureKey> for BevyTextureFetcher {
+impl TextureFetcher for BevyTextureFetcher {
     async fn fetch_range(
         &self,
         id: TextureKey,
+        source: &RemoteTextureSource,
         start: usize,
         end: usize,
     ) -> Result<FetchChunk, FetchError> {
         // The blocking request runs on whatever thread `block_on`s this future
         // (a Bevy task/thread dedicated to the fetch), which is the intended use.
-        self.fetch_blocking(id, start, end)
+        self.fetch_blocking(id, source, start, end)
     }
 }
 

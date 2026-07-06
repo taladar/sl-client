@@ -123,6 +123,7 @@ mod test {
             library_root: None,
             library_owner: None,
             library_skeleton: Vec::new(),
+            agent_appearance_service: None,
         })))
     }
 

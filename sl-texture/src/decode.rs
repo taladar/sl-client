@@ -90,6 +90,15 @@ pub fn decode_j2c(
     let image = Image::from_bytes_with(codestream, params)
         .map_err(|error| DecodeError::Codec(error.to_string()))?;
     let components = u16::try_from(image.num_components()).unwrap_or(0);
+    // A Second Life server ("Sunshine") avatar bake is a 5-component J2C
+    // (`R, G, B, bump, clothing`), which `jpeg2k`'s `get_pixels` rejects (it only
+    // maps 1–4 components). Take the diffuse RGB from the first three channels and
+    // drop the bump/clothing aux channels (opaque alpha), matching the reference
+    // viewer, which decodes a baked texture with `decodeChannels(.., 0, 4)` and
+    // uses just the colour for the opaque body.
+    if image.num_components() > 4 {
+        return decode_multicomponent(&image, discard_level);
+    }
     let data = image
         .get_pixels(Some(u32::from(OPAQUE_ALPHA)))
         .map_err(|error| DecodeError::Codec(error.to_string()))?;
@@ -104,6 +113,60 @@ pub fn decode_j2c(
         width: data.width,
         height: data.height,
         components,
+        discard_level,
+        pixels: Bytes::from(pixels),
+    })
+}
+
+/// Decodes a J2C with more than four components — a Second Life server avatar bake
+/// (`R, G, B, bump, clothing`) — into opaque RGBA, taking the diffuse RGB from the
+/// first three components and dropping the bump/clothing aux channels.
+///
+/// `jpeg2k`'s [`get_pixels`](jpeg2k::Image::get_pixels) only maps 1–4 components,
+/// so a 5-component bake is read here from its individual components instead. A
+/// component whose sample resolution differs from the image (a subsampled aux
+/// channel) is ignored — only the first three (full-resolution) colour channels
+/// are used. Reports [`components`](DecodedImage::components) as 3 so the alpha is
+/// treated as absent (a wholly opaque bake).
+#[cfg(feature = "decode")]
+fn decode_multicomponent(
+    image: &jpeg2k::Image,
+    discard_level: DiscardLevel,
+) -> Result<DecodedImage, DecodeError> {
+    let width = image.width();
+    let height = image.height();
+    let pixel_count = usize::try_from(width)
+        .unwrap_or(0)
+        .saturating_mul(usize::try_from(height).unwrap_or(0));
+    if pixel_count == 0 {
+        return Err(DecodeError::Empty);
+    }
+    let comps = image.components();
+    // The first three components as full 8-bit channels; a monochrome source (only
+    // one component) replicates its single channel across RGB.
+    let channel = |index: usize| -> Vec<u8> {
+        comps
+            .get(index)
+            .map_or_else(Vec::new, |comp| comp.data_u8().collect())
+    };
+    let red = channel(0);
+    if red.len() < pixel_count {
+        return Err(DecodeError::Empty);
+    }
+    let green = channel(1);
+    let blue = channel(2);
+    let mut pixels = Vec::with_capacity(pixel_count.saturating_mul(4));
+    for index in 0..pixel_count {
+        let r = red.get(index).copied().unwrap_or(0);
+        pixels.push(r);
+        pixels.push(green.get(index).copied().unwrap_or(r));
+        pixels.push(blue.get(index).copied().unwrap_or(r));
+        pixels.push(OPAQUE_ALPHA);
+    }
+    Ok(DecodedImage {
+        width,
+        height,
+        components: 3,
         discard_level,
         pixels: Bytes::from(pixels),
     })

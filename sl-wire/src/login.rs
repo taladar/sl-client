@@ -394,6 +394,13 @@ pub struct LoginSuccess {
     /// The shared Library inventory's folder skeleton, from the
     /// `inventory-skel-lib` response field. Empty if not requested/provided.
     pub library_skeleton: Vec<SkeletonFolder>,
+    /// The base URL of the agent-appearance (server-side "Sunshine" bake)
+    /// service, from the `agent_appearance_service` response field. Server-baked
+    /// avatar textures are fetched from here as
+    /// `<url>texture/<avatar_id>/<slot>/<baked_uuid>` — **not** by UUID from the
+    /// `GetTexture`/`ViewerAsset` CDN (which rejects a baked id, typically with a
+    /// `503`). `None` on a grid that does not central-bake (e.g. OpenSim).
+    pub agent_appearance_service: Option<url::Url>,
 }
 
 /// An agent's home location, parsed from the `home` login response field (a
@@ -610,6 +617,9 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
         library_owner: parse_array_struct_uuid(response_struct, "inventory-lib-owner", "agent_id")
             .map(AgentKey::from),
         library_skeleton: parse_skeleton(response_struct, "inventory-skel-lib"),
+        agent_appearance_service: members
+            .get("agent_appearance_service")
+            .and_then(|s| url::Url::parse(s.trim()).ok()),
     })))
 }
 

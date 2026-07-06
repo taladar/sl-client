@@ -18,6 +18,7 @@ use parking_lot::Mutex;
 use sl_proto::{DiscardLevel, TextureKey, j2c};
 
 use crate::decode::DecodedImage;
+use crate::fetcher::RemoteTextureSource;
 use crate::schedule::{Priority, Requesters, TextureProgress};
 
 /// The JPEG-2000 codestream prefix fetched for a texture so far.
@@ -75,6 +76,12 @@ pub struct TextureEntry {
     /// The finest requester target (as a raw discard level), cached; `u8::MAX`
     /// means "no requester".
     pub(crate) target_want: AtomicU8,
+    /// Where this texture is fetched from — the network source the store hands the
+    /// fetcher on every (re)fetch. Set by [`get`](crate::TextureStore::get) /
+    /// [`request`](crate::TextureStore::request); defaults to
+    /// [`RemoteTextureSource::Default`] (the CDN by UUID), overridden to a bake's
+    /// appearance-service URL when the caller requests one.
+    pub(crate) source: ArcSwap<RemoteTextureSource>,
 }
 
 impl std::fmt::Debug for TextureEntry {
@@ -101,6 +108,7 @@ impl TextureEntry {
             requesters: Mutex::new(Requesters::default()),
             effective_priority: AtomicU32::new(0),
             target_want: AtomicU8::new(u8::MAX),
+            source: ArcSwap::from_pointee(RemoteTextureSource::Default),
         })
     }
 
