@@ -38,10 +38,10 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberI
 use crate::appearance::{ServerBakeState, drive_server_bake};
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{
-    AvatarBakeMaterials, AvatarState, apply_avatar_appearance, apply_avatar_bake_textures,
-    apply_avatar_names, apply_avatar_part_visibility, assign_avatar_bake_materials,
-    ingest_avatar_bakes, position_name_tags, setup_avatar_body, update_avatar_objects,
-    update_coarse_avatars,
+    AvatarBakeMaterials, AvatarState, OwnLocalBake, apply_avatar_appearance,
+    apply_avatar_bake_textures, apply_avatar_names, apply_avatar_part_visibility,
+    apply_own_local_bake, assign_avatar_bake_materials, ingest_avatar_bakes, position_name_tags,
+    setup_avatar_body, update_avatar_objects, update_coarse_avatars,
 };
 use crate::bake_inputs::{
     OwnBakeInputs, WearableAssetFetched, WearableAssetManager, assemble_own_bake,
@@ -275,6 +275,7 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
     .init_resource::<TextureManager>()
     .init_resource::<PrimTextures>()
     .init_resource::<AvatarBakeMaterials>()
+    .init_resource::<OwnLocalBake>()
     .init_resource::<ServerBakeState>()
     .init_resource::<MeshManager>()
     .init_resource::<OwnBakeInputs>()
@@ -329,14 +330,18 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
             // base regions from the worn skirt / mesh-body items (P13.5), then
             // fetch each avatar's server-published baked textures (P14.1) and
             // drape them over the matching body regions (P14.2), filling each
-            // region material once its bake decodes. Nested into one tuple to stay
-            // within Bevy's per-tuple system limit.
+            // region material once its bake decodes. When the grid publishes no
+            // server bake for our own avatar (OpenSim), drape the locally
+            // composited client-side bake (P15.3) over the regions it did not bake,
+            // after the server-bake assignment so a real bake still wins. Nested
+            // into one tuple to stay within Bevy's per-tuple system limit.
             (
                 apply_avatar_appearance,
                 apply_avatar_part_visibility,
                 ingest_avatar_bakes,
                 assign_avatar_bake_materials,
                 apply_avatar_bake_textures,
+                apply_own_local_bake.after(assign_avatar_bake_materials),
             ),
             position_name_tags,
             // Append newly received local chat to the on-screen overlay.

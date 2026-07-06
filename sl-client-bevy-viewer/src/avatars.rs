@@ -36,13 +36,15 @@ use std::collections::{HashMap, HashSet};
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, AvatarName, BaseMesh, CoarseLocation, Command, MAX_FACES, MaskTexture, MorphWeights,
-    Object, PartMorphMask, ResolvedParams, ScopedObjectId, SkeletalDeformations, SlCommand,
-    SlEvent, SlSessionEvent, TextureEntry, TextureKey, avatar_texture, decode_texture_entry, pcode,
-    to_bevy_base_mesh, to_bevy_image, to_bevy_morphed_mesh,
+    AgentKey, AvatarName, BakeRegion, BaseMesh, CoarseLocation, Command, MAX_FACES, MaskTexture,
+    MorphWeights, Object, PartMorphMask, ResolvedParams, ScopedObjectId, SkeletalDeformations,
+    SlCommand, SlEvent, SlIdentity, SlSessionEvent, TextureEntry, TextureKey, avatar_texture,
+    composite_region, decode_texture_entry, pcode, to_bevy_base_mesh, to_bevy_image,
+    to_bevy_morphed_mesh,
 };
 
 use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
+use crate::bake_inputs::OwnBakeInputs;
 use crate::coords::{sl_to_bevy_object_rotation, sl_to_bevy_vec};
 use crate::textures::{TextureDecoded, TextureManager};
 
@@ -1062,6 +1064,32 @@ impl AvatarBakeMaterials {
         }
         handle
     }
+
+    /// The material for one avatar body region draped with a **locally composited**
+    /// client-side bake (P15.3) rather than a fetched server bake: reuse (or
+    /// create) the `(agent, slot)` region material and set the already-uploaded
+    /// composited `image` + its composited-alpha `alpha` mode directly, bypassing
+    /// the fetched-UUID [`ensure_bake`](Self::ensure_bake) path. Shares the same
+    /// per-region material slot as [`region_material`](Self::region_material), so a
+    /// server bake arriving later cleanly replaces the local one.
+    fn local_region_material(
+        &mut self,
+        agent: AgentKey,
+        slot: usize,
+        image: Handle<Image>,
+        alpha: BakeAlpha,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> Handle<StandardMaterial> {
+        let handle = self
+            .materials
+            .entry((agent, slot))
+            .or_insert_with(|| materials.add(baked_region_material()))
+            .clone();
+        if let Some(mut material) = materials.get_mut(&handle) {
+            apply_bake_image(&mut material, image, alpha.alpha_mode());
+        }
+        handle
+    }
 }
 
 /// The un-textured base material for a body region: the skin tint as a fallback
@@ -1275,6 +1303,197 @@ pub(crate) fn apply_avatar_bake_textures(
     }
     if filled > 0 {
         debug!("draped {filled} decoded bake(s) onto avatar body region material(s)");
+    }
+}
+
+/// The side length, in pixels, of a locally composited client-side bake region
+/// (P15.3). The reference viewer bakes body regions at 512×512; each source
+/// wearable layer is bilinearly resampled to this by [`composite_region`].
+const LOCAL_BAKE_SIZE: u32 = 512;
+
+/// Our own avatar's **client-side** composited bake (P15.3): one uploaded
+/// [`Image`] plus its composited-alpha classification per baked slot, built once
+/// the client-side bake inputs ([`OwnBakeInputs`]) are assembled.
+///
+/// On a grid that publishes no server "Sunshine" bake for our own avatar
+/// (OpenSim, and any grid without central baking) our own avatar would otherwise
+/// stay an untextured cloud: the P14 [`ingest_avatar_bakes`] path finds no baked
+/// UUIDs in our own appearance, so [`assign_avatar_bake_materials`] leaves our
+/// body on the flat skin material. This resource instead holds the bake the
+/// *viewer* composited from the worn wearable layers (P15.1/P15.2), which
+/// [`apply_own_local_bake`] drapes over our own body regions — the client-bake
+/// counterpart of the server bake other avatars (and our own on Second Life)
+/// carry.
+#[derive(Resource, Default)]
+pub(crate) struct OwnLocalBake {
+    /// The composited region image + its alpha classification, keyed by baked
+    /// slot ([`BakeRegion::slot`]); a region with no worn layers is absent (so its
+    /// body part keeps the flat skin material rather than a transparent bake).
+    regions: HashMap<usize, (Handle<Image>, BakeAlpha)>,
+    /// Whether the composite has been built from the ready bake inputs (a one-shot
+    /// per session — the worn outfit does not change in this passive viewer).
+    built: bool,
+}
+
+/// Flip an RGBA8 image's rows in place — mirror it about its horizontal axis —
+/// mapping between the top-down decoded-image row order and the OpenGL bottom-up
+/// convention Second Life avatar UVs are authored in (P15.3). A zero dimension,
+/// or a pixel buffer too short for `width`×`height` RGBA, is left untouched.
+const fn flip_rows_vertically(pixels: &mut [u8], width: usize, height: usize) {
+    let stride = width.saturating_mul(RGBA_CHANNELS);
+    // Guard the swaps: every index touched must be within the buffer.
+    if stride == 0 || height == 0 || pixels.len() < stride.saturating_mul(height) {
+        return;
+    }
+    let mut row = 0_usize;
+    while row < height / 2 {
+        let opposite = height.saturating_sub(1).saturating_sub(row);
+        let top = row.saturating_mul(stride);
+        let bottom = opposite.saturating_mul(stride);
+        let mut offset = 0_usize;
+        while offset < stride {
+            pixels.swap(top.saturating_add(offset), bottom.saturating_add(offset));
+            offset = offset.saturating_add(1);
+        }
+        row = row.saturating_add(1);
+    }
+}
+
+/// Force every pixel of an RGBA8 image fully opaque (alpha byte → 255), so a
+/// bake draped on a solid surface (the eyeball) is not carved by stray
+/// source-texture transparency (P15.3).
+fn force_alpha_opaque(pixels: &mut [u8]) {
+    let mut index = RGBA_CHANNELS.saturating_sub(1);
+    while index < pixels.len() {
+        // The alpha byte of each RGBA texel.
+        if let Some(alpha) = pixels.get_mut(index) {
+            *alpha = u8::MAX;
+        }
+        index = index.saturating_add(RGBA_CHANNELS);
+    }
+}
+
+/// Composite our own avatar's ready client-side bake inputs (P15.2) into one
+/// uploaded [`Image`] + alpha classification per baked slot: walk each bake
+/// region's ordered layer list ([`OwnBakeInputs::region_layers`]) through
+/// [`composite_region`], classify the composited alpha (so an alpha wearable
+/// carved into the bake renders masked, P14.3), and upload the RGBA to a Bevy
+/// [`Image`]. A region with no worn layers is skipped — an empty composite is
+/// wholly transparent and would wrongly carve the region away.
+fn build_local_bake(
+    inputs: &OwnBakeInputs,
+    images: &mut Assets<Image>,
+) -> HashMap<usize, (Handle<Image>, BakeAlpha)> {
+    let mut regions = HashMap::new();
+    let mut summary: Vec<String> = Vec::new();
+    for region in BakeRegion::ALL {
+        let layers = inputs.region_layers(region);
+        if layers.is_empty() {
+            continue;
+        }
+        let mut baked = composite_region(region, LOCAL_BAKE_SIZE, layers);
+        // Second Life avatar `.llm` UVs are authored in the OpenGL bottom-up
+        // convention (V = 0 at the bottom), so the body samples a baked texture
+        // upside down relative to a top-down decoded image — the composite (like
+        // a fetched J2C) is top-down, which would land the head bake's chin/teeth
+        // (low in the image) on the forehead. Flip the composited rows so the
+        // body-region UVs sample it the right way up.
+        let side = usize::try_from(LOCAL_BAKE_SIZE).unwrap_or(0);
+        flip_rows_vertically(&mut baked.pixels, side, side);
+        // The eyeball is an opaque surface. Our simplified eye composite carries
+        // only the iris layer, not the opaque sclera base the reference viewer's
+        // eye layer set builds, so the iris texture's own transparent surround
+        // would classify the bake as masked and carve the eyeballs into empty
+        // sockets. Force the eye bake opaque so the eyeballs render solid.
+        if region == BakeRegion::Eyes {
+            force_alpha_opaque(&mut baked.pixels);
+        }
+        let decoded = baked.to_decoded_image();
+        let alpha = classify_bake_alpha(decoded.components, &decoded.pixels);
+        let handle = images.add(to_bevy_image(&decoded));
+        let _prev = regions.insert(region.slot(), (handle, alpha));
+        summary.push(format!(
+            "{}={} layer(s)/{alpha:?}",
+            region.name(),
+            layers.len()
+        ));
+    }
+    info!(
+        "composited client-side bake for own avatar: {}",
+        summary.join(" ")
+    );
+    regions
+}
+
+/// Drape our own avatar's locally composited client-side bake (P15.3) over its
+/// body regions when the grid publishes no server bake for us (OpenSim).
+///
+/// Once the bake inputs are assembled ([`OwnBakeInputs::is_ready`]) the composite
+/// is built once ([`build_local_bake`]) and, for each of our own body parts whose
+/// region the grid did **not** bake for us, the composited region image is set as
+/// that region's material — reusing the same per-`(agent, slot)` material slot the
+/// P14 server-bake path uses, so a server bake (Second Life) cleanly wins over the
+/// local one. Runs every frame but idempotent: it only re-assigns a body part
+/// whose material actually differs, so it self-heals after
+/// [`assign_avatar_bake_materials`] resets a part on a fresh appearance, and lands
+/// on parts that spawn after the composite is ready.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system compositing our own bake and draping it over the body-region materials"
+)]
+pub(crate) fn apply_own_local_bake(
+    identity: Res<SlIdentity>,
+    inputs: Res<OwnBakeInputs>,
+    state: Res<AvatarState>,
+    body: Option<Res<AvatarBody>>,
+    mut local: ResMut<OwnLocalBake>,
+    mut bake_mats: ResMut<AvatarBakeMaterials>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut parts: Query<(&AvatarBodyPart, &mut MeshMaterial3d<StandardMaterial>)>,
+) {
+    // Nothing to drape until the body assets loaded, the bake inputs are ready,
+    // and we know which agent is our own avatar.
+    if body.is_none() || !inputs.is_ready() {
+        return;
+    }
+    let Some(agent) = identity.agent_id else {
+        return;
+    };
+    if !local.built {
+        local.regions = build_local_bake(&inputs, &mut images);
+        local.built = true;
+    }
+    if local.regions.is_empty() {
+        return;
+    }
+    let mut draped = 0_usize;
+    for (part, mut material) in &mut parts {
+        if part.agent != agent {
+            continue;
+        }
+        let slot = part.region.baked_slot();
+        // A server-published bake for this region wins (P14 / Second Life); the
+        // local composite only fills regions the grid did not bake for us.
+        if state
+            .baked_textures
+            .get(&agent)
+            .is_some_and(|bakes| bakes.contains_key(&slot))
+        {
+            continue;
+        }
+        let Some((image, alpha)) = local.regions.get(&slot) else {
+            continue;
+        };
+        let desired =
+            bake_mats.local_region_material(agent, slot, image.clone(), *alpha, &mut materials);
+        if material.0 != desired {
+            *material = MeshMaterial3d(desired);
+            draped = draped.saturating_add(1);
+        }
+    }
+    if draped > 0 {
+        debug!("draped client-side bake onto {draped} own avatar body part(s)");
     }
 }
 
@@ -1582,7 +1801,7 @@ mod tests {
     use bevy::prelude::AlphaMode;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
-        AgentKey, CircuitId, CoarseLocation, Object, ObjectMotion, RegionHandle,
+        AgentKey, BakeRegion, CircuitId, CoarseLocation, Object, ObjectMotion, RegionHandle,
         RegionLocalObjectId, Rotation, ScopedObjectId, TextureEntry, TextureFace, TextureKey, Uuid,
         Vector, avatar_texture, encode_texture_entry,
     };
@@ -1713,6 +1932,56 @@ mod tests {
         assert_eq!(BodyRegion::Upper.baked_slot(), avatar_texture::UPPER_BAKED);
         assert_eq!(BodyRegion::Lower.baked_slot(), avatar_texture::LOWER_BAKED);
         assert_eq!(BodyRegion::Skirt.baked_slot(), avatar_texture::SKIRT_BAKED);
+    }
+
+    /// The client-side bake (P15.3) keys its composited regions by
+    /// [`BakeRegion::slot`], and looks them up per body part by
+    /// [`BodyRegion::baked_slot`]; the two slot mappings must agree for every
+    /// region, or a composited bake would never be found for its body part.
+    #[test]
+    fn body_region_baked_slots_round_trip_through_bake_region() {
+        for region in [
+            BodyRegion::Head,
+            BodyRegion::Hair,
+            BodyRegion::Eyes,
+            BodyRegion::Upper,
+            BodyRegion::Lower,
+            BodyRegion::Skirt,
+        ] {
+            let slot = region.baked_slot();
+            // Every body region's baked slot names a bake region, and that bake
+            // region reports the same slot the local composite is keyed by.
+            assert_eq!(
+                BakeRegion::from_slot(slot).map(BakeRegion::slot),
+                Some(slot)
+            );
+        }
+    }
+
+    /// The client-side bake flip (P15.3) mirrors the image about its horizontal
+    /// axis: the top row and bottom row swap, and a degenerate buffer is left
+    /// untouched. A 1×2 RGBA image (one red row over one blue row) inverts.
+    #[test]
+    fn flip_rows_vertically_mirrors_top_and_bottom() {
+        // Row 0 red, row 1 blue (1 px wide, RGBA).
+        let mut pixels = vec![255, 0, 0, 255, 0, 0, 255, 255];
+        super::flip_rows_vertically(&mut pixels, 1, 2);
+        assert_eq!(pixels, vec![0, 0, 255, 255, 255, 0, 0, 255]);
+        // A buffer too short for its declared geometry is left as-is.
+        let mut short = vec![1, 2, 3];
+        super::flip_rows_vertically(&mut short, 1, 2);
+        assert_eq!(short, vec![1, 2, 3]);
+    }
+
+    /// The eye-bake opacity forcing (P15.3) sets every texel's alpha byte to 255
+    /// while leaving the colour channels untouched, so a transparent-surround iris
+    /// no longer carves the opaque eyeball away.
+    #[test]
+    fn force_alpha_opaque_fills_only_the_alpha_channel() {
+        // Two RGBA texels with varied colour and alpha 0 / 128.
+        let mut pixels = vec![10, 20, 30, 0, 40, 50, 60, 128];
+        super::force_alpha_opaque(&mut pixels);
+        assert_eq!(pixels, vec![10, 20, 30, 255, 40, 50, 60, 255]);
     }
 
     /// Only the head, upper-body and lower-body regions carry masked clothing

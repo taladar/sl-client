@@ -85,22 +85,16 @@ pub(crate) struct OwnBakeInputs {
 
 impl OwnBakeInputs {
     /// The assembled layer list for a bake region, once [`is_ready`](Self::is_ready).
-    /// Empty (or absent) until assembly completes.
+    /// Empty (or absent) until assembly completes. Consumed by the P15.3
+    /// composite/render pass
+    /// ([`apply_own_local_bake`](crate::avatars::apply_own_local_bake)).
     #[must_use]
-    #[expect(
-        dead_code,
-        reason = "the P15.2 output surface, consumed by the P15.3 composite/render pass"
-    )]
     pub(crate) fn region_layers(&self, region: BakeRegion) -> &[Layer] {
         self.layers.get(&region).map_or(&[], Vec::as_slice)
     }
 
     /// Whether the bake inputs have been assembled.
     #[must_use]
-    #[expect(
-        dead_code,
-        reason = "the P15.2 output surface, consumed by the P15.3 composite/render pass"
-    )]
     pub(crate) fn is_ready(&self) -> bool {
         self.stage == BakeInputStage::Ready
     }

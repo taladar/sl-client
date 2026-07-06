@@ -1037,16 +1037,53 @@ own avatar and as the fallback whenever a baked slot is absent / default.
   freckles, bump maps) need a per-param procedural renderer the P15.1 compositor
   does not have and are left to a follow-up. Rendering these inputs onto the
   body is P15.3.
-- [ ] **P15.3. Composite & render our own bake.** When no server bake is
+- [x] **P15.3. Composite & render our own bake.** When no server bake is
   published for an avatar (our own on OpenSim), composite its regions with
   `sl-bake` and drive the Phase-14 body-region materials + Phase-17 BoM from the
   local composite instead of a fetched baked UUID (alpha honoured). Verify our
-  own avatar renders skin/clothing-textured on OpenSim.
+  own avatar renders skin/clothing-textured on OpenSim. **Done (Phase-14 body
+  regions; the Phase-17 BoM half is deferred with Phase 17):** a new
+  `OwnLocalBake` resource + `apply_own_local_bake` system (`avatars.rs`)
+  composites each ready `OwnBakeInputs` region (P15.2) through
+  `composite_region` at 512², uploads it, and drapes it onto our own avatar's
+  body-region materials for every slot the grid did **not** server-bake —
+  reusing the P14 per-`(agent, slot)` region material so a real server bake
+  (Second Life) still wins, and self-healing after
+  `assign_avatar_bake_materials` resets a part. A region with no worn layers is
+  skipped (an empty composite is fully transparent and would wrongly carve the
+  region). Two live-found orientation/alpha fixes were needed on top of the
+  plan: (a) Second Life avatar `.llm` UVs are OpenGL bottom-up, so the
+  composited bake (top-down, like every decoded J2C) is flipped vertically
+  before upload (`flip_rows_vertically`), else the head bake reads
+  upside down (chin/teeth on the forehead); (b) the eyeball is opaque geometry
+  but our simplified eye composite carries only the iris layer (not the opaque
+  sclera base the reference eye layer-set builds), whose transparent surround
+  classified the bake `Masked` and carved the eyeballs into empty sockets — so
+  the eyes region bake is forced opaque (`force_alpha_opaque`). Verified live on
+  OpenSim: our own avatar renders skin/clothing-textured, right-way-up, with
+  visible eyeballs (default outfit composites `head`/`upper`/`lower` opaque +
+  `eyes` forced-opaque + `hair` masked; `skirt` empty). The eyeball vertical
+  placement issue this surfaced is tracked separately as P15.5.
 - [ ] **P15.4. (Optional) Publish the bake.** J2C-**encode** the composited
   regions and upload via the existing `UploadBakedTexture` cap so the sim /
   other viewers see us. **Needs a J2C encoder** (OpenJPEG encode) — the one
   heavy net-new dependency; may slip to a follow-up. Local rendering (P15.3)
   does not depend on it.
+- [ ] **P15.5. Fix rigid eyeball placement (follow-up from P15.3).** Once our
+  own avatar was textured (P15.3), the classic rigid eyeballs (`avatar_eye.llm`
+  pinned to `mEyeLeft` / `mEyeRight`) read as ~one eye-height too low on the
+  face, their white sclera poking through the lower-face skin. This is a
+  **pre-existing P13 avatar-fidelity gap**, not a bake issue: extensive
+  measurement (offline `.llm`/skeleton probes + in-viewer `GlobalTransform`
+  logging) put each eyeball centred on its eye joint at Z ≈ 1.762, within ~6 mm
+  of the morphed head eye-socket geometry and correctly sized — i.e.
+  geometrically it matches the reference viewer's classic setup, yet it *looks*
+  too low. Resolve the perception-vs-measurement gap: re-check the head
+  eye-opening / eyelid geometry vs. the eyeball, whether an eye-region visual
+  param (eye depth / spacing / opening) should move the eye bone or the eyeball,
+  and how the reference viewer seats the eyeball in the socket; then correct the
+  placement (likely a live visual iteration, since it renders "correct" by the
+  numbers). Verify the eyeballs sit in the sockets on OpenSim.
 
 ## Phase 16 — Attachments (rigid)
 
